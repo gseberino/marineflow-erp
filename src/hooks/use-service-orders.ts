@@ -70,9 +70,10 @@ export function useCreateServiceOrder() {
   return useMutation({
     mutationFn: async (values: Record<string, any>) => {
       const soNumber = await generateSONumber();
+      const payload = { ...values, service_order_number: soNumber };
       const { data, error } = await supabase
         .from('service_orders')
-        .insert({ ...values, service_order_number: soNumber })
+        .insert(payload as any)
         .select()
         .single();
       if (error) throw error;
@@ -90,7 +91,7 @@ export function useUpdateServiceOrder() {
     mutationFn: async ({ id, ...values }: { id: string } & Record<string, any>) => {
       const { data, error } = await supabase
         .from('service_orders')
-        .update(values)
+        .update(values as any)
         .eq('id', id)
         .select()
         .single();
