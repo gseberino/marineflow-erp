@@ -7,21 +7,24 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { AddressFields } from '@/components/AddressFields';
-import { useCreateMarina, useUpdateMarina, type Marina } from '@/hooks/use-marinas';
+import { useCreateSupplier, useUpdateSupplier, type Supplier } from '@/hooks/use-suppliers';
 import { toast } from 'sonner';
 import type { TablesInsert } from '@/integrations/supabase/types';
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  marina?: Marina | null;
+  supplier?: Supplier | null;
 }
 
 const empty = {
-  marina_name: '',
+  supplier_name: '',
+  trade_name: '',
+  cnpj_cpf: '',
   contact_name: '',
   contact_phone: '',
   contact_email: '',
+  website: '',
   postal_code: '',
   address_line_1: '',
   address_number: '',
@@ -30,45 +33,44 @@ const empty = {
   city: '',
   state: '',
   country: 'Brazil',
-  latitude: null as number | null,
-  longitude: null as number | null,
-  access_notes: '',
-  billing_notes: '',
+  payment_terms: '',
+  notes: '',
   active: true,
 };
 
-export function MarinaFormDialog({ open, onOpenChange, marina }: Props) {
+export function SupplierFormDialog({ open, onOpenChange, supplier }: Props) {
   const { t } = useI18n();
-  const create = useCreateMarina();
-  const update = useUpdateMarina();
+  const create = useCreateSupplier();
+  const update = useUpdateSupplier();
   const [form, setForm] = useState(empty);
-  const isEdit = !!marina;
+  const isEdit = !!supplier;
 
   useEffect(() => {
-    if (marina) {
+    if (supplier) {
       setForm({
-        marina_name: marina.marina_name,
-        contact_name: marina.contact_name ?? '',
-        contact_phone: marina.contact_phone ?? '',
-        contact_email: marina.contact_email ?? '',
-        postal_code: marina.postal_code ?? '',
-        address_line_1: marina.address_line_1 ?? '',
-        address_number: '',
-        address_complement: '',
-        neighborhood: '',
-        city: marina.city ?? '',
-        state: marina.state ?? '',
-        country: marina.country ?? 'Brazil',
-        latitude: marina.latitude ?? null,
-        longitude: marina.longitude ?? null,
-        access_notes: marina.access_notes ?? '',
-        billing_notes: marina.billing_notes ?? '',
-        active: marina.active,
+        supplier_name: supplier.supplier_name,
+        trade_name: supplier.trade_name ?? '',
+        cnpj_cpf: supplier.cnpj_cpf ?? '',
+        contact_name: supplier.contact_name ?? '',
+        contact_phone: supplier.contact_phone ?? '',
+        contact_email: supplier.contact_email ?? '',
+        website: supplier.website ?? '',
+        postal_code: supplier.postal_code ?? '',
+        address_line_1: supplier.address_line_1 ?? '',
+        address_number: supplier.address_number ?? '',
+        address_complement: supplier.address_complement ?? '',
+        neighborhood: supplier.neighborhood ?? '',
+        city: supplier.city ?? '',
+        state: supplier.state ?? '',
+        country: supplier.country ?? 'Brazil',
+        payment_terms: supplier.payment_terms ?? '',
+        notes: supplier.notes ?? '',
+        active: supplier.active,
       });
     } else {
       setForm(empty);
     }
-  }, [marina, open]);
+  }, [supplier, open]);
 
   const set = (key: string, value: any) => setForm(prev => ({ ...prev, [key]: value }));
 
@@ -76,29 +78,33 @@ export function MarinaFormDialog({ open, onOpenChange, marina }: Props) {
     e.preventDefault();
     try {
       const fullAddress = [form.address_line_1, form.address_number, form.address_complement].filter(Boolean).join(', ');
-      const payload: TablesInsert<'marinas'> = {
-        marina_name: form.marina_name,
+      const payload: TablesInsert<'suppliers'> = {
+        supplier_name: form.supplier_name,
+        trade_name: form.trade_name || null,
+        cnpj_cpf: form.cnpj_cpf || null,
         contact_name: form.contact_name || null,
         contact_phone: form.contact_phone || null,
         contact_email: form.contact_email || null,
+        website: form.website || null,
+        postal_code: form.postal_code || null,
         address_line_1: fullAddress || null,
+        address_number: form.address_number || null,
+        address_complement: form.address_complement || null,
+        neighborhood: form.neighborhood || null,
         city: form.city || null,
         state: form.state || null,
-        postal_code: form.postal_code || null,
         country: form.country || 'Brazil',
-        latitude: form.latitude,
-        longitude: form.longitude,
-        access_notes: form.access_notes || null,
-        billing_notes: form.billing_notes || null,
+        payment_terms: form.payment_terms || null,
+        notes: form.notes || null,
         active: form.active,
       };
 
-      if (isEdit && marina) {
-        await update.mutateAsync({ id: marina.id, ...payload });
-        toast.success(t.marinas.updateSuccess);
+      if (isEdit && supplier) {
+        await update.mutateAsync({ id: supplier.id, ...payload });
+        toast.success(t.suppliers.updateSuccess);
       } else {
         await create.mutateAsync(payload);
-        toast.success(t.marinas.createSuccess);
+        toast.success(t.suppliers.createSuccess);
       }
       onOpenChange(false);
     } catch (err: any) {
@@ -112,30 +118,42 @@ export function MarinaFormDialog({ open, onOpenChange, marina }: Props) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{isEdit ? t.marinas.editMarina : t.marinas.newMarina}</DialogTitle>
+          <DialogTitle>{isEdit ? t.suppliers.editSupplier : t.suppliers.newSupplier}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <Label>{t.suppliers.supplierName} *</Label>
+            <Input required value={form.supplier_name} onChange={e => set('supplier_name', e.target.value)} />
+          </div>
           <div className="grid grid-cols-2 gap-4">
-            <div className="col-span-2">
-              <Label>{t.marinas.marinaName} *</Label>
-              <Input required value={form.marina_name} onChange={e => set('marina_name', e.target.value)} />
+            <div>
+              <Label>{t.suppliers.tradeName}</Label>
+              <Input value={form.trade_name} onChange={e => set('trade_name', e.target.value)} />
             </div>
             <div>
-              <Label>{t.marinas.contactName}</Label>
+              <Label>{t.suppliers.cnpj}</Label>
+              <Input value={form.cnpj_cpf} onChange={e => set('cnpj_cpf', e.target.value)} />
+            </div>
+            <div>
+              <Label>{t.suppliers.contactName}</Label>
               <Input value={form.contact_name} onChange={e => set('contact_name', e.target.value)} />
             </div>
             <div>
-              <Label>{t.marinas.contactPhone}</Label>
+              <Label>{t.clients.phone}</Label>
               <Input value={form.contact_phone} onChange={e => set('contact_phone', e.target.value)} />
             </div>
-            <div className="col-span-2">
-              <Label>{t.marinas.contactEmail}</Label>
+            <div>
+              <Label>{t.clients.email}</Label>
               <Input type="email" value={form.contact_email} onChange={e => set('contact_email', e.target.value)} />
+            </div>
+            <div>
+              <Label>Website</Label>
+              <Input value={form.website} onChange={e => set('website', e.target.value)} />
             </div>
           </div>
 
           <AddressFields
-            showCoordinates={true}
+            showCoordinates={false}
             value={{
               postal_code: form.postal_code,
               address_line_1: form.address_line_1,
@@ -145,22 +163,20 @@ export function MarinaFormDialog({ open, onOpenChange, marina }: Props) {
               city: form.city,
               state: form.state,
               country: form.country,
-              latitude: form.latitude,
-              longitude: form.longitude,
             }}
             onChange={(field, val) => set(field, val)}
           />
 
-          <div className="space-y-4">
-            <div>
-              <Label>{t.marinas.accessNotes}</Label>
-              <Textarea value={form.access_notes} onChange={e => set('access_notes', e.target.value)} />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="col-span-2">
+              <Label>{t.suppliers.paymentTerms}</Label>
+              <Input value={form.payment_terms} onChange={e => set('payment_terms', e.target.value)} />
             </div>
-            <div>
-              <Label>{t.marinas.billingNotes}</Label>
-              <Textarea value={form.billing_notes} onChange={e => set('billing_notes', e.target.value)} />
+            <div className="col-span-2">
+              <Label>{t.common.notes}</Label>
+              <Textarea value={form.notes} onChange={e => set('notes', e.target.value)} />
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 col-span-2">
               <Switch checked={form.active} onCheckedChange={v => set('active', v)} />
               <Label>{t.common.active}</Label>
             </div>
