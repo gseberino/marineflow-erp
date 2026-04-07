@@ -151,6 +151,22 @@ export const en = {
     noFilesYet: 'No files uploaded yet',
     dragAndDrop: 'Drag and drop or click upload to add photos and documents',
     prioritySuffix: 'Priority',
+    // Service order form
+    alterStatus: 'Change Status',
+    technicianNotes: 'Technician Notes',
+    internalNotes: 'Internal Notes',
+    customerReport: 'Report for Client',
+    hourlyRate: 'Hourly Rate (R$)',
+    estimatedHours: 'Estimated Hours',
+    recalculate: 'Recalculate',
+    manualOverride: 'Manual override',
+    noCoordinates: 'Marina has no coordinates — fill in the marina location for automatic calculation',
+    addTimeEntry: 'Log Hours',
+    paymentMethodPix: 'PIX',
+    paymentMethodCard: 'Credit Card',
+    cardTotalNote: 'Amount to charge',
+    cardFeeNote: 'Estimated fee',
+    saveOrder: 'Save Order',
   },
 
   // Statuses
