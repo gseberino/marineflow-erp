@@ -387,6 +387,8 @@ export const en = {
     nov: 'Nov',
     dec: 'Dec',
   },
-} as const;
+};
 
-export type TranslationKeys = typeof en;
+// Deep string record type for translations
+type DeepStringRecord = { [key: string]: string | DeepStringRecord };
+export type TranslationKeys = typeof en & DeepStringRecord;
