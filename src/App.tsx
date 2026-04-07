@@ -18,6 +18,7 @@ import InventoryPage from "./pages/InventoryPage";
 import FinancialPage from "./pages/FinancialPage";
 import ReportsPage from "./pages/ReportsPage";
 import SettingsPage from "./pages/SettingsPage";
+import SupplierList from "./pages/SupplierList";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -40,6 +41,7 @@ const App = () => (
               <Route path="/vessels/:id" element={<VesselDetail />} />
               <Route path="/marinas" element={<MarinaList />} />
               <Route path="/products" element={<ProductList />} />
+              <Route path="/suppliers" element={<SupplierList />} />
               <Route path="/inventory" element={<InventoryPage />} />
               <Route path="/financial" element={<FinancialPage />} />
               <Route path="/reports" element={<ReportsPage />} />

@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { AddressFields } from '@/components/AddressFields';
 import { useCreateClient, useUpdateClient, type Client } from '@/hooks/use-clients';
 import { toast } from 'sonner';
 import type { TablesInsert } from '@/integrations/supabase/types';
@@ -17,18 +18,21 @@ interface Props {
   client?: Client | null;
 }
 
-const empty: TablesInsert<'clients'> = {
-  type: 'individual',
+const empty = {
+  type: 'individual' as string,
   full_name_or_company_name: '',
   cpf_cnpj: '',
   phone: '',
   whatsapp: '',
   email: '',
+  postal_code: '',
   address_line_1: '',
+  address_number: '',
+  address_complement: '',
+  neighborhood: '',
   address_line_2: '',
   city: '',
   state: '',
-  postal_code: '',
   country: 'Brazil',
   notes: '',
   active: true,
@@ -38,7 +42,7 @@ export function ClientFormDialog({ open, onOpenChange, client }: Props) {
   const { t } = useI18n();
   const create = useCreateClient();
   const update = useUpdateClient();
-  const [form, setForm] = useState<TablesInsert<'clients'>>(empty);
+  const [form, setForm] = useState(empty);
   const isEdit = !!client;
 
   useEffect(() => {
@@ -50,11 +54,14 @@ export function ClientFormDialog({ open, onOpenChange, client }: Props) {
         phone: client.phone ?? '',
         whatsapp: client.whatsapp ?? '',
         email: client.email ?? '',
+        postal_code: client.postal_code ?? '',
         address_line_1: client.address_line_1 ?? '',
+        address_number: '',
+        address_complement: '',
+        neighborhood: '',
         address_line_2: client.address_line_2 ?? '',
         city: client.city ?? '',
         state: client.state ?? '',
-        postal_code: client.postal_code ?? '',
         country: client.country ?? 'Brazil',
         notes: client.notes ?? '',
         active: client.active,
@@ -64,16 +71,34 @@ export function ClientFormDialog({ open, onOpenChange, client }: Props) {
     }
   }, [client, open]);
 
-  const set = (key: string, value: string | boolean) => setForm(prev => ({ ...prev, [key]: value }));
+  const set = (key: string, value: string | boolean | number | null) => setForm(prev => ({ ...prev, [key]: value as any }));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      const fullAddress = [form.address_line_1, form.address_number, form.address_complement].filter(Boolean).join(', ');
+      const payload: TablesInsert<'clients'> = {
+        type: form.type,
+        full_name_or_company_name: form.full_name_or_company_name,
+        cpf_cnpj: form.cpf_cnpj || null,
+        phone: form.phone || null,
+        whatsapp: form.whatsapp || null,
+        email: form.email || null,
+        address_line_1: fullAddress || null,
+        address_line_2: form.address_line_2 || null,
+        city: form.city || null,
+        state: form.state || null,
+        postal_code: form.postal_code || null,
+        country: form.country || 'Brazil',
+        notes: form.notes || null,
+        active: form.active,
+      };
+
       if (isEdit && client) {
-        await update.mutateAsync({ id: client.id, ...form });
+        await update.mutateAsync({ id: client.id, ...payload });
         toast.success(t.clients.updateSuccess);
       } else {
-        await create.mutateAsync(form);
+        await create.mutateAsync(payload);
         toast.success(t.clients.createSuccess);
       }
       onOpenChange(false);
@@ -108,50 +133,44 @@ export function ClientFormDialog({ open, onOpenChange, client }: Props) {
             </div>
             <div>
               <Label>{form.type === 'company' ? t.clients.cnpj : t.clients.cpf}</Label>
-              <Input value={form.cpf_cnpj ?? ''} onChange={e => set('cpf_cnpj', e.target.value)} />
+              <Input value={form.cpf_cnpj} onChange={e => set('cpf_cnpj', e.target.value)} />
             </div>
             <div>
               <Label>{t.clients.email}</Label>
-              <Input type="email" value={form.email ?? ''} onChange={e => set('email', e.target.value)} />
+              <Input type="email" value={form.email} onChange={e => set('email', e.target.value)} />
             </div>
             <div>
               <Label>{t.clients.phone}</Label>
-              <Input value={form.phone ?? ''} onChange={e => set('phone', e.target.value)} />
+              <Input value={form.phone} onChange={e => set('phone', e.target.value)} />
             </div>
             <div>
               <Label>{t.clients.whatsapp}</Label>
-              <Input value={form.whatsapp ?? ''} onChange={e => set('whatsapp', e.target.value)} />
+              <Input value={form.whatsapp} onChange={e => set('whatsapp', e.target.value)} />
             </div>
-            <div className="col-span-2">
-              <Label>{t.clients.addressLine1}</Label>
-              <Input value={form.address_line_1 ?? ''} onChange={e => set('address_line_1', e.target.value)} />
-            </div>
-            <div className="col-span-2">
-              <Label>{t.clients.addressLine2}</Label>
-              <Input value={form.address_line_2 ?? ''} onChange={e => set('address_line_2', e.target.value)} />
-            </div>
+          </div>
+
+          <AddressFields
+            showCoordinates={false}
+            value={{
+              postal_code: form.postal_code,
+              address_line_1: form.address_line_1,
+              address_number: form.address_number,
+              address_complement: form.address_complement,
+              neighborhood: form.neighborhood,
+              city: form.city,
+              state: form.state,
+              country: form.country,
+            }}
+            onChange={(field, val) => set(field, val)}
+          />
+
+          <div className="space-y-4">
             <div>
-              <Label>{t.clients.city}</Label>
-              <Input value={form.city ?? ''} onChange={e => set('city', e.target.value)} />
-            </div>
-            <div>
-              <Label>{t.clients.state}</Label>
-              <Input maxLength={2} value={form.state ?? ''} onChange={e => set('state', e.target.value.toUpperCase())} />
-            </div>
-            <div>
-              <Label>{t.clients.postalCode}</Label>
-              <Input value={form.postal_code ?? ''} onChange={e => set('postal_code', e.target.value)} />
-            </div>
-            <div>
-              <Label>{t.clients.country}</Label>
-              <Input value={form.country ?? 'Brazil'} onChange={e => set('country', e.target.value)} />
-            </div>
-            <div className="col-span-2">
               <Label>{t.common.notes}</Label>
-              <Textarea value={form.notes ?? ''} onChange={e => set('notes', e.target.value)} />
+              <Textarea value={form.notes} onChange={e => set('notes', e.target.value)} />
             </div>
-            <div className="flex items-center gap-2 col-span-2">
-              <Switch checked={form.active ?? true} onCheckedChange={v => set('active', v)} />
+            <div className="flex items-center gap-2">
+              <Switch checked={form.active} onCheckedChange={v => set('active', v)} />
               <Label>{t.common.active}</Label>
             </div>
           </div>

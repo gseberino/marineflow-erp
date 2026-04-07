@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
+import { AddressFields } from '@/components/AddressFields';
 import { useCreateMarina, useUpdateMarina, type Marina } from '@/hooks/use-marinas';
 import { toast } from 'sonner';
 import type { TablesInsert } from '@/integrations/supabase/types';
@@ -16,18 +17,21 @@ interface Props {
   marina?: Marina | null;
 }
 
-const empty: TablesInsert<'marinas'> = {
+const empty = {
   marina_name: '',
   contact_name: '',
   contact_phone: '',
   contact_email: '',
+  postal_code: '',
   address_line_1: '',
+  address_number: '',
+  address_complement: '',
+  neighborhood: '',
   city: '',
   state: '',
-  postal_code: '',
   country: 'Brazil',
-  latitude: undefined,
-  longitude: undefined,
+  latitude: null as number | null,
+  longitude: null as number | null,
   access_notes: '',
   billing_notes: '',
   active: true,
@@ -37,7 +41,7 @@ export function MarinaFormDialog({ open, onOpenChange, marina }: Props) {
   const { t } = useI18n();
   const create = useCreateMarina();
   const update = useUpdateMarina();
-  const [form, setForm] = useState<TablesInsert<'marinas'>>(empty);
+  const [form, setForm] = useState(empty);
   const isEdit = !!marina;
 
   useEffect(() => {
@@ -47,13 +51,16 @@ export function MarinaFormDialog({ open, onOpenChange, marina }: Props) {
         contact_name: marina.contact_name ?? '',
         contact_phone: marina.contact_phone ?? '',
         contact_email: marina.contact_email ?? '',
+        postal_code: marina.postal_code ?? '',
         address_line_1: marina.address_line_1 ?? '',
+        address_number: '',
+        address_complement: '',
+        neighborhood: '',
         city: marina.city ?? '',
         state: marina.state ?? '',
-        postal_code: marina.postal_code ?? '',
         country: marina.country ?? 'Brazil',
-        latitude: marina.latitude ?? undefined,
-        longitude: marina.longitude ?? undefined,
+        latitude: marina.latitude ?? null,
+        longitude: marina.longitude ?? null,
         access_notes: marina.access_notes ?? '',
         billing_notes: marina.billing_notes ?? '',
         active: marina.active,
@@ -68,11 +75,29 @@ export function MarinaFormDialog({ open, onOpenChange, marina }: Props) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      const fullAddress = [form.address_line_1, form.address_number, form.address_complement].filter(Boolean).join(', ');
+      const payload: TablesInsert<'marinas'> = {
+        marina_name: form.marina_name,
+        contact_name: form.contact_name || null,
+        contact_phone: form.contact_phone || null,
+        contact_email: form.contact_email || null,
+        address_line_1: fullAddress || null,
+        city: form.city || null,
+        state: form.state || null,
+        postal_code: form.postal_code || null,
+        country: form.country || 'Brazil',
+        latitude: form.latitude,
+        longitude: form.longitude,
+        access_notes: form.access_notes || null,
+        billing_notes: form.billing_notes || null,
+        active: form.active,
+      };
+
       if (isEdit && marina) {
-        await update.mutateAsync({ id: marina.id, ...form });
+        await update.mutateAsync({ id: marina.id, ...payload });
         toast.success(t.marinas.updateSuccess);
       } else {
-        await create.mutateAsync(form);
+        await create.mutateAsync(payload);
         toast.success(t.marinas.createSuccess);
       }
       onOpenChange(false);
@@ -97,54 +122,46 @@ export function MarinaFormDialog({ open, onOpenChange, marina }: Props) {
             </div>
             <div>
               <Label>{t.marinas.contactName}</Label>
-              <Input value={form.contact_name ?? ''} onChange={e => set('contact_name', e.target.value)} />
+              <Input value={form.contact_name} onChange={e => set('contact_name', e.target.value)} />
             </div>
             <div>
               <Label>{t.marinas.contactPhone}</Label>
-              <Input value={form.contact_phone ?? ''} onChange={e => set('contact_phone', e.target.value)} />
+              <Input value={form.contact_phone} onChange={e => set('contact_phone', e.target.value)} />
             </div>
             <div className="col-span-2">
               <Label>{t.marinas.contactEmail}</Label>
-              <Input type="email" value={form.contact_email ?? ''} onChange={e => set('contact_email', e.target.value)} />
+              <Input type="email" value={form.contact_email} onChange={e => set('contact_email', e.target.value)} />
             </div>
-            <div className="col-span-2">
-              <Label>{t.clients.addressLine1}</Label>
-              <Input value={form.address_line_1 ?? ''} onChange={e => set('address_line_1', e.target.value)} />
-            </div>
+          </div>
+
+          <AddressFields
+            showCoordinates={true}
+            value={{
+              postal_code: form.postal_code,
+              address_line_1: form.address_line_1,
+              address_number: form.address_number,
+              address_complement: form.address_complement,
+              neighborhood: form.neighborhood,
+              city: form.city,
+              state: form.state,
+              country: form.country,
+              latitude: form.latitude,
+              longitude: form.longitude,
+            }}
+            onChange={(field, val) => set(field, val)}
+          />
+
+          <div className="space-y-4">
             <div>
-              <Label>{t.clients.city}</Label>
-              <Input value={form.city ?? ''} onChange={e => set('city', e.target.value)} />
-            </div>
-            <div>
-              <Label>{t.clients.state}</Label>
-              <Input maxLength={2} value={form.state ?? ''} onChange={e => set('state', e.target.value.toUpperCase())} />
-            </div>
-            <div>
-              <Label>{t.clients.postalCode}</Label>
-              <Input value={form.postal_code ?? ''} onChange={e => set('postal_code', e.target.value)} />
-            </div>
-            <div>
-              <Label>{t.clients.country}</Label>
-              <Input value={form.country ?? 'Brazil'} onChange={e => set('country', e.target.value)} />
-            </div>
-            <div>
-              <Label>{t.settings.latitude}</Label>
-              <Input type="number" step="0.0000001" value={form.latitude ?? ''} onChange={e => set('latitude', e.target.value ? Number(e.target.value) : undefined)} />
-            </div>
-            <div>
-              <Label>{t.settings.longitude}</Label>
-              <Input type="number" step="0.0000001" value={form.longitude ?? ''} onChange={e => set('longitude', e.target.value ? Number(e.target.value) : undefined)} />
-            </div>
-            <div className="col-span-2">
               <Label>{t.marinas.accessNotes}</Label>
-              <Textarea value={form.access_notes ?? ''} onChange={e => set('access_notes', e.target.value)} />
+              <Textarea value={form.access_notes} onChange={e => set('access_notes', e.target.value)} />
             </div>
-            <div className="col-span-2">
+            <div>
               <Label>{t.marinas.billingNotes}</Label>
-              <Textarea value={form.billing_notes ?? ''} onChange={e => set('billing_notes', e.target.value)} />
+              <Textarea value={form.billing_notes} onChange={e => set('billing_notes', e.target.value)} />
             </div>
-            <div className="flex items-center gap-2 col-span-2">
-              <Switch checked={form.active ?? true} onCheckedChange={v => set('active', v)} />
+            <div className="flex items-center gap-2">
+              <Switch checked={form.active} onCheckedChange={v => set('active', v)} />
               <Label>{t.common.active}</Label>
             </div>
           </div>
