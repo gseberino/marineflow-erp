@@ -389,6 +389,9 @@ export const en = {
   },
 };
 
-// Deep string record type for translations
-type DeepStringRecord = { [key: string]: string | DeepStringRecord };
-export type TranslationKeys = typeof en & DeepStringRecord;
+// Recursive type that mirrors the structure but allows any string values
+type StringifyLeaves<T> = {
+  [K in keyof T]: T[K] extends string ? string : StringifyLeaves<T[K]>;
+};
+
+export type TranslationKeys = StringifyLeaves<typeof en>;
