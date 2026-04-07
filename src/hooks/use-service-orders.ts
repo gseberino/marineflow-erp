@@ -406,3 +406,66 @@ export const STATUS_TRANSITIONS: Record<string, string[]> = {
   invoiced: [],
   cancelled: [],
 };
+
+// Service order services (labor lines)
+export function useServiceOrderServices(serviceOrderId: string | undefined) {
+  return useQuery({
+    queryKey: ['so-services', serviceOrderId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('service_order_services')
+        .select('*, services(service_name)')
+        .eq('service_order_id', serviceOrderId!)
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!serviceOrderId,
+  });
+}
+
+export function useAddServiceOrderService() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (values: {
+      service_order_id: string;
+      service_id?: string;
+      service_name_snapshot: string;
+      description_snapshot?: string;
+      billing_unit_snapshot: string;
+      quantity: number;
+      unit_price_snapshot: number;
+      notes?: string;
+    }) => {
+      const line_total = Math.round(values.quantity * values.unit_price_snapshot * 100) / 100;
+      const { error } = await supabase.from('service_order_services').insert({
+        ...values,
+        line_total,
+      });
+      if (error) throw error;
+      await recalcTotals(values.service_order_id);
+    },
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ['so-services', vars.service_order_id] });
+      qc.invalidateQueries({ queryKey: ['service-orders', vars.service_order_id] });
+    },
+  });
+}
+
+export function useRemoveServiceOrderService() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, service_order_id }: { id: string; service_order_id: string }) => {
+      const { error } = await supabase
+        .from('service_order_services')
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
+      await recalcTotals(service_order_id);
+    },
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ['so-services', vars.service_order_id] });
+      qc.invalidateQueries({ queryKey: ['service-orders', vars.service_order_id] });
+    },
+  });
+}
