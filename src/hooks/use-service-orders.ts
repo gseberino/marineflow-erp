@@ -186,13 +186,21 @@ async function recalcTotals(soId: string) {
     .eq('service_order_id', soId);
   const partsCost = (parts || []).reduce((s, p) => s + (p.line_total_sale || 0), 0);
 
+  // Service lines for labor cost (billing)
+  const { data: serviceLines } = await supabase
+    .from('service_order_services')
+    .select('line_total')
+    .eq('service_order_id', soId);
+  const laborCost = (serviceLines || []).reduce((s, l) => s + (l.line_total || 0), 0);
+
+  // Time entries for internal hours tracking only
   const { data: te } = await supabase
     .from('time_entries')
     .select('duration_minutes, billable')
     .eq('service_order_id', soId);
   const { data: so } = await supabase
     .from('service_orders')
-    .select('hourly_rate, travel_cost_total, subcontract_cost_total, discount_amount, tax_amount')
+    .select('travel_cost_total, subcontract_cost_total, discount_amount, tax_amount')
     .eq('id', soId)
     .single();
 
@@ -200,7 +208,6 @@ async function recalcTotals(soId: string) {
     .filter((e) => e.billable)
     .reduce((s, e) => s + (e.duration_minutes || 0), 0);
   const laborHours = Math.round((billableMinutes / 60) * 100) / 100;
-  const laborCost = Math.round(laborHours * (so?.hourly_rate || 0) * 100) / 100;
 
   const grand =
     laborCost +
@@ -213,7 +220,7 @@ async function recalcTotals(soId: string) {
   await supabase.from('service_orders').update({
     parts_cost_total: partsCost,
     labor_hours_total: laborHours,
-    labor_cost_total: laborCost,
+    labor_cost_total: Math.round(laborCost * 100) / 100,
     grand_total: Math.round(grand * 100) / 100,
   }).eq('id', soId);
 }
@@ -399,3 +406,66 @@ export const STATUS_TRANSITIONS: Record<string, string[]> = {
   invoiced: [],
   cancelled: [],
 };
+
+// Service order services (labor lines)
+export function useServiceOrderServices(serviceOrderId: string | undefined) {
+  return useQuery({
+    queryKey: ['so-services', serviceOrderId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('service_order_services')
+        .select('*, services(service_name)')
+        .eq('service_order_id', serviceOrderId!)
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!serviceOrderId,
+  });
+}
+
+export function useAddServiceOrderService() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (values: {
+      service_order_id: string;
+      service_id?: string;
+      service_name_snapshot: string;
+      description_snapshot?: string;
+      billing_unit_snapshot: string;
+      quantity: number;
+      unit_price_snapshot: number;
+      notes?: string;
+    }) => {
+      const line_total = Math.round(values.quantity * values.unit_price_snapshot * 100) / 100;
+      const { error } = await supabase.from('service_order_services').insert({
+        ...values,
+        line_total,
+      });
+      if (error) throw error;
+      await recalcTotals(values.service_order_id);
+    },
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ['so-services', vars.service_order_id] });
+      qc.invalidateQueries({ queryKey: ['service-orders', vars.service_order_id] });
+    },
+  });
+}
+
+export function useRemoveServiceOrderService() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, service_order_id }: { id: string; service_order_id: string }) => {
+      const { error } = await supabase
+        .from('service_order_services')
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
+      await recalcTotals(service_order_id);
+    },
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ['so-services', vars.service_order_id] });
+      qc.invalidateQueries({ queryKey: ['service-orders', vars.service_order_id] });
+    },
+  });
+}

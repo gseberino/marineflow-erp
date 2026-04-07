@@ -5,6 +5,8 @@ import { useClients } from '@/hooks/use-clients';
 import { useVessels } from '@/hooks/use-vessels';
 import { useMarinas } from '@/hooks/use-marinas';
 import { useProducts } from '@/hooks/use-products';
+import { useServices } from '@/hooks/use-services';
+import { useCardFees } from '@/hooks/use-card-fees';
 import {
   useCreateServiceOrder,
   useUpdateServiceOrder,
@@ -12,6 +14,9 @@ import {
   useServiceOrderParts,
   useAddServiceOrderPart,
   useRemoveServiceOrderPart,
+  useServiceOrderServices,
+  useAddServiceOrderService,
+  useRemoveServiceOrderService,
   useTimeEntries,
   useAddTimeEntry,
   useRemoveTimeEntry,
@@ -21,6 +26,7 @@ import {
 import { calculateDisplacement } from '@/lib/displacement';
 import { statusConfig, priorityConfig } from '@/lib/constants';
 import { StatusBadge } from '@/components/StatusBadge';
+import { ServiceFormDialog } from '@/components/ServiceFormDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -28,7 +34,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Props {
@@ -48,6 +54,13 @@ const STATUSES = [
   'awaiting_client', 'completed', 'invoiced', 'cancelled',
 ] as const;
 
+const BILLING_UNIT_LABELS: Record<string, string> = {
+  hour: 'h',
+  visit: 'visita(s)',
+  day: 'dia(s)',
+  unit: 'un.',
+};
+
 export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const navigate = useNavigate();
   const { t, formatCurrency, formatDateTime } = useI18n();
@@ -58,6 +71,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const { data: marinas } = useMarinas();
   const { data: products } = useProducts();
   const { data: appUsers } = useAppUsers();
+  const { data: services } = useServices();
+  const { data: cardFees } = useCardFees();
 
   const createSO = useCreateServiceOrder();
   const updateSO = useUpdateServiceOrder();
@@ -66,6 +81,10 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const { data: parts } = useServiceOrderParts(orderId);
   const addPart = useAddServiceOrderPart();
   const removePart = useRemoveServiceOrderPart();
+
+  const { data: soServices } = useServiceOrderServices(orderId);
+  const addService = useAddServiceOrderService();
+  const removeService = useRemoveServiceOrderService();
 
   const { data: timeEntries } = useTimeEntries(orderId);
   const addTime = useAddTimeEntry();
@@ -107,14 +126,19 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [partForm, setPartForm] = useState({ product_id: '', quantity: 1, unit_cost: 0, unit_sale: 0 });
   const [showPartForm, setShowPartForm] = useState(false);
 
+  // Service line form
+  const [svcForm, setSvcForm] = useState({ service_id: '', quantity: 1, unit_price: 0, notes: '', service_name_snapshot: '', description_snapshot: '', billing_unit_snapshot: 'hour' });
+  const [showSvcForm, setShowSvcForm] = useState(false);
+  const [showNewServiceDialog, setShowNewServiceDialog] = useState(false);
+
   // Time form
   const [timeForm, setTimeForm] = useState({
     technician_user_id: '', started_at: '', ended_at: '', duration_minutes: 0, billable: true, notes: '',
   });
   const [showTimeForm, setShowTimeForm] = useState(false);
 
-  // Card fee
-  const [cardFee, setCardFee] = useState(3.5);
+  // Card installments
+  const [selectedInstallments, setSelectedInstallments] = useState(1);
 
   useEffect(() => {
     if (orderData) {
@@ -152,19 +176,6 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     }
   }, [orderData]);
 
-  // Load card fee
-  useEffect(() => {
-    (async () => {
-      const { supabase } = await import('@/integrations/supabase/client');
-      const { data } = await supabase
-        .from('app_settings')
-        .select('value')
-        .eq('key', 'card_fee_percent')
-        .maybeSingle();
-      if (data) setCardFee(parseFloat(data.value) || 3.5);
-    })();
-  }, []);
-
   const set = (field: string, value: any) => setForm((p) => ({ ...p, [field]: value }));
 
   // Filter vessels by client
@@ -201,7 +212,13 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const partsCost = orderData?.parts_cost_total || 0;
   const subtotal = laborCost + partsCost + form.travel_cost_total + form.subcontract_cost_total;
   const grandTotal = subtotal - form.discount_amount + form.tax_amount;
-  const cardTotal = grandTotal / (1 - cardFee / 100);
+
+  // Card fee calculation
+  const selectedFee = cardFees?.find((f) => f.installments === selectedInstallments);
+  const feePercent = selectedFee?.fee_percent || 0;
+  const cardGross = feePercent > 0 ? grandTotal / (1 - Number(feePercent) / 100) : grandTotal;
+  const cardFeeAmount = cardGross - grandTotal;
+  const installmentValue = selectedInstallments > 0 ? cardGross / selectedInstallments : cardGross;
 
   const handleSave = async () => {
     if (!form.client_id || !form.vessel_id || !form.problem_description) {
@@ -211,29 +228,21 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     try {
       if (isNew) {
         const result = await createSO.mutateAsync(form);
-        // Save technicians
         if (selectedTechnicians.length > 0) {
           const { supabase } = await import('@/integrations/supabase/client');
           await supabase.from('service_order_technicians').insert(
-            selectedTechnicians.map((uid) => ({
-              service_order_id: result.id,
-              user_id: uid,
-            }))
+            selectedTechnicians.map((uid) => ({ service_order_id: result.id, user_id: uid }))
           );
         }
         toast.success('Ordem de serviço criada com sucesso');
         navigate(`/service-orders/${result.id}`);
       } else {
         await updateSO.mutateAsync({ id: orderId!, ...form });
-        // Update technicians
         const { supabase } = await import('@/integrations/supabase/client');
         await supabase.from('service_order_technicians').delete().eq('service_order_id', orderId!);
         if (selectedTechnicians.length > 0) {
           await supabase.from('service_order_technicians').insert(
-            selectedTechnicians.map((uid) => ({
-              service_order_id: orderId!,
-              user_id: uid,
-            }))
+            selectedTechnicians.map((uid) => ({ service_order_id: orderId!, user_id: uid }))
           );
         }
         toast.success('Ordem de serviço atualizada');
@@ -268,6 +277,27 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       toast.success('Peça adicionada');
     } catch (e: any) {
       toast.error(e.message || 'Erro ao adicionar peça');
+    }
+  };
+
+  const handleAddService = async () => {
+    if (!orderId || !svcForm.service_name_snapshot || svcForm.quantity <= 0) return;
+    try {
+      await addService.mutateAsync({
+        service_order_id: orderId,
+        service_id: svcForm.service_id || undefined,
+        service_name_snapshot: svcForm.service_name_snapshot,
+        description_snapshot: svcForm.description_snapshot || undefined,
+        billing_unit_snapshot: svcForm.billing_unit_snapshot,
+        quantity: svcForm.quantity,
+        unit_price_snapshot: svcForm.unit_price,
+        notes: svcForm.notes || undefined,
+      });
+      setSvcForm({ service_id: '', quantity: 1, unit_price: 0, notes: '', service_name_snapshot: '', description_snapshot: '', billing_unit_snapshot: 'hour' });
+      setShowSvcForm(false);
+      toast.success('Serviço adicionado');
+    } catch (e: any) {
+      toast.error(e.message || 'Erro ao adicionar serviço');
     }
   };
 
@@ -330,7 +360,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           {!isNew && validTransitions.length > 0 && (
             <Select onValueChange={handleStatusChange}>
               <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder={t.serviceOrders.alterStatus || 'Alterar Status'} />
+                <SelectValue placeholder={t.serviceOrders.alterStatus} />
               </SelectTrigger>
               <SelectContent>
                 {validTransitions.map((s) => (
@@ -495,79 +525,181 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             <Textarea value={form.solution_applied} onChange={(e) => set('solution_applied', e.target.value)} rows={2} />
           </div>
           <div>
-            <Label>{t.serviceOrders.technicianNotes || 'Notas do Técnico'}</Label>
+            <Label>{t.serviceOrders.technicianNotes}</Label>
             <Textarea value={form.technician_notes} onChange={(e) => set('technician_notes', e.target.value)} rows={2} />
           </div>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div>
-            <Label>{t.serviceOrders.internalNotes || 'Notas Internas'}</Label>
+            <Label>{t.serviceOrders.internalNotes}</Label>
             <Textarea value={form.internal_notes} onChange={(e) => set('internal_notes', e.target.value)} rows={2} />
           </div>
           <div>
-            <Label>{t.serviceOrders.customerReport || 'Relatório para o Cliente'}</Label>
+            <Label>{t.serviceOrders.customerReport}</Label>
             <Textarea value={form.customer_visible_report} onChange={(e) => set('customer_visible_report', e.target.value)} rows={2} />
           </div>
         </div>
       </section>
 
-      {/* E - Labor & Displacement */}
-      <section className="rounded-xl border bg-card p-5 shadow-sm space-y-4">
-        <h2 className="font-semibold text-sm">{t.serviceOrders.labor}</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <Label>{t.serviceOrders.hourlyRate || 'Valor Hora (R$)'}</Label>
-            <Input type="number" value={form.hourly_rate} onChange={(e) => set('hourly_rate', parseFloat(e.target.value) || 0)} />
+      {/* E - Labor Services (edit only) */}
+      {!isNew && (
+        <section className="rounded-xl border bg-card shadow-sm overflow-hidden">
+          <div className="p-5 border-b flex items-center justify-between">
+            <h2 className="font-semibold text-sm">{t.services.laborSection}</h2>
+            <Button variant="outline" size="sm" className="gap-1" onClick={() => setShowSvcForm(!showSvcForm)}>
+              <Plus className="h-3 w-3" /> {t.services.selectService}
+            </Button>
           </div>
-          <div>
-            <Label>{t.serviceOrders.estimatedHours || 'Horas Estimadas'}</Label>
-            <Input type="number" value={form.estimated_hours} onChange={(e) => set('estimated_hours', parseFloat(e.target.value) || 0)} />
-          </div>
-        </div>
-
-        {/* Displacement card */}
-        <div className="rounded-lg border p-4 bg-muted/30 space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-medium">{t.serviceOrders.travelCalculation}</h3>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={runDisplacement} className="gap-1">
-                <RefreshCw className="h-3 w-3" /> {t.serviceOrders.recalculate || 'Recalcular'}
-              </Button>
-              <label className="flex items-center gap-1.5 text-xs">
-                <Switch checked={manualTravel} onCheckedChange={setManualTravel} />
-                {t.serviceOrders.manualOverride || 'Ajuste manual'}
-              </label>
-            </div>
-          </div>
-          {!marina?.latitude && form.marina_id && (
-            <div className="flex items-center gap-2 text-xs text-warning">
-              <AlertTriangle className="h-3.5 w-3.5" />
-              {t.serviceOrders.noCoordinates || 'Marina sem coordenadas — preencha a localização da marina para calcular automaticamente'}
+          {showSvcForm && (
+            <div className="p-4 border-b bg-muted/30 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <Label>{t.services.selectService}</Label>
+                  <Select value={svcForm.service_id} onValueChange={(v) => {
+                    const svc = services?.find((s) => s.id === v);
+                    if (svc) {
+                      setSvcForm({
+                        ...svcForm,
+                        service_id: v,
+                        service_name_snapshot: svc.service_name,
+                        description_snapshot: svc.description || '',
+                        billing_unit_snapshot: svc.billing_unit,
+                        unit_price: svc.default_price || 0,
+                      });
+                    }
+                  }}>
+                    <SelectTrigger><SelectValue placeholder={t.services.selectService} /></SelectTrigger>
+                    <SelectContent>
+                      {services?.filter((s) => s.active).map((s) => (
+                        <SelectItem key={s.id} value={s.id}>
+                          {s.service_name} ({BILLING_UNIT_LABELS[s.billing_unit] || s.billing_unit} — {formatCurrency(s.default_price || 0)})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <button type="button" className="text-xs text-primary mt-1 hover:underline"
+                    onClick={() => setShowNewServiceDialog(true)}>
+                    {t.services.registerNew}
+                  </button>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <Label>{t.serviceOrders.qty}</Label>
+                    <Input type="number" min={0.001} step="any" value={svcForm.quantity}
+                      onChange={(e) => setSvcForm({ ...svcForm, quantity: parseFloat(e.target.value) || 1 })} />
+                  </div>
+                  <div>
+                    <Label>{t.serviceOrders.unitPrice}</Label>
+                    <Input type="number" value={svcForm.unit_price}
+                      onChange={(e) => setSvcForm({ ...svcForm, unit_price: parseFloat(e.target.value) || 0 })} />
+                  </div>
+                  <div>
+                    <Label>{t.common.total}</Label>
+                    <Input readOnly value={formatCurrency(svcForm.quantity * svcForm.unit_price)} className="bg-muted" />
+                  </div>
+                </div>
+              </div>
+              <div>
+                <Label>{t.common.notes}</Label>
+                <Input value={svcForm.notes} onChange={(e) => setSvcForm({ ...svcForm, notes: e.target.value })} />
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" onClick={handleAddService} disabled={addService.isPending}>{t.common.save}</Button>
+                <Button size="sm" variant="outline" onClick={() => setShowSvcForm(false)}>{t.common.cancel}</Button>
+              </div>
             </div>
           )}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-            <div>
-              <span className="text-muted-foreground">{t.serviceOrders.distance}</span>
-              <p className="font-medium">{form.travel_distance_km} km</p>
-            </div>
-            <div>
-              <span className="text-muted-foreground">{t.serviceOrders.rate}</span>
-              <p className="font-medium">{formatCurrency(form.travel_cost_per_km)}/km</p>
-            </div>
-            <div>
-              <span className="text-muted-foreground">{t.serviceOrders.technicians}</span>
-              <p className="font-medium">{form.technician_count_for_travel}</p>
-            </div>
-            <div>
-              <span className="text-muted-foreground">{t.serviceOrders.travelTotal}</span>
-              {manualTravel ? (
-                <Input type="number" value={form.travel_cost_total}
-                  onChange={(e) => set('travel_cost_total', parseFloat(e.target.value) || 0)}
-                  className="h-7 text-sm" />
-              ) : (
-                <p className="font-bold">{formatCurrency(form.travel_cost_total)}</p>
-              )}
-            </div>
+          {(!soServices || soServices.length === 0) ? (
+            <p className="text-sm text-muted-foreground p-5">{t.services.noServicesLinked}</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-muted/50">
+                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.services.serviceName}</th>
+                  <th className="px-4 py-2 text-center font-medium text-muted-foreground">{t.services.billingUnit}</th>
+                  <th className="px-4 py-2 text-center font-medium text-muted-foreground">{t.serviceOrders.qty}</th>
+                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">{t.serviceOrders.unitPrice}</th>
+                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">{t.common.total}</th>
+                  <th className="px-4 py-2 w-10"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {soServices.map((s: any) => (
+                  <tr key={s.id} className="border-b last:border-0">
+                    <td className="px-4 py-3 font-medium">{s.service_name_snapshot}</td>
+                    <td className="px-4 py-3 text-center">{BILLING_UNIT_LABELS[s.billing_unit_snapshot] || s.billing_unit_snapshot}</td>
+                    <td className="px-4 py-3 text-center">{s.quantity}</td>
+                    <td className="px-4 py-3 text-right">{formatCurrency(s.unit_price_snapshot)}</td>
+                    <td className="px-4 py-3 text-right font-semibold">{formatCurrency(s.line_total)}</td>
+                    <td className="px-4 py-3">
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
+                        onClick={() => removeService.mutate({ id: s.id, service_order_id: orderId! })}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <ServiceFormDialog open={showNewServiceDialog} onOpenChange={setShowNewServiceDialog}
+            onCreated={(svc) => {
+              setSvcForm({
+                ...svcForm,
+                service_id: svc.id,
+                service_name_snapshot: svc.service_name,
+                description_snapshot: svc.description || '',
+                billing_unit_snapshot: svc.billing_unit,
+                unit_price: svc.default_price || 0,
+              });
+              setShowSvcForm(true);
+            }}
+          />
+        </section>
+      )}
+
+      {/* Displacement card */}
+      <section className="rounded-xl border bg-card p-5 shadow-sm space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold text-sm">{t.serviceOrders.travelCalculation}</h2>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={runDisplacement} className="gap-1">
+              <RefreshCw className="h-3 w-3" /> {t.serviceOrders.recalculate}
+            </Button>
+            <label className="flex items-center gap-1.5 text-xs">
+              <Switch checked={manualTravel} onCheckedChange={setManualTravel} />
+              {t.serviceOrders.manualOverride}
+            </label>
+          </div>
+        </div>
+        {!marina?.latitude && form.marina_id && (
+          <div className="flex items-center gap-2 text-xs text-warning">
+            <AlertTriangle className="h-3.5 w-3.5" />
+            {t.serviceOrders.noCoordinates}
+          </div>
+        )}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+          <div>
+            <span className="text-muted-foreground">{t.serviceOrders.distance}</span>
+            <p className="font-medium">{form.travel_distance_km} km</p>
+          </div>
+          <div>
+            <span className="text-muted-foreground">{t.serviceOrders.rate}</span>
+            <p className="font-medium">{formatCurrency(form.travel_cost_per_km)}/km</p>
+          </div>
+          <div>
+            <span className="text-muted-foreground">{t.serviceOrders.technicians}</span>
+            <p className="font-medium">{form.technician_count_for_travel}</p>
+          </div>
+          <div>
+            <span className="text-muted-foreground">{t.serviceOrders.travelTotal}</span>
+            {manualTravel ? (
+              <Input type="number" value={form.travel_cost_total}
+                onChange={(e) => set('travel_cost_total', parseFloat(e.target.value) || 0)}
+                className="h-7 text-sm" />
+            ) : (
+              <p className="font-bold">{formatCurrency(form.travel_cost_total)}</p>
+            )}
           </div>
         </div>
       </section>
@@ -658,13 +790,16 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         </section>
       )}
 
-      {/* G - Time Entries (edit only) */}
+      {/* G - Time Entries (edit only) — internal control */}
       {!isNew && (
         <section className="rounded-xl border bg-card shadow-sm overflow-hidden">
           <div className="p-5 border-b flex items-center justify-between">
-            <h2 className="font-semibold text-sm">{t.serviceOrders.timeEntries}</h2>
+            <div>
+              <h2 className="font-semibold text-sm">{t.services.timeSection}</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">{t.services.timeNote}</p>
+            </div>
             <Button variant="outline" size="sm" className="gap-1" onClick={() => setShowTimeForm(!showTimeForm)}>
-              <Plus className="h-3 w-3" /> {t.serviceOrders.addTimeEntry || 'Registrar Horas'}
+              <Plus className="h-3 w-3" /> {t.serviceOrders.addTimeEntry}
             </Button>
           </div>
           {showTimeForm && (
@@ -793,21 +928,49 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             <div className="rounded-lg border p-3 bg-muted/30">
               <div className="flex items-center gap-2 mb-1">
                 <Calculator className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm font-medium">PIX</span>
+                <span className="text-sm font-medium">{t.serviceOrders.paymentMethodPix}</span>
               </div>
-              <p className="text-sm">{formatCurrency(grandTotal)}</p>
+              <p className="text-sm font-semibold">{formatCurrency(grandTotal)}</p>
             </div>
-            <div className="rounded-lg border p-3 bg-muted/30">
-              <div className="flex items-center gap-2 mb-1">
-                <Calculator className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm font-medium">{t.serviceOrders.paymentMethodCard || 'Cartão de Crédito'}</span>
+            <div className="rounded-lg border p-3 bg-muted/30 space-y-3">
+              <div className="flex items-center gap-2">
+                <CreditCard className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-medium">{t.serviceOrders.paymentMethodCard}</span>
               </div>
-              <p className="text-sm">
-                {t.serviceOrders.cardTotalNote || 'Valor a cobrar'}: <span className="font-semibold">{formatCurrency(cardTotal)}</span>
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {t.serviceOrders.cardFeeNote || 'Taxa estimada'}: {formatCurrency(cardTotal - grandTotal)} ({cardFee}%)
-              </p>
+              {/* Installment selector */}
+              <div className="flex gap-1.5">
+                {[1, 2, 3, 4, 5, 6].map((n) => (
+                  <button key={n} type="button"
+                    className={`px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${
+                      selectedInstallments === n
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : 'bg-background text-foreground border-border hover:bg-muted'
+                    }`}
+                    onClick={() => setSelectedInstallments(n)}>
+                    {n}x
+                  </button>
+                ))}
+              </div>
+              <div className="space-y-1 text-sm">
+                <div className="flex justify-between">
+                  <span className="font-medium">{t.serviceOrders.cardGrossAmount}:</span>
+                  <span className="font-bold">{formatCurrency(cardGross)}</span>
+                </div>
+                {selectedInstallments > 1 && (
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>{t.serviceOrders.cardInstallmentValue}:</span>
+                    <span>{selectedInstallments}x {formatCurrency(installmentValue)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-muted-foreground">
+                  <span>{t.serviceOrders.cardFeeAmount} ({Number(feePercent).toFixed(2)}%):</span>
+                  <span>{formatCurrency(cardFeeAmount)}</span>
+                </div>
+                <div className="flex justify-between text-success pt-1 border-t">
+                  <span className="font-medium">{t.serviceOrders.cardNetAmount}:</span>
+                  <span className="font-semibold">{formatCurrency(grandTotal)}</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>

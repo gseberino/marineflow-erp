@@ -74,6 +74,24 @@ export type Database = {
         }
         Relationships: []
       }
+      card_installment_fees: {
+        Row: {
+          fee_percent: number
+          installments: number
+          updated_at: string | null
+        }
+        Insert: {
+          fee_percent?: number
+          installments: number
+          updated_at?: string | null
+        }
+        Update: {
+          fee_percent?: number
+          installments?: number
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       clients: {
         Row: {
           active: boolean
@@ -690,6 +708,66 @@ export type Database = {
           },
         ]
       }
+      service_order_services: {
+        Row: {
+          billing_unit_snapshot: string
+          created_at: string | null
+          description_snapshot: string | null
+          id: string
+          line_total: number
+          notes: string | null
+          quantity: number
+          service_id: string | null
+          service_name_snapshot: string
+          service_order_id: string
+          unit_price_snapshot: number
+          updated_at: string | null
+        }
+        Insert: {
+          billing_unit_snapshot?: string
+          created_at?: string | null
+          description_snapshot?: string | null
+          id?: string
+          line_total?: number
+          notes?: string | null
+          quantity?: number
+          service_id?: string | null
+          service_name_snapshot: string
+          service_order_id: string
+          unit_price_snapshot?: number
+          updated_at?: string | null
+        }
+        Update: {
+          billing_unit_snapshot?: string
+          created_at?: string | null
+          description_snapshot?: string | null
+          id?: string
+          line_total?: number
+          notes?: string | null
+          quantity?: number
+          service_id?: string | null
+          service_name_snapshot?: string
+          service_order_id?: string
+          unit_price_snapshot?: number
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_order_services_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_services_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       service_order_technicians: {
         Row: {
           created_at: string
@@ -889,6 +967,45 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      services: {
+        Row: {
+          active: boolean | null
+          billing_unit: string
+          category: string | null
+          created_at: string | null
+          currency: string | null
+          default_price: number | null
+          description: string | null
+          id: string
+          service_name: string
+          updated_at: string | null
+        }
+        Insert: {
+          active?: boolean | null
+          billing_unit?: string
+          category?: string | null
+          created_at?: string | null
+          currency?: string | null
+          default_price?: number | null
+          description?: string | null
+          id?: string
+          service_name: string
+          updated_at?: string | null
+        }
+        Update: {
+          active?: boolean | null
+          billing_unit?: string
+          category?: string | null
+          created_at?: string | null
+          currency?: string | null
+          default_price?: number | null
+          description?: string | null
+          id?: string
+          service_name?: string
+          updated_at?: string | null
+        }
+        Relationships: []
       }
       suppliers: {
         Row: {
