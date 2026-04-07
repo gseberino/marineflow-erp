@@ -34,7 +34,7 @@ export function useAddProductSupplier() {
 export function useUpdateProductSupplier() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, product_id, ...rest }: { id: string; product_id: string; [k: string]: any }) => {
+    mutationFn: async ({ id, product_id, ...rest }: { id: string; product_id: string; is_preferred?: boolean; cost_price?: number; currency?: string; lead_time_days?: number; minimum_order_qty?: number; supplier_sku?: string; notes?: string | null }) => {
       const { data, error } = await supabase.from('product_suppliers').update(rest).eq('id', id).select().single();
       if (error) throw error;
       return data;

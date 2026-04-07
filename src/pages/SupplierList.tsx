@@ -98,7 +98,9 @@ export default function SupplierList() {
                   </td>
                   <td className="px-4 py-3 text-center font-medium">{productCounts?.[s.id] ?? 0}</td>
                   <td className="px-4 py-3 text-center">
-                    <StatusBadge status={s.active ? 'active' : 'inactive'} label={s.active ? t.common.active : t.common.inactive} />
+                    <StatusBadge className={s.active ? 'bg-emerald-100 text-emerald-700' : 'bg-muted text-muted-foreground'}>
+                      {s.active ? t.common.active : t.common.inactive}
+                    </StatusBadge>
                   </td>
                   <td className="px-4 py-3 text-center">
                     <Button variant="ghost" size="sm" onClick={() => { setEditing(s); setFormOpen(true); }}>{t.common.edit}</Button>
