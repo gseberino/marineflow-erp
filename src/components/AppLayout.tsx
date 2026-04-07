@@ -1,29 +1,31 @@
 import { ReactNode, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { Link, useLocation } from 'react-router-dom';
+import { useI18n } from '@/i18n';
 import {
   LayoutDashboard, Users, Ship, Anchor, Package, ClipboardList,
   DollarSign, BarChart3, Settings, ChevronLeft, ChevronRight, Menu, X,
   Warehouse
 } from 'lucide-react';
 
-const navItems = [
-  { label: 'Dashboard', icon: LayoutDashboard, path: '/' },
-  { label: 'Service Orders', icon: ClipboardList, path: '/service-orders' },
-  { label: 'Clients', icon: Users, path: '/clients' },
-  { label: 'Vessels', icon: Ship, path: '/vessels' },
-  { label: 'Marinas', icon: Anchor, path: '/marinas' },
-  { label: 'Products', icon: Package, path: '/products' },
-  { label: 'Inventory', icon: Warehouse, path: '/inventory' },
-  { label: 'Financial', icon: DollarSign, path: '/financial' },
-  { label: 'Reports', icon: BarChart3, path: '/reports' },
-  { label: 'Settings', icon: Settings, path: '/settings' },
+const navKeys = [
+  { key: 'dashboard' as const, icon: LayoutDashboard, path: '/' },
+  { key: 'serviceOrders' as const, icon: ClipboardList, path: '/service-orders' },
+  { key: 'clients' as const, icon: Users, path: '/clients' },
+  { key: 'vessels' as const, icon: Ship, path: '/vessels' },
+  { key: 'marinas' as const, icon: Anchor, path: '/marinas' },
+  { key: 'products' as const, icon: Package, path: '/products' },
+  { key: 'inventory' as const, icon: Warehouse, path: '/inventory' },
+  { key: 'financial' as const, icon: DollarSign, path: '/financial' },
+  { key: 'reports' as const, icon: BarChart3, path: '/reports' },
+  { key: 'settings' as const, icon: Settings, path: '/settings' },
 ];
 
 export function AppLayout({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
+  const { t } = useI18n();
 
   const isActive = (path: string) => {
     if (path === '/') return location.pathname === '/';
@@ -45,7 +47,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
       </div>
 
       <nav className="flex-1 space-y-1 p-2 overflow-y-auto scrollbar-thin">
-        {navItems.map((item) => (
+        {navKeys.map((item) => (
           <Link
             key={item.path}
             to={item.path}
@@ -58,7 +60,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
             )}
           >
             <item.icon className="h-4 w-4 shrink-0" />
-            {!collapsed && <span>{item.label}</span>}
+            {!collapsed && <span>{t.nav[item.key]}</span>}
           </Link>
         ))}
       </nav>
@@ -76,7 +78,6 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background">
-      {/* Desktop sidebar */}
       <aside
         className={cn(
           'hidden lg:flex flex-col bg-sidebar border-r border-sidebar-border transition-all duration-200 shrink-0',
@@ -86,7 +87,6 @@ export function AppLayout({ children }: { children: ReactNode }) {
         {sidebarContent}
       </aside>
 
-      {/* Mobile overlay */}
       {mobileOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-foreground/50" onClick={() => setMobileOpen(false)} />
@@ -96,7 +96,6 @@ export function AppLayout({ children }: { children: ReactNode }) {
         </div>
       )}
 
-      {/* Main content */}
       <div className="flex flex-1 flex-col overflow-hidden">
         <header className="flex h-14 items-center gap-4 border-b px-4 lg:px-6 shrink-0">
           <button
@@ -109,7 +108,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           <div className="flex items-center gap-3">
             <div className="text-right hidden sm:block">
               <p className="text-sm font-medium">Carlos Mendes</p>
-              <p className="text-xs text-muted-foreground">Admin</p>
+              <p className="text-xs text-muted-foreground">{t.roles.admin}</p>
             </div>
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold">
               CM

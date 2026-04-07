@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PageHeader } from '@/components/PageHeader';
+import { useI18n } from '@/i18n';
 import { vessels, getClient, getMarina } from '@/data/mock-data';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,6 +9,7 @@ import { Plus, Search, Anchor, Ship } from 'lucide-react';
 
 export default function VesselList() {
   const [search, setSearch] = useState('');
+  const { t } = useI18n();
   const filtered = vessels.filter(v =>
     !search ||
     v.boat_name.toLowerCase().includes(search.toLowerCase()) ||
@@ -18,22 +20,22 @@ export default function VesselList() {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <PageHeader title="Vessels" description="Fleet registry and technical profiles">
-        <Button className="gap-2 bg-accent text-accent-foreground hover:bg-accent/90"><Plus className="h-4 w-4" /> New Vessel</Button>
+      <PageHeader title={t.vessels.title} description={t.vessels.description}>
+        <Button className="gap-2 bg-accent text-accent-foreground hover:bg-accent/90"><Plus className="h-4 w-4" /> {t.vessels.newVessel}</Button>
       </PageHeader>
       <div className="relative">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input placeholder="Search by vessel name, manufacturer, or owner..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
+        <Input placeholder={t.vessels.searchPlaceholder} value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
       </div>
       <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
         <table className="w-full text-sm">
           <thead><tr className="border-b bg-muted/50">
-            <th className="px-4 py-3 text-left font-medium text-muted-foreground">Vessel</th>
-            <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">Owner</th>
-            <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">Marina</th>
-            <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">Engine</th>
-            <th className="px-4 py-3 text-center font-medium text-muted-foreground">Length</th>
-            <th className="px-4 py-3 text-center font-medium text-muted-foreground hidden lg:table-cell">Year</th>
+            <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.vessels.vessel}</th>
+            <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">{t.vessels.owner}</th>
+            <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">{t.serviceOrders.marina}</th>
+            <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">{t.vessels.engine}</th>
+            <th className="px-4 py-3 text-center font-medium text-muted-foreground">{t.vessels.length}</th>
+            <th className="px-4 py-3 text-center font-medium text-muted-foreground hidden lg:table-cell">{t.vessels.year}</th>
           </tr></thead>
           <tbody>
             {filtered.map(v => {
