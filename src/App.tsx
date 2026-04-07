@@ -3,6 +3,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { I18nProvider } from "@/i18n";
 import { AppLayout } from "@/components/AppLayout";
 import Dashboard from "./pages/Dashboard";
 import ServiceOrderList from "./pages/ServiceOrderList";
@@ -23,30 +24,32 @@ const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <AppLayout>
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/service-orders" element={<ServiceOrderList />} />
-            <Route path="/service-orders/:id" element={<ServiceOrderDetail />} />
-            <Route path="/clients" element={<ClientList />} />
-            <Route path="/clients/:id" element={<ClientDetail />} />
-            <Route path="/vessels" element={<VesselList />} />
-            <Route path="/vessels/:id" element={<VesselDetail />} />
-            <Route path="/marinas" element={<MarinaList />} />
-            <Route path="/products" element={<ProductList />} />
-            <Route path="/inventory" element={<InventoryPage />} />
-            <Route path="/financial" element={<FinancialPage />} />
-            <Route path="/reports" element={<ReportsPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </AppLayout>
-      </BrowserRouter>
-    </TooltipProvider>
+    <I18nProvider>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
+          <AppLayout>
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/service-orders" element={<ServiceOrderList />} />
+              <Route path="/service-orders/:id" element={<ServiceOrderDetail />} />
+              <Route path="/clients" element={<ClientList />} />
+              <Route path="/clients/:id" element={<ClientDetail />} />
+              <Route path="/vessels" element={<VesselList />} />
+              <Route path="/vessels/:id" element={<VesselDetail />} />
+              <Route path="/marinas" element={<MarinaList />} />
+              <Route path="/products" element={<ProductList />} />
+              <Route path="/inventory" element={<InventoryPage />} />
+              <Route path="/financial" element={<FinancialPage />} />
+              <Route path="/reports" element={<ReportsPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </AppLayout>
+        </BrowserRouter>
+      </TooltipProvider>
+    </I18nProvider>
   </QueryClientProvider>
 );
 
