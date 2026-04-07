@@ -1,62 +1,99 @@
 import { useState } from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import { useI18n } from '@/i18n';
-import { products } from '@/data/mock-data';
+import { useProducts, type Product } from '@/hooks/use-products';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Plus, Search, AlertTriangle } from 'lucide-react';
+import { Plus, Search, AlertTriangle, Edit } from 'lucide-react';
 import { StatusBadge } from '@/components/StatusBadge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { ProductFormDialog } from '@/components/ProductFormDialog';
 
 export default function ProductList() {
   const [search, setSearch] = useState('');
+  const [formOpen, setFormOpen] = useState(false);
+  const [editProduct, setEditProduct] = useState<Product | null>(null);
   const { t, formatCurrency } = useI18n();
-  const filtered = products.filter(p =>
-    !search || p.product_name.toLowerCase().includes(search.toLowerCase()) || p.sku.toLowerCase().includes(search.toLowerCase()) || p.category.toLowerCase().includes(search.toLowerCase())
+  const { data: products, isLoading, error } = useProducts();
+
+  const filtered = (products ?? []).filter(p =>
+    !search ||
+    p.product_name.toLowerCase().includes(search.toLowerCase()) ||
+    (p.sku ?? '').toLowerCase().includes(search.toLowerCase()) ||
+    (p.category ?? '').toLowerCase().includes(search.toLowerCase())
   );
+
+  if (error) return <div className="py-20 text-center text-destructive">{(error as Error).message}</div>;
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <PageHeader title={t.products.title} description={t.products.description}>
-        <Button className="gap-2 bg-accent text-accent-foreground hover:bg-accent/90"><Plus className="h-4 w-4" /> {t.products.newProduct}</Button>
+      <PageHeader title={t.products.title} description={`${t.products.description} (${products?.length ?? 0})`}>
+        <Button className="gap-2 bg-accent text-accent-foreground hover:bg-accent/90" onClick={() => { setEditProduct(null); setFormOpen(true); }}>
+          <Plus className="h-4 w-4" /> {t.products.newProduct}
+        </Button>
       </PageHeader>
       <div className="relative">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input placeholder={t.products.searchPlaceholder} value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
       </div>
-      <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
-          <thead><tr className="border-b bg-muted/50">
-            <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.serviceOrders.product}</th>
-            <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">{t.products.category}</th>
-            <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">{t.products.brand}</th>
-            <th className="px-4 py-3 text-center font-medium text-muted-foreground">{t.products.stock}</th>
-            <th className="px-4 py-3 text-right font-medium text-muted-foreground hidden md:table-cell">{t.products.cost}</th>
-            <th className="px-4 py-3 text-right font-medium text-muted-foreground">{t.products.salePrice}</th>
-          </tr></thead>
-          <tbody>
-            {filtered.map(p => {
-              const lowStock = p.stock_quantity <= p.minimum_stock;
-              return (
-                <tr key={p.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
-                  <td className="px-4 py-3">
-                    <p className="font-medium">{p.product_name}</p>
-                    <p className="text-xs text-muted-foreground">{p.sku}</p>
-                  </td>
-                  <td className="px-4 py-3 hidden md:table-cell"><StatusBadge className="bg-secondary text-secondary-foreground">{p.category}</StatusBadge></td>
-                  <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">{p.brand}</td>
-                  <td className="px-4 py-3 text-center">
-                    <span className={lowStock ? 'text-destructive font-semibold' : ''}>{p.stock_quantity}</span>
-                    {lowStock && <AlertTriangle className="h-3 w-3 text-destructive inline ml-1" />}
-                    <span className="text-xs text-muted-foreground block">{t.products.min}: {p.minimum_stock}</span>
-                  </td>
-                  <td className="px-4 py-3 text-right hidden md:table-cell text-muted-foreground">{formatCurrency(p.cost_price)}</td>
-                  <td className="px-4 py-3 text-right font-medium">{formatCurrency(p.sale_price)}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+
+      {isLoading ? (
+        <div className="space-y-2">{[1,2,3,4].map(i => <Skeleton key={i} className="h-14 rounded-lg" />)}</div>
+      ) : filtered.length === 0 ? (
+        <div className="py-16 text-center">
+          <p className="text-muted-foreground">{products?.length === 0 ? t.products.noProducts : t.common.noResults}</p>
+          {products?.length === 0 && (
+            <Button variant="outline" className="mt-4" onClick={() => setFormOpen(true)}>
+              <Plus className="h-4 w-4 mr-2" /> {t.products.createFirst}
+            </Button>
+          )}
+        </div>
+      ) : (
+        <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
+          <table className="w-full text-sm">
+            <thead><tr className="border-b bg-muted/50">
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.serviceOrders.product}</th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">{t.products.category}</th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">{t.products.brand}</th>
+              <th className="px-4 py-3 text-center font-medium text-muted-foreground">{t.products.stock}</th>
+              <th className="px-4 py-3 text-right font-medium text-muted-foreground hidden md:table-cell">{t.products.cost}</th>
+              <th className="px-4 py-3 text-right font-medium text-muted-foreground">{t.products.salePrice}</th>
+              <th className="px-4 py-3 text-center font-medium text-muted-foreground w-12"></th>
+            </tr></thead>
+            <tbody>
+              {filtered.map(p => {
+                const lowStock = (p.stock_quantity ?? 0) <= (p.minimum_stock ?? 0);
+                return (
+                  <tr key={p.id} className={`border-b last:border-0 hover:bg-muted/30 transition-colors ${lowStock ? 'bg-warning/5' : ''}`}>
+                    <td className="px-4 py-3">
+                      <p className="font-medium">{p.product_name}</p>
+                      <p className="text-xs text-muted-foreground">{p.sku}</p>
+                    </td>
+                    <td className="px-4 py-3 hidden md:table-cell">
+                      {p.category && <StatusBadge className="bg-secondary text-secondary-foreground">{p.category}</StatusBadge>}
+                    </td>
+                    <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">{p.brand}</td>
+                    <td className="px-4 py-3 text-center">
+                      <span className={lowStock ? 'text-destructive font-semibold' : ''}>{p.stock_quantity ?? 0}</span>
+                      {lowStock && <AlertTriangle className="h-3 w-3 text-destructive inline ml-1" />}
+                      <span className="text-xs text-muted-foreground block">{t.products.min}: {p.minimum_stock ?? 0}</span>
+                    </td>
+                    <td className="px-4 py-3 text-right hidden md:table-cell text-muted-foreground">{formatCurrency(p.cost_price ?? 0, p.cost_currency ?? 'BRL')}</td>
+                    <td className="px-4 py-3 text-right font-medium">{formatCurrency(p.sale_price ?? 0, p.sale_currency ?? 'BRL')}</td>
+                    <td className="px-4 py-3 text-center">
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setEditProduct(p); setFormOpen(true); }}>
+                        <Edit className="h-3.5 w-3.5" />
+                      </Button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <ProductFormDialog open={formOpen} onOpenChange={setFormOpen} product={editProduct} />
     </div>
   );
 }
