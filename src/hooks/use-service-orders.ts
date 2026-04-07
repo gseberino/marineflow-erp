@@ -148,7 +148,7 @@ export function useUpdateServiceOrderStatus() {
       }
       const { data, error } = await supabase
         .from('service_orders')
-        .update(updates)
+        .update(updates as any)
         .eq('id', id)
         .select()
         .single();
