@@ -363,6 +363,7 @@ export type Database = {
           paid_amount: number | null
           payment_method: string | null
           status: string | null
+          supplier_id: string | null
           supplier_name: string | null
           updated_at: string
         }
@@ -381,6 +382,7 @@ export type Database = {
           paid_amount?: number | null
           payment_method?: string | null
           status?: string | null
+          supplier_id?: string | null
           supplier_name?: string | null
           updated_at?: string
         }
@@ -399,6 +401,7 @@ export type Database = {
           paid_amount?: number | null
           payment_method?: string | null
           status?: string | null
+          supplier_id?: string | null
           supplier_name?: string | null
           updated_at?: string
         }
@@ -408,6 +411,79 @@ export type Database = {
             columns: ["linked_service_order_id"]
             isOneToOne: false
             referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payables_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_suppliers: {
+        Row: {
+          cost_price: number | null
+          created_at: string | null
+          currency: string | null
+          id: string
+          is_preferred: boolean | null
+          last_purchase_date: string | null
+          last_purchase_price: number | null
+          lead_time_days: number | null
+          minimum_order_qty: number | null
+          notes: string | null
+          product_id: string
+          supplier_id: string
+          supplier_sku: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          cost_price?: number | null
+          created_at?: string | null
+          currency?: string | null
+          id?: string
+          is_preferred?: boolean | null
+          last_purchase_date?: string | null
+          last_purchase_price?: number | null
+          lead_time_days?: number | null
+          minimum_order_qty?: number | null
+          notes?: string | null
+          product_id: string
+          supplier_id: string
+          supplier_sku?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          cost_price?: number | null
+          created_at?: string | null
+          currency?: string | null
+          id?: string
+          is_preferred?: boolean | null
+          last_purchase_date?: string | null
+          last_purchase_price?: number | null
+          lead_time_days?: number | null
+          minimum_order_qty?: number | null
+          notes?: string | null
+          product_id?: string
+          supplier_id?: string
+          supplier_sku?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_suppliers_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_suppliers_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
             referencedColumns: ["id"]
           },
         ]
@@ -813,6 +889,78 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      suppliers: {
+        Row: {
+          active: boolean | null
+          address_complement: string | null
+          address_line_1: string | null
+          address_number: string | null
+          city: string | null
+          cnpj_cpf: string | null
+          contact_email: string | null
+          contact_name: string | null
+          contact_phone: string | null
+          country: string | null
+          created_at: string | null
+          id: string
+          neighborhood: string | null
+          notes: string | null
+          payment_terms: string | null
+          postal_code: string | null
+          state: string | null
+          supplier_name: string
+          trade_name: string | null
+          updated_at: string | null
+          website: string | null
+        }
+        Insert: {
+          active?: boolean | null
+          address_complement?: string | null
+          address_line_1?: string | null
+          address_number?: string | null
+          city?: string | null
+          cnpj_cpf?: string | null
+          contact_email?: string | null
+          contact_name?: string | null
+          contact_phone?: string | null
+          country?: string | null
+          created_at?: string | null
+          id?: string
+          neighborhood?: string | null
+          notes?: string | null
+          payment_terms?: string | null
+          postal_code?: string | null
+          state?: string | null
+          supplier_name: string
+          trade_name?: string | null
+          updated_at?: string | null
+          website?: string | null
+        }
+        Update: {
+          active?: boolean | null
+          address_complement?: string | null
+          address_line_1?: string | null
+          address_number?: string | null
+          city?: string | null
+          cnpj_cpf?: string | null
+          contact_email?: string | null
+          contact_name?: string | null
+          contact_phone?: string | null
+          country?: string | null
+          created_at?: string | null
+          id?: string
+          neighborhood?: string | null
+          notes?: string | null
+          payment_terms?: string | null
+          postal_code?: string | null
+          state?: string | null
+          supplier_name?: string
+          trade_name?: string | null
+          updated_at?: string | null
+          website?: string | null
+        }
+        Relationships: []
       }
       time_entries: {
         Row: {
