@@ -334,7 +334,35 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     }
   };
 
-  // Compute duration from start/end
+  const handleAddExpense = async () => {
+    if (!orderId || !expForm.category || !expForm.description || expForm.amount <= 0) return;
+    try {
+      await addExpense.mutateAsync({
+        service_order_id: orderId,
+        category: expForm.category,
+        description: expForm.description,
+        amount: expForm.amount,
+        currency: expForm.currency,
+        expense_date: expForm.expense_date,
+        paid_by: expForm.paid_by,
+        technician_user_id: expForm.paid_by === 'technician' ? expForm.technician_user_id || undefined : undefined,
+        receipt_url: expForm.receipt_url || undefined,
+        notes: expForm.notes || undefined,
+        also_create_payable: expForm.also_create_payable,
+      });
+      setExpForm({
+        category: '', description: '', amount: 0, currency: 'BRL',
+        expense_date: new Date().toISOString().slice(0, 10),
+        paid_by: 'company', technician_user_id: '', receipt_url: '', notes: '',
+        also_create_payable: false,
+      });
+      setShowExpForm(false);
+      toast.success('Despesa adicionada');
+    } catch (e: any) {
+      toast.error(e.message || 'Erro ao adicionar despesa');
+    }
+  };
+
   useEffect(() => {
     if (timeForm.started_at && timeForm.ended_at) {
       const start = new Date(timeForm.started_at).getTime();
