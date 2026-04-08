@@ -74,6 +74,53 @@ export type Database = {
         }
         Relationships: []
       }
+      bank_transactions: {
+        Row: {
+          amount: number
+          bank_ref_id: string | null
+          created_at: string | null
+          description: string
+          id: string
+          import_batch_id: string | null
+          reconciled: boolean | null
+          reconciled_payment_id: string | null
+          transaction_date: string
+          transaction_type: string
+        }
+        Insert: {
+          amount: number
+          bank_ref_id?: string | null
+          created_at?: string | null
+          description: string
+          id?: string
+          import_batch_id?: string | null
+          reconciled?: boolean | null
+          reconciled_payment_id?: string | null
+          transaction_date: string
+          transaction_type: string
+        }
+        Update: {
+          amount?: number
+          bank_ref_id?: string | null
+          created_at?: string | null
+          description?: string
+          id?: string
+          import_batch_id?: string | null
+          reconciled?: boolean | null
+          reconciled_payment_id?: string | null
+          transaction_date?: string
+          transaction_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bank_transactions_reconciled_payment_id_fkey"
+            columns: ["reconciled_payment_id"]
+            isOneToOne: false
+            referencedRelation: "payments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       card_installment_fees: {
         Row: {
           fee_percent: number
@@ -436,6 +483,63 @@ export type Database = {
             columns: ["supplier_id"]
             isOneToOne: false
             referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payments: {
+        Row: {
+          amount: number
+          card_fee_percent: number | null
+          created_at: string | null
+          id: string
+          installments: number | null
+          net_amount: number | null
+          notes: string | null
+          payable_id: string | null
+          payment_date: string
+          payment_method: string
+          receivable_id: string | null
+        }
+        Insert: {
+          amount: number
+          card_fee_percent?: number | null
+          created_at?: string | null
+          id?: string
+          installments?: number | null
+          net_amount?: number | null
+          notes?: string | null
+          payable_id?: string | null
+          payment_date?: string
+          payment_method?: string
+          receivable_id?: string | null
+        }
+        Update: {
+          amount?: number
+          card_fee_percent?: number | null
+          created_at?: string | null
+          id?: string
+          installments?: number | null
+          net_amount?: number | null
+          notes?: string | null
+          payable_id?: string | null
+          payment_date?: string
+          payment_method?: string
+          receivable_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payments_payable_id_fkey"
+            columns: ["payable_id"]
+            isOneToOne: false
+            referencedRelation: "payables"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payments_receivable_id_fkey"
+            columns: ["receivable_id"]
+            isOneToOne: false
+            referencedRelation: "receivables"
             referencedColumns: ["id"]
           },
         ]

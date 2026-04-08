@@ -1,0 +1,100 @@
+import { useState } from 'react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useI18n } from '@/i18n';
+import { useSuppliers } from '@/hooks/use-suppliers';
+import { useServiceOrders } from '@/hooks/use-service-orders';
+import { useCreatePayable } from '@/hooks/use-financial';
+import { toast } from 'sonner';
+
+const EXPENSE_CATEGORIES = [
+  'Peças e Materiais', 'Veículo e Combustível', 'Ferramentas e Equipamentos',
+  'Seguro', 'Aluguel', 'Salários', 'Impostos', 'Marketing', 'Outros',
+];
+
+interface Props { open: boolean; onOpenChange: (open: boolean) => void; }
+
+export function PayableFormDialog({ open, onOpenChange }: Props) {
+  const { t } = useI18n();
+  const { data: suppliers } = useSuppliers();
+  const { data: orders } = useServiceOrders();
+  const create = useCreatePayable();
+
+  const [supplierId, setSupplierId] = useState('');
+  const [supplierName, setSupplierName] = useState('');
+  const [category, setCategory] = useState('');
+  const [description, setDescription] = useState('');
+  const [issueDate, setIssueDate] = useState(new Date().toISOString().split('T')[0]);
+  const [dueDate, setDueDate] = useState('');
+  const [amount, setAmount] = useState('');
+  const [currency, setCurrency] = useState('BRL');
+  const [soId, setSoId] = useState('');
+  const [notes, setNotes] = useState('');
+
+  const handleSave = async () => {
+    if (!description || !dueDate || !amount) return;
+    const selectedSupplier = suppliers?.find(s => s.id === supplierId);
+    try {
+      await create.mutateAsync({
+        description, issue_date: issueDate, due_date: dueDate,
+        amount: parseFloat(amount), currency,
+        expense_category: category || undefined,
+        supplier_id: supplierId || undefined,
+        supplier_name: selectedSupplier?.supplier_name || supplierName || undefined,
+        linked_service_order_id: soId || undefined,
+        notes: notes || undefined,
+      });
+      toast.success(t.financial.newPayable);
+      onOpenChange(false);
+    } catch { toast.error('Erro ao criar despesa'); }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader><DialogTitle>{t.financial.newPayable}</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div><Label>{t.financial.supplierOptional}</Label>
+            <Select value={supplierId} onValueChange={v => { setSupplierId(v); setSupplierName(''); }}>
+              <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
+              <SelectContent>{(suppliers || []).map(s => <SelectItem key={s.id} value={s.id}>{s.supplier_name}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          {!supplierId && <div><Label>Nome do fornecedor</Label><Input value={supplierName} onChange={e => setSupplierName(e.target.value)} /></div>}
+          <div><Label>{t.financial.expenseCategory}</Label>
+            <Select value={category} onValueChange={setCategory}>
+              <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
+              <SelectContent>{EXPENSE_CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div><Label>{t.common.description} *</Label><Input value={description} onChange={e => setDescription(e.target.value)} /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label>{t.common.date}</Label><Input type="date" value={issueDate} onChange={e => setIssueDate(e.target.value)} /></div>
+            <div><Label>{t.financial.dueDate} *</Label><Input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} /></div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label>{t.common.amount} *</Label><Input type="number" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} /></div>
+            <div><Label>Moeda</Label>
+              <Select value={currency} onValueChange={setCurrency}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent><SelectItem value="BRL">BRL</SelectItem><SelectItem value="USD">USD</SelectItem><SelectItem value="EUR">EUR</SelectItem></SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div><Label>{t.financial.linkedOrder}</Label>
+            <Select value={soId} onValueChange={setSoId}>
+              <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
+              <SelectContent>{(orders || []).map(o => <SelectItem key={o.id} value={o.id}>{o.service_order_number}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div><Label>{t.common.notes}</Label><Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} /></div>
+        </div>
+        <DialogFooter><Button onClick={handleSave} disabled={create.isPending}>{t.common.save}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
