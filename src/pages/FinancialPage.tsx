@@ -323,6 +323,8 @@ export default function FinancialPage() {
               </table>
             </div>
           )}
+          </>
+          )}
         </TabsContent>
 
         {/* === RECONCILIATION === */}
@@ -339,10 +341,12 @@ export default function FinancialPage() {
           receivable={paymentTarget.receivable}
           payable={paymentTarget.payable}
         />
-          )}
-          </>
-          )}
+      )}
       <ReceivableFormDialog open={showNewReceivable} onOpenChange={setShowNewReceivable} />
+      <PayableFormDialog open={showNewPayable} onOpenChange={setShowNewPayable} />
+    </div>
+  );
+}
       <PayableFormDialog open={showNewPayable} onOpenChange={setShowNewPayable} />
     </div>
   );
