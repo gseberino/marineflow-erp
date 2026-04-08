@@ -19,6 +19,7 @@ export function BankReconciliation() {
   const dismiss = useDismissBankTransaction();
 
   const [preview, setPreview] = useState<BankTransaction[] | null>(null);
+  const [previewSource, setPreviewSource] = useState<'bank' | 'credit_card'>('bank');
   const [filter, setFilter] = useState<'all' | 'credit' | 'debit'>('all');
   const [reconcileId, setReconcileId] = useState<string | null>(null);
   const [searchMatch, setSearchMatch] = useState('');
@@ -27,12 +28,13 @@ export function BankReconciliation() {
     const reader = new FileReader();
     reader.onload = (e) => {
       const content = e.target?.result as string;
-      const parsed = parseFile(content, file.name);
-      if (parsed.length === 0) {
+      const result = parseFile(content, file.name);
+      if (result.transactions.length === 0) {
         toast.error('Nenhuma transação encontrada no arquivo');
         return;
       }
-      setPreview(parsed);
+      setPreview(result.transactions);
+      setPreviewSource(result.source_type);
     };
     reader.readAsText(file);
   }, []);
