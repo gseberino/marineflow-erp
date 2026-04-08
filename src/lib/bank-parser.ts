@@ -109,9 +109,16 @@ export function parseCSV(content: string): BankTransaction[] {
   return results;
 }
 
-export function parseFile(content: string, filename: string): BankTransaction[] {
+export function detectFileSource(filename: string, content: string): 'bank' | 'credit_card' {
+  const fn = filename.toLowerCase();
+  if (/fatura|cartao|cartão|card|credit/.test(fn)) return 'credit_card';
+  if (/<ACCTTYPE>CREDITLINE/i.test(content) || /<CREDITCARDMSGSRSV1/i.test(content)) return 'credit_card';
+  return 'bank';
+}
+
+export function parseFile(content: string, filename: string): { transactions: BankTransaction[]; source_type: 'bank' | 'credit_card' } {
   const ext = filename.toLowerCase().split('.').pop() || '';
-  if (ext === 'ofx') return parseOFX(content);
-  // .csv, .xls, .xlsx — try CSV (many banks export HTML/CSV as .xls)
-  return parseCSV(content);
+  const source_type = detectFileSource(filename, content);
+  const transactions = ext === 'ofx' ? parseOFX(content) : parseCSV(content);
+  return { transactions, source_type };
 }
