@@ -347,7 +347,3 @@ export default function FinancialPage() {
     </div>
   );
 }
-      <PayableFormDialog open={showNewPayable} onOpenChange={setShowNewPayable} />
-    </div>
-  );
-}
