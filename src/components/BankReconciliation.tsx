@@ -48,7 +48,7 @@ export function BankReconciliation() {
   const handleImport = async () => {
     if (!preview) return;
     try {
-      await importMutation.mutateAsync(preview);
+      await importMutation.mutateAsync({ transactions: preview, source_type: previewSource });
       toast.success(`${preview.length} transações importadas`);
       setPreview(null);
     } catch { toast.error('Erro ao importar'); }
