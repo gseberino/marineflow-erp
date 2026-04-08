@@ -84,6 +84,8 @@ export type Database = {
           import_batch_id: string | null
           reconciled: boolean | null
           reconciled_payment_id: string | null
+          reconciled_service_order_id: string | null
+          source_type: string | null
           transaction_date: string
           transaction_type: string
         }
@@ -96,6 +98,8 @@ export type Database = {
           import_batch_id?: string | null
           reconciled?: boolean | null
           reconciled_payment_id?: string | null
+          reconciled_service_order_id?: string | null
+          source_type?: string | null
           transaction_date: string
           transaction_type: string
         }
@@ -108,6 +112,8 @@ export type Database = {
           import_batch_id?: string | null
           reconciled?: boolean | null
           reconciled_payment_id?: string | null
+          reconciled_service_order_id?: string | null
+          source_type?: string | null
           transaction_date?: string
           transaction_type?: string
         }
@@ -117,6 +123,13 @@ export type Database = {
             columns: ["reconciled_payment_id"]
             isOneToOne: false
             referencedRelation: "payments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bank_transactions_reconciled_service_order_id_fkey"
+            columns: ["reconciled_service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
             referencedColumns: ["id"]
           },
         ]
@@ -752,6 +765,105 @@ export type Database = {
           },
         ]
       }
+      service_order_expenses: {
+        Row: {
+          amount: number
+          category: string
+          created_at: string | null
+          created_by: string | null
+          currency: string | null
+          description: string
+          expense_date: string
+          id: string
+          linked_payable_id: string | null
+          notes: string | null
+          paid_by: string
+          receipt_url: string | null
+          reimbursed: boolean | null
+          reimbursed_at: string | null
+          reimbursed_payment_id: string | null
+          service_order_id: string | null
+          technician_user_id: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          amount: number
+          category: string
+          created_at?: string | null
+          created_by?: string | null
+          currency?: string | null
+          description: string
+          expense_date?: string
+          id?: string
+          linked_payable_id?: string | null
+          notes?: string | null
+          paid_by?: string
+          receipt_url?: string | null
+          reimbursed?: boolean | null
+          reimbursed_at?: string | null
+          reimbursed_payment_id?: string | null
+          service_order_id?: string | null
+          technician_user_id?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          amount?: number
+          category?: string
+          created_at?: string | null
+          created_by?: string | null
+          currency?: string | null
+          description?: string
+          expense_date?: string
+          id?: string
+          linked_payable_id?: string | null
+          notes?: string | null
+          paid_by?: string
+          receipt_url?: string | null
+          reimbursed?: boolean | null
+          reimbursed_at?: string | null
+          reimbursed_payment_id?: string | null
+          service_order_id?: string | null
+          technician_user_id?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_order_expenses_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_expenses_linked_payable_id_fkey"
+            columns: ["linked_payable_id"]
+            isOneToOne: false
+            referencedRelation: "payables"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_expenses_reimbursed_payment_id_fkey"
+            columns: ["reimbursed_payment_id"]
+            isOneToOne: false
+            referencedRelation: "payments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_expenses_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_expenses_technician_user_id_fkey"
+            columns: ["technician_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       service_order_parts: {
         Row: {
           created_at: string
@@ -936,6 +1048,7 @@ export type Database = {
           labor_cost_total: number | null
           labor_hours_total: number | null
           marina_id: string | null
+          operational_cost_total: number | null
           parts_cost_total: number | null
           payment_status: string | null
           priority: string
@@ -978,6 +1091,7 @@ export type Database = {
           labor_cost_total?: number | null
           labor_hours_total?: number | null
           marina_id?: string | null
+          operational_cost_total?: number | null
           parts_cost_total?: number | null
           payment_status?: string | null
           priority?: string
@@ -1020,6 +1134,7 @@ export type Database = {
           labor_cost_total?: number | null
           labor_hours_total?: number | null
           marina_id?: string | null
+          operational_cost_total?: number | null
           parts_cost_total?: number | null
           payment_status?: string | null
           priority?: string
