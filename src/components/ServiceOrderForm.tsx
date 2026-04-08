@@ -92,6 +92,11 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const addTime = useAddTimeEntry();
   const removeTime = useRemoveTimeEntry();
 
+  const { data: soExpenses } = useServiceOrderExpenses(orderId);
+  const addExpense = useAddServiceOrderExpense();
+  const removeExpense = useRemoveServiceOrderExpense();
+  const removeTime = useRemoveTimeEntry();
+
   // Form state
   const [form, setForm] = useState<Record<string, any>>({
     status: 'draft',
