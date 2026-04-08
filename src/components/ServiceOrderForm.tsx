@@ -65,7 +65,7 @@ const BILLING_UNIT_LABELS: Record<string, string> = {
 
 export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const navigate = useNavigate();
-  const { t, formatCurrency, formatDateTime } = useI18n();
+  const { t, formatCurrency, formatDateTime, formatDate } = useI18n();
   const isNew = !orderId;
 
   const { data: clients } = useClients();
@@ -1069,6 +1069,10 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">{t.serviceOrders.parts}</span>
               <span>{formatCurrency(partsCost)}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">{t.serviceOrders.operationalCost}</span>
+              <span>{formatCurrency(operationalCost)}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">{t.serviceOrders.travel}</span>
