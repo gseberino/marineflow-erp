@@ -23,6 +23,8 @@ import {
   useAppUsers,
   STATUS_TRANSITIONS,
 } from '@/hooks/use-service-orders';
+import { useServiceOrderExpenses, useAddServiceOrderExpense, useRemoveServiceOrderExpense } from '@/hooks/use-service-order-expenses';
+import { OPERATIONAL_EXPENSE_CATEGORIES } from '@/lib/expense-categories';
 import { calculateDisplacement } from '@/lib/displacement';
 import { statusConfig, priorityConfig } from '@/lib/constants';
 import { StatusBadge } from '@/components/StatusBadge';
@@ -34,7 +36,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard, Receipt } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Props {
@@ -63,7 +65,7 @@ const BILLING_UNIT_LABELS: Record<string, string> = {
 
 export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const navigate = useNavigate();
-  const { t, formatCurrency, formatDateTime } = useI18n();
+  const { t, formatCurrency, formatDateTime, formatDate } = useI18n();
   const isNew = !orderId;
 
   const { data: clients } = useClients();
@@ -89,6 +91,10 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const { data: timeEntries } = useTimeEntries(orderId);
   const addTime = useAddTimeEntry();
   const removeTime = useRemoveTimeEntry();
+
+  const { data: soExpenses } = useServiceOrderExpenses(orderId);
+  const addExpense = useAddServiceOrderExpense();
+  const removeExpense = useRemoveServiceOrderExpense();
 
   // Form state
   const [form, setForm] = useState<Record<string, any>>({
@@ -136,6 +142,16 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     technician_user_id: '', started_at: '', ended_at: '', duration_minutes: 0, billable: true, notes: '',
   });
   const [showTimeForm, setShowTimeForm] = useState(false);
+
+  // Expense form
+  const [expForm, setExpForm] = useState({
+    category: '', description: '', amount: 0, currency: 'BRL',
+    expense_date: new Date().toISOString().slice(0, 10),
+    paid_by: 'company' as 'company' | 'technician',
+    technician_user_id: '', receipt_url: '', notes: '',
+    also_create_payable: false,
+  });
+  const [showExpForm, setShowExpForm] = useState(false);
 
   // Card installments
   const [selectedInstallments, setSelectedInstallments] = useState(1);
@@ -210,7 +226,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   // Financial summary
   const laborCost = orderData?.labor_cost_total || 0;
   const partsCost = orderData?.parts_cost_total || 0;
-  const subtotal = laborCost + partsCost + form.travel_cost_total + form.subcontract_cost_total;
+  const operationalCost = orderData?.operational_cost_total || 0;
+  const subtotal = laborCost + partsCost + operationalCost + form.travel_cost_total + form.subcontract_cost_total;
   const grandTotal = subtotal - form.discount_amount + form.tax_amount;
 
   // Card fee calculation
@@ -317,7 +334,35 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     }
   };
 
-  // Compute duration from start/end
+  const handleAddExpense = async () => {
+    if (!orderId || !expForm.category || !expForm.description || expForm.amount <= 0) return;
+    try {
+      await addExpense.mutateAsync({
+        service_order_id: orderId,
+        category: expForm.category,
+        description: expForm.description,
+        amount: expForm.amount,
+        currency: expForm.currency,
+        expense_date: expForm.expense_date,
+        paid_by: expForm.paid_by,
+        technician_user_id: expForm.paid_by === 'technician' ? expForm.technician_user_id || undefined : undefined,
+        receipt_url: expForm.receipt_url || undefined,
+        notes: expForm.notes || undefined,
+        also_create_payable: expForm.also_create_payable,
+      });
+      setExpForm({
+        category: '', description: '', amount: 0, currency: 'BRL',
+        expense_date: new Date().toISOString().slice(0, 10),
+        paid_by: 'company', technician_user_id: '', receipt_url: '', notes: '',
+        also_create_payable: false,
+      });
+      setShowExpForm(false);
+      toast.success('Despesa adicionada');
+    } catch (e: any) {
+      toast.error(e.message || 'Erro ao adicionar despesa');
+    }
+  };
+
   useEffect(() => {
     if (timeForm.started_at && timeForm.ended_at) {
       const start = new Date(timeForm.started_at).getTime();
@@ -790,6 +835,133 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         </section>
       )}
 
+      {/* Expenses section (edit only) */}
+      {!isNew && (
+        <section className="rounded-xl border bg-card shadow-sm overflow-hidden">
+          <div className="p-5 border-b flex items-center justify-between">
+            <h2 className="font-semibold text-sm">{t.serviceOrders.operationalExpenses}</h2>
+            <Button variant="outline" size="sm" className="gap-1" onClick={() => setShowExpForm(!showExpForm)}>
+              <Plus className="h-3 w-3" /> {t.serviceOrders.addExpense}
+            </Button>
+          </div>
+          {showExpForm && (
+            <div className="p-4 border-b bg-muted/30 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <Label>{t.products.category}</Label>
+                  <Select value={expForm.category} onValueChange={(v) => setExpForm({ ...expForm, category: v })}>
+                    <SelectTrigger><SelectValue placeholder={t.products.category} /></SelectTrigger>
+                    <SelectContent>
+                      {OPERATIONAL_EXPENSE_CATEGORIES.map((c) => (
+                        <SelectItem key={c} value={c}>{c}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>{t.serviceOrders.expenseDate}</Label>
+                  <Input type="date" value={expForm.expense_date} onChange={(e) => setExpForm({ ...expForm, expense_date: e.target.value })} />
+                </div>
+                <div>
+                  <Label>{t.common.amount}</Label>
+                  <Input type="number" min={0} step="0.01" value={expForm.amount}
+                    onChange={(e) => setExpForm({ ...expForm, amount: parseFloat(e.target.value) || 0 })} />
+                </div>
+              </div>
+              <div>
+                <Label>{t.common.description}</Label>
+                <Input value={expForm.description} onChange={(e) => setExpForm({ ...expForm, description: e.target.value })} />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <Label>{t.serviceOrders.paidBy}</Label>
+                  <Select value={expForm.paid_by} onValueChange={(v: 'company' | 'technician') => setExpForm({ ...expForm, paid_by: v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="company">{t.serviceOrders.paidByCompany}</SelectItem>
+                      <SelectItem value="technician">{t.serviceOrders.paidByTechnician}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {expForm.paid_by === 'technician' && (
+                  <div>
+                    <Label>{t.serviceOrders.technicians}</Label>
+                    <Select value={expForm.technician_user_id} onValueChange={(v) => setExpForm({ ...expForm, technician_user_id: v })}>
+                      <SelectTrigger><SelectValue placeholder={t.serviceOrders.technicians} /></SelectTrigger>
+                      <SelectContent>
+                        {appUsers?.map((u) => (
+                          <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-warning mt-1">{t.serviceOrders.pendingReimbursement}</p>
+                  </div>
+                )}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <Label>{t.serviceOrders.receiptUrl}</Label>
+                  <Input value={expForm.receipt_url} onChange={(e) => setExpForm({ ...expForm, receipt_url: e.target.value })} placeholder="https://..." />
+                </div>
+                <div>
+                  <Label>{t.common.notes}</Label>
+                  <Input value={expForm.notes} onChange={(e) => setExpForm({ ...expForm, notes: e.target.value })} />
+                </div>
+              </div>
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" checked={expForm.also_create_payable}
+                  onChange={(e) => setExpForm({ ...expForm, also_create_payable: e.target.checked })} />
+                {t.serviceOrders.alsoCreatePayable}
+              </label>
+              <div className="flex gap-2">
+                <Button size="sm" onClick={handleAddExpense} disabled={addExpense.isPending}>{t.common.save}</Button>
+                <Button size="sm" variant="outline" onClick={() => setShowExpForm(false)}>{t.common.cancel}</Button>
+              </div>
+            </div>
+          )}
+          {(!soExpenses || soExpenses.length === 0) ? (
+            <p className="text-sm text-muted-foreground p-5">{t.serviceOrders.noExpensesYet}</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-muted/50">
+                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.common.date}</th>
+                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.products.category}</th>
+                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.common.description}</th>
+                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.serviceOrders.paidBy}</th>
+                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">{t.common.amount}</th>
+                  <th className="px-4 py-2 w-10"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {soExpenses.map((exp: any) => (
+                  <tr key={exp.id} className="border-b last:border-0">
+                    <td className="px-4 py-3 text-muted-foreground">{formatDate(exp.expense_date)}</td>
+                    <td className="px-4 py-3"><StatusBadge className="bg-secondary text-secondary-foreground">{exp.category}</StatusBadge></td>
+                    <td className="px-4 py-3 font-medium">{exp.description}</td>
+                    <td className="px-4 py-3">
+                      {exp.paid_by === 'technician' ? (
+                        <span className="text-warning">{exp.app_users?.full_name || t.serviceOrders.paidByTechnician}
+                          {!exp.reimbursed && <StatusBadge className="bg-warning/15 text-warning ml-1">{t.serviceOrders.pendingReimbursement}</StatusBadge>}
+                          {exp.reimbursed && <StatusBadge className="bg-success/15 text-success ml-1">{t.serviceOrders.reimbursed}</StatusBadge>}
+                        </span>
+                      ) : t.serviceOrders.paidByCompany}
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold">{formatCurrency(Number(exp.amount))}</td>
+                    <td className="px-4 py-3">
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
+                        onClick={() => removeExpense.mutate({ id: exp.id, service_order_id: orderId! })}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
+      )}
+
       {/* G - Time Entries (edit only) — internal control */}
       {!isNew && (
         <section className="rounded-xl border bg-card shadow-sm overflow-hidden">
@@ -897,6 +1069,10 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">{t.serviceOrders.parts}</span>
               <span>{formatCurrency(partsCost)}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">{t.serviceOrders.operationalCost}</span>
+              <span>{formatCurrency(operationalCost)}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">{t.serviceOrders.travel}</span>

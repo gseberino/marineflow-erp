@@ -9,10 +9,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useReceivables, usePayables, useFinancialSummary, useCashFlow } from '@/hooks/use-financial';
+import { usePendingReimbursements } from '@/hooks/use-service-order-expenses';
 import { PaymentDialog } from '@/components/PaymentDialog';
 import { ReceivableFormDialog } from '@/components/ReceivableFormDialog';
 import { PayableFormDialog } from '@/components/PayableFormDialog';
 import { BankReconciliation } from '@/components/BankReconciliation';
+import { ReimbursementsPanel } from '@/components/ReimbursementsPanel';
 import { ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 
 function getStatusBadgeClass(status: string, dueDate: string) {
@@ -44,6 +46,8 @@ export default function FinancialPage() {
   const [payFilter, setPayFilter] = useState('all');
   const [recSearch, setRecSearch] = useState('');
   const [paySearch, setPaySearch] = useState('');
+  const [paySubTab, setPaySubTab] = useState<'list' | 'reimbursements'>('list');
+  const { data: pendingReimb } = usePendingReimbursements();
 
   const filterStatuses = ['all', 'pending', 'partially_paid', 'paid', 'overdue'] as const;
 
@@ -250,9 +254,24 @@ export default function FinancialPage() {
         {/* === PAYABLES === */}
         <TabsContent value="payables" className="mt-4 space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="font-semibold text-lg">{t.financial.payables}</h3>
+            <div className="flex items-center gap-2">
+              <h3 className="font-semibold text-lg">{t.financial.payables}</h3>
+              <div className="flex gap-1 ml-4">
+                <Button size="sm" variant={paySubTab === 'list' ? 'default' : 'outline'} onClick={() => setPaySubTab('list')}>
+                  {t.financial.payables}
+                </Button>
+                <Button size="sm" variant={paySubTab === 'reimbursements' ? 'default' : 'outline'} onClick={() => setPaySubTab('reimbursements')}>
+                  {t.financial.pendingReimbursements} ({pendingReimb?.length || 0})
+                </Button>
+              </div>
+            </div>
             <Button onClick={() => setShowNewPayable(true)}><Plus className="h-4 w-4 mr-1" />{t.financial.newPayable}</Button>
           </div>
+
+          {paySubTab === 'reimbursements' ? (
+            <ReimbursementsPanel />
+          ) : (
+          <>
           <div className="flex flex-wrap gap-2">
             {filterStatuses.map(s => (
               <Button key={s} size="sm" variant={payFilter === s ? 'default' : 'outline'}
@@ -303,6 +322,8 @@ export default function FinancialPage() {
                 </tbody>
               </table>
             </div>
+          )}
+          </>
           )}
         </TabsContent>
 

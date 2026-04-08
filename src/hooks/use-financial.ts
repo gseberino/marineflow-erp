@@ -211,9 +211,9 @@ export function useBankTransactions() {
 export function useImportBankTransactions() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (transactions: BankTransaction[]) => {
+    mutationFn: async (args: { transactions: BankTransaction[]; source_type?: 'bank' | 'credit_card' }) => {
       const batch_id = crypto.randomUUID();
-      const rows = transactions.map(t => ({ ...t, import_batch_id: batch_id, reconciled: false }));
+      const rows = args.transactions.map(t => ({ ...t, import_batch_id: batch_id, reconciled: false, source_type: args.source_type || 'bank' }));
       const { data, error } = await supabase.from('bank_transactions').insert(rows).select();
       if (error) throw error;
       return data;
