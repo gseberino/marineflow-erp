@@ -143,6 +143,16 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   });
   const [showTimeForm, setShowTimeForm] = useState(false);
 
+  // Expense form
+  const [expForm, setExpForm] = useState({
+    category: '', description: '', amount: 0, currency: 'BRL',
+    expense_date: new Date().toISOString().slice(0, 10),
+    paid_by: 'company' as 'company' | 'technician',
+    technician_user_id: '', receipt_url: '', notes: '',
+    also_create_payable: false,
+  });
+  const [showExpForm, setShowExpForm] = useState(false);
+
   // Card installments
   const [selectedInstallments, setSelectedInstallments] = useState(1);
 
