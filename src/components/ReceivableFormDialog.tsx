@@ -1,0 +1,85 @@
+import { useState } from 'react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useI18n } from '@/i18n';
+import { useClients } from '@/hooks/use-clients';
+import { useServiceOrders } from '@/hooks/use-service-orders';
+import { useCreateReceivable } from '@/hooks/use-financial';
+import { toast } from 'sonner';
+
+interface Props { open: boolean; onOpenChange: (open: boolean) => void; }
+
+export function ReceivableFormDialog({ open, onOpenChange }: Props) {
+  const { t } = useI18n();
+  const { data: clients } = useClients();
+  const { data: orders } = useServiceOrders();
+  const create = useCreateReceivable();
+
+  const [clientId, setClientId] = useState('');
+  const [soId, setSoId] = useState('');
+  const [description, setDescription] = useState('');
+  const [issueDate, setIssueDate] = useState(new Date().toISOString().split('T')[0]);
+  const [dueDate, setDueDate] = useState('');
+  const [amount, setAmount] = useState('');
+  const [currency, setCurrency] = useState('BRL');
+  const [notes, setNotes] = useState('');
+
+  const handleSave = async () => {
+    if (!clientId || !description || !dueDate || !amount) return;
+    try {
+      await create.mutateAsync({
+        client_id: clientId, description, issue_date: issueDate,
+        due_date: dueDate, amount: parseFloat(amount), currency,
+        service_order_id: soId || undefined, notes: notes || undefined,
+      });
+      toast.success(t.financial.newReceivable);
+      onOpenChange(false);
+    } catch { toast.error('Erro ao criar cobrança'); }
+  };
+
+  const clientOrders = orders?.filter(o => o.client_id === clientId) || [];
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader><DialogTitle>{t.financial.newReceivable}</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div><Label>{t.serviceOrders.client} *</Label>
+            <Select value={clientId} onValueChange={setClientId}>
+              <SelectTrigger><SelectValue placeholder={t.serviceOrders.client} /></SelectTrigger>
+              <SelectContent>{(clients || []).map(c => <SelectItem key={c.id} value={c.id}>{c.full_name_or_company_name}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          {clientId && clientOrders.length > 0 && (
+            <div><Label>{t.financial.linkedOrder}</Label>
+              <Select value={soId} onValueChange={setSoId}>
+                <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
+                <SelectContent>{clientOrders.map(o => <SelectItem key={o.id} value={o.id}>{o.service_order_number}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+          )}
+          <div><Label>{t.common.description} *</Label><Input value={description} onChange={e => setDescription(e.target.value)} /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label>{t.common.date}</Label><Input type="date" value={issueDate} onChange={e => setIssueDate(e.target.value)} /></div>
+            <div><Label>{t.financial.dueDate} *</Label><Input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} /></div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label>{t.common.amount} *</Label><Input type="number" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} /></div>
+            <div><Label>Moeda</Label>
+              <Select value={currency} onValueChange={setCurrency}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent><SelectItem value="BRL">BRL</SelectItem><SelectItem value="USD">USD</SelectItem><SelectItem value="EUR">EUR</SelectItem></SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div><Label>{t.common.notes}</Label><Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} /></div>
+        </div>
+        <DialogFooter><Button onClick={handleSave} disabled={create.isPending}>{t.common.save}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
