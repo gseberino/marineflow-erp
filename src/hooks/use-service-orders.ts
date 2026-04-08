@@ -200,7 +200,7 @@ async function recalcTotals(soId: string) {
     .eq('service_order_id', soId);
   const { data: so } = await supabase
     .from('service_orders')
-    .select('travel_cost_total, subcontract_cost_total, discount_amount, tax_amount')
+    .select('travel_cost_total, subcontract_cost_total, discount_amount, tax_amount, operational_cost_total')
     .eq('id', soId)
     .single();
 
@@ -213,6 +213,7 @@ async function recalcTotals(soId: string) {
     laborCost +
     partsCost +
     (so?.travel_cost_total || 0) +
+    (so?.operational_cost_total || 0) +
     (so?.subcontract_cost_total || 0) -
     (so?.discount_amount || 0) +
     (so?.tax_amount || 0);
