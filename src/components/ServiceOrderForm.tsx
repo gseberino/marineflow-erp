@@ -226,7 +226,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   // Financial summary
   const laborCost = orderData?.labor_cost_total || 0;
   const partsCost = orderData?.parts_cost_total || 0;
-  const subtotal = laborCost + partsCost + form.travel_cost_total + form.subcontract_cost_total;
+  const operationalCost = orderData?.operational_cost_total || 0;
+  const subtotal = laborCost + partsCost + operationalCost + form.travel_cost_total + form.subcontract_cost_total;
   const grandTotal = subtotal - form.discount_amount + form.tax_amount;
 
   // Card fee calculation
