@@ -431,7 +431,8 @@ export default function FinancialPage() {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {Object.entries(grouped).map(([groupName, items]) => {
+                  {Object.entries(grouped).map(([groupName, rawItems]) => {
+                    const items = rawItems as any[];
                     const groupBalance = items.filter((p: any) => p.status !== 'paid' && p.status !== 'cancelled').reduce((s: number, p: any) => s + Number(p.balance_amount), 0);
                     return (
                       <Collapsible key={groupName} defaultOpen>
