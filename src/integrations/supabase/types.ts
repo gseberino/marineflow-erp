@@ -429,6 +429,7 @@ export type Database = {
         Row: {
           amount: number
           balance_amount: number | null
+          bank_transaction_id: string | null
           created_at: string
           currency: string | null
           description: string
@@ -438,6 +439,7 @@ export type Database = {
           issue_date: string
           linked_service_order_id: string | null
           notes: string | null
+          origin: string | null
           paid_amount: number | null
           payment_method: string | null
           status: string | null
@@ -448,6 +450,7 @@ export type Database = {
         Insert: {
           amount: number
           balance_amount?: number | null
+          bank_transaction_id?: string | null
           created_at?: string
           currency?: string | null
           description: string
@@ -457,6 +460,7 @@ export type Database = {
           issue_date: string
           linked_service_order_id?: string | null
           notes?: string | null
+          origin?: string | null
           paid_amount?: number | null
           payment_method?: string | null
           status?: string | null
@@ -467,6 +471,7 @@ export type Database = {
         Update: {
           amount?: number
           balance_amount?: number | null
+          bank_transaction_id?: string | null
           created_at?: string
           currency?: string | null
           description?: string
@@ -476,6 +481,7 @@ export type Database = {
           issue_date?: string
           linked_service_order_id?: string | null
           notes?: string | null
+          origin?: string | null
           paid_amount?: number | null
           payment_method?: string | null
           status?: string | null
@@ -484,6 +490,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "payables_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "bank_transactions"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "payables_linked_service_order_id_fkey"
             columns: ["linked_service_order_id"]
