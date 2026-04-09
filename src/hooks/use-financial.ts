@@ -22,7 +22,7 @@ export function usePayables() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('payables')
-        .select('*, suppliers!payables_supplier_id_fkey(supplier_name)')
+        .select('*, suppliers!payables_supplier_id_fkey(supplier_name), service_orders!payables_linked_service_order_id_fkey(service_order_number)')
         .order('due_date', { ascending: true });
       if (error) throw error;
       return data;
@@ -200,11 +200,25 @@ export function useBankTransactions() {
     queryKey: ['bank-transactions'],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('bank_transactions').select('*')
+        .from('bank_transactions')
+        .select('*, service_orders!bank_transactions_reconciled_service_order_id_fkey(service_order_number)')
         .order('transaction_date', { ascending: false });
       if (error) throw error;
       return data;
     },
+  });
+}
+
+export function useUnignoreBankTransaction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('bank_transactions')
+        .update({ reconciled: false, reconciled_payment_id: null, reconciled_service_order_id: null })
+        .eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['bank-transactions'] }),
   });
 }
 
