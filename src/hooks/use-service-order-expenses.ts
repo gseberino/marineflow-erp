@@ -82,6 +82,7 @@ export function useAddServiceOrderExpense() {
           status: 'pending',
           balance_amount: expense.amount,
           paid_amount: 0,
+          origin: 'service_order_expense',
         }).select().single();
 
         if (payable) {
