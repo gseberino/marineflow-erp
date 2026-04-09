@@ -3,7 +3,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { KPICard } from '@/components/KPICard';
 import { StatusBadge } from '@/components/StatusBadge';
 import { useI18n } from '@/i18n';
-import { DollarSign, TrendingUp, TrendingDown, AlertTriangle, ArrowUpCircle, ArrowDownCircle, Plus } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, AlertTriangle, ArrowUpCircle, ArrowDownCircle, Plus, Info } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,7 +15,10 @@ import { ReceivableFormDialog } from '@/components/ReceivableFormDialog';
 import { PayableFormDialog } from '@/components/PayableFormDialog';
 import { BankReconciliation } from '@/components/BankReconciliation';
 import { ReimbursementsPanel } from '@/components/ReimbursementsPanel';
-import { ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip } from 'recharts';
+import { useNavigate } from 'react-router-dom';
 
 function getStatusBadgeClass(status: string, dueDate: string) {
   const isOverdue = status !== 'paid' && status !== 'cancelled' && new Date(dueDate) < new Date();
@@ -31,8 +34,45 @@ function getDisplayStatus(status: string, dueDate: string, t: any): string {
   return (t.paymentStatus as Record<string, string>)[status] || status;
 }
 
+function getDueDateAlert(dueDate: string, status: string): { label: string; className: string } | null {
+  if (status === 'paid' || status === 'cancelled') return null;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const due = new Date(dueDate); due.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((due.getTime() - today.getTime()) / 86400000);
+  if (diffDays < 0) return { label: `${Math.abs(diffDays)}d em atraso`, className: 'bg-destructive/10 text-destructive font-semibold' };
+  if (diffDays === 0) return { label: 'Vence hoje', className: 'bg-destructive/15 text-destructive font-bold' };
+  if (diffDays <= 3) return { label: `Vence em ${diffDays}d`, className: 'bg-warning/15 text-warning font-medium' };
+  if (diffDays <= 7) return { label: `Vence em ${diffDays}d`, className: 'bg-amber-100 text-amber-700' };
+  return null;
+}
+
+function getOriginBadge(origin: string | null): { label: string; className: string } {
+  switch (origin) {
+    case 'service_order_expense': return { label: 'Despesa de OS', className: 'bg-blue-100 text-blue-700' };
+    case 'bank_reconciliation': return { label: 'Conciliação', className: 'bg-purple-100 text-purple-700' };
+    default: return { label: 'Manual', className: 'bg-muted text-muted-foreground' };
+  }
+}
+
+function groupPayables(payables: any[], groupBy: string) {
+  if (groupBy === 'none') return { 'Todos': payables };
+  return payables.reduce((acc: Record<string, any[]>, p: any) => {
+    let key = '';
+    if (groupBy === 'category') key = p.expense_category || 'Sem categoria';
+    if (groupBy === 'supplier') key = (p as any).suppliers?.supplier_name || p.supplier_name || 'Sem fornecedor';
+    if (groupBy === 'month') {
+      const d = new Date(p.due_date);
+      key = d.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+    }
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(p);
+    return acc;
+  }, {} as Record<string, any[]>);
+}
+
 export default function FinancialPage() {
   const { t, formatCurrency, formatDate } = useI18n();
+  const navigate = useNavigate();
   const { data: receivables, isLoading: loadingRec } = useReceivables();
   const { data: payables, isLoading: loadingPay } = usePayables();
   const { data: summary, isLoading: loadingSummary } = useFinancialSummary();
@@ -47,6 +87,7 @@ export default function FinancialPage() {
   const [recSearch, setRecSearch] = useState('');
   const [paySearch, setPaySearch] = useState('');
   const [paySubTab, setPaySubTab] = useState<'list' | 'reimbursements'>('list');
+  const [groupBy, setGroupBy] = useState<'none' | 'category' | 'supplier' | 'month'>('none');
   const { data: pendingReimb } = usePendingReimbursements();
 
   const filterStatuses = ['all', 'pending', 'partially_paid', 'paid', 'overdue'] as const;
@@ -68,7 +109,7 @@ export default function FinancialPage() {
     if (payFilter !== 'all' && effectiveStatus !== payFilter) return false;
     if (paySearch) {
       const s = paySearch.toLowerCase();
-      return p.description.toLowerCase().includes(s) || (p.supplier_name || '').toLowerCase().includes(s);
+      return p.description.toLowerCase().includes(s) || ((p as any).suppliers?.supplier_name || p.supplier_name || '').toLowerCase().includes(s);
     }
     return true;
   });
@@ -77,8 +118,84 @@ export default function FinancialPage() {
   const in30 = new Date(today.getTime() + 30 * 86400000);
   const upcomingRec = (receivables || []).filter(r => r.status !== 'paid' && r.status !== 'cancelled' && new Date(r.due_date) <= in30).slice(0, 5);
   const upcomingPay = (payables || []).filter(p => p.status !== 'paid' && p.status !== 'cancelled' && new Date(p.due_date) <= in30).slice(0, 5);
-
   const periodBalance = (cashFlow || []).reduce((s, m) => s + m.net, 0);
+
+  const payTotalBalance = filteredPayables.filter(p => p.status !== 'paid' && p.status !== 'cancelled').reduce((s, p) => s + Number(p.balance_amount), 0);
+  const payTotalPaid = filteredPayables.reduce((s, p) => s + Number(p.paid_amount), 0);
+
+  const grouped = groupPayables(filteredPayables, groupBy);
+
+  const renderPayableRow = (p: any) => {
+    const isOverdue = p.status !== 'paid' && p.status !== 'cancelled' && new Date(p.due_date) < new Date();
+    const alert = getDueDateAlert(p.due_date, p.status || 'pending');
+    const origin = getOriginBadge((p as any).origin);
+    return (
+      <tr key={p.id} className={`border-b last:border-0 hover:bg-muted/30 ${isOverdue ? 'bg-destructive/5' : ''}`}>
+        <td className="px-4 py-3">
+          <div className="text-muted-foreground">{formatDate(p.due_date)}</div>
+          {alert && <StatusBadge className={`${alert.className} text-xs mt-1`}>{alert.label}</StatusBadge>}
+        </td>
+        <td className="px-4 py-3 hidden md:table-cell">{(p as any).suppliers?.supplier_name || p.supplier_name || '—'}</td>
+        <td className="px-4 py-3 hidden lg:table-cell">
+          {p.expense_category ? <StatusBadge className="bg-secondary text-secondary-foreground">{p.expense_category}</StatusBadge> : '—'}
+        </td>
+        <td className="px-4 py-3">
+          <div className="font-medium truncate max-w-[200px]">{p.description}</div>
+          {p.notes && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger><Info className="h-3 w-3 text-muted-foreground inline ml-1" /></TooltipTrigger>
+                <TooltipContent><p className="max-w-xs">{p.notes}</p></TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+        </td>
+        <td className="px-4 py-3 hidden lg:table-cell">
+          {(p as any).service_orders?.service_order_number ? (
+            <button className="text-primary hover:underline text-sm" onClick={() => navigate(`/service-orders/${p.linked_service_order_id}`)}>
+              {(p as any).service_orders.service_order_number}
+            </button>
+          ) : '—'}
+        </td>
+        <td className="px-4 py-3 hidden xl:table-cell">
+          <StatusBadge className={origin.className}>{origin.label}</StatusBadge>
+        </td>
+        <td className="px-4 py-3 text-right font-medium">{formatCurrency(Number(p.amount))}</td>
+        <td className="px-4 py-3 text-right hidden md:table-cell">
+          <span className={Number(p.paid_amount) > 0 ? 'text-success' : ''}>{formatCurrency(Number(p.paid_amount))}</span>
+        </td>
+        <td className="px-4 py-3 text-right hidden md:table-cell font-semibold">{formatCurrency(Number(p.balance_amount))}</td>
+        <td className="px-4 py-3">
+          <StatusBadge className={getStatusBadgeClass(p.status || 'pending', p.due_date)}>
+            {getDisplayStatus(p.status || 'pending', p.due_date, t)}
+          </StatusBadge>
+        </td>
+        <td className="px-4 py-3 text-right">
+          {p.status !== 'paid' && (
+            <Button size="sm" variant="outline" onClick={() => setPaymentTarget({ payable: p })}>
+              {t.financial.registerPayment}
+            </Button>
+          )}
+        </td>
+      </tr>
+    );
+  };
+
+  const payableTableHead = (
+    <thead><tr className="border-b bg-muted/50">
+      <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.financial.dueDate}</th>
+      <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">{t.suppliers.title}</th>
+      <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">{t.products.category}</th>
+      <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.common.description}</th>
+      <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">OS</th>
+      <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden xl:table-cell">Origem</th>
+      <th className="px-4 py-3 text-right font-medium text-muted-foreground">{t.common.total}</th>
+      <th className="px-4 py-3 text-right font-medium text-muted-foreground hidden md:table-cell">Pago</th>
+      <th className="px-4 py-3 text-right font-medium text-muted-foreground hidden md:table-cell">{t.common.balance}</th>
+      <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.common.status}</th>
+      <th className="px-4 py-3 text-right font-medium text-muted-foreground">{t.common.actions}</th>
+    </tr></thead>
+  );
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -111,7 +228,6 @@ export default function FinancialPage() {
             </>
           )}
 
-          {/* Cash Flow Chart */}
           <div className="rounded-xl border bg-card p-5 shadow-sm">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold">{t.financial.cashFlowChart}</h3>
@@ -130,7 +246,7 @@ export default function FinancialPage() {
                     <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                     <XAxis dataKey="month" className="text-xs" />
                     <YAxis className="text-xs" tickFormatter={v => formatCurrency(v)} width={90} />
-                    <Tooltip formatter={(v: number) => formatCurrency(v)} />
+                    <RechartsTooltip formatter={(v: number) => formatCurrency(v)} />
                     <Bar dataKey="inflow" name={t.financial.inflow} fill="hsl(var(--success))" radius={[4, 4, 0, 0]} />
                     <Bar dataKey="outflow" name={t.financial.outflow} fill="hsl(var(--destructive))" radius={[4, 4, 0, 0]} />
                     <Line dataKey="net" name={t.financial.netBalance} stroke="hsl(var(--primary))" strokeWidth={2} dot />
@@ -145,7 +261,6 @@ export default function FinancialPage() {
             )}
           </div>
 
-          {/* Upcoming */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="rounded-xl border bg-card p-5 shadow-sm">
               <h3 className="font-semibold mb-3">{t.financial.upcomingReceivables}</h3>
@@ -200,8 +315,7 @@ export default function FinancialPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             {filterStatuses.map(s => (
-              <Button key={s} size="sm" variant={recFilter === s ? 'default' : 'outline'}
-                onClick={() => setRecFilter(s)}>
+              <Button key={s} size="sm" variant={recFilter === s ? 'default' : 'outline'} onClick={() => setRecFilter(s)}>
                 {s === 'all' ? t.common.all : (t.paymentStatus as Record<string, string>)[s] || s}
               </Button>
             ))}
@@ -272,56 +386,83 @@ export default function FinancialPage() {
             <ReimbursementsPanel />
           ) : (
           <>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 items-center">
             {filterStatuses.map(s => (
-              <Button key={s} size="sm" variant={payFilter === s ? 'default' : 'outline'}
-                onClick={() => setPayFilter(s)}>
+              <Button key={s} size="sm" variant={payFilter === s ? 'default' : 'outline'} onClick={() => setPayFilter(s)}>
                 {s === 'all' ? t.common.all : (t.paymentStatus as Record<string, string>)[s] || s}
+              </Button>
+            ))}
+            <span className="mx-2 border-l h-6" />
+            <span className="text-sm text-muted-foreground">{t.financial.groupBy}:</span>
+            {([
+              { v: 'none' as const, l: t.financial.groupByNone },
+              { v: 'category' as const, l: t.financial.groupByCategory },
+              { v: 'supplier' as const, l: t.financial.groupBySupplier },
+              { v: 'month' as const, l: t.financial.groupByMonth },
+            ]).map(({ v, l }) => (
+              <Button key={v} size="sm" variant={groupBy === v ? 'secondary' : 'ghost'} onClick={() => setGroupBy(v)}>
+                {l}
               </Button>
             ))}
             <Input placeholder={t.common.search} className="max-w-xs ml-auto" value={paySearch} onChange={e => setPaySearch(e.target.value)} />
           </div>
 
           {loadingPay ? <Skeleton className="h-64 rounded-xl" /> : (
-            <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
-              <table className="w-full text-sm">
-                <thead><tr className="border-b bg-muted/50">
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.financial.dueDate}</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">{t.suppliers.title}</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">{t.products.category}</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.common.description}</th>
-                  <th className="px-4 py-3 text-right font-medium text-muted-foreground">{t.common.amount}</th>
-                  <th className="px-4 py-3 text-right font-medium text-muted-foreground hidden md:table-cell">{t.common.balance}</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.common.status}</th>
-                  <th className="px-4 py-3 text-right font-medium text-muted-foreground">{t.common.actions}</th>
-                </tr></thead>
-                <tbody>
-                  {filteredPayables.length === 0 ? (
-                    <tr><td colSpan={8} className="text-center py-8 text-muted-foreground">{t.common.noResults}</td></tr>
-                  ) : filteredPayables.map(p => {
-                    const isOverdue = p.status !== 'paid' && p.status !== 'cancelled' && new Date(p.due_date) < new Date();
-                    return (
-                      <tr key={p.id} className={`border-b last:border-0 hover:bg-muted/30 ${isOverdue ? 'bg-destructive/5' : ''}`}>
-                        <td className="px-4 py-3 text-muted-foreground">{formatDate(p.due_date)}</td>
-                        <td className="px-4 py-3 hidden md:table-cell">{(p as any).suppliers?.supplier_name || p.supplier_name || '—'}</td>
-                        <td className="px-4 py-3 hidden lg:table-cell"><StatusBadge className="bg-secondary text-secondary-foreground">{p.expense_category || '—'}</StatusBadge></td>
-                        <td className="px-4 py-3 font-medium">{p.description}</td>
-                        <td className="px-4 py-3 text-right font-medium">{formatCurrency(Number(p.amount))}</td>
-                        <td className="px-4 py-3 text-right hidden md:table-cell font-semibold">{formatCurrency(Number(p.balance_amount))}</td>
-                        <td className="px-4 py-3"><StatusBadge className={getStatusBadgeClass(p.status || 'pending', p.due_date)}>{getDisplayStatus(p.status || 'pending', p.due_date, t)}</StatusBadge></td>
-                        <td className="px-4 py-3 text-right">
-                          {p.status !== 'paid' && (
-                            <Button size="sm" variant="outline" onClick={() => setPaymentTarget({ payable: p })}>
-                              {t.financial.registerPayment}
-                            </Button>
-                          )}
-                        </td>
+            <>
+              {groupBy === 'none' ? (
+                <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
+                  <table className="w-full text-sm">
+                    {payableTableHead}
+                    <tbody>
+                      {filteredPayables.length === 0 ? (
+                        <tr><td colSpan={11} className="text-center py-8 text-muted-foreground">{t.common.noResults}</td></tr>
+                      ) : filteredPayables.map(renderPayableRow)}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-muted/50 border-t-2 font-medium">
+                        <td colSpan={6} className="px-4 py-3">{t.common.total}: {filteredPayables.length} itens</td>
+                        <td className="px-4 py-3 text-right">{formatCurrency(filteredPayables.reduce((s, p) => s + Number(p.amount), 0))}</td>
+                        <td className="px-4 py-3 text-right hidden md:table-cell text-success">{formatCurrency(payTotalPaid)}</td>
+                        <td className="px-4 py-3 text-right hidden md:table-cell">{formatCurrency(payTotalBalance)}</td>
+                        <td colSpan={2} />
                       </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {Object.entries(grouped).map(([groupName, rawItems]) => {
+                    const items = rawItems as any[];
+                    const groupBalance = items.filter((p: any) => p.status !== 'paid' && p.status !== 'cancelled').reduce((s: number, p: any) => s + Number(p.balance_amount), 0);
+                    return (
+                      <Collapsible key={groupName} defaultOpen>
+                        <CollapsibleTrigger className="flex items-center justify-between w-full rounded-lg border bg-card p-3 hover:bg-muted/50">
+                          <span className="font-semibold">{groupName} <span className="text-muted-foreground font-normal">({items.length})</span></span>
+                          <span className="font-semibold">{t.financial.subtotal}: {formatCurrency(groupBalance)}</span>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent>
+                          <div className="rounded-b-xl border border-t-0 bg-card shadow-sm overflow-hidden">
+                            <table className="w-full text-sm">
+                              {payableTableHead}
+                              <tbody>{items.map(renderPayableRow)}</tbody>
+                              <tfoot>
+                                <tr className="bg-muted/30 font-medium text-sm">
+                                  <td colSpan={6} className="px-4 py-2">{t.financial.subtotal}</td>
+                                  <td className="px-4 py-2 text-right">{formatCurrency(items.reduce((s: number, p: any) => s + Number(p.amount), 0))}</td>
+                                  <td className="px-4 py-2 text-right hidden md:table-cell">{formatCurrency(items.reduce((s: number, p: any) => s + Number(p.paid_amount), 0))}</td>
+                                  <td className="px-4 py-2 text-right hidden md:table-cell">{formatCurrency(groupBalance)}</td>
+                                  <td colSpan={2} />
+                                </tr>
+                              </tfoot>
+                            </table>
+                          </div>
+                        </CollapsibleContent>
+                      </Collapsible>
                     );
                   })}
-                </tbody>
-              </table>
-            </div>
+                </div>
+              )}
+            </>
           )}
           </>
           )}
@@ -333,7 +474,6 @@ export default function FinancialPage() {
         </TabsContent>
       </Tabs>
 
-      {/* Dialogs */}
       {paymentTarget && (
         <PaymentDialog
           open={!!paymentTarget}
