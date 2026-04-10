@@ -309,14 +309,7 @@ export default function FinancialPage() {
             <h3 className="font-semibold text-lg">{t.financial.receivables}</h3>
             <Button onClick={() => setShowNewReceivable(true)}><Plus className="h-4 w-4 mr-1" />{t.financial.newReceivable}</Button>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {filterStatuses.map(s => (
-              <Button key={s} size="sm" variant={recFilter === s ? 'default' : 'outline'} onClick={() => setRecFilter(s)}>
-                {s === 'all' ? t.common.all : (t.paymentStatus as Record<string, string>)[s] || s}
-              </Button>
-            ))}
-            <Input placeholder={t.common.search} className="max-w-xs ml-auto" value={recSearch} onChange={e => setRecSearch(e.target.value)} />
-          </div>
+          <FinancialFilterPanel type="receivable" filters={recFilters} onChange={setRecFilters} />
 
           {loadingRec ? <Skeleton className="h-64 rounded-xl" /> : (
             <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
