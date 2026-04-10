@@ -3,11 +3,14 @@ import { useI18n } from '@/i18n';
 import { useServices } from '@/hooks/use-services';
 import { PageHeader } from '@/components/PageHeader';
 import { ServiceFormDialog } from '@/components/ServiceFormDialog';
+import { ImportWizard } from '@/components/ImportWizard';
+import { BulkEditor } from '@/components/BulkEditor';
+import { exportToCSV, SERVICES_COLUMNS } from '@/lib/export-utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatusBadge } from '@/components/StatusBadge';
-import { Plus, Search, Wrench, Pencil } from 'lucide-react';
+import { Plus, Search, Wrench, Pencil, Upload, Download, Table2 } from 'lucide-react';
 
 export default function ServiceList() {
   const { t, formatCurrency } = useI18n();
@@ -15,6 +18,8 @@ export default function ServiceList() {
   const [search, setSearch] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editData, setEditData] = useState<any>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
 
   const filtered = services?.filter((s) => {
     const q = search.toLowerCase();
@@ -31,10 +36,21 @@ export default function ServiceList() {
   return (
     <div className="space-y-6 animate-fade-in">
       <PageHeader title={t.services.title} description={t.services.description}>
-        <Button className="gap-2 bg-accent text-accent-foreground hover:bg-accent/90"
-          onClick={() => { setEditData(null); setDialogOpen(true); }}>
-          <Plus className="h-4 w-4" /> {t.services.newService}
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" className="gap-1" onClick={() => setImportOpen(true)}>
+            <Upload className="h-3.5 w-3.5" /> {t.imports.importData}
+          </Button>
+          <Button variant="outline" size="sm" className="gap-1" onClick={() => setBulkOpen(true)}>
+            <Table2 className="h-3.5 w-3.5" /> {t.imports.bulkEdit}
+          </Button>
+          <Button variant="outline" size="sm" className="gap-1" onClick={() => services && exportToCSV(services, 'servicos.csv', SERVICES_COLUMNS)}>
+            <Download className="h-3.5 w-3.5" /> {t.imports.exportCSV}
+          </Button>
+          <Button className="gap-2 bg-accent text-accent-foreground hover:bg-accent/90"
+            onClick={() => { setEditData(null); setDialogOpen(true); }}>
+            <Plus className="h-4 w-4" /> {t.services.newService}
+          </Button>
+        </div>
       </PageHeader>
 
       <div className="relative max-w-sm">
@@ -94,6 +110,8 @@ export default function ServiceList() {
       )}
 
       <ServiceFormDialog open={dialogOpen} onOpenChange={setDialogOpen} editData={editData} />
+      <ImportWizard entityType="services" open={importOpen} onOpenChange={setImportOpen} />
+      <BulkEditor entityType="services" open={bulkOpen} onOpenChange={setBulkOpen} />
     </div>
   );
 }
