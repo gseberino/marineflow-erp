@@ -375,13 +375,8 @@ export default function FinancialPage() {
             <ReimbursementsPanel />
           ) : (
           <>
-          <div className="flex flex-wrap gap-2 items-center">
-            {filterStatuses.map(s => (
-              <Button key={s} size="sm" variant={payFilter === s ? 'default' : 'outline'} onClick={() => setPayFilter(s)}>
-                {s === 'all' ? t.common.all : (t.paymentStatus as Record<string, string>)[s] || s}
-              </Button>
-            ))}
-            <span className="mx-2 border-l h-6" />
+          <FinancialFilterPanel type="payable" filters={payFilters} onChange={setPayFilters} />
+          <div className="flex flex-wrap gap-1 items-center">
             <span className="text-sm text-muted-foreground">{t.financial.groupBy}:</span>
             {([
               { v: 'none' as const, l: t.financial.groupByNone },
@@ -393,7 +388,6 @@ export default function FinancialPage() {
                 {l}
               </Button>
             ))}
-            <Input placeholder={t.common.search} className="max-w-xs ml-auto" value={paySearch} onChange={e => setPaySearch(e.target.value)} />
           </div>
 
           {loadingPay ? <Skeleton className="h-64 rounded-xl" /> : (
