@@ -96,37 +96,38 @@ export function useImportRows() {
       if (entityType === 'products') {
         for (const chunk of chunks(newRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            product_name: r.product_name,
-            sku: r.sku || null,
-            sale_price: r.sale_price || 0,
-            cost_price: r.cost_price || 0,
-            stock_quantity: r.stock_quantity || 0,
-            minimum_stock: r.minimum_stock || 0,
-            unit: r.unit || 'un',
-            brand: r.brand || null,
-            location_bin: r.location_bin || null,
-            notes: r.notes || null,
+            product_name: r.product_name as string,
+            sku: (r.sku || null) as string | null,
+            sale_price: (r.sale_price || 0) as number,
+            cost_price: (r.cost_price || 0) as number,
+            stock_quantity: (r.stock_quantity || 0) as number,
+            minimum_stock: (r.minimum_stock || 0) as number,
+            unit: (r.unit || 'un') as string,
+            brand: (r.brand || null) as string | null,
+            location_bin: (r.location_bin || null) as string | null,
+            notes: (r.notes || null) as string | null,
             active: r.active !== false,
-            sale_currency: 'BRL',
-            cost_currency: 'BRL',
+            sale_currency: 'BRL' as string,
+            cost_currency: 'BRL' as string,
           }));
           const { data, error } = await supabase.from('products').insert(rows).select('id, stock_quantity');
           if (error) throw error;
           inserted += data?.length || 0;
 
           for (const p of data || []) {
-            if (p.stock_quantity > 0) {
+            if ((p.stock_quantity ?? 0) > 0) {
               await supabase.from('inventory_movements').insert({
                 product_id: p.id,
-                movement_type: 'purchase',
-                quantity_delta: p.stock_quantity,
-                reference_type: 'import',
+                movement_type: 'purchase' as string,
+                quantity_delta: p.stock_quantity ?? 0,
+                reference_type: 'import' as string,
               });
             }
           }
         }
         for (const u of updates) {
-          await supabase.from('products').update(u.data).eq('id', u.id);
+          const typedData = u.data as Record<string, string | number | boolean | null>;
+          await supabase.from('products').update(typedData as any).eq('id', u.id);
           updated++;
         }
       }
@@ -134,11 +135,11 @@ export function useImportRows() {
       if (entityType === 'services') {
         for (const chunk of chunks(newRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            service_name: r.service_name,
-            default_price: r.default_price || 0,
-            billing_unit: 'visit',
-            currency: 'BRL',
-            notes: r.notes || null,
+            service_name: r.service_name as string,
+            default_price: (r.default_price || 0) as number,
+            billing_unit: 'visit' as string,
+            currency: 'BRL' as string,
+            notes: (r.notes || null) as string | null,
             active: r.active !== false,
           }));
           const { error } = await supabase.from('services').insert(rows);
@@ -146,7 +147,7 @@ export function useImportRows() {
           inserted += chunk.length;
         }
         for (const u of updates) {
-          await supabase.from('services').update(u.data).eq('id', u.id);
+          await supabase.from('services').update(u.data as any).eq('id', u.id);
           updated++;
         }
       }
