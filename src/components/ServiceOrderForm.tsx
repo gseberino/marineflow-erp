@@ -22,6 +22,8 @@ import {
   useRemoveTimeEntry,
   useAppUsers,
   STATUS_TRANSITIONS,
+  useCancelServiceOrder,
+  useReopenServiceOrder,
 } from '@/hooks/use-service-orders';
 import { useServiceOrderExpenses, useAddServiceOrderExpense, useRemoveServiceOrderExpense } from '@/hooks/use-service-order-expenses';
 import { OPERATIONAL_EXPENSE_CATEGORIES } from '@/lib/expense-categories';
@@ -29,6 +31,8 @@ import { calculateDisplacement } from '@/lib/displacement';
 import { statusConfig, priorityConfig } from '@/lib/constants';
 import { StatusBadge } from '@/components/StatusBadge';
 import { ServiceFormDialog } from '@/components/ServiceFormDialog';
+import { RecordHistory } from '@/components/RecordHistory';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -36,7 +40,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard, Receipt } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard, Receipt, Lock, RotateCcw, Ban } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Props {
