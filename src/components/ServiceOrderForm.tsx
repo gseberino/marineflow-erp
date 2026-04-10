@@ -83,6 +83,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const createSO = useCreateServiceOrder();
   const updateSO = useUpdateServiceOrder();
   const updateStatus = useUpdateServiceOrderStatus();
+  const cancelSO = useCancelServiceOrder();
+  const reopenSO = useReopenServiceOrder();
 
   const { data: parts } = useServiceOrderParts(orderId);
   const addPart = useAddServiceOrderPart();
@@ -159,6 +161,12 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
 
   // Card installments
   const [selectedInstallments, setSelectedInstallments] = useState(1);
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [showReopenDialog, setShowReopenDialog] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [reopenReason, setReopenReason] = useState('');
+
+  const isLocked = currentStatus === 'invoiced' || currentStatus === 'cancelled';
 
   useEffect(() => {
     if (orderData) {
