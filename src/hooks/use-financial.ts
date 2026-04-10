@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import type { BankTransaction } from '@/lib/bank-parser';
+import { writeAuditLog } from '@/hooks/use-audit-log';
+import { cancelPaymentCascade } from '@/lib/cascade-updates';
 
 export function useReceivables() {
   return useQuery({
@@ -56,6 +58,7 @@ export function useCreatePayable() {
       amount: number; currency?: string; expense_category?: string;
       supplier_id?: string; supplier_name?: string;
       linked_service_order_id?: string; notes?: string;
+      origin?: string; bank_transaction_id?: string;
     }) => {
       const { data, error } = await supabase.from('payables').insert({
         ...p, balance_amount: p.amount, paid_amount: 0, status: 'pending',
@@ -92,7 +95,7 @@ export function useRegisterPayment() {
       card_fee_percent?: number; net_amount?: number; notes?: string;
     }) => {
       const { data: payment, error: pErr } = await supabase
-        .from('payments').insert(input).select().single();
+        .from('payments').insert({ ...input, status: 'confirmed' }).select().single();
       if (pErr) throw pErr;
 
       // Recalc parent
@@ -101,7 +104,7 @@ export function useRegisterPayment() {
       const fk = input.receivable_id ? 'receivable_id' : 'payable_id';
 
       const { data: payments } = await supabase
-        .from('payments').select('amount').eq(fk, parentId);
+        .from('payments').select('amount').eq(fk, parentId).eq('status', 'confirmed');
       const totalPaid = (payments || []).reduce((s, p) => s + Number(p.amount), 0);
 
       const { data: parent } = await supabase
@@ -114,12 +117,35 @@ export function useRegisterPayment() {
         paid_amount: totalPaid, balance_amount: balance, status,
       }).eq('id', parentId);
 
+      await writeAuditLog({
+        table_name: 'payments',
+        record_id: payment.id,
+        action: 'update',
+        new_value: { amount: input.amount, payment_method: input.payment_method },
+      });
+
       return payment;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['receivables'] });
       qc.invalidateQueries({ queryKey: ['payables'] });
       qc.invalidateQueries({ queryKey: ['payments'] });
+      qc.invalidateQueries({ queryKey: ['financial-summary'] });
+    },
+  });
+}
+
+export function useCancelPayment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, reason }: { id: string; reason: string }) => {
+      await cancelPaymentCascade(id, reason);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['payments'] });
+      qc.invalidateQueries({ queryKey: ['receivables'] });
+      qc.invalidateQueries({ queryKey: ['payables'] });
+      qc.invalidateQueries({ queryKey: ['bank-transactions'] });
       qc.invalidateQueries({ queryKey: ['financial-summary'] });
     },
   });
@@ -137,8 +163,8 @@ export function useFinancialSummary() {
         supabase.from('receivables').select('balance_amount').not('status', 'in', '("paid","cancelled")').lt('due_date', today),
         supabase.from('payables').select('balance_amount').not('status', 'in', '("paid","cancelled")'),
         supabase.from('payables').select('balance_amount').not('status', 'in', '("paid","cancelled")').lt('due_date', today),
-        supabase.from('payments').select('amount').not('receivable_id', 'is', null).gte('payment_date', firstOfMonth),
-        supabase.from('payments').select('amount').not('payable_id', 'is', null).gte('payment_date', firstOfMonth),
+        supabase.from('payments').select('amount').not('receivable_id', 'is', null).eq('status', 'confirmed').gte('payment_date', firstOfMonth),
+        supabase.from('payments').select('amount').not('payable_id', 'is', null).eq('status', 'confirmed').gte('payment_date', firstOfMonth),
       ]);
 
       const sum = (rows: any[] | null) => (rows || []).reduce((s, r) => s + Number(r.balance_amount || r.amount || 0), 0);
@@ -165,6 +191,7 @@ export function useCashFlow(months: number = 6) {
 
       const { data } = await supabase
         .from('payments').select('payment_date, amount, receivable_id, payable_id')
+        .eq('status', 'confirmed')
         .gte('payment_date', startStr).order('payment_date');
 
       const monthMap: Record<string, { inflow: number; outflow: number }> = {};
@@ -245,7 +272,6 @@ export function useReconcile() {
       bankTransactionId: string; receivableId?: string; payableId?: string;
       amount: number; paymentMethod?: string;
     }) => {
-      // Create payment
       const payment = await registerPayment.mutateAsync({
         receivable_id: input.receivableId,
         payable_id: input.payableId,
@@ -254,7 +280,6 @@ export function useReconcile() {
         payment_method: input.paymentMethod || 'bank_transfer',
       });
 
-      // Mark bank transaction reconciled
       await supabase.from('bank_transactions').update({
         reconciled: true, reconciled_payment_id: payment.id,
       }).eq('id', input.bankTransactionId);

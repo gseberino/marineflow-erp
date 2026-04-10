@@ -5,7 +5,7 @@ import { useI18n } from '@/i18n';
 import {
   LayoutDashboard, Users, Ship, Anchor, Package, ClipboardList,
   DollarSign, BarChart3, Settings, ChevronLeft, ChevronRight, Menu, X,
-  Warehouse, Building2, Wrench
+  Warehouse, Building2, Wrench, History
 } from 'lucide-react';
 
 const navKeys = [
@@ -20,6 +20,7 @@ const navKeys = [
   { key: 'inventory' as const, icon: Warehouse, path: '/inventory' },
   { key: 'financial' as const, icon: DollarSign, path: '/financial' },
   { key: 'reports' as const, icon: BarChart3, path: '/reports' },
+  { key: 'auditLog' as const, icon: History, path: '/audit-log' },
   { key: 'settings' as const, icon: Settings, path: '/settings' },
 ];
 

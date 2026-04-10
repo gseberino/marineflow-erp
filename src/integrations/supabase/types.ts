@@ -74,6 +74,48 @@ export type Database = {
         }
         Relationships: []
       }
+      audit_log: {
+        Row: {
+          action: string
+          changed_at: string | null
+          changed_by: string
+          id: string
+          new_value: Json | null
+          previous_value: Json | null
+          reason: string | null
+          record_id: string
+          table_name: string
+          triggered_by_id: string | null
+          triggered_by_table: string | null
+        }
+        Insert: {
+          action: string
+          changed_at?: string | null
+          changed_by?: string
+          id?: string
+          new_value?: Json | null
+          previous_value?: Json | null
+          reason?: string | null
+          record_id: string
+          table_name: string
+          triggered_by_id?: string | null
+          triggered_by_table?: string | null
+        }
+        Update: {
+          action?: string
+          changed_at?: string | null
+          changed_by?: string
+          id?: string
+          new_value?: Json | null
+          previous_value?: Json | null
+          reason?: string | null
+          record_id?: string
+          table_name?: string
+          triggered_by_id?: string | null
+          triggered_by_table?: string | null
+        }
+        Relationships: []
+      }
       bank_transactions: {
         Row: {
           amount: number
@@ -543,6 +585,8 @@ export type Database = {
       payments: {
         Row: {
           amount: number
+          cancellation_reason: string | null
+          cancelled_at: string | null
           card_fee_percent: number | null
           created_at: string | null
           id: string
@@ -553,9 +597,12 @@ export type Database = {
           payment_date: string
           payment_method: string
           receivable_id: string | null
+          status: string | null
         }
         Insert: {
           amount: number
+          cancellation_reason?: string | null
+          cancelled_at?: string | null
           card_fee_percent?: number | null
           created_at?: string | null
           id?: string
@@ -566,9 +613,12 @@ export type Database = {
           payment_date?: string
           payment_method?: string
           receivable_id?: string | null
+          status?: string | null
         }
         Update: {
           amount?: number
+          cancellation_reason?: string | null
+          cancelled_at?: string | null
           card_fee_percent?: number | null
           created_at?: string | null
           id?: string
@@ -579,6 +629,7 @@ export type Database = {
           payment_date?: string
           payment_method?: string
           receivable_id?: string | null
+          status?: string | null
         }
         Relationships: [
           {
@@ -1095,6 +1146,8 @@ export type Database = {
       }
       service_orders: {
         Row: {
+          cancellation_reason: string | null
+          cancelled_at: string | null
           check_in_at: string | null
           check_out_at: string | null
           client_id: string
@@ -1120,6 +1173,8 @@ export type Database = {
           payment_status: string | null
           priority: string
           problem_description: string | null
+          reopen_reason: string | null
+          reopened_at: string | null
           requested_by_name: string | null
           scheduled_end_at: string | null
           scheduled_start_at: string | null
@@ -1138,6 +1193,8 @@ export type Database = {
           vessel_id: string
         }
         Insert: {
+          cancellation_reason?: string | null
+          cancelled_at?: string | null
           check_in_at?: string | null
           check_out_at?: string | null
           client_id: string
@@ -1163,6 +1220,8 @@ export type Database = {
           payment_status?: string | null
           priority?: string
           problem_description?: string | null
+          reopen_reason?: string | null
+          reopened_at?: string | null
           requested_by_name?: string | null
           scheduled_end_at?: string | null
           scheduled_start_at?: string | null
@@ -1181,6 +1240,8 @@ export type Database = {
           vessel_id: string
         }
         Update: {
+          cancellation_reason?: string | null
+          cancelled_at?: string | null
           check_in_at?: string | null
           check_out_at?: string | null
           client_id?: string
@@ -1206,6 +1267,8 @@ export type Database = {
           payment_status?: string | null
           priority?: string
           problem_description?: string | null
+          reopen_reason?: string | null
+          reopened_at?: string | null
           requested_by_name?: string | null
           scheduled_end_at?: string | null
           scheduled_start_at?: string | null

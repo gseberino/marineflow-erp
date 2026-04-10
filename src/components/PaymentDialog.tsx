@@ -3,13 +3,15 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useI18n } from '@/i18n';
-import { usePayments, useRegisterPayment } from '@/hooks/use-financial';
+import { usePayments, useRegisterPayment, useCancelPayment } from '@/hooks/use-financial';
 import { useCardFees } from '@/hooks/use-card-fees';
 import { toast } from 'sonner';
 import { Separator } from '@/components/ui/separator';
-import { StatusBadge } from '@/components/StatusBadge';
+import { Badge } from '@/components/ui/badge';
+import { AlertTriangle } from 'lucide-react';
 
 interface PaymentDialogProps {
   open: boolean;
@@ -39,6 +41,7 @@ export function PaymentDialog({ open, onOpenChange, receivable, payable }: Payme
   );
   const { data: cardFees } = useCardFees();
   const registerPayment = useRegisterPayment();
+  const cancelPayment = useCancelPayment();
 
   const [showDetailed, setShowDetailed] = useState(false);
   const [method, setMethod] = useState('pix');
@@ -46,6 +49,8 @@ export function PaymentDialog({ open, onOpenChange, receivable, payable }: Payme
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
   const [amount, setAmount] = useState(Number(record?.balance_amount || 0));
   const [notes, setNotes] = useState('');
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
 
   if (!record) return null;
 
@@ -119,12 +124,47 @@ export function PaymentDialog({ open, onOpenChange, receivable, payable }: Payme
           {payments && payments.length > 0 && (
             <div>
               <p className="text-sm font-medium text-muted-foreground mb-2">{t.financial.paymentHistory}</p>
-              <div className="space-y-1">
-                {payments.map(p => (
-                  <div key={p.id} className="flex justify-between text-sm border-b pb-1">
-                    <span>{new Date(p.payment_date).toLocaleDateString('pt-BR')}</span>
-                    <span className="text-muted-foreground">{methods[p.payment_method] || p.payment_method}</span>
-                    <span className="font-medium">{formatCurrency(Number(p.amount))}</span>
+              <div className="space-y-2">
+                {payments.map((p: any) => (
+                  <div key={p.id} className={`border rounded-lg p-2 text-sm ${p.status === 'cancelled' ? 'opacity-50' : ''}`}>
+                    <div className="flex justify-between items-center">
+                      <span>{new Date(p.payment_date).toLocaleDateString('pt-BR')}</span>
+                      <span className="text-muted-foreground">{methods[p.payment_method] || p.payment_method}</span>
+                      <span className={`font-medium ${p.status === 'cancelled' ? 'line-through' : ''}`}>{formatCurrency(Number(p.amount))}</span>
+                      <Badge variant={p.status === 'cancelled' ? 'destructive' : 'default'} className="text-xs">
+                        {p.status === 'cancelled' ? t.financial.paymentCancelled : t.financial.paymentConfirmed}
+                      </Badge>
+                    </div>
+                    {p.status === 'confirmed' && cancellingId !== p.id && (
+                      <Button variant="ghost" size="sm" className="text-destructive text-xs mt-1" onClick={() => setCancellingId(p.id)}>
+                        {t.financial.cancelPayment}
+                      </Button>
+                    )}
+                    {cancellingId === p.id && (
+                      <div className="mt-2 space-y-2 border-t pt-2">
+                        <p className="text-xs text-muted-foreground">{t.financial.cancelPaymentWarning}</p>
+                        <Input placeholder={t.financial.cancelPaymentReason} value={cancelReason} onChange={e => setCancelReason(e.target.value)} />
+                        <div className="flex gap-2">
+                          <Button size="sm" variant="destructive" disabled={cancelReason.length < 3 || cancelPayment.isPending}
+                            onClick={async () => {
+                              try {
+                                await cancelPayment.mutateAsync({ id: p.id, reason: cancelReason });
+                                toast.success(t.financial.paymentCancelSuccess);
+                                setCancellingId(null);
+                                setCancelReason('');
+                              } catch (e: any) { toast.error(e.message); }
+                            }}>
+                            {t.serviceOrders.confirmCancel}
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => { setCancellingId(null); setCancelReason(''); }}>
+                            {t.common.cancel}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                    {p.cancellation_reason && (
+                      <p className="text-xs text-muted-foreground mt-1 italic">{p.cancellation_reason}</p>
+                    )}
                   </div>
                 ))}
               </div>
