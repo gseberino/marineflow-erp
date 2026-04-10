@@ -166,8 +166,6 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [cancelReason, setCancelReason] = useState('');
   const [reopenReason, setReopenReason] = useState('');
 
-  const isLocked = currentStatus === 'invoiced' || currentStatus === 'cancelled';
-
   useEffect(() => {
     if (orderData) {
       const d = orderData;
