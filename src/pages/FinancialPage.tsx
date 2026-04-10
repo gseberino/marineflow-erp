@@ -6,6 +6,7 @@ import { useI18n } from '@/i18n';
 import { DollarSign, TrendingUp, TrendingDown, AlertTriangle, ArrowUpCircle, ArrowDownCircle, Plus, Info } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useReceivables, usePayables, useFinancialSummary, useCashFlow } from '@/hooks/use-financial';
 import { usePendingReimbursements } from '@/hooks/use-service-order-expenses';
