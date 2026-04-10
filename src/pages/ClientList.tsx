@@ -5,16 +5,19 @@ import { useI18n } from '@/i18n';
 import { useClients } from '@/hooks/use-clients';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Plus, Search, Phone, Mail, Ship } from 'lucide-react';
+import { Plus, Search, Phone, Mail, Ship, Upload, Download } from 'lucide-react';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ClientFormDialog } from '@/components/ClientFormDialog';
+import { ImportWizard } from '@/components/ImportWizard';
+import { exportToCSV, CLIENTS_COLUMNS } from '@/lib/export-utils';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 
 export default function ClientList() {
   const [search, setSearch] = useState('');
   const [formOpen, setFormOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const { t } = useI18n();
   const { data: clients, isLoading, error } = useClients();
 
@@ -43,9 +46,17 @@ export default function ClientList() {
   return (
     <div className="space-y-4 animate-fade-in">
       <PageHeader title={t.clients.title} description={`${t.clients.description} (${clients?.length ?? 0})`}>
-        <Button className="gap-2 bg-accent text-accent-foreground hover:bg-accent/90" onClick={() => setFormOpen(true)}>
-          <Plus className="h-4 w-4" /> {t.clients.newClient}
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" className="gap-1" onClick={() => setImportOpen(true)}>
+            <Upload className="h-3.5 w-3.5" /> {t.imports.importData}
+          </Button>
+          <Button variant="outline" size="sm" className="gap-1" onClick={() => clients && exportToCSV(clients, 'clientes.csv', CLIENTS_COLUMNS)}>
+            <Download className="h-3.5 w-3.5" /> {t.imports.exportCSV}
+          </Button>
+          <Button className="gap-2 bg-accent text-accent-foreground hover:bg-accent/90" onClick={() => setFormOpen(true)}>
+            <Plus className="h-4 w-4" /> {t.clients.newClient}
+          </Button>
+        </div>
       </PageHeader>
 
       <div className="relative">
@@ -98,6 +109,7 @@ export default function ClientList() {
       )}
 
       <ClientFormDialog open={formOpen} onOpenChange={setFormOpen} />
+      <ImportWizard entityType="auto" open={importOpen} onOpenChange={setImportOpen} />
     </div>
   );
 }

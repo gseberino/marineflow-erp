@@ -4,15 +4,20 @@ import { useI18n } from '@/i18n';
 import { useProducts, type Product } from '@/hooks/use-products';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Plus, Search, AlertTriangle, Edit } from 'lucide-react';
+import { Plus, Search, AlertTriangle, Edit, Upload, Download, Table2 } from 'lucide-react';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ProductFormDialog } from '@/components/ProductFormDialog';
+import { ImportWizard } from '@/components/ImportWizard';
+import { BulkEditor } from '@/components/BulkEditor';
+import { exportToCSV, PRODUCTS_COLUMNS } from '@/lib/export-utils';
 
 export default function ProductList() {
   const [search, setSearch] = useState('');
   const [formOpen, setFormOpen] = useState(false);
   const [editProduct, setEditProduct] = useState<Product | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const { t, formatCurrency } = useI18n();
   const { data: products, isLoading, error } = useProducts();
 
@@ -28,9 +33,20 @@ export default function ProductList() {
   return (
     <div className="space-y-4 animate-fade-in">
       <PageHeader title={t.products.title} description={`${t.products.description} (${products?.length ?? 0})`}>
-        <Button className="gap-2 bg-accent text-accent-foreground hover:bg-accent/90" onClick={() => { setEditProduct(null); setFormOpen(true); }}>
-          <Plus className="h-4 w-4" /> {t.products.newProduct}
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" className="gap-1" onClick={() => setImportOpen(true)}>
+            <Upload className="h-3.5 w-3.5" /> {t.imports.importData}
+          </Button>
+          <Button variant="outline" size="sm" className="gap-1" onClick={() => setBulkOpen(true)}>
+            <Table2 className="h-3.5 w-3.5" /> {t.imports.bulkEdit}
+          </Button>
+          <Button variant="outline" size="sm" className="gap-1" onClick={() => products && exportToCSV(products, 'produtos.csv', PRODUCTS_COLUMNS)}>
+            <Download className="h-3.5 w-3.5" /> {t.imports.exportCSV}
+          </Button>
+          <Button className="gap-2 bg-accent text-accent-foreground hover:bg-accent/90" onClick={() => { setEditProduct(null); setFormOpen(true); }}>
+            <Plus className="h-4 w-4" /> {t.products.newProduct}
+          </Button>
+        </div>
       </PageHeader>
       <div className="relative">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -94,6 +110,8 @@ export default function ProductList() {
       )}
 
       <ProductFormDialog open={formOpen} onOpenChange={setFormOpen} product={editProduct} />
+      <ImportWizard entityType="products" open={importOpen} onOpenChange={setImportOpen} />
+      <BulkEditor entityType="products" open={bulkOpen} onOpenChange={setBulkOpen} />
     </div>
   );
 }

@@ -4,10 +4,12 @@ import { useI18n } from '@/i18n';
 import { useSuppliers, type Supplier } from '@/hooks/use-suppliers';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Plus, Search, Building2 } from 'lucide-react';
+import { Plus, Search, Building2, Upload, Download } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatusBadge } from '@/components/StatusBadge';
 import { SupplierFormDialog } from '@/components/SupplierFormDialog';
+import { ImportWizard } from '@/components/ImportWizard';
+import { exportToCSV, SUPPLIERS_COLUMNS } from '@/lib/export-utils';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 
@@ -32,6 +34,7 @@ export default function SupplierList() {
   const [search, setSearch] = useState('');
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Supplier | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
   const { t } = useI18n();
   const { data: suppliers, isLoading, error } = useSuppliers();
   const { data: productCounts } = useSupplierProductCounts();
@@ -48,9 +51,17 @@ export default function SupplierList() {
   return (
     <div className="space-y-4 animate-fade-in">
       <PageHeader title={t.suppliers.title} description={`${t.suppliers.description} (${suppliers?.length ?? 0})`}>
-        <Button className="gap-2 bg-accent text-accent-foreground hover:bg-accent/90" onClick={() => { setEditing(null); setFormOpen(true); }}>
-          <Plus className="h-4 w-4" /> {t.suppliers.newSupplier}
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" className="gap-1" onClick={() => setImportOpen(true)}>
+            <Upload className="h-3.5 w-3.5" /> {t.imports.importData}
+          </Button>
+          <Button variant="outline" size="sm" className="gap-1" onClick={() => suppliers && exportToCSV(suppliers, 'fornecedores.csv', SUPPLIERS_COLUMNS)}>
+            <Download className="h-3.5 w-3.5" /> {t.imports.exportCSV}
+          </Button>
+          <Button className="gap-2 bg-accent text-accent-foreground hover:bg-accent/90" onClick={() => { setEditing(null); setFormOpen(true); }}>
+            <Plus className="h-4 w-4" /> {t.suppliers.newSupplier}
+          </Button>
+        </div>
       </PageHeader>
       <div className="relative">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -113,6 +124,7 @@ export default function SupplierList() {
       )}
 
       <SupplierFormDialog open={formOpen} onOpenChange={setFormOpen} supplier={editing} />
+      <ImportWizard entityType="suppliers" open={importOpen} onOpenChange={setImportOpen} />
     </div>
   );
 }

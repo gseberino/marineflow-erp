@@ -311,6 +311,45 @@ export type Database = {
         }
         Relationships: []
       }
+      import_sessions: {
+        Row: {
+          column_mapping: Json | null
+          conflict_rows: number | null
+          created_at: string | null
+          entity_type: string
+          filename: string
+          id: string
+          imported_rows: number | null
+          skipped_rows: number | null
+          status: string | null
+          total_rows: number | null
+        }
+        Insert: {
+          column_mapping?: Json | null
+          conflict_rows?: number | null
+          created_at?: string | null
+          entity_type: string
+          filename: string
+          id?: string
+          imported_rows?: number | null
+          skipped_rows?: number | null
+          status?: string | null
+          total_rows?: number | null
+        }
+        Update: {
+          column_mapping?: Json | null
+          conflict_rows?: number | null
+          created_at?: string | null
+          entity_type?: string
+          filename?: string
+          id?: string
+          imported_rows?: number | null
+          skipped_rows?: number | null
+          status?: string | null
+          total_rows?: number | null
+        }
+        Relationships: []
+      }
       inventory_movements: {
         Row: {
           created_at: string
