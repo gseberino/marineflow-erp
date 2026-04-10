@@ -6,7 +6,6 @@ import { useI18n } from '@/i18n';
 import { DollarSign, TrendingUp, TrendingDown, AlertTriangle, ArrowUpCircle, ArrowDownCircle, Plus, Info } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useReceivables, usePayables, useFinancialSummary, useCashFlow } from '@/hooks/use-financial';
 import { usePendingReimbursements } from '@/hooks/use-service-order-expenses';
@@ -15,6 +14,7 @@ import { ReceivableFormDialog } from '@/components/ReceivableFormDialog';
 import { PayableFormDialog } from '@/components/PayableFormDialog';
 import { BankReconciliation } from '@/components/BankReconciliation';
 import { ReimbursementsPanel } from '@/components/ReimbursementsPanel';
+import { FinancialFilterPanel, applyFilters, defaultFilters, type FinancialFilters } from '@/components/FinancialFilterPanel';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip } from 'recharts';
@@ -56,14 +56,32 @@ function getOriginBadge(origin: string | null): { label: string; className: stri
 
 function groupPayables(payables: any[], groupBy: string) {
   if (groupBy === 'none') return { 'Todos': payables };
+
+  if (groupBy === 'month') {
+    const dates = payables.map(p => new Date(p.due_date));
+    const minDate = dates.length > 0 ? new Date(Math.min(...dates.map(d => d.getTime()))) : new Date();
+    const maxDate = dates.length > 0 ? new Date(Math.max(...dates.map(d => d.getTime()))) : new Date();
+    const allMonths: string[] = [];
+    const cursor = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
+    const end = new Date(maxDate.getFullYear(), maxDate.getMonth(), 1);
+    while (cursor <= end) {
+      allMonths.push(cursor.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }));
+      cursor.setMonth(cursor.getMonth() + 1);
+    }
+    const result: Record<string, any[]> = {};
+    allMonths.forEach(m => result[m] = []);
+    payables.forEach(p => {
+      const key = new Date(p.due_date).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+      if (result[key]) result[key].push(p);
+      else result[key] = [p];
+    });
+    return result;
+  }
+
   return payables.reduce((acc: Record<string, any[]>, p: any) => {
     let key = '';
     if (groupBy === 'category') key = p.expense_category || 'Sem categoria';
     if (groupBy === 'supplier') key = (p as any).suppliers?.supplier_name || p.supplier_name || 'Sem fornecedor';
-    if (groupBy === 'month') {
-      const d = new Date(p.due_date);
-      key = d.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
-    }
     if (!acc[key]) acc[key] = [];
     acc[key].push(p);
     return acc;
