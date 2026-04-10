@@ -20,6 +20,7 @@ import ReportsPage from "./pages/ReportsPage";
 import SettingsPage from "./pages/SettingsPage";
 import SupplierList from "./pages/SupplierList";
 import ServiceList from "./pages/ServiceList";
+import AuditLogPage from "./pages/AuditLogPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -48,6 +49,7 @@ const App = () => (
               <Route path="/inventory" element={<InventoryPage />} />
               <Route path="/financial" element={<FinancialPage />} />
               <Route path="/reports" element={<ReportsPage />} />
+              <Route path="/audit-log" element={<AuditLogPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
