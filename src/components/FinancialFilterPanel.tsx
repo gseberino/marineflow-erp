@@ -96,19 +96,19 @@ export function FinancialFilterPanel({ type, filters, onChange }: Props) {
     if (!saveName.trim()) return;
     try {
       await createSaved.mutateAsync({ name: saveName.trim(), filter_type: type, filter_config: filters });
-      toast.success(t.financial.saveFilter);
+      toast.success(ft.saveFilter);
       setSaveName('');
       setShowSave(false);
     } catch { toast.error('Erro'); }
   };
 
   const datePresets = [
-    { key: 'this_month', label: t.financial.thisMonth },
-    { key: 'last_month', label: t.financial.lastMonth },
-    { key: 'last_30', label: t.financial.last30days },
-    { key: 'last_90', label: t.financial.last90days },
-    { key: 'this_year', label: t.financial.thisYear },
-    { key: 'custom', label: t.financial.customRange },
+    { key: 'this_month', label: ft.thisMonth },
+    { key: 'last_month', label: ft.lastMonth },
+    { key: 'last_30', label: ft.last30days },
+    { key: 'last_90', label: ft.last90days },
+    { key: 'this_year', label: ft.thisYear },
+    { key: 'custom', label: ft.customRange },
   ];
 
   const statuses = [
@@ -124,7 +124,7 @@ export function FinancialFilterPanel({ type, filters, onChange }: Props) {
       <div className="flex items-center gap-2">
         <Button variant={open ? 'default' : 'outline'} size="sm" onClick={() => setOpen(!open)}>
           <Filter className="h-4 w-4 mr-1" />
-          {t.financial.advancedFilters}
+          {ft.advancedFilters}
           {activeCount > 0 && (
             <StatusBadge className="bg-primary/20 text-primary-foreground ml-1">{activeCount}</StatusBadge>
           )}
@@ -137,7 +137,7 @@ export function FinancialFilterPanel({ type, filters, onChange }: Props) {
         />
         {activeCount > 0 && (
           <Button variant="ghost" size="sm" onClick={() => onChange({ ...defaultFilters })}>
-            <X className="h-3 w-3 mr-1" />{t.financial.clearFilters}
+            <X className="h-3 w-3 mr-1" />{ft.clearFilters}
           </Button>
         )}
       </div>
@@ -157,8 +157,8 @@ export function FinancialFilterPanel({ type, filters, onChange }: Props) {
             </div>
             {filters.datePreset === 'custom' && (
               <div className="flex gap-2 mt-2">
-                <div><Label className="text-xs">{t.financial.dateFrom}</Label><Input type="date" value={filters.dateFrom} onChange={e => onChange({ ...filters, dateFrom: e.target.value })} /></div>
-                <div><Label className="text-xs">{t.financial.dateTo}</Label><Input type="date" value={filters.dateTo} onChange={e => onChange({ ...filters, dateTo: e.target.value })} /></div>
+                <div><Label className="text-xs">{ft.dateFrom}</Label><Input type="date" value={filters.dateFrom} onChange={e => onChange({ ...filters, dateFrom: e.target.value })} /></div>
+                <div><Label className="text-xs">{ft.dateTo}</Label><Input type="date" value={filters.dateTo} onChange={e => onChange({ ...filters, dateTo: e.target.value })} /></div>
               </div>
             )}
           </div>
@@ -178,7 +178,7 @@ export function FinancialFilterPanel({ type, filters, onChange }: Props) {
 
           {/* Categories */}
           <div>
-            <Label className="text-xs text-muted-foreground mb-1 block">{t.financial.allCategories}</Label>
+            <Label className="text-xs text-muted-foreground mb-1 block">{ft.allCategories}</Label>
             <div className="flex flex-wrap gap-1">
               {(categories || []).map(c => (
                 <Button key={c.id} size="sm" variant={filters.categories.includes(c.name) ? 'default' : 'outline'}
@@ -193,7 +193,7 @@ export function FinancialFilterPanel({ type, filters, onChange }: Props) {
           {/* Suppliers (payable) or Clients (receivable) */}
           {type === 'payable' ? (
             <div>
-              <Label className="text-xs text-muted-foreground mb-1 block">{t.financial.allSuppliers}</Label>
+              <Label className="text-xs text-muted-foreground mb-1 block">{ft.allSuppliers}</Label>
               <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
                 {(suppliersList || []).map(s => (
                   <Button key={s.id} size="sm" variant={filters.suppliers.includes(s.supplier_name) ? 'default' : 'outline'}
@@ -205,7 +205,7 @@ export function FinancialFilterPanel({ type, filters, onChange }: Props) {
             </div>
           ) : (
             <div>
-              <Label className="text-xs text-muted-foreground mb-1 block">{t.financial.allClients}</Label>
+              <Label className="text-xs text-muted-foreground mb-1 block">{ft.allClients}</Label>
               <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
                 {(clientsList || []).map(c => (
                   <Button key={c.id} size="sm" variant={filters.clients.includes(c.full_name_or_company_name) ? 'default' : 'outline'}
@@ -219,8 +219,8 @@ export function FinancialFilterPanel({ type, filters, onChange }: Props) {
 
           {/* Amount range */}
           <div className="flex gap-3 items-end">
-            <div><Label className="text-xs">{t.financial.amountMin}</Label><Input type="number" placeholder={t.financial.anyAmount} className="w-32" value={filters.amountMin ?? ''} onChange={e => onChange({ ...filters, amountMin: e.target.value ? Number(e.target.value) : null })} /></div>
-            <div><Label className="text-xs">{t.financial.amountMax}</Label><Input type="number" placeholder={t.financial.anyAmount} className="w-32" value={filters.amountMax ?? ''} onChange={e => onChange({ ...filters, amountMax: e.target.value ? Number(e.target.value) : null })} /></div>
+            <div><Label className="text-xs">{ft.amountMin}</Label><Input type="number" placeholder={ft.anyAmount} className="w-32" value={filters.amountMin ?? ''} onChange={e => onChange({ ...filters, amountMin: e.target.value ? Number(e.target.value) : null })} /></div>
+            <div><Label className="text-xs">{ft.amountMax}</Label><Input type="number" placeholder={ft.anyAmount} className="w-32" value={filters.amountMax ?? ''} onChange={e => onChange({ ...filters, amountMax: e.target.value ? Number(e.target.value) : null })} /></div>
           </div>
 
           {/* Origin (payable only) */}
@@ -229,9 +229,9 @@ export function FinancialFilterPanel({ type, filters, onChange }: Props) {
               <Label className="text-xs text-muted-foreground mb-1 block">Origem</Label>
               <div className="flex flex-wrap gap-1">
                 {[
-                  { key: 'manual', label: t.financial.originManual },
-                  { key: 'service_order_expense', label: t.financial.originServiceOrder },
-                  { key: 'bank_reconciliation', label: t.financial.originReconciliation },
+                  { key: 'manual', label: ft.originManual },
+                  { key: 'service_order_expense', label: ft.originServiceOrder },
+                  { key: 'bank_reconciliation', label: ft.originReconciliation },
                 ].map(o => (
                   <Button key={o.key} size="sm" variant={filters.origin.includes(o.key) ? 'default' : 'outline'}
                     onClick={() => onChange({ ...filters, origin: toggleArray(filters.origin, o.key) })}>
@@ -245,24 +245,24 @@ export function FinancialFilterPanel({ type, filters, onChange }: Props) {
           {/* Actions */}
           <div className="flex items-center justify-between border-t pt-3">
             <Button variant="ghost" size="sm" onClick={() => onChange({ ...defaultFilters })}>
-              {t.financial.clearFilters}
+              {ft.clearFilters}
             </Button>
             <div className="flex items-center gap-2">
               {showSave ? (
                 <div className="flex items-center gap-1">
-                  <Input placeholder={t.financial.filterName} className="w-40 h-8" value={saveName} onChange={e => setSaveName(e.target.value)} />
+                  <Input placeholder={ft.filterName} className="w-40 h-8" value={saveName} onChange={e => setSaveName(e.target.value)} />
                   <Button size="sm" onClick={handleSave} disabled={createSaved.isPending}>{t.common.save}</Button>
                   <Button size="sm" variant="ghost" onClick={() => setShowSave(false)}><X className="h-3 w-3" /></Button>
                 </div>
               ) : (
                 <Button size="sm" variant="outline" onClick={() => setShowSave(true)}>
-                  <Star className="h-3 w-3 mr-1" />{t.financial.saveFilter}
+                  <Star className="h-3 w-3 mr-1" />{ft.saveFilter}
                 </Button>
               )}
               {(saved || []).length > 0 && (
                 <Popover>
                   <PopoverTrigger asChild>
-                    <Button size="sm" variant="outline">{t.financial.savedFilters} ({saved?.length})</Button>
+                    <Button size="sm" variant="outline">{ft.savedFilters} ({saved?.length})</Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-64 p-2" align="end">
                     <div className="space-y-1">
