@@ -53,7 +53,7 @@ interface Props {
 
 export function FinancialFilterPanel({ type, filters, onChange }: Props) {
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
+  const ft = t.financial as any;
   const [saveName, setSaveName] = useState('');
   const [showSave, setShowSave] = useState(false);
   const { data: categories } = useFinancialCategories(type);
