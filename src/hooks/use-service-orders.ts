@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { writeAuditLog } from '@/hooks/use-audit-log';
+import { cancelServiceOrderCascade, reopenServiceOrder, updateReceivableFromSO } from '@/lib/cascade-updates';
 
 const SO_SELECT = `
   *,
@@ -89,6 +91,13 @@ export function useUpdateServiceOrder() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, ...values }: { id: string } & Record<string, any>) => {
+      // Get previous values for audit
+      const { data: prev } = await supabase
+        .from('service_orders')
+        .select('grand_total, status')
+        .eq('id', id)
+        .single();
+
       const { data, error } = await supabase
         .from('service_orders')
         .update(values as any)
@@ -96,11 +105,26 @@ export function useUpdateServiceOrder() {
         .select()
         .single();
       if (error) throw error;
+
+      // Cascade update receivable if grand_total changed
+      if (prev && data && prev.grand_total !== data.grand_total) {
+        await updateReceivableFromSO(id, Number(data.grand_total));
+      }
+
+      await writeAuditLog({
+        table_name: 'service_orders',
+        record_id: id,
+        action: 'update',
+        previous_value: prev,
+        new_value: values,
+      });
+
       return data;
     },
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ['service-orders'] });
       qc.invalidateQueries({ queryKey: ['service-orders', vars.id] });
+      qc.invalidateQueries({ queryKey: ['receivables'] });
     },
   });
 }
@@ -109,6 +133,10 @@ export function useUpdateServiceOrderStatus() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) => {
+      if (status === 'cancelled') {
+        throw new Error('Use o botão "Cancelar OS" para cancelar com estorno completo.');
+      }
+
       const updates: Record<string, any> = { status };
       if (status === 'in_progress') {
         const { data: current } = await supabase
@@ -153,11 +181,52 @@ export function useUpdateServiceOrderStatus() {
         .select()
         .single();
       if (error) throw error;
+
+      await writeAuditLog({
+        table_name: 'service_orders',
+        record_id: id,
+        action: 'update',
+        new_value: { status },
+      });
+
       return data;
     },
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ['service-orders'] });
       qc.invalidateQueries({ queryKey: ['service-orders', vars.id] });
+      qc.invalidateQueries({ queryKey: ['receivables'] });
+    },
+  });
+}
+
+export function useCancelServiceOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, reason }: { id: string; reason: string }) => {
+      return await cancelServiceOrderCascade(id, reason);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['service-orders'] });
+      qc.invalidateQueries({ queryKey: ['receivables'] });
+      qc.invalidateQueries({ queryKey: ['payables'] });
+      qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: ['payments'] });
+      qc.invalidateQueries({ queryKey: ['bank-transactions'] });
+    },
+  });
+}
+
+export function useReopenServiceOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, reason }: { id: string; reason: string }) => {
+      await reopenServiceOrder(id, reason);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['service-orders'] });
+      qc.invalidateQueries({ queryKey: ['receivables'] });
+      qc.invalidateQueries({ queryKey: ['payments'] });
+      qc.invalidateQueries({ queryKey: ['bank-transactions'] });
     },
   });
 }
@@ -186,14 +255,12 @@ async function recalcTotals(soId: string) {
     .eq('service_order_id', soId);
   const partsCost = (parts || []).reduce((s, p) => s + (p.line_total_sale || 0), 0);
 
-  // Service lines for labor cost (billing)
   const { data: serviceLines } = await supabase
     .from('service_order_services')
     .select('line_total')
     .eq('service_order_id', soId);
   const laborCost = (serviceLines || []).reduce((s, l) => s + (l.line_total || 0), 0);
 
-  // Time entries for internal hours tracking only
   const { data: te } = await supabase
     .from('time_entries')
     .select('duration_minutes, billable')
@@ -246,7 +313,6 @@ export function useAddServiceOrderPart() {
       });
       if (error) throw error;
 
-      // Decrement stock
       const { data: prod } = await supabase
         .from('products')
         .select('stock_quantity')
@@ -257,7 +323,6 @@ export function useAddServiceOrderPart() {
         .update({ stock_quantity: (prod?.stock_quantity || 0) - values.quantity })
         .eq('id', values.product_id);
 
-      // Inventory movement
       await supabase.from('inventory_movements').insert({
         product_id: values.product_id,
         movement_type: 'service_usage',
@@ -293,7 +358,6 @@ export function useRemoveServiceOrderPart() {
         .eq('id', part.id);
       if (error) throw error;
 
-      // Restore stock
       const { data: prod } = await supabase
         .from('products')
         .select('stock_quantity')
@@ -304,7 +368,6 @@ export function useRemoveServiceOrderPart() {
         .update({ stock_quantity: (prod?.stock_quantity || 0) + part.quantity })
         .eq('id', part.product_id);
 
-      // Inventory movement
       await supabase.from('inventory_movements').insert({
         product_id: part.product_id,
         movement_type: 'return',
@@ -312,6 +375,16 @@ export function useRemoveServiceOrderPart() {
         reference_type: 'service_order',
         reference_id: part.service_order_id,
         unit_cost_snapshot: part.unit_cost_snapshot,
+      });
+
+      await writeAuditLog({
+        table_name: 'service_order_parts',
+        record_id: part.id,
+        action: 'reversal',
+        previous_value: { product_id: part.product_id, quantity: part.quantity },
+        reason: 'Peça removida da OS',
+        triggered_by_table: 'service_orders',
+        triggered_by_id: part.service_order_id,
       });
 
       await recalcTotals(part.service_order_id);
