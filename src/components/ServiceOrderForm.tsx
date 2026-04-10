@@ -1249,6 +1249,13 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           </div>
         </div>
       </section>
+
+      {/* Record History */}
+      {!isNew && (
+        <section className="rounded-xl border bg-card p-5 shadow-sm">
+          <RecordHistory tableName="service_orders" recordId={orderId} />
+        </section>
+      )}
     </div>
   );
 }
