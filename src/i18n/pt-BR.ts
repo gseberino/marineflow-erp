@@ -13,6 +13,7 @@ export const ptBR: TranslationKeys = {
     inventory: 'Estoque',
     financial: 'Financeiro',
     reports: 'Relatórios',
+    auditLog: 'Audit Log',
     settings: 'Configurações',
   },
 

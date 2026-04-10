@@ -12,6 +12,7 @@ export const en = {
     inventory: 'Inventory',
     financial: 'Financial',
     reports: 'Reports',
+    auditLog: 'Audit Log',
     settings: 'Settings',
   },
 
