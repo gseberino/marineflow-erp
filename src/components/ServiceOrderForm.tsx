@@ -388,9 +388,44 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const currentStatus = form.status;
   const validTransitions = STATUS_TRANSITIONS[currentStatus] || [];
   const marina = marinas?.find((m) => m.id === form.marina_id);
+  const isLocked = currentStatus === 'invoiced' || currentStatus === 'cancelled';
+
+  const handleCancel = async () => {
+    if (!orderId || cancelReason.length < 5) return;
+    try {
+      await cancelSO.mutateAsync({ id: orderId, reason: cancelReason });
+      toast.success(t.serviceOrders.cancelSuccess);
+      setShowCancelDialog(false);
+      navigate('/service-orders');
+    } catch (e: any) { toast.error(e.message); }
+  };
+
+  const handleReopen = async () => {
+    if (!orderId || reopenReason.length < 5) return;
+    try {
+      await reopenSO.mutateAsync({ id: orderId, reason: reopenReason });
+      toast.success(t.serviceOrders.reopenSuccess);
+      setShowReopenDialog(false);
+    } catch (e: any) { toast.error(e.message); }
+  };
 
   return (
     <div className="space-y-6 animate-fade-in max-w-5xl">
+      {/* Invoiced lock banner */}
+      {isLocked && !isNew && (
+        <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 p-4">
+          <div className="flex items-center gap-2">
+            <Lock className="h-5 w-5 text-amber-600" />
+            <span className="text-sm font-medium text-amber-800">{t.serviceOrders.osLocked}</span>
+          </div>
+          {currentStatus === 'invoiced' && (
+            <Button variant="outline" size="sm" onClick={() => setShowReopenDialog(true)}>
+              <RotateCcw className="h-4 w-4 mr-1" /> {t.serviceOrders.reopenOS}
+            </Button>
+          )}
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center gap-3 flex-wrap">
         <Button variant="ghost" size="icon" onClick={() => navigate('/service-orders')}>
@@ -412,7 +447,12 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           )}
         </div>
         <div className="flex gap-2">
-          {!isNew && validTransitions.length > 0 && (
+          {!isNew && !isLocked && currentStatus !== 'cancelled' && (
+            <Button variant="outline" size="sm" className="text-destructive" onClick={() => setShowCancelDialog(true)}>
+              <Ban className="h-4 w-4 mr-1" /> {t.serviceOrders.cancelOS}
+            </Button>
+          )}
+          {!isNew && !isLocked && validTransitions.length > 0 && (
             <Select onValueChange={handleStatusChange}>
               <SelectTrigger className="w-[180px]">
                 <SelectValue placeholder={t.serviceOrders.alterStatus} />
@@ -426,12 +466,60 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               </SelectContent>
             </Select>
           )}
-          <Button onClick={handleSave} disabled={createSO.isPending || updateSO.isPending}
-            className="bg-accent text-accent-foreground hover:bg-accent/90">
-            {t.common.save}
-          </Button>
+          {!isLocked && (
+            <Button onClick={handleSave} disabled={createSO.isPending || updateSO.isPending}
+              className="bg-accent text-accent-foreground hover:bg-accent/90">
+              {t.common.save}
+            </Button>
+          )}
         </div>
       </div>
+
+      {/* Cancel Dialog */}
+      <Dialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>{t.serviceOrders.cancelOS}</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+              <AlertTriangle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+              <p className="text-sm">{t.serviceOrders.cancelWarning}</p>
+            </div>
+            <div>
+              <Label>{t.serviceOrders.cancelReason}</Label>
+              <Textarea value={cancelReason} onChange={e => setCancelReason(e.target.value)} placeholder="..." />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setShowCancelDialog(false)}>{t.common.cancel}</Button>
+              <Button variant="destructive" onClick={handleCancel} disabled={cancelReason.length < 5 || cancelSO.isPending}>
+                {t.serviceOrders.confirmCancel}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reopen Dialog */}
+      <Dialog open={showReopenDialog} onOpenChange={setShowReopenDialog}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>{t.serviceOrders.reopenOS}</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+              <p className="text-sm">{t.serviceOrders.reopenWarning}</p>
+            </div>
+            <div>
+              <Label>{t.serviceOrders.reopenReason}</Label>
+              <Textarea value={reopenReason} onChange={e => setReopenReason(e.target.value)} placeholder="..." />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setShowReopenDialog(false)}>{t.common.cancel}</Button>
+              <Button onClick={handleReopen} disabled={reopenReason.length < 5 || reopenSO.isPending}>
+                {t.serviceOrders.confirmReopen}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* A - Identification */}
       <section className="rounded-xl border bg-card p-5 shadow-sm space-y-4">
