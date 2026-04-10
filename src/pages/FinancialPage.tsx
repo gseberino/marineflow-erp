@@ -101,37 +101,14 @@ export default function FinancialPage() {
   const [paymentTarget, setPaymentTarget] = useState<{ receivable?: any; payable?: any } | null>(null);
   const [showNewReceivable, setShowNewReceivable] = useState(false);
   const [showNewPayable, setShowNewPayable] = useState(false);
-  const [recFilter, setRecFilter] = useState('all');
-  const [payFilter, setPayFilter] = useState('all');
-  const [recSearch, setRecSearch] = useState('');
-  const [paySearch, setPaySearch] = useState('');
+  const [recFilters, setRecFilters] = useState<FinancialFilters>({ ...defaultFilters });
+  const [payFilters, setPayFilters] = useState<FinancialFilters>({ ...defaultFilters });
   const [paySubTab, setPaySubTab] = useState<'list' | 'reimbursements'>('list');
   const [groupBy, setGroupBy] = useState<'none' | 'category' | 'supplier' | 'month'>('none');
   const { data: pendingReimb } = usePendingReimbursements();
 
-  const filterStatuses = ['all', 'pending', 'partially_paid', 'paid', 'overdue'] as const;
-
-  const filteredReceivables = (receivables || []).filter(r => {
-    const isOverdue = r.status !== 'paid' && r.status !== 'cancelled' && new Date(r.due_date) < new Date();
-    const effectiveStatus = isOverdue ? 'overdue' : r.status;
-    if (recFilter !== 'all' && effectiveStatus !== recFilter) return false;
-    if (recSearch) {
-      const s = recSearch.toLowerCase();
-      return r.description.toLowerCase().includes(s) || ((r as any).clients?.full_name_or_company_name || '').toLowerCase().includes(s);
-    }
-    return true;
-  });
-
-  const filteredPayables = (payables || []).filter(p => {
-    const isOverdue = p.status !== 'paid' && p.status !== 'cancelled' && new Date(p.due_date) < new Date();
-    const effectiveStatus = isOverdue ? 'overdue' : p.status;
-    if (payFilter !== 'all' && effectiveStatus !== payFilter) return false;
-    if (paySearch) {
-      const s = paySearch.toLowerCase();
-      return p.description.toLowerCase().includes(s) || ((p as any).suppliers?.supplier_name || p.supplier_name || '').toLowerCase().includes(s);
-    }
-    return true;
-  });
+  const filteredReceivables = applyFilters(receivables || [], recFilters, 'receivable');
+  const filteredPayables = applyFilters(payables || [], payFilters, 'payable');
 
   const today = new Date();
   const in30 = new Date(today.getTime() + 30 * 86400000);
