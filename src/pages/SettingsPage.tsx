@@ -12,10 +12,6 @@ import { useFinancialCategories, useCreateFinancialCategory, useUpdateFinancialC
 import { Switch } from '@/components/ui/switch';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useCardFees, useUpdateCardFee } from '@/hooks/use-card-fees';
-import { supabase } from '@/integrations/supabase/client';
-import { toast } from 'sonner';
 
 const TERM_KEYS = [
   { key: 'terms_warranty', labelKey: 'termsWarranty' as const },
