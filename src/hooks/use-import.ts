@@ -139,7 +139,7 @@ export function useImportRows() {
             default_price: (r.default_price || 0) as number,
             billing_unit: 'visit' as string,
             currency: 'BRL' as string,
-            notes: (r.notes || null) as string | null,
+            description: (r.notes || null) as string | null,
             active: r.active !== false,
           }));
           const { error } = await supabase.from('services').insert(rows);
