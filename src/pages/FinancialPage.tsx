@@ -15,6 +15,7 @@ import { ReceivableFormDialog } from '@/components/ReceivableFormDialog';
 import { PayableFormDialog } from '@/components/PayableFormDialog';
 import { BankReconciliation } from '@/components/BankReconciliation';
 import { ReimbursementsPanel } from '@/components/ReimbursementsPanel';
+import { FinancialFilterPanel, applyFilters, defaultFilters, type FinancialFilters } from '@/components/FinancialFilterPanel';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip } from 'recharts';
@@ -56,14 +57,32 @@ function getOriginBadge(origin: string | null): { label: string; className: stri
 
 function groupPayables(payables: any[], groupBy: string) {
   if (groupBy === 'none') return { 'Todos': payables };
+
+  if (groupBy === 'month') {
+    const dates = payables.map(p => new Date(p.due_date));
+    const minDate = dates.length > 0 ? new Date(Math.min(...dates.map(d => d.getTime()))) : new Date();
+    const maxDate = dates.length > 0 ? new Date(Math.max(...dates.map(d => d.getTime()))) : new Date();
+    const allMonths: string[] = [];
+    const cursor = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
+    const end = new Date(maxDate.getFullYear(), maxDate.getMonth(), 1);
+    while (cursor <= end) {
+      allMonths.push(cursor.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }));
+      cursor.setMonth(cursor.getMonth() + 1);
+    }
+    const result: Record<string, any[]> = {};
+    allMonths.forEach(m => result[m] = []);
+    payables.forEach(p => {
+      const key = new Date(p.due_date).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+      if (result[key]) result[key].push(p);
+      else result[key] = [p];
+    });
+    return result;
+  }
+
   return payables.reduce((acc: Record<string, any[]>, p: any) => {
     let key = '';
     if (groupBy === 'category') key = p.expense_category || 'Sem categoria';
     if (groupBy === 'supplier') key = (p as any).suppliers?.supplier_name || p.supplier_name || 'Sem fornecedor';
-    if (groupBy === 'month') {
-      const d = new Date(p.due_date);
-      key = d.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
-    }
     if (!acc[key]) acc[key] = [];
     acc[key].push(p);
     return acc;
@@ -82,37 +101,14 @@ export default function FinancialPage() {
   const [paymentTarget, setPaymentTarget] = useState<{ receivable?: any; payable?: any } | null>(null);
   const [showNewReceivable, setShowNewReceivable] = useState(false);
   const [showNewPayable, setShowNewPayable] = useState(false);
-  const [recFilter, setRecFilter] = useState('all');
-  const [payFilter, setPayFilter] = useState('all');
-  const [recSearch, setRecSearch] = useState('');
-  const [paySearch, setPaySearch] = useState('');
+  const [recFilters, setRecFilters] = useState<FinancialFilters>({ ...defaultFilters });
+  const [payFilters, setPayFilters] = useState<FinancialFilters>({ ...defaultFilters });
   const [paySubTab, setPaySubTab] = useState<'list' | 'reimbursements'>('list');
   const [groupBy, setGroupBy] = useState<'none' | 'category' | 'supplier' | 'month'>('none');
   const { data: pendingReimb } = usePendingReimbursements();
 
-  const filterStatuses = ['all', 'pending', 'partially_paid', 'paid', 'overdue'] as const;
-
-  const filteredReceivables = (receivables || []).filter(r => {
-    const isOverdue = r.status !== 'paid' && r.status !== 'cancelled' && new Date(r.due_date) < new Date();
-    const effectiveStatus = isOverdue ? 'overdue' : r.status;
-    if (recFilter !== 'all' && effectiveStatus !== recFilter) return false;
-    if (recSearch) {
-      const s = recSearch.toLowerCase();
-      return r.description.toLowerCase().includes(s) || ((r as any).clients?.full_name_or_company_name || '').toLowerCase().includes(s);
-    }
-    return true;
-  });
-
-  const filteredPayables = (payables || []).filter(p => {
-    const isOverdue = p.status !== 'paid' && p.status !== 'cancelled' && new Date(p.due_date) < new Date();
-    const effectiveStatus = isOverdue ? 'overdue' : p.status;
-    if (payFilter !== 'all' && effectiveStatus !== payFilter) return false;
-    if (paySearch) {
-      const s = paySearch.toLowerCase();
-      return p.description.toLowerCase().includes(s) || ((p as any).suppliers?.supplier_name || p.supplier_name || '').toLowerCase().includes(s);
-    }
-    return true;
-  });
+  const filteredReceivables = applyFilters(receivables || [], recFilters, 'receivable');
+  const filteredPayables = applyFilters(payables || [], payFilters, 'payable');
 
   const today = new Date();
   const in30 = new Date(today.getTime() + 30 * 86400000);
@@ -313,14 +309,7 @@ export default function FinancialPage() {
             <h3 className="font-semibold text-lg">{t.financial.receivables}</h3>
             <Button onClick={() => setShowNewReceivable(true)}><Plus className="h-4 w-4 mr-1" />{t.financial.newReceivable}</Button>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {filterStatuses.map(s => (
-              <Button key={s} size="sm" variant={recFilter === s ? 'default' : 'outline'} onClick={() => setRecFilter(s)}>
-                {s === 'all' ? t.common.all : (t.paymentStatus as Record<string, string>)[s] || s}
-              </Button>
-            ))}
-            <Input placeholder={t.common.search} className="max-w-xs ml-auto" value={recSearch} onChange={e => setRecSearch(e.target.value)} />
-          </div>
+          <FinancialFilterPanel type="receivable" filters={recFilters} onChange={setRecFilters} />
 
           {loadingRec ? <Skeleton className="h-64 rounded-xl" /> : (
             <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
@@ -386,13 +375,8 @@ export default function FinancialPage() {
             <ReimbursementsPanel />
           ) : (
           <>
-          <div className="flex flex-wrap gap-2 items-center">
-            {filterStatuses.map(s => (
-              <Button key={s} size="sm" variant={payFilter === s ? 'default' : 'outline'} onClick={() => setPayFilter(s)}>
-                {s === 'all' ? t.common.all : (t.paymentStatus as Record<string, string>)[s] || s}
-              </Button>
-            ))}
-            <span className="mx-2 border-l h-6" />
+          <FinancialFilterPanel type="payable" filters={payFilters} onChange={setPayFilters} />
+          <div className="flex flex-wrap gap-1 items-center">
             <span className="text-sm text-muted-foreground">{t.financial.groupBy}:</span>
             {([
               { v: 'none' as const, l: t.financial.groupByNone },
@@ -404,7 +388,6 @@ export default function FinancialPage() {
                 {l}
               </Button>
             ))}
-            <Input placeholder={t.common.search} className="max-w-xs ml-auto" value={paySearch} onChange={e => setPaySearch(e.target.value)} />
           </div>
 
           {loadingPay ? <Skeleton className="h-64 rounded-xl" /> : (

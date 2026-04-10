@@ -242,6 +242,33 @@ export type Database = {
         }
         Relationships: []
       }
+      financial_categories: {
+        Row: {
+          active: boolean | null
+          color: string | null
+          created_at: string | null
+          id: string
+          name: string
+          type: string
+        }
+        Insert: {
+          active?: boolean | null
+          color?: string | null
+          created_at?: string | null
+          id?: string
+          name: string
+          type: string
+        }
+        Update: {
+          active?: boolean | null
+          color?: string | null
+          created_at?: string | null
+          id?: string
+          name?: string
+          type?: string
+        }
+        Relationships: []
+      }
       inventory_movements: {
         Row: {
           created_at: string
@@ -703,6 +730,7 @@ export type Database = {
         Row: {
           amount: number
           balance_amount: number | null
+          category: string | null
           client_id: string
           created_at: string
           currency: string | null
@@ -721,6 +749,7 @@ export type Database = {
         Insert: {
           amount: number
           balance_amount?: number | null
+          category?: string | null
           client_id: string
           created_at?: string
           currency?: string | null
@@ -739,6 +768,7 @@ export type Database = {
         Update: {
           amount?: number
           balance_amount?: number | null
+          category?: string | null
           client_id?: string
           created_at?: string
           currency?: string | null
@@ -777,6 +807,30 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      saved_filters: {
+        Row: {
+          created_at: string | null
+          filter_config: Json
+          filter_type: string
+          id: string
+          name: string
+        }
+        Insert: {
+          created_at?: string | null
+          filter_config?: Json
+          filter_type: string
+          id?: string
+          name: string
+        }
+        Update: {
+          created_at?: string | null
+          filter_config?: Json
+          filter_type?: string
+          id?: string
+          name?: string
+        }
+        Relationships: []
       }
       service_order_expenses: {
         Row: {

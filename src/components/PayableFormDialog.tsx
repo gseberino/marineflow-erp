@@ -5,16 +5,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { CategorySelect } from '@/components/CategorySelect';
 import { useI18n } from '@/i18n';
 import { useSuppliers } from '@/hooks/use-suppliers';
 import { useServiceOrders } from '@/hooks/use-service-orders';
 import { useCreatePayable } from '@/hooks/use-financial';
 import { toast } from 'sonner';
-
-const EXPENSE_CATEGORIES = [
-  'Peças e Materiais', 'Veículo e Combustível', 'Ferramentas e Equipamentos',
-  'Seguro', 'Aluguel', 'Salários', 'Impostos', 'Marketing', 'Outros',
-];
 
 interface Props { open: boolean; onOpenChange: (open: boolean) => void; }
 
@@ -66,10 +62,7 @@ export function PayableFormDialog({ open, onOpenChange }: Props) {
           </div>
           {!supplierId && <div><Label>Nome do fornecedor</Label><Input value={supplierName} onChange={e => setSupplierName(e.target.value)} /></div>}
           <div><Label>{t.financial.expenseCategory}</Label>
-            <Select value={category} onValueChange={setCategory}>
-              <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
-              <SelectContent>{EXPENSE_CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-            </Select>
+            <CategorySelect type="payable" value={category} onChange={setCategory} placeholder="—" />
           </div>
           <div><Label>{t.common.description} *</Label><Input value={description} onChange={e => setDescription(e.target.value)} /></div>
           <div className="grid grid-cols-2 gap-3">
