@@ -93,7 +93,8 @@ export function detectFormat(parsed: ParsedFile): DetectionResult {
     }
 
     return {
-      format: 'bling_products',
+      format: 'vhsys_products',
+      formatLabel: 'VHSYS — Produtos',
       entityType: 'products',
       confidence: 95,
       recordCount: allProducts ? rows.length : rows.filter(r => r['Tipo (Produto/Servico)'] === 'Produto').length,
