@@ -1,4 +1,4 @@
-export type KnownFormat = 'bling_products' | 'bling_services' | 'bling_clients' | 'generic';
+export type KnownFormat = 'vhsys_products' | 'vhsys_services' | 'vhsys_clients' | 'generic';
 
 export type ColumnMapping = {
   [sourceColumn: string]: string | null;
@@ -13,6 +13,7 @@ export type ParsedFile = {
 
 export type DetectionResult = {
   format: KnownFormat;
+  formatLabel: string;
   entityType: 'products' | 'services' | 'clients' | 'suppliers' | 'mixed';
   confidence: number;
   suggestedMapping: ColumnMapping;
@@ -77,7 +78,8 @@ export function detectFormat(parsed: ParsedFile): DetectionResult {
 
     if (allServices) {
       return {
-        format: 'bling_services',
+        format: 'vhsys_services',
+        formatLabel: 'VHSYS — Serviços',
         entityType: 'services',
         confidence: 95,
         recordCount: rows.length,
@@ -91,7 +93,8 @@ export function detectFormat(parsed: ParsedFile): DetectionResult {
     }
 
     return {
-      format: 'bling_products',
+      format: 'vhsys_products',
+      formatLabel: 'VHSYS — Produtos',
       entityType: 'products',
       confidence: 95,
       recordCount: allProducts ? rows.length : rows.filter(r => r['Tipo (Produto/Servico)'] === 'Produto').length,
@@ -112,10 +115,11 @@ export function detectFormat(parsed: ParsedFile): DetectionResult {
     };
   }
 
-  // Bling Clients/Suppliers
+  // VHSYS Clients/Suppliers
   if (headers.includes('Razao Social/Nome') && headers.includes('Tipo Cadastro (Cliente/Fornecedor/Ambos)')) {
     return {
-      format: 'bling_clients',
+      format: 'vhsys_clients',
+      formatLabel: 'VHSYS — Clientes e Fornecedores',
       entityType: 'mixed',
       confidence: 95,
       recordCount: rows.length,
@@ -143,6 +147,7 @@ export function detectFormat(parsed: ParsedFile): DetectionResult {
 
   return {
     format: 'generic',
+    formatLabel: 'Formato desconhecido',
     entityType: 'products',
     confidence: 0,
     recordCount: rows.length,
