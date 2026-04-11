@@ -115,11 +115,11 @@ export function detectFormat(parsed: ParsedFile): DetectionResult {
     };
   }
 
-  // Bling Clients/Suppliers
+  // VHSYS Clients/Suppliers
   if (headers.includes('Razao Social/Nome') && headers.includes('Tipo Cadastro (Cliente/Fornecedor/Ambos)')) {
     return {
-      format: 'bling_clients',
-      entityType: 'mixed',
+      format: 'vhsys_clients',
+      formatLabel: 'VHSYS — Clientes e Fornecedores',
       confidence: 95,
       recordCount: rows.length,
       suggestedMapping: {
