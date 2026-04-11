@@ -1,4 +1,4 @@
-export type KnownFormat = 'bling_products' | 'bling_services' | 'bling_clients' | 'generic';
+export type KnownFormat = 'vhsys_products' | 'vhsys_services' | 'vhsys_clients' | 'generic';
 
 export type ColumnMapping = {
   [sourceColumn: string]: string | null;
