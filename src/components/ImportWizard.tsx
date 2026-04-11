@@ -184,7 +184,7 @@ export function ImportWizard({ entityType, open, onOpenChange, onComplete }: Imp
                 <div className="flex items-center gap-2 mb-1">
                   {detection.confidence >= 80 ? <CheckCircle className="h-4 w-4 text-success" /> : <AlertTriangle className="h-4 w-4 text-warning" />}
                   <span className="font-medium">
-                    {detection.confidence >= 80 ? t.imports.formatRecognized : t.imports.formatUnknown}
+                    {detection.confidence >= 80 ? `${t.imports.formatRecognized}: ${detection.formatLabel}` : t.imports.formatUnknown}
                   </span>
                 </div>
                 {detection.confidence >= 80 && (
