@@ -13,6 +13,7 @@ export type ParsedFile = {
 
 export type DetectionResult = {
   format: KnownFormat;
+  formatLabel: string;
   entityType: 'products' | 'services' | 'clients' | 'suppliers' | 'mixed';
   confidence: number;
   suggestedMapping: ColumnMapping;
