@@ -78,7 +78,8 @@ export function detectFormat(parsed: ParsedFile): DetectionResult {
 
     if (allServices) {
       return {
-        format: 'bling_services',
+        format: 'vhsys_services',
+        formatLabel: 'VHSYS — Serviços',
         entityType: 'services',
         confidence: 95,
         recordCount: rows.length,
