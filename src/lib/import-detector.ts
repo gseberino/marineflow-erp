@@ -120,6 +120,7 @@ export function detectFormat(parsed: ParsedFile): DetectionResult {
     return {
       format: 'vhsys_clients',
       formatLabel: 'VHSYS — Clientes e Fornecedores',
+      entityType: 'mixed',
       confidence: 95,
       recordCount: rows.length,
       suggestedMapping: {
@@ -146,6 +147,7 @@ export function detectFormat(parsed: ParsedFile): DetectionResult {
 
   return {
     format: 'generic',
+    formatLabel: 'Formato desconhecido',
     entityType: 'products',
     confidence: 0,
     recordCount: rows.length,
