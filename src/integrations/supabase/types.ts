@@ -714,6 +714,63 @@ export type Database = {
           },
         ]
       }
+      product_categories: {
+        Row: {
+          active: boolean | null
+          created_at: string | null
+          default_cofins_rate: number | null
+          default_commission_rate: number | null
+          default_csosn: string | null
+          default_fiscal_origin: number | null
+          default_icms_rate: number | null
+          default_ipi_rate: number | null
+          default_ncm: string | null
+          default_pis_rate: number | null
+          default_profit_margin: number | null
+          description: string | null
+          id: string
+          is_commissionable: boolean | null
+          name: string
+          updated_at: string | null
+        }
+        Insert: {
+          active?: boolean | null
+          created_at?: string | null
+          default_cofins_rate?: number | null
+          default_commission_rate?: number | null
+          default_csosn?: string | null
+          default_fiscal_origin?: number | null
+          default_icms_rate?: number | null
+          default_ipi_rate?: number | null
+          default_ncm?: string | null
+          default_pis_rate?: number | null
+          default_profit_margin?: number | null
+          description?: string | null
+          id?: string
+          is_commissionable?: boolean | null
+          name: string
+          updated_at?: string | null
+        }
+        Update: {
+          active?: boolean | null
+          created_at?: string | null
+          default_cofins_rate?: number | null
+          default_commission_rate?: number | null
+          default_csosn?: string | null
+          default_fiscal_origin?: number | null
+          default_icms_rate?: number | null
+          default_ipi_rate?: number | null
+          default_ncm?: string | null
+          default_pis_rate?: number | null
+          default_profit_margin?: number | null
+          description?: string | null
+          id?: string
+          is_commissionable?: boolean | null
+          name?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       product_suppliers: {
         Row: {
           cost_price: number | null
@@ -796,11 +853,13 @@ export type Database = {
           icms_rate: number | null
           id: string
           ipi_rate: number | null
+          is_commissionable: boolean | null
           location_bin: string | null
           minimum_stock: number | null
           ncm: string | null
           notes: string | null
           pis_rate: number | null
+          product_category_id: string | null
           product_name: string
           profit_margin: number | null
           sale_currency: string | null
@@ -826,11 +885,13 @@ export type Database = {
           icms_rate?: number | null
           id?: string
           ipi_rate?: number | null
+          is_commissionable?: boolean | null
           location_bin?: string | null
           minimum_stock?: number | null
           ncm?: string | null
           notes?: string | null
           pis_rate?: number | null
+          product_category_id?: string | null
           product_name: string
           profit_margin?: number | null
           sale_currency?: string | null
@@ -856,11 +917,13 @@ export type Database = {
           icms_rate?: number | null
           id?: string
           ipi_rate?: number | null
+          is_commissionable?: boolean | null
           location_bin?: string | null
           minimum_stock?: number | null
           ncm?: string | null
           notes?: string | null
           pis_rate?: number | null
+          product_category_id?: string | null
           product_name?: string
           profit_margin?: number | null
           sale_currency?: string | null
@@ -871,7 +934,15 @@ export type Database = {
           updated_at?: string
           use_global_fiscal?: boolean | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "products_product_category_id_fkey"
+            columns: ["product_category_id"]
+            isOneToOne: false
+            referencedRelation: "product_categories"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       receivables: {
         Row: {
