@@ -25,6 +25,8 @@ const TERM_KEYS = [
 ];
 
 export default function SettingsPage() {
+  const [searchParams] = useSearchParams();
+  const defaultTab = searchParams.get('tab') || 'company';
   const { t, locale, setLocale, currency, setCurrency } = useI18n();
   const { data: cardFees } = useCardFees();
   const updateFee = useUpdateCardFee();
