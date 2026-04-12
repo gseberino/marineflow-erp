@@ -19,17 +19,36 @@ export function useCheckConflicts() {
       const newRows: Record<string, any>[] = [];
       const conflicts: ConflictItem[] = [];
 
+      async function batchIn<T>(
+        table: string,
+        column: string,
+        values: string[],
+        selectCols: string = '*'
+      ): Promise<T[]> {
+        if (values.length === 0) return [];
+        const size = 100;
+        const results: T[] = [];
+        for (let i = 0; i < values.length; i += size) {
+          const chunk = values.slice(i, i + size);
+          const { data, error } = await (supabase
+            .from(table as any)
+            .select(selectCols) as any)
+            .in(column, chunk);
+          if (error) throw error;
+          results.push(...((data as T[]) || []));
+        }
+        return results;
+      }
+
       if (entityType === 'products') {
-        const skus = rows.map(r => r.sku).filter(Boolean);
-        const names = rows.map(r => r.product_name).filter(Boolean);
-        const { data: existingBySku } = skus.length > 0
-          ? await supabase.from('products').select('*').in('sku', skus)
-          : { data: [] as any[] };
-        const { data: existingByName } = names.length > 0
-          ? await supabase.from('products').select('*').in('product_name', names)
-          : { data: [] as any[] };
-        const skuMap = new Map((existingBySku || []).map(p => [p.sku, p]));
-        const nameMap = new Map((existingByName || []).map(p => [p.product_name, p]));
+        const skus = rows.map(r => r.sku).filter(Boolean) as string[];
+        const names = rows.map(r => r.product_name).filter(Boolean) as string[];
+        const [bySku, byName] = await Promise.all([
+          batchIn<any>('products', 'sku', skus, 'id,sku,product_name'),
+          batchIn<any>('products', 'product_name', names, 'id,sku,product_name'),
+        ]);
+        const skuMap = new Map(bySku.map(p => [p.sku, p]));
+        const nameMap = new Map(byName.map(p => [p.product_name, p]));
         for (const row of rows) {
           const existing = (row.sku && skuMap.get(row.sku))
             || (row.product_name && nameMap.get(row.product_name))
@@ -41,13 +60,11 @@ export function useCheckConflicts() {
           }
         }
       } else if (entityType === 'services') {
-        const names = rows.map(r => r.service_name).filter(Boolean);
-        const { data: existing } = names.length > 0
-          ? await supabase.from('services').select('*').in('service_name', names)
-          : { data: [] as any[] };
-        const nameMap = new Map((existing || []).map(s => [s.service_name, s]));
+        const names = rows.map(r => r.service_name).filter(Boolean) as string[];
+        const existing = await batchIn<any>('services', 'service_name', names, 'id,service_name');
+        const nameMap = new Map(existing.map(s => [s.service_name, s]));
         for (const row of rows) {
-          const found = row.service_name && nameMap.get(row.service_name);
+          const found = row.service_name ? nameMap.get(row.service_name) : null;
           if (found) {
             conflicts.push({ incoming: row, existing: found, resolution: 'keep' });
           } else {
@@ -55,13 +72,11 @@ export function useCheckConflicts() {
           }
         }
       } else if (entityType === 'clients') {
-        const cnpjs = rows.map(r => r.cnpj_cpf).filter(Boolean);
-        const { data: existing } = cnpjs.length > 0
-          ? await supabase.from('clients').select('*').in('cpf_cnpj', cnpjs)
-          : { data: [] as any[] };
-        const cnpjMap = new Map((existing || []).map(c => [c.cpf_cnpj, c]));
+        const cnpjs = rows.map(r => r.cnpj_cpf).filter(Boolean) as string[];
+        const existing = await batchIn<any>('clients', 'cpf_cnpj', cnpjs, 'id,cpf_cnpj,full_name_or_company_name');
+        const cnpjMap = new Map(existing.map(c => [c.cpf_cnpj, c]));
         for (const row of rows) {
-          const found = row.cnpj_cpf && cnpjMap.get(row.cnpj_cpf);
+          const found = row.cnpj_cpf ? cnpjMap.get(row.cnpj_cpf) : null;
           if (found) {
             conflicts.push({ incoming: row, existing: found, resolution: 'keep' });
           } else {
@@ -69,13 +84,11 @@ export function useCheckConflicts() {
           }
         }
       } else if (entityType === 'suppliers') {
-        const cnpjs = rows.map(r => r.cnpj_cpf).filter(Boolean);
-        const { data: existing } = cnpjs.length > 0
-          ? await supabase.from('suppliers').select('*').in('cnpj_cpf', cnpjs)
-          : { data: [] as any[] };
-        const cnpjMap = new Map((existing || []).map(s => [s.cnpj_cpf, s]));
+        const cnpjs = rows.map(r => r.cnpj_cpf).filter(Boolean) as string[];
+        const existing = await batchIn<any>('suppliers', 'cnpj_cpf', cnpjs, 'id,cnpj_cpf,supplier_name');
+        const cnpjMap = new Map(existing.map(s => [s.cnpj_cpf, s]));
         for (const row of rows) {
-          const found = row.cnpj_cpf && cnpjMap.get(row.cnpj_cpf);
+          const found = row.cnpj_cpf ? cnpjMap.get(row.cnpj_cpf) : null;
           if (found) {
             conflicts.push({ incoming: row, existing: found, resolution: 'keep' });
           } else {
@@ -87,16 +100,14 @@ export function useCheckConflicts() {
           r._entity_type === 'Cliente' || r._entity_type === 'Ambos');
         const supplierRows = rows.filter(r =>
           r._entity_type === 'Fornecedor' || r._entity_type === 'Ambos');
-        const clientCnpjs = clientRows.map(r => r.cnpj_cpf).filter(Boolean);
-        const { data: existingClients } = clientCnpjs.length > 0
-          ? await supabase.from('clients').select('*').in('cpf_cnpj', clientCnpjs)
-          : { data: [] as any[] };
-        const clientMap = new Map((existingClients || []).map(c => [c.cpf_cnpj, c]));
-        const supplierCnpjs = supplierRows.map(r => r.cnpj_cpf).filter(Boolean);
-        const { data: existingSuppliers } = supplierCnpjs.length > 0
-          ? await supabase.from('suppliers').select('*').in('cnpj_cpf', supplierCnpjs)
-          : { data: [] as any[] };
-        const supplierMap = new Map((existingSuppliers || []).map(s => [s.cnpj_cpf, s]));
+        const clientCnpjs = clientRows.map(r => r.cnpj_cpf).filter(Boolean) as string[];
+        const supplierCnpjs = supplierRows.map(r => r.cnpj_cpf).filter(Boolean) as string[];
+        const [existingClients, existingSuppliers] = await Promise.all([
+          batchIn<any>('clients', 'cpf_cnpj', clientCnpjs, 'id,cpf_cnpj'),
+          batchIn<any>('suppliers', 'cnpj_cpf', supplierCnpjs, 'id,cnpj_cpf'),
+        ]);
+        const clientMap = new Map(existingClients.map(c => [c.cpf_cnpj, c]));
+        const supplierMap = new Map(existingSuppliers.map(s => [s.cnpj_cpf, s]));
         for (const row of rows) {
           const isClient = row._entity_type === 'Cliente' || row._entity_type === 'Ambos';
           const isSupplier = row._entity_type === 'Fornecedor' || row._entity_type === 'Ambos';
@@ -166,12 +177,16 @@ export function useImportRows() {
 
           for (const p of data || []) {
             if ((p.stock_quantity ?? 0) > 0) {
-              await supabase.from('inventory_movements').insert({
-                product_id: p.id,
-                movement_type: 'purchase' as string,
-                quantity_delta: p.stock_quantity ?? 0,
-                reference_type: 'import' as string,
-              });
+              try {
+                await supabase.from('inventory_movements').insert({
+                  product_id: p.id,
+                  movement_type: 'purchase' as string,
+                  quantity_delta: p.stock_quantity ?? 0,
+                  reference_type: 'import' as string,
+                });
+              } catch {
+                // Non-critical: inventory movement logging failed
+              }
             }
           }
         }
