@@ -87,7 +87,7 @@ export default function SettingsPage() {
     <div className="space-y-6 animate-fade-in">
       <PageHeader title={t.settings.title} description={t.settings.description} />
 
-      <Tabs defaultValue="company">
+      <Tabs defaultValue={defaultTab}>
         <TabsList className="flex-wrap h-auto gap-1">
           <TabsTrigger value="company">{t.settings.tabCompany}</TabsTrigger>
           <TabsTrigger value="travel">{t.settings.tabTravel}</TabsTrigger>
@@ -97,6 +97,10 @@ export default function SettingsPage() {
           <TabsTrigger value="cardFees">{t.settings.tabCardFees}</TabsTrigger>
           <TabsTrigger value="terms">{(t.settings as any).tabTerms}</TabsTrigger>
           <TabsTrigger value="categories">{(t.settings as any).tabCategories}</TabsTrigger>
+          <TabsTrigger value="product-categories">
+            <Package className="h-3.5 w-3.5 mr-1" />
+            {(t.settings as any).tabProductCategories || 'Categorias de Produto'}
+          </TabsTrigger>
           <TabsTrigger value="fiscal">{(t.settings as any).tabFiscal || 'Fiscal'}</TabsTrigger>
         </TabsList>
 
