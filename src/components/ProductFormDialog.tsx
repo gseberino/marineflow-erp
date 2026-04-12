@@ -156,7 +156,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
       setForm(prev => ({
         ...prev,
         profit_margin: prev.profit_margin || Number(s.default_profit_margin) || 30,
-        icms_rate: prev.icms_rate || Number(s.default_icms_rate) || 0,
+        icms_rate: prev.icms_rate || Number(s.simples_aliquota) || 6,
         commission_rate: prev.commission_rate || Number(s.default_commission_rate) || 0,
         csosn: prev.csosn || s.default_csosn || '400',
         fiscal_origin: prev.fiscal_origin ?? s.default_fiscal_origin ?? 0,
@@ -170,18 +170,19 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
   // Category change handler
   const handleCategoryChange = (categoryId: string) => {
     const cat = productCategories?.find(c => c.id === categoryId);
+    if (!cat) return;
     setForm(prev => ({
       ...prev,
       product_category_id: categoryId,
-      category: cat?.name || prev.category,
-      profit_margin: cat?.default_profit_margin ?? prev.profit_margin,
-      commission_rate: cat?.default_commission_rate ?? prev.commission_rate,
-      is_commissionable: cat?.is_commissionable ?? prev.is_commissionable,
-      ...(prev.use_global_fiscal ? {
-        csosn: cat?.default_csosn || prev.csosn,
-        fiscal_origin: cat?.default_fiscal_origin ?? prev.fiscal_origin,
-        icms_rate: cat?.default_icms_rate ?? prev.icms_rate,
-      } : {}),
+      category: cat.name,
+      profit_margin: cat.default_profit_margin ?? prev.profit_margin,
+      commission_rate: cat.default_commission_rate ?? prev.commission_rate,
+      csosn: cat.default_csosn || prev.csosn,
+      fiscal_origin: cat.default_fiscal_origin ?? prev.fiscal_origin,
+      icms_rate: cat.default_icms_rate ?? prev.icms_rate,
+      ipi_rate: cat.default_ipi_rate ?? prev.ipi_rate,
+      pis_rate: cat.default_pis_rate ?? prev.pis_rate,
+      cofins_rate: cat.default_cofins_rate ?? prev.cofins_rate,
     }));
   };
 
@@ -300,10 +301,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
               </Select>
               {form.product_category_id && selectedCategory && (
                 <p className="text-[10px] text-muted-foreground mt-1">
-                  Margem: {selectedCategory.default_profit_margin}% |{' '}
-                  {selectedCategory.is_commissionable
-                    ? `Comissão: ${selectedCategory.default_commission_rate}%`
-                    : 'Não comissionado'}
+                  Margem: {selectedCategory.default_profit_margin}% | Comissão: {selectedCategory.default_commission_rate}%
                 </p>
               )}
             </div>
@@ -547,8 +545,11 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
                 <Switch
                   checked={(form as any).is_commissionable !== false}
                   onCheckedChange={v => {
-                    set('is_commissionable', v);
-                    if (!v) set('commission_rate', 0);
+                    setForm(prev => ({
+                      ...prev,
+                      is_commissionable: v,
+                      commission_rate: v ? prev.commission_rate : 0,
+                    }));
                   }}
                 />
               </div>
