@@ -55,7 +55,6 @@ const empty: TablesInsert<'products'> = {
   profit_margin: 0,
   use_global_fiscal: true,
   product_category_id: null,
-  is_commissionable: true,
 };
 
 const emptySupplierForm = {
@@ -137,7 +136,6 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
         profit_margin: p.profit_margin ?? 0,
         use_global_fiscal: p.use_global_fiscal !== false,
         product_category_id: p.product_category_id ?? null,
-        is_commissionable: p.is_commissionable !== false,
       });
       setUseGlobal(p.use_global_fiscal !== false);
     } else {
@@ -299,9 +297,12 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
                   ))}
                 </SelectContent>
               </Select>
-              {form.product_category_id && selectedCategory && (
+              {selectedCategory && (
                 <p className="text-[10px] text-muted-foreground mt-1">
-                  Margem: {selectedCategory.default_profit_margin}% | Comissão: {selectedCategory.default_commission_rate}%
+                  Margem padrão: {selectedCategory.default_profit_margin}%
+                  {selectedCategory.is_commissionable
+                    ? ` · Comissão: ${selectedCategory.default_commission_rate}%`
+                    : ' · Não comissionável'}
                 </p>
               )}
             </div>
@@ -370,8 +371,16 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
               {p.priceCalculator || 'Formação de Preço'}
               <ChevronDown className={`h-4 w-4 transition-transform ${priceOpen ? 'rotate-180' : ''}`} />
             </CollapsibleTrigger>
-            <CollapsibleContent>
-              <PriceCalculator
+            <CollapsibleContent className="space-y-3">
+              {selectedCategory && !selectedCategory.is_commissionable && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 flex items-start gap-2">
+                  <span>⚠️</span>
+                  <span>
+                    A categoria <strong>{selectedCategory.name}</strong> não permite comissionamento. O campo comissão será ignorado no cálculo do preço.
+                  </span>
+                </div>
+              )}
+               <PriceCalculator
                 costPrice={Number(form.cost_price) || 0}
                 salePrice={Number(form.sale_price) || 0}
                 profitMargin={Number((form as any).profit_margin) || 0}
@@ -383,7 +392,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
                 onProfitMarginChange={v => set('profit_margin', v)}
                 onTaxRateChange={v => set('icms_rate', v)}
                 onCommissionRateChange={v => set('commission_rate', v)}
-                isCommissionable={(form as any).is_commissionable !== false}
+                isCommissionable={selectedCategory ? (selectedCategory.is_commissionable ?? true) : true}
               />
             </CollapsibleContent>
           </Collapsible>
@@ -532,38 +541,6 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
                 <Input value={form.barcode ?? ''} onChange={e => set('barcode', e.target.value)} />
               </div>
 
-              <Separator />
-
-              {/* Commissionable toggle */}
-              <div className="flex items-center justify-between rounded-lg border p-3">
-                <div>
-                  <p className="text-sm font-medium">{p.isCommissionable || 'Produto comissionável'}</p>
-                  <p className="text-[10px] text-muted-foreground">
-                    {p.commissionableHelper || 'Ative para incluir comissão no preço de venda'}
-                  </p>
-                </div>
-                <Switch
-                  checked={(form as any).is_commissionable !== false}
-                  onCheckedChange={v => {
-                    setForm(prev => ({
-                      ...prev,
-                      is_commissionable: v,
-                      commission_rate: v ? prev.commission_rate : 0,
-                    }));
-                  }}
-                />
-              </div>
-
-              {(form as any).is_commissionable !== false ? (
-                <p className="text-[10px] text-muted-foreground">
-                  A comissão é configurada na seção "Formação de Preço" acima.
-                  Valor atual: {(form as any).commission_rate || 0}%
-                </p>
-              ) : (
-                <div className="rounded-lg border border-amber-300/30 bg-amber-50 p-2 text-xs text-amber-700">
-                  ⚠️ {p.notCommissionableWarning || 'Este produto não gera comissão. O campo comissão na Formação de Preço será ignorado.'}
-                </div>
-              )}
 
             </CollapsibleContent>
           </Collapsible>
