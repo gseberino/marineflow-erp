@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useI18n } from '@/i18n';
 import { useQuery } from '@tanstack/react-query';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -13,10 +13,11 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { useCreateProduct, useUpdateProduct, type Product } from '@/hooks/use-products';
 import { useProductSuppliers, useAddProductSupplier, useUpdateProductSupplier, useRemoveProductSupplier } from '@/hooks/use-product-suppliers';
 import { useSuppliers } from '@/hooks/use-suppliers';
+import { useProductCategories } from '@/hooks/use-product-categories';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import type { TablesInsert } from '@/integrations/supabase/types';
-import { Plus, Trash2, Star, ChevronDown } from 'lucide-react';
+import { Plus, Trash2, Star, ChevronDown, ExternalLink, Info } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PriceCalculator } from '@/components/PriceCalculator';
 import { CSOSN_OPTIONS, FISCAL_ORIGIN_OPTIONS } from '@/lib/price-calculator';
@@ -53,6 +54,8 @@ const empty: TablesInsert<'products'> = {
   commission_rate: 0,
   profit_margin: 0,
   use_global_fiscal: true,
+  product_category_id: null,
+  is_commissionable: true,
 };
 
 const emptySupplierForm = {
@@ -73,15 +76,12 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
   const [form, setForm] = useState<TablesInsert<'products'>>(empty);
   const isEdit = !!product;
 
-  // Price calculator mode
   const [priceMode, setPriceMode] = useState<'calculate' | 'direct'>('calculate');
-
-  // Fiscal section state
   const [useGlobal, setUseGlobal] = useState(true);
   const [fiscalOpen, setFiscalOpen] = useState(false);
   const [priceOpen, setPriceOpen] = useState(true);
 
-  // App settings for fiscal defaults
+  // App settings
   const { data: settings } = useQuery({
     queryKey: ['app-settings-fiscal'],
     queryFn: async () => {
@@ -94,6 +94,9 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
     },
   });
 
+  // Product categories
+  const { data: productCategories } = useProductCategories();
+
   // Supplier section
   const { data: productSuppliers, isLoading: psLoading } = useProductSuppliers(product?.id);
   const { data: allSuppliers } = useSuppliers();
@@ -103,6 +106,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
   const [showAddSupplier, setShowAddSupplier] = useState(false);
   const [supplierForm, setSupplierForm] = useState(emptySupplierForm);
 
+  // Initialize form from product or defaults
   useEffect(() => {
     if (product) {
       const p = product as any;
@@ -132,6 +136,8 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
         commission_rate: p.commission_rate ?? 0,
         profit_margin: p.profit_margin ?? 0,
         use_global_fiscal: p.use_global_fiscal !== false,
+        product_category_id: p.product_category_id ?? null,
+        is_commissionable: p.is_commissionable !== false,
       });
       setUseGlobal(p.use_global_fiscal !== false);
     } else {
@@ -143,8 +149,60 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
     setPriceMode('calculate');
   }, [product, open]);
 
+  // Apply global defaults when settings load for new products
+  useEffect(() => {
+    if (!product && settings) {
+      const s = settings as any;
+      setForm(prev => ({
+        ...prev,
+        profit_margin: prev.profit_margin || Number(s.default_profit_margin) || 30,
+        icms_rate: prev.icms_rate || Number(s.default_icms_rate) || 0,
+        commission_rate: prev.commission_rate || Number(s.default_commission_rate) || 0,
+        csosn: prev.csosn || s.default_csosn || '400',
+        fiscal_origin: prev.fiscal_origin ?? s.default_fiscal_origin ?? 0,
+      }));
+    }
+  }, [settings, product]);
+
   const set = (key: string, value: any) => setForm(prev => ({ ...prev, [key]: value }));
   const setSF = (key: string, value: any) => setSupplierForm(prev => ({ ...prev, [key]: value }));
+
+  // Category change handler
+  const handleCategoryChange = (categoryId: string) => {
+    const cat = productCategories?.find(c => c.id === categoryId);
+    setForm(prev => ({
+      ...prev,
+      product_category_id: categoryId,
+      category: cat?.name || prev.category,
+      profit_margin: cat?.default_profit_margin ?? prev.profit_margin,
+      commission_rate: cat?.default_commission_rate ?? prev.commission_rate,
+      is_commissionable: cat?.is_commissionable ?? prev.is_commissionable,
+      ...(prev.use_global_fiscal ? {
+        csosn: cat?.default_csosn || prev.csosn,
+        fiscal_origin: cat?.default_fiscal_origin ?? prev.fiscal_origin,
+        icms_rate: cat?.default_icms_rate ?? prev.icms_rate,
+      } : {}),
+    }));
+  };
+
+  // Fiscal hierarchy: product override → category → global
+  const selectedCategory = useMemo(() => {
+    if (!form.product_category_id || !productCategories) return null;
+    return productCategories.find(c => c.id === form.product_category_id) || null;
+  }, [form.product_category_id, productCategories]);
+
+  const s = settings as any;
+
+  const effectiveNCM = !useGlobal ? ((form as any).ncm || '') : (selectedCategory?.default_ncm || '');
+  const effectiveCSOSN = !useGlobal ? ((form as any).csosn || '400') : (selectedCategory?.default_csosn || s?.default_csosn || '400');
+  const effectiveOrigin = !useGlobal ? ((form as any).fiscal_origin ?? 0) : (selectedCategory?.default_fiscal_origin ?? s?.default_fiscal_origin ?? 0);
+  const effectiveICMS = !useGlobal ? ((form as any).icms_rate ?? 0) : (selectedCategory?.default_icms_rate ?? s?.default_icms_rate ?? 0);
+
+  const fiscalSource = !useGlobal
+    ? 'Personalizado para este produto'
+    : selectedCategory
+      ? `Categoria: ${selectedCategory.name}`
+      : 'Global (Configurações)';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -199,7 +257,6 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
   const isPending = create.isPending || update.isPending;
   const currencies = ['BRL', 'USD', 'EUR'];
   const p = t.products as any;
-  const s = settings as any;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -217,10 +274,40 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
               <Label>{t.products.sku}</Label>
               <Input value={form.sku ?? ''} onChange={e => set('sku', e.target.value)} />
             </div>
+
+            {/* Category Select */}
             <div>
-              <Label>{t.products.category}</Label>
-              <Input value={form.category ?? ''} onChange={e => set('category', e.target.value)} />
+              <div className="flex items-center justify-between">
+                <Label>{p.productCategoryId || t.products.category}</Label>
+                <a
+                  href="/settings?tab=product-categories"
+                  target="_blank"
+                  className="text-[10px] text-primary hover:underline flex items-center gap-0.5"
+                >
+                  {p.manageCategories || 'Gerenciar categorias'} <ExternalLink className="h-2.5 w-2.5" />
+                </a>
+              </div>
+              <Select
+                value={form.product_category_id ?? ''}
+                onValueChange={handleCategoryChange}
+              >
+                <SelectTrigger><SelectValue placeholder={t.products.category} /></SelectTrigger>
+                <SelectContent>
+                  {(productCategories || []).map(cat => (
+                    <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {form.product_category_id && selectedCategory && (
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Margem: {selectedCategory.default_profit_margin}% |{' '}
+                  {selectedCategory.is_commissionable
+                    ? `Comissão: ${selectedCategory.default_commission_rate}%`
+                    : 'Não comissionado'}
+                </p>
+              )}
             </div>
+
             <div>
               <Label>{t.products.brand}</Label>
               <Input value={form.brand ?? ''} onChange={e => set('brand', e.target.value)} />
@@ -298,6 +385,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
                 onProfitMarginChange={v => set('profit_margin', v)}
                 onTaxRateChange={v => set('icms_rate', v)}
                 onCommissionRateChange={v => set('commission_rate', v)}
+                isCommissionable={(form as any).is_commissionable !== false}
               />
             </CollapsibleContent>
           </Collapsible>
@@ -309,40 +397,83 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
               <ChevronDown className={`h-4 w-4 transition-transform ${fiscalOpen ? 'rotate-180' : ''}`} />
             </CollapsibleTrigger>
             <CollapsibleContent className="space-y-4 pt-2">
-              {/* Use global toggle */}
+
+              {/* Effective fiscal summary */}
+              <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  {p.fiscalEffective || 'Configuração fiscal efetiva'}
+                </p>
+                <div className="grid grid-cols-4 gap-2 text-sm">
+                  <div>
+                    <span className="text-[10px] text-muted-foreground block">NCM</span>
+                    <span className="font-medium">{effectiveNCM || '—'}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-muted-foreground block">CSOSN</span>
+                    <span className="font-medium">{effectiveCSOSN}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-muted-foreground block">Origem</span>
+                    <span className="font-medium">{effectiveOrigin}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-muted-foreground block">ICMS</span>
+                    <span className="font-medium">{effectiveICMS}%</span>
+                  </div>
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  {p.fiscalSource || 'Fonte'}: {fiscalSource}
+                </p>
+              </div>
+
+              {/* Override toggle */}
               <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <input
                   type="checkbox"
-                  checked={useGlobal}
+                  checked={!useGlobal}
                   onChange={e => {
-                    setUseGlobal(e.target.checked);
-                    set('use_global_fiscal', e.target.checked);
+                    const custom = e.target.checked;
+                    setUseGlobal(!custom);
+                    set('use_global_fiscal', !custom);
                   }}
                   className="rounded border-input"
                 />
-                {p.useGlobalFiscal || 'Usar configuração fiscal padrão (definida nas Configurações)'}
+                <div>
+                  <span className="font-medium">{p.customizeFiscal || 'Personalizar dados fiscais para este produto'}</span>
+                  <p className="text-[10px] text-muted-foreground">
+                    {p.customizeFiscalHelper || 'Sobrescreve os padrões globais e de categoria'}
+                  </p>
+                </div>
               </label>
 
-              {useGlobal ? (
-                <div className="rounded-lg border bg-muted/30 p-3 text-sm space-y-1">
-                  <div className="flex justify-between"><span className="text-muted-foreground">CSOSN:</span><span>{s?.default_csosn || '400'}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Origem:</span><span>{s?.default_fiscal_origin ?? 0}</span></div>
-                </div>
-              ) : (
-                <div className="space-y-3">
+              {/* Custom fiscal fields */}
+              {!useGlobal && (
+                <div className="space-y-3 border-l-2 border-primary/20 pl-3">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase">
+                    {p.fiscalClassification || 'Classificação Fiscal'}
+                  </p>
                   <div>
-                    <Label>{p.ncm || 'NCM'}</Label>
-                    <Input value={(form as any).ncm ?? ''} onChange={e => set('ncm', e.target.value)} placeholder="00000000" />
-                    <p className="text-xs text-muted-foreground mt-1">{p.ncmHelper || 'Código NCM de 8 dígitos — classifica o produto na NF-e'}</p>
+                    <Label>NCM (8 dígitos)</Label>
+                    <Input
+                      value={(form as any).ncm ?? ''}
+                      onChange={e => set('ncm', e.target.value.replace(/\D/g, '').slice(0, 8))}
+                      placeholder="00000000"
+                    />
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      {p.ncmHelper2 || 'Obrigatório na NF-e. Consulte a tabela NCM da Receita Federal.'}
+                    </p>
                   </div>
                   <div>
-                    <Label>{p.csosn || 'CSOSN'}</Label>
+                    <Label>CSOSN</Label>
                     <Select value={(form as any).csosn ?? '400'} onValueChange={v => set('csosn', v)}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         {CSOSN_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
                       </SelectContent>
                     </Select>
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      {p.csosnHelper || 'Situação tributária do ICMS. Mais comum para revenda: 400.'}
+                    </p>
                   </div>
                   <div>
                     <Label>{p.fiscalOrigin || 'Origem'}</Label>
@@ -352,38 +483,87 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
                         {FISCAL_ORIGIN_OPTIONS.map(o => <SelectItem key={o.value} value={String(o.value)}>{o.label}</SelectItem>)}
                       </SelectContent>
                     </Select>
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      {p.originHelper || '0 — Nacional. 1 ou 2 — Estrangeira (importado).'}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-1 mt-2">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase">
+                      {p.fiscalRates || 'Alíquotas'}
+                    </p>
+                    <div className="group relative">
+                      <Info className="h-3 w-3 text-muted-foreground" />
+                      <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-56 p-2 rounded bg-popover border text-[10px] text-muted-foreground shadow-lg z-50">
+                        {p.simplesRatesInfo || 'No Simples Nacional, alíquotas são informativas para a NF-e'}
+                      </div>
+                    </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <Label>ICMS %</Label>
-                      <Input type="number" step="0.01" value={(form as any).icms_rate ?? 0} onChange={e => set('icms_rate', parseFloat(e.target.value) || 0)} />
+                      <Label className="text-xs">ICMS %</Label>
+                      <Input type="number" step="0.0001" value={(form as any).icms_rate ?? 0} onChange={e => set('icms_rate', parseFloat(e.target.value) || 0)} />
                     </div>
                     <div>
-                      <Label>IPI %</Label>
-                      <Input type="number" step="0.01" value={(form as any).ipi_rate ?? 0} onChange={e => set('ipi_rate', parseFloat(e.target.value) || 0)} />
+                      <Label className="text-xs">IPI %</Label>
+                      <Input type="number" step="0.0001" value={(form as any).ipi_rate ?? 0} onChange={e => set('ipi_rate', parseFloat(e.target.value) || 0)} />
+                      <p className="text-[10px] text-muted-foreground">{p.ipiHelper || 'Geralmente 0% no Simples'}</p>
                     </div>
                     <div>
-                      <Label>PIS %</Label>
-                      <Input type="number" step="0.01" value={(form as any).pis_rate ?? 0} onChange={e => set('pis_rate', parseFloat(e.target.value) || 0)} />
+                      <Label className="text-xs">PIS %</Label>
+                      <Input type="number" step="0.0001" value={(form as any).pis_rate ?? 0} onChange={e => set('pis_rate', parseFloat(e.target.value) || 0)} />
+                      <p className="text-[10px] text-muted-foreground">{p.pisHelper || 'Incluso no DAS'}</p>
                     </div>
                     <div>
-                      <Label>COFINS %</Label>
-                      <Input type="number" step="0.01" value={(form as any).cofins_rate ?? 0} onChange={e => set('cofins_rate', parseFloat(e.target.value) || 0)} />
+                      <Label className="text-xs">COFINS %</Label>
+                      <Input type="number" step="0.0001" value={(form as any).cofins_rate ?? 0} onChange={e => set('cofins_rate', parseFloat(e.target.value) || 0)} />
+                      <p className="text-[10px] text-muted-foreground">{p.cofinsHelper || 'Incluso no DAS'}</p>
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* Always visible fields */}
+              <Separator />
+
+              {/* Identification */}
+              <p className="text-xs font-semibold text-muted-foreground uppercase">
+                {p.fiscalIdentification || 'Identificação'}
+              </p>
               <div>
-                <Label>{p.barcode || 'Código de Barras'}</Label>
+                <Label>{p.barcode || 'Código de Barras (EAN-13 / GTIN)'}</Label>
                 <Input value={form.barcode ?? ''} onChange={e => set('barcode', e.target.value)} />
               </div>
-              <div>
-                <Label>{p.commissionField || 'Comissão padrão (%)'}</Label>
-                <Input type="number" step="0.01" value={(form as any).commission_rate ?? 0} onChange={e => set('commission_rate', parseFloat(e.target.value) || 0)} />
-                <p className="text-xs text-muted-foreground mt-1">Percentual de comissão padrão para este produto</p>
+
+              <Separator />
+
+              {/* Commissionable toggle */}
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <div>
+                  <p className="text-sm font-medium">{p.isCommissionable || 'Produto comissionável'}</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {p.commissionableHelper || 'Ative para incluir comissão no preço de venda'}
+                  </p>
+                </div>
+                <Switch
+                  checked={(form as any).is_commissionable !== false}
+                  onCheckedChange={v => {
+                    set('is_commissionable', v);
+                    if (!v) set('commission_rate', 0);
+                  }}
+                />
               </div>
+
+              {(form as any).is_commissionable !== false ? (
+                <p className="text-[10px] text-muted-foreground">
+                  A comissão é configurada na seção "Formação de Preço" acima.
+                  Valor atual: {(form as any).commission_rate || 0}%
+                </p>
+              ) : (
+                <div className="rounded-lg border border-amber-300/30 bg-amber-50 p-2 text-xs text-amber-700">
+                  ⚠️ {p.notCommissionableWarning || 'Este produto não gera comissão. O campo comissão na Formação de Preço será ignorado.'}
+                </div>
+              )}
+
             </CollapsibleContent>
           </Collapsible>
 
