@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from 'react';
+import { toast } from 'sonner';
 import { useI18n } from '@/i18n';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -117,7 +118,7 @@ export function ImportWizard({ entityType, open, onOpenChange, onComplete }: Imp
       setConflicts(result.conflicts);
       setStep(3);
     } catch (err: any) {
-      console.error('Conflict check failed:', err);
+      toast.error('Erro ao verificar conflitos: ' + (err?.message || 'Tente novamente'));
     } finally {
       setChecking(false);
     }

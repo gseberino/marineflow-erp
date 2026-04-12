@@ -30,9 +30,9 @@ export function useCheckConflicts() {
         const results: T[] = [];
         for (let i = 0; i < values.length; i += size) {
           const chunk = values.slice(i, i + size);
-          const { data, error } = await supabase
-            .from(table)
-            .select(selectCols)
+          const { data, error } = await (supabase
+            .from(table as any)
+            .select(selectCols) as any)
             .in(column, chunk);
           if (error) throw error;
           results.push(...((data as T[]) || []));
