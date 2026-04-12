@@ -155,7 +155,8 @@ export function useImportRows() {
       let updated = 0;
 
       if (entityType === 'products') {
-        for (const chunk of chunks(newRows, 50)) {
+        const validProductRows = newRows.filter(r => r.product_name);
+        for (const chunk of chunks(validProductRows, 50)) {
           const rows = chunk.map((r: any) => ({
             product_name: r.product_name as string,
             sku: (r.sku || null) as string | null,
@@ -198,7 +199,8 @@ export function useImportRows() {
       }
 
       if (entityType === 'services') {
-        for (const chunk of chunks(newRows, 50)) {
+        const validServiceRows = newRows.filter(r => r.service_name);
+        for (const chunk of chunks(validServiceRows, 50)) {
           const rows = chunk.map((r: any) => ({
             service_name: r.service_name as string,
             default_price: (r.default_price || 0) as number,
@@ -218,7 +220,8 @@ export function useImportRows() {
       }
 
       if (entityType === 'clients') {
-        for (const chunk of chunks(newRows, 50)) {
+        const validClientRows = newRows.filter(r => r.full_name_or_company_name);
+        for (const chunk of chunks(validClientRows, 50)) {
           const rows = chunk.map((r: any) => ({
             full_name_or_company_name: r.full_name_or_company_name,
             type: r._type || 'company',
@@ -226,6 +229,7 @@ export function useImportRows() {
             email: r.email || null,
             phone: r.phone || r.contact_phone || null,
             address_line_1: r.address_line_1 || null,
+            address_line_2: [r.address_number, r.neighborhood, r.address_complement].filter(Boolean).join(', ') || null,
             postal_code: r.postal_code || null,
             city: r.city || null,
             state: r.state || null,
@@ -239,7 +243,8 @@ export function useImportRows() {
       }
 
       if (entityType === 'suppliers') {
-        for (const chunk of chunks(newRows, 50)) {
+        const validSupplierRows = newRows.filter(r => r.full_name_or_company_name || r.supplier_name);
+        for (const chunk of chunks(validSupplierRows, 50)) {
           const rows = chunk.map((r: any) => ({
             supplier_name: r.full_name_or_company_name || r.supplier_name,
             trade_name: r.trade_name || null,
@@ -260,8 +265,12 @@ export function useImportRows() {
       }
 
       if (entityType === 'mixed') {
-        const clientRows = newRows.filter(r => r._entity_type === 'Cliente' || r._entity_type === 'Ambos');
-        const supplierRows = newRows.filter(r => r._entity_type === 'Fornecedor' || r._entity_type === 'Ambos');
+        const clientRows = newRows.filter(r =>
+          (r._entity_type === 'Cliente' || r._entity_type === 'Ambos') &&
+          r.full_name_or_company_name);
+        const supplierRows = newRows.filter(r =>
+          (r._entity_type === 'Fornecedor' || r._entity_type === 'Ambos') &&
+          r.full_name_or_company_name);
 
         for (const chunk of chunks(clientRows, 50)) {
           const rows = chunk.map((r: any) => ({
@@ -271,6 +280,7 @@ export function useImportRows() {
             email: r.email || null,
             phone: r.phone || r.contact_phone || null,
             address_line_1: r.address_line_1 || null,
+            address_line_2: [r.address_number, r.neighborhood, r.address_complement].filter(Boolean).join(', ') || null,
             postal_code: r.postal_code || null,
             city: r.city || null,
             state: r.state || null,
