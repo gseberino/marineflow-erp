@@ -129,6 +129,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     discount_amount: 0,
     tax_amount: 0,
     subcontract_cost_total: 0,
+    commission_rate: 0,
+    commission_amount: 0,
+    commissioned_person: '',
   });
 
   const [manualTravel, setManualTravel] = useState(false);
@@ -195,6 +198,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         discount_amount: d.discount_amount || 0,
         tax_amount: d.tax_amount || 0,
         subcontract_cost_total: d.subcontract_cost_total || 0,
+        commission_rate: d.commission_rate || 0,
+        commission_amount: d.commission_amount || 0,
+        commissioned_person: d.commissioned_person || '',
       });
       if (d.service_order_technicians) {
         setSelectedTechnicians(d.service_order_technicians.map((t: any) => t.user_id));
@@ -1184,17 +1190,58 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             <div className="flex justify-between text-sm items-center">
               <span className="text-muted-foreground">{t.serviceOrders.discount}</span>
               <Input type="number" className="w-28 h-7 text-right text-sm" value={form.discount_amount}
-                onChange={(e) => set('discount_amount', parseFloat(e.target.value) || 0)} />
+                onChange={(e) => set('discount_amount', parseFloat(e.target.value) || 0)} disabled={isLocked} />
             </div>
             <div className="flex justify-between text-sm items-center">
               <span className="text-muted-foreground">{t.serviceOrders.tax}</span>
               <Input type="number" className="w-28 h-7 text-right text-sm" value={form.tax_amount}
-                onChange={(e) => set('tax_amount', parseFloat(e.target.value) || 0)} />
+                onChange={(e) => set('tax_amount', parseFloat(e.target.value) || 0)} disabled={isLocked} />
             </div>
+
+            {/* Commission */}
+            <div className="space-y-2 pt-2 border-t border-dashed">
+              <div className="flex justify-between text-sm items-center">
+                <span className="text-muted-foreground">{(t.serviceOrders as any).commissionedPerson || 'Comissionado'}</span>
+                <Input className="w-40 h-7 text-right text-sm" value={form.commissioned_person}
+                  onChange={(e) => set('commissioned_person', e.target.value)}
+                  placeholder="Nome do indicador"
+                  disabled={isLocked} />
+              </div>
+              <div className="flex justify-between text-sm items-center">
+                <span className="text-muted-foreground">{(t.serviceOrders as any).commissionAmount || 'Comissão'} (%)</span>
+                <div className="flex items-center gap-2">
+                  <Input type="number" step="0.01" className="w-20 h-7 text-right text-sm" value={form.commission_rate}
+                    onChange={(e) => {
+                      const rate = parseFloat(e.target.value) || 0;
+                      const amount = Math.round(grandTotal * rate / 100 * 100) / 100;
+                      setForm(f => ({ ...f, commission_rate: rate, commission_amount: amount }));
+                    }}
+                    disabled={isLocked} />
+                  {(form.commission_rate || 0) > 0 && (
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">
+                      = {formatCurrency(grandTotal * (form.commission_rate || 0) / 100)}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
             <div className="flex justify-between pt-3 border-t-2">
               <span className="font-bold text-lg">{t.serviceOrders.grandTotal}</span>
               <span className="font-bold text-lg text-accent">{formatCurrency(grandTotal)}</span>
             </div>
+            {(form.commission_amount || 0) > 0 && (
+              <>
+                <div className="flex justify-between text-sm text-muted-foreground">
+                  <span>{(t.serviceOrders as any).commissionAmount || 'Comissão'} ({form.commission_rate}%)</span>
+                  <span>− {formatCurrency(form.commission_amount || 0)}</span>
+                </div>
+                <div className="flex justify-between text-sm font-medium">
+                  <span>{(t.serviceOrders as any).netTotal || 'Total líquido'}</span>
+                  <span>{formatCurrency(grandTotal - (form.commission_amount || 0))}</span>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Payment info */}
