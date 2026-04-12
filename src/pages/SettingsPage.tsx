@@ -575,6 +575,7 @@ function ProductCategoriesTab() {
     name: '',
     default_profit_margin: 30,
     default_commission_rate: 0,
+    is_commissionable: true,
     default_csosn: '400',
     default_ncm: '',
   });
@@ -589,11 +590,12 @@ function ProductCategoriesTab() {
         name: newForm.name.trim(),
         default_profit_margin: newForm.default_profit_margin,
         default_commission_rate: newForm.default_commission_rate,
+        is_commissionable: newForm.is_commissionable,
         default_csosn: newForm.default_csosn,
         default_ncm: newForm.default_ncm || null,
       });
       setShowNew(false);
-      setNewForm({ name: '', default_profit_margin: 30, default_commission_rate: 0, default_csosn: '400', default_ncm: '' });
+      setNewForm({ name: '', default_profit_margin: 30, default_commission_rate: 0, is_commissionable: true, default_csosn: '400', default_ncm: '' });
       toast.success(st.newProductCategory || 'Categoria criada');
     } catch (e: any) {
       toast.error(e.message || 'Erro');
@@ -625,6 +627,7 @@ function ProductCategoriesTab() {
               <th className="px-4 py-2 text-left font-medium text-muted-foreground">Nome</th>
               <th className="px-3 py-2 text-right font-medium text-muted-foreground">{st.defaultProfitMargin || 'Margem %'}</th>
               <th className="px-3 py-2 text-right font-medium text-muted-foreground">{st.defaultCommissionRate || 'Comissão %'}</th>
+              <th className="px-3 py-2 text-center font-medium text-muted-foreground">Comissionável</th>
               <th className="px-3 py-2 text-left font-medium text-muted-foreground">NCM</th>
               <th className="px-3 py-2 text-center font-medium text-muted-foreground">{t.common.active}</th>
             </tr>
@@ -687,6 +690,12 @@ function ProductCategoriesTab() {
                     </button>
                   )}
                 </td>
+                <td className="px-3 py-2 text-center">
+                  <Switch
+                    checked={cat.is_commissionable ?? true}
+                    onCheckedChange={v => updateCat.mutate({ id: cat.id, is_commissionable: v })}
+                  />
+                </td>
                 <td className="px-3 py-2">
                   {editingId === cat.id && editField === 'default_ncm' ? (
                     <Input
@@ -737,6 +746,13 @@ function ProductCategoriesTab() {
               <label className="text-xs font-medium text-muted-foreground">{st.defaultCommissionRate || 'Comissão %'}</label>
               <Input type="number" step="0.01" value={newForm.default_commission_rate}
                 onChange={e => setNewForm(p => ({ ...p, default_commission_rate: parseFloat(e.target.value) || 0 }))} className="mt-1" />
+            </div>
+            <div className="flex items-center gap-2 col-span-2 pt-1">
+              <Switch
+                checked={newForm.is_commissionable}
+                onCheckedChange={v => setNewForm(p => ({ ...p, is_commissionable: v }))}
+              />
+              <label className="text-xs">Permite comissionamento</label>
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground">NCM Padrão</label>
