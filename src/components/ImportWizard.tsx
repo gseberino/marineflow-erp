@@ -126,17 +126,22 @@ export function ImportWizard({ entityType, open, onOpenChange, onComplete }: Imp
 
   const handleImport = async () => {
     setStep(4);
-    const updates = conflicts
-      .filter(c => c.resolution === 'replace')
-      .map(c => ({ id: c.existing.id, data: c.incoming }));
+    try {
+      const updates = conflicts
+        .filter(c => c.resolution === 'replace')
+        .map(c => ({ id: c.existing.id, data: c.incoming }));
 
-    const result = await importRows.mutateAsync({
-      entityType: resolvedType,
-      newRows,
-      updates,
-    });
-    setImportResult(result);
-    onComplete?.(result.inserted + result.updated);
+      const result = await importRows.mutateAsync({
+        entityType: resolvedType,
+        newRows,
+        updates,
+      });
+      setImportResult(result);
+      onComplete?.(result.inserted + result.updated);
+    } catch (err: any) {
+      toast.error('Erro na importação: ' + (err?.message || 'Tente novamente'));
+      setStep(3);
+    }
   };
 
   const setAllConflictResolutions = (res: 'keep' | 'replace') => {
@@ -372,22 +377,25 @@ export function ImportWizard({ entityType, open, onOpenChange, onComplete }: Imp
 
         {/* STEP 4: Importing / Done */}
         {step === 4 && (
-          <div className="py-12 text-center space-y-4">
+          <div className="flex flex-col items-center justify-center py-12 gap-4">
             {!importResult ? (
               <>
-                <Loader2 className="h-10 w-10 animate-spin mx-auto text-accent" />
-                <p className="font-medium">{t.imports.importing}</p>
+                <Loader2 className="h-10 w-10 animate-spin text-primary" />
+                <p className="text-sm font-medium">{t.imports.importing}</p>
+                <p className="text-xs text-muted-foreground">
+                  Importando {newRows.length} registros em lotes...
+                </p>
               </>
             ) : (
               <>
-                <CheckCircle className="h-12 w-12 mx-auto text-success" />
-                <p className="text-lg font-bold">{t.imports.importDone}</p>
-                <p className="text-muted-foreground">
+                <CheckCircle className="h-12 w-12 text-success" />
+                <p className="text-lg font-semibold">{t.imports.importDone}</p>
+                <p className="text-sm text-muted-foreground">
                   {t.imports.importSummary
                     .replace('{inserted}', String(importResult.inserted))
                     .replace('{updated}', String(importResult.updated))}
                 </p>
-                <Button onClick={() => { reset(); onOpenChange(false); }}>{t.common.back}</Button>
+                <Button onClick={() => { reset(); onOpenChange(false); }}>Fechar</Button>
               </>
             )}
           </div>
