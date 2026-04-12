@@ -301,10 +301,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
               </Select>
               {form.product_category_id && selectedCategory && (
                 <p className="text-[10px] text-muted-foreground mt-1">
-                  Margem: {selectedCategory.default_profit_margin}% |{' '}
-                  {selectedCategory.is_commissionable
-                    ? `Comissão: ${selectedCategory.default_commission_rate}%`
-                    : 'Não comissionado'}
+                  Margem: {selectedCategory.default_profit_margin}% | Comissão: {selectedCategory.default_commission_rate}%
                 </p>
               )}
             </div>
