@@ -310,6 +310,11 @@ export default function SettingsPage() {
           <CategoriesTab />
         </TabsContent>
 
+        {/* Product Categories Tab */}
+        <TabsContent value="product-categories" className="mt-4 space-y-4">
+          <ProductCategoriesTab />
+        </TabsContent>
+
         {/* Fiscal Tab */}
         <TabsContent value="fiscal" className="mt-4 space-y-4">
           <FiscalTab />
