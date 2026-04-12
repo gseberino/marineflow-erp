@@ -19,51 +19,101 @@ export function useCheckConflicts() {
       const newRows: Record<string, any>[] = [];
       const conflicts: ConflictItem[] = [];
 
-      for (const row of rows) {
-        let existing = null;
-
-        if (entityType === 'products') {
-          if (row.sku) {
-            const { data } = await supabase.from('products')
-              .select('*').eq('sku', row.sku).maybeSingle();
-            existing = data;
-          }
-          if (!existing && row.product_name) {
-            const { data } = await supabase.from('products')
-              .select('*').eq('product_name', row.product_name).maybeSingle();
-            existing = data;
-          }
-        }
-
-        if (entityType === 'services') {
-          if (row.service_name) {
-            const { data } = await supabase.from('services')
-              .select('*').eq('service_name', row.service_name).maybeSingle();
-            existing = data;
+      if (entityType === 'products') {
+        const skus = rows.map(r => r.sku).filter(Boolean);
+        const names = rows.map(r => r.product_name).filter(Boolean);
+        const { data: existingBySku } = skus.length > 0
+          ? await supabase.from('products').select('*').in('sku', skus)
+          : { data: [] as any[] };
+        const { data: existingByName } = names.length > 0
+          ? await supabase.from('products').select('*').in('product_name', names)
+          : { data: [] as any[] };
+        const skuMap = new Map((existingBySku || []).map(p => [p.sku, p]));
+        const nameMap = new Map((existingByName || []).map(p => [p.product_name, p]));
+        for (const row of rows) {
+          const existing = (row.sku && skuMap.get(row.sku))
+            || (row.product_name && nameMap.get(row.product_name))
+            || null;
+          if (existing) {
+            conflicts.push({ incoming: row, existing, resolution: 'keep' });
+          } else {
+            newRows.push(row);
           }
         }
-
-        if (entityType === 'clients' || entityType === 'mixed') {
-          if (row.cnpj_cpf) {
-            const { data } = await supabase.from('clients')
-              .select('*').eq('cpf_cnpj', row.cnpj_cpf).maybeSingle();
-            existing = data;
+      } else if (entityType === 'services') {
+        const names = rows.map(r => r.service_name).filter(Boolean);
+        const { data: existing } = names.length > 0
+          ? await supabase.from('services').select('*').in('service_name', names)
+          : { data: [] as any[] };
+        const nameMap = new Map((existing || []).map(s => [s.service_name, s]));
+        for (const row of rows) {
+          const found = row.service_name && nameMap.get(row.service_name);
+          if (found) {
+            conflicts.push({ incoming: row, existing: found, resolution: 'keep' });
+          } else {
+            newRows.push(row);
           }
         }
-
-        if (entityType === 'suppliers' || entityType === 'mixed') {
-          if (row.cnpj_cpf && (row._entity_type === 'Fornecedor' || row._entity_type === 'Ambos')) {
-            const { data } = await supabase.from('suppliers')
-              .select('*').eq('cnpj_cpf', row.cnpj_cpf).maybeSingle();
-            if (data) existing = data;
+      } else if (entityType === 'clients') {
+        const cnpjs = rows.map(r => r.cnpj_cpf).filter(Boolean);
+        const { data: existing } = cnpjs.length > 0
+          ? await supabase.from('clients').select('*').in('cpf_cnpj', cnpjs)
+          : { data: [] as any[] };
+        const cnpjMap = new Map((existing || []).map(c => [c.cpf_cnpj, c]));
+        for (const row of rows) {
+          const found = row.cnpj_cpf && cnpjMap.get(row.cnpj_cpf);
+          if (found) {
+            conflicts.push({ incoming: row, existing: found, resolution: 'keep' });
+          } else {
+            newRows.push(row);
           }
         }
-
-        if (existing) {
-          conflicts.push({ incoming: row, existing, resolution: 'keep' });
-        } else {
-          newRows.push(row);
+      } else if (entityType === 'suppliers') {
+        const cnpjs = rows.map(r => r.cnpj_cpf).filter(Boolean);
+        const { data: existing } = cnpjs.length > 0
+          ? await supabase.from('suppliers').select('*').in('cnpj_cpf', cnpjs)
+          : { data: [] as any[] };
+        const cnpjMap = new Map((existing || []).map(s => [s.cnpj_cpf, s]));
+        for (const row of rows) {
+          const found = row.cnpj_cpf && cnpjMap.get(row.cnpj_cpf);
+          if (found) {
+            conflicts.push({ incoming: row, existing: found, resolution: 'keep' });
+          } else {
+            newRows.push(row);
+          }
         }
+      } else if (entityType === 'mixed') {
+        const clientRows = rows.filter(r =>
+          r._entity_type === 'Cliente' || r._entity_type === 'Ambos');
+        const supplierRows = rows.filter(r =>
+          r._entity_type === 'Fornecedor' || r._entity_type === 'Ambos');
+        const clientCnpjs = clientRows.map(r => r.cnpj_cpf).filter(Boolean);
+        const { data: existingClients } = clientCnpjs.length > 0
+          ? await supabase.from('clients').select('*').in('cpf_cnpj', clientCnpjs)
+          : { data: [] as any[] };
+        const clientMap = new Map((existingClients || []).map(c => [c.cpf_cnpj, c]));
+        const supplierCnpjs = supplierRows.map(r => r.cnpj_cpf).filter(Boolean);
+        const { data: existingSuppliers } = supplierCnpjs.length > 0
+          ? await supabase.from('suppliers').select('*').in('cnpj_cpf', supplierCnpjs)
+          : { data: [] as any[] };
+        const supplierMap = new Map((existingSuppliers || []).map(s => [s.cnpj_cpf, s]));
+        for (const row of rows) {
+          const isClient = row._entity_type === 'Cliente' || row._entity_type === 'Ambos';
+          const isSupplier = row._entity_type === 'Fornecedor' || row._entity_type === 'Ambos';
+          const existingClient = isClient && row.cnpj_cpf ? clientMap.get(row.cnpj_cpf) : null;
+          const existingSupplier = isSupplier && row.cnpj_cpf ? supplierMap.get(row.cnpj_cpf) : null;
+          if (existingClient || existingSupplier) {
+            conflicts.push({
+              incoming: row,
+              existing: existingClient || existingSupplier,
+              resolution: 'keep',
+            });
+          } else {
+            newRows.push(row);
+          }
+        }
+      } else {
+        newRows.push(...rows);
       }
 
       return { newRows, conflicts };

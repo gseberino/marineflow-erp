@@ -108,14 +108,19 @@ export function ImportWizard({ entityType, open, onOpenChange, onComplete }: Imp
   };
 
   const goToReview = async () => {
-    if (!parsedFile) return;
+    if (!parsedFile || checking) return;
     setChecking(true);
-    const transformed = applyMapping(parsedFile.rows, mapping, resolvedType);
-    const result = await checkConflicts.mutateAsync({ entityType: resolvedType, rows: transformed });
-    setNewRows(result.newRows);
-    setConflicts(result.conflicts);
-    setChecking(false);
-    setStep(3);
+    try {
+      const transformed = applyMapping(parsedFile.rows, mapping, resolvedType);
+      const result = await checkConflicts.mutateAsync({ entityType: resolvedType, rows: transformed });
+      setNewRows(result.newRows);
+      setConflicts(result.conflicts);
+      setStep(3);
+    } catch (err: any) {
+      console.error('Conflict check failed:', err);
+    } finally {
+      setChecking(false);
+    }
   };
 
   const handleImport = async () => {
