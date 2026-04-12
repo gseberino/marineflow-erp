@@ -3,6 +3,7 @@ import { useI18n } from '@/i18n';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { calculateSalePrice, calculateMarginFromPrice } from '@/lib/price-calculator';
 
 interface Props {
@@ -18,30 +19,34 @@ interface Props {
   onProfitMarginChange: (v: number) => void;
   onTaxRateChange: (v: number) => void;
   onCommissionRateChange: (v: number) => void;
+  isCommissionable?: boolean;
 }
 
 export function PriceCalculator({
   costPrice, salePrice, profitMargin, taxRate, commissionRate,
   mode, onModeChange,
   onSalePriceChange, onProfitMarginChange, onTaxRateChange, onCommissionRateChange,
+  isCommissionable = true,
 }: Props) {
   const { t, formatCurrency } = useI18n();
   const p = t.products as any;
 
+  const effectiveCommission = isCommissionable ? commissionRate : 0;
+
   const breakdown = useMemo(() =>
-    calculateSalePrice({ cost_price: costPrice, profit_margin: profitMargin, tax_rate: taxRate, commission_rate: commissionRate }),
-    [costPrice, profitMargin, taxRate, commissionRate]
+    calculateSalePrice({ cost_price: costPrice, profit_margin: profitMargin, tax_rate: taxRate, commission_rate: effectiveCommission }),
+    [costPrice, profitMargin, taxRate, effectiveCommission]
   );
 
   const effectiveSalePrice = mode === 'calculate' ? breakdown.sale_price : salePrice;
   const resultingMargin = mode === 'direct'
-    ? calculateMarginFromPrice(costPrice, salePrice, taxRate, commissionRate)
+    ? calculateMarginFromPrice(costPrice, salePrice, taxRate, effectiveCommission)
     : profitMargin;
 
   const directBreakdown = useMemo(() => {
     if (mode !== 'direct') return breakdown;
-    return calculateSalePrice({ cost_price: costPrice, profit_margin: resultingMargin, tax_rate: taxRate, commission_rate: commissionRate });
-  }, [mode, costPrice, salePrice, resultingMargin, taxRate, commissionRate]);
+    return calculateSalePrice({ cost_price: costPrice, profit_margin: resultingMargin, tax_rate: taxRate, commission_rate: effectiveCommission });
+  }, [mode, costPrice, salePrice, resultingMargin, taxRate, effectiveCommission]);
 
   const bd = mode === 'calculate' ? breakdown : directBreakdown;
 
@@ -54,7 +59,7 @@ export function PriceCalculator({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [breakdown.sale_price, mode]);
 
-  const impossiblePrice = (profitMargin + taxRate + commissionRate) >= 100;
+  const impossiblePrice = (profitMargin + taxRate + effectiveCommission) >= 100;
 
   return (
     <div className="space-y-4">
@@ -102,11 +107,19 @@ export function PriceCalculator({
           />
         </div>
         <div>
-          <Label className="text-xs">{p.commissionField || 'Comissão %'}</Label>
+          <Label className="text-xs flex items-center gap-2">
+            {p.commissionField || 'Comissão %'}
+            {!isCommissionable && (
+              <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                {p.notCommissionable || 'Não comissionado'}
+              </Badge>
+            )}
+          </Label>
           <Input
             type="number" step="0.01" min="0"
-            value={commissionRate}
-            className="text-sm"
+            value={effectiveCommission}
+            className={`text-sm ${!isCommissionable ? 'bg-muted/30 opacity-60' : ''}`}
+            disabled={!isCommissionable}
             onChange={e => onCommissionRateChange(parseFloat(e.target.value) || 0)}
           />
         </div>
@@ -135,8 +148,12 @@ export function PriceCalculator({
           <span className="text-amber-600">{formatCurrency(bd.tax_amount)}</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-blue-600">Comissão ({commissionRate}%)</span>
-          <span className="text-blue-600">{formatCurrency(bd.commission_amount)}</span>
+          <span className={isCommissionable ? 'text-blue-600' : 'text-muted-foreground line-through'}>
+            Comissão ({effectiveCommission}%)
+          </span>
+          <span className={isCommissionable ? 'text-blue-600' : 'text-muted-foreground line-through'}>
+            {formatCurrency(bd.commission_amount)}
+          </span>
         </div>
         <div className="flex justify-between">
           <span className={bd.profit_amount > 0 ? 'text-emerald-600' : 'text-destructive'}>
