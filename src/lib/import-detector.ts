@@ -111,6 +111,9 @@ export function detectFormat(parsed: ParsedFile): DetectionResult {
         'Observações': 'notes',
         'Situação (Ativo/Inativo)': 'active',
         'Fornecedor': '_supplier_name',
+        'NCM (8)': 'ncm',
+        'Código de Barras (GTIN-8,12,13,14)': 'barcode',
+        'Origem (0 a 8)': 'fiscal_origin',
       },
     };
   }

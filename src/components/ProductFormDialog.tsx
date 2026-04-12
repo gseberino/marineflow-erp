@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useI18n } from '@/i18n';
+import { useQuery } from '@tanstack/react-query';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,13 +9,17 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useCreateProduct, useUpdateProduct, type Product } from '@/hooks/use-products';
 import { useProductSuppliers, useAddProductSupplier, useUpdateProductSupplier, useRemoveProductSupplier } from '@/hooks/use-product-suppliers';
 import { useSuppliers } from '@/hooks/use-suppliers';
+import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import type { TablesInsert } from '@/integrations/supabase/types';
-import { Plus, Trash2, Star } from 'lucide-react';
+import { Plus, Trash2, Star, ChevronDown } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
+import { PriceCalculator } from '@/components/PriceCalculator';
+import { CSOSN_OPTIONS, FISCAL_ORIGIN_OPTIONS } from '@/lib/price-calculator';
 
 interface Props {
   open: boolean;
@@ -38,6 +43,16 @@ const empty: TablesInsert<'products'> = {
   barcode: '',
   notes: '',
   active: true,
+  ncm: '',
+  csosn: '400',
+  fiscal_origin: 0,
+  icms_rate: 0,
+  ipi_rate: 0,
+  pis_rate: 0,
+  cofins_rate: 0,
+  commission_rate: 0,
+  profit_margin: 0,
+  use_global_fiscal: true,
 };
 
 const emptySupplierForm = {
@@ -58,6 +73,27 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
   const [form, setForm] = useState<TablesInsert<'products'>>(empty);
   const isEdit = !!product;
 
+  // Price calculator mode
+  const [priceMode, setPriceMode] = useState<'calculate' | 'direct'>('calculate');
+
+  // Fiscal section state
+  const [useGlobal, setUseGlobal] = useState(true);
+  const [fiscalOpen, setFiscalOpen] = useState(false);
+  const [priceOpen, setPriceOpen] = useState(true);
+
+  // App settings for fiscal defaults
+  const { data: settings } = useQuery({
+    queryKey: ['app-settings-fiscal'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('app_settings')
+        .select('*')
+        .limit(1)
+        .maybeSingle();
+      return data;
+    },
+  });
+
   // Supplier section
   const { data: productSuppliers, isLoading: psLoading } = useProductSuppliers(product?.id);
   const { data: allSuppliers } = useSuppliers();
@@ -69,28 +105,42 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
 
   useEffect(() => {
     if (product) {
+      const p = product as any;
       setForm({
-        product_name: product.product_name,
-        sku: product.sku ?? '',
-        category: product.category ?? '',
-        brand: product.brand ?? '',
-        unit: product.unit ?? 'pcs',
-        cost_price: product.cost_price ?? 0,
-        cost_currency: product.cost_currency ?? 'BRL',
-        sale_price: product.sale_price ?? 0,
-        sale_currency: product.sale_currency ?? 'BRL',
-        stock_quantity: product.stock_quantity ?? 0,
-        minimum_stock: product.minimum_stock ?? 0,
-        location_bin: product.location_bin ?? '',
-        barcode: product.barcode ?? '',
-        notes: product.notes ?? '',
-        active: product.active,
+        product_name: p.product_name,
+        sku: p.sku ?? '',
+        category: p.category ?? '',
+        brand: p.brand ?? '',
+        unit: p.unit ?? 'pcs',
+        cost_price: p.cost_price ?? 0,
+        cost_currency: p.cost_currency ?? 'BRL',
+        sale_price: p.sale_price ?? 0,
+        sale_currency: p.sale_currency ?? 'BRL',
+        stock_quantity: p.stock_quantity ?? 0,
+        minimum_stock: p.minimum_stock ?? 0,
+        location_bin: p.location_bin ?? '',
+        barcode: p.barcode ?? '',
+        notes: p.notes ?? '',
+        active: p.active,
+        ncm: p.ncm ?? '',
+        csosn: p.csosn ?? '400',
+        fiscal_origin: p.fiscal_origin ?? 0,
+        icms_rate: p.icms_rate ?? 0,
+        ipi_rate: p.ipi_rate ?? 0,
+        pis_rate: p.pis_rate ?? 0,
+        cofins_rate: p.cofins_rate ?? 0,
+        commission_rate: p.commission_rate ?? 0,
+        profit_margin: p.profit_margin ?? 0,
+        use_global_fiscal: p.use_global_fiscal !== false,
       });
+      setUseGlobal(p.use_global_fiscal !== false);
     } else {
       setForm(empty);
+      setUseGlobal(true);
     }
     setShowAddSupplier(false);
     setSupplierForm(emptySupplierForm);
+    setPriceMode('calculate');
   }, [product, open]);
 
   const set = (key: string, value: any) => setForm(prev => ({ ...prev, [key]: value }));
@@ -136,7 +186,6 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
 
   const handleTogglePreferred = async (psId: string, currentVal: boolean) => {
     if (!product) return;
-    // If setting to preferred, unset others first
     if (!currentVal && productSuppliers) {
       for (const ps of productSuppliers) {
         if (ps.is_preferred && ps.id !== psId) {
@@ -149,6 +198,8 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
 
   const isPending = create.isPending || update.isPending;
   const currencies = ['BRL', 'USD', 'EUR'];
+  const p = t.products as any;
+  const s = settings as any;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -219,10 +270,6 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
               <Input value={form.location_bin ?? ''} onChange={e => set('location_bin', e.target.value)} />
             </div>
             <div className="col-span-2">
-              <Label>{t.products.barcode}</Label>
-              <Input value={form.barcode ?? ''} onChange={e => set('barcode', e.target.value)} />
-            </div>
-            <div className="col-span-2">
               <Label>{t.common.notes}</Label>
               <Textarea value={form.notes ?? ''} onChange={e => set('notes', e.target.value)} />
             </div>
@@ -231,6 +278,114 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
               <Label>{t.common.active}</Label>
             </div>
           </div>
+
+          {/* Price Calculator Section */}
+          <Collapsible open={priceOpen} onOpenChange={setPriceOpen}>
+            <CollapsibleTrigger className="flex items-center justify-between w-full py-2 text-sm font-semibold hover:text-primary transition-colors">
+              {p.priceCalculator || 'Formação de Preço'}
+              <ChevronDown className={`h-4 w-4 transition-transform ${priceOpen ? 'rotate-180' : ''}`} />
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <PriceCalculator
+                costPrice={Number(form.cost_price) || 0}
+                salePrice={Number(form.sale_price) || 0}
+                profitMargin={Number((form as any).profit_margin) || 0}
+                taxRate={Number((form as any).icms_rate) || 0}
+                commissionRate={Number((form as any).commission_rate) || 0}
+                mode={priceMode}
+                onModeChange={setPriceMode}
+                onSalePriceChange={v => set('sale_price', v)}
+                onProfitMarginChange={v => set('profit_margin', v)}
+                onTaxRateChange={v => set('icms_rate', v)}
+                onCommissionRateChange={v => set('commission_rate', v)}
+              />
+            </CollapsibleContent>
+          </Collapsible>
+
+          {/* Fiscal Data Section */}
+          <Collapsible open={fiscalOpen} onOpenChange={setFiscalOpen}>
+            <CollapsibleTrigger className="flex items-center justify-between w-full py-2 text-sm font-semibold hover:text-primary transition-colors">
+              {p.fiscalData || 'Dados Fiscais'}
+              <ChevronDown className={`h-4 w-4 transition-transform ${fiscalOpen ? 'rotate-180' : ''}`} />
+            </CollapsibleTrigger>
+            <CollapsibleContent className="space-y-4 pt-2">
+              {/* Use global toggle */}
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={useGlobal}
+                  onChange={e => {
+                    setUseGlobal(e.target.checked);
+                    set('use_global_fiscal', e.target.checked);
+                  }}
+                  className="rounded border-input"
+                />
+                {p.useGlobalFiscal || 'Usar configuração fiscal padrão (definida nas Configurações)'}
+              </label>
+
+              {useGlobal ? (
+                <div className="rounded-lg border bg-muted/30 p-3 text-sm space-y-1">
+                  <div className="flex justify-between"><span className="text-muted-foreground">CSOSN:</span><span>{s?.default_csosn || '400'}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Origem:</span><span>{s?.default_fiscal_origin ?? 0}</span></div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div>
+                    <Label>{p.ncm || 'NCM'}</Label>
+                    <Input value={(form as any).ncm ?? ''} onChange={e => set('ncm', e.target.value)} placeholder="00000000" />
+                    <p className="text-xs text-muted-foreground mt-1">{p.ncmHelper || 'Código NCM de 8 dígitos — classifica o produto na NF-e'}</p>
+                  </div>
+                  <div>
+                    <Label>{p.csosn || 'CSOSN'}</Label>
+                    <Select value={(form as any).csosn ?? '400'} onValueChange={v => set('csosn', v)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {CSOSN_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>{p.fiscalOrigin || 'Origem'}</Label>
+                    <Select value={String((form as any).fiscal_origin ?? 0)} onValueChange={v => set('fiscal_origin', Number(v))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {FISCAL_ORIGIN_OPTIONS.map(o => <SelectItem key={o.value} value={String(o.value)}>{o.label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label>ICMS %</Label>
+                      <Input type="number" step="0.01" value={(form as any).icms_rate ?? 0} onChange={e => set('icms_rate', parseFloat(e.target.value) || 0)} />
+                    </div>
+                    <div>
+                      <Label>IPI %</Label>
+                      <Input type="number" step="0.01" value={(form as any).ipi_rate ?? 0} onChange={e => set('ipi_rate', parseFloat(e.target.value) || 0)} />
+                    </div>
+                    <div>
+                      <Label>PIS %</Label>
+                      <Input type="number" step="0.01" value={(form as any).pis_rate ?? 0} onChange={e => set('pis_rate', parseFloat(e.target.value) || 0)} />
+                    </div>
+                    <div>
+                      <Label>COFINS %</Label>
+                      <Input type="number" step="0.01" value={(form as any).cofins_rate ?? 0} onChange={e => set('cofins_rate', parseFloat(e.target.value) || 0)} />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Always visible fields */}
+              <div>
+                <Label>{p.barcode || 'Código de Barras'}</Label>
+                <Input value={form.barcode ?? ''} onChange={e => set('barcode', e.target.value)} />
+              </div>
+              <div>
+                <Label>{p.commissionField || 'Comissão padrão (%)'}</Label>
+                <Input type="number" step="0.01" value={(form as any).commission_rate ?? 0} onChange={e => set('commission_rate', parseFloat(e.target.value) || 0)} />
+                <p className="text-xs text-muted-foreground mt-1">Percentual de comissão padrão para este produto</p>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
 
           {/* Supplier section — edit mode only */}
           {isEdit && product && (
@@ -264,21 +419,12 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
                           </div>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleTogglePreferred(ps.id, ps.is_preferred ?? false)}
-                            title={t.suppliers.preferred}
-                          >
+                          <Button type="button" variant="ghost" size="sm"
+                            onClick={() => handleTogglePreferred(ps.id, ps.is_preferred ?? false)} title={t.suppliers.preferred}>
                             <Star className={`h-4 w-4 ${ps.is_preferred ? 'text-amber-500 fill-amber-500' : 'text-muted-foreground'}`} />
                           </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => removePS.mutate({ id: ps.id, product_id: product.id })}
-                          >
+                          <Button type="button" variant="ghost" size="sm"
+                            onClick={() => removePS.mutate({ id: ps.id, product_id: product.id })}>
                             <Trash2 className="h-4 w-4 text-destructive" />
                           </Button>
                         </div>

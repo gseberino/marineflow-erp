@@ -171,6 +171,10 @@ export function useImportRows() {
             active: r.active !== false,
             sale_currency: 'BRL' as string,
             cost_currency: 'BRL' as string,
+            ncm: (r.ncm || null) as string | null,
+            barcode: (r.barcode || null) as string | null,
+            fiscal_origin: r.fiscal_origin != null ? parseInt(r.fiscal_origin) : 0,
+            use_global_fiscal: true,
           }));
           const { data, error } = await supabase.from('products').insert(rows).select('id, stock_quantity');
           if (error) throw error;
