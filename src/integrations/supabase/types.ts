@@ -17,22 +17,49 @@ export type Database = {
       app_settings: {
         Row: {
           created_at: string
+          default_cofins_rate: number | null
+          default_commission_rate: number | null
+          default_csosn: string | null
+          default_fiscal_origin: number | null
+          default_icms_rate: number | null
+          default_ipi_rate: number | null
+          default_pis_rate: number | null
+          default_profit_margin: number | null
           description: string | null
           key: string
+          simples_aliquota: number | null
           updated_at: string
           value: string
         }
         Insert: {
           created_at?: string
+          default_cofins_rate?: number | null
+          default_commission_rate?: number | null
+          default_csosn?: string | null
+          default_fiscal_origin?: number | null
+          default_icms_rate?: number | null
+          default_ipi_rate?: number | null
+          default_pis_rate?: number | null
+          default_profit_margin?: number | null
           description?: string | null
           key: string
+          simples_aliquota?: number | null
           updated_at?: string
           value: string
         }
         Update: {
           created_at?: string
+          default_cofins_rate?: number | null
+          default_commission_rate?: number | null
+          default_csosn?: string | null
+          default_fiscal_origin?: number | null
+          default_icms_rate?: number | null
+          default_ipi_rate?: number | null
+          default_pis_rate?: number | null
+          default_profit_margin?: number | null
           description?: string | null
           key?: string
+          simples_aliquota?: number | null
           updated_at?: string
           value?: string
         }
@@ -759,60 +786,90 @@ export type Database = {
           barcode: string | null
           brand: string | null
           category: string | null
+          cofins_rate: number | null
+          commission_rate: number | null
           cost_currency: string | null
           cost_price: number | null
           created_at: string
+          csosn: string | null
+          fiscal_origin: number | null
+          icms_rate: number | null
           id: string
+          ipi_rate: number | null
           location_bin: string | null
           minimum_stock: number | null
+          ncm: string | null
           notes: string | null
+          pis_rate: number | null
           product_name: string
+          profit_margin: number | null
           sale_currency: string | null
           sale_price: number | null
           sku: string | null
           stock_quantity: number | null
           unit: string | null
           updated_at: string
+          use_global_fiscal: boolean | null
         }
         Insert: {
           active?: boolean
           barcode?: string | null
           brand?: string | null
           category?: string | null
+          cofins_rate?: number | null
+          commission_rate?: number | null
           cost_currency?: string | null
           cost_price?: number | null
           created_at?: string
+          csosn?: string | null
+          fiscal_origin?: number | null
+          icms_rate?: number | null
           id?: string
+          ipi_rate?: number | null
           location_bin?: string | null
           minimum_stock?: number | null
+          ncm?: string | null
           notes?: string | null
+          pis_rate?: number | null
           product_name: string
+          profit_margin?: number | null
           sale_currency?: string | null
           sale_price?: number | null
           sku?: string | null
           stock_quantity?: number | null
           unit?: string | null
           updated_at?: string
+          use_global_fiscal?: boolean | null
         }
         Update: {
           active?: boolean
           barcode?: string | null
           brand?: string | null
           category?: string | null
+          cofins_rate?: number | null
+          commission_rate?: number | null
           cost_currency?: string | null
           cost_price?: number | null
           created_at?: string
+          csosn?: string | null
+          fiscal_origin?: number | null
+          icms_rate?: number | null
           id?: string
+          ipi_rate?: number | null
           location_bin?: string | null
           minimum_stock?: number | null
+          ncm?: string | null
           notes?: string | null
+          pis_rate?: number | null
           product_name?: string
+          profit_margin?: number | null
           sale_currency?: string | null
           sale_price?: number | null
           sku?: string | null
           stock_quantity?: number | null
           unit?: string | null
           updated_at?: string
+          use_global_fiscal?: boolean | null
         }
         Relationships: []
       }
@@ -1191,6 +1248,9 @@ export type Database = {
           check_out_at: string | null
           client_id: string
           client_signature_url: string | null
+          commission_amount: number | null
+          commission_rate: number | null
+          commissioned_person: string | null
           created_at: string
           created_by: string | null
           currency: string | null
@@ -1238,6 +1298,9 @@ export type Database = {
           check_out_at?: string | null
           client_id: string
           client_signature_url?: string | null
+          commission_amount?: number | null
+          commission_rate?: number | null
+          commissioned_person?: string | null
           created_at?: string
           created_by?: string | null
           currency?: string | null
@@ -1285,6 +1348,9 @@ export type Database = {
           check_out_at?: string | null
           client_id?: string
           client_signature_url?: string | null
+          commission_amount?: number | null
+          commission_rate?: number | null
+          commissioned_person?: string | null
           created_at?: string
           created_by?: string | null
           currency?: string | null
