@@ -26,6 +26,10 @@ import {
   useReopenServiceOrder,
 } from '@/hooks/use-service-orders';
 import { useServiceOrderExpenses, useAddServiceOrderExpense, useRemoveServiceOrderExpense } from '@/hooks/use-service-order-expenses';
+import { usePDFData } from '@/hooks/use-pdf';
+import { generatePDF, DEFAULT_PDF_OPTIONS } from '@/lib/pdf-generator';
+import type { PDFOptions } from '@/lib/pdf-generator';
+import { PDFOptionsDialog } from '@/components/PDFOptionsDialog';
 import { OPERATIONAL_EXPENSE_CATEGORIES } from '@/lib/expense-categories';
 import { calculateDisplacement } from '@/lib/displacement';
 import { statusConfig, priorityConfig } from '@/lib/constants';
@@ -40,7 +44,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard, Receipt, Lock, RotateCcw, Ban } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard, Receipt, Lock, RotateCcw, Ban, FileText, Printer } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Props {
@@ -79,6 +83,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const { data: appUsers } = useAppUsers();
   const { data: services } = useServices();
   const { data: cardFees } = useCardFees();
+  const { data: pdfData } = usePDFData(isNew ? undefined : orderId);
 
   const createSO = useCreateServiceOrder();
   const updateSO = useUpdateServiceOrder();
@@ -168,6 +173,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [showReopenDialog, setShowReopenDialog] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [reopenReason, setReopenReason] = useState('');
+  const [pdfDialogType, setPdfDialogType] = useState<'quote' | 'service_order' | null>(null);
 
   useEffect(() => {
     if (orderData) {
@@ -452,7 +458,19 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             </div>
           )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
+          {!isNew && (
+            <>
+              <Button variant="outline" size="sm" onClick={() => setPdfDialogType('quote')} className="gap-1">
+                <FileText className="h-4 w-4" />
+                {t.pdf.quote}
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setPdfDialogType('service_order')} className="gap-1">
+                <Printer className="h-4 w-4" />
+                OS
+              </Button>
+            </>
+          )}
           {!isNew && !isLocked && currentStatus !== 'cancelled' && (
             <Button variant="outline" size="sm" className="text-destructive" onClick={() => setShowCancelDialog(true)}>
               <Ban className="h-4 w-4 mr-1" /> {t.serviceOrders.cancelOS}
@@ -1303,6 +1321,18 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           <RecordHistory tableName="service_orders" recordId={orderId} />
         </section>
       )}
+
+      {/* PDF Options Dialog */}
+      <PDFOptionsDialog
+        open={!!pdfDialogType}
+        onOpenChange={v => { if (!v) setPdfDialogType(null); }}
+        documentType={pdfDialogType || 'quote'}
+        onGenerate={(options) => {
+          if (!pdfData || !pdfDialogType) return;
+          generatePDF({ ...pdfData, documentType: pdfDialogType }, options);
+          setPdfDialogType(null);
+        }}
+      />
     </div>
   );
 }
