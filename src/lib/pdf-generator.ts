@@ -99,23 +99,17 @@ export function generatePDF(data: PDFData, options: PDFOptions): void {
   const html = buildHTMLDocument(data, options);
 
   const iframe = document.createElement('iframe');
-  iframe.style.position = 'fixed';
-  iframe.style.right = '0';
-  iframe.style.bottom = '0';
-  iframe.style.width = '0';
-  iframe.style.height = '0';
-  iframe.style.border = '0';
-  iframe.style.visibility = 'hidden';
+  iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;';
   document.body.appendChild(iframe);
 
-  const doc = iframe.contentWindow?.document;
+  const doc = iframe.contentDocument || iframe.contentWindow?.document;
   if (!doc) {
     document.body.removeChild(iframe);
     const win = window.open('', '_blank');
     if (win) {
       win.document.write(html);
       win.document.close();
-      setTimeout(() => win.print(), 400);
+      setTimeout(() => win.print(), 500);
     }
     return;
   }
@@ -124,18 +118,22 @@ export function generatePDF(data: PDFData, options: PDFOptions): void {
   doc.write(html);
   doc.close();
 
-  iframe.onload = () => {
+  requestAnimationFrame(() => {
     setTimeout(() => {
       try {
         iframe.contentWindow?.focus();
         iframe.contentWindow?.print();
+      } catch (e) {
+        console.error('Print failed:', e);
       } finally {
         setTimeout(() => {
-          document.body.removeChild(iframe);
-        }, 1000);
+          if (document.body.contains(iframe)) {
+            document.body.removeChild(iframe);
+          }
+        }, 2000);
       }
-    }, 300);
-  };
+    }, 500);
+  });
 }
 
 function buildHTMLDocument(data: PDFData, options: PDFOptions): string {
@@ -307,7 +305,14 @@ ${!isQuote && data.serviceOrder.technical_notes ? `
 </div>
 ` : ''}
 
-<!-- Summary -->
+${data.serviceOrder.extra_notes ? `
+<!-- Extra Notes -->
+<div style="border:1px solid #e5e7eb;border-radius:6px;padding:10px;margin-bottom:16px;">
+  <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Observações Adicionais</div>
+  <div style="white-space:pre-wrap;">${data.serviceOrder.extra_notes}</div>
+</div>
+` : ''}
+
 <div style="margin-bottom:16px;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;">
   <table style="font-size:12px;">
     <tbody>
