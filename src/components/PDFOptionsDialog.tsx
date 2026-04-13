@@ -15,17 +15,6 @@ interface Props {
   onGenerate: (options: PDFOptions) => void;
 }
 
-const OPTION_KEYS: Array<{ key: keyof PDFOptions; labelPtBr: string }> = [
-  { key: 'showServicePrices', labelKey: 'showServicePrices' },
-  { key: 'showPartsPrices', labelKey: 'showPartsPrices' },
-  { key: 'showTravelCost', labelKey: 'showTravelCost' },
-  { key: 'showDiscount', labelKey: 'showDiscount' },
-  { key: 'showTax', labelKey: 'showTax' },
-  { key: 'showCommission', labelKey: 'showCommission' },
-  { key: 'showTerms', labelKey: 'showTerms' },
-  { key: 'showSignature', labelKey: 'showSignature' },
-];
-
 export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate }: Props) {
   const { t } = useI18n();
   const [options, setOptions] = useState<PDFOptions>({ ...DEFAULT_PDF_OPTIONS });
@@ -38,6 +27,17 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate 
     ? `${t.pdf.generate} — ${t.pdf.quote}`
     : `${t.pdf.generate} — ${t.pdf.serviceOrder}`;
 
+  const checkboxItems: Array<{ key: keyof PDFOptions; label: string }> = [
+    { key: 'showServicePrices', label: t.pdf.showServicePrices },
+    { key: 'showPartsPrices', label: t.pdf.showPartsPrices },
+    { key: 'showTravelCost', label: t.pdf.showTravelCost },
+    { key: 'showDiscount', label: t.pdf.showDiscount },
+    { key: 'showTax', label: t.pdf.showTax },
+    { key: 'showCommission', label: t.pdf.showCommission },
+    { key: 'showTerms', label: t.pdf.showTerms },
+    { key: 'showSignature', label: t.pdf.showSignature },
+  ];
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
@@ -48,7 +48,7 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate 
 
         <div className="space-y-3 py-2">
           <p className="text-sm font-medium text-muted-foreground">{t.pdf.itemsToShow}</p>
-          {OPTION_KEYS.map(({ key, labelKey }) => (
+          {checkboxItems.map(({ key, label }) => (
             <div key={key} className="flex items-center gap-2">
               <Checkbox
                 id={key}
@@ -58,15 +58,15 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate 
                 }
               />
               <Label htmlFor={key} className="cursor-pointer text-sm">
-                {(t.pdf as any)[labelKey]}
+                {label}
               </Label>
             </div>
           ))}
         </div>
 
-        <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
-          <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-          <p className="text-xs text-amber-800">{t.pdf.pdfHint}</p>
+        <div className="flex items-start gap-2 rounded-lg border border-border bg-muted p-3">
+          <AlertTriangle className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+          <p className="text-xs text-muted-foreground">{t.pdf.pdfHint}</p>
         </div>
 
         <DialogFooter>

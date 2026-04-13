@@ -26,6 +26,10 @@ import {
   useReopenServiceOrder,
 } from '@/hooks/use-service-orders';
 import { useServiceOrderExpenses, useAddServiceOrderExpense, useRemoveServiceOrderExpense } from '@/hooks/use-service-order-expenses';
+import { usePDFData } from '@/hooks/use-pdf';
+import { generatePDF, DEFAULT_PDF_OPTIONS } from '@/lib/pdf-generator';
+import type { PDFOptions } from '@/lib/pdf-generator';
+import { PDFOptionsDialog } from '@/components/PDFOptionsDialog';
 import { OPERATIONAL_EXPENSE_CATEGORIES } from '@/lib/expense-categories';
 import { calculateDisplacement } from '@/lib/displacement';
 import { statusConfig, priorityConfig } from '@/lib/constants';
@@ -40,7 +44,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard, Receipt, Lock, RotateCcw, Ban } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard, Receipt, Lock, RotateCcw, Ban, FileText, Printer } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Props {
