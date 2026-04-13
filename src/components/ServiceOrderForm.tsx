@@ -83,6 +83,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const { data: appUsers } = useAppUsers();
   const { data: services } = useServices();
   const { data: cardFees } = useCardFees();
+  const { data: pdfData } = usePDFData(isNew ? undefined : orderId);
 
   const createSO = useCreateServiceOrder();
   const updateSO = useUpdateServiceOrder();
