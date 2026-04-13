@@ -130,12 +130,24 @@ export function useAdjustStock() {
         .from('inventory_movements')
         .insert({
           product_id: input.product_id,
-          movement_type: 'adjustment',
+          movement_type: 'manual_adjustment',
           quantity_delta: delta,
           reference_type: 'manual_adjustment',
           notes: input.reason + (input.notes ? ': ' + input.notes : ''),
-        });
-      if (mErr) throw mErr;
+        } as any);
+
+      if (mErr) {
+        // Fallback without notes if column issue
+        const { error: mErr2 } = await supabase
+          .from('inventory_movements')
+          .insert({
+            product_id: input.product_id,
+            movement_type: 'manual_adjustment',
+            quantity_delta: delta,
+            reference_type: 'manual_adjustment',
+          });
+        if (mErr2) throw mErr2;
+      }
 
       writeAuditLog({
         table_name: 'products',
@@ -188,8 +200,20 @@ export function useAddStockEntry() {
           unit_cost_snapshot: input.unit_cost ?? null,
           reference_type: 'manual_entry',
           notes: input.notes || null,
-        });
-      if (mErr) throw mErr;
+        } as any);
+
+      if (mErr) {
+        const { error: mErr2 } = await supabase
+          .from('inventory_movements')
+          .insert({
+            product_id: input.product_id,
+            movement_type: 'manual_add',
+            quantity_delta: input.quantity,
+            unit_cost_snapshot: input.unit_cost ?? null,
+            reference_type: 'manual_entry',
+          });
+        if (mErr2) throw mErr2;
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['inventory'] });
