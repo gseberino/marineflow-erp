@@ -62,6 +62,7 @@ export function usePDFData(serviceOrderId: string | undefined) {
           discount_amount: so.discount_amount || 0,
           tax_amount: so.tax_amount || 0,
           operational_cost_total: so.operational_cost_total || 0,
+          extra_notes: so.extra_notes ?? undefined,
         },
         client: {
           name: (so.clients as any)?.full_name_or_company_name || '—',

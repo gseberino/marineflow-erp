@@ -123,6 +123,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     diagnosis: '',
     solution_applied: '',
     technician_notes: '',
+    extra_notes: '',
     internal_notes: '',
     customer_visible_report: '',
     hourly_rate: 150,
@@ -193,6 +194,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         diagnosis: d.diagnosis || '',
         solution_applied: d.solution_applied || '',
         technician_notes: d.technician_notes || '',
+        extra_notes: d.extra_notes || '',
         internal_notes: d.internal_notes || '',
         customer_visible_report: d.customer_visible_report || '',
         hourly_rate: d.hourly_rate || 150,
@@ -693,7 +695,22 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           </div>
           <div>
             <Label>{t.serviceOrders.technicianNotes}</Label>
-            <Textarea value={form.technician_notes} onChange={(e) => set('technician_notes', e.target.value)} rows={2} />
+            <Textarea value={form.technician_notes} onChange={(e) => set('technician_notes', e.target.value)} rows={2} disabled={isLocked} />
+          </div>
+          <div className="space-y-2">
+            <Label className="flex items-center gap-2 text-sm font-medium">
+              Observações Adicionais para Impressão
+              <span className="text-xs text-muted-foreground font-normal">
+                (aparece no PDF deste documento)
+              </span>
+            </Label>
+            <Textarea
+              value={form.extra_notes || ''}
+              onChange={e => set('extra_notes', e.target.value)}
+              placeholder="Informações específicas para este cliente, condições especiais, garantias, prazos..."
+              rows={3}
+              disabled={isLocked}
+            />
           </div>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

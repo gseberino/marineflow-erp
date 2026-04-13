@@ -51,6 +51,7 @@ export type PDFData = {
     discount_amount: number;
     tax_amount: number;
     operational_cost_total?: number;
+    extra_notes?: string;
   };
   client: {
     name: string;
