@@ -90,7 +90,6 @@ export default function SettingsPage() {
       <Tabs defaultValue={defaultTab}>
         <TabsList className="flex-wrap h-auto gap-1">
           <TabsTrigger value="company">{t.settings.tabCompany}</TabsTrigger>
-          <TabsTrigger value="travel">{t.settings.tabTravel}</TabsTrigger>
           <TabsTrigger value="users">{t.settings.tabUsers}</TabsTrigger>
           <TabsTrigger value="language">{t.settings.tabLanguage}</TabsTrigger>
           <TabsTrigger value="currency">{t.settings.tabCurrency}</TabsTrigger>
@@ -105,44 +104,7 @@ export default function SettingsPage() {
         </TabsList>
 
         <TabsContent value="company" className="mt-4 space-y-4">
-          <div className="rounded-xl border bg-card p-6 shadow-sm max-w-2xl">
-            <h3 className="text-sm font-semibold mb-4 flex items-center gap-2"><MapPin className="h-4 w-4" /> {t.settings.companyInfo}</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div><label className="text-xs font-medium text-muted-foreground">{t.settings.companyName}</label><Input defaultValue="NautiTech Marine Services" className="mt-1" /></div>
-              <div><label className="text-xs font-medium text-muted-foreground">{t.settings.cnpj}</label><Input defaultValue="11.222.333/0001-44" className="mt-1" /></div>
-              <div className="md:col-span-2"><label className="text-xs font-medium text-muted-foreground">{t.settings.baseAddress}</label><Input defaultValue="Av. Brasil, 500 - Centro, Rio de Janeiro, RJ" className="mt-1" /></div>
-              <div><label className="text-xs font-medium text-muted-foreground">{t.settings.latitude}</label><Input defaultValue="-22.9068" className="mt-1" /></div>
-              <div><label className="text-xs font-medium text-muted-foreground">{t.settings.longitude}</label><Input defaultValue="-43.1729" className="mt-1" /></div>
-              <div><label className="text-xs font-medium text-muted-foreground">{t.settings.phone}</label><Input defaultValue="+55 21 3000-0000" className="mt-1" /></div>
-              <div><label className="text-xs font-medium text-muted-foreground">{t.settings.email}</label><Input defaultValue="contact@nautitech.com" className="mt-1" /></div>
-            </div>
-            <Button className="mt-6 bg-accent text-accent-foreground hover:bg-accent/90">{t.common.saveChanges}</Button>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="travel" className="mt-4 space-y-4">
-          <div className="rounded-xl border bg-card p-6 shadow-sm max-w-2xl">
-            <h3 className="text-sm font-semibold mb-4 flex items-center gap-2"><DollarSign className="h-4 w-4" /> {t.settings.travelSettings}</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div><label className="text-xs font-medium text-muted-foreground">{t.settings.defaultCostPerKm}</label><Input type="number" defaultValue="3.50" className="mt-1" /></div>
-              <div><label className="text-xs font-medium text-muted-foreground">{t.settings.defaultHourlyRate}</label><Input type="number" defaultValue="150" className="mt-1" /></div>
-            </div>
-            <div className="mt-4 space-y-3">
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" defaultChecked className="rounded border-input" />
-                {t.settings.multiplyByTechnicians}
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" className="rounded border-input" />
-                {t.settings.roundTrip}
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" defaultChecked className="rounded border-input" />
-                {t.settings.allowManualOverride}
-              </label>
-            </div>
-            <Button className="mt-6 bg-accent text-accent-foreground hover:bg-accent/90">{t.common.saveSettings}</Button>
-          </div>
+          <CompanyTab />
         </TabsContent>
 
         <TabsContent value="users" className="mt-4 space-y-4">

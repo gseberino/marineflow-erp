@@ -14,25 +14,24 @@ export function usePDFData(serviceOrderId: string | undefined) {
             *,
             clients(*),
             vessels(*),
-            marinas(marina_name, city),
-            service_order_services(*, services(service_name)),
+            marinas(*),
+            service_order_services(*, services(*)),
             service_order_parts(*, products(product_name, sku)),
             service_order_expenses(category, description, amount, paid_by)
           `)
           .eq('id', serviceOrderId)
           .single(),
         supabase.from('app_settings')
-          .select('key, value')
-          .in('key', [
-            'company_name', 'address_line_1', 'address_number', 'city', 'state',
-            'postal_code', 'phone', 'email', 'cnpj', 'default_terms',
-          ]),
+          .select('key, value'),
       ]);
 
       if (soRes.error) throw soRes.error;
       const so = soRes.data;
-      const settings = (settingsRes.data || []) as Array<{ key: string; value: string }>;
-      const get = (key: string) => settings.find(s => s.key === key)?.value || '';
+      const settingsMap: Record<string, string> = {};
+      for (const row of (settingsRes.data || []) as Array<{ key: string; value: string }>) {
+        if (row.key) settingsMap[row.key] = String(row.value || '');
+      }
+      const get = (key: string) => settingsMap[key] || '';
 
       const pdfData: PDFData = {
         documentType: 'service_order',
@@ -83,7 +82,7 @@ export function usePDFData(serviceOrderId: string | undefined) {
           registration: (so.vessels as any).hull_id_or_registration ?? undefined,
         } : undefined,
         marina: so.marinas ? {
-          name: (so.marinas as any).marina_name,
+          name: (so.marinas as any).marina_name || '—',
           city: (so.marinas as any).city ?? undefined,
         } : undefined,
         services: ((so as any).service_order_services || []).map((s: any) => ({
