@@ -1321,6 +1321,18 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           <RecordHistory tableName="service_orders" recordId={orderId} />
         </section>
       )}
+
+      {/* PDF Options Dialog */}
+      <PDFOptionsDialog
+        open={!!pdfDialogType}
+        onOpenChange={v => { if (!v) setPdfDialogType(null); }}
+        documentType={pdfDialogType || 'quote'}
+        onGenerate={(options) => {
+          if (!pdfData || !pdfDialogType) return;
+          generatePDF({ ...pdfData, documentType: pdfDialogType }, options);
+          setPdfDialogType(null);
+        }}
+      />
     </div>
   );
 }
