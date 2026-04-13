@@ -15,7 +15,7 @@ interface Props {
   onGenerate: (options: PDFOptions) => void;
 }
 
-const OPTION_KEYS: Array<{ key: keyof PDFOptions; labelKey: keyof typeof import('@/i18n/en').en.pdf }> = [
+const OPTION_KEYS: Array<{ key: keyof PDFOptions; labelPtBr: string }> = [
   { key: 'showServicePrices', labelKey: 'showServicePrices' },
   { key: 'showPartsPrices', labelKey: 'showPartsPrices' },
   { key: 'showTravelCost', labelKey: 'showTravelCost' },

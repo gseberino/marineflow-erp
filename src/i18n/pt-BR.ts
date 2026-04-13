@@ -821,6 +821,25 @@ export const ptBR: TranslationKeys = {
     configMappingDesc: 'Configure o mapeamento de colunas manualmente',
   },
 
+  pdf: {
+    generateQuote: 'Gerar Orçamento',
+    generateOS: 'Gerar OS',
+    pdfOptions: 'Escolha o que incluir no documento',
+    itemsToShow: 'Itens a exibir',
+    showServicePrices: 'Preço unitário dos serviços',
+    showPartsPrices: 'Preço unitário das peças',
+    showTravelCost: 'Custo de deslocamento',
+    showDiscount: 'Desconto',
+    showTax: 'Impostos',
+    showCommission: 'Comissão e total líquido',
+    showTerms: 'Termos e condições',
+    showSignature: 'Campo de assinatura',
+    pdfHint: 'O PDF será aberto em uma nova aba. Use Ctrl+P (ou Cmd+P) e selecione "Salvar como PDF".',
+    generate: 'Gerar PDF',
+    quote: 'Orçamento',
+    serviceOrder: 'Ordem de Serviço',
+  },
+
   months: {
     jan: 'Jan',
     feb: 'Fev',

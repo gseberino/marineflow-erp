@@ -841,6 +841,25 @@ export const en = {
     configMappingDesc: 'Configure column mapping manually',
   },
 
+  pdf: {
+    generateQuote: 'Generate Quote',
+    generateOS: 'Generate SO',
+    pdfOptions: 'Choose what to include in the document',
+    itemsToShow: 'Items to display',
+    showServicePrices: 'Service unit prices',
+    showPartsPrices: 'Parts unit prices',
+    showTravelCost: 'Travel cost',
+    showDiscount: 'Discount',
+    showTax: 'Taxes',
+    showCommission: 'Commission & net total',
+    showTerms: 'Terms and conditions',
+    showSignature: 'Signature field',
+    pdfHint: 'The PDF will open in a new tab. Use Ctrl+P (or Cmd+P) and select "Save as PDF".',
+    generate: 'Generate PDF',
+    quote: 'Quote',
+    serviceOrder: 'Service Order',
+  },
+
   months: {
     jan: 'Jan',
     feb: 'Feb',
