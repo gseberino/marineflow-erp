@@ -86,10 +86,13 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
     queryFn: async () => {
       const { data } = await supabase
         .from('app_settings')
-        .select('*')
-        .limit(1)
-        .maybeSingle();
-      return data;
+        .select('key, value');
+      if (!data) return {};
+      const map: Record<string, any> = {};
+      for (const row of data) {
+        if (row.key) map[row.key] = row.value;
+      }
+      return map;
     },
   });
 

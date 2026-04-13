@@ -483,18 +483,22 @@ function FiscalTab() {
 
   useEffect(() => {
     (async () => {
-      const { data } = await supabase.from('app_settings').select('*').limit(1).maybeSingle();
+      const { data } = await supabase.from('app_settings').select('key, value');
       if (data) {
+        const map: Record<string, string> = {};
+        for (const row of data) {
+          if (row.key) map[row.key] = String(row.value || '');
+        }
         setFiscal({
-          simples_aliquota: (data as any).simples_aliquota ?? 6,
-          default_profit_margin: (data as any).default_profit_margin ?? 30,
-          default_commission_rate: (data as any).default_commission_rate ?? 0,
-          default_csosn: (data as any).default_csosn ?? '400',
-          default_fiscal_origin: (data as any).default_fiscal_origin ?? 0,
-          default_icms_rate: (data as any).default_icms_rate ?? 0,
-          default_ipi_rate: (data as any).default_ipi_rate ?? 0,
-          default_pis_rate: (data as any).default_pis_rate ?? 0,
-          default_cofins_rate: (data as any).default_cofins_rate ?? 0,
+          simples_aliquota: Number(map.simples_aliquota) || 6,
+          default_profit_margin: Number(map.default_profit_margin) || 30,
+          default_commission_rate: Number(map.default_commission_rate) || 0,
+          default_csosn: map.default_csosn || '400',
+          default_fiscal_origin: Number(map.default_fiscal_origin) || 0,
+          default_icms_rate: Number(map.default_icms_rate) || 0,
+          default_ipi_rate: Number(map.default_ipi_rate) || 0,
+          default_pis_rate: Number(map.default_pis_rate) || 0,
+          default_cofins_rate: Number(map.default_cofins_rate) || 0,
         });
       }
       setLoading(false);
@@ -504,16 +508,23 @@ function FiscalTab() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      // Upsert a single row with key 'fiscal_defaults'
-      await supabase.from('app_settings').upsert(
-        {
-          key: 'fiscal_defaults',
-          value: JSON.stringify(fiscal),
-          ...fiscal,
-        } as any,
-        { onConflict: 'key' }
-      );
-      toast.success(st.termsSaved || 'Salvo com sucesso');
+      const entries = [
+        ['simples_aliquota', String(fiscal.simples_aliquota)],
+        ['default_profit_margin', String(fiscal.default_profit_margin)],
+        ['default_commission_rate', String(fiscal.default_commission_rate)],
+        ['default_csosn', String(fiscal.default_csosn)],
+        ['default_fiscal_origin', String(fiscal.default_fiscal_origin)],
+        ['default_icms_rate', String(fiscal.default_icms_rate)],
+        ['default_ipi_rate', String(fiscal.default_ipi_rate)],
+        ['default_pis_rate', String(fiscal.default_pis_rate)],
+        ['default_cofins_rate', String(fiscal.default_cofins_rate)],
+      ];
+      for (const [key, value] of entries) {
+        await supabase
+          .from('app_settings')
+          .upsert({ key, value }, { onConflict: 'key' });
+      }
+      toast.success('Configurações fiscais salvas com sucesso');
     } catch (e: any) {
       toast.error(e.message || 'Erro');
     } finally {
