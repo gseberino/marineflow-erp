@@ -90,7 +90,6 @@ export default function SettingsPage() {
       <Tabs defaultValue={defaultTab}>
         <TabsList className="flex-wrap h-auto gap-1">
           <TabsTrigger value="company">{t.settings.tabCompany}</TabsTrigger>
-          <TabsTrigger value="travel">{t.settings.tabTravel}</TabsTrigger>
           <TabsTrigger value="users">{t.settings.tabUsers}</TabsTrigger>
           <TabsTrigger value="language">{t.settings.tabLanguage}</TabsTrigger>
           <TabsTrigger value="currency">{t.settings.tabCurrency}</TabsTrigger>
@@ -105,44 +104,7 @@ export default function SettingsPage() {
         </TabsList>
 
         <TabsContent value="company" className="mt-4 space-y-4">
-          <div className="rounded-xl border bg-card p-6 shadow-sm max-w-2xl">
-            <h3 className="text-sm font-semibold mb-4 flex items-center gap-2"><MapPin className="h-4 w-4" /> {t.settings.companyInfo}</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div><label className="text-xs font-medium text-muted-foreground">{t.settings.companyName}</label><Input defaultValue="NautiTech Marine Services" className="mt-1" /></div>
-              <div><label className="text-xs font-medium text-muted-foreground">{t.settings.cnpj}</label><Input defaultValue="11.222.333/0001-44" className="mt-1" /></div>
-              <div className="md:col-span-2"><label className="text-xs font-medium text-muted-foreground">{t.settings.baseAddress}</label><Input defaultValue="Av. Brasil, 500 - Centro, Rio de Janeiro, RJ" className="mt-1" /></div>
-              <div><label className="text-xs font-medium text-muted-foreground">{t.settings.latitude}</label><Input defaultValue="-22.9068" className="mt-1" /></div>
-              <div><label className="text-xs font-medium text-muted-foreground">{t.settings.longitude}</label><Input defaultValue="-43.1729" className="mt-1" /></div>
-              <div><label className="text-xs font-medium text-muted-foreground">{t.settings.phone}</label><Input defaultValue="+55 21 3000-0000" className="mt-1" /></div>
-              <div><label className="text-xs font-medium text-muted-foreground">{t.settings.email}</label><Input defaultValue="contact@nautitech.com" className="mt-1" /></div>
-            </div>
-            <Button className="mt-6 bg-accent text-accent-foreground hover:bg-accent/90">{t.common.saveChanges}</Button>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="travel" className="mt-4 space-y-4">
-          <div className="rounded-xl border bg-card p-6 shadow-sm max-w-2xl">
-            <h3 className="text-sm font-semibold mb-4 flex items-center gap-2"><DollarSign className="h-4 w-4" /> {t.settings.travelSettings}</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div><label className="text-xs font-medium text-muted-foreground">{t.settings.defaultCostPerKm}</label><Input type="number" defaultValue="3.50" className="mt-1" /></div>
-              <div><label className="text-xs font-medium text-muted-foreground">{t.settings.defaultHourlyRate}</label><Input type="number" defaultValue="150" className="mt-1" /></div>
-            </div>
-            <div className="mt-4 space-y-3">
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" defaultChecked className="rounded border-input" />
-                {t.settings.multiplyByTechnicians}
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" className="rounded border-input" />
-                {t.settings.roundTrip}
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" defaultChecked className="rounded border-input" />
-                {t.settings.allowManualOverride}
-              </label>
-            </div>
-            <Button className="mt-6 bg-accent text-accent-foreground hover:bg-accent/90">{t.common.saveSettings}</Button>
-          </div>
+          <CompanyTab />
         </TabsContent>
 
         <TabsContent value="users" className="mt-4 space-y-4">
@@ -320,6 +282,184 @@ export default function SettingsPage() {
           <FiscalTab />
         </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+function CompanyTab() {
+  const { t } = useI18n();
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState({
+    company_name: '',
+    cnpj: '',
+    address_line_1: '',
+    address_number: '',
+    neighborhood: '',
+    city: '',
+    state: '',
+    postal_code: '',
+    phone: '',
+    email: '',
+    base_latitude: '-26.9189',
+    base_longitude: '-48.6728',
+    cost_per_km: '3.50',
+    default_hourly_rate: '150',
+  });
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from('app_settings')
+        .select('key, value');
+      if (data) {
+        const map: Record<string, string> = {};
+        for (const row of data) {
+          if (row.key && row.value !== null) map[row.key] = String(row.value);
+        }
+        setForm(prev => ({
+          ...prev,
+          company_name: map.company_name || '',
+          cnpj: map.cnpj || '',
+          address_line_1: map.address_line_1 || '',
+          address_number: map.address_number || '',
+          neighborhood: map.neighborhood || '',
+          city: map.city || '',
+          state: map.state || '',
+          postal_code: map.postal_code || '',
+          phone: map.phone || '',
+          email: map.email || '',
+          base_latitude: map.base_latitude || '-26.9189',
+          base_longitude: map.base_longitude || '-48.6728',
+          cost_per_km: map.cost_per_km || '3.50',
+          default_hourly_rate: map.default_hourly_rate || '150',
+        }));
+      }
+      setLoading(false);
+    })();
+  }, []);
+
+  const set = (key: string, value: string) =>
+    setForm(prev => ({ ...prev, [key]: value }));
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const entries = Object.entries(form);
+      for (const [key, value] of entries) {
+        await supabase
+          .from('app_settings')
+          .upsert({ key, value: String(value) }, { onConflict: 'key' });
+      }
+      toast.success('Configurações salvas com sucesso');
+    } catch (e: any) {
+      toast.error(e.message || 'Erro ao salvar');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) return <p className="text-sm text-muted-foreground">{t.common.loading}</p>;
+
+  return (
+    <div className="space-y-6 max-w-2xl">
+      <div className="rounded-xl border bg-card p-6 shadow-sm">
+        <h3 className="text-sm font-semibold mb-4 flex items-center gap-2">
+          <MapPin className="h-4 w-4" /> Dados da Empresa
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Nome da Empresa *</label>
+            <Input value={form.company_name} onChange={e => set('company_name', e.target.value)}
+              placeholder="HBR Consultoria Náutica" className="mt-1" />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">CNPJ</label>
+            <Input value={form.cnpj} onChange={e => set('cnpj', e.target.value)}
+              placeholder="00.000.000/0001-00" maxLength={18} className="mt-1" />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Telefone</label>
+            <Input value={form.phone} onChange={e => set('phone', e.target.value)}
+              placeholder="(47) 99999-9999" className="mt-1" />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">E-mail</label>
+            <Input value={form.email} onChange={e => set('email', e.target.value)}
+              placeholder="contato@empresa.com.br" type="email" className="mt-1" />
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-xl border bg-card p-6 shadow-sm">
+        <h3 className="text-sm font-semibold mb-4 flex items-center gap-2">
+          <MapPin className="h-4 w-4" /> Endereço
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Logradouro</label>
+            <Input value={form.address_line_1} onChange={e => set('address_line_1', e.target.value)}
+              placeholder="Rua das Palmeiras" className="mt-1" />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Número</label>
+            <Input value={form.address_number} onChange={e => set('address_number', e.target.value)}
+              placeholder="123" className="mt-1" />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Bairro</label>
+            <Input value={form.neighborhood} onChange={e => set('neighborhood', e.target.value)}
+              placeholder="Centro" className="mt-1" />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">CEP</label>
+            <Input value={form.postal_code} onChange={e => set('postal_code', e.target.value)}
+              placeholder="88000-000" maxLength={9} className="mt-1" />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Cidade</label>
+            <Input value={form.city} onChange={e => set('city', e.target.value)}
+              placeholder="Itajaí" className="mt-1" />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Estado</label>
+            <Input value={form.state} onChange={e => set('state', e.target.value)}
+              placeholder="SC" maxLength={2} className="mt-1" />
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-xl border bg-card p-6 shadow-sm">
+        <h3 className="text-sm font-semibold mb-4 flex items-center gap-2">
+          <DollarSign className="h-4 w-4" /> Parâmetros Operacionais
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Latitude base (para cálculo de deslocamento)</label>
+            <Input value={form.base_latitude} onChange={e => set('base_latitude', e.target.value)}
+              placeholder="-26.9189" className="mt-1" />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Longitude base</label>
+            <Input value={form.base_longitude} onChange={e => set('base_longitude', e.target.value)}
+              placeholder="-48.6728" className="mt-1" />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Custo por km (R$)</label>
+            <Input type="number" step="0.01" value={form.cost_per_km}
+              onChange={e => set('cost_per_km', e.target.value)} className="mt-1" />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Taxa horária padrão (R$)</label>
+            <Input type="number" step="0.01" value={form.default_hourly_rate}
+              onChange={e => set('default_hourly_rate', e.target.value)} className="mt-1" />
+          </div>
+        </div>
+      </div>
+
+      <Button onClick={handleSave} disabled={saving} className="bg-accent text-accent-foreground hover:bg-accent/90">
+        {saving ? 'Salvando...' : 'Salvar Configurações'}
+      </Button>
     </div>
   );
 }
