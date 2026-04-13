@@ -126,17 +126,15 @@ export function useAdjustStock() {
         .eq('id', input.product_id);
       if (uErr) throw uErr;
 
-      const insertData: Record<string, any> = {
-        product_id: input.product_id,
-        movement_type: 'manual_adjustment',
-        quantity_delta: delta,
-        reference_type: 'manual_adjustment',
-        notes: input.reason + (input.notes ? ': ' + input.notes : ''),
-      };
-
       const { error: mErr } = await supabase
         .from('inventory_movements')
-        .insert(insertData);
+        .insert({
+          product_id: input.product_id,
+          movement_type: 'manual_adjustment',
+          quantity_delta: delta,
+          reference_type: 'manual_adjustment',
+          notes: input.reason + (input.notes ? ': ' + input.notes : ''),
+        } as any);
 
       if (mErr) {
         // Fallback without notes if column issue
@@ -193,18 +191,16 @@ export function useAddStockEntry() {
         .eq('id', input.product_id);
       if (uErr) throw uErr;
 
-      const insertData: Record<string, any> = {
-        product_id: input.product_id,
-        movement_type: 'manual_add',
-        quantity_delta: input.quantity,
-        unit_cost_snapshot: input.unit_cost ?? null,
-        reference_type: 'manual_entry',
-        notes: input.notes || null,
-      };
-
       const { error: mErr } = await supabase
         .from('inventory_movements')
-        .insert(insertData);
+        .insert({
+          product_id: input.product_id,
+          movement_type: 'manual_add',
+          quantity_delta: input.quantity,
+          unit_cost_snapshot: input.unit_cost ?? null,
+          reference_type: 'manual_entry',
+          notes: input.notes || null,
+        } as any);
 
       if (mErr) {
         const { error: mErr2 } = await supabase
