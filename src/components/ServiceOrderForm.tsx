@@ -173,6 +173,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [showReopenDialog, setShowReopenDialog] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [reopenReason, setReopenReason] = useState('');
+  const [pdfDialogType, setPdfDialogType] = useState<'quote' | 'service_order' | null>(null);
 
   useEffect(() => {
     if (orderData) {
