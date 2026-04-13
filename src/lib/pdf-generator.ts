@@ -96,17 +96,45 @@ export type PDFData = {
 
 export function generatePDF(data: PDFData, options: PDFOptions): void {
   const html = buildHTMLDocument(data, options);
-  const win = window.open('', '_blank', 'width=800,height=600');
-  if (!win) {
-    alert('Por favor, permita popups para gerar o PDF.');
+
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0';
+  iframe.style.bottom = '0';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = '0';
+  iframe.style.visibility = 'hidden';
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentWindow?.document;
+  if (!doc) {
+    document.body.removeChild(iframe);
+    const win = window.open('', '_blank');
+    if (win) {
+      win.document.write(html);
+      win.document.close();
+      setTimeout(() => win.print(), 400);
+    }
     return;
   }
-  win.document.write(html);
-  win.document.close();
-  win.focus();
-  setTimeout(() => {
-    win.print();
-  }, 500);
+
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  iframe.onload = () => {
+    setTimeout(() => {
+      try {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+      } finally {
+        setTimeout(() => {
+          document.body.removeChild(iframe);
+        }, 1000);
+      }
+    }, 300);
+  };
 }
 
 function buildHTMLDocument(data: PDFData, options: PDFOptions): string {
