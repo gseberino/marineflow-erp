@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import { useI18n } from '@/i18n';
 import { KPICard } from '@/components/KPICard';
@@ -26,7 +26,7 @@ import {
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import {
-  Package, TrendingDown, AlertTriangle, Plus, DollarSign,
+  Package, TrendingDown, AlertTriangle, Plus, DollarSign, ChevronUp, ChevronDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -50,14 +50,35 @@ const REASONS = [
   'Produto vencido', 'Correção de erro de lançamento', 'Outro',
 ];
 
+// ── Sort Icon ─────────────────────────────────────────────
+function SortIcon({ field, sortField, sortDir }: { field: string; sortField: string; sortDir: 'asc' | 'desc' }) {
+  if (sortField !== field) return <span className="text-muted-foreground/40 text-xs">↕</span>;
+  return sortDir === 'asc'
+    ? <ChevronUp className="h-3 w-3 text-primary" />
+    : <ChevronDown className="h-3 w-3 text-primary" />;
+}
+
 // ── Main Page ─────────────────────────────────────────────
 export default function InventoryPage() {
   const { t, formatCurrency } = useI18n();
   const [tab, setTab] = useState('overview');
 
   // ── Filters ──
+  const [activeKpi, setActiveKpi] = useState<string>('all');
   const [prodFilters, setProdFilters] = useState<InventoryProductFilters>({ stockStatus: 'all' });
   const [movFilters, setMovFilters] = useState<MovementFilters>({});
+
+  // ── Sort ──
+  const [sortField, setSortField] = useState<string>('product_name');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const toggleSort = (field: string) => {
+    if (sortField === field) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDir('asc');
+    }
+  };
 
   // ── Data ──
   const { data: overview, isLoading: loadingOverview } = useInventoryOverview();
@@ -76,6 +97,31 @@ export default function InventoryPage() {
     const set = new Set(allProducts.filter(p => p.category).map(p => p.category!));
     return Array.from(set).sort();
   }, [allProducts]);
+
+  // ── Sorted products ──
+  const sortedProducts = useMemo(() => {
+    if (!products) return [];
+    return [...products].sort((a, b) => {
+      let aVal: any, bVal: any;
+      if (sortField === 'status') {
+        const getStatus = (p: any) => {
+          if ((p.stock_quantity ?? 0) === 0) return 0;
+          if ((p.stock_quantity ?? 0) < (p.minimum_stock ?? 0)) return 1;
+          return 2;
+        };
+        aVal = getStatus(a); bVal = getStatus(b);
+      } else {
+        aVal = (a as any)[sortField] ?? '';
+        bVal = (b as any)[sortField] ?? '';
+      }
+      if (typeof aVal === 'string') {
+        return sortDir === 'asc'
+          ? aVal.localeCompare(bVal, 'pt-BR')
+          : bVal.localeCompare(aVal, 'pt-BR');
+      }
+      return sortDir === 'asc' ? aVal - bVal : bVal - aVal;
+    });
+  }, [products, sortField, sortDir]);
 
   // ── Filtered totals ──
   const filteredValue = useMemo(() =>
@@ -96,6 +142,24 @@ export default function InventoryPage() {
     return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   };
 
+  // ── KPI click handler ──
+  const handleKpiClick = (kpi: string) => {
+    if (kpi === activeKpi) {
+      setActiveKpi('all');
+      setProdFilters(p => ({ ...p, stockStatus: 'all' }));
+    } else {
+      setActiveKpi(kpi);
+      setProdFilters(p => ({ ...p, stockStatus: kpi as any }));
+    }
+    setTab('overview');
+  };
+
+  const kpiRing = (kpi: string) =>
+    activeKpi === kpi ? 'ring-2 ring-primary ring-offset-2' : '';
+
+  const kpiHint = (kpi: string, filterLabel: string) =>
+    activeKpi === kpi ? 'Filtro ativo — clique para limpar' : filterLabel;
+
   return (
     <div className="space-y-4 animate-fade-in">
       <PageHeader title={t.inventory.title} description={t.inventory.description}>
@@ -104,32 +168,55 @@ export default function InventoryPage() {
         </Button>
       </PageHeader>
 
-      {/* KPI Cards */}
+      {/* KPI Cards — clickable filters */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {loadingOverview ? (
           Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)
         ) : (
           <>
-            <KPICard title={t.inventory.totalProducts} value={String(overview?.total_products ?? 0)} icon={Package} />
-            <KPICard
-              title={t.inventory.lowStockCount}
-              value={String(overview?.low_stock_count ?? 0)}
-              subtitle={t.inventory.belowMinimum}
-              icon={AlertTriangle}
-              className={(overview?.low_stock_count ?? 0) > 0 ? 'border-amber-300 bg-amber-50/50 dark:bg-amber-950/20' : ''}
-            />
-            <KPICard
-              title={t.inventory.outOfStock}
-              value={String(overview?.out_of_stock_count ?? 0)}
-              icon={TrendingDown}
-              className={(overview?.out_of_stock_count ?? 0) > 0 ? 'border-destructive/50 bg-destructive/5' : ''}
-            />
-            <KPICard
-              title={t.inventory.totalValue}
-              value={formatCurrency(overview?.total_stock_value ?? 0)}
-              subtitle={t.inventory.costTotal}
-              icon={DollarSign}
-            />
+            <div
+              className={`cursor-pointer transition-all ${kpiRing('all')}`}
+              onClick={() => handleKpiClick('all')}
+            >
+              <KPICard
+                title={t.inventory.totalProducts}
+                value={String(overview?.total_products ?? 0)}
+                subtitle={kpiHint('all', 'Clique para ver todos')}
+                icon={Package}
+              />
+            </div>
+            <div
+              className={`cursor-pointer transition-all ${kpiRing('low')}`}
+              onClick={() => handleKpiClick('low')}
+            >
+              <KPICard
+                title={t.inventory.lowStockCount}
+                value={String(overview?.low_stock_count ?? 0)}
+                subtitle={kpiHint('low', 'Clique para filtrar')}
+                icon={AlertTriangle}
+                className={(overview?.low_stock_count ?? 0) > 0 ? 'border-amber-300 bg-amber-50/50 dark:bg-amber-950/20' : ''}
+              />
+            </div>
+            <div
+              className={`cursor-pointer transition-all ${kpiRing('out')}`}
+              onClick={() => handleKpiClick('out')}
+            >
+              <KPICard
+                title={t.inventory.outOfStock}
+                value={String(overview?.out_of_stock_count ?? 0)}
+                subtitle={kpiHint('out', 'Clique para filtrar')}
+                icon={TrendingDown}
+                className={(overview?.out_of_stock_count ?? 0) > 0 ? 'border-destructive/50 bg-destructive/5' : ''}
+              />
+            </div>
+            <div>
+              <KPICard
+                title={t.inventory.totalValue}
+                value={formatCurrency(overview?.total_stock_value ?? 0)}
+                subtitle={t.inventory.costTotal}
+                icon={DollarSign}
+              />
+            </div>
           </>
         )}
       </div>
@@ -143,7 +230,7 @@ export default function InventoryPage() {
 
         {/* ── Tab 1: Overview ── */}
         <TabsContent value="overview" className="space-y-4">
-          {/* Filters */}
+          {/* Filters — search + category only */}
           <div className="flex flex-wrap gap-3 items-center">
             <Input
               placeholder="Buscar produto, SKU..."
@@ -151,18 +238,6 @@ export default function InventoryPage() {
               value={prodFilters.search || ''}
               onChange={e => setProdFilters(p => ({ ...p, search: e.target.value }))}
             />
-            <div className="flex gap-1">
-              {(['all', 'ok', 'low', 'out'] as const).map(s => (
-                <Button
-                  key={s}
-                  size="sm"
-                  variant={prodFilters.stockStatus === s ? 'default' : 'outline'}
-                  onClick={() => setProdFilters(p => ({ ...p, stockStatus: s }))}
-                >
-                  {s === 'all' ? 'Todos' : s === 'ok' ? t.inventory.stockOk : s === 'low' ? t.inventory.stockLow : t.inventory.stockOut}
-                </Button>
-              ))}
-            </div>
             {categories.length > 0 && (
               <Select
                 value={prodFilters.category || '__all'}
@@ -177,19 +252,32 @@ export default function InventoryPage() {
             )}
           </div>
 
-          {/* Products table */}
+          {/* Products table with sortable headers */}
           <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/50">
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">Produto</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">SKU</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">Categoria</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">Local</th>
-                  <th className="px-4 py-3 text-right font-medium text-muted-foreground hidden md:table-cell">Custo</th>
-                  <th className="px-4 py-3 text-center font-medium text-muted-foreground">Estoque</th>
-                  <th className="px-4 py-3 text-center font-medium text-muted-foreground hidden sm:table-cell">Mín.</th>
-                  <th className="px-4 py-3 text-center font-medium text-muted-foreground">{t.common.status}</th>
+                  {([
+                    { label: 'Produto', field: 'product_name', align: 'text-left', hide: '' },
+                    { label: 'SKU', field: 'sku', align: 'text-left', hide: 'hidden md:table-cell' },
+                    { label: 'Categoria', field: 'category', align: 'text-left', hide: 'hidden lg:table-cell' },
+                    { label: 'Local', field: 'location_bin', align: 'text-left', hide: 'hidden lg:table-cell' },
+                    { label: 'Custo', field: 'cost_price', align: 'text-right', hide: 'hidden md:table-cell' },
+                    { label: 'Estoque', field: 'stock_quantity', align: 'text-center', hide: '' },
+                    { label: 'Mín.', field: 'minimum_stock', align: 'text-center', hide: 'hidden sm:table-cell' },
+                    { label: 'Status', field: 'status', align: 'text-center', hide: '' },
+                  ] as const).map(col => (
+                    <th
+                      key={col.field}
+                      onClick={() => toggleSort(col.field)}
+                      className={`px-4 py-3 ${col.align} font-medium text-muted-foreground cursor-pointer select-none hover:bg-muted/50 transition-colors ${col.hide}`}
+                    >
+                      <div className={`flex items-center gap-1 ${col.align === 'text-right' ? 'justify-end' : col.align === 'text-center' ? 'justify-center' : ''}`}>
+                        {col.label}
+                        <SortIcon field={col.field} sortField={sortField} sortDir={sortDir} />
+                      </div>
+                    </th>
+                  ))}
                   <th className="px-4 py-3 text-right font-medium text-muted-foreground">{t.common.actions}</th>
                 </tr>
               </thead>
@@ -198,10 +286,10 @@ export default function InventoryPage() {
                   Array.from({ length: 5 }).map((_, i) => (
                     <tr key={i} className="border-b"><td colSpan={9} className="p-3"><Skeleton className="h-8 w-full" /></td></tr>
                   ))
-                ) : !products?.length ? (
+                ) : !sortedProducts.length ? (
                   <tr><td colSpan={9} className="text-center py-10 text-muted-foreground">{t.common.noResults}</td></tr>
                 ) : (
-                  products.map(p => {
+                  sortedProducts.map(p => {
                     const qty = p.stock_quantity ?? 0;
                     const min = p.minimum_stock ?? 0;
                     const isOut = qty === 0;
@@ -240,9 +328,9 @@ export default function InventoryPage() {
                 )}
               </tbody>
             </table>
-            {products && products.length > 0 && (
+            {sortedProducts.length > 0 && (
               <div className="flex items-center justify-between px-4 py-3 border-t bg-muted/30 text-xs text-muted-foreground">
-                <span>{products.length} produtos</span>
+                <span>{sortedProducts.length} produtos</span>
                 <span>{t.inventory.filteredValue}: {formatCurrency(filteredValue)}</span>
               </div>
             )}
@@ -382,17 +470,24 @@ function AdjustStockDialog({ product, onClose, formatCurrency }: {
   const current = product?.stock_quantity ?? 0;
   const delta = newQty - current;
 
-  // Reset on open
-  const handleOpenChange = (v: boolean) => {
-    if (!v) onClose();
-  };
-
-  // Sync newQty when product changes
-  if (product && newQty !== current && reason === '' && notes === '') {
-    setNewQty(current);
-  }
+  // Reset on product change
+  useEffect(() => {
+    if (product) {
+      setNewQty(product.stock_quantity ?? 0);
+      setReason('');
+      setNotes('');
+    }
+  }, [product]);
 
   const handleSubmit = async () => {
+    if (delta === 0) {
+      toast.error('A quantidade não foi alterada. Modifique o valor antes de confirmar.');
+      return;
+    }
+    if (!reason) {
+      toast.error('Selecione o motivo do ajuste antes de confirmar.');
+      return;
+    }
     try {
       await adjust.mutateAsync({
         product_id: product.id,
@@ -401,16 +496,14 @@ function AdjustStockDialog({ product, onClose, formatCurrency }: {
         notes: notes || undefined,
       });
       toast.success('Estoque ajustado com sucesso');
-      setReason('');
-      setNotes('');
       onClose();
-    } catch {
-      toast.error('Erro ao ajustar estoque');
+    } catch (err: any) {
+      toast.error('Erro ao ajustar estoque: ' + (err?.message || 'Tente novamente'));
     }
   };
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
+    <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Ajustar Estoque</DialogTitle>
@@ -442,7 +535,7 @@ function AdjustStockDialog({ product, onClose, formatCurrency }: {
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={onClose}>Cancelar</Button>
-            <Button onClick={handleSubmit} disabled={delta === 0 || !reason || adjust.isPending}>
+            <Button onClick={handleSubmit} disabled={adjust.isPending}>
               {adjust.isPending ? 'Salvando...' : 'Confirmar Ajuste'}
             </Button>
           </div>
