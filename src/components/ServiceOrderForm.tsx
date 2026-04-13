@@ -458,7 +458,19 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             </div>
           )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
+          {!isNew && (
+            <>
+              <Button variant="outline" size="sm" onClick={() => setPdfDialogType('quote')} className="gap-1">
+                <FileText className="h-4 w-4" />
+                {t.pdf.quote}
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setPdfDialogType('service_order')} className="gap-1">
+                <Printer className="h-4 w-4" />
+                OS
+              </Button>
+            </>
+          )}
           {!isNew && !isLocked && currentStatus !== 'cancelled' && (
             <Button variant="outline" size="sm" className="text-destructive" onClick={() => setShowCancelDialog(true)}>
               <Ban className="h-4 w-4 mr-1" /> {t.serviceOrders.cancelOS}
