@@ -1332,6 +1332,7 @@ export type Database = {
           diagnosis: string | null
           discount_amount: number | null
           estimated_hours: number | null
+          extra_notes: string | null
           grand_total: number | null
           hourly_rate: number | null
           id: string
@@ -1382,6 +1383,7 @@ export type Database = {
           diagnosis?: string | null
           discount_amount?: number | null
           estimated_hours?: number | null
+          extra_notes?: string | null
           grand_total?: number | null
           hourly_rate?: number | null
           id?: string
@@ -1432,6 +1434,7 @@ export type Database = {
           diagnosis?: string | null
           discount_amount?: number | null
           estimated_hours?: number | null
+          extra_notes?: string | null
           grand_total?: number | null
           hourly_rate?: number | null
           id?: string
