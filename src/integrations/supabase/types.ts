@@ -379,6 +379,7 @@ export type Database = {
       }
       inventory_movements: {
         Row: {
+          adjusted_by: string | null
           created_at: string
           created_by: string | null
           id: string
@@ -391,6 +392,7 @@ export type Database = {
           unit_cost_snapshot: number | null
         }
         Insert: {
+          adjusted_by?: string | null
           created_at?: string
           created_by?: string | null
           id?: string
@@ -403,6 +405,7 @@ export type Database = {
           unit_cost_snapshot?: number | null
         }
         Update: {
+          adjusted_by?: string | null
           created_at?: string
           created_by?: string | null
           id?: string
