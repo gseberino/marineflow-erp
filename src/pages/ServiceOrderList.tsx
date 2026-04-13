@@ -8,14 +8,27 @@ import { statusConfig, priorityConfig } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Plus, Search, Filter, ClipboardList } from 'lucide-react';
+import { Plus, Search, Filter, ClipboardList, MoreHorizontal, FileText, Printer } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { PDFOptionsDialog } from '@/components/PDFOptionsDialog';
+import { usePDFData } from '@/hooks/use-pdf';
+import { generatePDF, type PDFOptions } from '@/lib/pdf-generator';
 
 export default function ServiceOrderList() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const { t, formatCurrency, formatDate } = useI18n();
   const { data: orders, isLoading, error } = useServiceOrders();
+
+  const [pdfTarget, setPdfTarget] = useState<{ id: string; type: 'quote' | 'service_order' } | null>(null);
+  const { data: pdfData } = usePDFData(pdfTarget?.id);
+
+  const handleGeneratePDF = (options: PDFOptions) => {
+    if (!pdfData || !pdfTarget) return;
+    generatePDF({ ...pdfData, documentType: pdfTarget.type }, options);
+    setPdfTarget(null);
+  };
 
   const filtered = (orders || []).filter((so: any) => {
     const clientName = so.clients?.full_name_or_company_name || '';
@@ -89,6 +102,7 @@ export default function ServiceOrderList() {
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">{t.common.type}</th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">{t.serviceOrders.scheduled}</th>
                   <th className="px-4 py-3 text-right font-medium text-muted-foreground">{t.common.total}</th>
+                  <th className="px-4 py-3 w-10"></th>
                 </tr>
               </thead>
               <tbody>
@@ -96,7 +110,7 @@ export default function ServiceOrderList() {
                   const sc = statusConfig[so.status as keyof typeof statusConfig];
                   const pc = priorityConfig[so.priority as keyof typeof priorityConfig];
                   return (
-                    <tr key={so.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors cursor-pointer">
+                    <tr key={so.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
                       <td className="px-4 py-3">
                         <Link to={`/service-orders/${so.id}`} className="font-medium text-accent hover:underline">{so.service_order_number}</Link>
                       </td>
@@ -115,17 +129,53 @@ export default function ServiceOrderList() {
                         {so.scheduled_start_at ? formatDate(so.scheduled_start_at) : '—'}
                       </td>
                       <td className="px-4 py-3 text-right font-semibold">{formatCurrency(so.grand_total || 0)}</td>
+                      <td className="px-4 py-3">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem asChild>
+                              <Link to={`/service-orders/${so.id}`}>Abrir</Link>
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              onClick={() => setPdfTarget({ id: so.id, type: 'quote' })}
+                              className="gap-2"
+                            >
+                              <FileText className="h-4 w-4" />
+                              Imprimir Orçamento
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => setPdfTarget({ id: so.id, type: 'service_order' })}
+                              className="gap-2"
+                            >
+                              <Printer className="h-4 w-4" />
+                              Imprimir OS
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </td>
                     </tr>
                   );
                 })}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">{t.common.noResults}</td></tr>
+                  <tr><td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">{t.common.noResults}</td></tr>
                 )}
               </tbody>
             </table>
           </div>
         </div>
       )}
+
+      <PDFOptionsDialog
+        open={!!pdfTarget}
+        onOpenChange={v => { if (!v) setPdfTarget(null); }}
+        documentType={pdfTarget?.type || 'quote'}
+        onGenerate={handleGeneratePDF}
+      />
     </div>
   );
 }
