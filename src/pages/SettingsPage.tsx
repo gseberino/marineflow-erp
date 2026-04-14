@@ -109,26 +109,7 @@ export default function SettingsPage() {
         </TabsContent>
 
         <TabsContent value="users" className="mt-4 space-y-4">
-          <div className="rounded-xl border bg-card p-6 shadow-sm">
-            <h3 className="text-sm font-semibold mb-4 flex items-center gap-2"><Users className="h-4 w-4" /> {t.settings.teamMembers}</h3>
-            <p className="text-sm text-muted-foreground mb-4">{t.settings.userManagementNote}</p>
-            <div className="space-y-3">
-              {[
-                { name: 'Carlos Mendes', role: 'admin', email: 'carlos@nautitech.com' },
-                { name: 'Ricardo Silva', role: 'technician', email: 'ricardo@nautitech.com' },
-                { name: 'André Costa', role: 'technician', email: 'andre@nautitech.com' },
-                { name: 'Fernanda Lima', role: 'financial', email: 'fernanda@nautitech.com' },
-              ].map(u => (
-                <div key={u.email} className="flex items-center justify-between p-3 rounded-lg bg-muted/50 border">
-                  <div>
-                    <p className="text-sm font-medium">{u.name}</p>
-                    <p className="text-xs text-muted-foreground">{u.email}</p>
-                  </div>
-                  <span className="text-xs font-medium px-2 py-1 rounded bg-primary/10 text-primary">{(t.roles as Record<string, string>)[u.role]}</span>
-                </div>
-              ))}
-            </div>
-          </div>
+          <UsersTab />
         </TabsContent>
 
         <TabsContent value="language" className="mt-4 space-y-4">
