@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useCardFees, useUpdateCardFee } from '@/hooks/use-card-fees';
 import { useFinancialCategories, useCreateFinancialCategory, useUpdateFinancialCategory } from '@/hooks/use-financial-categories';
 import { useAllProductCategories, useCreateProductCategory, useUpdateProductCategory } from '@/hooks/use-product-categories';
+import { useAppUsers as useAppUsersHook, useCreateAppUser, useUpdateAppUser, USER_ROLES } from '@/hooks/use-app-users';
 import { Switch } from '@/components/ui/switch';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
