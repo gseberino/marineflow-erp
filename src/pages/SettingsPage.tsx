@@ -906,3 +906,110 @@ function ProductCategoriesTab() {
     </div>
   );
 }
+
+function UsersTab() {
+  const { t } = useI18n();
+  const { data: users, isLoading } = useAppUsersHook();
+  const createUser = useCreateAppUser();
+  const updateUser = useUpdateAppUser();
+  const [showNew, setShowNew] = useState(false);
+  const [newForm, setNewForm] = useState({
+    full_name: '', email: '', role: 'technician', phone: '',
+  });
+
+  const handleCreate = async () => {
+    if (!newForm.full_name || !newForm.email) {
+      toast.error('Nome e email são obrigatórios'); return;
+    }
+    try {
+      await createUser.mutateAsync(newForm);
+      setShowNew(false);
+      setNewForm({ full_name: '', email: '', role: 'technician', phone: '' });
+      toast.success('Usuário criado com sucesso');
+    } catch (e: any) { toast.error(e.message || 'Erro'); }
+  };
+
+  if (isLoading) return <p className="text-sm text-muted-foreground">{t.common.loading}</p>;
+
+  return (
+    <div className="space-y-4 max-w-3xl">
+      <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm">
+        <Users className="h-4 w-4 inline mr-1.5 text-primary" />
+        Cadastre técnicos, vendedores e outros membros da equipe. Eles aparecerão como opções nas OS.
+      </div>
+
+      <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b bg-muted/50">
+              <th className="px-4 py-2 text-left font-medium text-muted-foreground">Nome</th>
+              <th className="px-4 py-2 text-left font-medium text-muted-foreground">Email</th>
+              <th className="px-4 py-2 text-left font-medium text-muted-foreground">Função</th>
+              <th className="px-4 py-2 text-left font-medium text-muted-foreground">Telefone</th>
+              <th className="px-4 py-2 text-center font-medium text-muted-foreground">{t.common.active}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(users || []).map(u => (
+              <tr key={u.id} className="border-b last:border-0 hover:bg-muted/30">
+                <td className="px-4 py-2 font-medium">{u.full_name}</td>
+                <td className="px-4 py-2 text-muted-foreground">{u.email}</td>
+                <td className="px-4 py-2">
+                  <span className="text-xs font-medium px-2 py-1 rounded bg-primary/10 text-primary">
+                    {USER_ROLES.find(r => r.value === u.role)?.label || u.role}
+                  </span>
+                </td>
+                <td className="px-4 py-2 text-muted-foreground">{u.phone || '—'}</td>
+                <td className="px-4 py-2 text-center">
+                  <Switch checked={u.active} onCheckedChange={v => updateUser.mutate({ id: u.id, active: v })} />
+                </td>
+              </tr>
+            ))}
+            {(users || []).length === 0 && (
+              <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">Nenhum usuário cadastrado ainda</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <p className="text-xs text-muted-foreground">{(users || []).length} usuários</p>
+
+      {showNew ? (
+        <div className="rounded-xl border bg-card p-4 shadow-sm space-y-3">
+          <h4 className="text-sm font-semibold">Novo Usuário</h4>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Nome *</label>
+              <Input value={newForm.full_name} onChange={e => setNewForm(p => ({ ...p, full_name: e.target.value }))} className="mt-1" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Email *</label>
+              <Input value={newForm.email} onChange={e => setNewForm(p => ({ ...p, email: e.target.value }))} className="mt-1" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Telefone</label>
+              <Input value={newForm.phone} onChange={e => setNewForm(p => ({ ...p, phone: e.target.value }))} className="mt-1" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Função</label>
+              <Select value={newForm.role} onValueChange={v => setNewForm(p => ({ ...p, role: v }))}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {USER_ROLES.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" onClick={handleCreate} disabled={createUser.isPending}>Salvar</Button>
+            <Button size="sm" variant="ghost" onClick={() => setShowNew(false)}>{t.common.cancel}</Button>
+          </div>
+        </div>
+      ) : (
+        <Button variant="outline" size="sm" onClick={() => setShowNew(true)}>
+          + Novo Usuário
+        </Button>
+      )}
+    </div>
+  );
+}
