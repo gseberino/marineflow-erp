@@ -872,7 +872,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div>
-              <Label>{t.serviceOrders.distanceKm}</Label>
+              <Label>{t.serviceOrders.distance}</Label>
               <Input type="number" value={form.travel_distance_km}
                 onChange={(e) => {
                   const km = parseFloat(e.target.value) || 0;
@@ -883,7 +883,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 }} />
             </div>
             <div>
-              <Label>{t.serviceOrders.costPerKm}</Label>
+              <Label>Custo/km</Label>
               <Input type="number" value={form.travel_cost_per_km}
                 onChange={(e) => {
                   const cpk = parseFloat(e.target.value) || 0;
@@ -894,7 +894,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 }} />
             </div>
             <div>
-              <Label>{t.serviceOrders.technicianCount}</Label>
+              <Label>{t.serviceOrders.technicians}</Label>
               <Input type="number" min={1} value={form.technician_count_for_travel}
                 onChange={(e) => {
                   const count = parseInt(e.target.value) || 1;
@@ -906,7 +906,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             </div>
             <div>
               <Label className="flex items-center gap-2">
-                {t.serviceOrders.totalTravel}
+                {t.serviceOrders.travel} total
                 <label className="flex items-center gap-1 text-xs text-muted-foreground font-normal cursor-pointer">
                   <input type="checkbox" checked={manualTravel} onChange={(e) => setManualTravel(e.target.checked)} />
                   Manual
@@ -924,7 +924,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       {!isNew && (
         <section className="rounded-xl border bg-card shadow-sm overflow-hidden">
           <div className="p-5 border-b flex items-center justify-between">
-            <h2 className="font-semibold text-sm">{t.serviceOrders.partsAndMaterials}</h2>
+            <h2 className="font-semibold text-sm">{t.serviceOrders.parts}</h2>
             <Button variant="outline" size="sm" className="gap-1" onClick={() => setShowPartForm(!showPartForm)}>
               <Plus className="h-3 w-3" /> {t.serviceOrders.addPart}
             </Button>

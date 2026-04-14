@@ -67,7 +67,7 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate 
             <div key={key} className="flex items-center gap-2">
               <Checkbox
                 id={key}
-                checked={options[key]}
+                checked={!!options[key]}
                 onCheckedChange={(checked) =>
                   setOptions(p => ({ ...p, [key]: !!checked }))
                 }
