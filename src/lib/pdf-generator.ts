@@ -9,6 +9,7 @@ export type PDFOptions = {
   showCommission: boolean;
   showTerms: boolean;
   showSignature: boolean;
+  validity?: { mode: 'days' | 'date'; days?: number; date?: string };
 };
 
 export const DEFAULT_PDF_OPTIONS: PDFOptions = {
@@ -152,6 +153,21 @@ function buildHTMLDocument(data: PDFData, options: PDFOptions): string {
 
   const billingUnitLabel: Record<string, string> = {
     hour: 'hora', visit: 'visita', day: 'dia', unit: 'un.',
+  };
+
+  const getValidityText = (): string => {
+    const v = options.validity;
+    if (!v || v.mode === 'days') {
+      const days = v?.days || 15;
+      const expiry = new Date();
+      expiry.setDate(expiry.getDate() + days);
+      return `Validade: ${days} dias (até ${expiry.toLocaleDateString('pt-BR')}).`;
+    }
+    if (v.date) {
+      const d = new Date(v.date + 'T12:00:00');
+      return `Válido até: ${d.toLocaleDateString('pt-BR')}.`;
+    }
+    return 'Validade: 15 dias a partir da emissão.';
   };
 
   const serviceRows = data.services.map(s => `
@@ -326,7 +342,7 @@ ${data.serviceOrder.extra_notes ? `
       </tr>
     </tfoot>
   </table>
-  ${isQuote ? '<div style="padding:6px 8px;font-size:10px;color:#6b7280;border-top:1px solid #e5e7eb;">Validade deste orçamento: 15 dias a partir da emissão.</div>' : ''}
+  ${isQuote ? `<div style="padding:6px 8px;font-size:10px;color:#6b7280;border-top:1px solid #e5e7eb;">${getValidityText()}</div>` : ''}
 </div>
 
 ${options.showSignature ? `

@@ -25,6 +25,7 @@ import {
   useCancelServiceOrder,
   useReopenServiceOrder,
 } from '@/hooks/use-service-orders';
+import { useCommissionableUsers, USER_ROLES } from '@/hooks/use-app-users';
 import { useServiceOrderExpenses, useAddServiceOrderExpense, useRemoveServiceOrderExpense } from '@/hooks/use-service-order-expenses';
 import { usePDFData } from '@/hooks/use-pdf';
 import { generatePDF, DEFAULT_PDF_OPTIONS } from '@/lib/pdf-generator';
@@ -36,6 +37,7 @@ import { statusConfig, priorityConfig } from '@/lib/constants';
 import { StatusBadge } from '@/components/StatusBadge';
 import { ServiceFormDialog } from '@/components/ServiceFormDialog';
 import { RecordHistory } from '@/components/RecordHistory';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -44,7 +46,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard, Receipt, Lock, RotateCcw, Ban, FileText, Printer } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Props {
@@ -81,6 +83,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const { data: marinas } = useMarinas();
   const { data: products } = useProducts();
   const { data: appUsers } = useAppUsers();
+  const { data: commissionableUsers } = useCommissionableUsers();
   const { data: services } = useServices();
   const { data: cardFees } = useCardFees();
   const { data: pdfData } = usePDFData(isNew ? undefined : orderId);
@@ -138,10 +141,12 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     commission_rate: 0,
     commission_amount: 0,
     commissioned_person: '',
+    commissioned_user_id: '',
   });
 
   const [manualTravel, setManualTravel] = useState(false);
   const [selectedTechnicians, setSelectedTechnicians] = useState<string[]>([]);
+  const [extraFieldsOpen, setExtraFieldsOpen] = useState(false);
 
   // Part form
   const [partForm, setPartForm] = useState({ product_id: '', quantity: 1, unit_cost: 0, unit_sale: 0 });
@@ -209,9 +214,14 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         commission_rate: d.commission_rate || 0,
         commission_amount: d.commission_amount || 0,
         commissioned_person: d.commissioned_person || '',
+        commissioned_user_id: d.commissioned_user_id || '',
       });
       if (d.service_order_technicians) {
         setSelectedTechnicians(d.service_order_technicians.map((t: any) => t.user_id));
+      }
+      // Open extra fields if any has content
+      if (d.initial_findings || d.diagnosis || d.solution_applied || d.internal_notes || d.customer_visible_report || d.extra_notes) {
+        setExtraFieldsOpen(true);
       }
     }
   }, [orderData]);
@@ -267,8 +277,12 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       return;
     }
     try {
+      const payload = {
+        ...form,
+        commissioned_user_id: form.commissioned_user_id || null,
+      };
       if (isNew) {
-        const result = await createSO.mutateAsync(form);
+        const result = await createSO.mutateAsync(payload);
         if (selectedTechnicians.length > 0) {
           const { supabase } = await import('@/integrations/supabase/client');
           await supabase.from('service_order_technicians').insert(
@@ -278,7 +292,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         toast.success('Ordem de serviço criada com sucesso');
         navigate(`/service-orders/${result.id}`);
       } else {
-        await updateSO.mutateAsync({ id: orderId!, ...form });
+        await updateSO.mutateAsync({ id: orderId!, ...payload });
         const { supabase } = await import('@/integrations/supabase/client');
         await supabase.from('service_order_technicians').delete().eq('service_order_id', orderId!);
         if (selectedTechnicians.length > 0) {
@@ -636,7 +650,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         </div>
       </section>
 
-      {/* C - Scheduling */}
+      {/* C - Scheduling + Technicians (merged) */}
       <section className="rounded-xl border bg-card p-5 shadow-sm space-y-4">
         <h2 className="font-semibold text-sm">{t.serviceOrders.schedule}</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -673,56 +687,65 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         </div>
       </section>
 
-      {/* D - Problem & Technical */}
+      {/* D - Problem & Technical (compact with collapsible) */}
       <section className="rounded-xl border bg-card p-5 shadow-sm space-y-4">
         <h2 className="font-semibold text-sm">{t.serviceOrders.problemDescription}</h2>
         <div>
           <Label>{t.serviceOrders.problemDescription} *</Label>
           <Textarea value={form.problem_description} onChange={(e) => set('problem_description', e.target.value)} rows={3} />
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div>
-            <Label>{t.serviceOrders.initialFindings}</Label>
-            <Textarea value={form.initial_findings} onChange={(e) => set('initial_findings', e.target.value)} rows={2} />
-          </div>
-          <div>
-            <Label>{t.serviceOrders.diagnosis}</Label>
-            <Textarea value={form.diagnosis} onChange={(e) => set('diagnosis', e.target.value)} rows={2} />
-          </div>
-          <div>
-            <Label>{t.serviceOrders.solutionApplied}</Label>
-            <Textarea value={form.solution_applied} onChange={(e) => set('solution_applied', e.target.value)} rows={2} />
-          </div>
-          <div>
-            <Label>{t.serviceOrders.technicianNotes}</Label>
-            <Textarea value={form.technician_notes} onChange={(e) => set('technician_notes', e.target.value)} rows={2} disabled={isLocked} />
-          </div>
-          <div className="space-y-2">
-            <Label className="flex items-center gap-2 text-sm font-medium">
-              Observações Adicionais para Impressão
-              <span className="text-xs text-muted-foreground font-normal">
-                (aparece no PDF deste documento)
-              </span>
-            </Label>
-            <Textarea
-              value={form.extra_notes || ''}
-              onChange={e => set('extra_notes', e.target.value)}
-              placeholder="Informações específicas para este cliente, condições especiais, garantias, prazos..."
-              rows={3}
-              disabled={isLocked}
-            />
-          </div>
+        <div>
+          <Label>{t.serviceOrders.technicianNotes}</Label>
+          <Textarea value={form.technician_notes} onChange={(e) => set('technician_notes', e.target.value)} rows={2} disabled={isLocked} />
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div>
-            <Label>{t.serviceOrders.internalNotes}</Label>
-            <Textarea value={form.internal_notes} onChange={(e) => set('internal_notes', e.target.value)} rows={2} />
-          </div>
-          <div>
-            <Label>{t.serviceOrders.customerReport}</Label>
-            <Textarea value={form.customer_visible_report} onChange={(e) => set('customer_visible_report', e.target.value)} rows={2} />
-          </div>
-        </div>
+
+        <Collapsible open={extraFieldsOpen} onOpenChange={setExtraFieldsOpen}>
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" size="sm" className="gap-2 text-muted-foreground hover:text-foreground">
+              <ChevronDown className={`h-4 w-4 transition-transform ${extraFieldsOpen ? 'rotate-180' : ''}`} />
+              Campos adicionais (diagnóstico, laudo...)
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="space-y-4 pt-3">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div>
+                <Label>{t.serviceOrders.initialFindings}</Label>
+                <Textarea value={form.initial_findings} onChange={(e) => set('initial_findings', e.target.value)} rows={2} />
+              </div>
+              <div>
+                <Label>{t.serviceOrders.diagnosis}</Label>
+                <Textarea value={form.diagnosis} onChange={(e) => set('diagnosis', e.target.value)} rows={2} />
+              </div>
+              <div>
+                <Label>{t.serviceOrders.solutionApplied}</Label>
+                <Textarea value={form.solution_applied} onChange={(e) => set('solution_applied', e.target.value)} rows={2} />
+              </div>
+              <div>
+                <Label>{t.serviceOrders.internalNotes}</Label>
+                <Textarea value={form.internal_notes} onChange={(e) => set('internal_notes', e.target.value)} rows={2} />
+              </div>
+              <div>
+                <Label>{t.serviceOrders.customerReport}</Label>
+                <Textarea value={form.customer_visible_report} onChange={(e) => set('customer_visible_report', e.target.value)} rows={2} />
+              </div>
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2 text-sm font-medium">
+                  Observações Adicionais para Impressão
+                  <span className="text-xs text-muted-foreground font-normal">
+                    (aparece no PDF deste documento)
+                  </span>
+                </Label>
+                <Textarea
+                  value={form.extra_notes || ''}
+                  onChange={e => set('extra_notes', e.target.value)}
+                  placeholder="Informações específicas para este cliente, condições especiais, garantias, prazos..."
+                  rows={2}
+                  disabled={isLocked}
+                />
+              </div>
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
       </section>
 
       {/* E - Labor Services (edit only) */}
@@ -810,8 +833,11 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               <tbody>
                 {soServices.map((s: any) => (
                   <tr key={s.id} className="border-b last:border-0">
-                    <td className="px-4 py-3 font-medium">{s.service_name_snapshot}</td>
-                    <td className="px-4 py-3 text-center">{BILLING_UNIT_LABELS[s.billing_unit_snapshot] || s.billing_unit_snapshot}</td>
+                    <td className="px-4 py-3 font-medium">
+                      {s.service_name_snapshot}
+                      {s.description_snapshot && <span className="block text-xs text-muted-foreground">{s.description_snapshot}</span>}
+                    </td>
+                    <td className="px-4 py-3 text-center text-muted-foreground">{BILLING_UNIT_LABELS[s.billing_unit_snapshot] || s.billing_unit_snapshot}</td>
                     <td className="px-4 py-3 text-center">{s.quantity}</td>
                     <td className="px-4 py-3 text-right">{formatCurrency(s.unit_price_snapshot)}</td>
                     <td className="px-4 py-3 text-right font-semibold">{formatCurrency(s.line_total)}</td>
@@ -826,73 +852,79 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               </tbody>
             </table>
           )}
-          <ServiceFormDialog open={showNewServiceDialog} onOpenChange={setShowNewServiceDialog}
-            onCreated={(svc) => {
-              setSvcForm({
-                ...svcForm,
-                service_id: svc.id,
-                service_name_snapshot: svc.service_name,
-                description_snapshot: svc.description || '',
-                billing_unit_snapshot: svc.billing_unit,
-                unit_price: svc.default_price || 0,
-              });
-              setShowSvcForm(true);
-            }}
-          />
         </section>
       )}
 
-      {/* Displacement card */}
-      <section className="rounded-xl border bg-card p-5 shadow-sm space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-sm">{t.serviceOrders.travelCalculation}</h2>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={runDisplacement} className="gap-1">
-              <RefreshCw className="h-3 w-3" /> {t.serviceOrders.recalculate}
-            </Button>
-            <label className="flex items-center gap-1.5 text-xs">
-              <Switch checked={manualTravel} onCheckedChange={setManualTravel} />
-              {t.serviceOrders.manualOverride}
-            </label>
-          </div>
-        </div>
-        {!marina?.latitude && form.marina_id && (
-          <div className="flex items-center gap-2 text-xs text-warning">
-            <AlertTriangle className="h-3.5 w-3.5" />
-            {t.serviceOrders.noCoordinates}
-          </div>
-        )}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-          <div>
-            <span className="text-muted-foreground">{t.serviceOrders.distance}</span>
-            <p className="font-medium">{form.travel_distance_km} km</p>
-          </div>
-          <div>
-            <span className="text-muted-foreground">{t.serviceOrders.rate}</span>
-            <p className="font-medium">{formatCurrency(form.travel_cost_per_km)}/km</p>
-          </div>
-          <div>
-            <span className="text-muted-foreground">{t.serviceOrders.technicians}</span>
-            <p className="font-medium">{form.technician_count_for_travel}</p>
-          </div>
-          <div>
-            <span className="text-muted-foreground">{t.serviceOrders.travelTotal}</span>
-            {manualTravel ? (
-              <Input type="number" value={form.travel_cost_total}
-                onChange={(e) => set('travel_cost_total', parseFloat(e.target.value) || 0)}
-                className="h-7 text-sm" />
-            ) : (
-              <p className="font-bold">{formatCurrency(form.travel_cost_total)}</p>
+      {/* New Service Dialog */}
+      <ServiceFormDialog open={showNewServiceDialog} onOpenChange={setShowNewServiceDialog} />
+
+      {/* Travel Section */}
+      {!isNew && (
+        <section className="rounded-xl border bg-card p-5 shadow-sm space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold text-sm">{t.serviceOrders.travel}</h2>
+            {marina?.latitude && (
+              <Button variant="outline" size="sm" onClick={runDisplacement} className="gap-1">
+                <RefreshCw className="h-3 w-3" />
+                {t.serviceOrders.recalculate}
+              </Button>
             )}
           </div>
-        </div>
-      </section>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div>
+              <Label>{t.serviceOrders.distanceKm}</Label>
+              <Input type="number" value={form.travel_distance_km}
+                onChange={(e) => {
+                  const km = parseFloat(e.target.value) || 0;
+                  set('travel_distance_km', km);
+                  if (!manualTravel) {
+                    set('travel_cost_total', km * form.travel_cost_per_km * form.technician_count_for_travel);
+                  }
+                }} />
+            </div>
+            <div>
+              <Label>{t.serviceOrders.costPerKm}</Label>
+              <Input type="number" value={form.travel_cost_per_km}
+                onChange={(e) => {
+                  const cpk = parseFloat(e.target.value) || 0;
+                  set('travel_cost_per_km', cpk);
+                  if (!manualTravel) {
+                    set('travel_cost_total', form.travel_distance_km * cpk * form.technician_count_for_travel);
+                  }
+                }} />
+            </div>
+            <div>
+              <Label>{t.serviceOrders.technicianCount}</Label>
+              <Input type="number" min={1} value={form.technician_count_for_travel}
+                onChange={(e) => {
+                  const count = parseInt(e.target.value) || 1;
+                  set('technician_count_for_travel', count);
+                  if (!manualTravel) {
+                    set('travel_cost_total', form.travel_distance_km * form.travel_cost_per_km * count);
+                  }
+                }} />
+            </div>
+            <div>
+              <Label className="flex items-center gap-2">
+                {t.serviceOrders.totalTravel}
+                <label className="flex items-center gap-1 text-xs text-muted-foreground font-normal cursor-pointer">
+                  <input type="checkbox" checked={manualTravel} onChange={(e) => setManualTravel(e.target.checked)} />
+                  Manual
+                </label>
+              </Label>
+              <Input type="number" value={form.travel_cost_total}
+                onChange={(e) => set('travel_cost_total', parseFloat(e.target.value) || 0)}
+                disabled={!manualTravel} className={!manualTravel ? 'bg-muted' : ''} />
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* F - Parts (edit only) */}
       {!isNew && (
         <section className="rounded-xl border bg-card shadow-sm overflow-hidden">
           <div className="p-5 border-b flex items-center justify-between">
-            <h2 className="font-semibold text-sm">{t.serviceOrders.partsUsed}</h2>
+            <h2 className="font-semibold text-sm">{t.serviceOrders.partsAndMaterials}</h2>
             <Button variant="outline" size="sm" className="gap-1" onClick={() => setShowPartForm(!showPartForm)}>
               <Plus className="h-3 w-3" /> {t.serviceOrders.addPart}
             </Button>
@@ -1217,7 +1249,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               <span className="text-muted-foreground">{t.serviceOrders.travel}</span>
               <span>{formatCurrency(form.travel_cost_total)}</span>
             </div>
-            <div className="flex justify-between text-sm">
+            <div className="flex justify-between text-sm items-center">
               <span className="text-muted-foreground">{t.serviceOrders.subcontract}</span>
               <Input type="number" className="w-28 h-7 text-right text-sm" value={form.subcontract_cost_total}
                 onChange={(e) => set('subcontract_cost_total', parseFloat(e.target.value) || 0)} />
@@ -1237,10 +1269,30 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             <div className="space-y-2 pt-2 border-t border-dashed">
               <div className="flex justify-between text-sm items-center">
                 <span className="text-muted-foreground">{(t.serviceOrders as any).commissionedPerson || 'Comissionado'}</span>
-                <Input className="w-40 h-7 text-right text-sm" value={form.commissioned_person}
-                  onChange={(e) => set('commissioned_person', e.target.value)}
-                  placeholder="Nome do indicador"
-                  disabled={isLocked} />
+                <Select
+                  value={form.commissioned_user_id || 'none'}
+                  onValueChange={(v) => {
+                    const user = commissionableUsers?.find(u => u.id === v);
+                    setForm(f => ({
+                      ...f,
+                      commissioned_user_id: v === 'none' ? '' : v,
+                      commissioned_person: user?.full_name || '',
+                    }));
+                  }}
+                  disabled={isLocked}
+                >
+                  <SelectTrigger className="w-52 h-7 text-sm">
+                    <SelectValue placeholder="Selecionar" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">—</SelectItem>
+                    {(commissionableUsers || []).map(u => (
+                      <SelectItem key={u.id} value={u.id}>
+                        {u.full_name} ({USER_ROLES.find(r => r.value === u.role)?.label || u.role})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="flex justify-between text-sm items-center">
                 <span className="text-muted-foreground">{(t.serviceOrders as any).commissionAmount || 'Comissão'} (%)</span>
@@ -1344,9 +1396,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         open={!!pdfDialogType}
         onOpenChange={v => { if (!v) setPdfDialogType(null); }}
         documentType={pdfDialogType || 'quote'}
-        onGenerate={(options) => {
+        onGenerate={(options, validity) => {
           if (!pdfData || !pdfDialogType) return;
-          generatePDF({ ...pdfData, documentType: pdfDialogType }, options);
+          generatePDF({ ...pdfData, documentType: pdfDialogType }, { ...options, validity });
           setPdfDialogType(null);
         }}
       />

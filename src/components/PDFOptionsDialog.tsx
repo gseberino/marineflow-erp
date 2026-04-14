@@ -4,23 +4,38 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
 import { AlertTriangle } from 'lucide-react';
 import type { PDFOptions } from '@/lib/pdf-generator';
 import { DEFAULT_PDF_OPTIONS } from '@/lib/pdf-generator';
+
+export type ValidityConfig = {
+  mode: 'days' | 'date';
+  days?: number;
+  date?: string;
+};
 
 interface Props {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   documentType: 'quote' | 'service_order';
-  onGenerate: (options: PDFOptions) => void;
+  onGenerate: (options: PDFOptions, validity?: ValidityConfig) => void;
 }
 
 export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate }: Props) {
   const { t } = useI18n();
   const [options, setOptions] = useState<PDFOptions>({ ...DEFAULT_PDF_OPTIONS });
+  const [validityMode, setValidityMode] = useState<'days' | 'date'>('days');
+  const [validityDays, setValidityDays] = useState(15);
+  const [validityDate, setValidityDate] = useState('');
 
   useEffect(() => {
-    if (open) setOptions({ ...DEFAULT_PDF_OPTIONS });
+    if (open) {
+      setOptions({ ...DEFAULT_PDF_OPTIONS });
+      setValidityMode('days');
+      setValidityDays(15);
+      setValidityDate('');
+    }
   }, [open]);
 
   const title = documentType === 'quote'
@@ -64,6 +79,52 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate 
           ))}
         </div>
 
+        {/* Quote validity section */}
+        {documentType === 'quote' && (
+          <div className="space-y-3 rounded-lg border border-border p-3">
+            <p className="text-sm font-medium">Validade do Orçamento</p>
+            <div className="flex gap-3">
+              <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+                <input
+                  type="radio"
+                  name="validityMode"
+                  checked={validityMode === 'days'}
+                  onChange={() => setValidityMode('days')}
+                />
+                Em dias
+              </label>
+              <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+                <input
+                  type="radio"
+                  name="validityMode"
+                  checked={validityMode === 'date'}
+                  onChange={() => setValidityMode('date')}
+                />
+                Data específica
+              </label>
+            </div>
+            {validityMode === 'days' ? (
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={1}
+                  value={validityDays}
+                  onChange={(e) => setValidityDays(Number(e.target.value) || 15)}
+                  className="w-24"
+                />
+                <span className="text-sm text-muted-foreground">dias a partir da emissão</span>
+              </div>
+            ) : (
+              <Input
+                type="date"
+                value={validityDate}
+                onChange={(e) => setValidityDate(e.target.value)}
+                min={new Date().toISOString().split('T')[0]}
+              />
+            )}
+          </div>
+        )}
+
         <div className="flex items-start gap-2 rounded-lg border border-border bg-muted p-3">
           <AlertTriangle className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
           <p className="text-xs text-muted-foreground">{t.pdf.pdfHint}</p>
@@ -74,7 +135,12 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate 
             {t.common.cancel}
           </Button>
           <Button
-            onClick={() => onGenerate(options)}
+            onClick={() => onGenerate(
+              options,
+              documentType === 'quote'
+                ? { mode: validityMode, days: validityDays, date: validityDate }
+                : undefined
+            )}
             className="bg-accent text-accent-foreground hover:bg-accent/90"
           >
             {t.pdf.generate}
