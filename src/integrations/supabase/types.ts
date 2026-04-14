@@ -1325,6 +1325,7 @@ export type Database = {
           commission_amount: number | null
           commission_rate: number | null
           commissioned_person: string | null
+          commissioned_user_id: string | null
           created_at: string
           created_by: string | null
           currency: string | null
@@ -1347,6 +1348,8 @@ export type Database = {
           payment_status: string | null
           priority: string
           problem_description: string | null
+          quote_validity_date: string | null
+          quote_validity_days: number | null
           reopen_reason: string | null
           reopened_at: string | null
           requested_by_name: string | null
@@ -1376,6 +1379,7 @@ export type Database = {
           commission_amount?: number | null
           commission_rate?: number | null
           commissioned_person?: string | null
+          commissioned_user_id?: string | null
           created_at?: string
           created_by?: string | null
           currency?: string | null
@@ -1398,6 +1402,8 @@ export type Database = {
           payment_status?: string | null
           priority?: string
           problem_description?: string | null
+          quote_validity_date?: string | null
+          quote_validity_days?: number | null
           reopen_reason?: string | null
           reopened_at?: string | null
           requested_by_name?: string | null
@@ -1427,6 +1433,7 @@ export type Database = {
           commission_amount?: number | null
           commission_rate?: number | null
           commissioned_person?: string | null
+          commissioned_user_id?: string | null
           created_at?: string
           created_by?: string | null
           currency?: string | null
@@ -1449,6 +1456,8 @@ export type Database = {
           payment_status?: string | null
           priority?: string
           problem_description?: string | null
+          quote_validity_date?: string | null
+          quote_validity_days?: number | null
           reopen_reason?: string | null
           reopened_at?: string | null
           requested_by_name?: string | null
@@ -1474,6 +1483,13 @@ export type Database = {
             columns: ["client_id"]
             isOneToOne: false
             referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_orders_commissioned_user_id_fkey"
+            columns: ["commissioned_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
             referencedColumns: ["id"]
           },
           {

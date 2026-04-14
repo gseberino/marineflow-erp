@@ -24,9 +24,9 @@ export default function ServiceOrderList() {
   const [pdfTarget, setPdfTarget] = useState<{ id: string; type: 'quote' | 'service_order' } | null>(null);
   const { data: pdfData } = usePDFData(pdfTarget?.id);
 
-  const handleGeneratePDF = (options: PDFOptions) => {
+  const handleGeneratePDF = (options: PDFOptions, validity?: any) => {
     if (!pdfData || !pdfTarget) return;
-    generatePDF({ ...pdfData, documentType: pdfTarget.type }, options);
+    generatePDF({ ...pdfData, documentType: pdfTarget.type }, { ...options, validity });
     setPdfTarget(null);
   };
 
