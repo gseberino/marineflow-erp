@@ -19,6 +19,8 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   vessel?: Vessel | null;
+  initialClientId?: string;
+  onCreated?: (vessel: { id: string; boat_name: string; marina_id?: string | null }) => void;
 }
 
 const empty: TablesInsert<'vessels'> = {
@@ -46,7 +48,7 @@ const empty: TablesInsert<'vessels'> = {
   active: true,
 };
 
-export function VesselFormDialog({ open, onOpenChange, vessel }: Props) {
+export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, onCreated }: Props) {
   const { t } = useI18n();
   const create = useCreateVessel();
   const update = useUpdateVessel();
@@ -82,9 +84,9 @@ export function VesselFormDialog({ open, onOpenChange, vessel }: Props) {
         active: vessel.active,
       });
     } else {
-      setForm(empty);
+      setForm({ ...empty, client_id: initialClientId || '' });
     }
-  }, [vessel, open]);
+  }, [vessel, open, initialClientId]);
 
   const set = (key: string, value: any) => setForm(prev => ({ ...prev, [key]: value }));
 
@@ -100,8 +102,11 @@ export function VesselFormDialog({ open, onOpenChange, vessel }: Props) {
         await update.mutateAsync({ id: vessel.id, ...payload });
         toast.success(t.vessels.updateSuccess);
       } else {
-        await create.mutateAsync(payload);
+        const result = await create.mutateAsync(payload);
         toast.success(t.vessels.createSuccess);
+        if (onCreated && result) {
+          onCreated({ id: result.id, boat_name: result.boat_name, marina_id: result.marina_id });
+        }
       }
       onOpenChange(false);
     } catch (err: any) {
