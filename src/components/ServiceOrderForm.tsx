@@ -151,6 +151,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [manualTravel, setManualTravel] = useState(false);
   const [selectedTechnicians, setSelectedTechnicians] = useState<string[]>([]);
   const [extraFieldsOpen, setExtraFieldsOpen] = useState(false);
+  const { data: vesselContacts } = useVesselContacts(form.vessel_id || undefined);
 
   // Part form
   const [partForm, setPartForm] = useState({ product_id: '', quantity: 1, unit_cost: 0, unit_sale: 0 });
