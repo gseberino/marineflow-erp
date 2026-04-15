@@ -246,3 +246,95 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
     </Dialog>
   );
 }
+
+function VesselContactsSection({ vesselId }: { vesselId: string }) {
+  const { data: contacts, isLoading } = useVesselContacts(vesselId);
+  const createContact = useCreateVesselContact();
+  const [showForm, setShowForm] = useState(false);
+  const [contactForm, setContactForm] = useState({
+    full_name: '', role: 'owner', phone: '', email: '',
+  });
+
+  const handleAdd = async () => {
+    if (!contactForm.full_name) {
+      toast.error('Nome é obrigatório');
+      return;
+    }
+    try {
+      await createContact.mutateAsync({
+        vessel_id: vesselId,
+        full_name: contactForm.full_name,
+        role: contactForm.role,
+        phone: contactForm.phone || undefined,
+        email: contactForm.email || undefined,
+      });
+      setContactForm({ full_name: '', role: 'owner', phone: '', email: '' });
+      setShowForm(false);
+      toast.success('Contato adicionado');
+    } catch (e: any) {
+      toast.error(e.message || 'Erro');
+    }
+  };
+
+  return (
+    <div className="col-span-2 border-t pt-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <Label className="text-sm font-semibold">Contatos da Embarcação</Label>
+        <Button type="button" variant="outline" size="sm" onClick={() => setShowForm(!showForm)} className="gap-1">
+          <Plus className="h-3 w-3" /> Contato
+        </Button>
+      </div>
+
+      {showForm && (
+        <div className="grid grid-cols-2 gap-3 p-3 rounded-lg border bg-muted/30">
+          <div>
+            <Label className="text-xs">Nome *</Label>
+            <Input value={contactForm.full_name} onChange={e => setContactForm(p => ({ ...p, full_name: e.target.value }))} />
+          </div>
+          <div>
+            <Label className="text-xs">Função</Label>
+            <Select value={contactForm.role} onValueChange={v => setContactForm(p => ({ ...p, role: v }))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {VESSEL_CONTACT_ROLES.map(r => (
+                  <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs">Telefone</Label>
+            <Input value={contactForm.phone} onChange={e => setContactForm(p => ({ ...p, phone: e.target.value }))} />
+          </div>
+          <div>
+            <Label className="text-xs">Email</Label>
+            <Input type="email" value={contactForm.email} onChange={e => setContactForm(p => ({ ...p, email: e.target.value }))} />
+          </div>
+          <div className="col-span-2 flex gap-2">
+            <Button type="button" size="sm" onClick={handleAdd} disabled={createContact.isPending}>Salvar</Button>
+            <Button type="button" size="sm" variant="outline" onClick={() => setShowForm(false)}>Cancelar</Button>
+          </div>
+        </div>
+      )}
+
+      {isLoading ? (
+        <p className="text-sm text-muted-foreground">Carregando...</p>
+      ) : contacts && contacts.length > 0 ? (
+        <div className="space-y-1">
+          {contacts.map(c => (
+            <div key={c.id} className="flex items-center gap-2 text-sm py-1.5 px-2 rounded hover:bg-muted/50">
+              <span className="font-medium">{c.full_name}</span>
+              <Badge variant="secondary" className="text-xs">
+                {VESSEL_CONTACT_ROLES.find(r => r.value === c.role)?.label || c.role}
+              </Badge>
+              {c.phone && <span className="text-muted-foreground text-xs">{c.phone}</span>}
+              {c.email && <span className="text-muted-foreground text-xs">{c.email}</span>}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">Nenhum contato cadastrado</p>
+      )}
+    </div>
+  );
+}
