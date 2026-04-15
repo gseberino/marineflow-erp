@@ -90,6 +90,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const { data: services } = useServices();
   const { data: cardFees } = useCardFees();
   const { data: pdfData } = usePDFData(isNew ? undefined : orderId);
+  const { data: vesselContacts } = useVesselContacts(form.vessel_id || undefined);
 
   const createSO = useCreateServiceOrder();
   const updateSO = useUpdateServiceOrder();
@@ -122,6 +123,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     vessel_id: '',
     marina_id: '',
     requested_by_name: '',
+    requested_by_contact_id: '',
     scheduled_start_at: '',
     scheduled_end_at: '',
     problem_description: '',
@@ -195,6 +197,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         vessel_id: d.vessel_id || '',
         marina_id: d.marina_id || '',
         requested_by_name: d.requested_by_name || '',
+        requested_by_contact_id: d.requested_by_contact_id || '',
         scheduled_start_at: d.scheduled_start_at ? d.scheduled_start_at.slice(0, 16) : '',
         scheduled_end_at: d.scheduled_end_at ? d.scheduled_end_at.slice(0, 16) : '',
         problem_description: d.problem_description || '',
@@ -283,6 +286,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       const payload = {
         ...form,
         commissioned_user_id: form.commissioned_user_id || null,
+        requested_by_contact_id: form.requested_by_contact_id || null,
       };
       if (isNew) {
         const result = await createSO.mutateAsync(payload);
