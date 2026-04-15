@@ -614,29 +614,36 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <Label>{t.serviceOrders.client} *</Label>
-            <Select value={form.client_id} onValueChange={(v) => { set('client_id', v); set('vessel_id', ''); }}>
-              <SelectTrigger><SelectValue placeholder={t.vessels.selectClient} /></SelectTrigger>
-              <SelectContent>
-                {clients?.filter((c) => c.active).map((c) => (
-                  <SelectItem key={c.id} value={c.id}>{c.full_name_or_company_name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <ClientCombobox
+              value={form.client_id}
+              onChange={(clientId) => {
+                set('client_id', clientId);
+                set('vessel_id', '');
+                set('requested_by_contact_id', '');
+                set('requested_by_name', '');
+              }}
+              clients={clients}
+              disabled={isLocked}
+            />
           </div>
           <div>
             <Label>{t.serviceOrders.vessel} *</Label>
-            <Select value={form.vessel_id} onValueChange={(v) => {
-              set('vessel_id', v);
-              const vessel = allVessels?.find((vv) => vv.id === v);
-              if (vessel?.marina_id) set('marina_id', vessel.marina_id);
-            }} disabled={!form.client_id}>
-              <SelectTrigger><SelectValue placeholder={t.vessels.selectMarina || 'Selecionar embarcação'} /></SelectTrigger>
-              <SelectContent>
-                {clientVessels.filter((v) => v.active).map((v) => (
-                  <SelectItem key={v.id} value={v.id}>{v.boat_name} {v.manufacturer ? `(${v.manufacturer})` : ''}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <VesselSelect
+              value={form.vessel_id}
+              clientId={form.client_id}
+              vessels={clientVessels}
+              disabled={!form.client_id || isLocked}
+              onChange={(vesselId) => {
+                set('vessel_id', vesselId);
+                set('requested_by_contact_id', '');
+                const vessel = allVessels?.find(v => v.id === vesselId);
+                if (vessel?.marina_id) set('marina_id', vessel.marina_id);
+              }}
+              onVesselCreated={(vessel) => {
+                set('vessel_id', vessel.id);
+                if (vessel.marina_id) set('marina_id', vessel.marina_id);
+              }}
+            />
           </div>
           <div>
             <Label>{t.serviceOrders.marina}</Label>
@@ -652,7 +659,51 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           </div>
           <div>
             <Label>{t.serviceOrders.requestedBy}</Label>
-            <Input value={form.requested_by_name} onChange={(e) => set('requested_by_name', e.target.value)} />
+            {vesselContacts && vesselContacts.length > 0 ? (
+              <Select
+                value={form.requested_by_contact_id || 'none'}
+                onValueChange={(v) => {
+                  const contact = vesselContacts.find(c => c.id === v);
+                  setForm(f => ({
+                    ...f,
+                    requested_by_contact_id: v === 'none' ? '' : v,
+                    requested_by_name: contact?.full_name || '',
+                  }));
+                }}
+                disabled={isLocked}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecionar contato" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">—</SelectItem>
+                  {vesselContacts.map(c => (
+                    <SelectItem key={c.id} value={c.id}>
+                      <span className="flex items-center gap-1">
+                        {c.full_name}
+                        <span className="text-xs text-muted-foreground">
+                          ({VESSEL_CONTACT_ROLES.find(r => r.value === c.role)?.label || c.role})
+                        </span>
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <div>
+                <Input
+                  value={form.requested_by_name}
+                  onChange={e => set('requested_by_name', e.target.value)}
+                  placeholder="Nome do solicitante"
+                  disabled={isLocked}
+                />
+                {form.vessel_id && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Cadastre contatos na embarcação para aparecerem aqui
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </section>
