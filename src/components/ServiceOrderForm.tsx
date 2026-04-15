@@ -90,7 +90,6 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const { data: services } = useServices();
   const { data: cardFees } = useCardFees();
   const { data: pdfData } = usePDFData(isNew ? undefined : orderId);
-  const { data: vesselContacts } = useVesselContacts(form.vessel_id || undefined);
 
   const createSO = useCreateServiceOrder();
   const updateSO = useUpdateServiceOrder();
