@@ -26,6 +26,9 @@ import {
   useReopenServiceOrder,
 } from '@/hooks/use-service-orders';
 import { useCommissionableUsers, USER_ROLES } from '@/hooks/use-app-users';
+import { useVesselContacts, VESSEL_CONTACT_ROLES } from '@/hooks/use-vessel-contacts';
+import { ClientCombobox } from '@/components/ClientCombobox';
+import { VesselSelect } from '@/components/VesselSelect';
 import { useServiceOrderExpenses, useAddServiceOrderExpense, useRemoveServiceOrderExpense } from '@/hooks/use-service-order-expenses';
 import { usePDFData } from '@/hooks/use-pdf';
 import { generatePDF, DEFAULT_PDF_OPTIONS } from '@/lib/pdf-generator';
