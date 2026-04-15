@@ -10,6 +10,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useCreateVessel, useUpdateVessel } from '@/hooks/use-vessels';
 import { useClients } from '@/hooks/use-clients';
 import { useMarinas } from '@/hooks/use-marinas';
+import { useVesselContacts, useCreateVesselContact, VESSEL_CONTACT_ROLES } from '@/hooks/use-vessel-contacts';
+import { Badge } from '@/components/ui/badge';
+import { Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Tables, TablesInsert } from '@/integrations/supabase/types';
 
@@ -19,6 +22,8 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   vessel?: Vessel | null;
+  initialClientId?: string;
+  onCreated?: (vessel: { id: string; boat_name: string; marina_id?: string | null }) => void;
 }
 
 const empty: TablesInsert<'vessels'> = {
@@ -46,7 +51,7 @@ const empty: TablesInsert<'vessels'> = {
   active: true,
 };
 
-export function VesselFormDialog({ open, onOpenChange, vessel }: Props) {
+export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, onCreated }: Props) {
   const { t } = useI18n();
   const create = useCreateVessel();
   const update = useUpdateVessel();
@@ -82,9 +87,9 @@ export function VesselFormDialog({ open, onOpenChange, vessel }: Props) {
         active: vessel.active,
       });
     } else {
-      setForm(empty);
+      setForm({ ...empty, client_id: initialClientId || '' });
     }
-  }, [vessel, open]);
+  }, [vessel, open, initialClientId]);
 
   const set = (key: string, value: any) => setForm(prev => ({ ...prev, [key]: value }));
 
@@ -100,8 +105,11 @@ export function VesselFormDialog({ open, onOpenChange, vessel }: Props) {
         await update.mutateAsync({ id: vessel.id, ...payload });
         toast.success(t.vessels.updateSuccess);
       } else {
-        await create.mutateAsync(payload);
+        const result = await create.mutateAsync(payload);
         toast.success(t.vessels.createSuccess);
+        if (onCreated && result) {
+          onCreated({ id: result.id, boat_name: result.boat_name, marina_id: result.marina_id });
+        }
       }
       onOpenChange(false);
     } catch (err: any) {
@@ -225,6 +233,10 @@ export function VesselFormDialog({ open, onOpenChange, vessel }: Props) {
               <Label>{t.common.active}</Label>
             </div>
           </div>
+
+          {/* Vessel Contacts - only when editing */}
+          {isEdit && vessel && <VesselContactsSection vesselId={vessel.id} />}
+
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>{t.common.cancel}</Button>
             <Button type="submit" disabled={isPending}>{t.common.save}</Button>
@@ -232,5 +244,97 @@ export function VesselFormDialog({ open, onOpenChange, vessel }: Props) {
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function VesselContactsSection({ vesselId }: { vesselId: string }) {
+  const { data: contacts, isLoading } = useVesselContacts(vesselId);
+  const createContact = useCreateVesselContact();
+  const [showForm, setShowForm] = useState(false);
+  const [contactForm, setContactForm] = useState({
+    full_name: '', role: 'owner', phone: '', email: '',
+  });
+
+  const handleAdd = async () => {
+    if (!contactForm.full_name) {
+      toast.error('Nome é obrigatório');
+      return;
+    }
+    try {
+      await createContact.mutateAsync({
+        vessel_id: vesselId,
+        full_name: contactForm.full_name,
+        role: contactForm.role,
+        phone: contactForm.phone || undefined,
+        email: contactForm.email || undefined,
+      });
+      setContactForm({ full_name: '', role: 'owner', phone: '', email: '' });
+      setShowForm(false);
+      toast.success('Contato adicionado');
+    } catch (e: any) {
+      toast.error(e.message || 'Erro');
+    }
+  };
+
+  return (
+    <div className="col-span-2 border-t pt-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <Label className="text-sm font-semibold">Contatos da Embarcação</Label>
+        <Button type="button" variant="outline" size="sm" onClick={() => setShowForm(!showForm)} className="gap-1">
+          <Plus className="h-3 w-3" /> Contato
+        </Button>
+      </div>
+
+      {showForm && (
+        <div className="grid grid-cols-2 gap-3 p-3 rounded-lg border bg-muted/30">
+          <div>
+            <Label className="text-xs">Nome *</Label>
+            <Input value={contactForm.full_name} onChange={e => setContactForm(p => ({ ...p, full_name: e.target.value }))} />
+          </div>
+          <div>
+            <Label className="text-xs">Função</Label>
+            <Select value={contactForm.role} onValueChange={v => setContactForm(p => ({ ...p, role: v }))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {VESSEL_CONTACT_ROLES.map(r => (
+                  <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs">Telefone</Label>
+            <Input value={contactForm.phone} onChange={e => setContactForm(p => ({ ...p, phone: e.target.value }))} />
+          </div>
+          <div>
+            <Label className="text-xs">Email</Label>
+            <Input type="email" value={contactForm.email} onChange={e => setContactForm(p => ({ ...p, email: e.target.value }))} />
+          </div>
+          <div className="col-span-2 flex gap-2">
+            <Button type="button" size="sm" onClick={handleAdd} disabled={createContact.isPending}>Salvar</Button>
+            <Button type="button" size="sm" variant="outline" onClick={() => setShowForm(false)}>Cancelar</Button>
+          </div>
+        </div>
+      )}
+
+      {isLoading ? (
+        <p className="text-sm text-muted-foreground">Carregando...</p>
+      ) : contacts && contacts.length > 0 ? (
+        <div className="space-y-1">
+          {contacts.map(c => (
+            <div key={c.id} className="flex items-center gap-2 text-sm py-1.5 px-2 rounded hover:bg-muted/50">
+              <span className="font-medium">{c.full_name}</span>
+              <Badge variant="secondary" className="text-xs">
+                {VESSEL_CONTACT_ROLES.find(r => r.value === c.role)?.label || c.role}
+              </Badge>
+              {c.phone && <span className="text-muted-foreground text-xs">{c.phone}</span>}
+              {c.email && <span className="text-muted-foreground text-xs">{c.email}</span>}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">Nenhum contato cadastrado</p>
+      )}
+    </div>
   );
 }

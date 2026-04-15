@@ -16,6 +16,8 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   client?: Client | null;
+  initialName?: string;
+  onCreated?: (client: { id: string; full_name_or_company_name: string }) => void;
 }
 
 const empty = {
@@ -38,7 +40,7 @@ const empty = {
   active: true,
 };
 
-export function ClientFormDialog({ open, onOpenChange, client }: Props) {
+export function ClientFormDialog({ open, onOpenChange, client, initialName, onCreated }: Props) {
   const { t } = useI18n();
   const create = useCreateClient();
   const update = useUpdateClient();
@@ -67,9 +69,9 @@ export function ClientFormDialog({ open, onOpenChange, client }: Props) {
         active: client.active,
       });
     } else {
-      setForm(empty);
+      setForm({ ...empty, full_name_or_company_name: initialName || '' });
     }
-  }, [client, open]);
+  }, [client, open, initialName]);
 
   const set = (key: string, value: string | boolean | number | null) => setForm(prev => ({ ...prev, [key]: value as any }));
 
@@ -98,8 +100,11 @@ export function ClientFormDialog({ open, onOpenChange, client }: Props) {
         await update.mutateAsync({ id: client.id, ...payload });
         toast.success(t.clients.updateSuccess);
       } else {
-        await create.mutateAsync(payload);
+        const result = await create.mutateAsync(payload);
         toast.success(t.clients.createSuccess);
+        if (onCreated && result) {
+          onCreated({ id: result.id, full_name_or_company_name: result.full_name_or_company_name });
+        }
       }
       onOpenChange(false);
     } catch (err: any) {

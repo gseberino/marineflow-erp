@@ -1352,6 +1352,7 @@ export type Database = {
           quote_validity_days: number | null
           reopen_reason: string | null
           reopened_at: string | null
+          requested_by_contact_id: string | null
           requested_by_name: string | null
           scheduled_end_at: string | null
           scheduled_start_at: string | null
@@ -1406,6 +1407,7 @@ export type Database = {
           quote_validity_days?: number | null
           reopen_reason?: string | null
           reopened_at?: string | null
+          requested_by_contact_id?: string | null
           requested_by_name?: string | null
           scheduled_end_at?: string | null
           scheduled_start_at?: string | null
@@ -1460,6 +1462,7 @@ export type Database = {
           quote_validity_days?: number | null
           reopen_reason?: string | null
           reopened_at?: string | null
+          requested_by_contact_id?: string | null
           requested_by_name?: string | null
           scheduled_end_at?: string | null
           scheduled_start_at?: string | null
@@ -1504,6 +1507,13 @@ export type Database = {
             columns: ["marina_id"]
             isOneToOne: false
             referencedRelation: "marinas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_orders_requested_by_contact_id_fkey"
+            columns: ["requested_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "vessel_contacts"
             referencedColumns: ["id"]
           },
           {
@@ -1676,6 +1686,50 @@ export type Database = {
             columns: ["technician_user_id"]
             isOneToOne: false
             referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      vessel_contacts: {
+        Row: {
+          active: boolean | null
+          created_at: string | null
+          email: string | null
+          full_name: string
+          id: string
+          notes: string | null
+          phone: string | null
+          role: string
+          vessel_id: string
+        }
+        Insert: {
+          active?: boolean | null
+          created_at?: string | null
+          email?: string | null
+          full_name: string
+          id?: string
+          notes?: string | null
+          phone?: string | null
+          role?: string
+          vessel_id: string
+        }
+        Update: {
+          active?: boolean | null
+          created_at?: string | null
+          email?: string | null
+          full_name?: string
+          id?: string
+          notes?: string | null
+          phone?: string | null
+          role?: string
+          vessel_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vessel_contacts_vessel_id_fkey"
+            columns: ["vessel_id"]
+            isOneToOne: false
+            referencedRelation: "vessels"
             referencedColumns: ["id"]
           },
         ]

@@ -26,6 +26,9 @@ import {
   useReopenServiceOrder,
 } from '@/hooks/use-service-orders';
 import { useCommissionableUsers, USER_ROLES } from '@/hooks/use-app-users';
+import { useVesselContacts, VESSEL_CONTACT_ROLES } from '@/hooks/use-vessel-contacts';
+import { ClientCombobox } from '@/components/ClientCombobox';
+import { VesselSelect } from '@/components/VesselSelect';
 import { useServiceOrderExpenses, useAddServiceOrderExpense, useRemoveServiceOrderExpense } from '@/hooks/use-service-order-expenses';
 import { usePDFData } from '@/hooks/use-pdf';
 import { generatePDF, DEFAULT_PDF_OPTIONS } from '@/lib/pdf-generator';
@@ -119,6 +122,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     vessel_id: '',
     marina_id: '',
     requested_by_name: '',
+    requested_by_contact_id: '',
     scheduled_start_at: '',
     scheduled_end_at: '',
     problem_description: '',
@@ -147,6 +151,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [manualTravel, setManualTravel] = useState(false);
   const [selectedTechnicians, setSelectedTechnicians] = useState<string[]>([]);
   const [extraFieldsOpen, setExtraFieldsOpen] = useState(false);
+  const { data: vesselContacts } = useVesselContacts(form.vessel_id || undefined);
 
   // Part form
   const [partForm, setPartForm] = useState({ product_id: '', quantity: 1, unit_cost: 0, unit_sale: 0 });
@@ -192,6 +197,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         vessel_id: d.vessel_id || '',
         marina_id: d.marina_id || '',
         requested_by_name: d.requested_by_name || '',
+        requested_by_contact_id: d.requested_by_contact_id || '',
         scheduled_start_at: d.scheduled_start_at ? d.scheduled_start_at.slice(0, 16) : '',
         scheduled_end_at: d.scheduled_end_at ? d.scheduled_end_at.slice(0, 16) : '',
         problem_description: d.problem_description || '',
@@ -280,6 +286,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       const payload = {
         ...form,
         commissioned_user_id: form.commissioned_user_id || null,
+        requested_by_contact_id: form.requested_by_contact_id || null,
       };
       if (isNew) {
         const result = await createSO.mutateAsync(payload);
@@ -607,29 +614,36 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <Label>{t.serviceOrders.client} *</Label>
-            <Select value={form.client_id} onValueChange={(v) => { set('client_id', v); set('vessel_id', ''); }}>
-              <SelectTrigger><SelectValue placeholder={t.vessels.selectClient} /></SelectTrigger>
-              <SelectContent>
-                {clients?.filter((c) => c.active).map((c) => (
-                  <SelectItem key={c.id} value={c.id}>{c.full_name_or_company_name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <ClientCombobox
+              value={form.client_id}
+              onChange={(clientId) => {
+                set('client_id', clientId);
+                set('vessel_id', '');
+                set('requested_by_contact_id', '');
+                set('requested_by_name', '');
+              }}
+              clients={clients}
+              disabled={isLocked}
+            />
           </div>
           <div>
             <Label>{t.serviceOrders.vessel} *</Label>
-            <Select value={form.vessel_id} onValueChange={(v) => {
-              set('vessel_id', v);
-              const vessel = allVessels?.find((vv) => vv.id === v);
-              if (vessel?.marina_id) set('marina_id', vessel.marina_id);
-            }} disabled={!form.client_id}>
-              <SelectTrigger><SelectValue placeholder={t.vessels.selectMarina || 'Selecionar embarcação'} /></SelectTrigger>
-              <SelectContent>
-                {clientVessels.filter((v) => v.active).map((v) => (
-                  <SelectItem key={v.id} value={v.id}>{v.boat_name} {v.manufacturer ? `(${v.manufacturer})` : ''}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <VesselSelect
+              value={form.vessel_id}
+              clientId={form.client_id}
+              vessels={clientVessels}
+              disabled={!form.client_id || isLocked}
+              onChange={(vesselId) => {
+                set('vessel_id', vesselId);
+                set('requested_by_contact_id', '');
+                const vessel = allVessels?.find(v => v.id === vesselId);
+                if (vessel?.marina_id) set('marina_id', vessel.marina_id);
+              }}
+              onVesselCreated={(vessel) => {
+                set('vessel_id', vessel.id);
+                if (vessel.marina_id) set('marina_id', vessel.marina_id);
+              }}
+            />
           </div>
           <div>
             <Label>{t.serviceOrders.marina}</Label>
@@ -645,7 +659,51 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           </div>
           <div>
             <Label>{t.serviceOrders.requestedBy}</Label>
-            <Input value={form.requested_by_name} onChange={(e) => set('requested_by_name', e.target.value)} />
+            {vesselContacts && vesselContacts.length > 0 ? (
+              <Select
+                value={form.requested_by_contact_id || 'none'}
+                onValueChange={(v) => {
+                  const contact = vesselContacts.find(c => c.id === v);
+                  setForm(f => ({
+                    ...f,
+                    requested_by_contact_id: v === 'none' ? '' : v,
+                    requested_by_name: contact?.full_name || '',
+                  }));
+                }}
+                disabled={isLocked}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecionar contato" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">—</SelectItem>
+                  {vesselContacts.map(c => (
+                    <SelectItem key={c.id} value={c.id}>
+                      <span className="flex items-center gap-1">
+                        {c.full_name}
+                        <span className="text-xs text-muted-foreground">
+                          ({VESSEL_CONTACT_ROLES.find(r => r.value === c.role)?.label || c.role})
+                        </span>
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <div>
+                <Input
+                  value={form.requested_by_name}
+                  onChange={e => set('requested_by_name', e.target.value)}
+                  placeholder="Nome do solicitante"
+                  disabled={isLocked}
+                />
+                {form.vessel_id && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Cadastre contatos na embarcação para aparecerem aqui
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </section>
