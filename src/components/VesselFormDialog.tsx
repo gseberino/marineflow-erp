@@ -10,6 +10,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useCreateVessel, useUpdateVessel } from '@/hooks/use-vessels';
 import { useClients } from '@/hooks/use-clients';
 import { useMarinas } from '@/hooks/use-marinas';
+import { useVesselContacts, useCreateVesselContact, VESSEL_CONTACT_ROLES } from '@/hooks/use-vessel-contacts';
+import { Badge } from '@/components/ui/badge';
+import { Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Tables, TablesInsert } from '@/integrations/supabase/types';
 
@@ -230,6 +233,10 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
               <Label>{t.common.active}</Label>
             </div>
           </div>
+
+          {/* Vessel Contacts - only when editing */}
+          {isEdit && vessel && <VesselContactsSection vesselId={vessel.id} />}
+
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>{t.common.cancel}</Button>
             <Button type="submit" disabled={isPending}>{t.common.save}</Button>
