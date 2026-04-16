@@ -1,10 +1,18 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/use-auth';
+import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Anchor, Loader2, Eye, EyeOff } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
+import { Anchor, Loader2, Eye, EyeOff, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function LoginPage() {
@@ -14,6 +22,11 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  const [showForgot, setShowForgot] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotSent, setForgotSent] = useState(false);
+  const [forgotLoading, setForgotLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,6 +51,21 @@ export default function LoginPage() {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleForgot = async () => {
+    if (!forgotEmail) return;
+    setForgotLoading(true);
+    try {
+      await supabase.auth.resetPasswordForEmail(forgotEmail, {
+        redirectTo: window.location.origin + '/reset-password',
+      });
+      setForgotSent(true);
+    } catch {
+      setForgotSent(true);
+    } finally {
+      setForgotLoading(false);
     }
   };
 
@@ -105,6 +133,13 @@ export default function LoginPage() {
               'Entrar'
             )}
           </Button>
+          <button
+            type="button"
+            onClick={() => setShowForgot(true)}
+            className="text-xs text-muted-foreground hover:text-primary transition-colors w-full text-center"
+          >
+            Esqueci minha senha
+          </button>
         </form>
 
         <p className="text-center text-xs text-muted-foreground">
@@ -121,6 +156,66 @@ export default function LoginPage() {
           </div>
         )}
       </div>
+
+      <Dialog open={showForgot} onOpenChange={setShowForgot}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Redefinir senha</DialogTitle>
+            <DialogDescription>
+              Insira seu email. Se houver uma conta associada, você receberá
+              um link para redefinir sua senha.
+            </DialogDescription>
+          </DialogHeader>
+          {forgotSent ? (
+            <div className="flex flex-col items-center gap-3 py-4 text-center">
+              <CheckCircle className="h-10 w-10 text-primary" />
+              <p className="text-sm text-muted-foreground">
+                Se este email estiver cadastrado, você receberá as instruções
+                em breve. Verifique sua caixa de entrada.
+              </p>
+              <Button
+                onClick={() => {
+                  setShowForgot(false);
+                  setForgotSent(false);
+                  setForgotEmail('');
+                }}
+              >
+                Fechar
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="forgot-email">Email</Label>
+                <Input
+                  id="forgot-email"
+                  type="email"
+                  placeholder="usuario@email.com"
+                  value={forgotEmail}
+                  onChange={e => setForgotEmail(e.target.value)}
+                  disabled={forgotLoading}
+                  autoFocus
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="ghost" onClick={() => setShowForgot(false)}>
+                  Cancelar
+                </Button>
+                <Button onClick={handleForgot} disabled={forgotLoading || !forgotEmail}>
+                  {forgotLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Enviando...
+                    </>
+                  ) : (
+                    'Enviar link'
+                  )}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
