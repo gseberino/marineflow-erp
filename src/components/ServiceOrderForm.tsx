@@ -752,9 +752,20 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           <Label>{t.serviceOrders.problemDescription} *</Label>
           <Textarea value={form.problem_description} onChange={(e) => set('problem_description', e.target.value)} rows={3} />
         </div>
-        <div>
-          <Label>{t.serviceOrders.technicianNotes}</Label>
-          <Textarea value={form.technician_notes} onChange={(e) => set('technician_notes', e.target.value)} rows={2} disabled={isLocked} />
+        <div className="space-y-2">
+          <Label className="flex items-center gap-2 text-sm font-medium">
+            Observações Adicionais para Impressão
+            <span className="text-xs text-muted-foreground font-normal">
+              (aparece no PDF deste documento)
+            </span>
+          </Label>
+          <Textarea
+            value={form.extra_notes || ''}
+            onChange={e => set('extra_notes', e.target.value)}
+            placeholder="Informações específicas para este cliente, condições especiais, garantias, prazos..."
+            rows={2}
+            disabled={isLocked}
+          />
         </div>
 
         <Collapsible open={extraFieldsOpen} onOpenChange={setExtraFieldsOpen}>
@@ -766,6 +777,10 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           </CollapsibleTrigger>
           <CollapsibleContent className="space-y-4 pt-3">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div>
+                <Label>{t.serviceOrders.technicianNotes}</Label>
+                <Textarea value={form.technician_notes} onChange={(e) => set('technician_notes', e.target.value)} rows={2} disabled={isLocked} />
+              </div>
               <div>
                 <Label>{t.serviceOrders.initialFindings}</Label>
                 <Textarea value={form.initial_findings} onChange={(e) => set('initial_findings', e.target.value)} rows={2} />
@@ -785,21 +800,6 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               <div>
                 <Label>{t.serviceOrders.customerReport}</Label>
                 <Textarea value={form.customer_visible_report} onChange={(e) => set('customer_visible_report', e.target.value)} rows={2} />
-              </div>
-              <div className="space-y-2">
-                <Label className="flex items-center gap-2 text-sm font-medium">
-                  Observações Adicionais para Impressão
-                  <span className="text-xs text-muted-foreground font-normal">
-                    (aparece no PDF deste documento)
-                  </span>
-                </Label>
-                <Textarea
-                  value={form.extra_notes || ''}
-                  onChange={e => set('extra_notes', e.target.value)}
-                  placeholder="Informações específicas para este cliente, condições especiais, garantias, prazos..."
-                  rows={2}
-                  disabled={isLocked}
-                />
               </div>
             </div>
           </CollapsibleContent>
