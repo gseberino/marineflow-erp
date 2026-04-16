@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { MapPin, DollarSign, Users, Globe, Banknote, CreditCard, FileText, Tag, Receipt, Package } from 'lucide-react';
+import { MapPin, DollarSign, Users, Globe, Banknote, CreditCard, FileText, Tag, Receipt, Package, Mail } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useCardFees, useUpdateCardFee } from '@/hooks/use-card-fees';
 import { useFinancialCategories, useCreateFinancialCategory, useUpdateFinancialCategory } from '@/hooks/use-financial-categories';
@@ -947,6 +947,7 @@ function UsersTab() {
               <th className="px-4 py-2 text-left font-medium text-muted-foreground">Função</th>
               <th className="px-4 py-2 text-left font-medium text-muted-foreground">Telefone</th>
               <th className="px-4 py-2 text-center font-medium text-muted-foreground">{t.common.active}</th>
+              <th className="px-4 py-2 text-center font-medium text-muted-foreground">Ações</th>
             </tr>
           </thead>
           <tbody>
@@ -963,10 +964,29 @@ function UsersTab() {
                 <td className="px-4 py-2 text-center">
                   <Switch checked={u.active} onCheckedChange={v => updateUser.mutate({ id: u.id, active: v })} />
                 </td>
+                <td className="px-4 py-2 text-center">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={async () => {
+                      try {
+                        await supabase.auth.resetPasswordForEmail(u.email, {
+                          redirectTo: window.location.origin + '/reset-password',
+                        });
+                        toast.success(`Link enviado para ${u.email}`);
+                      } catch {
+                        toast.error('Erro ao enviar email');
+                      }
+                    }}
+                  >
+                    <Mail className="h-3.5 w-3.5 mr-1" />
+                    Enviar acesso
+                  </Button>
+                </td>
               </tr>
             ))}
             {(users || []).length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">Nenhum usuário cadastrado ainda</td></tr>
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Nenhum usuário cadastrado ainda</td></tr>
             )}
           </tbody>
         </table>
