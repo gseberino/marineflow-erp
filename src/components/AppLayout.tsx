@@ -1,12 +1,21 @@
 import { ReactNode, useState } from 'react';
 import { cn } from '@/lib/utils';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useI18n } from '@/i18n';
+import { useAuth } from '@/hooks/use-auth';
 import {
   LayoutDashboard, Users, Ship, Anchor, Package, ClipboardList,
-  DollarSign, BarChart3, Settings, ChevronLeft, ChevronRight, Menu, X,
-  Warehouse, Building2, Wrench, History
+  DollarSign, BarChart3, Settings, ChevronLeft, ChevronRight, Menu,
+  Warehouse, Building2, Wrench, History, LogOut
 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 const navKeys = [
   { key: 'dashboard' as const, icon: LayoutDashboard, path: '/' },
@@ -24,15 +33,47 @@ const navKeys = [
   { key: 'settings' as const, icon: Settings, path: '/settings' },
 ];
 
+const roleLabels: Record<string, string> = {
+  admin: 'Administrador',
+  technician: 'Técnico',
+  financial: 'Financeiro',
+  seller: 'Vendedor',
+  other: 'Usuário',
+};
+
 export function AppLayout({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
   const { t } = useI18n();
+  const { user, signOut } = useAuth();
 
   const isActive = (path: string) => {
     if (path === '/') return location.pathname === '/';
     return location.pathname.startsWith(path);
+  };
+
+  const visibleNavKeys = navKeys.filter(item => {
+    if (item.path === '/financial') {
+      return user?.role === 'admin' || user?.role === 'financial';
+    }
+    if (item.path === '/audit-log' || item.path === '/settings') {
+      return user?.role === 'admin';
+    }
+    return true;
+  });
+
+  const initials = user?.full_name
+    ?.split(' ')
+    .map(n => n[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase() || '?';
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/login');
   };
 
   const sidebarContent = (
@@ -43,14 +84,14 @@ export function AppLayout({ children }: { children: ReactNode }) {
         </div>
         {!collapsed && (
           <div className="flex flex-col">
-            <span className="text-sm font-bold text-sidebar-accent-foreground">NautiTech</span>
+            <span className="text-sm font-bold text-sidebar-accent-foreground">MarineFlow</span>
             <span className="text-[10px] text-sidebar-foreground">Marine ERP</span>
           </div>
         )}
       </div>
 
       <nav className="flex-1 space-y-1 p-2 overflow-y-auto scrollbar-thin">
-        {navKeys.map((item) => (
+        {visibleNavKeys.map((item) => (
           <Link
             key={item.path}
             to={item.path}
@@ -109,13 +150,32 @@ export function AppLayout({ children }: { children: ReactNode }) {
           </button>
           <div className="flex-1" />
           <div className="flex items-center gap-3">
-            <div className="text-right hidden sm:block">
-              <p className="text-sm font-medium">Carlos Mendes</p>
-              <p className="text-xs text-muted-foreground">{t.roles.admin}</p>
-            </div>
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold">
-              CM
-            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger className="flex items-center gap-3 outline-none">
+                <div className="text-right hidden sm:block">
+                  <p className="text-sm font-medium">{user?.full_name || 'Usuário'}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {roleLabels[user?.role || ''] || user?.role}
+                  </p>
+                </div>
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold">
+                  {initials}
+                </div>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuLabel>
+                  <div>
+                    <p className="font-medium">{user?.full_name}</p>
+                    <p className="text-xs text-muted-foreground font-normal">{user?.email}</p>
+                  </div>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleSignOut}>
+                  <LogOut className="h-4 w-4" />
+                  Sair
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </header>
 
