@@ -10,6 +10,7 @@ export const en = {
     suppliers: 'Suppliers',
     services: 'Services',
     inventory: 'Inventory',
+    agenda: 'Schedule',
     financial: 'Financial',
     reports: 'Reports',
     auditLog: 'Audit Log',

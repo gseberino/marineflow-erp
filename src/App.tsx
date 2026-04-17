@@ -17,6 +17,7 @@ import VesselDetail from "./pages/VesselDetail";
 import MarinaList from "./pages/MarinaList";
 import ProductList from "./pages/ProductList";
 import InventoryPage from "./pages/InventoryPage";
+import AgendaPage from "./pages/AgendaPage";
 import FinancialPage from "./pages/FinancialPage";
 import ReportsPage from "./pages/ReportsPage";
 import SettingsPage from "./pages/SettingsPage";
@@ -57,6 +58,7 @@ const App = () => (
                       <Route path="/suppliers" element={<SupplierList />} />
                       <Route path="/services" element={<ServiceList />} />
                       <Route path="/inventory" element={<InventoryPage />} />
+                      <Route path="/agenda" element={<AgendaPage />} />
                       <Route path="/financial" element={
                         <ProtectedRoute roles={['admin', 'financial']}>
                           <FinancialPage />

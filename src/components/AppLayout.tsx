@@ -6,7 +6,7 @@ import { useAuth } from '@/hooks/use-auth';
 import {
   LayoutDashboard, Users, Ship, Anchor, Package, ClipboardList,
   DollarSign, BarChart3, Settings, ChevronLeft, ChevronRight, Menu,
-  Warehouse, Building2, Wrench, History, LogOut
+  Warehouse, Building2, Wrench, History, LogOut, CalendarDays
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -20,6 +20,7 @@ import {
 const navKeys = [
   { key: 'dashboard' as const, icon: LayoutDashboard, path: '/' },
   { key: 'serviceOrders' as const, icon: ClipboardList, path: '/service-orders' },
+  { key: 'agenda' as const, icon: CalendarDays, path: '/agenda' },
   { key: 'clients' as const, icon: Users, path: '/clients' },
   { key: 'vessels' as const, icon: Ship, path: '/vessels' },
   { key: 'marinas' as const, icon: Anchor, path: '/marinas' },
