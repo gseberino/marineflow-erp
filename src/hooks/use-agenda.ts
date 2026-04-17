@@ -75,7 +75,7 @@ export function useQuickSchedule() {
         .single();
       if (getErr) throw getErr;
 
-      const updatePayload: Record<string, any> = {
+      const updatePayload: { scheduled_start_at: string; scheduled_end_at: string | null; status?: string } = {
         scheduled_start_at: input.scheduled_start_at,
         scheduled_end_at: input.scheduled_end_at,
       };

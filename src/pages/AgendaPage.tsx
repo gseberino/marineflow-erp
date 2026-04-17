@@ -129,12 +129,11 @@ export default function AgendaPage() {
       <PageHeader
         title="Agenda"
         description="Programação de ordens de serviço por técnico e data"
-        actions={
-          <Button onClick={() => openQuickSchedule()}>
-            <Plus className="h-4 w-4" /> Agendar OS
-          </Button>
-        }
-      />
+      >
+        <Button onClick={() => openQuickSchedule()}>
+          <Plus className="h-4 w-4" /> Agendar OS
+        </Button>
+      </PageHeader>
 
       <Card className="p-4 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
