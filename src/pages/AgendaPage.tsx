@@ -263,8 +263,8 @@ function WeekView({
           ))}
 
           {rows.map((tech) => (
-            <>
-              <div key={`name-${tech.id}`} className="p-2 text-sm font-medium border-t flex items-center">
+            <div key={tech.id} className="contents">
+              <div className="p-2 text-sm font-medium border-t flex items-center">
                 {tech.full_name}
               </div>
               {days.map((d, i) => {
@@ -316,7 +316,7 @@ function WeekView({
                   </div>
                 );
               })}
-            </>
+            </div>
           ))}
         </div>
       </div>
