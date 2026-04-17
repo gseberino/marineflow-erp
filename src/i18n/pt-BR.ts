@@ -11,6 +11,7 @@ export const ptBR: TranslationKeys = {
     suppliers: 'Fornecedores',
     services: 'Serviços',
     inventory: 'Estoque',
+    agenda: 'Agenda',
     financial: 'Financeiro',
     reports: 'Relatórios',
     auditLog: 'Audit Log',
