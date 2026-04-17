@@ -167,7 +167,7 @@ function PerformanceTab() {
                   </Link>
                 </TableCell>
                 <TableCell>{o.client}</TableCell>
-                <TableCell><StatusBadge status={o.status} /></TableCell>
+                <TableCell><StatusBadge className="bg-muted text-foreground">{o.status}</StatusBadge></TableCell>
                 <TableCell className="text-right font-mono">{o.days_since}d</TableCell>
               </TableRow>
             ))}
