@@ -342,11 +342,18 @@ export default function FinancialPage() {
                         <td className="px-4 py-3 text-right hidden md:table-cell font-semibold">{formatCurrency(Number(r.balance_amount))}</td>
                         <td className="px-4 py-3"><StatusBadge className={getStatusBadgeClass(r.status || 'pending', r.due_date)}>{getDisplayStatus(r.status || 'pending', r.due_date, t)}</StatusBadge></td>
                         <td className="px-4 py-3 text-right">
-                          {r.status !== 'paid' && (
-                            <Button size="sm" variant="outline" onClick={() => setPaymentTarget({ receivable: r })}>
-                              {t.financial.registerPayment}
-                            </Button>
-                          )}
+                          <div className="flex justify-end gap-1">
+                            {Number(r.paid_amount || 0) > 0 && (
+                              <Button size="sm" variant="ghost" title="Gerar Recibo" onClick={() => handleGenerateReceipt(r)}>
+                                <ReceiptIcon className="h-4 w-4 mr-1" /> Recibo
+                              </Button>
+                            )}
+                            {r.status !== 'paid' && (
+                              <Button size="sm" variant="outline" onClick={() => setPaymentTarget({ receivable: r })}>
+                                {t.financial.registerPayment}
+                              </Button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
