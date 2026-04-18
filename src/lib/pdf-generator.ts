@@ -1,4 +1,4 @@
-export type PDFDocumentType = 'quote' | 'service_order';
+export type PDFDocumentType = 'quote' | 'service_order' | 'invoice' | 'receipt';
 
 export type PDFOptions = {
   showServicePrices: boolean;
@@ -9,7 +9,12 @@ export type PDFOptions = {
   showCommission: boolean;
   showTerms: boolean;
   showSignature: boolean;
+  // Invoice-only
+  showBankDetails?: boolean;
+  showPaymentInstructions?: boolean;
   validity?: { mode: 'days' | 'date'; days?: number; date?: string };
+  // Invoice payment due date (yyyy-mm-dd)
+  dueDate?: string;
 };
 
 export const DEFAULT_PDF_OPTIONS: PDFOptions = {
@@ -21,6 +26,8 @@ export const DEFAULT_PDF_OPTIONS: PDFOptions = {
   showCommission: false,
   showTerms: true,
   showSignature: true,
+  showBankDetails: true,
+  showPaymentInstructions: true,
 };
 
 export type PDFData = {
@@ -34,6 +41,12 @@ export type PDFData = {
     phone: string;
     email: string;
     cnpj: string;
+  };
+  bank?: {
+    bank_name?: string;
+    bank_agency?: string;
+    bank_account?: string;
+    pix_key?: string;
   };
   serviceOrder: {
     service_order_number: string;
@@ -93,6 +106,14 @@ export type PDFData = {
     description: string;
     amount: number;
   }>;
+  // Receipt-only
+  receipt?: {
+    amount: number;
+    payment_date: string; // ISO
+    payment_method: string;
+    reference?: string;
+    notes?: string;
+  };
   terms?: string;
 };
 
@@ -137,19 +158,121 @@ export function generatePDF(data: PDFData, options: PDFOptions): void {
   });
 }
 
+// ============= Number to words (pt-BR) =============
+const _ones = ['', 'um', 'dois', 'três', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove', 'dez',
+  'onze', 'doze', 'treze', 'quatorze', 'quinze', 'dezesseis', 'dezessete', 'dezoito', 'dezenove'];
+const _tens = ['', '', 'vinte', 'trinta', 'quarenta', 'cinquenta', 'sessenta', 'setenta', 'oitenta', 'noventa'];
+const _hundreds = ['', 'cento', 'duzentos', 'trezentos', 'quatrocentos', 'quinhentos', 'seiscentos', 'setecentos', 'oitocentos', 'novecentos'];
+
+function _under1000(n: number): string {
+  if (n === 0) return '';
+  if (n === 100) return 'cem';
+  const h = Math.floor(n / 100);
+  const rest = n % 100;
+  const parts: string[] = [];
+  if (h > 0) parts.push(_hundreds[h]);
+  if (rest > 0) {
+    if (rest < 20) parts.push(_ones[rest]);
+    else {
+      const t = Math.floor(rest / 10);
+      const o = rest % 10;
+      parts.push(o > 0 ? `${_tens[t]} e ${_ones[o]}` : _tens[t]);
+    }
+  }
+  return parts.join(' e ');
+}
+
+function numberToWordsBRL(value: number): string {
+  if (value < 0) return 'menos ' + numberToWordsBRL(-value);
+  const intPart = Math.floor(value);
+  const cents = Math.round((value - intPart) * 100);
+
+  const intWords = (() => {
+    if (intPart === 0) return 'zero';
+    const millions = Math.floor(intPart / 1_000_000);
+    const thousands = Math.floor((intPart % 1_000_000) / 1000);
+    const rest = intPart % 1000;
+    const parts: string[] = [];
+    if (millions > 0) parts.push(millions === 1 ? 'um milhão' : `${_under1000(millions)} milhões`);
+    if (thousands > 0) parts.push(thousands === 1 ? 'mil' : `${_under1000(thousands)} mil`);
+    if (rest > 0) parts.push(_under1000(rest));
+    return parts.join(' e ');
+  })();
+
+  const reaisLabel = intPart === 1 ? 'real' : 'reais';
+  let result = `${intWords} ${reaisLabel}`;
+  if (cents > 0) {
+    const centWords = _under1000(cents);
+    result += ` e ${centWords} ${cents === 1 ? 'centavo' : 'centavos'}`;
+  }
+  return result;
+}
+
+const PAYMENT_METHOD_LABELS: Record<string, string> = {
+  pix: 'PIX',
+  credit_card: 'Cartão de Crédito',
+  debit_card: 'Cartão de Débito',
+  cash: 'Dinheiro',
+  bank_transfer: 'Transferência Bancária',
+  check: 'Cheque',
+  boleto: 'Boleto',
+  ted: 'TED',
+};
+
 function buildHTMLDocument(data: PDFData, options: PDFOptions): string {
+  if (data.documentType === 'receipt') return buildReceiptHTML(data, options);
+  if (data.documentType === 'invoice') return buildInvoiceHTML(data, options);
+  return buildOrderHTML(data, options);
+}
+
+const fmtCurrency = (v: number) =>
+  new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
+
+const fmtDate = (iso?: string) => {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString('pt-BR');
+};
+
+function companyHeaderHTML(company: PDFData['company']): string {
+  return `
+<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #1e3a5f;padding-bottom:12px;margin-bottom:16px;">
+  <div>
+    <h1 style="font-size:20px;color:#1e3a5f;margin:0;">${company.name}</h1>
+  </div>
+  <div style="text-align:right;font-size:11px;color:#6b7280;">
+    <div>${company.address}${company.city ? `, ${company.city}` : ''}${company.state ? ` - ${company.state}` : ''}</div>
+    <div>${company.postal_code ? `CEP: ${company.postal_code}` : ''}${company.phone ? ` · Tel: ${company.phone}` : ''}</div>
+    <div>${company.email ? `Email: ${company.email}` : ''}${company.cnpj ? ` · CNPJ: ${company.cnpj}` : ''}</div>
+  </div>
+</div>`;
+}
+
+function pageWrapper(title: string, body: string): string {
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<title>${title}</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; font-size:12px; color:#1f2937; padding:20px; }
+  @media print {
+    body { padding:0; }
+    @page { margin:15mm 20mm; size:A4; }
+  }
+  table { border-collapse:collapse; width:100%; }
+</style>
+</head>
+<body>${body}</body>
+</html>`;
+}
+
+// ============= QUOTE / SERVICE_ORDER (preserved behavior) =============
+function buildOrderHTML(data: PDFData, options: PDFOptions): string {
   const isQuote = data.documentType === 'quote';
   const docTitle = isQuote ? 'ORÇAMENTO' : 'ORDEM DE SERVIÇO';
   const docNumber = data.serviceOrder.service_order_number;
   const today = new Date().toLocaleDateString('pt-BR');
-
-  const formatCurrency = (v: number) =>
-    new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
-
-  const formatDate = (iso?: string) => {
-    if (!iso) return '—';
-    return new Date(iso).toLocaleDateString('pt-BR');
-  };
 
   const billingUnitLabel: Record<string, string> = {
     hour: 'hora', visit: 'visita', day: 'dia', unit: 'un.',
@@ -174,8 +297,8 @@ function buildHTMLDocument(data: PDFData, options: PDFOptions): string {
     <tr>
       <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">${s.service_name}${s.description ? `<br/><small style="color:#6b7280;">${s.description}</small>` : ''}</td>
       <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:center;">${s.quantity} ${billingUnitLabel[s.billing_unit] || s.billing_unit}</td>
-      ${options.showServicePrices ? `<td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">${formatCurrency(s.unit_price)}</td>` : ''}
-      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">${formatCurrency(s.line_total)}</td>
+      ${options.showServicePrices ? `<td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtCurrency(s.unit_price)}</td>` : ''}
+      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtCurrency(s.line_total)}</td>
     </tr>
   `).join('');
 
@@ -183,70 +306,42 @@ function buildHTMLDocument(data: PDFData, options: PDFOptions): string {
     <tr>
       <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">${p.product_name}${p.sku ? ` <small style="color:#6b7280;">(${p.sku})</small>` : ''}</td>
       <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:center;">${p.quantity}</td>
-      ${options.showPartsPrices ? `<td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">${formatCurrency(p.unit_price)}</td>` : ''}
-      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">${formatCurrency(p.line_total)}</td>
+      ${options.showPartsPrices ? `<td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtCurrency(p.unit_price)}</td>` : ''}
+      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtCurrency(p.line_total)}</td>
     </tr>
   `).join('');
 
   const summaryRows = [
     data.services.length > 0
-      ? `<tr><td style="padding:4px 8px;">Mão de obra</td><td style="padding:4px 8px;text-align:right;">${formatCurrency(data.serviceOrder.labor_cost_total)}</td></tr>` : '',
+      ? `<tr><td style="padding:4px 8px;">Mão de obra</td><td style="padding:4px 8px;text-align:right;">${fmtCurrency(data.serviceOrder.labor_cost_total)}</td></tr>` : '',
     data.parts.length > 0
-      ? `<tr><td style="padding:4px 8px;">Peças e materiais</td><td style="padding:4px 8px;text-align:right;">${formatCurrency(data.serviceOrder.parts_cost_total)}</td></tr>` : '',
+      ? `<tr><td style="padding:4px 8px;">Peças e materiais</td><td style="padding:4px 8px;text-align:right;">${fmtCurrency(data.serviceOrder.parts_cost_total)}</td></tr>` : '',
     options.showTravelCost && data.serviceOrder.travel_cost_total > 0
-      ? `<tr><td style="padding:4px 8px;">Deslocamento</td><td style="padding:4px 8px;text-align:right;">${formatCurrency(data.serviceOrder.travel_cost_total)}</td></tr>` : '',
+      ? `<tr><td style="padding:4px 8px;">Deslocamento</td><td style="padding:4px 8px;text-align:right;">${fmtCurrency(data.serviceOrder.travel_cost_total)}</td></tr>` : '',
     (data.serviceOrder.operational_cost_total ?? 0) > 0
-      ? `<tr><td style="padding:4px 8px;">Despesas operacionais</td><td style="padding:4px 8px;text-align:right;">${formatCurrency(data.serviceOrder.operational_cost_total!)}</td></tr>` : '',
+      ? `<tr><td style="padding:4px 8px;">Despesas operacionais</td><td style="padding:4px 8px;text-align:right;">${fmtCurrency(data.serviceOrder.operational_cost_total!)}</td></tr>` : '',
     options.showDiscount && data.serviceOrder.discount_amount > 0
-      ? `<tr><td style="padding:4px 8px;">Desconto</td><td style="padding:4px 8px;text-align:right;color:#dc2626;">− ${formatCurrency(data.serviceOrder.discount_amount)}</td></tr>` : '',
+      ? `<tr><td style="padding:4px 8px;">Desconto</td><td style="padding:4px 8px;text-align:right;color:#dc2626;">− ${fmtCurrency(data.serviceOrder.discount_amount)}</td></tr>` : '',
     options.showTax && data.serviceOrder.tax_amount > 0
-      ? `<tr><td style="padding:4px 8px;">Impostos</td><td style="padding:4px 8px;text-align:right;">${formatCurrency(data.serviceOrder.tax_amount)}</td></tr>` : '',
+      ? `<tr><td style="padding:4px 8px;">Impostos</td><td style="padding:4px 8px;text-align:right;">${fmtCurrency(data.serviceOrder.tax_amount)}</td></tr>` : '',
   ].filter(Boolean).join('');
 
   const commissionRows = options.showCommission && (data.serviceOrder.commission_amount ?? 0) > 0
     ? `
-      <tr><td style="padding:4px 8px;">Comissão (${data.serviceOrder.commission_rate}%)</td><td style="padding:4px 8px;text-align:right;color:#dc2626;">− ${formatCurrency(data.serviceOrder.commission_amount ?? 0)}</td></tr>
-      <tr><td style="padding:4px 8px;font-weight:600;">Total líquido</td><td style="padding:4px 8px;text-align:right;font-weight:600;">${formatCurrency(data.serviceOrder.grand_total - (data.serviceOrder.commission_amount ?? 0))}</td></tr>
+      <tr><td style="padding:4px 8px;">Comissão (${data.serviceOrder.commission_rate}%)</td><td style="padding:4px 8px;text-align:right;color:#dc2626;">− ${fmtCurrency(data.serviceOrder.commission_amount ?? 0)}</td></tr>
+      <tr><td style="padding:4px 8px;font-weight:600;">Total líquido</td><td style="padding:4px 8px;text-align:right;font-weight:600;">${fmtCurrency(data.serviceOrder.grand_total - (data.serviceOrder.commission_amount ?? 0))}</td></tr>
     ` : '';
 
-  return `<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="UTF-8"/>
-<title>${docTitle} ${docNumber}</title>
-<style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family: 'Segoe UI', Arial, sans-serif; font-size:12px; color:#1f2937; padding:20px; }
-  @media print {
-    body { padding:0; }
-    @page { margin:15mm 20mm; size:A4; }
-  }
-  table { border-collapse:collapse; width:100%; }
-</style>
-</head>
-<body>
+  const body = `
+${companyHeaderHTML(data.company)}
 
-<!-- Company Header -->
-<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #1e3a5f;padding-bottom:12px;margin-bottom:16px;">
-  <div>
-    <h1 style="font-size:20px;color:#1e3a5f;margin:0;">${data.company.name}</h1>
-  </div>
-  <div style="text-align:right;font-size:11px;color:#6b7280;">
-    <div>${data.company.address}${data.company.city ? `, ${data.company.city}` : ''}${data.company.state ? ` - ${data.company.state}` : ''}</div>
-    <div>${data.company.postal_code ? `CEP: ${data.company.postal_code}` : ''}${data.company.phone ? ` · Tel: ${data.company.phone}` : ''}</div>
-    <div>${data.company.email ? `Email: ${data.company.email}` : ''}${data.company.cnpj ? ` · CNPJ: ${data.company.cnpj}` : ''}</div>
-  </div>
-</div>
-
-<!-- Document Title -->
 <div style="text-align:center;margin-bottom:16px;">
   <h2 style="font-size:16px;letter-spacing:2px;color:#1e3a5f;margin:0;">${docTitle}</h2>
   <div style="font-size:14px;font-weight:600;margin-top:4px;">${docNumber}</div>
   <div style="font-size:11px;color:#6b7280;">Emitido em: ${today}</div>
-  ${data.serviceOrder.scheduled_start_at ? `<div style="font-size:11px;color:#6b7280;">Agendado: ${formatDate(data.serviceOrder.scheduled_start_at)}</div>` : ''}
+  ${data.serviceOrder.scheduled_start_at ? `<div style="font-size:11px;color:#6b7280;">Agendado: ${fmtDate(data.serviceOrder.scheduled_start_at)}</div>` : ''}
 </div>
 
-<!-- Client & Vessel -->
 <div style="display:flex;gap:16px;margin-bottom:16px;">
   <div style="flex:1;border:1px solid #e5e7eb;border-radius:6px;padding:10px;">
     <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Cliente</div>
@@ -270,7 +365,6 @@ function buildHTMLDocument(data: PDFData, options: PDFOptions): string {
 </div>
 
 ${data.serviceOrder.problem_description ? `
-<!-- Problem Description -->
 <div style="border:1px solid #e5e7eb;border-radius:6px;padding:10px;margin-bottom:16px;">
   <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">${isQuote ? 'Escopo do Serviço' : 'Descrição do Problema'}</div>
   <div style="white-space:pre-wrap;">${data.serviceOrder.problem_description}</div>
@@ -278,7 +372,6 @@ ${data.serviceOrder.problem_description ? `
 ` : ''}
 
 ${data.services.length > 0 ? `
-<!-- Services Table -->
 <div style="margin-bottom:16px;">
   <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Serviços / Mão de Obra</div>
   <table>
@@ -296,7 +389,6 @@ ${data.services.length > 0 ? `
 ` : ''}
 
 ${data.parts.length > 0 ? `
-<!-- Parts Table -->
 <div style="margin-bottom:16px;">
   <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Peças e Materiais</div>
   <table>
@@ -314,7 +406,6 @@ ${data.parts.length > 0 ? `
 ` : ''}
 
 ${!isQuote && data.serviceOrder.technical_notes ? `
-<!-- Technical Notes -->
 <div style="border:1px solid #e5e7eb;border-radius:6px;padding:10px;margin-bottom:16px;">
   <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Observações Técnicas</div>
   <div style="white-space:pre-wrap;">${data.serviceOrder.technical_notes}</div>
@@ -322,7 +413,6 @@ ${!isQuote && data.serviceOrder.technical_notes ? `
 ` : ''}
 
 ${data.serviceOrder.extra_notes ? `
-<!-- Extra Notes -->
 <div style="border:1px solid #e5e7eb;border-radius:6px;padding:10px;margin-bottom:16px;">
   <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Observações Adicionais</div>
   <div style="white-space:pre-wrap;">${data.serviceOrder.extra_notes}</div>
@@ -338,7 +428,7 @@ ${data.serviceOrder.extra_notes ? `
     <tfoot>
       <tr style="background:#1e3a5f;color:#fff;">
         <td style="padding:8px;font-weight:700;font-size:14px;">TOTAL</td>
-        <td style="padding:8px;text-align:right;font-weight:700;font-size:14px;">${formatCurrency(data.serviceOrder.grand_total)}</td>
+        <td style="padding:8px;text-align:right;font-weight:700;font-size:14px;">${fmtCurrency(data.serviceOrder.grand_total)}</td>
       </tr>
     </tfoot>
   </table>
@@ -346,7 +436,6 @@ ${data.serviceOrder.extra_notes ? `
 </div>
 
 ${options.showSignature ? `
-<!-- Signatures -->
 <div style="display:flex;gap:40px;margin-top:40px;margin-bottom:24px;">
   <div style="flex:1;text-align:center;">
     <div style="border-top:1px solid #1f2937;padding-top:6px;margin-top:60px;">
@@ -363,18 +452,252 @@ ${options.showSignature ? `
 ` : ''}
 
 ${options.showTerms && data.terms ? `
-<!-- Terms -->
 <div style="border-top:1px solid #e5e7eb;padding-top:10px;margin-top:16px;">
   <div style="font-weight:700;font-size:10px;color:#1e3a5f;text-transform:uppercase;margin-bottom:4px;">Termos e Condições</div>
   <div style="font-size:9px;color:#6b7280;white-space:pre-wrap;">${data.terms}</div>
 </div>
 ` : ''}
 
-<!-- Footer -->
 <div style="text-align:center;font-size:9px;color:#9ca3af;margin-top:20px;border-top:1px solid #e5e7eb;padding-top:8px;">
   ${docTitle} gerado em ${today} · ${data.serviceOrder.service_order_number}
+</div>`;
+
+  return pageWrapper(`${docTitle} ${docNumber}`, body);
+}
+
+// ============= INVOICE (FATURA) =============
+function buildInvoiceHTML(data: PDFData, options: PDFOptions): string {
+  const docNumber = `FAT-${data.serviceOrder.service_order_number}`;
+  const today = new Date().toLocaleDateString('pt-BR');
+  const dueDate = options.dueDate
+    ? new Date(options.dueDate + 'T12:00:00').toLocaleDateString('pt-BR')
+    : (() => {
+        const d = new Date();
+        d.setDate(d.getDate() + 15);
+        return d.toLocaleDateString('pt-BR');
+      })();
+
+  const billingUnitLabel: Record<string, string> = {
+    hour: 'hora', visit: 'visita', day: 'dia', unit: 'un.',
+  };
+
+  const serviceRows = data.services.map(s => `
+    <tr>
+      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">${s.service_name}${s.description ? `<br/><small style="color:#6b7280;">${s.description}</small>` : ''}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:center;">${s.quantity} ${billingUnitLabel[s.billing_unit] || s.billing_unit}</td>
+      ${options.showServicePrices ? `<td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtCurrency(s.unit_price)}</td>` : ''}
+      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtCurrency(s.line_total)}</td>
+    </tr>
+  `).join('');
+
+  const partsRows = data.parts.map(p => `
+    <tr>
+      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">${p.product_name}${p.sku ? ` <small style="color:#6b7280;">(${p.sku})</small>` : ''}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:center;">${p.quantity}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtCurrency(p.unit_price)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtCurrency(p.line_total)}</td>
+    </tr>
+  `).join('');
+
+  const summaryRows = [
+    data.services.length > 0
+      ? `<tr><td style="padding:4px 8px;">Mão de obra</td><td style="padding:4px 8px;text-align:right;">${fmtCurrency(data.serviceOrder.labor_cost_total)}</td></tr>` : '',
+    data.parts.length > 0
+      ? `<tr><td style="padding:4px 8px;">Peças e materiais</td><td style="padding:4px 8px;text-align:right;">${fmtCurrency(data.serviceOrder.parts_cost_total)}</td></tr>` : '',
+    options.showTravelCost && data.serviceOrder.travel_cost_total > 0
+      ? `<tr><td style="padding:4px 8px;">Deslocamento</td><td style="padding:4px 8px;text-align:right;">${fmtCurrency(data.serviceOrder.travel_cost_total)}</td></tr>` : '',
+    options.showDiscount && data.serviceOrder.discount_amount > 0
+      ? `<tr><td style="padding:4px 8px;">Desconto</td><td style="padding:4px 8px;text-align:right;color:#dc2626;">− ${fmtCurrency(data.serviceOrder.discount_amount)}</td></tr>` : '',
+    options.showTax && data.serviceOrder.tax_amount > 0
+      ? `<tr><td style="padding:4px 8px;">Impostos</td><td style="padding:4px 8px;text-align:right;">${fmtCurrency(data.serviceOrder.tax_amount)}</td></tr>` : '',
+  ].filter(Boolean).join('');
+
+  const bank = data.bank || {};
+  const hasBank = !!(bank.bank_name || bank.bank_agency || bank.bank_account || bank.pix_key);
+
+  const body = `
+${companyHeaderHTML(data.company)}
+
+<div style="text-align:center;margin-bottom:20px;">
+  <h2 style="font-size:28px;letter-spacing:6px;color:#1e3a5f;margin:0;font-weight:800;">FATURA</h2>
+  <div style="font-size:14px;font-weight:600;margin-top:6px;">${docNumber}</div>
+  <div style="font-size:11px;color:#6b7280;margin-top:2px;">Emitida em: ${today} · Vencimento: <strong style="color:#dc2626;">${dueDate}</strong></div>
 </div>
 
-</body>
-</html>`;
+<div style="display:flex;gap:16px;margin-bottom:16px;">
+  <div style="flex:1;border:1px solid #e5e7eb;border-radius:6px;padding:10px;">
+    <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Cliente</div>
+    <div>
+      <strong>${data.client.name}</strong><br/>
+      ${data.client.cpf_cnpj ? `CPF/CNPJ: ${data.client.cpf_cnpj}<br/>` : ''}
+      ${data.client.phone ? `Tel: ${data.client.phone}<br/>` : ''}
+      ${data.client.email ? `Email: ${data.client.email}<br/>` : ''}
+      ${data.client.address || ''}
+    </div>
+  </div>
+  <div style="flex:1;border:1px solid #e5e7eb;border-radius:6px;padding:10px;">
+    <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Referência</div>
+    <div>
+      OS: <strong>${data.serviceOrder.service_order_number}</strong><br/>
+      ${data.vessel ? `Embarcação: ${data.vessel.name}<br/>` : ''}
+      ${data.marina ? `Marina: ${data.marina.name}` : ''}
+    </div>
+  </div>
+</div>
+
+${data.services.length > 0 ? `
+<div style="margin-bottom:16px;">
+  <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Serviços</div>
+  <table>
+    <thead>
+      <tr style="background:#f3f4f6;">
+        <th style="padding:6px 8px;text-align:left;font-size:11px;">Descrição</th>
+        <th style="padding:6px 8px;text-align:center;font-size:11px;">Qtd</th>
+        ${options.showServicePrices ? '<th style="padding:6px 8px;text-align:right;font-size:11px;">Unit.</th>' : ''}
+        <th style="padding:6px 8px;text-align:right;font-size:11px;">Total</th>
+      </tr>
+    </thead>
+    <tbody>${serviceRows}</tbody>
+  </table>
+</div>
+` : ''}
+
+${data.parts.length > 0 ? `
+<div style="margin-bottom:16px;">
+  <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Peças e Materiais</div>
+  <table>
+    <thead>
+      <tr style="background:#f3f4f6;">
+        <th style="padding:6px 8px;text-align:left;font-size:11px;">Item</th>
+        <th style="padding:6px 8px;text-align:center;font-size:11px;">Qtd</th>
+        <th style="padding:6px 8px;text-align:right;font-size:11px;">Unit.</th>
+        <th style="padding:6px 8px;text-align:right;font-size:11px;">Total</th>
+      </tr>
+    </thead>
+    <tbody>${partsRows}</tbody>
+  </table>
+</div>
+` : ''}
+
+<div style="margin-bottom:16px;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;">
+  <table style="font-size:12px;">
+    <tbody>${summaryRows}</tbody>
+    <tfoot>
+      <tr style="background:#1e3a5f;color:#fff;">
+        <td style="padding:10px;font-weight:700;font-size:15px;">TOTAL A PAGAR</td>
+        <td style="padding:10px;text-align:right;font-weight:700;font-size:15px;">${fmtCurrency(data.serviceOrder.grand_total)}</td>
+      </tr>
+    </tfoot>
+  </table>
+</div>
+
+${options.showBankDetails !== false && hasBank ? `
+<div style="border:1px solid #e5e7eb;border-radius:6px;padding:12px;margin-bottom:16px;background:#f9fafb;">
+  <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:8px;">Dados Bancários</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;">
+    ${bank.bank_name ? `<div><strong>Banco:</strong> ${bank.bank_name}</div>` : ''}
+    ${bank.bank_agency ? `<div><strong>Agência:</strong> ${bank.bank_agency}</div>` : ''}
+    ${bank.bank_account ? `<div><strong>Conta:</strong> ${bank.bank_account}</div>` : ''}
+    ${bank.pix_key ? `<div><strong>Chave PIX:</strong> ${bank.pix_key}</div>` : ''}
+    <div><strong>Favorecido:</strong> ${data.company.name}</div>
+    ${data.company.cnpj ? `<div><strong>CNPJ:</strong> ${data.company.cnpj}</div>` : ''}
+  </div>
+</div>
+` : ''}
+
+${options.showPaymentInstructions !== false ? `
+<div style="border:1px solid #e5e7eb;border-radius:6px;padding:10px;margin-bottom:16px;">
+  <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Formas de Pagamento Aceitas</div>
+  <div style="font-size:11px;line-height:1.6;">
+    • <strong>PIX</strong> — pagamento instantâneo usando a chave acima<br/>
+    • <strong>TED / Transferência Bancária</strong> — para os dados bancários informados<br/>
+    • <strong>Boleto</strong> — solicite o boleto pelo telefone ou e-mail de contato
+  </div>
+  <div style="font-size:10px;color:#6b7280;margin-top:8px;">
+    Após o pagamento, envie o comprovante para ${data.company.email || 'o e-mail de contato'} informando o número da fatura <strong>${docNumber}</strong>.
+  </div>
+</div>
+` : ''}
+
+${options.showTerms && data.terms ? `
+<div style="border-top:1px solid #e5e7eb;padding-top:10px;margin-top:16px;">
+  <div style="font-weight:700;font-size:10px;color:#1e3a5f;text-transform:uppercase;margin-bottom:4px;">Termos e Condições</div>
+  <div style="font-size:9px;color:#6b7280;white-space:pre-wrap;">${data.terms}</div>
+</div>
+` : ''}
+
+<div style="text-align:center;font-size:9px;color:#9ca3af;margin-top:20px;border-top:1px solid #e5e7eb;padding-top:8px;">
+  FATURA gerada em ${today} · ${docNumber}
+</div>`;
+
+  return pageWrapper(`FATURA ${docNumber}`, body);
+}
+
+// ============= RECEIPT (RECIBO) =============
+function buildReceiptHTML(data: PDFData, options: PDFOptions): string {
+  const today = new Date().toLocaleDateString('pt-BR');
+  const r = data.receipt || {
+    amount: data.serviceOrder.grand_total,
+    payment_date: new Date().toISOString(),
+    payment_method: 'pix',
+    reference: data.serviceOrder.service_order_number,
+  };
+  const methodLabel = PAYMENT_METHOD_LABELS[r.payment_method] || r.payment_method;
+  const amountWords = numberToWordsBRL(r.amount);
+
+  const body = `
+${companyHeaderHTML(data.company)}
+
+<div style="text-align:center;margin:30px 0 20px;">
+  <h2 style="font-size:26px;letter-spacing:5px;color:#1e3a5f;margin:0;font-weight:800;">RECIBO DE PAGAMENTO</h2>
+</div>
+
+<div style="text-align:right;font-size:13px;margin-bottom:20px;">
+  <strong>Valor:</strong> <span style="font-size:18px;font-weight:700;color:#1e3a5f;">${fmtCurrency(r.amount)}</span>
+</div>
+
+<div style="border:1px solid #e5e7eb;border-radius:6px;padding:20px;margin-bottom:24px;line-height:1.8;font-size:13px;">
+  Recebemos de <strong>${data.client.name}</strong>${data.client.cpf_cnpj ? `, inscrito(a) no CPF/CNPJ <strong>${data.client.cpf_cnpj}</strong>,` : ''}
+  a importância de <strong>${fmtCurrency(r.amount)}</strong>
+  <em>(${amountWords})</em>,
+  referente a <strong>${r.reference || data.serviceOrder.service_order_number}</strong>${data.vessel ? ` — embarcação <strong>${data.vessel.name}</strong>` : ''},
+  pago via <strong>${methodLabel}</strong> em <strong>${fmtDate(r.payment_date)}</strong>.
+  ${r.notes ? `<br/><br/><span style="color:#6b7280;">Obs.: ${r.notes}</span>` : ''}
+  <br/><br/>
+  Para clareza e validade, firmamos o presente recibo, dando plena, geral e irrevogável quitação do valor recebido.
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px;font-size:12px;">
+  <div style="border:1px solid #e5e7eb;border-radius:6px;padding:10px;">
+    <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Pagador</div>
+    <div>
+      <strong>${data.client.name}</strong><br/>
+      ${data.client.cpf_cnpj ? `CPF/CNPJ: ${data.client.cpf_cnpj}<br/>` : ''}
+      ${data.client.phone || ''}
+    </div>
+  </div>
+  <div style="border:1px solid #e5e7eb;border-radius:6px;padding:10px;">
+    <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Recebedor</div>
+    <div>
+      <strong>${data.company.name}</strong><br/>
+      ${data.company.cnpj ? `CNPJ: ${data.company.cnpj}<br/>` : ''}
+      ${data.company.city ? `${data.company.city}${data.company.state ? ` - ${data.company.state}` : ''}` : ''}
+    </div>
+  </div>
+</div>
+
+<div style="text-align:center;margin-top:60px;">
+  <div style="display:inline-block;text-align:center;min-width:280px;">
+    <div style="border-top:1px solid #1f2937;padding-top:6px;">
+      <strong>${data.company.name}</strong>
+      <div style="font-size:10px;color:#6b7280;">${data.company.city || ''}${data.company.city ? ', ' : ''}${today}</div>
+    </div>
+  </div>
+</div>
+
+<div style="text-align:center;font-size:9px;color:#9ca3af;margin-top:30px;border-top:1px solid #e5e7eb;padding-top:8px;">
+  RECIBO gerado em ${today} · Ref: ${r.reference || data.serviceOrder.service_order_number}
+</div>`;
+
+  return pageWrapper(`RECIBO — ${r.reference || data.serviceOrder.service_order_number}`, body);
 }
