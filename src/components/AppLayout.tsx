@@ -17,6 +17,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { NotificationBell } from '@/components/NotificationBell';
+import { PWAInstallPrompt } from '@/components/PWAInstallPrompt';
+import { OfflineIndicator } from '@/components/OfflineIndicator';
 
 const navKeys = [
   { key: 'dashboard' as const, icon: LayoutDashboard, path: '/' },
@@ -143,6 +145,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
       )}
 
       <div className="flex flex-1 flex-col overflow-hidden">
+        <OfflineIndicator />
         <header className="flex h-14 items-center gap-4 border-b px-4 lg:px-6 shrink-0">
           <button
             onClick={() => setMobileOpen(true)}
@@ -186,6 +189,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           {children}
         </main>
       </div>
+      <PWAInstallPrompt />
     </div>
   );
 }
