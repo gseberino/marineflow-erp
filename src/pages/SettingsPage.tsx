@@ -287,6 +287,10 @@ function CompanyTab() {
     base_longitude: '-48.6728',
     cost_per_km: '3.50',
     default_hourly_rate: '150',
+    bank_name: '',
+    bank_agency: '',
+    bank_account: '',
+    pix_key: '',
   });
 
   useEffect(() => {
@@ -315,6 +319,10 @@ function CompanyTab() {
           base_longitude: map.base_longitude || '-48.6728',
           cost_per_km: map.cost_per_km || '3.50',
           default_hourly_rate: map.default_hourly_rate || '150',
+          bank_name: map.bank_name || '',
+          bank_agency: map.bank_agency || '',
+          bank_account: map.bank_account || '',
+          pix_key: map.pix_key || '',
         }));
       }
       setLoading(false);
@@ -435,6 +443,34 @@ function CompanyTab() {
             <label className="text-xs font-medium text-muted-foreground">Taxa horária padrão (R$)</label>
             <Input type="number" step="0.01" value={form.default_hourly_rate}
               onChange={e => set('default_hourly_rate', e.target.value)} className="mt-1" />
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-xl border bg-card p-6 shadow-sm">
+        <h3 className="text-sm font-semibold mb-4 flex items-center gap-2">
+          <Banknote className="h-4 w-4" /> Dados Bancários (para Faturas)
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Banco</label>
+            <Input value={form.bank_name} onChange={e => set('bank_name', e.target.value)}
+              placeholder="Banco do Brasil" className="mt-1" />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Agência</label>
+            <Input value={form.bank_agency} onChange={e => set('bank_agency', e.target.value)}
+              placeholder="0001-2" className="mt-1" />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Conta</label>
+            <Input value={form.bank_account} onChange={e => set('bank_account', e.target.value)}
+              placeholder="12345-6" className="mt-1" />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Chave PIX</label>
+            <Input value={form.pix_key} onChange={e => set('pix_key', e.target.value)}
+              placeholder="CNPJ, e-mail, telefone ou chave aleatória" className="mt-1" />
           </div>
         </div>
       </div>
