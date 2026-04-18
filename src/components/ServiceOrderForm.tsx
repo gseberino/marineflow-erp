@@ -184,7 +184,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [showReopenDialog, setShowReopenDialog] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [reopenReason, setReopenReason] = useState('');
-  const [pdfDialogType, setPdfDialogType] = useState<'quote' | 'service_order' | null>(null);
+  const [pdfDialogType, setPdfDialogType] = useState<'quote' | 'service_order' | 'invoice' | null>(null);
 
   useEffect(() => {
     if (orderData) {
@@ -492,6 +492,12 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 <Printer className="h-4 w-4" />
                 OS
               </Button>
+              {(currentStatus === 'completed' || currentStatus === 'invoiced') && (
+                <Button variant="outline" size="sm" onClick={() => setPdfDialogType('invoice')} className="gap-1">
+                  <Receipt className="h-4 w-4" />
+                  Fatura
+                </Button>
+              )}
             </>
           )}
           {!isNew && !isLocked && currentStatus !== 'cancelled' && (
