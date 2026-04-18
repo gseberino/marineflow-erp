@@ -45,6 +45,12 @@ export function usePDFData(serviceOrderId: string | undefined) {
           email: get('email'),
           cnpj: get('cnpj'),
         },
+        bank: {
+          bank_name: get('bank_name') || undefined,
+          bank_agency: get('bank_agency') || undefined,
+          bank_account: get('bank_account') || undefined,
+          pix_key: get('pix_key') || undefined,
+        },
         serviceOrder: {
           service_order_number: so.service_order_number,
           status: so.status,
