@@ -124,6 +124,72 @@ export default function FinancialPage() {
 
   const grouped = groupPayables(filteredPayables, groupBy);
 
+  const handleGenerateReceipt = async (r: any) => {
+    try {
+      const { data: settingsRows } = await supabase.from('app_settings').select('key, value');
+      const sm: Record<string, string> = {};
+      for (const row of (settingsRows || []) as Array<{ key: string; value: string }>) {
+        if (row.key) sm[row.key] = String(row.value || '');
+      }
+      const get = (k: string) => sm[k] || '';
+
+      // Find latest confirmed payment for this receivable
+      const { data: pays } = await supabase
+        .from('payments')
+        .select('*')
+        .eq('receivable_id', r.id)
+        .eq('status', 'confirmed')
+        .order('payment_date', { ascending: false })
+        .limit(1);
+      const lastPay = (pays || [])[0];
+
+      const amount = lastPay ? Number(lastPay.amount) : Number(r.paid_amount || 0);
+      if (amount <= 0) {
+        toast.error('Não há pagamento confirmado para gerar recibo');
+        return;
+      }
+
+      const pdfData: PDFData = {
+        documentType: 'receipt',
+        company: {
+          name: get('company_name') || 'MarineFlow',
+          address: [get('address_line_1'), get('address_number')].filter(Boolean).join(', '),
+          city: get('city'), state: get('state'), postal_code: get('postal_code'),
+          phone: get('phone'), email: get('email'), cnpj: get('cnpj'),
+        },
+        bank: {
+          bank_name: get('bank_name') || undefined,
+          bank_agency: get('bank_agency') || undefined,
+          bank_account: get('bank_account') || undefined,
+          pix_key: get('pix_key') || undefined,
+        },
+        serviceOrder: {
+          service_order_number: (r as any).service_orders?.service_order_number || r.description || r.id.slice(0, 8),
+          status: r.status || 'paid', created_at: r.created_at || new Date().toISOString(),
+          grand_total: amount, labor_cost_total: 0, parts_cost_total: 0,
+          travel_cost_total: 0, discount_amount: 0, tax_amount: 0,
+        },
+        client: {
+          name: (r as any).clients?.full_name_or_company_name || '—',
+          cpf_cnpj: (r as any).clients?.cpf_cnpj ?? undefined,
+          phone: (r as any).clients?.phone ?? undefined,
+          email: (r as any).clients?.email ?? undefined,
+        },
+        services: [], parts: [],
+        receipt: {
+          amount,
+          payment_date: lastPay?.payment_date || new Date().toISOString(),
+          payment_method: lastPay?.payment_method || r.payment_method || 'pix',
+          reference: (r as any).service_orders?.service_order_number || r.description,
+          notes: lastPay?.notes || undefined,
+        },
+      };
+      generatePDF(pdfData, { ...DEFAULT_PDF_OPTIONS });
+    } catch (e: any) {
+      toast.error(e.message || 'Erro ao gerar recibo');
+    }
+  };
+
   const renderPayableRow = (p: any) => {
     const isOverdue = p.status !== 'paid' && p.status !== 'cancelled' && new Date(p.due_date) < new Date();
     const alert = getDueDateAlert(p.due_date, p.status || 'pending');
