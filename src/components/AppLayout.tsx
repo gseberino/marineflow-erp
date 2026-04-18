@@ -16,6 +16,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { NotificationBell } from '@/components/NotificationBell';
 
 const navKeys = [
   { key: 'dashboard' as const, icon: LayoutDashboard, path: '/' },
@@ -151,6 +152,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           </button>
           <div className="flex-1" />
           <div className="flex items-center gap-3">
+            <NotificationBell />
             <DropdownMenu>
               <DropdownMenuTrigger className="flex items-center gap-3 outline-none">
                 <div className="text-right hidden sm:block">
