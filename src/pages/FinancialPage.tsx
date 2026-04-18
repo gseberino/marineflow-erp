@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useReceivables, usePayables, useFinancialSummary, useCashFlow, usePayments } from '@/hooks/use-financial';
+import { useReceivables, usePayables, useFinancialSummary, useCashFlow } from '@/hooks/use-financial';
 import { usePendingReimbursements } from '@/hooks/use-service-order-expenses';
 import { PaymentDialog } from '@/components/PaymentDialog';
 import { ReceivableFormDialog } from '@/components/ReceivableFormDialog';
