@@ -3,12 +3,12 @@ import { PageHeader } from '@/components/PageHeader';
 import { KPICard } from '@/components/KPICard';
 import { StatusBadge } from '@/components/StatusBadge';
 import { useI18n } from '@/i18n';
-import { DollarSign, TrendingUp, TrendingDown, AlertTriangle, ArrowUpCircle, ArrowDownCircle, Plus, Info } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, AlertTriangle, ArrowUpCircle, ArrowDownCircle, Plus, Info, Receipt as ReceiptIcon } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useReceivables, usePayables, useFinancialSummary, useCashFlow } from '@/hooks/use-financial';
+import { useReceivables, usePayables, useFinancialSummary, useCashFlow, usePayments } from '@/hooks/use-financial';
 import { usePendingReimbursements } from '@/hooks/use-service-order-expenses';
 import { PaymentDialog } from '@/components/PaymentDialog';
 import { ReceivableFormDialog } from '@/components/ReceivableFormDialog';
@@ -20,6 +20,9 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip } from 'recharts';
 import { useNavigate } from 'react-router-dom';
+import { supabase } from '@/integrations/supabase/client';
+import { generatePDF, DEFAULT_PDF_OPTIONS, type PDFData } from '@/lib/pdf-generator';
+import { toast } from 'sonner';
 
 function getStatusBadgeClass(status: string, dueDate: string) {
   const isOverdue = status !== 'paid' && status !== 'cancelled' && new Date(dueDate) < new Date();
