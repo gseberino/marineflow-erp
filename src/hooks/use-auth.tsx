@@ -42,14 +42,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         id: authUser.id,
         email: authUser.email || '',
         full_name: data?.full_name || authUser.email || '',
-        role: (data?.role as AuthUser['role']) || 'admin',
+        role: (data?.role as AuthUser['role']) || 'other',
       });
     } catch {
       setUser({
         id: authUser.id,
         email: authUser.email || '',
         full_name: authUser.email || '',
-        role: 'admin',
+        role: 'other',
       });
     }
   };
