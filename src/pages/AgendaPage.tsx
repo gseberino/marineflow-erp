@@ -12,34 +12,10 @@ import { ChevronLeft, ChevronRight, CalendarDays, Plus, Loader2 } from 'lucide-r
 import { cn } from '@/lib/utils';
 import { useAgendaOrders, useTechnicians, useSchedulableOrders, useQuickSchedule } from '@/hooks/use-agenda';
 import { toast } from 'sonner';
+import { useI18n } from '@/i18n';
+import { statusConfig } from '@/lib/constants';
 
 type ViewMode = 'week' | 'month';
-
-const STATUS_STYLES: Record<string, string> = {
-  draft: 'bg-muted text-muted-foreground',
-  scheduled: 'bg-blue-500/15 text-blue-700 dark:text-blue-300',
-  open: 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
-  in_progress: 'bg-primary/15 text-primary',
-  completed: 'bg-green-500/15 text-green-700 dark:text-green-300',
-  invoiced: 'bg-teal-500/15 text-teal-700 dark:text-teal-300',
-  cancelled: 'bg-destructive/15 text-destructive',
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  draft: 'Rascunho',
-  scheduled: 'Agendada',
-  open: 'Aberta',
-  in_progress: 'Em andamento',
-  completed: 'Concluída',
-  invoiced: 'Faturada',
-  cancelled: 'Cancelada',
-};
-
-const WEEKDAYS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
-const MONTH_NAMES = [
-  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
-];
 
 function startOfWeek(d: Date): Date {
   const date = new Date(d);
