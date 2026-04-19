@@ -20,12 +20,11 @@ import {
   useTimeEntries,
   useAddTimeEntry,
   useRemoveTimeEntry,
-  useAppUsers,
   STATUS_TRANSITIONS,
   useCancelServiceOrder,
   useReopenServiceOrder,
 } from '@/hooks/use-service-orders';
-import { useCommissionableUsers, USER_ROLES } from '@/hooks/use-app-users';
+import { useAppUsers, useCommissionableUsers, USER_ROLES } from '@/hooks/use-app-users';
 import { useVesselContacts, VESSEL_CONTACT_ROLES } from '@/hooks/use-vessel-contacts';
 import { ClientCombobox } from '@/components/ClientCombobox';
 import { VesselSelect } from '@/components/VesselSelect';
