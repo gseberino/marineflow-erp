@@ -83,6 +83,13 @@ export const ptBR: TranslationKeys = {
     viewAll: 'Ver todas',
     viewInventory: 'Ver estoque',
     viewReceivables: 'Ver recebíveis',
+    weekdays: ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'],
+  },
+
+  agenda: {
+    weekdaysShort: ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'],
+    monthNames: ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+      'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'],
   },
 
   serviceOrders: {

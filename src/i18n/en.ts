@@ -84,6 +84,14 @@ export const en = {
     viewAll: 'View all',
     viewInventory: 'View inventory',
     viewReceivables: 'View receivables',
+    weekdays: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+  },
+
+  // Agenda
+  agenda: {
+    weekdaysShort: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+    monthNames: ['January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'],
   },
 
   // Service Orders

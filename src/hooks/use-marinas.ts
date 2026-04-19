@@ -15,6 +15,7 @@ export function useMarinas() {
       if (error) throw error;
       return data as Marina[];
     },
+    staleTime: 5 * 60 * 1000,
   });
 }
 

@@ -452,21 +452,6 @@ export function useRemoveTimeEntry() {
   });
 }
 
-// App users
-export function useAppUsers() {
-  return useQuery({
-    queryKey: ['app-users'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('app_users')
-        .select('*')
-        .eq('active', true)
-        .order('full_name');
-      if (error) throw error;
-      return data;
-    },
-  });
-}
 
 // Status transitions
 export const STATUS_TRANSITIONS: Record<string, string[]> = {

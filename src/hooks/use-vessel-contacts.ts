@@ -25,6 +25,7 @@ export function useVesselContacts(vesselId: string | undefined) {
       return data || [];
     },
     enabled: !!vesselId,
+    staleTime: 5 * 60 * 1000,
   });
 }
 

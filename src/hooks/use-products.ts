@@ -15,6 +15,7 @@ export function useProducts() {
       if (error) throw error;
       return data as Product[];
     },
+    staleTime: 5 * 60 * 1000,
   });
 }
 

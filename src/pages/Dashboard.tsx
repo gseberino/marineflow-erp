@@ -5,36 +5,27 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { TrendingUp, TrendingDown, AlertTriangle, CheckCircle, DollarSign, Package, ArrowRight, RefreshCw } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
-
-const STATUS_LABELS: Record<string, string> = {
-  draft: 'Rascunho', scheduled: 'Agendada', open: 'Aberta',
-  in_progress: 'Em andamento', awaiting_parts: 'Aguard. Peças',
-  awaiting_client: 'Aguard. Cliente', completed: 'Concluída', invoiced: 'Faturada',
-};
-
-const STATUS_COLORS: Record<string, string> = {
-  draft: 'bg-muted text-muted-foreground',
-  scheduled: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
-  open: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
-  in_progress: 'bg-primary/10 text-primary',
-  awaiting_parts: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400',
-  awaiting_client: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
-  completed: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
-  invoiced: 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400',
-};
+import { statusConfig } from '@/lib/constants';
 
 const STATUS_ORDER = ['draft', 'scheduled', 'open', 'in_progress', 'awaiting_parts', 'awaiting_client', 'completed', 'invoiced'];
 
 export default function Dashboard() {
-  const { formatCurrency } = useI18n();
+  const { formatCurrency, t, locale } = useI18n();
   const navigate = useNavigate();
   const { data, isLoading, error, refetch } = useDashboardData();
+  const statusLabels = t.status as Record<string, string>;
 
   const hour = new Date().getHours();
-  const greeting = hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite';
-  const weekdays = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+  const d = t.dashboard as any;
+  const greeting = hour < 12 ? d.greeting.morning
+    : hour < 18 ? d.greeting.afternoon
+    : d.greeting.evening;
+  const weekdays = d.weekdays as string[];
   const today = new Date();
-  const dateStr = `${weekdays[today.getDay()]}, ${today.toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}`;
+  const dateStr = `${weekdays[today.getDay()]}, ${today.toLocaleDateString(
+    locale === 'pt-BR' ? 'pt-BR' : 'en-US',
+    { day: 'numeric', month: 'long', year: 'numeric' }
+  )}`;
 
   if (error) {
     return (
@@ -141,9 +132,9 @@ export default function Dashboard() {
             <button
               key={status}
               onClick={() => navigate(`/service-orders?status=${status}`)}
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-opacity hover:opacity-80 ${STATUS_COLORS[status]}`}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-opacity hover:opacity-80 ${statusConfig[status as keyof typeof statusConfig]?.className || 'bg-muted text-muted-foreground'}`}
             >
-              {STATUS_LABELS[status]}: {count}
+              {statusLabels[status] || status}: {count}
             </button>
           );
         })}
@@ -192,8 +183,8 @@ export default function Dashboard() {
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium text-accent">{so.service_order_number}</span>
-                    <span className={`text-xs rounded-full px-2 py-0.5 font-medium ${STATUS_COLORS[so.status] || ''}`}>
-                      {STATUS_LABELS[so.status] || so.status}
+                    <span className={`text-xs rounded-full px-2 py-0.5 font-medium ${statusConfig[so.status as keyof typeof statusConfig]?.className || 'bg-muted text-muted-foreground'}`}>
+                      {statusLabels[so.status] || so.status}
                     </span>
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
@@ -245,8 +236,8 @@ export default function Dashboard() {
                       <td className="px-4 py-2.5 text-muted-foreground">{so.clients?.full_name_or_company_name || '—'}</td>
                       <td className="px-4 py-2.5 text-muted-foreground hidden md:table-cell">{so.vessels?.boat_name || '—'}</td>
                       <td className="px-4 py-2.5">
-                        <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[so.status] || ''}`}>
-                          {STATUS_LABELS[so.status] || so.status}
+                        <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${statusConfig[so.status as keyof typeof statusConfig]?.className || 'bg-muted text-muted-foreground'}`}>
+                          {statusLabels[so.status] || so.status}
                         </span>
                       </td>
                       <td className="px-4 py-2.5 text-right font-medium">{formatCurrency(so.grand_total || 0)}</td>

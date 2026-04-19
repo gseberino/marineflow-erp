@@ -12,34 +12,10 @@ import { ChevronLeft, ChevronRight, CalendarDays, Plus, Loader2 } from 'lucide-r
 import { cn } from '@/lib/utils';
 import { useAgendaOrders, useTechnicians, useSchedulableOrders, useQuickSchedule } from '@/hooks/use-agenda';
 import { toast } from 'sonner';
+import { useI18n } from '@/i18n';
+import { statusConfig } from '@/lib/constants';
 
 type ViewMode = 'week' | 'month';
-
-const STATUS_STYLES: Record<string, string> = {
-  draft: 'bg-muted text-muted-foreground',
-  scheduled: 'bg-blue-500/15 text-blue-700 dark:text-blue-300',
-  open: 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
-  in_progress: 'bg-primary/15 text-primary',
-  completed: 'bg-green-500/15 text-green-700 dark:text-green-300',
-  invoiced: 'bg-teal-500/15 text-teal-700 dark:text-teal-300',
-  cancelled: 'bg-destructive/15 text-destructive',
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  draft: 'Rascunho',
-  scheduled: 'Agendada',
-  open: 'Aberta',
-  in_progress: 'Em andamento',
-  completed: 'Concluída',
-  invoiced: 'Faturada',
-  cancelled: 'Cancelada',
-};
-
-const WEEKDAYS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
-const MONTH_NAMES = [
-  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
-];
 
 function startOfWeek(d: Date): Date {
   const date = new Date(d);
@@ -211,6 +187,9 @@ function WeekView({
   onCardClick: (id: string) => void;
   onCellClick: (technicianId: string, date: Date) => void;
 }) {
+  const { t } = useI18n();
+  const ag = t.agenda as any;
+  const WEEKDAYS = ag.weekdaysShort as string[];
   const days = useMemo(
     () => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)),
     [weekStart],
@@ -290,7 +269,7 @@ function WeekView({
                         onClick={() => onCardClick(o.id)}
                         className={cn(
                           'rounded-md p-1.5 text-xs cursor-pointer hover:ring-1 hover:ring-primary transition-all',
-                          STATUS_STYLES[o.status] || 'bg-muted',
+                          statusConfig[o.status as keyof typeof statusConfig]?.className || 'bg-muted text-muted-foreground',
                         )}
                       >
                         <div className="flex items-center justify-between gap-1">
@@ -336,6 +315,11 @@ function MonthView({
   onSelectDay: (d: Date | null) => void;
   onCardClick: (id: string) => void;
 }) {
+  const { t } = useI18n();
+  const ag = t.agenda as any;
+  const WEEKDAYS = ag.weekdaysShort as string[];
+  const MONTH_NAMES = ag.monthNames as string[];
+  const statusLabels = t.status as Record<string, string>;
   const today = new Date();
   const first = startOfMonth(cursor);
   const gridStart = startOfWeek(first);
@@ -424,7 +408,7 @@ function MonthView({
             onClick={() => onCardClick(o.id)}
             className={cn(
               'rounded-md p-2 text-xs cursor-pointer hover:ring-1 hover:ring-primary transition-all',
-              STATUS_STYLES[o.status] || 'bg-muted',
+              statusConfig[o.status as keyof typeof statusConfig]?.className || 'bg-muted text-muted-foreground',
             )}
           >
             <div className="flex items-center justify-between">
@@ -439,8 +423,8 @@ function MonthView({
             {o.vessels?.boat_name && (
               <div className="opacity-75 text-[11px]">{o.vessels.boat_name}</div>
             )}
-            <StatusBadge className={cn('mt-1', STATUS_STYLES[o.status])}>
-              {STATUS_LABELS[o.status] || o.status}
+            <StatusBadge className={cn('mt-1', statusConfig[o.status as keyof typeof statusConfig]?.className || 'bg-muted text-muted-foreground')}>
+              {statusLabels[o.status] || o.status}
             </StatusBadge>
           </div>
         ))}

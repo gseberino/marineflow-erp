@@ -15,6 +15,7 @@ export function useVessels() {
       if (error) throw error;
       return data;
     },
+    staleTime: 5 * 60 * 1000,
   });
 }
 
@@ -32,6 +33,7 @@ export function useVessel(id: string | undefined) {
       return data;
     },
     enabled: !!id,
+    staleTime: 5 * 60 * 1000,
   });
 }
 
@@ -49,6 +51,7 @@ export function useVesselsForClient(clientId: string | undefined) {
       return data;
     },
     enabled: !!clientId,
+    staleTime: 5 * 60 * 1000,
   });
 }
 

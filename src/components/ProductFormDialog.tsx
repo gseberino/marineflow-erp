@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useI18n } from '@/i18n';
-import { useQuery } from '@tanstack/react-query';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,7 +13,7 @@ import { useCreateProduct, useUpdateProduct, type Product } from '@/hooks/use-pr
 import { useProductSuppliers, useAddProductSupplier, useUpdateProductSupplier, useRemoveProductSupplier } from '@/hooks/use-product-suppliers';
 import { useSuppliers } from '@/hooks/use-suppliers';
 import { useProductCategories } from '@/hooks/use-product-categories';
-import { supabase } from '@/integrations/supabase/client';
+import { useAppSettings } from '@/hooks/use-app-settings';
 import { toast } from 'sonner';
 import type { TablesInsert } from '@/integrations/supabase/types';
 import { Plus, Trash2, Star, ChevronDown, ExternalLink, Info } from 'lucide-react';
@@ -81,20 +80,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
   const [priceOpen, setPriceOpen] = useState(true);
 
   // App settings
-  const { data: settings } = useQuery({
-    queryKey: ['app-settings-fiscal'],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('app_settings')
-        .select('key, value');
-      if (!data) return {};
-      const map: Record<string, any> = {};
-      for (const row of data) {
-        if (row.key) map[row.key] = row.value;
-      }
-      return map;
-    },
-  });
+  const { data: settings } = useAppSettings();
 
   // Product categories
   const { data: productCategories } = useProductCategories();
