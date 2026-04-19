@@ -132,9 +132,9 @@ export default function Dashboard() {
             <button
               key={status}
               onClick={() => navigate(`/service-orders?status=${status}`)}
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-opacity hover:opacity-80 ${STATUS_COLORS[status]}`}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-opacity hover:opacity-80 ${statusConfig[status as keyof typeof statusConfig]?.className || 'bg-muted text-muted-foreground'}`}
             >
-              {STATUS_LABELS[status]}: {count}
+              {statusLabels[status] || status}: {count}
             </button>
           );
         })}
@@ -183,8 +183,8 @@ export default function Dashboard() {
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium text-accent">{so.service_order_number}</span>
-                    <span className={`text-xs rounded-full px-2 py-0.5 font-medium ${STATUS_COLORS[so.status] || ''}`}>
-                      {STATUS_LABELS[so.status] || so.status}
+                    <span className={`text-xs rounded-full px-2 py-0.5 font-medium ${statusConfig[so.status as keyof typeof statusConfig]?.className || 'bg-muted text-muted-foreground'}`}>
+                      {statusLabels[so.status] || so.status}
                     </span>
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
@@ -236,8 +236,8 @@ export default function Dashboard() {
                       <td className="px-4 py-2.5 text-muted-foreground">{so.clients?.full_name_or_company_name || '—'}</td>
                       <td className="px-4 py-2.5 text-muted-foreground hidden md:table-cell">{so.vessels?.boat_name || '—'}</td>
                       <td className="px-4 py-2.5">
-                        <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[so.status] || ''}`}>
-                          {STATUS_LABELS[so.status] || so.status}
+                        <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${statusConfig[so.status as keyof typeof statusConfig]?.className || 'bg-muted text-muted-foreground'}`}>
+                          {statusLabels[so.status] || so.status}
                         </span>
                       </td>
                       <td className="px-4 py-2.5 text-right font-medium">{formatCurrency(so.grand_total || 0)}</td>
