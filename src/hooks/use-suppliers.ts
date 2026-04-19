@@ -15,6 +15,7 @@ export function useSuppliers() {
       if (error) throw error;
       return data as Supplier[];
     },
+    staleTime: 5 * 60 * 1000,
   });
 }
 

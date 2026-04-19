@@ -15,6 +15,7 @@ export function useClients() {
       if (error) throw error;
       return data as Client[];
     },
+    staleTime: 5 * 60 * 1000,
   });
 }
 
@@ -32,6 +33,7 @@ export function useClient(id: string | undefined) {
       return data as Client | null;
     },
     enabled: !!id,
+    staleTime: 5 * 60 * 1000,
   });
 }
 

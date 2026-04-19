@@ -16,6 +16,7 @@ export function useProductCategories() {
       if (error) throw error;
       return data as ProductCategory[];
     },
+    staleTime: 5 * 60 * 1000,
   });
 }
 
@@ -30,6 +31,7 @@ export function useAllProductCategories() {
       if (error) throw error;
       return data as ProductCategory[];
     },
+    staleTime: 5 * 60 * 1000,
   });
 }
 

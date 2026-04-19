@@ -21,6 +21,7 @@ export function useAppUsers() {
       if (error) throw error;
       return data || [];
     },
+    staleTime: 5 * 60 * 1000,
   });
 }
 
@@ -36,6 +37,7 @@ export function useCommissionableUsers() {
       if (error) throw error;
       return data || [];
     },
+    staleTime: 5 * 60 * 1000,
   });
 }
 
