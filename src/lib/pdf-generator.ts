@@ -233,16 +233,27 @@ const fmtDate = (iso?: string) => {
   return new Date(iso).toLocaleDateString('pt-BR');
 };
 
+const esc = (v: unknown): string => {
+  if (v === null || v === undefined) return '';
+  return String(v)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+};
+
+
 function companyHeaderHTML(company: PDFData['company']): string {
   return `
 <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #1e3a5f;padding-bottom:12px;margin-bottom:16px;">
   <div>
-    <h1 style="font-size:20px;color:#1e3a5f;margin:0;">${company.name}</h1>
+    <h1 style="font-size:20px;color:#1e3a5f;margin:0;">${esc(company.name)}</h1>
   </div>
   <div style="text-align:right;font-size:11px;color:#6b7280;">
-    <div>${company.address}${company.city ? `, ${company.city}` : ''}${company.state ? ` - ${company.state}` : ''}</div>
-    <div>${company.postal_code ? `CEP: ${company.postal_code}` : ''}${company.phone ? ` · Tel: ${company.phone}` : ''}</div>
-    <div>${company.email ? `Email: ${company.email}` : ''}${company.cnpj ? ` · CNPJ: ${company.cnpj}` : ''}</div>
+    <div>${esc(company.address)}${company.city ? `, ${esc(company.city)}` : ''}${company.state ? ` - ${esc(company.state)}` : ''}</div>
+    <div>${company.postal_code ? `CEP: ${esc(company.postal_code)}` : ''}${company.phone ? ` · Tel: ${esc(company.phone)}` : ''}</div>
+    <div>${company.email ? `Email: ${esc(company.email)}` : ''}${company.cnpj ? ` · CNPJ: ${esc(company.cnpj)}` : ''}</div>
   </div>
 </div>`;
 }
@@ -295,8 +306,8 @@ function buildOrderHTML(data: PDFData, options: PDFOptions): string {
 
   const serviceRows = data.services.map(s => `
     <tr>
-      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">${s.service_name}${s.description ? `<br/><small style="color:#6b7280;">${s.description}</small>` : ''}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:center;">${s.quantity} ${billingUnitLabel[s.billing_unit] || s.billing_unit}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">${esc(s.service_name)}${s.description ? `<br/><small style="color:#6b7280;">${esc(s.description)}</small>` : ''}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:center;">${s.quantity} ${esc(billingUnitLabel[s.billing_unit] || s.billing_unit)}</td>
       ${options.showServicePrices ? `<td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtCurrency(s.unit_price)}</td>` : ''}
       <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtCurrency(s.line_total)}</td>
     </tr>
@@ -304,7 +315,7 @@ function buildOrderHTML(data: PDFData, options: PDFOptions): string {
 
   const partsRows = data.parts.map(p => `
     <tr>
-      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">${p.product_name}${p.sku ? ` <small style="color:#6b7280;">(${p.sku})</small>` : ''}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">${esc(p.product_name)}${p.sku ? ` <small style="color:#6b7280;">(${esc(p.sku)})</small>` : ''}</td>
       <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:center;">${p.quantity}</td>
       ${options.showPartsPrices ? `<td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtCurrency(p.unit_price)}</td>` : ''}
       <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtCurrency(p.line_total)}</td>
@@ -337,7 +348,7 @@ ${companyHeaderHTML(data.company)}
 
 <div style="text-align:center;margin-bottom:16px;">
   <h2 style="font-size:16px;letter-spacing:2px;color:#1e3a5f;margin:0;">${docTitle}</h2>
-  <div style="font-size:14px;font-weight:600;margin-top:4px;">${docNumber}</div>
+  <div style="font-size:14px;font-weight:600;margin-top:4px;">${esc(docNumber)}</div>
   <div style="font-size:11px;color:#6b7280;">Emitido em: ${today}</div>
   ${data.serviceOrder.scheduled_start_at ? `<div style="font-size:11px;color:#6b7280;">Agendado: ${fmtDate(data.serviceOrder.scheduled_start_at)}</div>` : ''}
 </div>
@@ -346,20 +357,20 @@ ${companyHeaderHTML(data.company)}
   <div style="flex:1;border:1px solid #e5e7eb;border-radius:6px;padding:10px;">
     <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Cliente</div>
     <div>
-      <strong>${data.client.name}</strong><br/>
-      ${data.client.cpf_cnpj ? `CPF/CNPJ: ${data.client.cpf_cnpj}<br/>` : ''}
-      ${data.client.phone ? `Tel: ${data.client.phone}<br/>` : ''}
-      ${data.client.email ? `Email: ${data.client.email}<br/>` : ''}
-      ${data.client.address || ''}
+      <strong>${esc(data.client.name)}</strong><br/>
+      ${data.client.cpf_cnpj ? `CPF/CNPJ: ${esc(data.client.cpf_cnpj)}<br/>` : ''}
+      ${data.client.phone ? `Tel: ${esc(data.client.phone)}<br/>` : ''}
+      ${data.client.email ? `Email: ${esc(data.client.email)}<br/>` : ''}
+      ${esc(data.client.address || '')}
     </div>
   </div>
   <div style="flex:1;border:1px solid #e5e7eb;border-radius:6px;padding:10px;">
     <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Embarcação${data.marina ? ' / Marina' : ''}</div>
     <div>
-      ${data.vessel ? `<strong>${data.vessel.name}</strong><br/>` : ''}
-      ${data.vessel?.manufacturer ? `${data.vessel.manufacturer}${data.vessel.model ? ` ${data.vessel.model}` : ''}${data.vessel.year ? ` (${data.vessel.year})` : ''}<br/>` : ''}
+      ${data.vessel ? `<strong>${esc(data.vessel.name)}</strong><br/>` : ''}
+      ${data.vessel?.manufacturer ? `${esc(data.vessel.manufacturer)}${data.vessel.model ? ` ${esc(data.vessel.model)}` : ''}${data.vessel.year ? ` (${esc(data.vessel.year)})` : ''}<br/>` : ''}
       ${data.vessel?.registration ? `Registro: ${data.vessel.registration}<br/>` : ''}
-      ${data.marina ? `Marina: ${data.marina.name}${data.marina.city ? `, ${data.marina.city}` : ''}` : ''}
+      ${data.marina ? `Marina: ${esc(data.marina.name)}${data.marina.city ? `, ${esc(data.marina.city)}` : ''}` : ''}
     </div>
   </div>
 </div>
@@ -367,7 +378,7 @@ ${companyHeaderHTML(data.company)}
 ${data.serviceOrder.problem_description ? `
 <div style="border:1px solid #e5e7eb;border-radius:6px;padding:10px;margin-bottom:16px;">
   <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">${isQuote ? 'Escopo do Serviço' : 'Descrição do Problema'}</div>
-  <div style="white-space:pre-wrap;">${data.serviceOrder.problem_description}</div>
+  <div style="white-space:pre-wrap;">${esc(data.serviceOrder.problem_description)}</div>
 </div>
 ` : ''}
 
@@ -408,14 +419,14 @@ ${data.parts.length > 0 ? `
 ${!isQuote && data.serviceOrder.technical_notes ? `
 <div style="border:1px solid #e5e7eb;border-radius:6px;padding:10px;margin-bottom:16px;">
   <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Observações Técnicas</div>
-  <div style="white-space:pre-wrap;">${data.serviceOrder.technical_notes}</div>
+  <div style="white-space:pre-wrap;">${esc(data.serviceOrder.technical_notes)}</div>
 </div>
 ` : ''}
 
 ${data.serviceOrder.extra_notes ? `
 <div style="border:1px solid #e5e7eb;border-radius:6px;padding:10px;margin-bottom:16px;">
   <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Observações Adicionais</div>
-  <div style="white-space:pre-wrap;">${data.serviceOrder.extra_notes}</div>
+  <div style="white-space:pre-wrap;">${esc(data.serviceOrder.extra_notes)}</div>
 </div>
 ` : ''}
 
@@ -439,12 +450,12 @@ ${options.showSignature ? `
 <div style="display:flex;gap:40px;margin-top:40px;margin-bottom:24px;">
   <div style="flex:1;text-align:center;">
     <div style="border-top:1px solid #1f2937;padding-top:6px;margin-top:60px;">
-      <strong>${data.company.name}</strong>
+      <strong>${esc(data.company.name)}</strong>
     </div>
   </div>
   <div style="flex:1;text-align:center;">
     <div style="border-top:1px solid #1f2937;padding-top:6px;margin-top:60px;">
-      <div><strong>${data.client.name}</strong></div>
+      <div><strong>${esc(data.client.name)}</strong></div>
       <div style="font-size:10px;color:#6b7280;">${isQuote ? 'Aprovação do Orçamento' : 'Aceite do Serviço Realizado'}</div>
     </div>
   </div>
@@ -454,20 +465,20 @@ ${options.showSignature ? `
 ${options.showTerms && data.terms ? `
 <div style="border-top:1px solid #e5e7eb;padding-top:10px;margin-top:16px;">
   <div style="font-weight:700;font-size:10px;color:#1e3a5f;text-transform:uppercase;margin-bottom:4px;">Termos e Condições</div>
-  <div style="font-size:9px;color:#6b7280;white-space:pre-wrap;">${data.terms}</div>
+  <div style="font-size:9px;color:#6b7280;white-space:pre-wrap;">${esc(data.terms)}</div>
 </div>
 ` : ''}
 
 <div style="text-align:center;font-size:9px;color:#9ca3af;margin-top:20px;border-top:1px solid #e5e7eb;padding-top:8px;">
-  ${docTitle} gerado em ${today} · ${data.serviceOrder.service_order_number}
+  ${docTitle} gerado em ${today} · ${esc(data.serviceOrder.service_order_number)}
 </div>`;
 
-  return pageWrapper(`${docTitle} ${docNumber}`, body);
+  return pageWrapper(`${docTitle} ${esc(docNumber)}`, body);
 }
 
 // ============= INVOICE (FATURA) =============
 function buildInvoiceHTML(data: PDFData, options: PDFOptions): string {
-  const docNumber = `FAT-${data.serviceOrder.service_order_number}`;
+  const docNumber = `FAT-${esc(data.serviceOrder.service_order_number)}`;
   const today = new Date().toLocaleDateString('pt-BR');
   const dueDate = options.dueDate
     ? new Date(options.dueDate + 'T12:00:00').toLocaleDateString('pt-BR')
@@ -483,8 +494,8 @@ function buildInvoiceHTML(data: PDFData, options: PDFOptions): string {
 
   const serviceRows = data.services.map(s => `
     <tr>
-      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">${s.service_name}${s.description ? `<br/><small style="color:#6b7280;">${s.description}</small>` : ''}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:center;">${s.quantity} ${billingUnitLabel[s.billing_unit] || s.billing_unit}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">${esc(s.service_name)}${s.description ? `<br/><small style="color:#6b7280;">${esc(s.description)}</small>` : ''}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:center;">${s.quantity} ${esc(billingUnitLabel[s.billing_unit] || s.billing_unit)}</td>
       ${options.showServicePrices ? `<td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtCurrency(s.unit_price)}</td>` : ''}
       <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtCurrency(s.line_total)}</td>
     </tr>
@@ -492,7 +503,7 @@ function buildInvoiceHTML(data: PDFData, options: PDFOptions): string {
 
   const partsRows = data.parts.map(p => `
     <tr>
-      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">${p.product_name}${p.sku ? ` <small style="color:#6b7280;">(${p.sku})</small>` : ''}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">${esc(p.product_name)}${p.sku ? ` <small style="color:#6b7280;">(${esc(p.sku)})</small>` : ''}</td>
       <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:center;">${p.quantity}</td>
       <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtCurrency(p.unit_price)}</td>
       <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtCurrency(p.line_total)}</td>
@@ -520,7 +531,7 @@ ${companyHeaderHTML(data.company)}
 
 <div style="text-align:center;margin-bottom:20px;">
   <h2 style="font-size:28px;letter-spacing:6px;color:#1e3a5f;margin:0;font-weight:800;">FATURA</h2>
-  <div style="font-size:14px;font-weight:600;margin-top:6px;">${docNumber}</div>
+  <div style="font-size:14px;font-weight:600;margin-top:6px;">${esc(docNumber)}</div>
   <div style="font-size:11px;color:#6b7280;margin-top:2px;">Emitida em: ${today} · Vencimento: <strong style="color:#dc2626;">${dueDate}</strong></div>
 </div>
 
@@ -528,19 +539,19 @@ ${companyHeaderHTML(data.company)}
   <div style="flex:1;border:1px solid #e5e7eb;border-radius:6px;padding:10px;">
     <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Cliente</div>
     <div>
-      <strong>${data.client.name}</strong><br/>
-      ${data.client.cpf_cnpj ? `CPF/CNPJ: ${data.client.cpf_cnpj}<br/>` : ''}
-      ${data.client.phone ? `Tel: ${data.client.phone}<br/>` : ''}
-      ${data.client.email ? `Email: ${data.client.email}<br/>` : ''}
-      ${data.client.address || ''}
+      <strong>${esc(data.client.name)}</strong><br/>
+      ${data.client.cpf_cnpj ? `CPF/CNPJ: ${esc(data.client.cpf_cnpj)}<br/>` : ''}
+      ${data.client.phone ? `Tel: ${esc(data.client.phone)}<br/>` : ''}
+      ${data.client.email ? `Email: ${esc(data.client.email)}<br/>` : ''}
+      ${esc(data.client.address || '')}
     </div>
   </div>
   <div style="flex:1;border:1px solid #e5e7eb;border-radius:6px;padding:10px;">
     <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Referência</div>
     <div>
-      OS: <strong>${data.serviceOrder.service_order_number}</strong><br/>
-      ${data.vessel ? `Embarcação: ${data.vessel.name}<br/>` : ''}
-      ${data.marina ? `Marina: ${data.marina.name}` : ''}
+      OS: <strong>${esc(data.serviceOrder.service_order_number)}</strong><br/>
+      ${data.vessel ? `Embarcação: ${esc(data.vessel.name)}<br/>` : ''}
+      ${data.marina ? `Marina: ${esc(data.marina.name)}` : ''}
     </div>
   </div>
 </div>
@@ -595,12 +606,12 @@ ${options.showBankDetails !== false && hasBank ? `
 <div style="border:1px solid #e5e7eb;border-radius:6px;padding:12px;margin-bottom:16px;background:#f9fafb;">
   <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:8px;">Dados Bancários</div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;">
-    ${bank.bank_name ? `<div><strong>Banco:</strong> ${bank.bank_name}</div>` : ''}
-    ${bank.bank_agency ? `<div><strong>Agência:</strong> ${bank.bank_agency}</div>` : ''}
-    ${bank.bank_account ? `<div><strong>Conta:</strong> ${bank.bank_account}</div>` : ''}
-    ${bank.pix_key ? `<div><strong>Chave PIX:</strong> ${bank.pix_key}</div>` : ''}
-    <div><strong>Favorecido:</strong> ${data.company.name}</div>
-    ${data.company.cnpj ? `<div><strong>CNPJ:</strong> ${data.company.cnpj}</div>` : ''}
+    ${bank.bank_name ? `<div><strong>Banco:</strong> ${esc(bank.bank_name)}</div>` : ''}
+    ${bank.bank_agency ? `<div><strong>Agência:</strong> ${esc(bank.bank_agency)}</div>` : ''}
+    ${bank.bank_account ? `<div><strong>Conta:</strong> ${esc(bank.bank_account)}</div>` : ''}
+    ${bank.pix_key ? `<div><strong>Chave PIX:</strong> ${esc(bank.pix_key)}</div>` : ''}
+    <div><strong>Favorecido:</strong> ${esc(data.company.name)}</div>
+    ${data.company.cnpj ? `<div><strong>CNPJ:</strong> ${esc(data.company.cnpj)}</div>` : ''}
   </div>
 </div>
 ` : ''}
@@ -614,7 +625,7 @@ ${options.showPaymentInstructions !== false ? `
     • <strong>Boleto</strong> — solicite o boleto pelo telefone ou e-mail de contato
   </div>
   <div style="font-size:10px;color:#6b7280;margin-top:8px;">
-    Após o pagamento, envie o comprovante para ${data.company.email || 'o e-mail de contato'} informando o número da fatura <strong>${docNumber}</strong>.
+    Após o pagamento, envie o comprovante para ${data.company.email || 'o e-mail de contato'} informando o número da fatura <strong>${esc(docNumber)}</strong>.
   </div>
 </div>
 ` : ''}
@@ -622,15 +633,15 @@ ${options.showPaymentInstructions !== false ? `
 ${options.showTerms && data.terms ? `
 <div style="border-top:1px solid #e5e7eb;padding-top:10px;margin-top:16px;">
   <div style="font-weight:700;font-size:10px;color:#1e3a5f;text-transform:uppercase;margin-bottom:4px;">Termos e Condições</div>
-  <div style="font-size:9px;color:#6b7280;white-space:pre-wrap;">${data.terms}</div>
+  <div style="font-size:9px;color:#6b7280;white-space:pre-wrap;">${esc(data.terms)}</div>
 </div>
 ` : ''}
 
 <div style="text-align:center;font-size:9px;color:#9ca3af;margin-top:20px;border-top:1px solid #e5e7eb;padding-top:8px;">
-  FATURA gerada em ${today} · ${docNumber}
+  FATURA gerada em ${today} · ${esc(docNumber)}
 </div>`;
 
-  return pageWrapper(`FATURA ${docNumber}`, body);
+  return pageWrapper(`FATURA ${esc(docNumber)}`, body);
 }
 
 // ============= RECEIPT (RECIBO) =============
@@ -657,12 +668,12 @@ ${companyHeaderHTML(data.company)}
 </div>
 
 <div style="border:1px solid #e5e7eb;border-radius:6px;padding:20px;margin-bottom:24px;line-height:1.8;font-size:13px;">
-  Recebemos de <strong>${data.client.name}</strong>${data.client.cpf_cnpj ? `, inscrito(a) no CPF/CNPJ <strong>${data.client.cpf_cnpj}</strong>,` : ''}
+  Recebemos de <strong>${esc(data.client.name)}</strong>${data.client.cpf_cnpj ? `, inscrito(a) no CPF/CNPJ <strong>${esc(data.client.cpf_cnpj)}</strong>,` : ''}
   a importância de <strong>${fmtCurrency(r.amount)}</strong>
-  <em>(${amountWords})</em>,
-  referente a <strong>${r.reference || data.serviceOrder.service_order_number}</strong>${data.vessel ? ` — embarcação <strong>${data.vessel.name}</strong>` : ''},
-  pago via <strong>${methodLabel}</strong> em <strong>${fmtDate(r.payment_date)}</strong>.
-  ${r.notes ? `<br/><br/><span style="color:#6b7280;">Obs.: ${r.notes}</span>` : ''}
+  <em>(${esc(amountWords)})</em>,
+  referente a <strong>${esc(r.reference || data.serviceOrder.service_order_number)}</strong>${data.vessel ? ` — embarcação <strong>${esc(data.vessel.name)}</strong>` : ''},
+  pago via <strong>${esc(methodLabel)}</strong> em <strong>${fmtDate(r.payment_date)}</strong>.
+  ${r.notes ? `<br/><br/><span style="color:#6b7280;">Obs.: ${esc(r.notes)}</span>` : ''}
   <br/><br/>
   Para clareza e validade, firmamos o presente recibo, dando plena, geral e irrevogável quitação do valor recebido.
 </div>
@@ -671,17 +682,17 @@ ${companyHeaderHTML(data.company)}
   <div style="border:1px solid #e5e7eb;border-radius:6px;padding:10px;">
     <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Pagador</div>
     <div>
-      <strong>${data.client.name}</strong><br/>
-      ${data.client.cpf_cnpj ? `CPF/CNPJ: ${data.client.cpf_cnpj}<br/>` : ''}
+      <strong>${esc(data.client.name)}</strong><br/>
+      ${data.client.cpf_cnpj ? `CPF/CNPJ: ${esc(data.client.cpf_cnpj)}<br/>` : ''}
       ${data.client.phone || ''}
     </div>
   </div>
   <div style="border:1px solid #e5e7eb;border-radius:6px;padding:10px;">
     <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Recebedor</div>
     <div>
-      <strong>${data.company.name}</strong><br/>
-      ${data.company.cnpj ? `CNPJ: ${data.company.cnpj}<br/>` : ''}
-      ${data.company.city ? `${data.company.city}${data.company.state ? ` - ${data.company.state}` : ''}` : ''}
+      <strong>${esc(data.company.name)}</strong><br/>
+      ${data.company.cnpj ? `CNPJ: ${esc(data.company.cnpj)}<br/>` : ''}
+      ${data.company.city ? `${esc(data.company.city)}${data.company.state ? ` - ${esc(data.company.state)}` : ''}` : ''}
     </div>
   </div>
 </div>
@@ -689,15 +700,15 @@ ${companyHeaderHTML(data.company)}
 <div style="text-align:center;margin-top:60px;">
   <div style="display:inline-block;text-align:center;min-width:280px;">
     <div style="border-top:1px solid #1f2937;padding-top:6px;">
-      <strong>${data.company.name}</strong>
+      <strong>${esc(data.company.name)}</strong>
       <div style="font-size:10px;color:#6b7280;">${data.company.city || ''}${data.company.city ? ', ' : ''}${today}</div>
     </div>
   </div>
 </div>
 
 <div style="text-align:center;font-size:9px;color:#9ca3af;margin-top:30px;border-top:1px solid #e5e7eb;padding-top:8px;">
-  RECIBO gerado em ${today} · Ref: ${r.reference || data.serviceOrder.service_order_number}
+  RECIBO gerado em ${today} · Ref: ${esc(r.reference || data.serviceOrder.service_order_number)}
 </div>`;
 
-  return pageWrapper(`RECIBO — ${r.reference || data.serviceOrder.service_order_number}`, body);
+  return pageWrapper(`RECIBO — ${esc(r.reference || data.serviceOrder.service_order_number)}`, body);
 }
