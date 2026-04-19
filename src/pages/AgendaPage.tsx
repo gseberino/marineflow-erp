@@ -187,6 +187,9 @@ function WeekView({
   onCardClick: (id: string) => void;
   onCellClick: (technicianId: string, date: Date) => void;
 }) {
+  const { t } = useI18n();
+  const ag = t.agenda as any;
+  const WEEKDAYS = ag.weekdaysShort as string[];
   const days = useMemo(
     () => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)),
     [weekStart],
@@ -266,7 +269,7 @@ function WeekView({
                         onClick={() => onCardClick(o.id)}
                         className={cn(
                           'rounded-md p-1.5 text-xs cursor-pointer hover:ring-1 hover:ring-primary transition-all',
-                          STATUS_STYLES[o.status] || 'bg-muted',
+                          statusConfig[o.status as keyof typeof statusConfig]?.className || 'bg-muted text-muted-foreground',
                         )}
                       >
                         <div className="flex items-center justify-between gap-1">
@@ -312,6 +315,11 @@ function MonthView({
   onSelectDay: (d: Date | null) => void;
   onCardClick: (id: string) => void;
 }) {
+  const { t } = useI18n();
+  const ag = t.agenda as any;
+  const WEEKDAYS = ag.weekdaysShort as string[];
+  const MONTH_NAMES = ag.monthNames as string[];
+  const statusLabels = t.status as Record<string, string>;
   const today = new Date();
   const first = startOfMonth(cursor);
   const gridStart = startOfWeek(first);
@@ -400,7 +408,7 @@ function MonthView({
             onClick={() => onCardClick(o.id)}
             className={cn(
               'rounded-md p-2 text-xs cursor-pointer hover:ring-1 hover:ring-primary transition-all',
-              STATUS_STYLES[o.status] || 'bg-muted',
+              statusConfig[o.status as keyof typeof statusConfig]?.className || 'bg-muted text-muted-foreground',
             )}
           >
             <div className="flex items-center justify-between">
@@ -415,8 +423,8 @@ function MonthView({
             {o.vessels?.boat_name && (
               <div className="opacity-75 text-[11px]">{o.vessels.boat_name}</div>
             )}
-            <StatusBadge className={cn('mt-1', STATUS_STYLES[o.status])}>
-              {STATUS_LABELS[o.status] || o.status}
+            <StatusBadge className={cn('mt-1', statusConfig[o.status as keyof typeof statusConfig]?.className || 'bg-muted text-muted-foreground')}>
+              {statusLabels[o.status] || o.status}
             </StatusBadge>
           </div>
         ))}
