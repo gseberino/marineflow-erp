@@ -34,16 +34,18 @@ export function useAuth() {
   return ctx;
 }
 
-async function fetchProfile(authUser: {
-  id: string;
-  email?: string;
-}): Promise<AuthUser> {
-  const fallback: AuthUser = {
+function buildMinimalUser(authUser: { id: string; email?: string }): AuthUser {
+  return {
     id: authUser.id,
     email: authUser.email || '',
     full_name: authUser.email || '',
     role: 'admin',
   };
+}
+
+async function loadProfile(
+  authUser: { id: string; email?: string }
+): Promise<AuthUser> {
   try {
     let { data } = await supabase
       .from('app_users')
@@ -60,7 +62,7 @@ async function fetchProfile(authUser: {
       data = res.data;
     }
 
-    if (!data) return fallback;
+    if (!data) return buildMinimalUser(authUser);
 
     return {
       id: authUser.id,
@@ -69,7 +71,7 @@ async function fetchProfile(authUser: {
       role: (data.role as AuthUser['role']) || 'admin',
     };
   } catch {
-    return fallback;
+    return buildMinimalUser(authUser);
   }
 }
 
@@ -78,38 +80,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [authReady, setAuthReady] = useState(false);
+  const mountedRef = useRef(true);
 
-  // Refs to avoid stale closures and prevent double-finalize
-  const finalizedRef = useRef(false);
-  const authReadyRef = useRef(false);
+  function finalize() {
+    setLoading(false);
+    setAuthReady(true);
+  }
+
+  function loadProfileBackground(
+    authUser: { id: string; email?: string }
+  ) {
+    setUser(buildMinimalUser(authUser));
+
+    loadProfile(authUser).then((profile) => {
+      if (!mountedRef.current) return;
+      setUser(profile);
+      console.log('[Auth] Profile ready:', profile.role);
+    });
+  }
 
   useEffect(() => {
-    let mounted = true;
+    mountedRef.current = true;
 
-    // finalize() runs EXACTLY ONCE — never resets loading to true
-    function finalize() {
-      if (!mounted || finalizedRef.current) return;
-      finalizedRef.current = true;
-      authReadyRef.current = true;
-      setLoading(false);
-      setAuthReady(true);
-    }
-
-    // Safety net: force finalize after 6s no matter what
     const safetyTimer = setTimeout(() => {
-      if (!authReadyRef.current) {
-        console.warn('[Auth] Safety timeout — forcing finalize');
-        finalize();
-      }
-    }, 6000);
+      console.warn('[Auth] Safety timeout');
+      finalize();
+    }, 4000);
 
-    // onAuthStateChange handles post-boot events ONLY.
-    // INITIAL_SESSION is skipped — getSession() handles boot.
-    // TOKEN_REFRESHED is skipped — Supabase handles it internally.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, newSession) => {
-        if (!mounted) return;
-
+        if (!mountedRef.current) return;
         if (event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') {
           return;
         }
@@ -123,22 +123,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        // SIGNED_IN or USER_UPDATED
-        fetchProfile(newSession.user).then((profile) => {
-          if (!mounted) return;
-          setUser(profile);
-          console.log('[Auth] SIGNED_IN:', profile.email, profile.role);
-          finalize();
-        });
+        loadProfileBackground(newSession.user);
+        finalize();
       }
     );
 
-    // Bootstrap: ONLY getSession() restores the initial session.
-    // This is the single source of truth for boot-time auth state.
     supabase.auth
       .getSession()
       .then(({ data: { session: s } }) => {
-        if (!mounted) return;
+        if (!mountedRef.current) return;
+        clearTimeout(safetyTimer);
         setSession(s);
 
         if (!s?.user) {
@@ -146,19 +140,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        fetchProfile(s.user).then((profile) => {
-          if (!mounted) return;
-          setUser(profile);
-          console.log('[Auth] Boot:', profile.email, profile.role);
-          finalize();
-        });
+        loadProfileBackground(s.user);
+        finalize();
       })
       .catch(() => {
-        if (mounted) finalize();
+        clearTimeout(safetyTimer);
+        finalize();
       });
 
     return () => {
-      mounted = false;
+      mountedRef.current = false;
       clearTimeout(safetyTimer);
       subscription.unsubscribe();
     };
