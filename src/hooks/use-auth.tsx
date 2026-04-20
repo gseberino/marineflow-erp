@@ -1,4 +1,7 @@
-import { useState, useEffect, createContext, useContext, ReactNode, useRef } from 'react';
+import {
+  useState, useEffect, createContext,
+  useContext, ReactNode, useRef,
+} from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { queryClient } from '@/lib/query-client';
 import type { Session } from '@supabase/supabase-js';
@@ -27,28 +30,41 @@ export function useAuth() {
   return ctx;
 }
 
-const PROFILE_TIMEOUT_MS = 4000;
+async function fetchProfile(
+  authUser: { id: string; email?: string }
+): Promise<AuthUser> {
+  try {
+    // Try by email (case-insensitive)
+    let { data } = await supabase
+      .from('app_users')
+      .select('full_name, role')
+      .ilike('email', authUser.email || '')
+      .maybeSingle();
 
-function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
-  return new Promise((resolve) => {
-    let done = false;
-    const timer = setTimeout(() => {
-      if (done) return;
-      done = true;
-      resolve(fallback);
-    }, ms);
-    p.then((v) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      resolve(v);
-    }).catch(() => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      resolve(fallback);
-    });
-  });
+    // Fallback: try by id
+    if (!data) {
+      const res = await supabase
+        .from('app_users')
+        .select('full_name, role')
+        .eq('id', authUser.id)
+        .maybeSingle();
+      data = res.data;
+    }
+
+    return {
+      id: authUser.id,
+      email: authUser.email || '',
+      full_name: data?.full_name || authUser.email || '',
+      role: (data?.role as AuthUser['role']) || 'admin',
+    };
+  } catch {
+    return {
+      id: authUser.id,
+      email: authUser.email || '',
+      full_name: authUser.email || '',
+      role: 'admin',
+    };
+  }
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -56,127 +72,97 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [authReady, setAuthReady] = useState(false);
-  const profileLoadIdRef = useRef(0);
 
-  // If Settings menu is missing, verify app_users record:
-  // SELECT id, email, role FROM app_users
-  //   WHERE email ILIKE 'your@email.com';
-  // UPDATE app_users SET role = 'admin'
-  //   WHERE email ILIKE 'your@email.com';
-  const loadUserProfile = async (authUser: { id: string; email?: string }) => {
-    const myId = ++profileLoadIdRef.current;
-
-    // Build a minimal user immediately so the app never blocks on profile fetch
-    const minimal: AuthUser = {
-      id: authUser.id,
-      email: authUser.email || '',
-      full_name: authUser.email || '',
-      role: 'admin',
-    };
-
-    const fetchProfile = (async () => {
-      let { data } = await supabase
-        .from('app_users')
-        .select('full_name, role')
-        .ilike('email', authUser.email || '')
-        .maybeSingle();
-
-      if (!data && authUser.id) {
-        const res = await supabase
-          .from('app_users')
-          .select('full_name, role')
-          .eq('id', authUser.id)
-          .maybeSingle();
-        data = res.data;
-      }
-
-      return {
-        id: authUser.id,
-        email: authUser.email || '',
-        full_name: data?.full_name || authUser.email || '',
-        role: (data?.role as AuthUser['role']) || 'admin',
-      } as AuthUser;
-    })();
-
-    const resolved = await withTimeout(fetchProfile, PROFILE_TIMEOUT_MS, minimal);
-
-    // Stale-response guard: only the most recent load may write user state
-    if (myId !== profileLoadIdRef.current) return;
-    setUser(resolved);
-    console.log('[Auth] Profile loaded:', { email: resolved.email, role: resolved.role });
-  };
+  // Use refs to avoid stale closures
+  const authReadyRef = useRef(false);
+  const finalizedRef = useRef(false);
 
   useEffect(() => {
     let mounted = true;
 
-    const finalize = () => {
-      if (!mounted) return;
+    // Called ONCE to mark auth as done — never resets to true
+    function finalize() {
+      if (!mounted || finalizedRef.current) return;
+      finalizedRef.current = true;
+      authReadyRef.current = true;
       setLoading(false);
       setAuthReady(true);
-    };
+    }
 
-    // Register listener BEFORE getSession. The callback never blocks the
-    // auth pipeline with awaits — profile loading runs in the background.
+    // Safety net: force-finalize after 6 seconds no matter what
+    const safetyTimer = setTimeout(() => {
+      if (mounted && !authReadyRef.current) {
+        console.warn('[Auth] Safety timeout triggered');
+        finalize();
+      }
+    }, 6000);
+
+    // Single source of truth: onAuthStateChange handles everything.
+    // We skip INITIAL_SESSION (handled by getSession below) and
+    // TOKEN_REFRESHED (handled automatically by Supabase client).
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, newSession) => {
         if (!mounted) return;
+
+        // These events don't require any action from us
+        if (event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') {
+          return;
+        }
+
         setSession(newSession);
 
         if (event === 'SIGNED_OUT' || !newSession?.user) {
-          profileLoadIdRef.current++; // invalidate any in-flight profile load
           setUser(null);
-          if (event === 'SIGNED_OUT') queryClient.clear();
+          queryClient.clear();
           finalize();
           return;
         }
 
-        // Fire-and-forget profile load — does not block auth pipeline
-        loadUserProfile(newSession.user).finally(() => {
-          if (mounted) finalize();
+        // SIGNED_IN or USER_UPDATED: load the profile
+        fetchProfile(newSession.user).then((profile) => {
+          if (!mounted) return;
+          setUser(profile);
+          console.log('[Auth] SIGNED_IN profile:', profile.role);
+          finalize();
         });
-
       }
     );
 
-    // Initial session restoration
+    // Bootstrap: restore session from localStorage.
+    // This is the ONLY place we call getSession().
     supabase.auth.getSession().then(({ data: { session: s } }) => {
       if (!mounted) return;
       setSession(s);
-      if (s?.user) {
-        loadUserProfile(s.user).finally(() => {
-          if (mounted) finalize();
-        });
-      } else {
+
+      if (!s?.user) {
+        // No session in storage — done immediately
         finalize();
+        return;
       }
+
+      // Session found: load profile then finalize
+      fetchProfile(s.user).then((profile) => {
+        if (!mounted) return;
+        setUser(profile);
+        console.log('[Auth] Boot profile:', profile.role);
+        finalize();
+      });
     }).catch(() => {
-      finalize();
+      if (mounted) finalize();
     });
-
-    // Hard safety net: never let bootstrap take more than 8 seconds
-    const bootTimeout = setTimeout(() => {
-      if (mounted && !authReady) finalize();
-    }, 8000);
-
-    // When the tab becomes visible again, re-check the session
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        supabase.auth.getSession().catch(() => {});
-      }
-    };
-    document.addEventListener('visibilitychange', onVisibility);
 
     return () => {
       mounted = false;
-      clearTimeout(bootTimeout);
+      clearTimeout(safetyTimer);
       subscription.unsubscribe();
-      document.removeEventListener('visibilitychange', onVisibility);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
     if (error) throw error;
   };
 
@@ -188,7 +174,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, authReady, signIn, signOut }}>
+    <AuthContext.Provider
+      value={{ user, session, loading, authReady, signIn, signOut }}
+    >
       {children}
     </AuthContext.Provider>
   );
