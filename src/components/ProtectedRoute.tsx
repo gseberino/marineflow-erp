@@ -2,7 +2,6 @@ import { useAuth } from '@/hooks/use-auth';
 import { Navigate } from 'react-router-dom';
 import { Loader2, ShieldX } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useEffect, useState } from 'react';
 
 interface Props {
   children: React.ReactNode;
@@ -11,34 +10,11 @@ interface Props {
 
 export function ProtectedRoute({ children, roles }: Props) {
   const { user, loading, authReady } = useAuth();
-  const [timedOut, setTimedOut] = useState(false);
-
-  useEffect(() => {
-    if (!loading) {
-      setTimedOut(false);
-      return;
-    }
-    const t = setTimeout(() => setTimedOut(true), 10_000);
-    return () => clearTimeout(t);
-  }, [loading]);
 
   if (loading || !authReady) {
-    if (timedOut) {
-      return (
-        <div className="flex h-screen w-full flex-col items-center justify-center gap-4 p-8 text-center">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-          <p className="max-w-md text-sm text-muted-foreground">
-            O carregamento está demorando mais que o esperado.
-          </p>
-          <Button onClick={() => window.location.reload()}>
-            Recarregar página
-          </Button>
-        </div>
-      );
-    }
     return (
-      <div className="flex h-screen w-full items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      <div className="flex h-screen w-screen items-center justify-center">
+        <Loader2 className="h-16 w-16 animate-spin text-primary" />
       </div>
     );
   }
@@ -49,16 +25,13 @@ export function ProtectedRoute({ children, roles }: Props) {
 
   if (roles && !roles.includes(user.role)) {
     return (
-      <div className="flex h-screen flex-col items-center justify-center gap-4 p-8 text-center">
+      <div className="flex h-screen w-screen flex-col items-center justify-center gap-4 px-6 text-center">
         <ShieldX className="h-16 w-16 text-destructive" />
-        <h2 className="text-xl font-bold">Acesso não autorizado</h2>
-        <p className="max-w-md text-muted-foreground">
+        <h1 className="text-2xl font-bold">Acesso não autorizado</h1>
+        <p className="text-muted-foreground">
           Você não tem permissão para acessar esta página.
-          Entre em contato com o administrador do sistema.
         </p>
-        <Button variant="outline" onClick={() => window.history.back()}>
-          Voltar
-        </Button>
+        <Button onClick={() => window.history.back()}>Voltar</Button>
       </div>
     );
   }
