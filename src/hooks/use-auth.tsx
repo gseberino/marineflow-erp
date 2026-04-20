@@ -135,9 +135,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (mounted) finalize();
         });
 
-        if (event === 'TOKEN_REFRESHED') {
-          queryClient.invalidateQueries();
-        }
       }
     );
 
