@@ -59,11 +59,16 @@ export function AppLayout({ children }: { children: ReactNode }) {
   };
 
   const visibleNavKeys = navKeys.filter(item => {
+    if (!user) return true;
     if (item.path === '/financial') {
-      return user?.role === 'admin' || user?.role === 'financial';
+      return ['admin', 'financial'].includes(user.role);
     }
-    if (item.path === '/audit-log' || item.path === '/settings') {
-      return user?.role === 'admin';
+    if (item.path === '/audit-log') {
+      return user.role === 'admin';
+    }
+    if (item.path === '/settings') {
+      return ['admin', 'seller', 'financial', 'other'].includes(user.role)
+        || !user.role;
     }
     return true;
   });
