@@ -651,6 +651,30 @@ export type Database = {
           },
         ]
       }
+      payment_condition_presets: {
+        Row: {
+          active: boolean | null
+          created_at: string | null
+          id: string
+          label: string
+          sort_order: number | null
+        }
+        Insert: {
+          active?: boolean | null
+          created_at?: string | null
+          id?: string
+          label: string
+          sort_order?: number | null
+        }
+        Update: {
+          active?: boolean | null
+          created_at?: string | null
+          id?: string
+          label?: string
+          sort_order?: number | null
+        }
+        Relationships: []
+      }
       payments: {
         Row: {
           amount: number
@@ -1345,6 +1369,7 @@ export type Database = {
           marina_id: string | null
           operational_cost_total: number | null
           parts_cost_total: number | null
+          payment_conditions: string | null
           payment_status: string | null
           priority: string
           problem_description: string | null
@@ -1400,6 +1425,7 @@ export type Database = {
           marina_id?: string | null
           operational_cost_total?: number | null
           parts_cost_total?: number | null
+          payment_conditions?: string | null
           payment_status?: string | null
           priority?: string
           problem_description?: string | null
@@ -1455,6 +1481,7 @@ export type Database = {
           marina_id?: string | null
           operational_cost_total?: number | null
           parts_cost_total?: number | null
+          payment_conditions?: string | null
           payment_status?: string | null
           priority?: string
           problem_description?: string | null

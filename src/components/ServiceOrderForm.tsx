@@ -25,6 +25,7 @@ import {
   useReopenServiceOrder,
 } from '@/hooks/use-service-orders';
 import { useAppUsers, useCommissionableUsers, USER_ROLES } from '@/hooks/use-app-users';
+import { usePaymentConditionPresets } from '@/hooks/use-payment-conditions';
 import { useVesselContacts, VESSEL_CONTACT_ROLES } from '@/hooks/use-vessel-contacts';
 import { ClientCombobox } from '@/components/ClientCombobox';
 import { VesselSelect } from '@/components/VesselSelect';
@@ -88,6 +89,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const { data: commissionableUsers } = useCommissionableUsers();
   const { data: services } = useServices();
   const { data: cardFees } = useCardFees();
+  const { data: paymentPresets } = usePaymentConditionPresets();
   const { data: pdfData } = usePDFData(isNew ? undefined : orderId);
 
   const createSO = useCreateServiceOrder();
@@ -145,6 +147,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     commission_amount: 0,
     commissioned_person: '',
     commissioned_user_id: '',
+    payment_conditions: '',
   });
 
   const [manualTravel, setManualTravel] = useState(false);
@@ -184,6 +187,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [cancelReason, setCancelReason] = useState('');
   const [reopenReason, setReopenReason] = useState('');
   const [pdfDialogType, setPdfDialogType] = useState<'quote' | 'service_order' | 'invoice' | null>(null);
+  const [presetKey, setPresetKey] = useState(0);
 
   useEffect(() => {
     if (orderData) {
@@ -220,6 +224,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         commission_amount: d.commission_amount || 0,
         commissioned_person: d.commissioned_person || '',
         commissioned_user_id: d.commissioned_user_id || '',
+        payment_conditions: d.payment_conditions || '',
       });
       if (d.service_order_technicians) {
         setSelectedTechnicians(d.service_order_technicians.map((t: any) => t.user_id));
@@ -286,6 +291,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         ...form,
         commissioned_user_id: form.commissioned_user_id || null,
         requested_by_contact_id: form.requested_by_contact_id || null,
+        payment_conditions: form.payment_conditions || null,
       };
       if (isNew) {
         const result = await createSO.mutateAsync(payload);
@@ -1373,6 +1379,42 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                     </span>
                   )}
                 </div>
+              </div>
+            </div>
+
+            {/* Payment conditions */}
+            <div className="space-y-2 pt-2 border-t border-dashed">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm">Condições de Pagamento</Label>
+                <span className="text-xs text-muted-foreground">(aparece no PDF)</span>
+              </div>
+              <div className="flex gap-2 items-center">
+                <Select
+                  key={presetKey}
+                  onValueChange={(v) => {
+                    set('payment_conditions', v);
+                    setPresetKey((k) => k + 1);
+                  }}
+                  disabled={isLocked}
+                >
+                  <SelectTrigger className="w-44 h-8 text-sm">
+                    <SelectValue placeholder="Pré-definidas..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(paymentPresets || []).map((p: any) => (
+                      <SelectItem key={p.id} value={p.label}>
+                        {p.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input
+                  value={form.payment_conditions || ''}
+                  onChange={(e) => set('payment_conditions', e.target.value)}
+                  placeholder="Ou descreva livremente..."
+                  disabled={isLocked}
+                  className="flex-1 h-8 text-sm"
+                />
               </div>
             </div>
 
