@@ -66,6 +66,7 @@ export type PDFData = {
     tax_amount: number;
     operational_cost_total?: number;
     extra_notes?: string;
+    payment_conditions?: string;
   };
   client: {
     name: string;
@@ -446,6 +447,13 @@ ${data.serviceOrder.extra_notes ? `
   ${isQuote ? `<div style="padding:6px 8px;font-size:10px;color:#6b7280;border-top:1px solid #e5e7eb;">${getValidityText()}</div>` : ''}
 </div>
 
+${data.serviceOrder.payment_conditions ? `
+<div style="border:1px solid #e5e7eb;border-radius:6px;padding:10px;margin-bottom:16px;background:#f9fafb;">
+  <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Condições de Pagamento</div>
+  <div style="white-space:pre-wrap;font-size:12px;">${esc(data.serviceOrder.payment_conditions)}</div>
+</div>
+` : ''}
+
 ${options.showSignature ? `
 <div style="display:flex;gap:40px;margin-top:40px;margin-bottom:24px;">
   <div style="flex:1;text-align:center;">
@@ -627,6 +635,13 @@ ${options.showPaymentInstructions !== false ? `
   <div style="font-size:10px;color:#6b7280;margin-top:8px;">
     Após o pagamento, envie o comprovante para ${data.company.email || 'o e-mail de contato'} informando o número da fatura <strong>${esc(docNumber)}</strong>.
   </div>
+</div>
+` : ''}
+
+${data.serviceOrder.payment_conditions ? `
+<div style="border:1px solid #e5e7eb;border-radius:6px;padding:10px;margin-bottom:16px;background:#f9fafb;">
+  <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Condições de Pagamento</div>
+  <div style="white-space:pre-wrap;font-size:12px;">${esc(data.serviceOrder.payment_conditions)}</div>
 </div>
 ` : ''}
 
