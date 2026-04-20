@@ -30,6 +30,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // If Settings menu is missing, verify app_users record:
+  // SELECT id, email, role FROM app_users
+  //   WHERE email ILIKE 'your@email.com';
+  // UPDATE app_users SET role = 'admin'
+  //   WHERE email ILIKE 'your@email.com';
   const loadUserProfile = async (authUser: { id: string; email?: string }) => {
     try {
       let { data } = await supabase
@@ -51,6 +56,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         id: authUser.id,
         email: authUser.email || '',
         full_name: data?.full_name || authUser.email || '',
+        role: (data?.role as AuthUser['role']) || 'admin',
+      });
+      console.log('[Auth] Profile loaded:', {
+        email: authUser.email,
+        found: !!data,
         role: (data?.role as AuthUser['role']) || 'admin',
       });
     } catch {
