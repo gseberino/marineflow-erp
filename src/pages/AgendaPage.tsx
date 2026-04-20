@@ -145,7 +145,11 @@ export default function AgendaPage() {
           </div>
         </div>
 
-        {isLoading ? (
+        {ordersError ? (
+          <div className="py-8 text-center text-sm text-destructive">
+            Erro ao carregar agenda. Tente recarregar a página.
+          </div>
+        ) : isLoading ? (
           <div className="flex items-center justify-center py-12 text-muted-foreground">
             <Loader2 className="h-5 w-5 animate-spin" />
           </div>
