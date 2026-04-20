@@ -109,7 +109,10 @@ export function SupplierFormDialog({ open, onOpenChange, supplier }: Props) {
       }
       onOpenChange(false);
     } catch (err: any) {
-      toast.error(err.message);
+      const msg = err?.message || err?.details
+        || 'Erro ao salvar fornecedor.';
+      toast.error(msg);
+      console.error('SupplierFormDialog error:', err);
     }
   };
 

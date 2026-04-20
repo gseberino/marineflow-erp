@@ -14,8 +14,6 @@ function isAuthError(err: any): boolean {
   );
 }
 
-// Single-flight session refresh: if many queries fail with 401 at once,
-// only ONE real refresh call runs; everyone awaits the same promise.
 let inflightRefresh: Promise<void> | null = null;
 function refreshOnce(): Promise<void> {
   if (inflightRefresh) return inflightRefresh;
@@ -24,8 +22,7 @@ function refreshOnce(): Promise<void> {
     .then(() => {})
     .catch(() => {})
     .finally(() => {
-      // Allow another refresh attempt after a small cool-down
-      setTimeout(() => { inflightRefresh = null; }, 1500);
+      setTimeout(() => { inflightRefresh = null; }, 2000);
     });
   return inflightRefresh;
 }
@@ -33,18 +30,18 @@ function refreshOnce(): Promise<void> {
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 30_000,
+      staleTime: 60_000,
       gcTime: 5 * 60_000,
       refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
       retry: (failureCount, error) => {
         if (isAuthError(error)) {
-          // Coordinated refresh; up to 3 retries for auth errors
           refreshOnce();
-          return failureCount < 3;
+          return failureCount < 1;
         }
-        return failureCount < 2;
+        return false;
       },
-      retryDelay: (attempt) => Math.min(500 * 2 ** attempt, 4000),
+      retryDelay: 1000,
     },
   },
 });

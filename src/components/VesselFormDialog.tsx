@@ -114,7 +114,10 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
       }
       onOpenChange(false);
     } catch (err: any) {
-      toast.error(err.message);
+      const msg = err?.message || err?.details
+        || 'Erro ao salvar embarcação.';
+      toast.error(msg);
+      console.error('VesselFormDialog error:', err);
     }
   };
 

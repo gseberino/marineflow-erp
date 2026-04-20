@@ -205,7 +205,10 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
       }
       onOpenChange(false);
     } catch (err: any) {
-      toast.error(err.message);
+      const msg = err?.message || err?.details
+        || 'Erro ao salvar produto.';
+      toast.error(msg);
+      console.error('ProductFormDialog error:', err);
     }
   };
 
@@ -226,7 +229,10 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
       setShowAddSupplier(false);
       setSupplierForm(emptySupplierForm);
     } catch (err: any) {
-      toast.error(err.message);
+      const msg = err?.message || err?.details
+        || 'Erro ao salvar produto.';
+      toast.error(msg);
+      console.error('ProductFormDialog error:', err);
     }
   };
 

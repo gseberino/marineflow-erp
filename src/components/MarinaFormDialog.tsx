@@ -103,7 +103,10 @@ export function MarinaFormDialog({ open, onOpenChange, marina }: Props) {
       }
       onOpenChange(false);
     } catch (err: any) {
-      toast.error(err.message);
+      const msg = err?.message || err?.details
+        || 'Erro ao salvar marina.';
+      toast.error(msg);
+      console.error('MarinaFormDialog error:', err);
     }
   };
 
