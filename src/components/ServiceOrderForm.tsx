@@ -289,6 +289,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     try {
       const payload = {
         ...form,
+        scheduled_start_at: form.scheduled_start_at || null,
+        scheduled_end_at: form.scheduled_end_at || null,
         commissioned_user_id: form.commissioned_user_id || null,
         requested_by_contact_id: form.requested_by_contact_id || null,
         payment_conditions: form.payment_conditions || null,

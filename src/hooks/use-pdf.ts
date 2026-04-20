@@ -127,6 +127,6 @@ export function usePDFData(serviceOrderId: string | undefined) {
       return pdfData;
     },
     enabled: !!serviceOrderId,
-    staleTime: 30_000,
+    staleTime: 0,
   });
 }

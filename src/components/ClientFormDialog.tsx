@@ -109,7 +109,10 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
       }
       onOpenChange(false);
     } catch (err: any) {
-      toast.error(err.message);
+      const msg = err?.message || err?.details
+        || 'Erro ao salvar cliente.';
+      toast.error(msg);
+      console.error('ClientFormDialog error:', err);
     }
   };
 

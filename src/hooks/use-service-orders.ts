@@ -338,6 +338,7 @@ export function useAddServiceOrderPart() {
       qc.invalidateQueries({ queryKey: ['so-parts', vars.service_order_id] });
       qc.invalidateQueries({ queryKey: ['service-orders', vars.service_order_id] });
       qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: ['pdf-data'] });
     },
   });
 }
@@ -393,6 +394,7 @@ export function useRemoveServiceOrderPart() {
       qc.invalidateQueries({ queryKey: ['so-parts', vars.service_order_id] });
       qc.invalidateQueries({ queryKey: ['service-orders', vars.service_order_id] });
       qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: ['pdf-data'] });
     },
   });
 }
@@ -507,6 +509,7 @@ export function useAddServiceOrderService() {
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ['so-services', vars.service_order_id] });
       qc.invalidateQueries({ queryKey: ['service-orders', vars.service_order_id] });
+      qc.invalidateQueries({ queryKey: ['pdf-data'] });
     },
   });
 }
@@ -525,6 +528,7 @@ export function useRemoveServiceOrderService() {
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ['so-services', vars.service_order_id] });
       qc.invalidateQueries({ queryKey: ['service-orders', vars.service_order_id] });
+      qc.invalidateQueries({ queryKey: ['pdf-data'] });
     },
   });
 }
