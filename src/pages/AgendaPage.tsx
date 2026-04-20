@@ -81,7 +81,7 @@ export default function AgendaPage() {
     return { from, to };
   }, [view, cursor]);
 
-  const { data: orders = [], isLoading } = useAgendaOrders(
+  const { data: orders = [], isLoading, error: ordersError } = useAgendaOrders(
     range.from.toISOString(),
     range.to.toISOString(),
   );

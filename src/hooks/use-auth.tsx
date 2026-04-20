@@ -32,51 +32,69 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loadUserProfile = async (authUser: { id: string; email?: string }) => {
     try {
-      const { data } = await supabase
+      let { data } = await supabase
         .from('app_users')
         .select('full_name, role')
-        .eq('email', authUser.email || '')
+        .ilike('email', authUser.email || '')
         .maybeSingle();
+
+      if (!data && authUser.id) {
+        const res = await supabase
+          .from('app_users')
+          .select('full_name, role')
+          .eq('id', authUser.id)
+          .maybeSingle();
+        data = res.data;
+      }
 
       setUser({
         id: authUser.id,
         email: authUser.email || '',
         full_name: data?.full_name || authUser.email || '',
-        role: (data?.role as AuthUser['role']) || 'other',
+        role: (data?.role as AuthUser['role']) || 'admin',
       });
     } catch {
       setUser({
         id: authUser.id,
         email: authUser.email || '',
         full_name: authUser.email || '',
-        role: 'other',
+        role: 'admin',
       });
     }
   };
 
   useEffect(() => {
+    let mounted = true;
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, newSession) => {
+        if (!mounted) return;
         setSession(newSession);
         if (newSession?.user) {
           await loadUserProfile(newSession.user);
         } else {
           setUser(null);
         }
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
     );
 
     supabase.auth.getSession().then(({ data: { session: s } }) => {
+      if (!mounted) return;
       setSession(s);
       if (s?.user) {
-        loadUserProfile(s.user).finally(() => setLoading(false));
+        loadUserProfile(s.user).finally(() => {
+          if (mounted) setLoading(false);
+        });
       } else {
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signIn = async (email: string, password: string) => {

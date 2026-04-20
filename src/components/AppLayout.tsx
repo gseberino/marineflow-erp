@@ -156,28 +156,35 @@ export function AppLayout({ children }: { children: ReactNode }) {
           <div className="flex-1" />
           <div className="flex items-center gap-3">
             <NotificationBell />
+            <div className="text-right hidden sm:block">
+              <p className="text-sm font-medium leading-none">
+                {user?.full_name || 'Usuário'}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {roleLabels[user?.role || ''] || ''}
+              </p>
+            </div>
             <DropdownMenu>
-              <DropdownMenuTrigger className="flex items-center gap-3 outline-none">
-                <div className="text-right hidden sm:block">
-                  <p className="text-sm font-medium">{user?.full_name || 'Usuário'}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {roleLabels[user?.role || ''] || user?.role}
-                  </p>
-                </div>
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold">
+              <DropdownMenuTrigger asChild>
+                <button
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold shrink-0 hover:opacity-80 transition-opacity cursor-pointer"
+                >
                   {initials}
-                </div>
+                </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuLabel>
-                  <div>
-                    <p className="font-medium">{user?.full_name}</p>
-                    <p className="text-xs text-muted-foreground font-normal">{user?.email}</p>
+              <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuLabel className="font-normal">
+                  <div className="flex flex-col space-y-1">
+                    <p className="text-sm font-medium">{user?.full_name}</p>
+                    <p className="text-xs text-muted-foreground">{user?.email}</p>
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleSignOut}>
-                  <LogOut className="h-4 w-4" />
+                <DropdownMenuItem
+                  onClick={handleSignOut}
+                  className="text-destructive focus:text-destructive cursor-pointer"
+                >
+                  <LogOut className="mr-2 h-4 w-4" />
                   Sair
                 </DropdownMenuItem>
               </DropdownMenuContent>

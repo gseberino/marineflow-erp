@@ -14,7 +14,12 @@ import { Plus, Search, Wrench, Pencil, Upload, Download, Table2 } from 'lucide-r
 
 export default function ServiceList() {
   const { t, formatCurrency } = useI18n();
-  const { data: services, isLoading } = useServices();
+  const { data: services, isLoading, error } = useServices();
+  if (error) return (
+    <div className="py-20 text-center text-destructive">
+      Erro ao carregar serviços. Tente recarregar a página.
+    </div>
+  );
   const [search, setSearch] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editData, setEditData] = useState<any>(null);
