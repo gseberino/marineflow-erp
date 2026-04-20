@@ -1,6 +1,10 @@
 import {
-  useState, useEffect, createContext,
-  useContext, ReactNode, useRef,
+  useState,
+  useEffect,
+  createContext,
+  useContext,
+  ReactNode,
+  useRef,
 } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { queryClient } from '@/lib/query-client';
@@ -30,18 +34,23 @@ export function useAuth() {
   return ctx;
 }
 
-async function fetchProfile(
-  authUser: { id: string; email?: string }
-): Promise<AuthUser> {
+async function fetchProfile(authUser: {
+  id: string;
+  email?: string;
+}): Promise<AuthUser> {
+  const fallback: AuthUser = {
+    id: authUser.id,
+    email: authUser.email || '',
+    full_name: authUser.email || '',
+    role: 'admin',
+  };
   try {
-    // Try by email (case-insensitive)
     let { data } = await supabase
       .from('app_users')
       .select('full_name, role')
       .ilike('email', authUser.email || '')
       .maybeSingle();
 
-    // Fallback: try by id
     if (!data) {
       const res = await supabase
         .from('app_users')
@@ -51,19 +60,16 @@ async function fetchProfile(
       data = res.data;
     }
 
+    if (!data) return fallback;
+
     return {
       id: authUser.id,
       email: authUser.email || '',
-      full_name: data?.full_name || authUser.email || '',
-      role: (data?.role as AuthUser['role']) || 'admin',
+      full_name: data.full_name || authUser.email || '',
+      role: (data.role as AuthUser['role']) || 'admin',
     };
   } catch {
-    return {
-      id: authUser.id,
-      email: authUser.email || '',
-      full_name: authUser.email || '',
-      role: 'admin',
-    };
+    return fallback;
   }
 }
 
@@ -73,14 +79,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [authReady, setAuthReady] = useState(false);
 
-  // Use refs to avoid stale closures
-  const authReadyRef = useRef(false);
+  // Refs to avoid stale closures and prevent double-finalize
   const finalizedRef = useRef(false);
+  const authReadyRef = useRef(false);
 
   useEffect(() => {
     let mounted = true;
 
-    // Called ONCE to mark auth as done — never resets to true
+    // finalize() runs EXACTLY ONCE — never resets loading to true
     function finalize() {
       if (!mounted || finalizedRef.current) return;
       finalizedRef.current = true;
@@ -89,22 +95,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAuthReady(true);
     }
 
-    // Safety net: force-finalize after 6 seconds no matter what
+    // Safety net: force finalize after 6s no matter what
     const safetyTimer = setTimeout(() => {
-      if (mounted && !authReadyRef.current) {
-        console.warn('[Auth] Safety timeout triggered');
+      if (!authReadyRef.current) {
+        console.warn('[Auth] Safety timeout — forcing finalize');
         finalize();
       }
     }, 6000);
 
-    // Single source of truth: onAuthStateChange handles everything.
-    // We skip INITIAL_SESSION (handled by getSession below) and
-    // TOKEN_REFRESHED (handled automatically by Supabase client).
+    // onAuthStateChange handles post-boot events ONLY.
+    // INITIAL_SESSION is skipped — getSession() handles boot.
+    // TOKEN_REFRESHED is skipped — Supabase handles it internally.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, newSession) => {
         if (!mounted) return;
 
-        // These events don't require any action from us
         if (event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') {
           return;
         }
@@ -118,38 +123,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        // SIGNED_IN or USER_UPDATED: load the profile
+        // SIGNED_IN or USER_UPDATED
         fetchProfile(newSession.user).then((profile) => {
           if (!mounted) return;
           setUser(profile);
-          console.log('[Auth] SIGNED_IN profile:', profile.role);
+          console.log('[Auth] SIGNED_IN:', profile.email, profile.role);
           finalize();
         });
       }
     );
 
-    // Bootstrap: restore session from localStorage.
-    // This is the ONLY place we call getSession().
-    supabase.auth.getSession().then(({ data: { session: s } }) => {
-      if (!mounted) return;
-      setSession(s);
-
-      if (!s?.user) {
-        // No session in storage — done immediately
-        finalize();
-        return;
-      }
-
-      // Session found: load profile then finalize
-      fetchProfile(s.user).then((profile) => {
+    // Bootstrap: ONLY getSession() restores the initial session.
+    // This is the single source of truth for boot-time auth state.
+    supabase.auth
+      .getSession()
+      .then(({ data: { session: s } }) => {
         if (!mounted) return;
-        setUser(profile);
-        console.log('[Auth] Boot profile:', profile.role);
-        finalize();
+        setSession(s);
+
+        if (!s?.user) {
+          finalize();
+          return;
+        }
+
+        fetchProfile(s.user).then((profile) => {
+          if (!mounted) return;
+          setUser(profile);
+          console.log('[Auth] Boot:', profile.email, profile.role);
+          finalize();
+        });
+      })
+      .catch(() => {
+        if (mounted) finalize();
       });
-    }).catch(() => {
-      if (mounted) finalize();
-    });
 
     return () => {
       mounted = false;
