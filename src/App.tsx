@@ -43,41 +43,43 @@ const App = () => (
               <Route path="/reset-password" element={<ResetPasswordPage />} />
               <Route path="/*" element={
                 <ProtectedRoute>
-                  <AppLayout>
-                    <Routes>
-                      <Route path="/" element={<Dashboard />} />
-                      <Route path="/service-orders" element={<ServiceOrderList />} />
-                      <Route path="/service-orders/new" element={<ServiceOrderDetail />} />
-                      <Route path="/service-orders/:id" element={<ServiceOrderDetail />} />
-                      <Route path="/clients" element={<ClientList />} />
-                      <Route path="/clients/:id" element={<ClientDetail />} />
-                      <Route path="/vessels" element={<VesselList />} />
-                      <Route path="/vessels/:id" element={<VesselDetail />} />
-                      <Route path="/marinas" element={<MarinaList />} />
-                      <Route path="/products" element={<ProductList />} />
-                      <Route path="/suppliers" element={<SupplierList />} />
-                      <Route path="/services" element={<ServiceList />} />
-                      <Route path="/inventory" element={<InventoryPage />} />
-                      <Route path="/agenda" element={<AgendaPage />} />
-                      <Route path="/financial" element={
-                        <ProtectedRoute roles={['admin', 'financial']}>
-                          <FinancialPage />
-                        </ProtectedRoute>
-                      } />
-                      <Route path="/reports" element={<ReportsPage />} />
-                      <Route path="/audit-log" element={
-                        <ProtectedRoute roles={['admin']}>
-                          <AuditLogPage />
-                        </ProtectedRoute>
-                      } />
-                      <Route path="/settings" element={
-                        <ProtectedRoute roles={['admin']}>
-                          <SettingsPage />
-                        </ProtectedRoute>
-                      } />
-                      <Route path="*" element={<NotFound />} />
-                    </Routes>
-                  </AppLayout>
+                  <QueryGate>
+                    <AppLayout>
+                      <Routes>
+                        <Route path="/" element={<Dashboard />} />
+                        <Route path="/service-orders" element={<ServiceOrderList />} />
+                        <Route path="/service-orders/new" element={<ServiceOrderDetail />} />
+                        <Route path="/service-orders/:id" element={<ServiceOrderDetail />} />
+                        <Route path="/clients" element={<ClientList />} />
+                        <Route path="/clients/:id" element={<ClientDetail />} />
+                        <Route path="/vessels" element={<VesselList />} />
+                        <Route path="/vessels/:id" element={<VesselDetail />} />
+                        <Route path="/marinas" element={<MarinaList />} />
+                        <Route path="/products" element={<ProductList />} />
+                        <Route path="/suppliers" element={<SupplierList />} />
+                        <Route path="/services" element={<ServiceList />} />
+                        <Route path="/inventory" element={<InventoryPage />} />
+                        <Route path="/agenda" element={<AgendaPage />} />
+                        <Route path="/financial" element={
+                          <ProtectedRoute roles={['admin', 'financial']}>
+                            <FinancialPage />
+                          </ProtectedRoute>
+                        } />
+                        <Route path="/reports" element={<ReportsPage />} />
+                        <Route path="/audit-log" element={
+                          <ProtectedRoute roles={['admin']}>
+                            <AuditLogPage />
+                          </ProtectedRoute>
+                        } />
+                        <Route path="/settings" element={
+                          <ProtectedRoute roles={['admin']}>
+                            <SettingsPage />
+                          </ProtectedRoute>
+                        } />
+                        <Route path="*" element={<NotFound />} />
+                      </Routes>
+                    </AppLayout>
+                  </QueryGate>
                 </ProtectedRoute>
               } />
             </Routes>
