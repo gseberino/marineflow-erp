@@ -59,7 +59,11 @@ export default function ServiceList() {
           onChange={(e) => setSearch(e.target.value)} className="pl-9" />
       </div>
 
-      {isLoading ? (
+      {error ? (
+        <div className="py-20 text-center text-destructive">
+          Erro ao carregar serviços. Tente recarregar a página.
+        </div>
+      ) : isLoading ? (
         <div className="space-y-3">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}</div>
       ) : !filtered?.length ? (
         <div className="flex flex-col items-center gap-3 py-16 text-center">
