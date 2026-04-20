@@ -25,6 +25,7 @@ import {
   useReopenServiceOrder,
 } from '@/hooks/use-service-orders';
 import { useAppUsers, useCommissionableUsers, USER_ROLES } from '@/hooks/use-app-users';
+import { usePaymentConditionPresets } from '@/hooks/use-payment-conditions';
 import { useVesselContacts, VESSEL_CONTACT_ROLES } from '@/hooks/use-vessel-contacts';
 import { ClientCombobox } from '@/components/ClientCombobox';
 import { VesselSelect } from '@/components/VesselSelect';
@@ -145,6 +146,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     commission_amount: 0,
     commissioned_person: '',
     commissioned_user_id: '',
+    payment_conditions: '',
   });
 
   const [manualTravel, setManualTravel] = useState(false);
@@ -220,6 +222,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         commission_amount: d.commission_amount || 0,
         commissioned_person: d.commissioned_person || '',
         commissioned_user_id: d.commissioned_user_id || '',
+        payment_conditions: d.payment_conditions || '',
       });
       if (d.service_order_technicians) {
         setSelectedTechnicians(d.service_order_technicians.map((t: any) => t.user_id));
@@ -286,6 +289,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         ...form,
         commissioned_user_id: form.commissioned_user_id || null,
         requested_by_contact_id: form.requested_by_contact_id || null,
+        payment_conditions: form.payment_conditions || null,
       };
       if (isNew) {
         const result = await createSO.mutateAsync(payload);
