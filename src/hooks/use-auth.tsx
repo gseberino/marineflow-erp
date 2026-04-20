@@ -1,5 +1,6 @@
 import { useState, useEffect, createContext, useContext, ReactNode } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { queryClient } from '@/lib/query-client';
 import type { Session } from '@supabase/supabase-js';
 
 type AuthUser = {
@@ -13,6 +14,7 @@ type AuthContextType = {
   user: AuthUser | null;
   session: Session | null;
   loading: boolean;
+  authReady: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
 };
@@ -29,6 +31,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authReady, setAuthReady] = useState(false);
 
   // If Settings menu is missing, verify app_users record:
   // SELECT id, email, role FROM app_users
@@ -76,16 +79,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
+    const finalize = () => {
+      if (!mounted) return;
+      setLoading(false);
+      setAuthReady(true);
+    };
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, newSession) => {
+      async (event, newSession) => {
         if (!mounted) return;
         setSession(newSession);
+
         if (newSession?.user) {
           await loadUserProfile(newSession.user);
         } else {
           setUser(null);
         }
-        if (mounted) setLoading(false);
+
+        if (event === 'TOKEN_REFRESHED') {
+          // Revalidate all queries with the freshly-rotated JWT
+          queryClient.invalidateQueries();
+        }
+        if (event === 'SIGNED_OUT') {
+          queryClient.clear();
+        }
+
+        finalize();
       }
     );
 
@@ -93,17 +112,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!mounted) return;
       setSession(s);
       if (s?.user) {
-        loadUserProfile(s.user).finally(() => {
-          if (mounted) setLoading(false);
-        });
+        loadUserProfile(s.user).finally(finalize);
       } else {
-        if (mounted) setLoading(false);
+        finalize();
       }
-    });
+    }).catch(finalize);
+
+    // When the tab becomes visible again, force the Supabase client to
+    // re-check the session. Suspended tabs may miss the auto-refresh
+    // and queries afterwards would 401 → infinite loading.
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        supabase.auth.getSession().catch(() => {});
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
 
     return () => {
       mounted = false;
       subscription.unsubscribe();
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, []);
 
@@ -116,10 +144,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut();
     setUser(null);
     setSession(null);
+    queryClient.clear();
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, session, loading, authReady, signIn, signOut }}>
       {children}
     </AuthContext.Provider>
   );
