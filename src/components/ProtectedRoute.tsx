@@ -10,7 +10,7 @@ interface Props {
 }
 
 export function ProtectedRoute({ children, roles }: Props) {
-  const { user, loading } = useAuth();
+  const { user, loading, authReady } = useAuth();
   const [timedOut, setTimedOut] = useState(false);
 
   useEffect(() => {
@@ -22,7 +22,7 @@ export function ProtectedRoute({ children, roles }: Props) {
     return () => clearTimeout(t);
   }, [loading]);
 
-  if (loading) {
+  if (loading || !authReady) {
     if (timedOut) {
       return (
         <div className="flex h-screen w-full flex-col items-center justify-center gap-4 p-8 text-center">
