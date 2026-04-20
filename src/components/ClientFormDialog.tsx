@@ -11,6 +11,7 @@ import { AddressFields } from '@/components/AddressFields';
 import { useCreateClient, useUpdateClient, type Client } from '@/hooks/use-clients';
 import { toast } from 'sonner';
 import type { TablesInsert } from '@/integrations/supabase/types';
+import { maskCPF, maskCNPJ, maskPhone } from '@/lib/masks';
 
 interface Props {
   open: boolean;
@@ -138,7 +139,12 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
             </div>
             <div>
               <Label>{form.type === 'company' ? t.clients.cnpj : t.clients.cpf}</Label>
-              <Input value={form.cpf_cnpj} onChange={e => set('cpf_cnpj', e.target.value)} />
+              <Input
+                value={form.cpf_cnpj}
+                onChange={e => set('cpf_cnpj', form.type === 'company' ? maskCNPJ(e.target.value) : maskCPF(e.target.value))}
+                placeholder={form.type === 'company' ? '00.000.000/0001-00' : '000.000.000-00'}
+                maxLength={form.type === 'company' ? 18 : 14}
+              />
             </div>
             <div>
               <Label>{t.clients.email}</Label>
@@ -146,11 +152,11 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
             </div>
             <div>
               <Label>{t.clients.phone}</Label>
-              <Input value={form.phone} onChange={e => set('phone', e.target.value)} />
+              <Input value={form.phone} onChange={e => set('phone', maskPhone(e.target.value))} placeholder="(47) 99999-9999" maxLength={15} />
             </div>
             <div>
               <Label>{t.clients.whatsapp}</Label>
-              <Input value={form.whatsapp} onChange={e => set('whatsapp', e.target.value)} />
+              <Input value={form.whatsapp} onChange={e => set('whatsapp', maskPhone(e.target.value))} placeholder="(47) 99999-9999" maxLength={15} />
             </div>
           </div>
 

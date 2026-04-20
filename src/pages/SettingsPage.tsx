@@ -17,6 +17,7 @@ import { Switch } from '@/components/ui/switch';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { CSOSN_OPTIONS, FISCAL_ORIGIN_OPTIONS } from '@/lib/price-calculator';
+import { maskCNPJ, maskPhone, maskCEP } from '@/lib/masks';
 
 const TERM_KEYS = [
   { key: 'terms_warranty', labelKey: 'termsWarranty' as const },
@@ -371,13 +372,13 @@ function CompanyTab() {
           </div>
           <div>
             <label className="text-xs font-medium text-muted-foreground">CNPJ</label>
-            <Input value={form.cnpj} onChange={e => set('cnpj', e.target.value)}
+            <Input value={form.cnpj} onChange={e => set('cnpj', maskCNPJ(e.target.value))}
               placeholder="00.000.000/0001-00" maxLength={18} className="mt-1" />
           </div>
           <div>
             <label className="text-xs font-medium text-muted-foreground">Telefone</label>
-            <Input value={form.phone} onChange={e => set('phone', e.target.value)}
-              placeholder="(47) 99999-9999" className="mt-1" />
+            <Input value={form.phone} onChange={e => set('phone', maskPhone(e.target.value))}
+              placeholder="(47) 99999-9999" maxLength={15} className="mt-1" />
           </div>
           <div>
             <label className="text-xs font-medium text-muted-foreground">E-mail</label>
@@ -409,7 +410,7 @@ function CompanyTab() {
           </div>
           <div>
             <label className="text-xs font-medium text-muted-foreground">CEP</label>
-            <Input value={form.postal_code} onChange={e => set('postal_code', e.target.value)}
+            <Input value={form.postal_code} onChange={e => set('postal_code', maskCEP(e.target.value))}
               placeholder="88000-000" maxLength={9} className="mt-1" />
           </div>
           <div>
@@ -1050,7 +1051,7 @@ function UsersTab() {
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground">Telefone</label>
-              <Input value={newForm.phone} onChange={e => setNewForm(p => ({ ...p, phone: e.target.value }))} className="mt-1" />
+              <Input value={newForm.phone} onChange={e => setNewForm(p => ({ ...p, phone: maskPhone(e.target.value) }))} className="mt-1" placeholder="(47) 99999-9999" maxLength={15} />
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground">Função</label>

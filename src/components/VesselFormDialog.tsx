@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge';
 import { Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Tables, TablesInsert } from '@/integrations/supabase/types';
+import { maskPhone } from '@/lib/masks';
 
 type Vessel = Tables<'vessels'>;
 
@@ -304,7 +305,7 @@ function VesselContactsSection({ vesselId }: { vesselId: string }) {
           </div>
           <div>
             <Label className="text-xs">Telefone</Label>
-            <Input value={contactForm.phone} onChange={e => setContactForm(p => ({ ...p, phone: e.target.value }))} />
+            <Input value={contactForm.phone} onChange={e => setContactForm(p => ({ ...p, phone: maskPhone(e.target.value) }))} placeholder="(47) 99999-9999" maxLength={15} />
           </div>
           <div>
             <Label className="text-xs">Email</Label>
