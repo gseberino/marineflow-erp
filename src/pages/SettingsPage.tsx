@@ -342,15 +342,25 @@ function CompanyTab() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const entries = Object.entries(form);
-      for (const [key, value] of entries) {
-        await supabase
-          .from('app_settings')
-          .upsert({ key, value: String(value) }, { onConflict: 'key' });
+      const results = await Promise.all(
+        Object.entries(form).map(([key, value]) =>
+          supabase
+            .from('app_settings')
+            .upsert(
+              { key, value: String(value ?? '') },
+              { onConflict: 'key', ignoreDuplicates: false }
+            )
+        )
+      );
+      const failed = results.filter(r => r.error);
+      if (failed.length > 0) {
+        const msg = failed[0].error?.message || 'Erro ao salvar';
+        throw new Error(msg);
       }
       toast.success('Configurações salvas com sucesso');
     } catch (e: any) {
-      toast.error(e.message || 'Erro ao salvar');
+      toast.error(e.message || 'Erro ao salvar configurações');
+      console.error('Settings save error:', e);
     } finally {
       setSaving(false);
     }
