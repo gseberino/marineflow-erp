@@ -10,6 +10,7 @@ import { AddressFields } from '@/components/AddressFields';
 import { useCreateMarina, useUpdateMarina, type Marina } from '@/hooks/use-marinas';
 import { toast } from 'sonner';
 import type { TablesInsert } from '@/integrations/supabase/types';
+import { maskPhone } from '@/lib/masks';
 
 interface Props {
   open: boolean;
@@ -126,7 +127,7 @@ export function MarinaFormDialog({ open, onOpenChange, marina }: Props) {
             </div>
             <div>
               <Label>{t.marinas.contactPhone}</Label>
-              <Input value={form.contact_phone} onChange={e => set('contact_phone', e.target.value)} />
+              <Input value={form.contact_phone} onChange={e => set('contact_phone', maskPhone(e.target.value))} placeholder="(47) 99999-9999" maxLength={15} />
             </div>
             <div className="col-span-2">
               <Label>{t.marinas.contactEmail}</Label>

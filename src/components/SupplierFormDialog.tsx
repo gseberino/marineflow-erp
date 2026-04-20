@@ -10,6 +10,7 @@ import { AddressFields } from '@/components/AddressFields';
 import { useCreateSupplier, useUpdateSupplier, type Supplier } from '@/hooks/use-suppliers';
 import { toast } from 'sonner';
 import type { TablesInsert } from '@/integrations/supabase/types';
+import { maskCPFCNPJ, maskPhone } from '@/lib/masks';
 
 interface Props {
   open: boolean;
@@ -132,7 +133,7 @@ export function SupplierFormDialog({ open, onOpenChange, supplier }: Props) {
             </div>
             <div>
               <Label>{t.suppliers.cnpj}</Label>
-              <Input value={form.cnpj_cpf} onChange={e => set('cnpj_cpf', e.target.value)} />
+              <Input value={form.cnpj_cpf} onChange={e => set('cnpj_cpf', maskCPFCNPJ(e.target.value))} placeholder="00.000.000/0001-00" maxLength={18} />
             </div>
             <div>
               <Label>{t.suppliers.contactName}</Label>
@@ -140,7 +141,7 @@ export function SupplierFormDialog({ open, onOpenChange, supplier }: Props) {
             </div>
             <div>
               <Label>{t.clients.phone}</Label>
-              <Input value={form.contact_phone} onChange={e => set('contact_phone', e.target.value)} />
+              <Input value={form.contact_phone} onChange={e => set('contact_phone', maskPhone(e.target.value))} placeholder="(47) 99999-9999" maxLength={15} />
             </div>
             <div>
               <Label>{t.clients.email}</Label>
