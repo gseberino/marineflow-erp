@@ -498,7 +498,9 @@ function AdjustStockDialog({ product, onClose, formatCurrency }: {
       toast.success('Estoque ajustado com sucesso');
       onClose();
     } catch (err: any) {
-      toast.error('Erro ao ajustar estoque: ' + (err?.message || 'Tente novamente'));
+      const msg = err?.message || err?.details || 'Tente novamente';
+      toast.error('Erro ao ajustar estoque: ' + msg);
+      console.error('Adjust stock error:', err);
     }
   };
 
@@ -578,8 +580,11 @@ function AddEntryDialog({ open, onClose, product, allProducts, formatCurrency }:
       });
       toast.success('Entrada registrada com sucesso');
       handleOpenChange(false);
-    } catch {
-      toast.error('Erro ao registrar entrada');
+    } catch (err: any) {
+      const msg = err?.message || err?.details
+        || 'Erro ao registrar entrada. Verifique os dados e tente novamente.';
+      toast.error(msg);
+      console.error('Stock entry error:', err);
     }
   };
 
