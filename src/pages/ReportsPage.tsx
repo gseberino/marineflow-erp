@@ -15,8 +15,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { StatusBadge } from '@/components/StatusBadge';
 import {
   BarChart3, Clock, Wrench, DollarSign, TrendingUp, FileCheck,
-  AlertTriangle, Percent, Users, Package, Loader2,
+  AlertTriangle, Percent, Users, Package, Loader2, RefreshCw,
 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,

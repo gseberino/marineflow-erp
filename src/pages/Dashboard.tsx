@@ -39,7 +39,7 @@ export default function Dashboard() {
     );
   }
 
-  if (isLoading || !data) {
+  if (isLoading) {
     return (
       <div className="space-y-6 animate-fade-in">
         <div className="space-y-1">
@@ -58,6 +58,17 @@ export default function Dashboard() {
           <Skeleton className="lg:col-span-3 h-64 rounded-xl" />
           <Skeleton className="lg:col-span-2 h-64 rounded-xl" />
         </div>
+      </div>
+    );
+  }
+
+  if (!data) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-4">
+        <p className="text-sm text-muted-foreground">Sem dados disponíveis.</p>
+        <Button onClick={() => refetch()} variant="outline" size="sm">
+          <RefreshCw className="h-4 w-4 mr-2" /> Recarregar
+        </Button>
       </div>
     );
   }
