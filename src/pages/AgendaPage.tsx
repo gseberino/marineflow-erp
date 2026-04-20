@@ -111,7 +111,7 @@ export default function AgendaPage() {
         </Button>
       </PageHeader>
 
-      <Card className="p-4 space-y-4">
+      <Card className="p-4 space-y-4 overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-1 rounded-md border p-1">
             <Button
@@ -126,16 +126,20 @@ export default function AgendaPage() {
             >Mês</Button>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Button size="sm" variant="outline" onClick={() => handleNav(-1)}>
               <ChevronLeft className="h-4 w-4" />
-              {view === 'week' ? 'Semana anterior' : 'Mês anterior'}
+              <span className="hidden sm:inline">
+                {view === 'week' ? 'Semana anterior' : 'Mês anterior'}
+              </span>
             </Button>
             <Button size="sm" variant="outline" onClick={() => setCursor(new Date())}>
               Hoje
             </Button>
             <Button size="sm" variant="outline" onClick={() => handleNav(1)}>
-              {view === 'week' ? 'Semana seguinte' : 'Mês seguinte'}
+              <span className="hidden sm:inline">
+                {view === 'week' ? 'Semana seguinte' : 'Mês seguinte'}
+              </span>
               <ChevronRight className="h-4 w-4" />
             </Button>
           </div>
@@ -224,8 +228,8 @@ function WeekView({
   ];
 
   return (
-    <div className="overflow-x-auto">
-      <div className="min-w-[900px]">
+    <div className="-mx-4 px-4 overflow-x-auto">
+      <div className="min-w-[700px]">
         <div className="grid grid-cols-[160px_repeat(7,1fr)] gap-1">
           <div className="p-2 text-xs font-semibold text-muted-foreground">Técnico</div>
           {days.map((d, i) => (
@@ -344,7 +348,7 @@ function MonthView({
     : [];
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+    <div className="grid gap-4 grid-cols-1 lg:grid-cols-[1fr_320px]">
       <div>
         <div className="text-center text-lg font-semibold mb-3">
           {MONTH_NAMES[cursor.getMonth()]} {cursor.getFullYear()}
