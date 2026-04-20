@@ -1075,3 +1075,87 @@ function UsersTab() {
     </div>
   );
 }
+
+function PaymentConditionsTab() {
+  const { data: presets, isLoading } = useAllPaymentConditionPresets();
+  const createPreset = useCreatePaymentConditionPreset();
+  const updatePreset = useUpdatePaymentConditionPreset();
+  const [newLabel, setNewLabel] = useState('');
+  const [showNew, setShowNew] = useState(false);
+
+  const handleCreate = async () => {
+    if (!newLabel.trim()) return;
+    try {
+      await createPreset.mutateAsync(newLabel.trim());
+      setNewLabel('');
+      setShowNew(false);
+      toast.success('Condição criada');
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  };
+
+  if (isLoading) {
+    return <div className="rounded-xl border bg-card p-6 shadow-sm text-sm text-muted-foreground">Carregando...</div>;
+  }
+
+  return (
+    <div className="rounded-xl border bg-card p-6 shadow-sm max-w-3xl space-y-4">
+      <div>
+        <h3 className="text-sm font-semibold mb-1">Condições de Pagamento</h3>
+        <p className="text-xs text-muted-foreground">
+          Cadastre condições de pagamento pré-definidas que aparecerão como opções rápidas nas Ordens de Serviço e nos PDFs.
+        </p>
+      </div>
+
+      <div className="rounded-lg border divide-y">
+        <div className="grid grid-cols-[1fr_80px] gap-3 px-3 py-2 bg-muted/50 text-xs font-medium text-muted-foreground">
+          <div>Descrição</div>
+          <div className="text-right">Ativo</div>
+        </div>
+        {(presets || []).map((p: any) => (
+          <div key={p.id} className="grid grid-cols-[1fr_80px] gap-3 px-3 py-2 items-center text-sm">
+            <div className={p.active ? '' : 'text-muted-foreground line-through'}>{p.label}</div>
+            <div className="flex justify-end">
+              <Switch
+                checked={p.active}
+                onCheckedChange={(v) => updatePreset.mutate({ id: p.id, active: v })}
+              />
+            </div>
+          </div>
+        ))}
+        {(presets || []).length === 0 && (
+          <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+            Nenhuma condição cadastrada
+          </div>
+        )}
+      </div>
+
+      {showNew ? (
+        <div className="space-y-2 rounded-lg border p-3 bg-muted/20">
+          <label className="text-xs font-medium text-muted-foreground">Nova Condição</label>
+          <Input
+            value={newLabel}
+            onChange={(e) => setNewLabel(e.target.value)}
+            placeholder="Ex: 50% de sinal + 50% na entrega"
+            autoFocus
+            onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+          />
+          <div className="flex gap-2">
+            <Button size="sm" onClick={handleCreate} disabled={createPreset.isPending}>
+              Salvar
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => { setShowNew(false); setNewLabel(''); }}>
+              Cancelar
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <Button variant="outline" size="sm" onClick={() => setShowNew(true)}>
+          + Nova Condição
+        </Button>
+      )}
+    </div>
+  );
+}
+
