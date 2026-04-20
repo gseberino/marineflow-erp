@@ -14,6 +14,22 @@ function isAuthError(err: any): boolean {
   );
 }
 
+// Single-flight session refresh: if many queries fail with 401 at once,
+// only ONE real refresh call runs; everyone awaits the same promise.
+let inflightRefresh: Promise<void> | null = null;
+function refreshOnce(): Promise<void> {
+  if (inflightRefresh) return inflightRefresh;
+  inflightRefresh = supabase.auth
+    .refreshSession()
+    .then(() => {})
+    .catch(() => {})
+    .finally(() => {
+      // Allow another refresh attempt after a small cool-down
+      setTimeout(() => { inflightRefresh = null; }, 1500);
+    });
+  return inflightRefresh;
+}
+
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -22,13 +38,13 @@ export const queryClient = new QueryClient({
       refetchOnWindowFocus: false,
       retry: (failureCount, error) => {
         if (isAuthError(error)) {
-          // Try to refresh the session in background; allow more retries
-          supabase.auth.refreshSession().catch(() => {});
-          return failureCount < 5;
+          // Coordinated refresh; up to 3 retries for auth errors
+          refreshOnce();
+          return failureCount < 3;
         }
-        return failureCount < 3;
+        return failureCount < 2;
       },
-      retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
+      retryDelay: (attempt) => Math.min(500 * 2 ** attempt, 4000),
     },
   },
 });

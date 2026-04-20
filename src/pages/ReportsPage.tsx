@@ -15,8 +15,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { StatusBadge } from '@/components/StatusBadge';
 import {
   BarChart3, Clock, Wrench, DollarSign, TrendingUp, FileCheck,
-  AlertTriangle, Percent, Users, Package, Loader2,
+  AlertTriangle, Percent, Users, Package, Loader2, RefreshCw,
 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
@@ -44,11 +45,25 @@ function LoadingBlock() {
   );
 }
 
+function ErrorBlock({ onRetry }: { onRetry?: () => void }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
+      <AlertTriangle className="h-8 w-8 text-destructive" />
+      <p className="text-sm text-muted-foreground">Erro ao carregar relatório.</p>
+      {onRetry && (
+        <Button variant="outline" size="sm" onClick={onRetry}>
+          <RefreshCw className="h-4 w-4 mr-2" /> Tentar novamente
+        </Button>
+      )}
+    </div>
+  );
+}
+
 // =============== TAB 1: REVENUE ===============
 function RevenueTab() {
   const { formatCurrency } = useI18n();
   const [period, setPeriod] = useState('30');
-  const { data, isLoading } = useRevenueReport(Number(period));
+  const { data, isLoading, error, refetch } = useRevenueReport(Number(period));
 
   return (
     <div className="space-y-6">
@@ -64,7 +79,7 @@ function RevenueTab() {
         </Select>
       </div>
 
-      {isLoading || !data ? <LoadingBlock /> : (
+      {isLoading ? <LoadingBlock /> : error ? <ErrorBlock onRetry={() => refetch()} /> : !data ? <LoadingBlock /> : (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <KPICard title="Total recebido" value={formatCurrency(data.totalReceived)} icon={DollarSign} />
@@ -115,9 +130,11 @@ function RevenueTab() {
 
 // =============== TAB 2: OS PERFORMANCE ===============
 function PerformanceTab() {
-  const { data, isLoading } = useOsPerformanceReport();
+  const { data, isLoading, error, refetch } = useOsPerformanceReport();
 
-  if (isLoading || !data) return <LoadingBlock />;
+  if (isLoading) return <LoadingBlock />;
+  if (error) return <ErrorBlock onRetry={() => refetch()} />;
+  if (!data) return <LoadingBlock />;
 
   return (
     <div className="space-y-6">
@@ -182,7 +199,7 @@ function PerformanceTab() {
 function PartsTab() {
   const { formatCurrency } = useI18n();
   const [period, setPeriod] = useState('30');
-  const { data, isLoading } = usePartsUsageReport(Number(period));
+  const { data, isLoading, error, refetch } = usePartsUsageReport(Number(period));
 
   return (
     <div className="space-y-6">
@@ -197,7 +214,7 @@ function PartsTab() {
         </Select>
       </div>
 
-      {isLoading || !data ? <LoadingBlock /> : (
+      {isLoading ? <LoadingBlock /> : error ? <ErrorBlock onRetry={() => refetch()} /> : !data ? <LoadingBlock /> : (
         <>
           <ChartCard title="Top 10 peças por quantidade">
             <ResponsiveContainer width="100%" height={320}>
@@ -244,9 +261,11 @@ function PartsTab() {
 // =============== TAB 4: TECHNICIAN PRODUCTIVITY ===============
 function TechniciansTab() {
   const { formatCurrency } = useI18n();
-  const { data, isLoading } = useTechnicianProductivityReport();
+  const { data, isLoading, error, refetch } = useTechnicianProductivityReport();
 
-  if (isLoading || !data) return <LoadingBlock />;
+  if (isLoading) return <LoadingBlock />;
+  if (error) return <ErrorBlock onRetry={() => refetch()} />;
+  if (!data) return <LoadingBlock />;
 
   return (
     <div className="space-y-6">
