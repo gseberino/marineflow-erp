@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
@@ -6,7 +6,9 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { I18nProvider } from "@/i18n";
 import { AuthProvider } from "@/hooks/use-auth";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { QueryGate } from "@/components/QueryGate";
 import { AppLayout } from "@/components/AppLayout";
+import { queryClient } from "@/lib/query-client";
 import Dashboard from "./pages/Dashboard";
 import ServiceOrderList from "./pages/ServiceOrderList";
 import ServiceOrderDetail from "./pages/ServiceOrderDetail";
@@ -27,16 +29,6 @@ import AuditLogPage from "./pages/AuditLogPage";
 import LoginPage from "./pages/LoginPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import NotFound from "./pages/NotFound";
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: 3,
-      retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
-      staleTime: 0,
-    },
-  },
-});
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
