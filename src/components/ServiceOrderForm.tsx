@@ -1382,8 +1382,6 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               </div>
             </div>
 
-            </div>
-
             {/* Payment conditions */}
             <div className="space-y-2 pt-2 border-t border-dashed">
               <div className="flex items-center justify-between">
