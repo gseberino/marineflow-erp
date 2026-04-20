@@ -89,6 +89,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const { data: commissionableUsers } = useCommissionableUsers();
   const { data: services } = useServices();
   const { data: cardFees } = useCardFees();
+  const { data: paymentPresets } = usePaymentConditionPresets();
   const { data: pdfData } = usePDFData(isNew ? undefined : orderId);
 
   const createSO = useCreateServiceOrder();
@@ -186,6 +187,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [cancelReason, setCancelReason] = useState('');
   const [reopenReason, setReopenReason] = useState('');
   const [pdfDialogType, setPdfDialogType] = useState<'quote' | 'service_order' | 'invoice' | null>(null);
+  const [presetKey, setPresetKey] = useState(0);
 
   useEffect(() => {
     if (orderData) {
@@ -1377,6 +1379,44 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                     </span>
                   )}
                 </div>
+              </div>
+            </div>
+
+            </div>
+
+            {/* Payment conditions */}
+            <div className="space-y-2 pt-2 border-t border-dashed">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm">Condições de Pagamento</Label>
+                <span className="text-xs text-muted-foreground">(aparece no PDF)</span>
+              </div>
+              <div className="flex gap-2 items-center">
+                <Select
+                  key={presetKey}
+                  onValueChange={(v) => {
+                    set('payment_conditions', v);
+                    setPresetKey((k) => k + 1);
+                  }}
+                  disabled={isLocked}
+                >
+                  <SelectTrigger className="w-44 h-8 text-sm">
+                    <SelectValue placeholder="Pré-definidas..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(paymentPresets || []).map((p: any) => (
+                      <SelectItem key={p.id} value={p.label}>
+                        {p.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input
+                  value={form.payment_conditions || ''}
+                  onChange={(e) => set('payment_conditions', e.target.value)}
+                  placeholder="Ou descreva livremente..."
+                  disabled={isLocked}
+                  className="flex-1 h-8 text-sm"
+                />
               </div>
             </div>
 
