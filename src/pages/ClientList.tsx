@@ -5,7 +5,7 @@ import { useI18n } from '@/i18n';
 import { useClients } from '@/hooks/use-clients';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Plus, Search, Phone, Mail, Ship, Upload, Download } from 'lucide-react';
+import { Plus, Search, Phone, Mail, Ship, Upload, Download, ChevronLeft, ChevronRight } from 'lucide-react';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ClientFormDialog } from '@/components/ClientFormDialog';
@@ -18,16 +18,15 @@ export default function ClientList() {
   const [search, setSearch] = useState('');
   const [formOpen, setFormOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 20;
   const { t } = useI18n();
   const { data: clients, isLoading, error } = useClients();
 
-  // Get vessel counts per client
   const { data: vesselCounts } = useQuery({
     queryKey: ['vessel-counts'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('vessels')
-        .select('client_id');
+      const { data, error } = await supabase.from('vessels').select('client_id');
       if (error) throw error;
       const counts: Record<string, number> = {};
       data.forEach(v => { counts[v.client_id] = (counts[v.client_id] || 0) + 1; });
@@ -40,6 +39,9 @@ export default function ClientList() {
     (c.email ?? '').toLowerCase().includes(search.toLowerCase()) ||
     (c.cpf_cnpj ?? '').includes(search)
   );
+
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   if (error) return <div className="py-20 text-center text-destructive">{(error as Error).message}</div>;
 
@@ -61,51 +63,111 @@ export default function ClientList() {
 
       <div className="relative">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input placeholder={t.clients.searchPlaceholder} value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
+        <Input
+          placeholder={t.clients.searchPlaceholder}
+          value={search}
+          onChange={e => { setSearch(e.target.value); setPage(1); }}
+          className="pl-9"
+        />
       </div>
 
       {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {[1,2,3,4,5,6].map(i => <Skeleton key={i} className="h-40 rounded-xl" />)}
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="py-16 text-center">
-          <p className="text-muted-foreground">{clients?.length === 0 ? t.clients.noClients : t.common.noResults}</p>
-          {clients?.length === 0 && (
-            <Button variant="outline" className="mt-4" onClick={() => setFormOpen(true)}>
-              <Plus className="h-4 w-4 mr-2" /> {t.clients.createFirst}
-            </Button>
-          )}
+        <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
+          <div className="p-4 space-y-3">
+            {[1,2,3,4,5].map(i => <Skeleton key={i} className="h-10 rounded-lg" />)}
+          </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filtered.map(client => {
-            const vc = vesselCounts?.[client.id] ?? 0;
-            return (
-              <Link key={client.id} to={`/clients/${client.id}`} className="rounded-xl border bg-card p-5 shadow-sm hover:shadow-md hover:border-accent/30 transition-all">
-                <div className="flex items-start justify-between mb-3">
-                  <div>
-                    <h3 className="font-semibold">{client.full_name_or_company_name}</h3>
-                    <StatusBadge className={client.type === 'company' ? 'bg-primary/10 text-primary mt-1' : 'bg-muted text-muted-foreground mt-1'}>
-                      {client.type === 'company' ? t.common.company : t.common.individual}
-                    </StatusBadge>
-                  </div>
-                  <StatusBadge className={client.active ? 'bg-success/15 text-success' : 'bg-destructive/10 text-destructive'}>
-                    {client.active ? t.common.active : t.common.inactive}
-                  </StatusBadge>
-                </div>
-                <div className="space-y-1.5 text-sm text-muted-foreground">
-                  {client.email && <div className="flex items-center gap-2"><Mail className="h-3.5 w-3.5" /> {client.email}</div>}
-                  {client.phone && <div className="flex items-center gap-2"><Phone className="h-3.5 w-3.5" /> {client.phone}</div>}
-                  <div className="flex items-center gap-2"><Ship className="h-3.5 w-3.5" /> {vc} {t.clients.vessels.toLowerCase()}</div>
-                </div>
-                <div className="flex items-center gap-3 mt-4 pt-3 border-t text-xs">
-                  <span className="text-muted-foreground ml-auto">{client.city}{client.state ? `, ${client.state}` : ''}</span>
-                </div>
-              </Link>
-            );
-          })}
-        </div>
+        <>
+          <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-muted/50">
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                    {(t.clients as any).name || 'Nome'}
+                  </th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">
+                    {(t.common as any).contact || 'Contato'}
+                  </th>
+                  <th className="px-4 py-3 text-center font-medium text-muted-foreground hidden sm:table-cell w-20">
+                    {t.clients.vessels || 'Embarcações'}
+                  </th>
+                  <th className="px-4 py-3 text-center font-medium text-muted-foreground w-20">
+                    {(t.common as any).status || 'Status'}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {paginated.map(client => {
+                  const vc = vesselCounts?.[client.id] ?? 0;
+                  return (
+                    <tr key={client.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                      <td className="px-4 py-3">
+                        <Link to={`/clients/${client.id}`} className="font-medium text-accent hover:underline block">
+                          {client.full_name_or_company_name}
+                        </Link>
+                        <span className="text-xs text-muted-foreground">
+                          {client.type === 'company' ? t.common.company : t.common.individual}
+                          {client.city ? ` · ${client.city}${client.state ? `/${client.state}` : ''}` : ''}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 hidden md:table-cell text-muted-foreground">
+                        {client.email && (
+                          <div className="flex items-center gap-1.5 truncate max-w-[200px]">
+                            <Mail className="h-3 w-3 shrink-0" />
+                            {client.email}
+                          </div>
+                        )}
+                        {client.phone && (
+                          <div className="flex items-center gap-1.5 text-xs mt-0.5">
+                            <Phone className="h-3 w-3 shrink-0" />
+                            {client.phone}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-center hidden sm:table-cell text-muted-foreground">
+                        <div className="flex items-center justify-center gap-1">
+                          <Ship className="h-3.5 w-3.5" />
+                          {vc}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <StatusBadge className={client.active ? 'bg-success/15 text-success' : 'bg-destructive/10 text-destructive'}>
+                          {client.active ? t.common.active : t.common.inactive}
+                        </StatusBadge>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {paginated.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-12 text-center text-muted-foreground">
+                      {clients?.length === 0 ? t.clients.noClients : t.common.noResults}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">
+                {filtered.length} {t.clients.title?.toLowerCase() || 'clientes'} · Página {page} de {totalPages}
+              </span>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
+                  <ChevronLeft className="h-4 w-4" />
+                  Anterior
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
+                  Próxima
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       <ClientFormDialog open={formOpen} onOpenChange={setFormOpen} />
