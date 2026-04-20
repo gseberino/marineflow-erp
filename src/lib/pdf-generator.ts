@@ -350,7 +350,7 @@ ${companyHeaderHTML(data.company)}
   <h2 style="font-size:16px;letter-spacing:2px;color:#1e3a5f;margin:0;">${docTitle}</h2>
   <div style="font-size:14px;font-weight:600;margin-top:4px;">${esc(docNumber)}</div>
   <div style="font-size:11px;color:#6b7280;">Emitido em: ${today}</div>
-  ${data.serviceOrder.scheduled_start_at ? `<div style="font-size:11px;color:#6b7280;">Agendado: ${fmtDate(data.serviceOrder.scheduled_start_at)}</div>` : ''}
+  ${!isQuote && data.serviceOrder.scheduled_start_at ? `<div style="font-size:11px;color:#6b7280;">Agendado: ${fmtDate(data.serviceOrder.scheduled_start_at)}</div>` : ''}
 </div>
 
 <div style="display:flex;gap:16px;margin-bottom:16px;">

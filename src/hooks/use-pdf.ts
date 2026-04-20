@@ -114,7 +114,13 @@ export function usePDFData(serviceOrderId: string | undefined) {
             description: e.description,
             amount: e.amount,
           })),
-        terms: get('default_terms') || undefined,
+        terms: [
+          get('terms_general'),
+          get('terms_warranty'),
+          get('terms_cancellation'),
+          get('terms_delivery'),
+          get('terms_responsibilities'),
+        ].filter(Boolean).join('\n\n') || undefined,
       };
 
       return pdfData;
