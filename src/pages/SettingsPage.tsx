@@ -12,6 +12,7 @@ import { useCardFees, useUpdateCardFee } from '@/hooks/use-card-fees';
 import { useFinancialCategories, useCreateFinancialCategory, useUpdateFinancialCategory } from '@/hooks/use-financial-categories';
 import { useAllProductCategories, useCreateProductCategory, useUpdateProductCategory } from '@/hooks/use-product-categories';
 import { useAppUsers as useAppUsersHook, useCreateAppUser, useUpdateAppUser, USER_ROLES } from '@/hooks/use-app-users';
+import { useAllPaymentConditionPresets, useCreatePaymentConditionPreset, useUpdatePaymentConditionPreset } from '@/hooks/use-payment-conditions';
 import { Switch } from '@/components/ui/switch';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -102,6 +103,7 @@ export default function SettingsPage() {
             {(t.settings as any).tabProductCategories || 'Categorias de Produto'}
           </TabsTrigger>
           <TabsTrigger value="fiscal">{(t.settings as any).tabFiscal || 'Fiscal'}</TabsTrigger>
+          <TabsTrigger value="payment-conditions">Condições de Pagamento</TabsTrigger>
         </TabsList>
 
         <TabsContent value="company" className="mt-4 space-y-4">
@@ -262,6 +264,10 @@ export default function SettingsPage() {
         {/* Fiscal Tab */}
         <TabsContent value="fiscal" className="mt-4 space-y-4">
           <FiscalTab />
+        </TabsContent>
+
+        <TabsContent value="payment-conditions" className="mt-4 space-y-4">
+          <PaymentConditionsTab />
         </TabsContent>
       </Tabs>
     </div>
