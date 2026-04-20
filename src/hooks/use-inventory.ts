@@ -115,7 +115,7 @@ export function useAdjustStock() {
         .select('stock_quantity')
         .eq('id', input.product_id)
         .single();
-      if (pErr) throw pErr;
+      if (pErr) throw new Error('Produto não encontrado: ' + pErr.message);
 
       const current = product.stock_quantity ?? 0;
       const delta = input.new_quantity - current;
@@ -124,7 +124,7 @@ export function useAdjustStock() {
         .from('products')
         .update({ stock_quantity: input.new_quantity })
         .eq('id', input.product_id);
-      if (uErr) throw uErr;
+      if (uErr) throw new Error('Erro ao atualizar estoque: ' + uErr.message);
 
       const { error: mErr } = await supabase
         .from('inventory_movements')
@@ -134,20 +134,8 @@ export function useAdjustStock() {
           quantity_delta: delta,
           reference_type: 'manual_adjustment',
           notes: input.reason + (input.notes ? ': ' + input.notes : ''),
-        } as any);
-
-      if (mErr) {
-        // Fallback without notes if column issue
-        const { error: mErr2 } = await supabase
-          .from('inventory_movements')
-          .insert({
-            product_id: input.product_id,
-            movement_type: 'manual_adjustment',
-            quantity_delta: delta,
-            reference_type: 'manual_adjustment',
-          });
-        if (mErr2) throw mErr2;
-      }
+        });
+      if (mErr) throw new Error('Erro ao registrar movimento: ' + mErr.message);
 
       writeAuditLog({
         table_name: 'products',
@@ -181,7 +169,7 @@ export function useAddStockEntry() {
         .select('stock_quantity')
         .eq('id', input.product_id)
         .single();
-      if (pErr) throw pErr;
+      if (pErr) throw new Error('Produto não encontrado: ' + pErr.message);
 
       const newQty = (product.stock_quantity ?? 0) + input.quantity;
 
@@ -189,31 +177,19 @@ export function useAddStockEntry() {
         .from('products')
         .update({ stock_quantity: newQty })
         .eq('id', input.product_id);
-      if (uErr) throw uErr;
+      if (uErr) throw new Error('Erro ao atualizar estoque: ' + uErr.message);
 
       const { error: mErr } = await supabase
         .from('inventory_movements')
         .insert({
           product_id: input.product_id,
-          movement_type: 'manual_add',
+          movement_type: 'purchase',
           quantity_delta: input.quantity,
           unit_cost_snapshot: input.unit_cost ?? null,
           reference_type: 'manual_entry',
           notes: input.notes || null,
-        } as any);
-
-      if (mErr) {
-        const { error: mErr2 } = await supabase
-          .from('inventory_movements')
-          .insert({
-            product_id: input.product_id,
-            movement_type: 'manual_add',
-            quantity_delta: input.quantity,
-            unit_cost_snapshot: input.unit_cost ?? null,
-            reference_type: 'manual_entry',
-          });
-        if (mErr2) throw mErr2;
-      }
+        });
+      if (mErr) throw new Error('Erro ao registrar movimento: ' + mErr.message);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['inventory'] });
