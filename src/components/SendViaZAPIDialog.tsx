@@ -13,6 +13,8 @@ import { normalizePhoneE164 } from '@/lib/masks';
 import { generatePDFBlob, DEFAULT_PDF_OPTIONS, type PDFDocumentType } from '@/lib/pdf-generator';
 import { usePDFData } from '@/hooks/use-pdf';
 import { useQueryClient } from '@tanstack/react-query';
+import { useWhatsAppTemplates, applyTemplateVariables } from '@/hooks/use-whatsapp-templates';
+import { useI18n } from '@/i18n';
 
 export type SendViaZAPITarget =
   | {
