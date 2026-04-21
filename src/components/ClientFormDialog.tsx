@@ -133,6 +133,15 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
         <DialogHeader>
           <DialogTitle>{isEdit ? t.clients.editClient : t.clients.newClient}</DialogTitle>
         </DialogHeader>
+        <Tabs defaultValue="data" className="w-full">
+          <TabsList className="grid grid-cols-2 w-full">
+            <TabsTrigger value="data">Dados do cliente</TabsTrigger>
+            <TabsTrigger value="zapi" disabled={!isEdit}>
+              WhatsApp / Z-API
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="data">
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2">
