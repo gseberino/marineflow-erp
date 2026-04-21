@@ -8,7 +8,8 @@ import { statusConfig, priorityConfig } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Plus, Search, Filter, ClipboardList, MoreHorizontal, FileText, Printer, MessageCircle } from 'lucide-react';
+import { Plus, Search, Filter, ClipboardList, MoreHorizontal, FileText, Printer, MessageCircle, Send } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { PDFOptionsDialog } from '@/components/PDFOptionsDialog';
@@ -80,6 +81,40 @@ export default function ServiceOrderList() {
     });
     if (!opened) {
       toast.error('Não foi possível abrir o WhatsApp. Verifique o bloqueador de pop-ups.');
+    }
+  };
+
+  const handleSendViaZAPI = async (so: any) => {
+    if (!so?.share_token) {
+      toast.error('Esta OS ainda não tem link público gerado.');
+      return;
+    }
+    const phoneRaw = so.clients?.whatsapp || so.clients?.phone || '';
+    const phone = normalizePhoneE164(phoneRaw);
+    if (!phone || phone.length < 10) {
+      toast.error('Cliente sem telefone válido cadastrado.');
+      return;
+    }
+    const url = `${window.location.origin}/view/${so.share_token}`;
+    const clientName = so.clients?.full_name_or_company_name || '';
+    const message = `Olá${clientName ? ' ' + clientName : ''}, segue o link da Ordem de Serviço ${so.service_order_number}: ${url}`;
+
+    const t = toast.loading('Enviando via WhatsApp (Z-API)...');
+    try {
+      const { data, error } = await supabase.functions.invoke('whatsapp-send', {
+        body: {
+          phone,
+          message,
+          service_order_id: so.id,
+          context: 'service_order',
+        },
+      });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      toast.success('Mensagem enviada com sucesso!', { id: t });
+    } catch (err: any) {
+      console.error('Z-API send error', err);
+      toast.error(`Falha no envio: ${err?.message || 'erro desconhecido'}`, { id: t });
     }
   };
 
@@ -215,7 +250,15 @@ export default function ServiceOrderList() {
                               className="gap-2"
                             >
                               <MessageCircle className="h-4 w-4" />
-                              Enviar por WhatsApp
+                              Enviar via wa.me (link)
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => handleSendViaZAPI(so)}
+                              disabled={!so.share_token}
+                              className="gap-2"
+                            >
+                              <Send className="h-4 w-4" />
+                              Enviar via Z-API (direto)
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
