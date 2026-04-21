@@ -53,6 +53,7 @@ import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCa
 import { toast } from 'sonner';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { writeAuditLog } from '@/hooks/use-audit-log';
+import { recordWhatsAppEvent } from '@/lib/diagnostics';
 
 interface Props {
   orderId?: string;
@@ -536,6 +537,15 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                         client_name: clientName,
                       },
                       reason: 'Abriu pré-visualização do WhatsApp',
+                    });
+                    recordWhatsAppEvent({
+                      source: 'detail_dialog',
+                      action: 'preview',
+                      serviceOrderId: orderData.id,
+                      serviceOrderNumber: orderData.service_order_number,
+                      shareToken: orderData.share_token,
+                      phoneRaw: String(phoneRaw),
+                      phoneNormalized: phone,
                     });
                   }}
                 >
@@ -1625,6 +1635,17 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                         : 'Falha ao abrir janela do WhatsApp (provável bloqueio de pop-up)',
                     });
                   }
+                  recordWhatsAppEvent({
+                    source: 'detail_dialog',
+                    action: 'send',
+                    serviceOrderId: orderData?.id,
+                    serviceOrderNumber: orderData?.service_order_number,
+                    shareToken: orderData?.share_token,
+                    phoneNormalized: waEditPhone || undefined,
+                    opened,
+                    popupBlocked: !opened,
+                    errorMessage: !opened ? 'window.open returned null (likely popup blocker)' : undefined,
+                  });
                   setWaPreview(null);
                 }}
               >
