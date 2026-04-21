@@ -196,6 +196,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [cancelReason, setCancelReason] = useState('');
   const [reopenReason, setReopenReason] = useState('');
   const [showZapiHistory, setShowZapiHistory] = useState(false);
+  const [zapiTarget, setZapiTarget] = useState<SendViaZAPITarget | null>(null);
   const { data: zapiHistory } = useWhatsAppSendHistory(orderId || null);
   const lastZapiSend = zapiHistory?.[0];
   const [pdfDialogType, setPdfDialogType] = useState<'quote' | 'service_order' | 'invoice' | null>(null);
