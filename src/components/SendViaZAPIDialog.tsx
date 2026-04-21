@@ -14,6 +14,11 @@ import { generatePDFBlob, DEFAULT_PDF_OPTIONS, type PDFDocumentType } from '@/li
 import { usePDFData } from '@/hooks/use-pdf';
 import { useQueryClient } from '@tanstack/react-query';
 import { useWhatsAppTemplates, applyTemplateVariables } from '@/hooks/use-whatsapp-templates';
+import {
+  useClientWhatsAppSettings,
+  pickClientSetting,
+  type ClientWhatsAppContext,
+} from '@/hooks/use-client-whatsapp-settings';
 
 export type SendViaZAPITarget =
   | {
