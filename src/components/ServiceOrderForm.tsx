@@ -49,7 +49,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Props {
@@ -503,6 +503,27 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 <Button variant="outline" size="sm" onClick={() => setPdfDialogType('invoice')} className="gap-1">
                   <Receipt className="h-4 w-4" />
                   Fatura
+                </Button>
+              )}
+              {orderData?.share_token && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1 border-green-600 text-green-700 hover:bg-green-50 hover:text-green-800 dark:hover:bg-green-950"
+                  onClick={() => {
+                    const url = `${window.location.origin}/view/${orderData.share_token}`;
+                    const phoneRaw = (orderData?.clients as any)?.whatsapp || (orderData?.clients as any)?.phone || '';
+                    const phone = String(phoneRaw).replace(/\D/g, '');
+                    const clientName = (orderData?.clients as any)?.full_name_or_company_name || '';
+                    const msg = `Olá${clientName ? ' ' + clientName : ''}, segue o link da Ordem de Serviço ${orderData.service_order_number}: ${url}`;
+                    const waUrl = phone
+                      ? `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`
+                      : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+                    window.open(waUrl, '_blank', 'noopener,noreferrer');
+                  }}
+                >
+                  <MessageCircle className="h-4 w-4" />
+                  WhatsApp
                 </Button>
               )}
             </>

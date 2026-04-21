@@ -28,6 +28,7 @@ import ServiceList from "./pages/ServiceList";
 import AuditLogPage from "./pages/AuditLogPage";
 import LoginPage from "./pages/LoginPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
+import PublicServiceOrderView from "./pages/PublicServiceOrderView";
 import NotFound from "./pages/NotFound";
 
 const App = () => (
@@ -41,6 +42,7 @@ const App = () => (
             <Routes>
               <Route path="/login" element={<LoginPage />} />
               <Route path="/reset-password" element={<ResetPasswordPage />} />
+              <Route path="/view/:token" element={<PublicServiceOrderView />} />
               <Route path="/*" element={
                 <ProtectedRoute>
                   <QueryGate>
