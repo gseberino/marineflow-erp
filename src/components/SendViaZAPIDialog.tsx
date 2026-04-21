@@ -90,15 +90,15 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
     }
   }, [open, target, publicUrl, documentType]);
 
-  if (!target) return null;
-
-  const canSendLink = !!publicUrl && target.kind === 'service_order';
-  const canSendDocument = target.kind === 'service_order' && !!pdfSourceId;
+  const canSendLink = !!publicUrl && target?.kind === 'service_order';
+  const canSendDocument = target?.kind === 'service_order' && !!pdfSourceId;
 
   // Força modo document para receivable sem link público (raro)
   useEffect(() => {
     if (!canSendLink && mode === 'link' && canSendDocument) setMode('document');
   }, [canSendLink, canSendDocument, mode]);
+
+  if (!target) return null;
 
   const titleLabel =
     target.kind === 'service_order'
