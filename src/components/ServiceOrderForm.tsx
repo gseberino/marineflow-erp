@@ -1757,6 +1757,12 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         serviceOrderId={showZapiHistory ? (orderId || null) : null}
         serviceOrderNumber={orderData?.service_order_number}
       />
+
+      <SendViaZAPIDialog
+        open={!!zapiTarget}
+        onOpenChange={v => { if (!v) setZapiTarget(null); }}
+        target={zapiTarget}
+      />
     </div>
   );
 }
