@@ -602,6 +602,51 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   WhatsApp
                 </Button>
               )}
+              {orderData?.share_token && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1 border-accent text-accent hover:bg-accent/10"
+                    >
+                      <Send className="h-4 w-4" />
+                      Enviar Z-API
+                      <ChevronDown className="h-3 w-3 opacity-60" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      onClick={() => setZapiTarget({
+                        kind: 'service_order',
+                        serviceOrderId: orderData.id,
+                        serviceOrderNumber: orderData.service_order_number,
+                        shareToken: orderData.share_token,
+                        clientId: (orderData?.clients as any)?.id || (orderData as any)?.client_id || null,
+                        clientName: (orderData?.clients as any)?.full_name_or_company_name || null,
+                        clientPhone: (orderData?.clients as any)?.whatsapp || (orderData?.clients as any)?.phone || null,
+                        documentType: 'service_order',
+                      })}
+                    >
+                      <Printer className="h-4 w-4 mr-2" /> Enviar OS
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setZapiTarget({
+                        kind: 'service_order',
+                        serviceOrderId: orderData.id,
+                        serviceOrderNumber: orderData.service_order_number,
+                        shareToken: orderData.share_token,
+                        clientId: (orderData?.clients as any)?.id || (orderData as any)?.client_id || null,
+                        clientName: (orderData?.clients as any)?.full_name_or_company_name || null,
+                        clientPhone: (orderData?.clients as any)?.whatsapp || (orderData?.clients as any)?.phone || null,
+                        documentType: 'quote',
+                      })}
+                    >
+                      <FileText className="h-4 w-4 mr-2" /> Enviar Orçamento
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
             </>
           )}
           {!isNew && !isLocked && currentStatus !== 'cancelled' && (
