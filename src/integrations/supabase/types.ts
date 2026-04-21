@@ -1937,6 +1937,129 @@ export type Database = {
           },
         ]
       }
+      whatsapp_leads: {
+        Row: {
+          created_at: string
+          display_name: string | null
+          first_message: string | null
+          id: string
+          last_message_at: string
+          linked_client_id: string | null
+          message_count: number
+          notes: string | null
+          phone_normalized: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          display_name?: string | null
+          first_message?: string | null
+          id?: string
+          last_message_at?: string
+          linked_client_id?: string | null
+          message_count?: number
+          notes?: string | null
+          phone_normalized: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          display_name?: string | null
+          first_message?: string | null
+          id?: string
+          last_message_at?: string
+          linked_client_id?: string | null
+          message_count?: number
+          notes?: string | null
+          phone_normalized?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whatsapp_leads_linked_client_id_fkey"
+            columns: ["linked_client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      whatsapp_messages: {
+        Row: {
+          body: string | null
+          client_id: string | null
+          created_at: string
+          delivery_status: string | null
+          direction: string
+          id: string
+          lead_id: string | null
+          media_url: string | null
+          message_type: string
+          occurred_at: string
+          phone_normalized: string
+          raw_payload: Json | null
+          service_order_id: string | null
+          zapi_message_id: string | null
+        }
+        Insert: {
+          body?: string | null
+          client_id?: string | null
+          created_at?: string
+          delivery_status?: string | null
+          direction: string
+          id?: string
+          lead_id?: string | null
+          media_url?: string | null
+          message_type?: string
+          occurred_at?: string
+          phone_normalized: string
+          raw_payload?: Json | null
+          service_order_id?: string | null
+          zapi_message_id?: string | null
+        }
+        Update: {
+          body?: string | null
+          client_id?: string | null
+          created_at?: string
+          delivery_status?: string | null
+          direction?: string
+          id?: string
+          lead_id?: string | null
+          media_url?: string | null
+          message_type?: string
+          occurred_at?: string
+          phone_normalized?: string
+          raw_payload?: Json | null
+          service_order_id?: string | null
+          zapi_message_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whatsapp_messages_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_messages_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "whatsapp_leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_messages_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never

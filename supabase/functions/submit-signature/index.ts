@@ -146,7 +146,7 @@ Deno.serve(async (req) => {
       .select('value')
       .eq('key', 'signature_status_after')
       .maybeSingle();
-    const newStatus = settingRow?.value || 'approved';
+    const newStatus = settingRow?.value || 'completed';
 
     // ---- atualizar OS ----
     const { error: updErr } = await admin
