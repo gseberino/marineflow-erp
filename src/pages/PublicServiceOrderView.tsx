@@ -325,11 +325,11 @@ export default function PublicServiceOrderView() {
       <div className="max-w-4xl mx-auto space-y-6">
         {/* Banner de status */}
         {needsResignature && (
-          <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 flex items-start gap-3">
-            <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+          <div className="rounded-lg border border-warning bg-warning/10 p-4 flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-warning shrink-0 mt-0.5" />
             <div className="text-sm">
-              <p className="font-semibold text-amber-900">Documento atualizado pela equipe</p>
-              <p className="text-amber-800">
+              <p className="font-semibold text-foreground">Documento atualizado pela equipe</p>
+              <p className="text-muted-foreground">
                 Esta Ordem de Serviço foi alterada após sua última assinatura. É necessário revisá-la e assinar novamente.
               </p>
             </div>
@@ -337,12 +337,12 @@ export default function PublicServiceOrderView() {
         )}
 
         {isSigned && (
-          <div className="rounded-lg border border-emerald-300 bg-emerald-50 p-4 flex items-start gap-3">
-            <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
+          <div className="rounded-lg border border-success bg-success/10 p-4 flex items-start gap-3">
+            <CheckCircle2 className="h-5 w-5 text-success shrink-0 mt-0.5" />
             <div className="text-sm">
-              <p className="font-semibold text-emerald-900">Documento assinado</p>
-              <p className="text-emerald-800">
-                Assinado por <strong>{order.signed_by_name}</strong> em {fmtDateTime(order.signed_at)}.
+              <p className="font-semibold text-foreground">Documento assinado</p>
+              <p className="text-muted-foreground">
+                Assinado por <strong className="text-foreground">{order.signed_by_name}</strong> em {fmtDateTime(order.signed_at)}.
               </p>
             </div>
           </div>
