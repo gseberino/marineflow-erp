@@ -7,11 +7,20 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { AddressFields } from '@/components/AddressFields';
 import { useCreateClient, useUpdateClient, type Client } from '@/hooks/use-clients';
 import { toast } from 'sonner';
 import type { TablesInsert } from '@/integrations/supabase/types';
 import { maskCPF, maskCNPJ, maskPhone } from '@/lib/masks';
+import {
+  useClientWhatsAppSettings,
+  useUpsertClientWhatsAppSetting,
+  useDeleteClientWhatsAppSetting,
+  pickClientSetting,
+  type ClientWhatsAppContext,
+} from '@/hooks/use-client-whatsapp-settings';
+import { Trash2 } from 'lucide-react';
 
 interface Props {
   open: boolean;
