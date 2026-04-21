@@ -95,9 +95,9 @@ function groupPayables(payables: any[], groupBy: string) {
 export default function FinancialPage() {
   const { t, formatCurrency, formatDate } = useI18n();
   const navigate = useNavigate();
-  const { data: receivables, isLoading: loadingRec } = useReceivables();
-  const { data: payables, isLoading: loadingPay } = usePayables();
-  const { data: summary, isLoading: loadingSummary } = useFinancialSummary();
+  const { data: receivables, isLoading: loadingRec, error: recError } = useReceivables();
+  const { data: payables, isLoading: loadingPay, error: payError } = usePayables();
+  const { data: summary, isLoading: loadingSummary, error: summaryError } = useFinancialSummary();
   const [cfMonths, setCfMonths] = useState(6);
   const { data: cashFlow } = useCashFlow(cfMonths);
 
@@ -123,6 +123,23 @@ export default function FinancialPage() {
   const payTotalPaid = filteredPayables.reduce((s, p) => s + Number(p.paid_amount), 0);
 
   const grouped = groupPayables(filteredPayables, groupBy);
+
+  if (recError || payError || summaryError) {
+    return (
+      <div className="flex h-96 flex-col items-center justify-center gap-4 text-center">
+        <p className="text-destructive font-medium">Erro ao carregar dados financeiros.</p>
+        <p className="text-sm text-muted-foreground">
+          {(recError || payError || summaryError)?.message || 'Verifique sua conexão e tente novamente.'}
+        </p>
+        <button
+          onClick={() => window.location.reload()}
+          className="rounded-md border px-4 py-2 text-sm hover:bg-muted transition-colors"
+        >
+          Recarregar página
+        </button>
+      </div>
+    );
+  }
 
   const handleGenerateReceipt = async (r: any) => {
     try {

@@ -81,8 +81,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [authReady, setAuthReady] = useState(false);
   const mountedRef = useRef(true);
+  const finalizedRef = useRef(false);
 
   function finalize() {
+    if (finalizedRef.current) return;
+    finalizedRef.current = true;
     setLoading(false);
     setAuthReady(true);
   }
@@ -105,7 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const safetyTimer = setTimeout(() => {
       console.warn('[Auth] Safety timeout');
       finalize();
-    }, 4000);
+    }, 8000);
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, newSession) => {
