@@ -498,6 +498,45 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               <span className={priorityConfig[form.priority]?.className || ''}>
                 {(t.priority as Record<string, string>)[form.priority]}
               </span>
+              {lastZapiSend && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => setShowZapiHistory(true)}
+                        className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs hover:bg-muted transition-colors"
+                        aria-label="Ver histórico de envios Z-API"
+                      >
+                        {lastZapiSend.success ? (
+                          <CheckCircle2 className="h-3.5 w-3.5 text-success" />
+                        ) : (
+                          <XCircle className="h-3.5 w-3.5 text-destructive" />
+                        )}
+                        <span className={lastZapiSend.success ? 'text-success' : 'text-destructive'}>
+                          Z-API: {lastZapiSend.success ? 'enviado' : 'falhou'}
+                        </span>
+                        <HistoryIcon className="h-3 w-3 text-muted-foreground" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="max-w-xs">
+                      <div className="text-xs space-y-1">
+                        <div className="font-medium">
+                          Último envio: {new Date(lastZapiSend.changed_at).toLocaleString('pt-BR')}
+                        </div>
+                        {!lastZapiSend.success && (
+                          <div className="text-destructive">
+                            {(lastZapiSend.new_value as any)?.zapi_response?.error
+                              || lastZapiSend.reason
+                              || `HTTP ${(lastZapiSend.new_value as any)?.http_status ?? '?'}`}
+                          </div>
+                        )}
+                        <div className="text-muted-foreground italic">Clique para ver histórico completo</div>
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
             </div>
           )}
         </div>
