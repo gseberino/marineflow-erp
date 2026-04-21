@@ -229,6 +229,49 @@ export default function ServiceOrderList() {
                         {so.scheduled_start_at ? formatDate(so.scheduled_start_at) : '—'}
                       </td>
                       <td className="px-4 py-3 text-right font-semibold">{formatCurrency(so.grand_total || 0)}</td>
+                      <td className="px-4 py-3 hidden md:table-cell text-center">
+                        {(() => {
+                          const entry = sendStatusMap?.get(so.id);
+                          if (!entry) {
+                            return <span className="text-xs text-muted-foreground">—</span>;
+                          }
+                          const nv: any = entry.new_value || {};
+                          const reason = nv?.zapi_response?.error || entry.reason || `HTTP ${nv?.http_status ?? '?'}`;
+                          const when = new Date(entry.changed_at).toLocaleString('pt-BR');
+                          return (
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    type="button"
+                                    onClick={() => setHistoryTarget({ id: so.id, number: so.service_order_number })}
+                                    className="inline-flex items-center"
+                                    aria-label="Ver histórico de envios Z-API"
+                                  >
+                                    {entry.success ? (
+                                      <CheckCircle2 className="h-4 w-4 text-success" />
+                                    ) : (
+                                      <XCircle className="h-4 w-4 text-destructive" />
+                                    )}
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent side="left" className="max-w-xs">
+                                  <div className="text-xs space-y-1">
+                                    <div className="font-medium">
+                                      {entry.success ? 'Enviado via Z-API' : 'Falha no envio Z-API'}
+                                    </div>
+                                    <div className="text-muted-foreground">{when}</div>
+                                    {!entry.success && (
+                                      <div className="text-destructive">{reason}</div>
+                                    )}
+                                    <div className="text-muted-foreground italic">Clique para ver histórico</div>
+                                  </div>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          );
+                        })()}
+                      </td>
                       <td className="px-4 py-3">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
