@@ -66,6 +66,18 @@ export default function ServiceOrderList() {
         ? 'Link do WhatsApp aberto (lista de OS)'
         : 'Falha ao abrir janela do WhatsApp (lista de OS)',
     });
+    recordWhatsAppEvent({
+      source: 'list_dropdown',
+      action: 'send',
+      serviceOrderId: so.id,
+      serviceOrderNumber: so.service_order_number,
+      shareToken: so.share_token,
+      phoneRaw: String(phoneRaw),
+      phoneNormalized: phone,
+      opened,
+      popupBlocked: !opened,
+      errorMessage: !opened ? 'window.open returned null (likely popup blocker)' : undefined,
+    });
     if (!opened) {
       toast.error('Não foi possível abrir o WhatsApp. Verifique o bloqueador de pop-ups.');
     }
