@@ -14,17 +14,31 @@ function isAuthError(err: any): boolean {
   );
 }
 
-let inflightRefresh: Promise<void> | null = null;
-function refreshOnce(): Promise<void> {
+let inflightRefresh: Promise<boolean> | null = null;
+
+function refreshOnce(): Promise<boolean> {
   if (inflightRefresh) return inflightRefresh;
   inflightRefresh = supabase.auth
     .refreshSession()
-    .then(() => {})
-    .catch(() => {})
+    .then(({ data, error }) => {
+      if (error || !data.session) return false;
+      return true;
+    })
+    .catch(() => false)
     .finally(() => {
-      setTimeout(() => { inflightRefresh = null; }, 2000);
-    });
+      setTimeout(() => {
+        inflightRefresh = null;
+      }, 2000);
+    }) as Promise<boolean>;
   return inflightRefresh;
+}
+
+export async function triggerRefreshAndInvalidate(): Promise<boolean> {
+  const ok = await refreshOnce();
+  if (ok) {
+    await queryClient.invalidateQueries();
+  }
+  return ok;
 }
 
 export const queryClient = new QueryClient({
@@ -36,12 +50,13 @@ export const queryClient = new QueryClient({
       refetchOnReconnect: false,
       retry: (failureCount, error) => {
         if (isAuthError(error)) {
-          refreshOnce();
-          return failureCount < 1;
+          // fire-and-forget refresh; retry will pick up new token
+          void triggerRefreshAndInvalidate();
+          return failureCount < 2;
         }
         return failureCount < 1;
       },
-      retryDelay: 1000,
+      retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 4000),
     },
   },
 });

@@ -9,9 +9,9 @@ interface Props {
 }
 
 export function ProtectedRoute({ children, roles }: Props) {
-  const { user, loading, authReady } = useAuth();
+  const { user, session, authReady } = useAuth();
 
-  if (loading || !authReady) {
+  if (!authReady) {
     return (
       <div className="flex h-screen w-screen items-center justify-center">
         <Loader2 className="h-16 w-16 animate-spin text-primary" />
@@ -19,11 +19,14 @@ export function ProtectedRoute({ children, roles }: Props) {
     );
   }
 
-  if (!user) {
+  // Only redirect when auth is fully resolved AND there is no session.
+  // Using `session` (not `user`) avoids a flash redirect during background
+  // profile loading, since `user` is populated asynchronously.
+  if (!session) {
     return <Navigate to="/login" replace />;
   }
 
-  if (roles && !roles.includes(user.role)) {
+  if (roles && user && !roles.includes(user.role)) {
     return (
       <div className="flex h-screen w-screen flex-col items-center justify-center gap-4 px-6 text-center">
         <ShieldX className="h-16 w-16 text-destructive" />

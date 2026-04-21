@@ -78,25 +78,17 @@ async function loadProfile(
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
   const [authReady, setAuthReady] = useState(false);
   const mountedRef = useRef(true);
   const profileRequestRef = useRef(0);
+  const lastUserIdRef = useRef<string | null>(null);
 
-  function finalize() {
-    setAuthReady((ready) => {
-      if (ready) return ready;
-      setLoading(false);
-      return true;
-    });
-  }
-
-  function loadProfileBackground(
-    authUser: { id: string; email?: string }
-  ) {
+  function loadProfileBackground(authUser: { id: string; email?: string }) {
     const requestId = profileRequestRef.current + 1;
     profileRequestRef.current = requestId;
-    setUser(buildMinimalUser(authUser));
+
+    // Only set minimal user if we don't already have a user for this id
+    setUser((prev) => (prev?.id === authUser.id ? prev : buildMinimalUser(authUser)));
 
     loadProfile(authUser)
       .then((profile) => {
@@ -107,70 +99,94 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .catch((error) => {
         if (!mountedRef.current || profileRequestRef.current !== requestId) return;
         console.warn('[Auth] Profile load failed:', error);
-        setUser(buildMinimalUser(authUser));
       });
   }
 
-  function applySession(newSession: Session | null) {
+  function applySession(newSession: Session | null, opts?: { reloadProfile?: boolean }) {
     setSession(newSession);
 
     if (!newSession?.user) {
       profileRequestRef.current += 1;
+      lastUserIdRef.current = null;
       setUser(null);
-      finalize();
       return;
     }
 
-    loadProfileBackground(newSession.user);
-    finalize();
+    const sameUser = lastUserIdRef.current === newSession.user.id;
+    lastUserIdRef.current = newSession.user.id;
+
+    if (!sameUser || opts?.reloadProfile) {
+      loadProfileBackground(newSession.user);
+    }
   }
 
   useEffect(() => {
     mountedRef.current = true;
 
+    let unsub: (() => void) | null = null;
+
+    // Safety timer: ensure UI does not hang forever
     const safetyTimer = setTimeout(() => {
-      console.warn('[Auth] Safety timeout');
-      finalize();
-    }, 2500);
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, newSession) => {
-        if (!mountedRef.current) return;
-
-        if (event === 'SIGNED_OUT') {
-          queryClient.clear();
-        }
-
-        applySession(newSession);
+      if (!mountedRef.current) return;
+      if (!authReady) {
+        console.warn('[Auth] Safety timeout — forcing authReady');
+        setAuthReady(true);
       }
-    );
+    }, 5000);
 
+    // 1) Restore session FIRST so we know the truth before listening
     supabase.auth
       .getSession()
       .then(({ data: { session: s } }) => {
         if (!mountedRef.current) return;
-        clearTimeout(safetyTimer);
         applySession(s);
+        setAuthReady(true);
+        clearTimeout(safetyTimer);
+
+        // 2) THEN register listener
+        const { data } = supabase.auth.onAuthStateChange((event, newSession) => {
+          if (!mountedRef.current) return;
+
+          if (event === 'SIGNED_OUT') {
+            queryClient.clear();
+            applySession(null);
+            return;
+          }
+
+          if (event === 'TOKEN_REFRESHED') {
+            applySession(newSession, { reloadProfile: false });
+            // Re-run any queries that may have failed with stale JWT
+            void queryClient.invalidateQueries();
+            return;
+          }
+
+          if (event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'INITIAL_SESSION') {
+            applySession(newSession);
+            return;
+          }
+
+          applySession(newSession);
+        });
+        unsub = () => data.subscription.unsubscribe();
       })
       .catch((error) => {
         if (!mountedRef.current) return;
         console.warn('[Auth] Session restore failed:', error);
-        clearTimeout(safetyTimer);
         applySession(null);
+        setAuthReady(true);
+        clearTimeout(safetyTimer);
       });
 
     return () => {
       mountedRef.current = false;
       clearTimeout(safetyTimer);
-      subscription.unsubscribe();
+      if (unsub) unsub();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
   };
 
@@ -178,12 +194,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut();
     setUser(null);
     setSession(null);
+    lastUserIdRef.current = null;
     queryClient.clear();
   };
 
   return (
     <AuthContext.Provider
-      value={{ user, session, loading, authReady, signIn, signOut }}
+      value={{ user, session, loading: !authReady, authReady, signIn, signOut }}
     >
       {children}
     </AuthContext.Provider>
