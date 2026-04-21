@@ -329,7 +329,7 @@ export default function ServiceOrderList() {
                   );
                 })}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">{t.common.noResults}</td></tr>
+                  <tr><td colSpan={10} className="px-4 py-12 text-center text-muted-foreground">{t.common.noResults}</td></tr>
                 )}
               </tbody>
             </table>
@@ -342,6 +342,13 @@ export default function ServiceOrderList() {
         onOpenChange={v => { if (!v) setPdfTarget(null); }}
         documentType={pdfTarget?.type || 'quote'}
         onGenerate={handleGeneratePDF}
+      />
+
+      <WhatsAppSendHistoryDialog
+        open={!!historyTarget}
+        onOpenChange={v => { if (!v) setHistoryTarget(null); }}
+        serviceOrderId={historyTarget?.id || null}
+        serviceOrderNumber={historyTarget?.number}
       />
     </div>
   );
