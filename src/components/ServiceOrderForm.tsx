@@ -516,7 +516,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   onClick={() => {
                     const url = `${window.location.origin}/view/${orderData.share_token}`;
                     const phoneRaw = (orderData?.clients as any)?.whatsapp || (orderData?.clients as any)?.phone || '';
-                    const phone = String(phoneRaw).replace(/\D/g, '');
+                    const phone = normalizePhoneE164(phoneRaw);
                     const clientName = (orderData?.clients as any)?.full_name_or_company_name || '';
                     const msg = `Olá${clientName ? ' ' + clientName : ''}, segue o link da Ordem de Serviço ${orderData.service_order_number}: ${url}`;
                     setWaEditPhone(phone);
