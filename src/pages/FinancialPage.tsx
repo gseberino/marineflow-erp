@@ -108,6 +108,7 @@ export default function FinancialPage() {
   const [paymentTarget, setPaymentTarget] = useState<{ receivable?: any; payable?: any } | null>(null);
   const [showNewReceivable, setShowNewReceivable] = useState(false);
   const [showNewPayable, setShowNewPayable] = useState(false);
+  const [zapiTarget, setZapiTarget] = useState<SendViaZAPITarget | null>(null);
   const [recFilters, setRecFilters] = useState<FinancialFilters>({ ...defaultFilters });
   const [payFilters, setPayFilters] = useState<FinancialFilters>({ ...defaultFilters });
   const [paySubTab, setPaySubTab] = useState<'list' | 'reimbursements'>('list');
