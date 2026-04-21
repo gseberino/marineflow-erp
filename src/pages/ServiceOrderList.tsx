@@ -29,9 +29,14 @@ export default function ServiceOrderList() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const { t, formatCurrency, formatDate } = useI18n();
   const { data: orders, isLoading, error } = useServiceOrders();
+  const queryClient = useQueryClient();
 
   const [pdfTarget, setPdfTarget] = useState<{ id: string; type: 'quote' | 'service_order' } | null>(null);
+  const [historyTarget, setHistoryTarget] = useState<{ id: string; number: string } | null>(null);
   const { data: pdfData } = usePDFData(pdfTarget?.id);
+
+  const orderIds = (orders || []).map((o: any) => o.id);
+  const { data: sendStatusMap } = useWhatsAppSendStatusMap(orderIds);
 
   const handleGeneratePDF = (options: PDFOptions, validity?: any) => {
     if (!pdfData || !pdfTarget) return;
