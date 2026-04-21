@@ -13,7 +13,7 @@ const SO_SELECT = `
 
 const SO_DETAIL_SELECT = `
   *,
-  clients!service_orders_client_id_fkey(full_name_or_company_name),
+  clients!service_orders_client_id_fkey(full_name_or_company_name, phone, whatsapp, email),
   vessels!service_orders_vessel_id_fkey(boat_name, manufacturer, model, current_dock_position),
   marinas!service_orders_marina_id_fkey(marina_name, latitude, longitude),
   service_order_parts(*, products(*)),
