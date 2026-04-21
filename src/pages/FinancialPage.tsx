@@ -604,6 +604,11 @@ export default function FinancialPage() {
       )}
       <ReceivableFormDialog open={showNewReceivable} onOpenChange={setShowNewReceivable} />
       <PayableFormDialog open={showNewPayable} onOpenChange={setShowNewPayable} />
+      <SendViaZAPIDialog
+        open={!!zapiTarget}
+        onOpenChange={v => { if (!v) setZapiTarget(null); }}
+        target={zapiTarget}
+      />
     </div>
   );
 }
