@@ -81,14 +81,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [authReady, setAuthReady] = useState(false);
   const mountedRef = useRef(true);
-  const authReadyRef = useRef(false);
   const profileRequestRef = useRef(0);
 
   function finalize() {
-    if (authReadyRef.current) return;
-    authReadyRef.current = true;
-    setLoading(false);
-    setAuthReady(true);
+    setAuthReady((ready) => {
+      if (ready) return ready;
+      setLoading(false);
+      return true;
+    });
   }
 
   function loadProfileBackground(
