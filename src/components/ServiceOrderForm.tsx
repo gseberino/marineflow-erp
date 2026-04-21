@@ -40,6 +40,10 @@ import { statusConfig, priorityConfig } from '@/lib/constants';
 import { StatusBadge } from '@/components/StatusBadge';
 import { ServiceFormDialog } from '@/components/ServiceFormDialog';
 import { RecordHistory } from '@/components/RecordHistory';
+import { WhatsAppSendHistoryDialog } from '@/components/WhatsAppSendHistoryDialog';
+import { useWhatsAppSendHistory } from '@/hooks/use-whatsapp-send-log';
+import { CheckCircle2, XCircle, History as HistoryIcon } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -189,6 +193,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [showReopenDialog, setShowReopenDialog] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [reopenReason, setReopenReason] = useState('');
+  const [showZapiHistory, setShowZapiHistory] = useState(false);
+  const { data: zapiHistory } = useWhatsAppSendHistory(orderId || null);
+  const lastZapiSend = zapiHistory?.[0];
   const [pdfDialogType, setPdfDialogType] = useState<'quote' | 'service_order' | 'invoice' | null>(null);
   const [waPreview, setWaPreview] = useState<{ phone: string; message: string; url: string; clientName: string } | null>(null);
   const [waEditMessage, setWaEditMessage] = useState('');
@@ -491,6 +498,45 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               <span className={priorityConfig[form.priority]?.className || ''}>
                 {(t.priority as Record<string, string>)[form.priority]}
               </span>
+              {lastZapiSend && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => setShowZapiHistory(true)}
+                        className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs hover:bg-muted transition-colors"
+                        aria-label="Ver histórico de envios Z-API"
+                      >
+                        {lastZapiSend.success ? (
+                          <CheckCircle2 className="h-3.5 w-3.5 text-success" />
+                        ) : (
+                          <XCircle className="h-3.5 w-3.5 text-destructive" />
+                        )}
+                        <span className={lastZapiSend.success ? 'text-success' : 'text-destructive'}>
+                          Z-API: {lastZapiSend.success ? 'enviado' : 'falhou'}
+                        </span>
+                        <HistoryIcon className="h-3 w-3 text-muted-foreground" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="max-w-xs">
+                      <div className="text-xs space-y-1">
+                        <div className="font-medium">
+                          Último envio: {new Date(lastZapiSend.changed_at).toLocaleString('pt-BR')}
+                        </div>
+                        {!lastZapiSend.success && (
+                          <div className="text-destructive">
+                            {(lastZapiSend.new_value as any)?.zapi_response?.error
+                              || lastZapiSend.reason
+                              || `HTTP ${(lastZapiSend.new_value as any)?.http_status ?? '?'}`}
+                          </div>
+                        )}
+                        <div className="text-muted-foreground italic">Clique para ver histórico completo</div>
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
             </div>
           )}
         </div>
@@ -1656,6 +1702,13 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           </div>
         </DialogContent>
       </Dialog>
+
+      <WhatsAppSendHistoryDialog
+        open={showZapiHistory}
+        onOpenChange={setShowZapiHistory}
+        serviceOrderId={showZapiHistory ? (orderId || null) : null}
+        serviceOrderNumber={orderData?.service_order_number}
+      />
     </div>
   );
 }
