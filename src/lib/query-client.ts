@@ -39,7 +39,7 @@ export const queryClient = new QueryClient({
           refreshOnce();
           return failureCount < 1;
         }
-        return false;
+        return failureCount < 1;
       },
       retryDelay: 1000,
     },
