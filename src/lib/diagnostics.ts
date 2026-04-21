@@ -280,7 +280,7 @@ async function snapshotAuditLog(userId: string | null) {
   try {
     const { data, error } = await supabase
       .from('audit_log')
-      .select('id, table_name, record_id, action, changed_at, changed_by, reason')
+      .select('id, table_name, record_id, action, changed_at, changed_by, reason, new_value')
       .eq('changed_by', userId)
       .order('changed_at', { ascending: false })
       .limit(100);
@@ -288,6 +288,42 @@ async function snapshotAuditLog(userId: string | null) {
     return data ?? [];
   } catch (err: any) {
     return [{ error: mask(String(err?.message || err)) }];
+  }
+}
+
+function maskPhone(phone?: string): string | undefined {
+  if (!phone) return phone;
+  // keep country code + last 2 digits visible: +5511*****12
+  if (phone.length < 6) return phone;
+  return phone.slice(0, 3) + '*'.repeat(Math.max(0, phone.length - 5)) + phone.slice(-2);
+}
+
+export function recordWhatsAppEvent(ev: Omit<WhatsAppEvent, 'ts' | 'hasPhone' | 'userAgent'> & { phoneNormalized?: string; phoneRaw?: string }) {
+  const entry: WhatsAppEvent = {
+    ts: new Date().toISOString(),
+    source: ev.source,
+    action: ev.action,
+    serviceOrderId: ev.serviceOrderId,
+    serviceOrderNumber: ev.serviceOrderNumber,
+    shareToken: ev.shareToken,
+    phoneRaw: maskPhone(ev.phoneRaw),
+    phoneNormalized: maskPhone(ev.phoneNormalized),
+    hasPhone: !!ev.phoneNormalized,
+    opened: ev.opened,
+    popupBlocked: ev.popupBlocked,
+    errorMessage: ev.errorMessage ? mask(ev.errorMessage) : undefined,
+    userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
+  };
+  pushCapped(whatsappBuffer, entry, MAX_WHATSAPP);
+  // Mirror in console buffer for cross-reference
+  try {
+    console.info('[whatsapp]', entry.action, entry.source, {
+      so: entry.serviceOrderNumber,
+      opened: entry.opened,
+      hasPhone: entry.hasPhone,
+    });
+  } catch {
+    /* ignore */
   }
 }
 
@@ -300,7 +336,7 @@ export type DiagnosticContext = {
 export async function buildDiagnosticPackage(ctx: DiagnosticContext) {
   const audit = await snapshotAuditLog(ctx.user?.id ?? ctx.session?.user?.id ?? null);
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt: new Date().toISOString(),
     app: 'MarineFlow',
     environment: snapshotEnv(),
@@ -310,6 +346,7 @@ export async function buildDiagnosticPackage(ctx: DiagnosticContext) {
     recentErrors: [...errorBuffer],
     recentNetwork: [...networkBuffer],
     recentConsole: [...consoleBuffer],
+    whatsappEvents: [...whatsappBuffer],
     auditLog: audit,
   };
 }
