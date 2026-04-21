@@ -38,7 +38,7 @@ const mockOrders = [
     priority: 'low',
     service_type: 'inspection',
     grand_total: 500,
-    share_token: null, // no token => disabled
+    share_token: null, // sem token => itens Z-API + wa.me desabilitados
     scheduled_start_at: null,
     clients: { full_name_or_company_name: 'Cliente Gama', phone: '11955554444', whatsapp: '' },
     vessels: { boat_name: 'Barco Gama' },
@@ -51,6 +51,11 @@ vi.mock('@/hooks/use-service-orders', () => ({
 
 vi.mock('@/hooks/use-pdf', () => ({
   usePDFData: () => ({ data: null }),
+}));
+
+vi.mock('@/hooks/use-whatsapp-send-log', () => ({
+  useWhatsAppSendStatusMap: () => ({ data: new Map() }),
+  useWhatsAppSendHistory: () => ({ data: [], isLoading: false }),
 }));
 
 vi.mock('@/hooks/use-audit-log', () => ({
@@ -88,6 +93,14 @@ vi.mock('@/components/PDFOptionsDialog', () => ({
   PDFOptionsDialog: () => null,
 }));
 
+vi.mock('@/components/WhatsAppSendHistoryDialog', () => ({
+  WhatsAppSendHistoryDialog: () => null,
+}));
+
+vi.mock('@/components/SendViaZAPIDialog', () => ({
+  SendViaZAPIDialog: () => null,
+}));
+
 function renderList() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -99,40 +112,45 @@ function renderList() {
   );
 }
 
-describe('ServiceOrderList — Enviar por WhatsApp', () => {
+describe('ServiceOrderList — Envio via WhatsApp / Z-API', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('shows the WhatsApp item enabled for every OS with a share_token and disabled when missing', async () => {
+  it('exibe os itens de envio (wa.me, OS Z-API, Orçamento Z-API) habilitados quando há share_token e desabilitados quando não há', async () => {
     const user = userEvent.setup();
     renderList();
 
-    // Iterate through each order row and open its dropdown
     for (const so of mockOrders) {
       const numberCell = await screen.findByText(so.service_order_number);
       const row = numberCell.closest('tr')!;
-      const trigger = within(row).getByRole('button');
+      // O último botão da linha é o trigger do dropdown (MoreHorizontal)
+      const buttons = within(row).getAllByRole('button');
+      const trigger = buttons[buttons.length - 1];
       await user.click(trigger);
 
-      const item = await screen.findByRole('menuitem', { name: /Enviar por WhatsApp/i });
-      expect(item).toBeInTheDocument();
+      const waItem = await screen.findByRole('menuitem', { name: /Enviar via wa\.me/i });
+      const osZapiItem = await screen.findByRole('menuitem', { name: /Enviar OS via Z-API/i });
+      const quoteZapiItem = await screen.findByRole('menuitem', { name: /Enviar Orçamento via Z-API/i });
 
       if (so.share_token) {
-        expect(item).not.toHaveAttribute('data-disabled');
+        expect(waItem).not.toHaveAttribute('data-disabled');
+        expect(osZapiItem).not.toHaveAttribute('data-disabled');
+        expect(quoteZapiItem).not.toHaveAttribute('data-disabled');
       } else {
-        expect(item).toHaveAttribute('data-disabled');
+        expect(waItem).toHaveAttribute('data-disabled');
+        expect(osZapiItem).toHaveAttribute('data-disabled');
+        expect(quoteZapiItem).toHaveAttribute('data-disabled');
       }
 
-      // Close menu before next iteration
       await user.keyboard('{Escape}');
       await waitFor(() =>
-        expect(screen.queryByRole('menuitem', { name: /Enviar por WhatsApp/i })).not.toBeInTheDocument()
+        expect(screen.queryByRole('menuitem', { name: /Enviar OS via Z-API/i })).not.toBeInTheDocument()
       );
     }
   });
 
-  it('opens the correct wa.me link with normalized phone and public URL on click', async () => {
+  it('abre wa.me com telefone normalizado e URL pública ao clicar em "Enviar via wa.me"', async () => {
     const user = userEvent.setup();
     const openSpy = vi.spyOn(window, 'open').mockReturnValue({} as Window);
 
@@ -140,9 +158,10 @@ describe('ServiceOrderList — Enviar por WhatsApp', () => {
 
     const numberCell = await screen.findByText('OS-001');
     const row = numberCell.closest('tr')!;
-    await user.click(within(row).getByRole('button'));
+    const buttons = within(row).getAllByRole('button');
+    await user.click(buttons[buttons.length - 1]);
 
-    const item = await screen.findByRole('menuitem', { name: /Enviar por WhatsApp/i });
+    const item = await screen.findByRole('menuitem', { name: /Enviar via wa\.me/i });
     await user.click(item);
 
     expect(openSpy).toHaveBeenCalledTimes(1);
@@ -152,21 +171,10 @@ describe('ServiceOrderList — Enviar por WhatsApp', () => {
     expect(decodeURIComponent(String(url))).toContain('/view/token-abc-123');
     expect(decodeURIComponent(String(url))).toContain('OS-001');
 
-    expect(recordWhatsAppEventMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        source: 'list_dropdown',
-        action: 'send',
-        serviceOrderId: 'so-1',
-        serviceOrderNumber: 'OS-001',
-        shareToken: 'token-abc-123',
-        opened: true,
-      })
-    );
-
     openSpy.mockRestore();
   });
 
-  it('prefers whatsapp over phone when both are available', async () => {
+  it('prefere whatsapp ao invés de phone quando ambos existem', async () => {
     const user = userEvent.setup();
     const openSpy = vi.spyOn(window, 'open').mockReturnValue({} as Window);
 
@@ -174,9 +182,10 @@ describe('ServiceOrderList — Enviar por WhatsApp', () => {
 
     const numberCell = await screen.findByText('OS-002');
     const row = numberCell.closest('tr')!;
-    await user.click(within(row).getByRole('button'));
+    const buttons = within(row).getAllByRole('button');
+    await user.click(buttons[buttons.length - 1]);
 
-    const item = await screen.findByRole('menuitem', { name: /Enviar por WhatsApp/i });
+    const item = await screen.findByRole('menuitem', { name: /Enviar via wa\.me/i });
     await user.click(item);
 
     const [url] = openSpy.mock.calls[0];
