@@ -17,6 +17,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { NotificationBell } from '@/components/NotificationBell';
+import { WhatsAppBell } from '@/components/WhatsAppBell';
 import { PWAInstallPrompt } from '@/components/PWAInstallPrompt';
 import { OfflineIndicator } from '@/components/OfflineIndicator';
 import { DiagnosticExportButton } from '@/components/DiagnosticExportButton';
@@ -182,6 +183,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           <div className="flex-1" />
           <div className="flex items-center gap-3">
             <DiagnosticExportButton />
+            <WhatsAppBell />
             <NotificationBell />
             <div className="text-right hidden sm:block">
               <p className="text-sm font-medium leading-none">
