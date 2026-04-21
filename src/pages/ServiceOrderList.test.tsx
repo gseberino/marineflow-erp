@@ -66,6 +66,28 @@ vi.mock('sonner', () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }));
 
+vi.mock('@/i18n', () => ({
+  useI18n: () => ({
+    t: {
+      serviceOrders: {
+        title: 'OS', description: '', newOrder: 'Nova', searchPlaceholder: 'Buscar',
+        allStatuses: 'Todos', orderNumber: 'Nº', client: 'Cliente', vessel: 'Embarcação',
+        priority: 'Prioridade', scheduled: 'Agendado',
+      },
+      common: { status: 'Status', type: 'Tipo', total: 'Total', noResults: 'Sem resultados' },
+      status: { open: 'Aberto', in_progress: 'Em andamento' },
+      priority: { normal: 'Normal', high: 'Alta', low: 'Baixa' },
+      serviceType: { maintenance: 'Manutenção', repair: 'Reparo', inspection: 'Inspeção' },
+    },
+    formatCurrency: (n: number) => `R$ ${n}`,
+    formatDate: (d: string) => d,
+  }),
+}));
+
+vi.mock('@/components/PDFOptionsDialog', () => ({
+  PDFOptionsDialog: () => null,
+}));
+
 function renderList() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
