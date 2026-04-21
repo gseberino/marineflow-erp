@@ -41,8 +41,10 @@ import { StatusBadge } from '@/components/StatusBadge';
 import { ServiceFormDialog } from '@/components/ServiceFormDialog';
 import { RecordHistory } from '@/components/RecordHistory';
 import { WhatsAppSendHistoryDialog } from '@/components/WhatsAppSendHistoryDialog';
+import { SendViaZAPIDialog, type SendViaZAPITarget } from '@/components/SendViaZAPIDialog';
 import { useWhatsAppSendHistory } from '@/hooks/use-whatsapp-send-log';
-import { CheckCircle2, XCircle, History as HistoryIcon } from 'lucide-react';
+import { CheckCircle2, XCircle, History as HistoryIcon, Send } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -194,6 +196,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [cancelReason, setCancelReason] = useState('');
   const [reopenReason, setReopenReason] = useState('');
   const [showZapiHistory, setShowZapiHistory] = useState(false);
+  const [zapiTarget, setZapiTarget] = useState<SendViaZAPITarget | null>(null);
   const { data: zapiHistory } = useWhatsAppSendHistory(orderId || null);
   const lastZapiSend = zapiHistory?.[0];
   const [pdfDialogType, setPdfDialogType] = useState<'quote' | 'service_order' | 'invoice' | null>(null);
@@ -598,6 +601,51 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   <MessageCircle className="h-4 w-4" />
                   WhatsApp
                 </Button>
+              )}
+              {orderData?.share_token && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1 border-accent text-accent hover:bg-accent/10"
+                    >
+                      <Send className="h-4 w-4" />
+                      Enviar Z-API
+                      <ChevronDown className="h-3 w-3 opacity-60" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      onClick={() => setZapiTarget({
+                        kind: 'service_order',
+                        serviceOrderId: orderData.id,
+                        serviceOrderNumber: orderData.service_order_number,
+                        shareToken: orderData.share_token,
+                        clientId: (orderData?.clients as any)?.id || (orderData as any)?.client_id || null,
+                        clientName: (orderData?.clients as any)?.full_name_or_company_name || null,
+                        clientPhone: (orderData?.clients as any)?.whatsapp || (orderData?.clients as any)?.phone || null,
+                        documentType: 'service_order',
+                      })}
+                    >
+                      <Printer className="h-4 w-4 mr-2" /> Enviar OS
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setZapiTarget({
+                        kind: 'service_order',
+                        serviceOrderId: orderData.id,
+                        serviceOrderNumber: orderData.service_order_number,
+                        shareToken: orderData.share_token,
+                        clientId: (orderData?.clients as any)?.id || (orderData as any)?.client_id || null,
+                        clientName: (orderData?.clients as any)?.full_name_or_company_name || null,
+                        clientPhone: (orderData?.clients as any)?.whatsapp || (orderData?.clients as any)?.phone || null,
+                        documentType: 'quote',
+                      })}
+                    >
+                      <FileText className="h-4 w-4 mr-2" /> Enviar Orçamento
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               )}
             </>
           )}
@@ -1708,6 +1756,12 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         onOpenChange={setShowZapiHistory}
         serviceOrderId={showZapiHistory ? (orderId || null) : null}
         serviceOrderNumber={orderData?.service_order_number}
+      />
+
+      <SendViaZAPIDialog
+        open={!!zapiTarget}
+        onOpenChange={v => { if (!v) setZapiTarget(null); }}
+        target={zapiTarget}
       />
     </div>
   );
