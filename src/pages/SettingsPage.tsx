@@ -6,7 +6,8 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { MapPin, DollarSign, Users, Globe, Banknote, CreditCard, FileText, Tag, Receipt, Package, Mail } from 'lucide-react';
+import { MapPin, DollarSign, Users, Globe, Banknote, CreditCard, FileText, Tag, Receipt, Package, Mail, MessageCircle } from 'lucide-react';
+import { WhatsAppTemplatesManager } from '@/components/WhatsAppTemplatesManager';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useCardFees, useUpdateCardFee } from '@/hooks/use-card-fees';
 import { useFinancialCategories, useCreateFinancialCategory, useUpdateFinancialCategory } from '@/hooks/use-financial-categories';
@@ -105,6 +106,10 @@ export default function SettingsPage() {
           </TabsTrigger>
           <TabsTrigger value="fiscal">{(t.settings as any).tabFiscal || 'Fiscal'}</TabsTrigger>
           <TabsTrigger value="payment-conditions">Condições de Pagamento</TabsTrigger>
+          <TabsTrigger value="whatsapp-templates">
+            <MessageCircle className="h-3.5 w-3.5 mr-1" />
+            Templates WhatsApp
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="company" className="mt-4 space-y-4">
