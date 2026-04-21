@@ -187,6 +187,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [cancelReason, setCancelReason] = useState('');
   const [reopenReason, setReopenReason] = useState('');
   const [pdfDialogType, setPdfDialogType] = useState<'quote' | 'service_order' | 'invoice' | null>(null);
+  const [waPreview, setWaPreview] = useState<{ phone: string; message: string; url: string; clientName: string } | null>(null);
+  const [waEditMessage, setWaEditMessage] = useState('');
+  const [waEditPhone, setWaEditPhone] = useState('');
   const [presetKey, setPresetKey] = useState(0);
 
   useEffect(() => {
