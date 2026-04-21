@@ -281,6 +281,22 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
             />
           </div>
 
+          {!!templates?.length && (
+            <div className="space-y-2">
+              <Label>Template</Label>
+              <select
+                className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+                value={templateId}
+                onChange={(e) => applyTemplate(e.target.value)}
+              >
+                <option value="">— mensagem livre —</option>
+                {templates.map(t => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <div className="space-y-2">
             <Label htmlFor="msg-zapi">
               {mode === 'document' ? 'Legenda do PDF' : 'Mensagem'}
