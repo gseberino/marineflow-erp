@@ -52,6 +52,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { normalizePhoneE164 } from '@/lib/masks';
+import { writeAuditLog } from '@/hooks/use-audit-log';
 
 interface Props {
   orderId?: string;
@@ -523,6 +524,19 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                     setWaEditPhone(phone);
                     setWaEditMessage(msg);
                     setWaPreview({ phone, message: msg, url, clientName });
+                    void writeAuditLog({
+                      table_name: 'service_orders',
+                      record_id: orderData.id,
+                      action: 'whatsapp_preview' as any,
+                      new_value: {
+                        share_token: orderData.share_token,
+                        public_url: url,
+                        phone_raw: String(phoneRaw),
+                        phone_normalized: phone,
+                        client_name: clientName,
+                      },
+                      reason: 'Abriu pré-visualização do WhatsApp',
+                    });
                   }}
                 >
                   <MessageCircle className="h-4 w-4" />
@@ -1586,7 +1600,31 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   const waUrl = waEditPhone
                     ? `https://wa.me/${waEditPhone}?text=${encodeURIComponent(waEditMessage)}`
                     : `https://wa.me/?text=${encodeURIComponent(waEditMessage)}`;
-                  window.open(waUrl, '_blank', 'noopener,noreferrer');
+                  let opened = false;
+                  try {
+                    const w = window.open(waUrl, '_blank', 'noopener,noreferrer');
+                    opened = !!w;
+                  } catch {
+                    opened = false;
+                  }
+                  if (orderData?.id) {
+                    void writeAuditLog({
+                      table_name: 'service_orders',
+                      record_id: orderData.id,
+                      action: 'whatsapp_send' as any,
+                      new_value: {
+                        share_token: orderData.share_token,
+                        public_url: waPreview?.url,
+                        phone_used: waEditPhone || null,
+                        had_phone: !!waEditPhone,
+                        wa_url: waUrl,
+                        window_opened: opened,
+                      },
+                      reason: opened
+                        ? 'Link do WhatsApp aberto'
+                        : 'Falha ao abrir janela do WhatsApp (provável bloqueio de pop-up)',
+                    });
+                  }
                   setWaPreview(null);
                 }}
               >
