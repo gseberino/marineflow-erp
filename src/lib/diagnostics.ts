@@ -4,6 +4,7 @@ import { queryClient } from '@/lib/query-client';
 const MAX_ERRORS = 50;
 const MAX_NETWORK = 50;
 const MAX_CONSOLE = 100;
+const MAX_WHATSAPP = 50;
 
 type ErrorEntry = {
   ts: string;
@@ -31,9 +32,26 @@ type ConsoleEntry = {
   message: string;
 };
 
+export type WhatsAppEvent = {
+  ts: string;
+  source: 'list_dropdown' | 'detail_dialog' | string;
+  action: 'preview' | 'send';
+  serviceOrderId?: string;
+  serviceOrderNumber?: string;
+  shareToken?: string;
+  phoneRaw?: string;
+  phoneNormalized?: string;
+  hasPhone: boolean;
+  opened?: boolean;
+  popupBlocked?: boolean;
+  errorMessage?: string;
+  userAgent?: string;
+};
+
 const errorBuffer: ErrorEntry[] = [];
 const networkBuffer: NetworkEntry[] = [];
 const consoleBuffer: ConsoleEntry[] = [];
+const whatsappBuffer: WhatsAppEvent[] = [];
 
 function pushCapped<T>(buf: T[], item: T, max: number) {
   buf.push(item);
