@@ -17,6 +17,7 @@ import { generatePDF, type PDFOptions } from '@/lib/pdf-generator';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { toast } from 'sonner';
+import { recordWhatsAppEvent } from '@/lib/diagnostics';
 
 export default function ServiceOrderList() {
   const [search, setSearch] = useState('');
