@@ -69,3 +69,28 @@ export function isValidPhone(value: string): boolean {
   const digits = value.replace(/\D/g, '');
   return digits.length === 10 || digits.length === 11;
 }
+
+/**
+ * Normaliza telefone para formato internacional (somente dígitos, com DDI).
+ * Regras:
+ * - Remove tudo que não é dígito.
+ * - Remove prefixo "00" de discagem internacional, se houver.
+ * - Se já parece ter DDI (12+ dígitos), retorna como está.
+ * - Se tem 10 ou 11 dígitos (formato BR sem DDI), prefixa com o DDI default (55).
+ * - Se tem 8 ou 9 dígitos (sem DDD), não há como adivinhar DDD/DDI: retorna apenas os dígitos.
+ * - Vazio retorna string vazia.
+ */
+export function normalizePhoneE164(value: string | null | undefined, defaultCountryCode = '55'): string {
+  if (!value) return '';
+  let digits = String(value).replace(/\D/g, '');
+  if (!digits) return '';
+  // Remove prefixo internacional "00"
+  if (digits.startsWith('00')) digits = digits.slice(2);
+  // Já tem DDI (BR é 13 com 9º dígito, 12 sem; outros países variam) — assume internacional
+  if (digits.length >= 12) return digits;
+  // Formato BR completo (DDD + número): 10 ou 11 dígitos → prefixa DDI
+  if (digits.length === 10 || digits.length === 11) return `${defaultCountryCode}${digits}`;
+  // Caso ambíguo (curto demais) — devolve só os dígitos
+  return digits;
+}
+
