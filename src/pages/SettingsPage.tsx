@@ -275,6 +275,10 @@ export default function SettingsPage() {
         <TabsContent value="payment-conditions" className="mt-4 space-y-4">
           <PaymentConditionsTab />
         </TabsContent>
+
+        <TabsContent value="whatsapp-templates" className="mt-4 space-y-4">
+          <WhatsAppTemplatesManager />
+        </TabsContent>
       </Tabs>
     </div>
   );

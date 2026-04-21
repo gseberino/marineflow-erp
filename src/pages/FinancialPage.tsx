@@ -23,6 +23,8 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { generatePDF, DEFAULT_PDF_OPTIONS, type PDFData } from '@/lib/pdf-generator';
 import { toast } from 'sonner';
+import { BulkBillingReminderDialog } from '@/components/BulkBillingReminderDialog';
+import { Send } from 'lucide-react';
 
 function getStatusBadgeClass(status: string, dueDate: string) {
   const isOverdue = status !== 'paid' && status !== 'cancelled' && new Date(dueDate) < new Date();
