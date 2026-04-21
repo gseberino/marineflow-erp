@@ -67,6 +67,15 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
       : 'billing';
   const { data: templates } = useWhatsAppTemplates(templateCategory);
 
+  const clientCtx: ClientWhatsAppContext =
+    target?.kind === 'service_order'
+      ? (target.documentType === 'quote' ? 'quote' : 'service_order')
+      : 'billing';
+  const { data: clientSettings } = useClientWhatsAppSettings(
+    open ? (target?.clientId ?? null) : null,
+  );
+  const clientSetting = pickClientSetting(clientSettings, clientCtx);
+
   // Carrega dados completos quando precisamos gerar PDF
   const pdfSourceId =
     target?.kind === 'service_order'
@@ -88,6 +97,24 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
     return `${window.location.origin}/view/${token}`;
   }, [target]);
 
+  // Variáveis disponíveis para placeholders
+  const templateVars = useMemo<Record<string, string>>(() => {
+    if (!target) return {};
+    const base: Record<string, string> = {
+      cliente: target.clientName || '',
+      link: publicUrl || '',
+    };
+    if (target.kind === 'service_order') {
+      base.os = target.serviceOrderNumber;
+      base.descricao = target.serviceOrderNumber;
+    } else {
+      base.descricao = target.description;
+      base.valor = target.amount != null ? String(target.amount) : '';
+      base.vencimento = target.dueDate || '';
+    }
+    return base;
+  }, [target, publicUrl]);
+
   // Defaults ao abrir
   useEffect(() => {
     if (!open || !target) return;
@@ -95,6 +122,11 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
     setMode('link');
     setIncludeLinkInCaption(true);
     setTemplateId('');
+    // Prioridade: config do cliente > template default
+    if (clientSetting?.message_body) {
+      setMessage(applyTemplateVariables(clientSetting.message_body, templateVars));
+      return;
+    }
     const name = target.clientName ? ` ${target.clientName}` : '';
     if (target.kind === 'service_order') {
       const label = documentType === 'quote' ? 'Orçamento' : 'Ordem de Serviço';
@@ -106,7 +138,7 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
     } else {
       setMessage(`Olá${name}, segue cobrança referente a: ${target.description}.`);
     }
-  }, [open, target, publicUrl, documentType]);
+  }, [open, target, publicUrl, documentType, clientSetting?.id, templateVars]);
 
   const applyTemplate = (id: string) => {
     setTemplateId(id);
