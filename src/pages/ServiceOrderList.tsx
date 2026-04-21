@@ -201,7 +201,7 @@ export default function ServiceOrderList() {
                               disabled={!so.share_token}
                               className="gap-2"
                             >
-                              <MessageCircle className="h-4 w-4 text-green-600" />
+                              <MessageCircle className="h-4 w-4" />
                               Enviar por WhatsApp
                             </DropdownMenuItem>
                           </DropdownMenuContent>
