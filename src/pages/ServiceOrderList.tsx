@@ -201,6 +201,7 @@ export default function ServiceOrderList() {
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">{t.common.type}</th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">{t.serviceOrders.scheduled}</th>
                   <th className="px-4 py-3 text-right font-medium text-muted-foreground">{t.common.total}</th>
+                  <th className="px-4 py-3 text-center font-medium text-muted-foreground hidden md:table-cell">WhatsApp</th>
                   <th className="px-4 py-3 w-10"></th>
                 </tr>
               </thead>
