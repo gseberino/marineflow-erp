@@ -1,18 +1,38 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Loader2, Ship, User, MapPin, FileText, Wrench, Package, Download } from 'lucide-react';
+import { Loader2, Ship, User, MapPin, FileText, Wrench, Package, Download, CheckCircle2, AlertTriangle, PenLine } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { generatePDF, DEFAULT_PDF_OPTIONS, type PDFData } from '@/lib/pdf-generator';
+import { SignaturePad } from '@/components/SignaturePad';
+import { computeDocumentHash } from '@/lib/document-hash';
+import { toast } from 'sonner';
 
 const fmtCurrency = (n: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(n || 0);
 
 const fmtDate = (d?: string | null) =>
   d ? new Date(d).toLocaleDateString('pt-BR') : '—';
+
+const fmtDateTime = (d?: string | null) =>
+  d ? new Date(d).toLocaleString('pt-BR') : '—';
+
+const isOn = (v?: string) => (v ?? 'true').toLowerCase() !== 'false';
+
+interface Signature {
+  id: string;
+  signature_image_url: string | null;
+  accepted_name: string;
+  signed_at: string;
+  superseded_at: string | null;
+  document_hash: string;
+}
 
 interface PublicData {
   order: any;
@@ -21,6 +41,7 @@ interface PublicData {
   parts: any[];
   services: any[];
   company: Record<string, string>;
+  signature: Signature | null;
 }
 
 export default function PublicServiceOrderView() {
@@ -28,10 +49,18 @@ export default function PublicServiceOrderView() {
   const [data, setData] = useState<PublicData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
+
+  // Estado de assinatura
+  const [acceptedName, setAcceptedName] = useState('');
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [signaturePng, setSignaturePng] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
+    setLoading(true);
 
     (async () => {
       try {
@@ -50,7 +79,7 @@ export default function PublicServiceOrderView() {
           return;
         }
 
-        const [clientRes, vesselRes, partsRes, servicesRes, settingsRes] = await Promise.all([
+        const [clientRes, vesselRes, partsRes, servicesRes, settingsRes, sigRes] = await Promise.all([
           supabase.from('clients').select('*').eq('id', order.client_id).maybeSingle(),
           order.vessel_id
             ? supabase.from('vessels').select('*').eq('id', order.vessel_id).maybeSingle()
@@ -64,6 +93,14 @@ export default function PublicServiceOrderView() {
             .select('*')
             .eq('service_order_id', order.id),
           supabase.from('app_settings').select('key, value'),
+          supabase
+            .from('service_order_signatures')
+            .select('id, signature_image_url, accepted_name, signed_at, superseded_at, document_hash')
+            .eq('service_order_id', order.id)
+            .is('superseded_at', null)
+            .order('signed_at', { ascending: false })
+            .limit(1)
+            .maybeSingle(),
         ]);
 
         const company: Record<string, string> = {};
@@ -79,6 +116,7 @@ export default function PublicServiceOrderView() {
             parts: partsRes.data || [],
             services: servicesRes.data || [],
             company,
+            signature: (sigRes.data as Signature) || null,
           });
           setLoading(false);
         }
@@ -93,7 +131,20 @@ export default function PublicServiceOrderView() {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, reload]);
+
+  // Texto consolidado dos termos (mesma lógica do PDF)
+  const termsText = useMemo(() => {
+    if (!data) return '';
+    const c = data.company;
+    return [
+      c.terms_general,
+      c.terms_warranty,
+      c.terms_cancellation,
+      c.terms_delivery,
+      c.terms_responsibilities,
+    ].filter(Boolean).join('\n\n');
+  }, [data]);
 
   if (loading) {
     return (
@@ -120,7 +171,25 @@ export default function PublicServiceOrderView() {
     );
   }
 
-  const { order, client, vessel, parts, services, company } = data;
+  const { order, client, vessel, parts, services, company, signature } = data;
+
+  // Toggles de exibição (settings)
+  const show = {
+    servicePrices: isOn(company.public_view_show_service_prices),
+    partsPrices: isOn(company.public_view_show_parts_prices),
+    travelCost: isOn(company.public_view_show_travel_cost),
+    discount: isOn(company.public_view_show_discount),
+    tax: isOn(company.public_view_show_tax),
+    terms: isOn(company.public_view_show_terms),
+    bankDetails: isOn(company.public_view_show_bank_details),
+    paymentInstructions: isOn(company.public_view_show_payment_instructions),
+    extraNotes: isOn(company.public_view_show_extra_notes),
+    validity: isOn(company.public_view_show_validity),
+    allowSignature: isOn(company.public_view_allow_signature),
+  };
+
+  const isSigned = !!order.signed_at && !order.requires_resignature;
+  const needsResignature = !!order.requires_resignature;
 
   const handleDownloadPDF = () => {
     const get = (k: string) => company[k] || '';
@@ -188,13 +257,97 @@ export default function PublicServiceOrderView() {
         unit_price: p.unit_sale_snapshot || 0,
         line_total: p.line_total_sale || 0,
       })),
+      terms: termsText || undefined,
     };
     generatePDF(pdfData, DEFAULT_PDF_OPTIONS);
+  };
+
+  const handleSubmitSignature = async () => {
+    if (!acceptedName.trim() || acceptedName.trim().length < 3) {
+      toast.error('Informe seu nome completo.');
+      return;
+    }
+    if (!acceptedTerms) {
+      toast.error('Você precisa marcar o aceite dos termos.');
+      return;
+    }
+    if (!signaturePng) {
+      toast.error('Desenhe sua assinatura no campo indicado.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const hash = await computeDocumentHash(
+        order,
+        services.map((s: any) => ({
+          name: s.service_name_snapshot,
+          qty: s.quantity,
+          unit_price: s.unit_price_snapshot,
+          line_total: s.line_total,
+        })),
+        parts.map((p: any) => ({
+          name: p.products?.product_name || '',
+          qty: p.quantity,
+          unit_price: p.unit_sale_snapshot,
+          line_total: p.line_total_sale,
+        })),
+        termsText,
+      );
+
+      const { data: result, error: fnErr } = await supabase.functions.invoke('submit-signature', {
+        body: {
+          share_token: token,
+          accepted_name: acceptedName.trim(),
+          signature_png_base64: signaturePng,
+          document_hash: hash,
+          accepted_terms_snapshot: termsText || null,
+        },
+      });
+
+      if (fnErr) throw fnErr;
+      if ((result as any)?.error) throw new Error((result as any).error);
+
+      toast.success('Assinatura registrada com sucesso!');
+      setAcceptedName('');
+      setAcceptedTerms(false);
+      setSignaturePng(null);
+      setReload((r) => r + 1);
+    } catch (e: any) {
+      toast.error(e?.message || 'Falha ao enviar assinatura.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
     <div className="min-h-screen bg-muted/30 py-8 px-4">
       <div className="max-w-4xl mx-auto space-y-6">
+        {/* Banner de status */}
+        {needsResignature && (
+          <div className="rounded-lg border border-warning bg-warning/10 p-4 flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-warning shrink-0 mt-0.5" />
+            <div className="text-sm">
+              <p className="font-semibold text-foreground">Documento atualizado pela equipe</p>
+              <p className="text-muted-foreground">
+                Esta Ordem de Serviço foi alterada após sua última assinatura. É necessário revisá-la e assinar novamente.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {isSigned && (
+          <div className="rounded-lg border border-success bg-success/10 p-4 flex items-start gap-3">
+            <CheckCircle2 className="h-5 w-5 text-success shrink-0 mt-0.5" />
+            <div className="text-sm">
+              <p className="font-semibold text-foreground">Documento assinado</p>
+              <p className="text-muted-foreground">
+                Assinado por <strong className="text-foreground">{order.signed_by_name}</strong> em {fmtDateTime(order.signed_at)}.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Company Header */}
         <Card>
           <CardContent className="pt-6">
@@ -217,6 +370,11 @@ export default function PublicServiceOrderView() {
                 <p className="text-xs text-muted-foreground">
                   Emissão: {fmtDate(order.created_at)}
                 </p>
+                {show.validity && order.quote_validity_date && (
+                  <p className="text-xs text-muted-foreground">
+                    Validade: {fmtDate(order.quote_validity_date)}
+                  </p>
+                )}
                 <Button onClick={handleDownloadPDF} size="sm" className="gap-2">
                   <Download className="h-4 w-4" /> Baixar PDF
                 </Button>
@@ -335,11 +493,15 @@ export default function PublicServiceOrderView() {
                       {s.description_snapshot && (
                         <p className="text-xs text-muted-foreground">{s.description_snapshot}</p>
                       )}
-                      <p className="text-xs text-muted-foreground">
-                        {s.quantity} × {fmtCurrency(s.unit_price_snapshot)}
-                      </p>
+                      {show.servicePrices && (
+                        <p className="text-xs text-muted-foreground">
+                          {s.quantity} × {fmtCurrency(s.unit_price_snapshot)}
+                        </p>
+                      )}
                     </div>
-                    <p className="font-medium tabular-nums">{fmtCurrency(s.line_total)}</p>
+                    {show.servicePrices && (
+                      <p className="font-medium tabular-nums">{fmtCurrency(s.line_total)}</p>
+                    )}
                   </div>
                 ))}
               </div>
@@ -365,11 +527,15 @@ export default function PublicServiceOrderView() {
                       {p.products?.sku && (
                         <p className="text-xs text-muted-foreground">SKU: {p.products.sku}</p>
                       )}
-                      <p className="text-xs text-muted-foreground">
-                        {p.quantity} × {fmtCurrency(p.unit_sale_snapshot)}
-                      </p>
+                      {show.partsPrices && (
+                        <p className="text-xs text-muted-foreground">
+                          {p.quantity} × {fmtCurrency(p.unit_sale_snapshot)}
+                        </p>
+                      )}
                     </div>
-                    <p className="font-medium tabular-nums">{fmtCurrency(p.line_total_sale)}</p>
+                    {show.partsPrices && (
+                      <p className="font-medium tabular-nums">{fmtCurrency(p.line_total_sale)}</p>
+                    )}
                   </div>
                 ))}
               </div>
@@ -380,15 +546,19 @@ export default function PublicServiceOrderView() {
         {/* Totals */}
         <Card>
           <CardContent className="pt-6 space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Mão de obra</span>
-              <span className="tabular-nums">{fmtCurrency(order.labor_cost_total)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Peças</span>
-              <span className="tabular-nums">{fmtCurrency(order.parts_cost_total)}</span>
-            </div>
-            {order.travel_cost_total > 0 && (
+            {show.servicePrices && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Mão de obra</span>
+                <span className="tabular-nums">{fmtCurrency(order.labor_cost_total)}</span>
+              </div>
+            )}
+            {show.partsPrices && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Peças</span>
+                <span className="tabular-nums">{fmtCurrency(order.parts_cost_total)}</span>
+              </div>
+            )}
+            {show.travelCost && order.travel_cost_total > 0 && (
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Deslocamento</span>
                 <span className="tabular-nums">{fmtCurrency(order.travel_cost_total)}</span>
@@ -400,13 +570,13 @@ export default function PublicServiceOrderView() {
                 <span className="tabular-nums">{fmtCurrency(order.operational_cost_total)}</span>
               </div>
             )}
-            {order.discount_amount > 0 && (
+            {show.discount && order.discount_amount > 0 && (
               <div className="flex justify-between text-destructive">
                 <span>Desconto</span>
                 <span className="tabular-nums">- {fmtCurrency(order.discount_amount)}</span>
               </div>
             )}
-            {order.tax_amount > 0 && (
+            {show.tax && order.tax_amount > 0 && (
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Impostos</span>
                 <span className="tabular-nums">{fmtCurrency(order.tax_amount)}</span>
@@ -424,6 +594,151 @@ export default function PublicServiceOrderView() {
             )}
           </CardContent>
         </Card>
+
+        {/* Dados bancários */}
+        {show.bankDetails && (company.bank_name || company.pix_key) && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Dados Bancários</CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm space-y-1">
+              {company.bank_name && <p><span className="text-muted-foreground">Banco:</span> {company.bank_name}</p>}
+              {company.bank_agency && <p><span className="text-muted-foreground">Agência:</span> {company.bank_agency}</p>}
+              {company.bank_account && <p><span className="text-muted-foreground">Conta:</span> {company.bank_account}</p>}
+              {company.pix_key && <p><span className="text-muted-foreground">Chave PIX:</span> {company.pix_key}</p>}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Instruções de pagamento */}
+        {show.paymentInstructions && company.payment_instructions && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Instruções de Pagamento</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm whitespace-pre-wrap text-muted-foreground">
+                {company.payment_instructions}
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Notas extras */}
+        {show.extraNotes && order.extra_notes && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Observações</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm whitespace-pre-wrap text-muted-foreground">
+                {order.extra_notes}
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Termos e condições */}
+        {show.terms && termsText && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Termos e Condições</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-xs text-muted-foreground whitespace-pre-wrap leading-relaxed max-h-72 overflow-y-auto rounded border bg-muted/40 p-3">
+                {termsText}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Bloco de assinatura */}
+        {show.allowSignature && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <PenLine className="h-5 w-5" />
+                Assinatura Digital
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {isSigned && signature ? (
+                <div className="space-y-3">
+                  <div className="rounded-lg border bg-background p-4">
+                    {signature.signature_image_url ? (
+                      <img
+                        src={signature.signature_image_url}
+                        alt="Assinatura do cliente"
+                        className="mx-auto max-h-32"
+                      />
+                    ) : (
+                      <p className="text-center text-sm text-muted-foreground">
+                        Assinatura registrada (imagem não disponível)
+                      </p>
+                    )}
+                  </div>
+                  <div className="text-sm text-center text-muted-foreground">
+                    <p>Assinado por <strong className="text-foreground">{signature.accepted_name}</strong></p>
+                    <p>{fmtDateTime(signature.signed_at)}</p>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    Para aprovar este documento, preencha seu nome, marque o aceite dos termos e desenhe sua assinatura abaixo.
+                  </p>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="accepted-name">Nome completo</Label>
+                    <Input
+                      id="accepted-name"
+                      value={acceptedName}
+                      onChange={(e) => setAcceptedName(e.target.value)}
+                      placeholder="Como assina nos documentos"
+                      disabled={submitting}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Assinatura</Label>
+                    <SignaturePad onChange={setSignaturePng} disabled={submitting} />
+                  </div>
+
+                  <div className="flex items-start gap-2 rounded border bg-muted/40 p-3">
+                    <Checkbox
+                      id="accept-terms"
+                      checked={acceptedTerms}
+                      onCheckedChange={(v) => setAcceptedTerms(!!v)}
+                      disabled={submitting}
+                      className="mt-0.5"
+                    />
+                    <Label htmlFor="accept-terms" className="text-sm leading-snug cursor-pointer">
+                      Li e aceito os termos, condições, valores e descrição apresentados nesta Ordem de Serviço.
+                    </Label>
+                  </div>
+
+                  <Button
+                    onClick={handleSubmitSignature}
+                    disabled={submitting}
+                    className="w-full gap-2"
+                    size="lg"
+                  >
+                    {submitting ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <PenLine className="h-4 w-4" />
+                    )}
+                    {submitting ? 'Enviando...' : 'Aprovar e Assinar'}
+                  </Button>
+
+                  <p className="text-[11px] text-center text-muted-foreground">
+                    Ao assinar, registramos seu nome, data, hora e endereço de IP para validade jurídica.
+                  </p>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         <p className="text-center text-xs text-muted-foreground py-4">
           Documento gerado por {company.company_name || 'MarineFlow'}

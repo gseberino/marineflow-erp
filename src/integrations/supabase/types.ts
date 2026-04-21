@@ -1296,6 +1296,62 @@ export type Database = {
           },
         ]
       }
+      service_order_signatures: {
+        Row: {
+          accepted_name: string
+          accepted_terms_snapshot: string | null
+          created_at: string
+          document_hash: string
+          id: string
+          ip_address: string | null
+          service_order_id: string
+          share_token: string
+          signature_image_url: string | null
+          signed_at: string
+          superseded_at: string | null
+          superseded_reason: string | null
+          user_agent: string | null
+        }
+        Insert: {
+          accepted_name: string
+          accepted_terms_snapshot?: string | null
+          created_at?: string
+          document_hash: string
+          id?: string
+          ip_address?: string | null
+          service_order_id: string
+          share_token: string
+          signature_image_url?: string | null
+          signed_at?: string
+          superseded_at?: string | null
+          superseded_reason?: string | null
+          user_agent?: string | null
+        }
+        Update: {
+          accepted_name?: string
+          accepted_terms_snapshot?: string | null
+          created_at?: string
+          document_hash?: string
+          id?: string
+          ip_address?: string | null
+          service_order_id?: string
+          share_token?: string
+          signature_image_url?: string | null
+          signed_at?: string
+          superseded_at?: string | null
+          superseded_reason?: string | null
+          user_agent?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_order_signatures_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       service_order_technicians: {
         Row: {
           created_at: string
@@ -1379,11 +1435,16 @@ export type Database = {
           reopened_at: string | null
           requested_by_contact_id: string | null
           requested_by_name: string | null
+          requires_resignature: boolean
+          resignature_requested_at: string | null
           scheduled_end_at: string | null
           scheduled_start_at: string | null
           service_order_number: string
           service_type: string | null
           share_token: string | null
+          signed_at: string | null
+          signed_by_name: string | null
+          signed_document_hash: string | null
           solution_applied: string | null
           status: string
           subcontract_cost_total: number | null
@@ -1436,11 +1497,16 @@ export type Database = {
           reopened_at?: string | null
           requested_by_contact_id?: string | null
           requested_by_name?: string | null
+          requires_resignature?: boolean
+          resignature_requested_at?: string | null
           scheduled_end_at?: string | null
           scheduled_start_at?: string | null
           service_order_number: string
           service_type?: string | null
           share_token?: string | null
+          signed_at?: string | null
+          signed_by_name?: string | null
+          signed_document_hash?: string | null
           solution_applied?: string | null
           status?: string
           subcontract_cost_total?: number | null
@@ -1493,11 +1559,16 @@ export type Database = {
           reopened_at?: string | null
           requested_by_contact_id?: string | null
           requested_by_name?: string | null
+          requires_resignature?: boolean
+          resignature_requested_at?: string | null
           scheduled_end_at?: string | null
           scheduled_start_at?: string | null
           service_order_number?: string
           service_type?: string | null
           share_token?: string | null
+          signed_at?: string | null
+          signed_by_name?: string | null
+          signed_document_hash?: string | null
           solution_applied?: string | null
           status?: string
           subcontract_cost_total?: number | null
