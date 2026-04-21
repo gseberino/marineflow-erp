@@ -1,82 +1,57 @@
 
-Objetivo: eliminar definitivamente o loading infinito atacando a causa raiz no bootstrap de autenticação e removendo todos os pontos do código que transformam erro/estado indefinido em spinner permanente.
 
-1. Reestruturar o bootstrap de autenticação em `src/hooks/use-auth.tsx`
-- Remover o `await loadUserProfile(...)` de dentro do callback de `onAuthStateChange`. Hoje isso faz consulta ao banco dentro do fluxo de eventos de autenticação, o que pode bloquear/embaralhar a restauração da sessão.
-- Separar claramente três fases:
-  - restauração inicial da sessão,
-  - carregamento do perfil,
-  - liberação final do app (`loading=false` e `authReady=true`).
-- Manter o listener registrado antes do `getSession()`, mas o callback passará a:
-  - atualizar `session`,
-  - limpar usuário em `SIGNED_OUT`,
-  - disparar carregamento de perfil sem prender o pipeline de auth,
-  - invalidar/limpar queries conforme o evento.
-- Adicionar proteção contra resposta obsoleta: se duas leituras de perfil acontecerem em sequência, só a mais recente poderá atualizar `user`.
-- Adicionar fallback com timeout no carregamento do perfil: se a leitura de `app_users` travar ou demorar além do razoável, o app continua com usuário mínimo em vez de ficar preso no boot.
+## Diagnóstico do botão WhatsApp
 
-2. Blindar o `QueryClient` em `src/lib/query-client.ts`
-- Trocar o `refreshSession()` atual por um mecanismo single-flight:
-  - se várias queries falharem por auth ao mesmo tempo, apenas uma tentativa real de refresh será feita;
-  - as demais reaproveitam a mesma promessa, evitando tempestade de refresh e revogação de token em cascata.
-- Manter retry diferenciado para erro de autenticação, mas com controle:
-  - retry maior só para 401/JWT,
-  - retry comum para demais erros,
-  - sem disparar refresh infinito.
-- Preservar `staleTime` mais alto para reduzir rajadas de refetch logo após navegação/refresh.
+O botão **existe** e está renderizado em `src/components/ServiceOrderForm.tsx` (linhas 508–528), aparece quando `orderData?.share_token` está preenchido. Ele monta corretamente:
 
-3. Ajustar a orquestração raiz em `src/App.tsx`, `src/components/QueryGate.tsx` e `src/components/ProtectedRoute.tsx`
-- Manter o `QueryGate`, mas garantir que ele só dependa do estado final e consistente de bootstrap do `use-auth`.
-- Evitar janelas em que `ProtectedRoute` e `QueryGate` possam divergir sobre o estado de readiness.
-- Preservar a saída de segurança do timeout em `ProtectedRoute`, mas baseada no fluxo corrigido de autenticação, para que ela vire exceção real e não comportamento comum.
+- A URL pública: `${window.location.origin}/view/${orderData.share_token}`
+- A mensagem com o número da OS
+- O fallback para `wa.me/?text=...` quando não há telefone
 
-4. Corrigir todos os loaders permanentes causados por condição incorreta de render
-- Revisão completa dos pontos auditados onde o código usa `isLoading || !data` para continuar mostrando loading mesmo após erro ou resultado indefinido.
-- Corrigir especificamente:
-  - `src/pages/ReportsPage.tsx`
-  - `src/pages/Dashboard.tsx`
-- Padrão a aplicar:
-  - `isLoading` mostra skeleton/loading,
-  - `error` mostra estado de erro com mensagem e ação de tentar novamente,
-  - ausência de dados sem erro mostra estado vazio,
-  - nunca usar `!data` como gatilho automático de spinner infinito.
-- Fazer uma segunda varredura no projeto para localizar qualquer outro uso equivalente e corrigir no mesmo padrão.
+### Problema raiz
 
-5. Revisar hooks e consumidores compartilhados que impactam todas as páginas
-- Validar os hooks que disparam consultas logo na montagem da shell autenticada, com foco especial em:
-  - `src/hooks/use-dashboard.ts`
-  - `src/hooks/use-reports.ts`
-  - `src/hooks/use-notifications.ts`
-- Garantir que falha de uma consulta compartilhada nunca deixe cabeçalho, dashboard ou abas presos em “carregando”.
-- Onde necessário, converter falhas silenciosas/ausência de retorno em erro explícito ou estado vazio explícito.
+A query que carrega a OS no formulário (`SO_DETAIL_SELECT` em `src/hooks/use-service-orders.ts`, linhas 14–22) traz **apenas** `clients(full_name_or_company_name)`. Os campos `phone` e `whatsapp` do cliente **nunca chegam** ao componente, então `phoneRaw` é sempre vazio e o botão sempre abre o WhatsApp Web pedindo para o usuário escolher o contato manualmente — dando a impressão de que "não funciona".
 
-6. Passo de saneamento final contra novos pontos de loading infinito
-- Fazer uma auditoria final por padrões de risco no código:
-  - `if (isLoading || !data)`
-  - `return <Loading...>` sem tratamento de `error`
-  - callbacks de auth com chamadas assíncronas bloqueantes
-  - retries de auth sem coordenação
-- Corrigir qualquer ocorrência restante encontrada na mesma rodada, para que o problema não reapareça em outra página.
+Há também um detalhe menor: a confirmação de que `share_token` está sendo retornado (vem via `*`, ok) e de que existem registros sem token (já foi feito backfill em mensagens anteriores).
 
-7. Validação final após a implementação
-- Verificar build TypeScript limpo.
-- Revisar console para confirmar que não restaram erros relacionados ao fluxo de carregamento.
-- Validar o comportamento esperado nestes cenários:
-  - refresh do navegador com sessão ativa,
-  - navegação rápida entre várias páginas,
-  - aba em background por longo período e retorno,
-  - abertura pelo domínio publicado.
-- Só concluir quando não houver mais nenhum caminho de spinner permanente identificado na autenticação, shell e páginas auditadas.
+## Correção planejada
 
-Detalhes técnicos
-- Causa principal confirmada: o app ainda faz trabalho assíncrono de perfil dentro de `onAuthStateChange`, exatamente no ponto mais sensível do bootstrap de sessão.
-- Causa secundária confirmada: o retry global atual pode gerar múltiplos `refreshSession()` concorrentes sob falha de auth.
-- Causa terciária confirmada: ainda existem telas com lógica de render que converte erro/`undefined` em loading eterno, especialmente em relatórios e dashboard.
-- Arquivos centrais da correção:
-  - `src/hooks/use-auth.tsx`
-  - `src/lib/query-client.ts`
-  - `src/App.tsx`
-  - `src/components/QueryGate.tsx`
-  - `src/components/ProtectedRoute.tsx`
-  - `src/pages/ReportsPage.tsx`
-  - `src/pages/Dashboard.tsx`
+**Arquivo único a alterar:** `src/hooks/use-service-orders.ts`
+
+Expandir o relacionamento `clients` no `SO_DETAIL_SELECT` para incluir os campos de contato necessários:
+
+```ts
+const SO_DETAIL_SELECT = `
+  *,
+  clients!service_orders_client_id_fkey(
+    full_name_or_company_name,
+    phone,
+    whatsapp,
+    email
+  ),
+  vessels!service_orders_vessel_id_fkey(boat_name, manufacturer, model, current_dock_position),
+  marinas!service_orders_marina_id_fkey(marina_name, latitude, longitude),
+  service_order_parts(*, products(*)),
+  service_order_technicians(*, app_users(*)),
+  time_entries(*, app_users!time_entries_technician_user_id_fkey(*))
+`;
+```
+
+Com isso, `(orderData?.clients as any)?.whatsapp || phone` em `ServiceOrderForm.tsx` finalmente resolve para o número do cliente e o botão abre o chat direto: `https://wa.me/<numero>?text=<msg>`.
+
+## Validação pós-mudança
+
+1. Abrir uma OS de cliente que tem `phone` ou `whatsapp` cadastrado.
+2. Clicar em **WhatsApp** → deve abrir `wa.me/<DDI+DDD+numero>?text=...` já no chat correto.
+3. Para cliente sem telefone, deve continuar caindo no fallback (`wa.me/?text=...`).
+4. Confirmar que o link `/view/<share_token>` abre a página pública sem login.
+
+## Observação
+
+Não vou mexer em RLS, no `PublicServiceOrderView.tsx`, no `pdf-generator.ts`, no auth, nem em qualquer outro arquivo — a correção é cirúrgica em uma só linha de SELECT.
+
+### Fora de escopo (sugestões para depois, se quiser)
+
+- Garantir que o número do cliente venha com DDI (ex.: prefixar `55` quando faltar) para evitar links que abrem em região errada.
+- Adicionar `service_order_services(*)` ao SELECT se quiser que o form mostre serviços já vinculados (hoje só vêm peças).
+
