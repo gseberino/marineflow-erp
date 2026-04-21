@@ -286,12 +286,20 @@ export default function ServiceOrderList() {
                               Enviar via wa.me (link)
                             </DropdownMenuItem>
                             <DropdownMenuItem
-                              onClick={() => handleSendViaZAPI(so)}
+                              onClick={() => openZapiDialog(so, 'service_order')}
                               disabled={!so.share_token}
                               className="gap-2"
                             >
                               <Send className="h-4 w-4" />
-                              Enviar via Z-API (direto)
+                              Enviar OS via Z-API…
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => openZapiDialog(so, 'quote')}
+                              disabled={!so.share_token}
+                              className="gap-2"
+                            >
+                              <Send className="h-4 w-4" />
+                              Enviar Orçamento via Z-API…
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() => setHistoryTarget({ id: so.id, number: so.service_order_number })}
