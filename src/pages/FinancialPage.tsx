@@ -24,6 +24,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { generatePDF, DEFAULT_PDF_OPTIONS, type PDFData } from '@/lib/pdf-generator';
 import { toast } from 'sonner';
 import { BulkBillingReminderDialog } from '@/components/BulkBillingReminderDialog';
+import { SendViaZAPIDialog, type SendViaZAPITarget } from '@/components/SendViaZAPIDialog';
+import { writeAuditLog } from '@/hooks/use-audit-log';
 import { Send } from 'lucide-react';
 
 function getStatusBadgeClass(status: string, dueDate: string) {
