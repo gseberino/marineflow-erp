@@ -13,6 +13,7 @@ import { normalizePhoneE164 } from '@/lib/masks';
 import { generatePDFBlob, DEFAULT_PDF_OPTIONS, type PDFDocumentType } from '@/lib/pdf-generator';
 import { usePDFData } from '@/hooks/use-pdf';
 import { useQueryClient } from '@tanstack/react-query';
+import { useWhatsAppTemplates, applyTemplateVariables } from '@/hooks/use-whatsapp-templates';
 
 export type SendViaZAPITarget =
   | {
@@ -48,7 +49,14 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
   const [message, setMessage] = useState('');
   const [includeLinkInCaption, setIncludeLinkInCaption] = useState(true);
   const [sending, setSending] = useState(false);
+  const [templateId, setTemplateId] = useState<string>('');
   const queryClient = useQueryClient();
+
+  const templateCategory =
+    target?.kind === 'service_order'
+      ? (target.documentType === 'quote' ? 'quote' : 'service_order')
+      : 'billing';
+  const { data: templates } = useWhatsAppTemplates(templateCategory);
 
   // Carrega dados completos quando precisamos gerar PDF
   const pdfSourceId =
@@ -77,6 +85,7 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
     setPhone(normalizePhoneE164(target.clientPhone || ''));
     setMode('link');
     setIncludeLinkInCaption(true);
+    setTemplateId('');
     const name = target.clientName ? ` ${target.clientName}` : '';
     if (target.kind === 'service_order') {
       const label = documentType === 'quote' ? 'Orçamento' : 'Ordem de Serviço';
@@ -89,6 +98,25 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
       setMessage(`Olá${name}, segue cobrança referente a: ${target.description}.`);
     }
   }, [open, target, publicUrl, documentType]);
+
+  const applyTemplate = (id: string) => {
+    setTemplateId(id);
+    const tpl = templates?.find(t => t.id === id);
+    if (!tpl || !target) return;
+    const vars: Record<string, string> = {
+      cliente: target.clientName || '',
+      link: publicUrl || '',
+    };
+    if (target.kind === 'service_order') {
+      vars.os = target.serviceOrderNumber;
+      vars.descricao = target.serviceOrderNumber;
+    } else {
+      vars.descricao = target.description;
+      vars.valor = '';
+      vars.vencimento = '';
+    }
+    setMessage(applyTemplateVariables(tpl.body, vars));
+  };
 
   const canSendLink = !!publicUrl && target?.kind === 'service_order';
   const canSendDocument = target?.kind === 'service_order' && !!pdfSourceId;
@@ -250,6 +278,22 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
               placeholder="5521999998888"
             />
           </div>
+
+          {!!templates?.length && (
+            <div className="space-y-2">
+              <Label>Template</Label>
+              <select
+                className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+                value={templateId}
+                onChange={(e) => applyTemplate(e.target.value)}
+              >
+                <option value="">— mensagem livre —</option>
+                {templates.map(t => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="msg-zapi">
