@@ -336,6 +336,12 @@ export default function ServiceOrderList() {
         serviceOrderId={historyTarget?.id || null}
         serviceOrderNumber={historyTarget?.number}
       />
+
+      <SendViaZAPIDialog
+        open={!!zapiTarget}
+        onOpenChange={v => { if (!v) setZapiTarget(null); }}
+        target={zapiTarget}
+      />
     </div>
   );
 }
