@@ -6,7 +6,7 @@ import { cancelServiceOrderCascade, reopenServiceOrder, updateReceivableFromSO }
 
 const SO_SELECT = `
   *,
-  clients!service_orders_client_id_fkey(full_name_or_company_name),
+  clients!service_orders_client_id_fkey(full_name_or_company_name, phone, whatsapp),
   vessels!service_orders_vessel_id_fkey(boat_name, manufacturer, model),
   marinas!service_orders_marina_id_fkey(marina_name, latitude, longitude)
 `;

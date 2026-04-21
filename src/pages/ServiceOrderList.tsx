@@ -8,12 +8,15 @@ import { statusConfig, priorityConfig } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Plus, Search, Filter, ClipboardList, MoreHorizontal, FileText, Printer } from 'lucide-react';
+import { Plus, Search, Filter, ClipboardList, MoreHorizontal, FileText, Printer, MessageCircle } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { PDFOptionsDialog } from '@/components/PDFOptionsDialog';
 import { usePDFData } from '@/hooks/use-pdf';
 import { generatePDF, type PDFOptions } from '@/lib/pdf-generator';
+import { normalizePhoneE164 } from '@/lib/masks';
+import { writeAuditLog } from '@/hooks/use-audit-log';
+import { toast } from 'sonner';
 
 export default function ServiceOrderList() {
   const [search, setSearch] = useState('');
@@ -28,6 +31,43 @@ export default function ServiceOrderList() {
     if (!pdfData || !pdfTarget) return;
     generatePDF({ ...pdfData, documentType: pdfTarget.type }, { ...options, validity });
     setPdfTarget(null);
+  };
+
+  const handleSendWhatsApp = (so: any) => {
+    if (!so?.share_token) {
+      toast.error('Esta OS ainda não tem link público gerado.');
+      return;
+    }
+    const url = `${window.location.origin}/view/${so.share_token}`;
+    const phoneRaw = so.clients?.whatsapp || so.clients?.phone || '';
+    const phone = normalizePhoneE164(phoneRaw);
+    const clientName = so.clients?.full_name_or_company_name || '';
+    const msg = `Olá${clientName ? ' ' + clientName : ''}, segue o link da Ordem de Serviço ${so.service_order_number}: ${url}`;
+    const waUrl = phone
+      ? `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`
+      : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+    const win = window.open(waUrl, '_blank', 'noopener,noreferrer');
+    const opened = !!win;
+    void writeAuditLog({
+      table_name: 'service_orders',
+      record_id: so.id,
+      action: 'whatsapp_send' as any,
+      new_value: {
+        share_token: so.share_token,
+        public_url: url,
+        phone_raw: String(phoneRaw),
+        phone_normalized: phone,
+        client_name: clientName,
+        opened,
+        source: 'list_dropdown',
+      },
+      reason: opened
+        ? 'Link do WhatsApp aberto (lista de OS)'
+        : 'Falha ao abrir janela do WhatsApp (lista de OS)',
+    });
+    if (!opened) {
+      toast.error('Não foi possível abrir o WhatsApp. Verifique o bloqueador de pop-ups.');
+    }
   };
 
   const filtered = (orders || []).filter((so: any) => {
@@ -154,6 +194,15 @@ export default function ServiceOrderList() {
                             >
                               <Printer className="h-4 w-4" />
                               Imprimir OS
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              onClick={() => handleSendWhatsApp(so)}
+                              disabled={!so.share_token}
+                              className="gap-2"
+                            >
+                              <MessageCircle className="h-4 w-4 text-green-600" />
+                              Enviar por WhatsApp
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
