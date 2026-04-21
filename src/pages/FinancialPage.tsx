@@ -436,6 +436,45 @@ export default function FinancialPage() {
                                 <ReceiptIcon className="h-4 w-4 mr-1" /> Recibo
                               </Button>
                             )}
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              title="Enviar via Z-API (Recibo/Cobrança)"
+                              onClick={() => {
+                                const client = (r as any).clients;
+                                const so = (r as any).service_orders;
+                                const target: SendViaZAPITarget = {
+                                  kind: 'receivable',
+                                  receivableId: r.id,
+                                  description: r.description,
+                                  serviceOrderId: so?.id || null,
+                                  shareToken: so?.share_token || null,
+                                  clientId: client?.id || (r as any).client_id || null,
+                                  clientName: client?.full_name_or_company_name || null,
+                                  clientPhone: client?.whatsapp || client?.phone || null,
+                                  amount: Number(r.balance_amount ?? r.amount) || null,
+                                  dueDate: r.due_date || null,
+                                };
+                                setZapiTarget(target);
+                                void writeAuditLog({
+                                  table_name: 'receivables',
+                                  record_id: r.id,
+                                  action: 'whatsapp_zapi_open' as any,
+                                  new_value: {
+                                    description: r.description,
+                                    amount: Number(r.amount),
+                                    balance: Number(r.balance_amount ?? r.amount),
+                                    due_date: r.due_date,
+                                    client_id: target.clientId,
+                                    service_order_id: target.serviceOrderId,
+                                    has_share_token: !!target.shareToken,
+                                  },
+                                  reason: 'Abriu envio Z-API de recibo/cobrança',
+                                });
+                              }}
+                            >
+                              <Send className="h-4 w-4 mr-1" /> Z-API
+                            </Button>
                             {r.status !== 'paid' && (
                               <Button size="sm" variant="outline" onClick={() => setPaymentTarget({ receivable: r })}>
                                 {t.financial.registerPayment}
