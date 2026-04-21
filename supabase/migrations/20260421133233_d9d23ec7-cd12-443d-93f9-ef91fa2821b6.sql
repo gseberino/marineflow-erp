@@ -1,0 +1,1 @@
+UPDATE service_orders SET share_token = gen_random_uuid() WHERE share_token IS NULL;
