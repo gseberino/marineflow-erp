@@ -121,9 +121,11 @@ export default function ServiceOrderList() {
       if (error) throw error;
       if ((data as any)?.error) throw new Error((data as any).error);
       toast.success('Mensagem enviada com sucesso!', { id: t });
+      queryClient.invalidateQueries({ queryKey: ['whatsapp-send-status'] });
     } catch (err: any) {
       console.error('Z-API send error', err);
       toast.error(`Falha no envio: ${err?.message || 'erro desconhecido'}`, { id: t });
+      queryClient.invalidateQueries({ queryKey: ['whatsapp-send-status'] });
     }
   };
 
