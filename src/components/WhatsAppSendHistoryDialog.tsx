@@ -52,7 +52,7 @@ export function WhatsAppSendHistoryDialog({ serviceOrderId, serviceOrderNumber, 
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
                         {e.success ? (
-                          <Badge className="gap-1 bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
+                          <Badge className="gap-1 bg-success/15 text-success hover:bg-success/20 border-success/30">
                             <CheckCircle2 className="h-3 w-3" /> Enviado
                           </Badge>
                         ) : (
