@@ -17,6 +17,7 @@ import { generatePDF, type PDFOptions } from '@/lib/pdf-generator';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { toast } from 'sonner';
+import { recordWhatsAppEvent } from '@/lib/diagnostics';
 
 export default function ServiceOrderList() {
   const [search, setSearch] = useState('');
@@ -64,6 +65,18 @@ export default function ServiceOrderList() {
       reason: opened
         ? 'Link do WhatsApp aberto (lista de OS)'
         : 'Falha ao abrir janela do WhatsApp (lista de OS)',
+    });
+    recordWhatsAppEvent({
+      source: 'list_dropdown',
+      action: 'send',
+      serviceOrderId: so.id,
+      serviceOrderNumber: so.service_order_number,
+      shareToken: so.share_token,
+      phoneRaw: String(phoneRaw),
+      phoneNormalized: phone,
+      opened,
+      popupBlocked: !opened,
+      errorMessage: !opened ? 'window.open returned null (likely popup blocker)' : undefined,
     });
     if (!opened) {
       toast.error('Não foi possível abrir o WhatsApp. Verifique o bloqueador de pop-ups.');
