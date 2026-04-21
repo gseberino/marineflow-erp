@@ -315,6 +315,13 @@ export default function ServiceOrderList() {
                               <Send className="h-4 w-4" />
                               Enviar via Z-API (direto)
                             </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => setHistoryTarget({ id: so.id, number: so.service_order_number })}
+                              className="gap-2"
+                            >
+                              <History className="h-4 w-4" />
+                              Histórico de envios Z-API
+                            </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </td>
