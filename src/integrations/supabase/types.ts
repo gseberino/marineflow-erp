@@ -1383,6 +1383,7 @@ export type Database = {
           scheduled_start_at: string | null
           service_order_number: string
           service_type: string | null
+          share_token: string | null
           solution_applied: string | null
           status: string
           subcontract_cost_total: number | null
@@ -1439,6 +1440,7 @@ export type Database = {
           scheduled_start_at?: string | null
           service_order_number: string
           service_type?: string | null
+          share_token?: string | null
           solution_applied?: string | null
           status?: string
           subcontract_cost_total?: number | null
@@ -1495,6 +1497,7 @@ export type Database = {
           scheduled_start_at?: string | null
           service_order_number?: string
           service_type?: string | null
+          share_token?: string | null
           solution_applied?: string | null
           status?: string
           subcontract_cost_total?: number | null
