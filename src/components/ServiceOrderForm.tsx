@@ -519,10 +519,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                     const phone = String(phoneRaw).replace(/\D/g, '');
                     const clientName = (orderData?.clients as any)?.full_name_or_company_name || '';
                     const msg = `Olá${clientName ? ' ' + clientName : ''}, segue o link da Ordem de Serviço ${orderData.service_order_number}: ${url}`;
-                    const waUrl = phone
-                      ? `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`
-                      : `https://wa.me/?text=${encodeURIComponent(msg)}`;
-                    window.open(waUrl, '_blank', 'noopener,noreferrer');
+                    setWaEditPhone(phone);
+                    setWaEditMessage(msg);
+                    setWaPreview({ phone, message: msg, url, clientName });
                   }}
                 >
                   <MessageCircle className="h-4 w-4" />
