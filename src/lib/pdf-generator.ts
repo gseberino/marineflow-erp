@@ -159,6 +159,43 @@ export function generatePDF(data: PDFData, options: PDFOptions): void {
   });
 }
 
+/**
+ * Gera o PDF como Blob (sem abrir janela de impressão).
+ * Usa html2pdf.js (jsPDF + html2canvas) renderizando o HTML montado por buildHTMLDocument.
+ */
+export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promise<Blob> {
+  const html = buildHTMLDocument(data, options);
+
+  // Container off-screen com largura A4 para captura fiel
+  const container = document.createElement('div');
+  container.style.cssText = 'position:fixed;left:-99999px;top:0;width:794px;background:#fff;';
+  container.innerHTML = html;
+  document.body.appendChild(container);
+
+  try {
+    // Import dinâmico para não pesar o bundle inicial
+    const html2pdfModule: any = await import('html2pdf.js');
+    const html2pdf = html2pdfModule.default || html2pdfModule;
+
+    const blob: Blob = await html2pdf()
+      .from(container)
+      .set({
+        margin: [10, 10, 10, 10],
+        filename: 'documento.pdf',
+        image: { type: 'jpeg', quality: 0.92 },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
+      })
+      .outputPdf('blob');
+
+    return blob;
+  } finally {
+    if (document.body.contains(container)) document.body.removeChild(container);
+  }
+}
+
+
 // ============= Number to words (pt-BR) =============
 const _ones = ['', 'um', 'dois', 'três', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove', 'dez',
   'onze', 'doze', 'treze', 'quatorze', 'quinze', 'dezesseis', 'dezessete', 'dezoito', 'dezenove'];
