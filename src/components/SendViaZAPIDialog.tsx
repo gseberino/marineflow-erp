@@ -26,6 +26,7 @@ export type SendViaZAPITarget =
       serviceOrderId: string;
       serviceOrderNumber: string;
       shareToken?: string | null;
+      clientId?: string | null;
       clientName?: string | null;
       clientPhone?: string | null;
       documentType?: PDFDocumentType; // 'service_order' | 'quote' (default: service_order)
@@ -36,8 +37,11 @@ export type SendViaZAPITarget =
       description: string;
       serviceOrderId?: string | null;
       shareToken?: string | null;
+      clientId?: string | null;
       clientName?: string | null;
       clientPhone?: string | null;
+      amount?: number | null;
+      dueDate?: string | null;
     };
 
 interface Props {
