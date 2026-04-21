@@ -19,6 +19,7 @@ import {
 import { NotificationBell } from '@/components/NotificationBell';
 import { PWAInstallPrompt } from '@/components/PWAInstallPrompt';
 import { OfflineIndicator } from '@/components/OfflineIndicator';
+import { DiagnosticExportButton } from '@/components/DiagnosticExportButton';
 
 const navKeys = [
   { key: 'dashboard' as const, icon: LayoutDashboard, path: '/' },
@@ -160,6 +161,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           </button>
           <div className="flex-1" />
           <div className="flex items-center gap-3">
+            <DiagnosticExportButton />
             <NotificationBell />
             <div className="text-right hidden sm:block">
               <p className="text-sm font-medium leading-none">

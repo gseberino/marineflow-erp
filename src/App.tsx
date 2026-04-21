@@ -8,6 +8,7 @@ import { AuthProvider } from "@/hooks/use-auth";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { QueryGate } from "@/components/QueryGate";
 import { AppLayout } from "@/components/AppLayout";
+import { DiagnosticFallback } from "@/components/DiagnosticFallback";
 import { queryClient } from "@/lib/query-client";
 import Dashboard from "./pages/Dashboard";
 import ServiceOrderList from "./pages/ServiceOrderList";
@@ -39,6 +40,7 @@ const App = () => (
         <Sonner />
         <BrowserRouter>
           <AuthProvider>
+            <DiagnosticFallback />
             <Routes>
               <Route path="/login" element={<LoginPage />} />
               <Route path="/reset-password" element={<ResetPasswordPage />} />
