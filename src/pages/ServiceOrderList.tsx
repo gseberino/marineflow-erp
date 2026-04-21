@@ -15,6 +15,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { PDFOptionsDialog } from '@/components/PDFOptionsDialog';
 import { WhatsAppSendHistoryDialog } from '@/components/WhatsAppSendHistoryDialog';
+import { SendViaZAPIDialog, type SendViaZAPITarget } from '@/components/SendViaZAPIDialog';
 import { useWhatsAppSendStatusMap } from '@/hooks/use-whatsapp-send-log';
 import { usePDFData } from '@/hooks/use-pdf';
 import { generatePDF, type PDFOptions } from '@/lib/pdf-generator';
@@ -33,6 +34,7 @@ export default function ServiceOrderList() {
 
   const [pdfTarget, setPdfTarget] = useState<{ id: string; type: 'quote' | 'service_order' } | null>(null);
   const [historyTarget, setHistoryTarget] = useState<{ id: string; number: string } | null>(null);
+  const [zapiTarget, setZapiTarget] = useState<SendViaZAPITarget | null>(null);
   const { data: pdfData } = usePDFData(pdfTarget?.id);
 
   const orderIds = (orders || []).map((o: any) => o.id);
@@ -93,40 +95,16 @@ export default function ServiceOrderList() {
     }
   };
 
-  const handleSendViaZAPI = async (so: any) => {
-    if (!so?.share_token) {
-      toast.error('Esta OS ainda não tem link público gerado.');
-      return;
-    }
-    const phoneRaw = so.clients?.whatsapp || so.clients?.phone || '';
-    const phone = normalizePhoneE164(phoneRaw);
-    if (!phone || phone.length < 10) {
-      toast.error('Cliente sem telefone válido cadastrado.');
-      return;
-    }
-    const url = `${window.location.origin}/view/${so.share_token}`;
-    const clientName = so.clients?.full_name_or_company_name || '';
-    const message = `Olá${clientName ? ' ' + clientName : ''}, segue o link da Ordem de Serviço ${so.service_order_number}: ${url}`;
-
-    const t = toast.loading('Enviando via WhatsApp (Z-API)...');
-    try {
-      const { data, error } = await supabase.functions.invoke('whatsapp-send', {
-        body: {
-          phone,
-          message,
-          service_order_id: so.id,
-          context: 'service_order',
-        },
-      });
-      if (error) throw error;
-      if ((data as any)?.error) throw new Error((data as any).error);
-      toast.success('Mensagem enviada com sucesso!', { id: t });
-      queryClient.invalidateQueries({ queryKey: ['whatsapp-send-status'] });
-    } catch (err: any) {
-      console.error('Z-API send error', err);
-      toast.error(`Falha no envio: ${err?.message || 'erro desconhecido'}`, { id: t });
-      queryClient.invalidateQueries({ queryKey: ['whatsapp-send-status'] });
-    }
+  const openZapiDialog = (so: any, documentType: 'service_order' | 'quote') => {
+    setZapiTarget({
+      kind: 'service_order',
+      serviceOrderId: so.id,
+      serviceOrderNumber: so.service_order_number,
+      shareToken: so.share_token,
+      clientName: so.clients?.full_name_or_company_name || null,
+      clientPhone: so.clients?.whatsapp || so.clients?.phone || null,
+      documentType,
+    });
   };
 
   const filtered = (orders || []).filter((so: any) => {
