@@ -81,11 +81,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [authReady, setAuthReady] = useState(false);
   const mountedRef = useRef(true);
-  const finalizedRef = useRef(false);
+  const authReadyRef = useRef(false);
+  const profileRequestRef = useRef(0);
 
   function finalize() {
-    if (finalizedRef.current) return;
-    finalizedRef.current = true;
+    if (authReadyRef.current) return;
+    authReadyRef.current = true;
     setLoading(false);
     setAuthReady(true);
   }
@@ -93,13 +94,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   function loadProfileBackground(
     authUser: { id: string; email?: string }
   ) {
+    const requestId = profileRequestRef.current + 1;
+    profileRequestRef.current = requestId;
     setUser(buildMinimalUser(authUser));
 
-    loadProfile(authUser).then((profile) => {
-      if (!mountedRef.current) return;
-      setUser(profile);
-      console.log('[Auth] Profile ready:', profile.role);
-    });
+    loadProfile(authUser)
+      .then((profile) => {
+        if (!mountedRef.current || profileRequestRef.current !== requestId) return;
+        setUser(profile);
+        console.log('[Auth] Profile ready:', profile.role);
+      })
+      .catch((error) => {
+        if (!mountedRef.current || profileRequestRef.current !== requestId) return;
+        console.warn('[Auth] Profile load failed:', error);
+        setUser(buildMinimalUser(authUser));
+      });
+  }
+
+  function applySession(newSession: Session | null) {
+    setSession(newSession);
+
+    if (!newSession?.user) {
+      profileRequestRef.current += 1;
+      setUser(null);
+      finalize();
+      return;
+    }
+
+    loadProfileBackground(newSession.user);
+    finalize();
   }
 
   useEffect(() => {
@@ -108,26 +131,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const safetyTimer = setTimeout(() => {
       console.warn('[Auth] Safety timeout');
       finalize();
-    }, 8000);
+    }, 2500);
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, newSession) => {
         if (!mountedRef.current) return;
-        if (event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') {
-          return;
-        }
 
-        setSession(newSession);
-
-        if (event === 'SIGNED_OUT' || !newSession?.user) {
-          setUser(null);
+        if (event === 'SIGNED_OUT') {
           queryClient.clear();
-          finalize();
-          return;
         }
 
-        loadProfileBackground(newSession.user);
-        finalize();
+        applySession(newSession);
       }
     );
 
@@ -136,19 +150,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then(({ data: { session: s } }) => {
         if (!mountedRef.current) return;
         clearTimeout(safetyTimer);
-        setSession(s);
-
-        if (!s?.user) {
-          finalize();
-          return;
-        }
-
-        loadProfileBackground(s.user);
-        finalize();
+        applySession(s);
       })
-      .catch(() => {
+      .catch((error) => {
+        if (!mountedRef.current) return;
+        console.warn('[Auth] Session restore failed:', error);
         clearTimeout(safetyTimer);
-        finalize();
+        applySession(null);
       });
 
     return () => {
