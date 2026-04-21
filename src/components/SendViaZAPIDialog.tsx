@@ -50,7 +50,15 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
   const [message, setMessage] = useState('');
   const [includeLinkInCaption, setIncludeLinkInCaption] = useState(true);
   const [sending, setSending] = useState(false);
+  const [templateId, setTemplateId] = useState<string>('');
   const queryClient = useQueryClient();
+  const { formatCurrency } = useI18n();
+
+  const templateCategory =
+    target?.kind === 'service_order'
+      ? (target.documentType === 'quote' ? 'quote' : 'service_order')
+      : 'billing';
+  const { data: templates } = useWhatsAppTemplates(templateCategory);
 
   // Carrega dados completos quando precisamos gerar PDF
   const pdfSourceId =
