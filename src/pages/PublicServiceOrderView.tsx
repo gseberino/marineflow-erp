@@ -4,7 +4,9 @@ import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Loader2, Ship, User, MapPin, FileText, Wrench, Package } from 'lucide-react';
+import { Loader2, Ship, User, MapPin, FileText, Wrench, Package, Download } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { generatePDF, DEFAULT_PDF_OPTIONS, type PDFData } from '@/lib/pdf-generator';
 
 const fmtCurrency = (n: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(n || 0);
@@ -120,6 +122,76 @@ export default function PublicServiceOrderView() {
 
   const { order, client, vessel, parts, services, company } = data;
 
+  const handleDownloadPDF = () => {
+    const get = (k: string) => company[k] || '';
+    const pdfData: PDFData = {
+      documentType: 'service_order',
+      company: {
+        name: get('company_name') || 'MarineFlow',
+        address: [get('address_line_1'), get('address_number')].filter(Boolean).join(', '),
+        city: get('city'),
+        state: get('state'),
+        postal_code: get('postal_code'),
+        phone: get('phone'),
+        email: get('email'),
+        cnpj: get('cnpj'),
+      },
+      bank: {
+        bank_name: get('bank_name') || undefined,
+        bank_agency: get('bank_agency') || undefined,
+        bank_account: get('bank_account') || undefined,
+        pix_key: get('pix_key') || undefined,
+      },
+      serviceOrder: {
+        service_order_number: order.service_order_number,
+        status: order.status,
+        created_at: order.created_at,
+        scheduled_start_at: order.scheduled_start_at ?? undefined,
+        problem_description: order.problem_description ?? undefined,
+        technical_notes: order.technician_notes ?? undefined,
+        grand_total: order.grand_total || 0,
+        labor_cost_total: order.labor_cost_total || 0,
+        parts_cost_total: order.parts_cost_total || 0,
+        travel_cost_total: order.travel_cost_total || 0,
+        discount_amount: order.discount_amount || 0,
+        tax_amount: order.tax_amount || 0,
+        operational_cost_total: order.operational_cost_total || 0,
+        extra_notes: order.extra_notes ?? undefined,
+        payment_conditions: order.payment_conditions ?? undefined,
+      },
+      client: {
+        name: client?.full_name_or_company_name || '—',
+        cpf_cnpj: client?.cpf_cnpj ?? undefined,
+        phone: client?.phone ?? undefined,
+        email: client?.email ?? undefined,
+        address: [client?.address_line_1, client?.city, client?.state].filter(Boolean).join(', ') || undefined,
+      },
+      vessel: vessel ? {
+        name: vessel.boat_name,
+        manufacturer: vessel.manufacturer ?? undefined,
+        model: vessel.model ?? undefined,
+        year: vessel.year ?? undefined,
+        registration: vessel.hull_id_or_registration ?? undefined,
+      } : undefined,
+      services: services.map((s: any) => ({
+        service_name: s.service_name_snapshot || '—',
+        description: s.description_snapshot ?? undefined,
+        billing_unit: s.billing_unit_snapshot || 'unit',
+        quantity: s.quantity || 1,
+        unit_price: s.unit_price_snapshot || 0,
+        line_total: s.line_total || 0,
+      })),
+      parts: parts.map((p: any) => ({
+        product_name: p.products?.product_name || '—',
+        sku: p.products?.sku ?? undefined,
+        quantity: p.quantity || 1,
+        unit_price: p.unit_sale_snapshot || 0,
+        line_total: p.line_total_sale || 0,
+      })),
+    };
+    generatePDF(pdfData, DEFAULT_PDF_OPTIONS);
+  };
+
   return (
     <div className="min-h-screen bg-muted/30 py-8 px-4">
       <div className="max-w-4xl mx-auto space-y-6">
@@ -138,13 +210,16 @@ export default function PublicServiceOrderView() {
                   </p>
                 )}
               </div>
-              <div className="text-left sm:text-right">
+              <div className="flex flex-col items-start sm:items-end gap-2">
                 <Badge variant="secondary" className="text-base px-3 py-1">
                   {order.service_order_number}
                 </Badge>
-                <p className="text-xs text-muted-foreground mt-1">
+                <p className="text-xs text-muted-foreground">
                   Emissão: {fmtDate(order.created_at)}
                 </p>
+                <Button onClick={handleDownloadPDF} size="sm" className="gap-2">
+                  <Download className="h-4 w-4" /> Baixar PDF
+                </Button>
               </div>
             </div>
           </CardContent>
