@@ -6,7 +6,7 @@ import { useAuth } from '@/hooks/use-auth';
 import {
   LayoutDashboard, Users, Ship, Anchor, Package, ClipboardList,
   DollarSign, BarChart3, Settings, ChevronLeft, ChevronRight, Menu,
-  Warehouse, Building2, Wrench, History, LogOut, CalendarDays
+  Warehouse, Building2, Wrench, History, LogOut, CalendarDays, MessageCircle
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -36,6 +36,10 @@ const navKeys = [
   { key: 'reports' as const, icon: BarChart3, path: '/reports' },
   { key: 'auditLog' as const, icon: History, path: '/audit-log' },
   { key: 'settings' as const, icon: Settings, path: '/settings' },
+];
+
+const extraNav = [
+  { label: 'WhatsApp Leads', icon: MessageCircle, path: '/whatsapp/leads' },
 ];
 
 const roleLabels: Record<string, string> = {
@@ -115,6 +119,22 @@ export function AppLayout({ children }: { children: ReactNode }) {
           >
             <item.icon className="h-4 w-4 shrink-0" />
             {!collapsed && <span>{t.nav[item.key]}</span>}
+          </Link>
+        ))}
+        {extraNav.map((item) => (
+          <Link
+            key={item.path}
+            to={item.path}
+            onClick={() => setMobileOpen(false)}
+            className={cn(
+              'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
+              isActive(item.path)
+                ? 'bg-sidebar-primary/15 text-sidebar-primary'
+                : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+            )}
+          >
+            <item.icon className="h-4 w-4 shrink-0" />
+            {!collapsed && <span>{item.label}</span>}
           </Link>
         ))}
       </nav>

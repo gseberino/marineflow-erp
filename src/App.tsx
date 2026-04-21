@@ -27,6 +27,7 @@ import SettingsPage from "./pages/SettingsPage";
 import SupplierList from "./pages/SupplierList";
 import ServiceList from "./pages/ServiceList";
 import AuditLogPage from "./pages/AuditLogPage";
+import WhatsAppLeadsPage from "./pages/WhatsAppLeadsPage";
 import LoginPage from "./pages/LoginPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import PublicServiceOrderView from "./pages/PublicServiceOrderView";
@@ -70,6 +71,7 @@ const App = () => (
                           </ProtectedRoute>
                         } />
                         <Route path="/reports" element={<ReportsPage />} />
+                        <Route path="/whatsapp/leads" element={<WhatsAppLeadsPage />} />
                         <Route path="/audit-log" element={
                           <ProtectedRoute roles={['admin']}>
                             <AuditLogPage />
