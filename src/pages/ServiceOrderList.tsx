@@ -8,26 +8,35 @@ import { statusConfig, priorityConfig } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Plus, Search, Filter, ClipboardList, MoreHorizontal, FileText, Printer, MessageCircle, Send } from 'lucide-react';
+import { Plus, Search, Filter, ClipboardList, MoreHorizontal, FileText, Printer, MessageCircle, Send, CheckCircle2, XCircle, History } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { PDFOptionsDialog } from '@/components/PDFOptionsDialog';
+import { WhatsAppSendHistoryDialog } from '@/components/WhatsAppSendHistoryDialog';
+import { useWhatsAppSendStatusMap } from '@/hooks/use-whatsapp-send-log';
 import { usePDFData } from '@/hooks/use-pdf';
 import { generatePDF, type PDFOptions } from '@/lib/pdf-generator';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { toast } from 'sonner';
 import { recordWhatsAppEvent } from '@/lib/diagnostics';
+import { useQueryClient } from '@tanstack/react-query';
 
 export default function ServiceOrderList() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const { t, formatCurrency, formatDate } = useI18n();
   const { data: orders, isLoading, error } = useServiceOrders();
+  const queryClient = useQueryClient();
 
   const [pdfTarget, setPdfTarget] = useState<{ id: string; type: 'quote' | 'service_order' } | null>(null);
+  const [historyTarget, setHistoryTarget] = useState<{ id: string; number: string } | null>(null);
   const { data: pdfData } = usePDFData(pdfTarget?.id);
+
+  const orderIds = (orders || []).map((o: any) => o.id);
+  const { data: sendStatusMap } = useWhatsAppSendStatusMap(orderIds);
 
   const handleGeneratePDF = (options: PDFOptions, validity?: any) => {
     if (!pdfData || !pdfTarget) return;
@@ -112,9 +121,11 @@ export default function ServiceOrderList() {
       if (error) throw error;
       if ((data as any)?.error) throw new Error((data as any).error);
       toast.success('Mensagem enviada com sucesso!', { id: t });
+      queryClient.invalidateQueries({ queryKey: ['whatsapp-send-status'] });
     } catch (err: any) {
       console.error('Z-API send error', err);
       toast.error(`Falha no envio: ${err?.message || 'erro desconhecido'}`, { id: t });
+      queryClient.invalidateQueries({ queryKey: ['whatsapp-send-status'] });
     }
   };
 
@@ -190,6 +201,7 @@ export default function ServiceOrderList() {
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">{t.common.type}</th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">{t.serviceOrders.scheduled}</th>
                   <th className="px-4 py-3 text-right font-medium text-muted-foreground">{t.common.total}</th>
+                  <th className="px-4 py-3 text-center font-medium text-muted-foreground hidden md:table-cell">WhatsApp</th>
                   <th className="px-4 py-3 w-10"></th>
                 </tr>
               </thead>
@@ -217,6 +229,49 @@ export default function ServiceOrderList() {
                         {so.scheduled_start_at ? formatDate(so.scheduled_start_at) : '—'}
                       </td>
                       <td className="px-4 py-3 text-right font-semibold">{formatCurrency(so.grand_total || 0)}</td>
+                      <td className="px-4 py-3 hidden md:table-cell text-center">
+                        {(() => {
+                          const entry = sendStatusMap?.get(so.id);
+                          if (!entry) {
+                            return <span className="text-xs text-muted-foreground">—</span>;
+                          }
+                          const nv: any = entry.new_value || {};
+                          const reason = nv?.zapi_response?.error || entry.reason || `HTTP ${nv?.http_status ?? '?'}`;
+                          const when = new Date(entry.changed_at).toLocaleString('pt-BR');
+                          return (
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    type="button"
+                                    onClick={() => setHistoryTarget({ id: so.id, number: so.service_order_number })}
+                                    className="inline-flex items-center"
+                                    aria-label="Ver histórico de envios Z-API"
+                                  >
+                                    {entry.success ? (
+                                      <CheckCircle2 className="h-4 w-4 text-success" />
+                                    ) : (
+                                      <XCircle className="h-4 w-4 text-destructive" />
+                                    )}
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent side="left" className="max-w-xs">
+                                  <div className="text-xs space-y-1">
+                                    <div className="font-medium">
+                                      {entry.success ? 'Enviado via Z-API' : 'Falha no envio Z-API'}
+                                    </div>
+                                    <div className="text-muted-foreground">{when}</div>
+                                    {!entry.success && (
+                                      <div className="text-destructive">{reason}</div>
+                                    )}
+                                    <div className="text-muted-foreground italic">Clique para ver histórico</div>
+                                  </div>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          );
+                        })()}
+                      </td>
                       <td className="px-4 py-3">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -260,6 +315,13 @@ export default function ServiceOrderList() {
                               <Send className="h-4 w-4" />
                               Enviar via Z-API (direto)
                             </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => setHistoryTarget({ id: so.id, number: so.service_order_number })}
+                              className="gap-2"
+                            >
+                              <History className="h-4 w-4" />
+                              Histórico de envios Z-API
+                            </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </td>
@@ -267,7 +329,7 @@ export default function ServiceOrderList() {
                   );
                 })}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">{t.common.noResults}</td></tr>
+                  <tr><td colSpan={10} className="px-4 py-12 text-center text-muted-foreground">{t.common.noResults}</td></tr>
                 )}
               </tbody>
             </table>
@@ -280,6 +342,13 @@ export default function ServiceOrderList() {
         onOpenChange={v => { if (!v) setPdfTarget(null); }}
         documentType={pdfTarget?.type || 'quote'}
         onGenerate={handleGeneratePDF}
+      />
+
+      <WhatsAppSendHistoryDialog
+        open={!!historyTarget}
+        onOpenChange={v => { if (!v) setHistoryTarget(null); }}
+        serviceOrderId={historyTarget?.id || null}
+        serviceOrderNumber={historyTarget?.number}
       />
     </div>
   );
