@@ -14,7 +14,6 @@ import { generatePDFBlob, DEFAULT_PDF_OPTIONS, type PDFDocumentType } from '@/li
 import { usePDFData } from '@/hooks/use-pdf';
 import { useQueryClient } from '@tanstack/react-query';
 import { useWhatsAppTemplates, applyTemplateVariables } from '@/hooks/use-whatsapp-templates';
-import { useI18n } from '@/i18n';
 
 export type SendViaZAPITarget =
   | {
@@ -52,7 +51,6 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
   const [sending, setSending] = useState(false);
   const [templateId, setTemplateId] = useState<string>('');
   const queryClient = useQueryClient();
-  const { formatCurrency } = useI18n();
 
   const templateCategory =
     target?.kind === 'service_order'
