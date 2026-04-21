@@ -524,6 +524,19 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                     setWaEditPhone(phone);
                     setWaEditMessage(msg);
                     setWaPreview({ phone, message: msg, url, clientName });
+                    void writeAuditLog({
+                      table_name: 'service_orders',
+                      record_id: orderData.id,
+                      action: 'whatsapp_preview' as any,
+                      new_value: {
+                        share_token: orderData.share_token,
+                        public_url: url,
+                        phone_raw: String(phoneRaw),
+                        phone_normalized: phone,
+                        client_name: clientName,
+                      },
+                      reason: 'Abriu pré-visualização do WhatsApp',
+                    });
                   }}
                 >
                   <MessageCircle className="h-4 w-4" />
