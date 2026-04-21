@@ -345,9 +345,16 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
           )}
 
           <div className="space-y-2">
-            <Label htmlFor="msg-zapi">
-              {mode === 'document' ? 'Legenda do PDF' : 'Mensagem'}
-            </Label>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="msg-zapi">
+                {mode === 'document' ? 'Legenda do PDF' : 'Mensagem'}
+              </Label>
+              {clientSetting?.message_body && (
+                <span className="text-xs text-muted-foreground">
+                  ✓ Usando mensagem padrão do cliente
+                </span>
+              )}
+            </div>
             <Textarea
               id="msg-zapi"
               rows={4}
