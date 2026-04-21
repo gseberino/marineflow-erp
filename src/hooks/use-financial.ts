@@ -10,7 +10,7 @@ export function useReceivables() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('receivables')
-        .select('*, clients!receivables_client_id_fkey(full_name_or_company_name), service_orders!receivables_service_order_id_fkey(service_order_number)')
+        .select('*, clients!receivables_client_id_fkey(id,full_name_or_company_name,whatsapp,phone), service_orders!receivables_service_order_id_fkey(id,service_order_number,share_token)')
         .order('due_date', { ascending: true });
       if (error) throw error;
       return data;
