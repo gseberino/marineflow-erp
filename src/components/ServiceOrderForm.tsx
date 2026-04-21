@@ -187,6 +187,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [cancelReason, setCancelReason] = useState('');
   const [reopenReason, setReopenReason] = useState('');
   const [pdfDialogType, setPdfDialogType] = useState<'quote' | 'service_order' | 'invoice' | null>(null);
+  const [waPreview, setWaPreview] = useState<{ phone: string; message: string; url: string; clientName: string } | null>(null);
+  const [waEditMessage, setWaEditMessage] = useState('');
+  const [waEditPhone, setWaEditPhone] = useState('');
   const [presetKey, setPresetKey] = useState(0);
 
   useEffect(() => {
@@ -516,10 +519,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                     const phone = String(phoneRaw).replace(/\D/g, '');
                     const clientName = (orderData?.clients as any)?.full_name_or_company_name || '';
                     const msg = `Olá${clientName ? ' ' + clientName : ''}, segue o link da Ordem de Serviço ${orderData.service_order_number}: ${url}`;
-                    const waUrl = phone
-                      ? `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`
-                      : `https://wa.me/?text=${encodeURIComponent(msg)}`;
-                    window.open(waUrl, '_blank', 'noopener,noreferrer');
+                    setWaEditPhone(phone);
+                    setWaEditMessage(msg);
+                    setWaPreview({ phone, message: msg, url, clientName });
                   }}
                 >
                   <MessageCircle className="h-4 w-4" />
@@ -1530,6 +1532,70 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           setPdfDialogType(null);
         }}
       />
+
+      {/* WhatsApp Preview Dialog */}
+      <Dialog open={!!waPreview} onOpenChange={v => { if (!v) setWaPreview(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MessageCircle className="h-5 w-5 text-green-600" />
+              Enviar via WhatsApp
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {waPreview?.clientName && (
+              <div className="text-sm text-muted-foreground">
+                Cliente: <span className="font-medium text-foreground">{waPreview.clientName}</span>
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label htmlFor="wa-phone">Número (com DDI + DDD)</Label>
+              <Input
+                id="wa-phone"
+                value={waEditPhone}
+                onChange={e => setWaEditPhone(e.target.value.replace(/\D/g, ''))}
+                placeholder="Ex: 5521999999999"
+              />
+              {!waEditPhone && (
+                <p className="text-xs text-muted-foreground">
+                  Sem número: o WhatsApp pedirá para você escolher o contato.
+                </p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="wa-message">Mensagem</Label>
+              <Textarea
+                id="wa-message"
+                value={waEditMessage}
+                onChange={e => setWaEditMessage(e.target.value)}
+                rows={5}
+              />
+            </div>
+            <div className="rounded-md border bg-muted/40 p-3 text-xs break-all">
+              <div className="font-medium text-foreground mb-1">Link público:</div>
+              {waPreview?.url}
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setWaPreview(null)}>
+                Cancelar
+              </Button>
+              <Button
+                className="bg-green-600 hover:bg-green-700 text-white gap-1"
+                onClick={() => {
+                  const waUrl = waEditPhone
+                    ? `https://wa.me/${waEditPhone}?text=${encodeURIComponent(waEditMessage)}`
+                    : `https://wa.me/?text=${encodeURIComponent(waEditMessage)}`;
+                  window.open(waUrl, '_blank', 'noopener,noreferrer');
+                  setWaPreview(null);
+                }}
+              >
+                <MessageCircle className="h-4 w-4" />
+                Abrir WhatsApp
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
