@@ -212,21 +212,29 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
         if (!publicUrl) throw new Error('Esta OS não possui link público.');
         invokeBody.kind = 'link';
         invokeBody.link_url = publicUrl;
-        invokeBody.link_title = titleLabel;
-        invokeBody.link_description =
-          target.kind === 'service_order'
-            ? 'Toque para visualizar o documento completo.'
-            : 'Toque para visualizar a cobrança.';
+        invokeBody.link_title = clientSetting?.link_title
+          ? applyTemplateVariables(clientSetting.link_title, templateVars)
+          : titleLabel;
+        invokeBody.link_description = clientSetting?.link_description
+          ? applyTemplateVariables(clientSetting.link_description, templateVars)
+          : (target.kind === 'service_order'
+              ? 'Toque para visualizar o documento completo.'
+              : 'Toque para visualizar a cobrança.');
       } else {
         if (!pdfData) throw new Error('Dados do documento ainda carregando — tente novamente em instantes.');
         const blob = await generatePDFBlob(
           { ...pdfData, documentType } as any,
           DEFAULT_PDF_OPTIONS,
         );
-        const filename =
+        const defaultFilename =
           target.kind === 'service_order'
             ? `${documentType === 'quote' ? 'Orcamento' : 'OS'}-${target.serviceOrderNumber}.pdf`
             : `Cobranca-${target.receivableId.slice(0, 8)}.pdf`;
+        const filename = clientSetting?.pdf_filename_pattern
+          ? applyTemplateVariables(clientSetting.pdf_filename_pattern, templateVars)
+              .replace(/[\\/:*?"<>|]/g, '_')
+              .replace(/\.pdf$/i, '') + '.pdf'
+          : defaultFilename;
         const url = await uploadPdfBlob(blob, filename);
         invokeBody.kind = 'document';
         invokeBody.document_url = url;
