@@ -193,6 +193,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [showReopenDialog, setShowReopenDialog] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [reopenReason, setReopenReason] = useState('');
+  const [showZapiHistory, setShowZapiHistory] = useState(false);
+  const { data: zapiHistory } = useWhatsAppSendHistory(orderId || null);
+  const lastZapiSend = zapiHistory?.[0];
   const [pdfDialogType, setPdfDialogType] = useState<'quote' | 'service_order' | 'invoice' | null>(null);
   const [waPreview, setWaPreview] = useState<{ phone: string; message: string; url: string; clientName: string } | null>(null);
   const [waEditMessage, setWaEditMessage] = useState('');
