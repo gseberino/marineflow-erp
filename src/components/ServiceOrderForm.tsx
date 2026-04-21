@@ -1600,7 +1600,31 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   const waUrl = waEditPhone
                     ? `https://wa.me/${waEditPhone}?text=${encodeURIComponent(waEditMessage)}`
                     : `https://wa.me/?text=${encodeURIComponent(waEditMessage)}`;
-                  window.open(waUrl, '_blank', 'noopener,noreferrer');
+                  let opened = false;
+                  try {
+                    const w = window.open(waUrl, '_blank', 'noopener,noreferrer');
+                    opened = !!w;
+                  } catch {
+                    opened = false;
+                  }
+                  if (orderData?.id) {
+                    void writeAuditLog({
+                      table_name: 'service_orders',
+                      record_id: orderData.id,
+                      action: 'whatsapp_send' as any,
+                      new_value: {
+                        share_token: orderData.share_token,
+                        public_url: waPreview?.url,
+                        phone_used: waEditPhone || null,
+                        had_phone: !!waEditPhone,
+                        wa_url: waUrl,
+                        window_opened: opened,
+                      },
+                      reason: opened
+                        ? 'Link do WhatsApp aberto'
+                        : 'Falha ao abrir janela do WhatsApp (provável bloqueio de pop-up)',
+                    });
+                  }
                   setWaPreview(null);
                 }}
               >
