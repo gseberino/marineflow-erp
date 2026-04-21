@@ -101,6 +101,7 @@ export default function ServiceOrderList() {
       serviceOrderId: so.id,
       serviceOrderNumber: so.service_order_number,
       shareToken: so.share_token,
+      clientId: so.client_id || so.clients?.id || null,
       clientName: so.clients?.full_name_or_company_name || null,
       clientPhone: so.clients?.whatsapp || so.clients?.phone || null,
       documentType,
