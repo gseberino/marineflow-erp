@@ -6,7 +6,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Loader2, LinkIcon, FileText, Send } from 'lucide-react';
+import { Loader2, LinkIcon, FileText, Send, RefreshCw } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { normalizePhoneE164 } from '@/lib/masks';
@@ -59,7 +59,24 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
   const [includeLinkInCaption, setIncludeLinkInCaption] = useState(true);
   const [sending, setSending] = useState(false);
   const [templateId, setTemplateId] = useState<string>('');
+  const [autoRetry, setAutoRetry] = useState<boolean>(() => {
+    try { return localStorage.getItem('zapi.autoRetry') !== '0'; } catch { return true; }
+  });
+  const [maxAttempts, setMaxAttempts] = useState<number>(() => {
+    try {
+      const v = parseInt(localStorage.getItem('zapi.maxAttempts') || '3', 10);
+      return Number.isFinite(v) && v >= 1 && v <= 5 ? v : 3;
+    } catch { return 3; }
+  });
+  const [attemptInfo, setAttemptInfo] = useState<string>('');
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    try { localStorage.setItem('zapi.autoRetry', autoRetry ? '1' : '0'); } catch {}
+  }, [autoRetry]);
+  useEffect(() => {
+    try { localStorage.setItem('zapi.maxAttempts', String(maxAttempts)); } catch {}
+  }, [maxAttempts]);
 
   const templateCategory =
     target?.kind === 'service_order'
