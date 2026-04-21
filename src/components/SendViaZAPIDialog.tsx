@@ -87,6 +87,7 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
     setPhone(normalizePhoneE164(target.clientPhone || ''));
     setMode('link');
     setIncludeLinkInCaption(true);
+    setTemplateId('');
     const name = target.clientName ? ` ${target.clientName}` : '';
     if (target.kind === 'service_order') {
       const label = documentType === 'quote' ? 'Orçamento' : 'Ordem de Serviço';
@@ -99,6 +100,25 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
       setMessage(`Olá${name}, segue cobrança referente a: ${target.description}.`);
     }
   }, [open, target, publicUrl, documentType]);
+
+  const applyTemplate = (id: string) => {
+    setTemplateId(id);
+    const tpl = templates?.find(t => t.id === id);
+    if (!tpl || !target) return;
+    const vars: Record<string, string> = {
+      cliente: target.clientName || '',
+      link: publicUrl || '',
+    };
+    if (target.kind === 'service_order') {
+      vars.os = target.serviceOrderNumber;
+      vars.descricao = target.serviceOrderNumber;
+    } else {
+      vars.descricao = target.description;
+      vars.valor = '';
+      vars.vencimento = '';
+    }
+    setMessage(applyTemplateVariables(tpl.body, vars));
+  };
 
   const canSendLink = !!publicUrl && target?.kind === 'service_order';
   const canSendDocument = target?.kind === 'service_order' && !!pdfSourceId;
