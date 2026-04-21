@@ -1702,6 +1702,13 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           </div>
         </DialogContent>
       </Dialog>
+
+      <WhatsAppSendHistoryDialog
+        open={showZapiHistory}
+        onOpenChange={setShowZapiHistory}
+        serviceOrderId={showZapiHistory ? (orderId || null) : null}
+        serviceOrderNumber={orderData?.service_order_number}
+      />
     </div>
   );
 }
