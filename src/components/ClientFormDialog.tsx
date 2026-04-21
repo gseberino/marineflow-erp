@@ -7,11 +7,20 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { AddressFields } from '@/components/AddressFields';
 import { useCreateClient, useUpdateClient, type Client } from '@/hooks/use-clients';
 import { toast } from 'sonner';
 import type { TablesInsert } from '@/integrations/supabase/types';
 import { maskCPF, maskCNPJ, maskPhone } from '@/lib/masks';
+import {
+  useClientWhatsAppSettings,
+  useUpsertClientWhatsAppSetting,
+  useDeleteClientWhatsAppSetting,
+  pickClientSetting,
+  type ClientWhatsAppContext,
+} from '@/hooks/use-client-whatsapp-settings';
+import { Trash2 } from 'lucide-react';
 
 interface Props {
   open: boolean;
@@ -124,6 +133,15 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
         <DialogHeader>
           <DialogTitle>{isEdit ? t.clients.editClient : t.clients.newClient}</DialogTitle>
         </DialogHeader>
+        <Tabs defaultValue="data" className="w-full">
+          <TabsList className="grid grid-cols-2 w-full">
+            <TabsTrigger value="data">Dados do cliente</TabsTrigger>
+            <TabsTrigger value="zapi" disabled={!isEdit}>
+              WhatsApp / Z-API
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="data">
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2">
@@ -193,7 +211,156 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
             <Button type="submit" disabled={isPending}>{t.common.save}</Button>
           </div>
         </form>
+          </TabsContent>
+
+          <TabsContent value="zapi">
+            {isEdit && client ? (
+              <ZapiSettingsTab clientId={client.id} />
+            ) : (
+              <p className="text-sm text-muted-foreground py-6 text-center">
+                Salve o cliente primeiro para configurar mensagens Z-API.
+              </p>
+            )}
+          </TabsContent>
+        </Tabs>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ----------------- Aba Z-API -----------------
+
+const CONTEXT_LABELS: Record<ClientWhatsAppContext, string> = {
+  service_order: 'Ordem de Serviço',
+  quote: 'Orçamento',
+  billing: 'Cobrança / Recibo',
+};
+
+const PLACEHOLDER_HINT = 'Variáveis: {cliente} {os} {descricao} {valor} {vencimento} {link}';
+
+function ZapiSettingsTab({ clientId }: { clientId: string }) {
+  const { data: settings, isLoading } = useClientWhatsAppSettings(clientId);
+  const upsert = useUpsertClientWhatsAppSetting();
+  const remove = useDeleteClientWhatsAppSetting();
+  const [activeCtx, setActiveCtx] = useState<ClientWhatsAppContext>('service_order');
+
+  const current = pickClientSetting(settings, activeCtx);
+  const [draft, setDraft] = useState({
+    message_body: '',
+    link_title: '',
+    link_description: '',
+    pdf_filename_pattern: '',
+  });
+
+  useEffect(() => {
+    setDraft({
+      message_body: current?.message_body ?? '',
+      link_title: current?.link_title ?? '',
+      link_description: current?.link_description ?? '',
+      pdf_filename_pattern: current?.pdf_filename_pattern ?? '',
+    });
+  }, [activeCtx, current?.id]);
+
+  const handleSave = async () => {
+    await upsert.mutateAsync({
+      client_id: clientId,
+      context: activeCtx,
+      message_body: draft.message_body || null,
+      link_title: draft.link_title || null,
+      link_description: draft.link_description || null,
+      pdf_filename_pattern: draft.pdf_filename_pattern || null,
+    });
+  };
+
+  const handleClear = async () => {
+    if (!current) return;
+    if (!confirm(`Remover configuração de "${CONTEXT_LABELS[activeCtx]}"?`)) return;
+    await remove.mutateAsync({ client_id: clientId, context: activeCtx });
+  };
+
+  if (isLoading) {
+    return <p className="text-sm text-muted-foreground py-6 text-center">Carregando…</p>;
+  }
+
+  return (
+    <div className="space-y-4 pt-2">
+      <div className="flex flex-wrap gap-1.5">
+        {(Object.keys(CONTEXT_LABELS) as ClientWhatsAppContext[]).map(ctx => {
+          const has = !!pickClientSetting(settings, ctx);
+          const isActive = ctx === activeCtx;
+          return (
+            <button
+              key={ctx}
+              type="button"
+              onClick={() => setActiveCtx(ctx)}
+              className={`px-3 py-1.5 rounded-md text-sm border transition-colors ${
+                isActive
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'bg-background hover:bg-muted border-input'
+              }`}
+            >
+              {CONTEXT_LABELS[ctx]}
+              {has && <span className="ml-1.5 text-xs opacity-70">●</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      <p className="text-xs text-muted-foreground">{PLACEHOLDER_HINT}</p>
+
+      <div className="space-y-3">
+        <div>
+          <Label>Mensagem (corpo)</Label>
+          <Textarea
+            rows={4}
+            value={draft.message_body}
+            onChange={e => setDraft(d => ({ ...d, message_body: e.target.value }))}
+            placeholder="Olá {cliente}, segue {descricao}…"
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label>Título do link (preview)</Label>
+            <Input
+              value={draft.link_title}
+              onChange={e => setDraft(d => ({ ...d, link_title: e.target.value }))}
+              placeholder="OS {os}"
+            />
+          </div>
+          <div>
+            <Label>Descrição do link (preview)</Label>
+            <Input
+              value={draft.link_description}
+              onChange={e => setDraft(d => ({ ...d, link_description: e.target.value }))}
+              placeholder="Toque para visualizar"
+            />
+          </div>
+        </div>
+        <div>
+          <Label>Padrão do nome do arquivo PDF</Label>
+          <Input
+            value={draft.pdf_filename_pattern}
+            onChange={e => setDraft(d => ({ ...d, pdf_filename_pattern: e.target.value }))}
+            placeholder="OS-{os}-{cliente}.pdf"
+          />
+        </div>
+      </div>
+
+      <div className="flex justify-between items-center pt-2 border-t">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={handleClear}
+          disabled={!current || remove.isPending}
+          className="text-destructive hover:text-destructive"
+        >
+          <Trash2 className="h-4 w-4 mr-1" /> Limpar
+        </Button>
+        <Button type="button" onClick={handleSave} disabled={upsert.isPending}>
+          Salvar mensagem
+        </Button>
+      </div>
+    </div>
   );
 }

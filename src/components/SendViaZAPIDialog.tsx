@@ -14,6 +14,11 @@ import { generatePDFBlob, DEFAULT_PDF_OPTIONS, type PDFDocumentType } from '@/li
 import { usePDFData } from '@/hooks/use-pdf';
 import { useQueryClient } from '@tanstack/react-query';
 import { useWhatsAppTemplates, applyTemplateVariables } from '@/hooks/use-whatsapp-templates';
+import {
+  useClientWhatsAppSettings,
+  pickClientSetting,
+  type ClientWhatsAppContext,
+} from '@/hooks/use-client-whatsapp-settings';
 
 export type SendViaZAPITarget =
   | {
@@ -21,6 +26,7 @@ export type SendViaZAPITarget =
       serviceOrderId: string;
       serviceOrderNumber: string;
       shareToken?: string | null;
+      clientId?: string | null;
       clientName?: string | null;
       clientPhone?: string | null;
       documentType?: PDFDocumentType; // 'service_order' | 'quote' (default: service_order)
@@ -31,8 +37,11 @@ export type SendViaZAPITarget =
       description: string;
       serviceOrderId?: string | null;
       shareToken?: string | null;
+      clientId?: string | null;
       clientName?: string | null;
       clientPhone?: string | null;
+      amount?: number | null;
+      dueDate?: string | null;
     };
 
 interface Props {
@@ -58,6 +67,15 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
       : 'billing';
   const { data: templates } = useWhatsAppTemplates(templateCategory);
 
+  const clientCtx: ClientWhatsAppContext =
+    target?.kind === 'service_order'
+      ? (target.documentType === 'quote' ? 'quote' : 'service_order')
+      : 'billing';
+  const { data: clientSettings } = useClientWhatsAppSettings(
+    open ? (target?.clientId ?? null) : null,
+  );
+  const clientSetting = pickClientSetting(clientSettings, clientCtx);
+
   // Carrega dados completos quando precisamos gerar PDF
   const pdfSourceId =
     target?.kind === 'service_order'
@@ -79,6 +97,24 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
     return `${window.location.origin}/view/${token}`;
   }, [target]);
 
+  // Variáveis disponíveis para placeholders
+  const templateVars = useMemo<Record<string, string>>(() => {
+    if (!target) return {};
+    const base: Record<string, string> = {
+      cliente: target.clientName || '',
+      link: publicUrl || '',
+    };
+    if (target.kind === 'service_order') {
+      base.os = target.serviceOrderNumber;
+      base.descricao = target.serviceOrderNumber;
+    } else {
+      base.descricao = target.description;
+      base.valor = target.amount != null ? String(target.amount) : '';
+      base.vencimento = target.dueDate || '';
+    }
+    return base;
+  }, [target, publicUrl]);
+
   // Defaults ao abrir
   useEffect(() => {
     if (!open || !target) return;
@@ -86,6 +122,11 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
     setMode('link');
     setIncludeLinkInCaption(true);
     setTemplateId('');
+    // Prioridade: config do cliente > template default
+    if (clientSetting?.message_body) {
+      setMessage(applyTemplateVariables(clientSetting.message_body, templateVars));
+      return;
+    }
     const name = target.clientName ? ` ${target.clientName}` : '';
     if (target.kind === 'service_order') {
       const label = documentType === 'quote' ? 'Orçamento' : 'Ordem de Serviço';
@@ -97,7 +138,7 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
     } else {
       setMessage(`Olá${name}, segue cobrança referente a: ${target.description}.`);
     }
-  }, [open, target, publicUrl, documentType]);
+  }, [open, target, publicUrl, documentType, clientSetting?.id, templateVars]);
 
   const applyTemplate = (id: string) => {
     setTemplateId(id);
@@ -171,21 +212,29 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
         if (!publicUrl) throw new Error('Esta OS não possui link público.');
         invokeBody.kind = 'link';
         invokeBody.link_url = publicUrl;
-        invokeBody.link_title = titleLabel;
-        invokeBody.link_description =
-          target.kind === 'service_order'
-            ? 'Toque para visualizar o documento completo.'
-            : 'Toque para visualizar a cobrança.';
+        invokeBody.link_title = clientSetting?.link_title
+          ? applyTemplateVariables(clientSetting.link_title, templateVars)
+          : titleLabel;
+        invokeBody.link_description = clientSetting?.link_description
+          ? applyTemplateVariables(clientSetting.link_description, templateVars)
+          : (target.kind === 'service_order'
+              ? 'Toque para visualizar o documento completo.'
+              : 'Toque para visualizar a cobrança.');
       } else {
         if (!pdfData) throw new Error('Dados do documento ainda carregando — tente novamente em instantes.');
         const blob = await generatePDFBlob(
           { ...pdfData, documentType } as any,
           DEFAULT_PDF_OPTIONS,
         );
-        const filename =
+        const defaultFilename =
           target.kind === 'service_order'
             ? `${documentType === 'quote' ? 'Orcamento' : 'OS'}-${target.serviceOrderNumber}.pdf`
             : `Cobranca-${target.receivableId.slice(0, 8)}.pdf`;
+        const filename = clientSetting?.pdf_filename_pattern
+          ? applyTemplateVariables(clientSetting.pdf_filename_pattern, templateVars)
+              .replace(/[\\/:*?"<>|]/g, '_')
+              .replace(/\.pdf$/i, '') + '.pdf'
+          : defaultFilename;
         const url = await uploadPdfBlob(blob, filename);
         invokeBody.kind = 'document';
         invokeBody.document_url = url;
@@ -296,9 +345,16 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
           )}
 
           <div className="space-y-2">
-            <Label htmlFor="msg-zapi">
-              {mode === 'document' ? 'Legenda do PDF' : 'Mensagem'}
-            </Label>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="msg-zapi">
+                {mode === 'document' ? 'Legenda do PDF' : 'Mensagem'}
+              </Label>
+              {clientSetting?.message_body && (
+                <span className="text-xs text-muted-foreground">
+                  ✓ Usando mensagem padrão do cliente
+                </span>
+              )}
+            </div>
             <Textarea
               id="msg-zapi"
               rows={4}
