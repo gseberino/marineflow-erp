@@ -6,7 +6,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Loader2, LinkIcon, FileText, Send } from 'lucide-react';
+import { Loader2, LinkIcon, FileText, Send, RefreshCw } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { normalizePhoneE164 } from '@/lib/masks';
@@ -59,7 +59,24 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
   const [includeLinkInCaption, setIncludeLinkInCaption] = useState(true);
   const [sending, setSending] = useState(false);
   const [templateId, setTemplateId] = useState<string>('');
+  const [autoRetry, setAutoRetry] = useState<boolean>(() => {
+    try { return localStorage.getItem('zapi.autoRetry') !== '0'; } catch { return true; }
+  });
+  const [maxAttempts, setMaxAttempts] = useState<number>(() => {
+    try {
+      const v = parseInt(localStorage.getItem('zapi.maxAttempts') || '3', 10);
+      return Number.isFinite(v) && v >= 1 && v <= 5 ? v : 3;
+    } catch { return 3; }
+  });
+  const [attemptInfo, setAttemptInfo] = useState<string>('');
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    try { localStorage.setItem('zapi.autoRetry', autoRetry ? '1' : '0'); } catch {}
+  }, [autoRetry]);
+  useEffect(() => {
+    try { localStorage.setItem('zapi.maxAttempts', String(maxAttempts)); } catch {}
+  }, [maxAttempts]);
 
   const templateCategory =
     target?.kind === 'service_order'
@@ -186,79 +203,114 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
     return data.publicUrl;
   }
 
+  async function attemptSend(attempt: number): Promise<void> {
+    const phoneClean = phone.replace(/\D/g, '');
+    let invokeBody: Record<string, unknown> = { phone: phoneClean, message };
+
+    if (target.kind === 'service_order') {
+      invokeBody.service_order_id = target.serviceOrderId;
+      invokeBody.context = documentType;
+    } else {
+      invokeBody.receivable_id = target.receivableId;
+      invokeBody.context = 'billing';
+      if (target.serviceOrderId) invokeBody.service_order_id = target.serviceOrderId;
+    }
+    invokeBody.attempt = attempt;
+
+    if (mode === 'link') {
+      if (!publicUrl) throw new Error('Esta OS não possui link público.');
+      invokeBody.kind = 'link';
+      invokeBody.link_url = publicUrl;
+      invokeBody.link_title = clientSetting?.link_title
+        ? applyTemplateVariables(clientSetting.link_title, templateVars)
+        : titleLabel;
+      invokeBody.link_description = clientSetting?.link_description
+        ? applyTemplateVariables(clientSetting.link_description, templateVars)
+        : (target.kind === 'service_order'
+            ? 'Toque para visualizar o documento completo.'
+            : 'Toque para visualizar a cobrança.');
+    } else {
+      if (!pdfData) throw new Error('Dados do documento ainda carregando — tente novamente em instantes.');
+      // Recalcula o PDF a cada tentativa (garante dados atualizados)
+      const blob = await generatePDFBlob(
+        { ...pdfData, documentType } as any,
+        DEFAULT_PDF_OPTIONS,
+      );
+      const defaultFilename =
+        target.kind === 'service_order'
+          ? `${documentType === 'quote' ? 'Orcamento' : 'OS'}-${target.serviceOrderNumber}.pdf`
+          : `Cobranca-${target.receivableId.slice(0, 8)}.pdf`;
+      const filename = clientSetting?.pdf_filename_pattern
+        ? applyTemplateVariables(clientSetting.pdf_filename_pattern, templateVars)
+            .replace(/[\\/:*?"<>|]/g, '_')
+            .replace(/\.pdf$/i, '') + '.pdf'
+        : defaultFilename;
+      const url = await uploadPdfBlob(blob, filename);
+      invokeBody.kind = 'document';
+      invokeBody.document_url = url;
+      invokeBody.document_filename = filename;
+      invokeBody.document_caption = includeLinkInCaption && publicUrl
+        ? `${message}\n\nLink online: ${publicUrl}`
+        : message;
+    }
+
+    const { data, error } = await supabase.functions.invoke('whatsapp-send', {
+      body: invokeBody,
+    });
+    if (error) throw error;
+    if ((data as any)?.error) throw new Error((data as any).error);
+  }
+
   async function handleSend() {
     if (!phone || phone.replace(/\D/g, '').length < 10) {
       toast.error('Telefone inválido. Inclua DDI+DDD.');
       return;
     }
     setSending(true);
+    setAttemptInfo('');
     const tId = toast.loading(
       mode === 'document' ? 'Gerando PDF e enviando…' : 'Enviando mensagem…',
     );
+    const total = autoRetry ? Math.max(1, maxAttempts) : 1;
+    let lastErr: any = null;
     try {
-      const phoneClean = phone.replace(/\D/g, '');
-      let invokeBody: Record<string, unknown> = { phone: phoneClean, message };
-
-      if (target.kind === 'service_order') {
-        invokeBody.service_order_id = target.serviceOrderId;
-        invokeBody.context = documentType;
-      } else {
-        invokeBody.receivable_id = target.receivableId;
-        invokeBody.context = 'billing';
-        if (target.serviceOrderId) invokeBody.service_order_id = target.serviceOrderId;
+      for (let attempt = 1; attempt <= total; attempt++) {
+        try {
+          if (attempt > 1) {
+            setAttemptInfo(`Tentativa ${attempt}/${total}…`);
+            toast.loading(`Reenviando (tentativa ${attempt}/${total})…`, { id: tId });
+          }
+          await attemptSend(attempt);
+          toast.success(
+            attempt > 1 ? `Enviado na tentativa ${attempt}/${total}!` : 'Enviado com sucesso!',
+            { id: tId },
+          );
+          queryClient.invalidateQueries({ queryKey: ['whatsapp-send-status'] });
+          queryClient.invalidateQueries({ queryKey: ['whatsapp-send-history'] });
+          onOpenChange(false);
+          return;
+        } catch (err: any) {
+          lastErr = err;
+          console.warn(`SendViaZAPI tentativa ${attempt}/${total} falhou`, err);
+          if (attempt < total) {
+            // Backoff exponencial leve: 1s, 2s, 4s…
+            const delay = Math.min(8000, 1000 * Math.pow(2, attempt - 1));
+            await new Promise(r => setTimeout(r, delay));
+          }
+        }
       }
-
-      if (mode === 'link') {
-        if (!publicUrl) throw new Error('Esta OS não possui link público.');
-        invokeBody.kind = 'link';
-        invokeBody.link_url = publicUrl;
-        invokeBody.link_title = clientSetting?.link_title
-          ? applyTemplateVariables(clientSetting.link_title, templateVars)
-          : titleLabel;
-        invokeBody.link_description = clientSetting?.link_description
-          ? applyTemplateVariables(clientSetting.link_description, templateVars)
-          : (target.kind === 'service_order'
-              ? 'Toque para visualizar o documento completo.'
-              : 'Toque para visualizar a cobrança.');
-      } else {
-        if (!pdfData) throw new Error('Dados do documento ainda carregando — tente novamente em instantes.');
-        const blob = await generatePDFBlob(
-          { ...pdfData, documentType } as any,
-          DEFAULT_PDF_OPTIONS,
-        );
-        const defaultFilename =
-          target.kind === 'service_order'
-            ? `${documentType === 'quote' ? 'Orcamento' : 'OS'}-${target.serviceOrderNumber}.pdf`
-            : `Cobranca-${target.receivableId.slice(0, 8)}.pdf`;
-        const filename = clientSetting?.pdf_filename_pattern
-          ? applyTemplateVariables(clientSetting.pdf_filename_pattern, templateVars)
-              .replace(/[\\/:*?"<>|]/g, '_')
-              .replace(/\.pdf$/i, '') + '.pdf'
-          : defaultFilename;
-        const url = await uploadPdfBlob(blob, filename);
-        invokeBody.kind = 'document';
-        invokeBody.document_url = url;
-        invokeBody.document_filename = filename;
-        invokeBody.document_caption = includeLinkInCaption && publicUrl
-          ? `${message}\n\nLink online: ${publicUrl}`
-          : message;
-      }
-
-      const { data, error } = await supabase.functions.invoke('whatsapp-send', {
-        body: invokeBody,
-      });
-      if (error) throw error;
-      if ((data as any)?.error) throw new Error((data as any).error);
-
-      toast.success('Enviado com sucesso!', { id: tId });
+      throw lastErr || new Error('Falha desconhecida');
+    } catch (err: any) {
+      console.error('SendViaZAPI error final', err);
+      toast.error(
+        `Falha após ${total} tentativa${total > 1 ? 's' : ''}: ${err?.message || 'erro desconhecido'}`,
+        { id: tId },
+      );
       queryClient.invalidateQueries({ queryKey: ['whatsapp-send-status'] });
       queryClient.invalidateQueries({ queryKey: ['whatsapp-send-history'] });
-      onOpenChange(false);
-    } catch (err: any) {
-      console.error('SendViaZAPI error', err);
-      toast.error(`Falha: ${err?.message || 'erro desconhecido'}`, { id: tId });
     } finally {
       setSending(false);
+      setAttemptInfo('');
     }
   }
 
@@ -372,6 +424,36 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
               Incluir também o link online na legenda
             </label>
           )}
+
+          <div className="rounded-lg border p-3 space-y-2 bg-muted/30">
+            <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+              <Checkbox
+                checked={autoRetry}
+                onCheckedChange={(v) => setAutoRetry(!!v)}
+              />
+              <RefreshCw className="h-3.5 w-3.5" />
+              Reenviar automaticamente em caso de falha
+            </label>
+            {autoRetry && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground pl-6 flex-wrap">
+                <span>Máx. tentativas:</span>
+                <select
+                  className="h-7 rounded border border-input bg-background px-2 text-xs"
+                  value={maxAttempts}
+                  onChange={(e) => setMaxAttempts(parseInt(e.target.value, 10))}
+                  disabled={sending}
+                >
+                  {[2, 3, 4, 5].map(n => (
+                    <option key={n} value={n}>{n}</option>
+                  ))}
+                </select>
+                <span>(backoff 1s → 2s → 4s; PDF é recalculado a cada tentativa)</span>
+              </div>
+            )}
+            {attemptInfo && (
+              <p className="text-xs text-accent pl-6">{attemptInfo}</p>
+            )}
+          </div>
         </div>
 
         <DialogFooter>
