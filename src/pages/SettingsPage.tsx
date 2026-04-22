@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { MapPin, DollarSign, Users, Globe, Banknote, CreditCard, FileText, Tag, Receipt, Package, Mail, MessageCircle } from 'lucide-react';
 import { WhatsAppTemplatesManager } from '@/components/WhatsAppTemplatesManager';
 import { WhatsAppReminderSettings } from '@/components/WhatsAppReminderSettings';
+import { WhatsAppWebhookValidator } from '@/components/WhatsAppWebhookValidator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useCardFees, useUpdateCardFee } from '@/hooks/use-card-fees';
 import { useFinancialCategories, useCreateFinancialCategory, useUpdateFinancialCategory } from '@/hooks/use-financial-categories';
@@ -286,6 +287,7 @@ export default function SettingsPage() {
         </TabsContent>
 
         <TabsContent value="whatsapp-reminders" className="mt-4 space-y-4">
+          <WhatsAppWebhookValidator />
           <WhatsAppReminderSettings />
         </TabsContent>
       </Tabs>
