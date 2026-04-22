@@ -4,7 +4,8 @@ import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { toast } from '@/hooks/use-toast';
-import { Activity, CheckCircle2, AlertTriangle, XCircle, Copy, RefreshCw } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
+import { Activity, CheckCircle2, AlertTriangle, XCircle, Copy, RefreshCw, Wand2 } from 'lucide-react';
 
 type HealthStatus = 'ok' | 'stale' | 'never';
 
