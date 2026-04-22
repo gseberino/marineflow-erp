@@ -355,7 +355,7 @@ function CompanyTab() {
           bank_agency: map.bank_agency || '',
           bank_account: map.bank_account || '',
           pix_key: map.pix_key || '',
-          app_public_url: map.app_public_url || '',
+          app_public_url: map.app_public_url || 'https://hbrmarine.online',
         }));
       }
       setLoading(false);
