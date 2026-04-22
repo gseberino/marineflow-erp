@@ -394,6 +394,8 @@ export function useSendCollectionWhatsApp() {
       overrideMethod?: CollectionSendMethod;
       pdfUrl?: string;
       pdfFilename?: string;
+      paymentMethod?: string;
+      cardInstallments?: number;
     }) => {
       const c = input.collection;
       const phoneRaw = c.contact_whatsapp || c.contact_phone || c.client?.whatsapp || c.client?.phone || '';
@@ -401,18 +403,32 @@ export function useSendCollectionWhatsApp() {
       if (!phone || phone.length < 10) throw new Error('Telefone inválido');
 
       const settings = await getAppSettings();
-      const ctx = {
-        nome: c.contact_name || c.client?.full_name_or_company_name || 'Cliente',
-        numero_os: c.service_order?.service_order_number || 'Avulso',
-        valor: Number(c.amount),
-        vencimento: c.due_date,
-        pix: settings['pix_key'] || settings['company_pix'] || '',
-        empresa: settings['company_name'] || 'HBR Marine',
-      };
+
+      // Resolve payment method: explicit override > linked OS lookup
+      let paymentMethod = input.paymentMethod;
+      let cardInstallments = input.cardInstallments;
+      if (!paymentMethod && c.service_order_id) {
+        const { data: so } = await supabase
+          .from('service_orders')
+          .select('payment_method, card_installments')
+          .eq('id', c.service_order_id)
+          .maybeSingle();
+        paymentMethod = (so as any)?.payment_method || undefined;
+        cardInstallments = (so as any)?.card_installments || undefined;
+      }
 
       const body = c.message_template || input.template?.body
         || 'Olá, {{nome}}! Lembrete da fatura {{numero_os}} de R$ {{valor}} venc. {{vencimento}}.';
-      const message = renderTemplate(body, ctx);
+
+      const { buildCollectionMessage } = await import('@/lib/collection-message');
+      const message = buildCollectionMessage({
+        template: body,
+        renderTemplate,
+        collection: c,
+        paymentMethod,
+        cardInstallments,
+        settings,
+      });
 
       const method = input.overrideMethod || c.send_method || 'text_link';
       const tryOrder: CollectionSendMethod[] = method === 'pdf'
