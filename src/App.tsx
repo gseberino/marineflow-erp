@@ -23,6 +23,7 @@ import InventoryPage from "./pages/InventoryPage";
 import AgendaPage from "./pages/AgendaPage";
 import FinancialPage from "./pages/FinancialPage";
 import ReportsPage from "./pages/ReportsPage";
+import CollectionsPage from "./pages/CollectionsPage";
 import SettingsPage from "./pages/SettingsPage";
 import SupplierList from "./pages/SupplierList";
 import ServiceList from "./pages/ServiceList";
@@ -68,6 +69,11 @@ const App = () => (
                         <Route path="/financial" element={
                           <ProtectedRoute roles={['admin', 'financial']}>
                             <FinancialPage />
+                          </ProtectedRoute>
+                        } />
+                        <Route path="/collections" element={
+                          <ProtectedRoute roles={['admin', 'financial']}>
+                            <CollectionsPage />
                           </ProtectedRoute>
                         } />
                         <Route path="/reports" element={<ReportsPage />} />
