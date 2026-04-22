@@ -16,7 +16,8 @@ import { useProductCategories } from '@/hooks/use-product-categories';
 import { useAppSettings } from '@/hooks/use-app-settings';
 import { toast } from 'sonner';
 import type { TablesInsert } from '@/integrations/supabase/types';
-import { Plus, Trash2, Star, ChevronDown, ExternalLink, Info } from 'lucide-react';
+import { Plus, Trash2, Star, ChevronDown, ExternalLink, Info, X, Upload, Package } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PriceCalculator } from '@/components/PriceCalculator';
 import { CSOSN_OPTIONS, FISCAL_ORIGIN_OPTIONS } from '@/lib/price-calculator';
@@ -44,6 +45,7 @@ const empty: TablesInsert<'products'> = {
   barcode: '',
   notes: '',
   active: true,
+  image_url: null,
   ncm: '',
   csosn: '400',
   fiscal_origin: 0,
@@ -115,6 +117,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
         barcode: p.barcode ?? '',
         notes: p.notes ?? '',
         active: p.active,
+        image_url: p.image_url ?? null,
         ncm: p.ncm ?? '',
         csosn: p.csosn ?? '400',
         fiscal_origin: p.fiscal_origin ?? 0,
@@ -154,6 +157,65 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
 
   const set = (key: string, value: any) => setForm(prev => ({ ...prev, [key]: value }));
   const setSF = (key: string, value: any) => setSupplierForm(prev => ({ ...prev, [key]: value }));
+
+  // Image upload state
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = (typeof window !== 'undefined') ? null : null;
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // permite re-selecionar o mesmo arquivo depois
+    if (!file) return;
+
+    const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (!allowed.includes(file.type)) {
+      toast.error('Formato inválido. Use JPG, PNG ou WEBP.');
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('Arquivo muito grande. Máximo 2MB.');
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+      const productFolder = product?.id || 'new';
+      const uuid = (crypto as any).randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const path = `products/${productFolder}/${uuid}.${ext}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('product-images')
+        .upload(path, file, { contentType: file.type, upsert: false });
+      if (uploadError) throw uploadError;
+
+      const { data: pub } = supabase.storage.from('product-images').getPublicUrl(path);
+      set('image_url', pub.publicUrl);
+      toast.success('Imagem enviada.');
+    } catch (err: any) {
+      console.error('Upload error:', err);
+      toast.error(err?.message || 'Erro ao enviar imagem.');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleImageRemove = async () => {
+    const url: string | null | undefined = (form as any).image_url;
+    if (!url) return;
+    try {
+      const marker = '/product-images/';
+      const idx = url.indexOf(marker);
+      if (idx >= 0) {
+        const path = url.substring(idx + marker.length);
+        await supabase.storage.from('product-images').remove([path]);
+      }
+    } catch (err) {
+      console.error('Remove error:', err);
+    } finally {
+      set('image_url', null);
+    }
+  };
 
   // Category change handler
   const handleCategoryChange = (categoryId: string) => {
@@ -264,6 +326,56 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
             <div className="col-span-2">
               <Label>{t.products.productName} *</Label>
               <Input required value={form.product_name} onChange={e => set('product_name', e.target.value)} />
+            </div>
+
+            {/* Foto do produto */}
+            <div className="col-span-2">
+              <Label>Foto do produto</Label>
+              <div className="mt-1 flex items-center gap-3">
+                {(form as any).image_url ? (
+                  <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-md border bg-muted">
+                    <img
+                      src={(form as any).image_url}
+                      alt={form.product_name || 'Produto'}
+                      className="h-full w-full object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleImageRemove}
+                      className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-destructive-foreground shadow hover:opacity-90"
+                      aria-label="Remover imagem"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-md border border-dashed bg-muted/40 text-muted-foreground">
+                    <Package className="h-7 w-7" />
+                  </div>
+                )}
+                <div className="flex flex-col gap-1">
+                  <input
+                    id="product-image-upload"
+                    type="file"
+                    accept="image/jpeg,image/jpg,image/png,image/webp"
+                    className="hidden"
+                    onChange={handleImageUpload}
+                    disabled={uploading}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1"
+                    disabled={uploading}
+                    onClick={() => document.getElementById('product-image-upload')?.click()}
+                  >
+                    <Upload className="h-3.5 w-3.5" />
+                    {uploading ? 'Enviando...' : ((form as any).image_url ? 'Trocar foto' : 'Adicionar foto')}
+                  </Button>
+                  <p className="text-[10px] text-muted-foreground">JPG, PNG ou WEBP, máx 2MB.</p>
+                </div>
+              </div>
             </div>
             <div>
               <Label>{t.products.sku}</Label>

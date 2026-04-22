@@ -9,6 +9,8 @@ export type PDFOptions = {
   showCommission: boolean;
   showTerms: boolean;
   showSignature: boolean;
+  // Optional: include product images in parts table
+  showProductImages?: boolean;
   // Invoice-only
   showBankDetails?: boolean;
   showPaymentInstructions?: boolean;
@@ -26,6 +28,7 @@ export const DEFAULT_PDF_OPTIONS: PDFOptions = {
   showCommission: false,
   showTerms: true,
   showSignature: true,
+  showProductImages: false,
   showBankDetails: true,
   showPaymentInstructions: true,
 };
@@ -101,6 +104,7 @@ export type PDFData = {
     quantity: number;
     unit_price: number;
     line_total: number;
+    image_url?: string | null;
   }>;
   expenses?: Array<{
     category: string;
@@ -379,14 +383,20 @@ function buildOrderHTML(data: PDFData, options: PDFOptions): string {
     </tr>
   `).join('');
 
-  const partsRows = data.parts.map(p => `
+  const partsRows = data.parts.map(p => {
+    const showImg = !!options.showProductImages && !!p.image_url;
+    const nameCell = showImg
+      ? `<div style="display:flex;align-items:center;gap:8px;"><img src="${esc(p.image_url || '')}" alt="" style="width:50px;height:50px;object-fit:cover;border:1px solid #e5e7eb;border-radius:4px;flex-shrink:0;" crossorigin="anonymous"/><span>${esc(p.product_name)}${p.sku ? ` <small style="color:#6b7280;">(${esc(p.sku)})</small>` : ''}</span></div>`
+      : `${esc(p.product_name)}${p.sku ? ` <small style="color:#6b7280;">(${esc(p.sku)})</small>` : ''}`;
+    return `
     <tr>
-      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">${esc(p.product_name)}${p.sku ? ` <small style="color:#6b7280;">(${esc(p.sku)})</small>` : ''}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:center;">${p.quantity}</td>
-      ${options.showPartsPrices ? `<td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtCurrency(p.unit_price)}</td>` : ''}
-      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtCurrency(p.line_total)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;vertical-align:middle;">${nameCell}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:center;vertical-align:middle;">${p.quantity}</td>
+      ${options.showPartsPrices ? `<td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;vertical-align:middle;">${fmtCurrency(p.unit_price)}</td>` : ''}
+      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;vertical-align:middle;">${fmtCurrency(p.line_total)}</td>
     </tr>
-  `).join('');
+  `;
+  }).join('');
 
   const summaryRows = [
     data.services.length > 0
@@ -574,14 +584,20 @@ function buildInvoiceHTML(data: PDFData, options: PDFOptions): string {
     </tr>
   `).join('');
 
-  const partsRows = data.parts.map(p => `
+  const partsRows = data.parts.map(p => {
+    const showImg = !!options.showProductImages && !!p.image_url;
+    const nameCell = showImg
+      ? `<div style="display:flex;align-items:center;gap:8px;"><img src="${esc(p.image_url || '')}" alt="" style="width:50px;height:50px;object-fit:cover;border:1px solid #e5e7eb;border-radius:4px;flex-shrink:0;" crossorigin="anonymous"/><span>${esc(p.product_name)}${p.sku ? ` <small style="color:#6b7280;">(${esc(p.sku)})</small>` : ''}</span></div>`
+      : `${esc(p.product_name)}${p.sku ? ` <small style="color:#6b7280;">(${esc(p.sku)})</small>` : ''}`;
+    return `
     <tr>
-      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">${esc(p.product_name)}${p.sku ? ` <small style="color:#6b7280;">(${esc(p.sku)})</small>` : ''}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:center;">${p.quantity}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtCurrency(p.unit_price)}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtCurrency(p.line_total)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;vertical-align:middle;">${nameCell}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:center;vertical-align:middle;">${p.quantity}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;vertical-align:middle;">${fmtCurrency(p.unit_price)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;vertical-align:middle;">${fmtCurrency(p.line_total)}</td>
     </tr>
-  `).join('');
+  `;
+  }).join('');
 
   const summaryRows = [
     data.services.length > 0
