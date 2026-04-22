@@ -447,6 +447,7 @@ Deno.serve(async (req) => {
       zapi_message_id: zapiMessageId ? String(zapiMessageId) : null,
       delivery_status: "received",
       is_broadcast: isBroadcast,
+      occurred_at: nowIso,
       raw_payload: payload as any,
     };
 

@@ -1,0 +1,1 @@
+ALTER TABLE public.whatsapp_messages ALTER COLUMN occurred_at SET DEFAULT now();
