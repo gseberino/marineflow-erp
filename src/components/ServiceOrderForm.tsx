@@ -340,7 +340,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         toast.success('Ordem de serviço atualizada');
 
         // Auto-trigger collection generation when status becomes 'invoiced'
-        if (payload.status === 'invoiced') {
+        if (form.status === 'invoiced') {
           const { generateCollectionsFromOS } = await import('@/lib/generate-collections');
           generateCollectionsFromOS({
             serviceOrderId: orderId!,
