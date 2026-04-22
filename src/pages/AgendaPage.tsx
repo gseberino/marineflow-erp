@@ -9,9 +9,22 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { EntityCombobox } from '@/components/EntityCombobox';
-import { ChevronLeft, ChevronRight, CalendarDays, Plus, Loader2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, CalendarDays, Plus, Loader2, ListChecks, Briefcase } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useAgendaOrders, useTechnicians, useSchedulableOrders, useQuickSchedule } from '@/hooks/use-agenda';
+import {
+  useAgendaOrders,
+  useAgendaTasks,
+  useTechnicians,
+  useSchedulableOrders,
+  useQuickSchedule,
+} from '@/hooks/use-agenda';
+import { AgendaTaskDialog, type ExistingTask } from '@/components/AgendaTaskDialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
 import { useI18n } from '@/i18n';
 import { statusConfig } from '@/lib/constants';
@@ -21,40 +34,32 @@ type ViewMode = 'week' | 'month';
 function startOfWeek(d: Date): Date {
   const date = new Date(d);
   date.setHours(0, 0, 0, 0);
-  const day = date.getDay(); // 0=Sun
+  const day = date.getDay();
   const diff = day === 0 ? -6 : 1 - day;
   date.setDate(date.getDate() + diff);
   return date;
 }
-
 function addDays(d: Date, n: number): Date {
   const x = new Date(d);
   x.setDate(x.getDate() + n);
   return x;
 }
-
 function startOfMonth(d: Date): Date {
-  const x = new Date(d.getFullYear(), d.getMonth(), 1);
-  return x;
+  return new Date(d.getFullYear(), d.getMonth(), 1);
 }
-
 function endOfMonth(d: Date): Date {
-  const x = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
-  return x;
+  return new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
 }
-
 function sameDay(a: Date, b: Date): boolean {
   return a.getFullYear() === b.getFullYear()
     && a.getMonth() === b.getMonth()
     && a.getDate() === b.getDate();
 }
-
 function fmtTime(iso: string | null): string {
   if (!iso) return '';
   const d = new Date(iso);
   return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 }
-
 function toLocalDateInput(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -62,13 +67,22 @@ function toLocalDateInput(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+const TASK_PRIORITY_CLASSES: Record<string, string> = {
+  low: 'bg-muted text-muted-foreground border border-border',
+  normal: 'bg-secondary text-secondary-foreground border border-border',
+  high: 'bg-amber-500/15 text-amber-700 border border-amber-500/30 dark:text-amber-400',
+  urgent: 'bg-destructive/15 text-destructive border border-destructive/30',
+};
+
 export default function AgendaPage() {
   const navigate = useNavigate();
   const [view, setView] = useState<ViewMode>('week');
   const [cursor, setCursor] = useState(() => new Date());
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
 
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [osDialogOpen, setOsDialogOpen] = useState(false);
+  const [taskDialogOpen, setTaskDialogOpen] = useState(false);
+  const [editingTask, setEditingTask] = useState<ExistingTask | null>(null);
   const [prefill, setPrefill] = useState<{ technicianId?: string; date?: string }>({});
 
   const range = useMemo(() => {
@@ -82,11 +96,17 @@ export default function AgendaPage() {
     return { from, to };
   }, [view, cursor]);
 
-  const { data: orders = [], isLoading, error: ordersError } = useAgendaOrders(
+  const { data: orders = [], isLoading: loadingOrders, error: ordersError } = useAgendaOrders(
+    range.from.toISOString(),
+    range.to.toISOString(),
+  );
+  const { data: tasks = [], isLoading: loadingTasks } = useAgendaTasks(
     range.from.toISOString(),
     range.to.toISOString(),
   );
   const { data: technicians = [] } = useTechnicians();
+
+  const isLoading = loadingOrders || loadingTasks;
 
   const handleNav = (delta: number) => {
     if (view === 'week') setCursor(addDays(cursor, delta * 7));
@@ -98,49 +118,60 @@ export default function AgendaPage() {
       technicianId,
       date: date ? toLocalDateInput(date) : toLocalDateInput(new Date()),
     });
-    setDialogOpen(true);
+    setOsDialogOpen(true);
+  };
+
+  const openTaskDialog = (technicianId?: string, date?: Date, existing?: ExistingTask | null) => {
+    setEditingTask(existing || null);
+    setPrefill({
+      technicianId,
+      date: date ? toLocalDateInput(date) : toLocalDateInput(new Date()),
+    });
+    setTaskDialogOpen(true);
   };
 
   return (
     <div className="space-y-4">
       <PageHeader
         title="Agenda"
-        description="Programação de ordens de serviço por técnico e data"
+        description="Programação de OS e tarefas dos técnicos"
       >
-        <Button onClick={() => openQuickSchedule()}>
-          <Plus className="h-4 w-4" /> Agendar OS
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button>
+              <Plus className="h-4 w-4" /> Agendar
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => openQuickSchedule()}>
+              <Briefcase className="h-4 w-4 mr-2" /> Ordem de serviço
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => openTaskDialog()}>
+              <ListChecks className="h-4 w-4 mr-2" /> Tarefa do técnico
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </PageHeader>
 
       <Card className="p-4 space-y-4 overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-1 rounded-md border p-1">
-            <Button
-              size="sm"
-              variant={view === 'week' ? 'default' : 'ghost'}
-              onClick={() => setView('week')}
-            >Semana</Button>
-            <Button
-              size="sm"
-              variant={view === 'month' ? 'default' : 'ghost'}
-              onClick={() => setView('month')}
-            >Mês</Button>
+            <Button size="sm" variant={view === 'week' ? 'default' : 'ghost'} onClick={() => setView('week')}>
+              Semana
+            </Button>
+            <Button size="sm" variant={view === 'month' ? 'default' : 'ghost'} onClick={() => setView('month')}>
+              Mês
+            </Button>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
             <Button size="sm" variant="outline" onClick={() => handleNav(-1)}>
               <ChevronLeft className="h-4 w-4" />
-              <span className="hidden sm:inline">
-                {view === 'week' ? 'Semana anterior' : 'Mês anterior'}
-              </span>
+              <span className="hidden sm:inline">{view === 'week' ? 'Semana anterior' : 'Mês anterior'}</span>
             </Button>
-            <Button size="sm" variant="outline" onClick={() => setCursor(new Date())}>
-              Hoje
-            </Button>
+            <Button size="sm" variant="outline" onClick={() => setCursor(new Date())}>Hoje</Button>
             <Button size="sm" variant="outline" onClick={() => handleNav(1)}>
-              <span className="hidden sm:inline">
-                {view === 'week' ? 'Semana seguinte' : 'Mês seguinte'}
-              </span>
+              <span className="hidden sm:inline">{view === 'week' ? 'Semana seguinte' : 'Mês seguinte'}</span>
               <ChevronRight className="h-4 w-4" />
             </Button>
           </div>
@@ -158,27 +189,40 @@ export default function AgendaPage() {
           <WeekView
             weekStart={range.from}
             orders={orders}
+            tasks={tasks}
             technicians={technicians}
             onCardClick={(id) => navigate(`/service-orders/${id}`)}
             onCellClick={openQuickSchedule}
+            onTaskClick={(t) => openTaskDialog(undefined, undefined, t)}
           />
         ) : (
           <MonthView
             cursor={cursor}
             orders={orders}
+            tasks={tasks}
             selectedDay={selectedDay}
             onSelectDay={setSelectedDay}
             onCardClick={(id) => navigate(`/service-orders/${id}`)}
+            onTaskClick={(t) => openTaskDialog(undefined, undefined, t)}
           />
         )}
       </Card>
 
       <QuickScheduleDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
+        open={osDialogOpen}
+        onOpenChange={setOsDialogOpen}
         technicians={technicians}
         prefillTechnicianId={prefill.technicianId}
         prefillDate={prefill.date}
+      />
+
+      <AgendaTaskDialog
+        open={taskDialogOpen}
+        onOpenChange={(v) => { setTaskDialogOpen(v); if (!v) setEditingTask(null); }}
+        technicians={technicians}
+        prefillTechnicianId={prefill.technicianId}
+        prefillDate={prefill.date}
+        existing={editingTask}
       />
     </div>
   );
@@ -188,13 +232,15 @@ export default function AgendaPage() {
 // WEEK VIEW
 // ============================================================
 function WeekView({
-  weekStart, orders, technicians, onCardClick, onCellClick,
+  weekStart, orders, tasks, technicians, onCardClick, onCellClick, onTaskClick,
 }: {
   weekStart: Date;
   orders: any[];
+  tasks: any[];
   technicians: { id: string; full_name: string }[];
   onCardClick: (id: string) => void;
   onCellClick: (technicianId: string, date: Date) => void;
+  onTaskClick: (task: ExistingTask) => void;
 }) {
   const { t } = useI18n();
   const ag = t.agenda as any;
@@ -209,8 +255,7 @@ function WeekView({
     const map = new Map<string, any[]>();
     for (const o of orders) {
       if (!o.scheduled_start_at) continue;
-      const d = new Date(o.scheduled_start_at);
-      const dayKey = toLocalDateInput(d);
+      const dayKey = toLocalDateInput(new Date(o.scheduled_start_at));
       const techs = o.service_order_technicians || [];
       if (techs.length === 0) {
         const k = `__unassigned__|${dayKey}`;
@@ -226,6 +271,18 @@ function WeekView({
     }
     return map;
   }, [orders]);
+
+  const tasksByTechAndDay = useMemo(() => {
+    const map = new Map<string, any[]>();
+    for (const t of tasks) {
+      if (!t.scheduled_start_at) continue;
+      const dayKey = toLocalDateInput(new Date(t.scheduled_start_at));
+      const k = `${t.technician_user_id}|${dayKey}`;
+      if (!map.has(k)) map.set(k, []);
+      map.get(k)!.push(t);
+    }
+    return map;
+  }, [tasks]);
 
   const rows = [
     ...technicians,
@@ -258,6 +315,7 @@ function WeekView({
               {days.map((d, i) => {
                 const dayKey = toLocalDateInput(d);
                 const cellOrders = ordersByTechAndDay.get(`${tech.id}|${dayKey}`) || [];
+                const cellTasks = tasksByTechAndDay.get(`${tech.id}|${dayKey}`) || [];
                 return (
                   <div
                     key={`${tech.id}-${i}`}
@@ -273,7 +331,7 @@ function WeekView({
                   >
                     {cellOrders.map((o) => (
                       <div
-                        key={o.id}
+                        key={`o-${o.id}`}
                         data-card
                         onClick={() => onCardClick(o.id)}
                         className={cn(
@@ -301,6 +359,33 @@ function WeekView({
                         )}
                       </div>
                     ))}
+                    {cellTasks.map((t) => (
+                      <div
+                        key={`t-${t.id}`}
+                        data-card
+                        onClick={(e) => { e.stopPropagation(); onTaskClick(t); }}
+                        className={cn(
+                          'rounded-md p-1.5 text-xs cursor-pointer hover:ring-1 hover:ring-primary transition-all',
+                          TASK_PRIORITY_CLASSES[t.priority] || TASK_PRIORITY_CLASSES.normal,
+                          t.status === 'done' && 'opacity-60 line-through',
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-[10px] uppercase tracking-wide opacity-70 flex items-center gap-1">
+                            <ListChecks className="h-3 w-3" /> Tarefa
+                          </span>
+                          {t.scheduled_start_at && (
+                            <span className="text-[10px] font-semibold">
+                              {fmtTime(t.scheduled_start_at)}
+                            </span>
+                          )}
+                        </div>
+                        <div className="font-medium truncate">{t.title}</div>
+                        {t.location && (
+                          <div className="truncate opacity-75 text-[10px]">{t.location}</div>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 );
               })}
@@ -316,13 +401,15 @@ function WeekView({
 // MONTH VIEW
 // ============================================================
 function MonthView({
-  cursor, orders, selectedDay, onSelectDay, onCardClick,
+  cursor, orders, tasks, selectedDay, onSelectDay, onCardClick, onTaskClick,
 }: {
   cursor: Date;
   orders: any[];
+  tasks: any[];
   selectedDay: Date | null;
   onSelectDay: (d: Date | null) => void;
   onCardClick: (id: string) => void;
+  onTaskClick: (task: ExistingTask) => void;
 }) {
   const { t } = useI18n();
   const ag = t.agenda as any;
@@ -348,9 +435,20 @@ function MonthView({
     return map;
   }, [orders]);
 
-  const selectedOrders = selectedDay
-    ? ordersByDay.get(toLocalDateInput(selectedDay)) || []
-    : [];
+  const tasksByDay = useMemo(() => {
+    const map = new Map<string, any[]>();
+    for (const t of tasks) {
+      if (!t.scheduled_start_at) continue;
+      const k = toLocalDateInput(new Date(t.scheduled_start_at));
+      if (!map.has(k)) map.set(k, []);
+      map.get(k)!.push(t);
+    }
+    return map;
+  }, [tasks]);
+
+  const selectedKey = selectedDay ? toLocalDateInput(selectedDay) : null;
+  const selectedOrders = selectedKey ? ordersByDay.get(selectedKey) || [] : [];
+  const selectedTasks = selectedKey ? tasksByDay.get(selectedKey) || [] : [];
 
   return (
     <div className="grid gap-4 grid-cols-1 lg:grid-cols-[1fr_320px]">
@@ -367,6 +465,7 @@ function MonthView({
           {days.map((d, i) => {
             const dayKey = toLocalDateInput(d);
             const dayOrders = ordersByDay.get(dayKey) || [];
+            const dayTasks = tasksByDay.get(dayKey) || [];
             const inMonth = d.getMonth() === cursor.getMonth();
             const isToday = sameDay(d, today);
             const isSelected = selectedDay && sameDay(d, selectedDay);
@@ -383,13 +482,18 @@ function MonthView({
                 )}
               >
                 <div className="text-sm font-medium">{d.getDate()}</div>
-                {dayOrders.length > 0 && (
-                  <div className="mt-1">
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {dayOrders.length > 0 && (
                     <span className="inline-flex items-center rounded-full bg-primary/15 text-primary px-2 py-0.5 text-[10px] font-medium">
                       {dayOrders.length} OS
                     </span>
-                  </div>
-                )}
+                  )}
+                  {dayTasks.length > 0 && (
+                    <span className="inline-flex items-center rounded-full bg-secondary text-secondary-foreground px-2 py-0.5 text-[10px] font-medium">
+                      {dayTasks.length} tarefa{dayTasks.length > 1 ? 's' : ''}
+                    </span>
+                  )}
+                </div>
               </button>
             );
           })}
@@ -405,15 +509,15 @@ function MonthView({
         </div>
         {!selectedDay && (
           <p className="text-xs text-muted-foreground">
-            Clique em um dia do calendário para ver as OS programadas.
+            Clique em um dia do calendário para ver OS e tarefas programadas.
           </p>
         )}
-        {selectedDay && selectedOrders.length === 0 && (
-          <p className="text-xs text-muted-foreground">Nenhuma OS agendada neste dia.</p>
+        {selectedDay && selectedOrders.length === 0 && selectedTasks.length === 0 && (
+          <p className="text-xs text-muted-foreground">Nenhuma OS ou tarefa neste dia.</p>
         )}
         {selectedOrders.map((o) => (
           <div
-            key={o.id}
+            key={`o-${o.id}`}
             onClick={() => onCardClick(o.id)}
             className={cn(
               'rounded-md p-2 text-xs cursor-pointer hover:ring-1 hover:ring-primary transition-all',
@@ -437,13 +541,40 @@ function MonthView({
             </StatusBadge>
           </div>
         ))}
+        {selectedTasks.map((t) => (
+          <div
+            key={`t-${t.id}`}
+            onClick={() => onTaskClick(t)}
+            className={cn(
+              'rounded-md p-2 text-xs cursor-pointer hover:ring-1 hover:ring-primary transition-all',
+              TASK_PRIORITY_CLASSES[t.priority] || TASK_PRIORITY_CLASSES.normal,
+              t.status === 'done' && 'opacity-60 line-through',
+            )}
+          >
+            <div className="flex items-center justify-between">
+              <span className="uppercase tracking-wide opacity-70 text-[10px] flex items-center gap-1">
+                <ListChecks className="h-3 w-3" /> Tarefa
+              </span>
+              {t.scheduled_start_at && (
+                <span className="font-semibold">{fmtTime(t.scheduled_start_at)}</span>
+              )}
+            </div>
+            <div className="font-medium mt-0.5">{t.title}</div>
+            {t.app_users?.full_name && (
+              <div className="opacity-75 text-[11px]">{t.app_users.full_name}</div>
+            )}
+            {t.location && (
+              <div className="opacity-75 text-[11px]">{t.location}</div>
+            )}
+          </div>
+        ))}
       </Card>
     </div>
   );
 }
 
 // ============================================================
-// QUICK SCHEDULE DIALOG
+// QUICK SCHEDULE DIALOG (OS)
 // ============================================================
 function QuickScheduleDialog({
   open, onOpenChange, technicians, prefillTechnicianId, prefillDate,
@@ -463,7 +594,6 @@ function QuickScheduleDialog({
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('11:00');
 
-  // Reset when opening
   useMemo(() => {
     if (open) {
       setOrderId('');
