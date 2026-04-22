@@ -42,6 +42,7 @@ import { statusConfig, priorityConfig } from '@/lib/constants';
 import { StatusBadge } from '@/components/StatusBadge';
 import { ServiceFormDialog } from '@/components/ServiceFormDialog';
 import { RecordHistory } from '@/components/RecordHistory';
+import { ServiceOrderSignatures } from '@/components/ServiceOrderSignatures';
 import { WhatsAppSendHistoryDialog } from '@/components/WhatsAppSendHistoryDialog';
 import { SendViaZAPIDialog, type SendViaZAPITarget } from '@/components/SendViaZAPIDialog';
 import { useWhatsAppSendHistory } from '@/hooks/use-whatsapp-send-log';
@@ -1913,11 +1914,52 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         </div>
       </section>
 
+      {/* Signatures */}
+      {!isNew && orderId && (
+        <section className="rounded-xl border bg-card p-5 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold text-sm flex items-center gap-2">
+              <FileText className="h-4 w-4" />
+              Assinaturas do Cliente
+            </h2>
+          </div>
+          <ServiceOrderSignatures serviceOrderId={orderId} />
+        </section>
+      )}
+
       {/* Record History */}
       {!isNew && (
         <section className="rounded-xl border bg-card p-5 shadow-sm">
           <RecordHistory tableName="service_orders" recordId={orderId} />
         </section>
+      )}
+
+      {/* Bottom Save bar (mirrors top action) */}
+      {!isLocked && (
+        <div className="flex justify-end pt-2">
+          <Button
+            onClick={handleSave}
+            disabled={createSO.isPending || updateSO.isPending}
+            size="lg"
+            className="bg-accent text-accent-foreground hover:bg-accent/90 min-w-[180px]"
+          >
+            {t.common.save}
+          </Button>
+        </div>
+      )}
+
+      {/* Sticky floating Save (mobile/desktop) */}
+      {!isLocked && (
+        <div className="sticky bottom-4 z-30 flex justify-end pointer-events-none">
+          <Button
+            onClick={handleSave}
+            disabled={createSO.isPending || updateSO.isPending}
+            size="lg"
+            className="pointer-events-auto bg-accent text-accent-foreground hover:bg-accent/90 shadow-lg shadow-accent/30 gap-2"
+          >
+            {createSO.isPending || updateSO.isPending ? 'Salvando...' : t.common.save}
+          </Button>
+        </div>
       )}
 
       {/* PDF Options Dialog */}
