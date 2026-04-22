@@ -1330,58 +1330,80 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         </section>
       )}
 
-      {/* F - Parts (edit only) */}
-      {!isNew && (
-        <section className="rounded-xl border bg-card shadow-sm overflow-hidden">
-          <div className="p-5 border-b flex items-center justify-between">
-            <h2 className="font-semibold text-sm">{t.serviceOrders.parts}</h2>
-            <Button variant="outline" size="sm" className="gap-1" onClick={() => setShowPartForm(!showPartForm)}>
-              <Plus className="h-3 w-3" /> {t.serviceOrders.addPart}
+      {/* F - Parts — always visible (with always-on entry row) */}
+      <section className="rounded-xl border bg-card shadow-sm overflow-hidden">
+        <div className="p-5 border-b">
+          <h2 className="font-semibold text-sm">{t.serviceOrders.parts}</h2>
+          {isNew && (
+            <p className="text-xs text-muted-foreground mt-1">
+              Itens adicionados aqui serão salvos quando você criar a OS.
+            </p>
+          )}
+        </div>
+
+        {/* Always-on entry row */}
+        <div className="p-4 border-b bg-muted/30 space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+            <div className="sm:col-span-2">
+              <Label>{t.serviceOrders.product}</Label>
+              <EntityCombobox
+                value={partForm.product_id}
+                onChange={(v) => {
+                  const prod = products?.find((p) => p.id === v);
+                  setPartForm({
+                    ...partForm,
+                    product_id: v,
+                    unit_cost: prod?.cost_price || 0,
+                    unit_sale: prod?.sale_price || 0,
+                  });
+                }}
+                options={(products || [])
+                  .filter((p) => p.active)
+                  .map<EntityOption>((p) => ({
+                    value: p.id,
+                    label: p.product_name,
+                    description: `Estoque: ${p.stock_quantity}${p.sku ? ` · SKU ${p.sku}` : ''}`,
+                    searchTerms: [p.sku || '', p.barcode || '', p.brand || '', p.category || ''],
+                  }))}
+                placeholder="Selecionar produto"
+                searchPlaceholder="Buscar produto... (digite ao menos 3 letras)"
+                emptyText="Nenhum produto encontrado"
+              />
+            </div>
+            <div>
+              <Label>{t.serviceOrders.qty}</Label>
+              <Input type="number" min={1} value={partForm.quantity}
+                onChange={(e) => setPartForm({ ...partForm, quantity: parseInt(e.target.value) || 1 })} />
+            </div>
+            <div>
+              <Label>{t.serviceOrders.unitPrice}</Label>
+              <Input type="number" value={partForm.unit_sale}
+                onChange={(e) => setPartForm({ ...partForm, unit_sale: parseFloat(e.target.value) || 0 })} />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              onClick={handleAddPart}
+              disabled={!partForm.product_id || partForm.quantity <= 0 || addPart.isPending}
+            >
+              <Plus className="h-3 w-3 mr-1" /> Adicionar peça
             </Button>
           </div>
-          {showPartForm && (
-            <div className="p-4 border-b bg-muted/30 space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                <div className="sm:col-span-2">
-                  <Label>{t.serviceOrders.product}</Label>
-                  <Select value={partForm.product_id} onValueChange={(v) => {
-                    const prod = products?.find((p) => p.id === v);
-                    setPartForm({
-                      ...partForm, product_id: v,
-                      unit_cost: prod?.cost_price || 0,
-                      unit_sale: prod?.sale_price || 0,
-                    });
-                  }}>
-                    <SelectTrigger><SelectValue placeholder="Selecionar produto" /></SelectTrigger>
-                    <SelectContent>
-                      {products?.filter((p) => p.active).map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.product_name} (estoque: {p.stock_quantity})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label>{t.serviceOrders.qty}</Label>
-                  <Input type="number" min={1} value={partForm.quantity}
-                    onChange={(e) => setPartForm({ ...partForm, quantity: parseInt(e.target.value) || 1 })} />
-                </div>
-                <div>
-                  <Label>{t.serviceOrders.unitPrice}</Label>
-                  <Input type="number" value={partForm.unit_sale}
-                    onChange={(e) => setPartForm({ ...partForm, unit_sale: parseFloat(e.target.value) || 0 })} />
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <Button size="sm" onClick={handleAddPart} disabled={addPart.isPending}>{t.common.save}</Button>
-                <Button size="sm" variant="outline" onClick={() => setShowPartForm(false)}>{t.common.cancel}</Button>
-              </div>
-            </div>
-          )}
-          {(!parts || parts.length === 0) ? (
-            <p className="text-sm text-muted-foreground p-5">{t.serviceOrders.noPartsYet}</p>
-          ) : (
+        </div>
+
+        {/* List of parts already added */}
+        {(() => {
+          const persisted = (parts || []) as any[];
+          const drafts = isNew ? draftParts : [];
+          if (persisted.length === 0 && drafts.length === 0) {
+            return (
+              <p className="text-sm text-muted-foreground p-5">
+                {t.serviceOrders.noPartsYet}
+              </p>
+            );
+          }
+          return (
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/50">
@@ -1393,7 +1415,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {parts.map((p: any) => (
+                {persisted.map((p: any) => (
                   <tr key={p.id} className="border-b last:border-0">
                     <td className="px-4 py-3 font-medium">{p.products?.product_name}</td>
                     <td className="px-4 py-3 text-center">{p.quantity}</td>
@@ -1410,11 +1432,28 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                     </td>
                   </tr>
                 ))}
+                {drafts.map((d) => (
+                  <tr key={d.tempId} className="border-b last:border-0 bg-amber-50/40">
+                    <td className="px-4 py-3 font-medium">
+                      {d.product_name}
+                      <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">rascunho</span>
+                    </td>
+                    <td className="px-4 py-3 text-center">{d.quantity}</td>
+                    <td className="px-4 py-3 text-right">{formatCurrency(d.unit_sale)}</td>
+                    <td className="px-4 py-3 text-right font-semibold">{formatCurrency(d.unit_sale * d.quantity)}</td>
+                    <td className="px-4 py-3">
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
+                        onClick={() => setDraftParts((prev) => prev.filter((x) => x.tempId !== d.tempId))}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
-          )}
-        </section>
-      )}
+          );
+        })()}
+      </section>
 
       {/* Expenses section (edit only) */}
       {!isNew && (
