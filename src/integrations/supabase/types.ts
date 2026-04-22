@@ -886,22 +886,28 @@ export type Database = {
       payment_condition_presets: {
         Row: {
           active: boolean | null
+          auto_generate_collections: boolean | null
           created_at: string | null
           id: string
+          installments: Json | null
           label: string
           sort_order: number | null
         }
         Insert: {
           active?: boolean | null
+          auto_generate_collections?: boolean | null
           created_at?: string | null
           id?: string
+          installments?: Json | null
           label: string
           sort_order?: number | null
         }
         Update: {
           active?: boolean | null
+          auto_generate_collections?: boolean | null
           created_at?: string | null
           id?: string
+          installments?: Json | null
           label?: string
           sort_order?: number | null
         }
@@ -1657,6 +1663,7 @@ export type Database = {
           marina_id: string | null
           operational_cost_total: number | null
           parts_cost_total: number | null
+          payment_condition_preset_id: string | null
           payment_conditions: string | null
           payment_status: string | null
           priority: string
@@ -1719,6 +1726,7 @@ export type Database = {
           marina_id?: string | null
           operational_cost_total?: number | null
           parts_cost_total?: number | null
+          payment_condition_preset_id?: string | null
           payment_conditions?: string | null
           payment_status?: string | null
           priority?: string
@@ -1781,6 +1789,7 @@ export type Database = {
           marina_id?: string | null
           operational_cost_total?: number | null
           parts_cost_total?: number | null
+          payment_condition_preset_id?: string | null
           payment_conditions?: string | null
           payment_status?: string | null
           priority?: string
@@ -1840,6 +1849,13 @@ export type Database = {
             columns: ["marina_id"]
             isOneToOne: false
             referencedRelation: "marinas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_orders_payment_condition_preset_id_fkey"
+            columns: ["payment_condition_preset_id"]
+            isOneToOne: false
+            referencedRelation: "payment_condition_presets"
             referencedColumns: ["id"]
           },
           {
