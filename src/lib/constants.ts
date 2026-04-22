@@ -7,6 +7,7 @@ export const statusConfig: Record<ServiceOrderStatus, { label: string; className
   in_progress: { label: 'In Progress', className: 'bg-warning/15 text-warning border border-warning/30' },
   awaiting_parts: { label: 'Awaiting Parts', className: 'bg-destructive/10 text-destructive border border-destructive/30' },
   awaiting_client: { label: 'Awaiting Client', className: 'bg-muted text-muted-foreground border border-border' },
+  approved: { label: 'Approved', className: 'bg-success/15 text-success border border-success/30' },
   completed: { label: 'Completed', className: 'bg-success/15 text-success border border-success/30' },
   invoiced: { label: 'Invoiced', className: 'bg-accent/15 text-accent border border-accent/30' },
   cancelled: { label: 'Cancelled', className: 'bg-destructive/10 text-muted-foreground line-through' },

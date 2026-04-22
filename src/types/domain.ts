@@ -91,7 +91,7 @@ export interface Product {
   updated_at: string;
 }
 
-export type ServiceOrderStatus = 'draft' | 'scheduled' | 'open' | 'in_progress' | 'awaiting_parts' | 'awaiting_client' | 'completed' | 'invoiced' | 'cancelled';
+export type ServiceOrderStatus = 'draft' | 'scheduled' | 'open' | 'in_progress' | 'awaiting_parts' | 'awaiting_client' | 'approved' | 'completed' | 'invoiced' | 'cancelled';
 export type ServiceOrderPriority = 'low' | 'normal' | 'high' | 'urgent';
 export type ServiceType = 'diagnosis' | 'repair' | 'installation' | 'preventive_maintenance' | 'consulting' | 'engineering_project' | 'commissioning' | 'inspection';
 
