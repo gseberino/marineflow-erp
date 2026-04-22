@@ -2136,6 +2136,31 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         onOpenChange={v => { if (!v) setZapiTarget(null); }}
         target={zapiTarget}
       />
+
+      <QuickProductDialog
+        open={quickProductOpen}
+        onOpenChange={setQuickProductOpen}
+        initialName={quickProductName}
+        onCreated={(prod) => {
+          setPartForm({
+            ...partForm,
+            product_id: prod.id,
+            unit_cost: prod.cost_price,
+            unit_sale: prod.sale_price,
+          });
+        }}
+      />
+
+      <PriceCalculatorDialog
+        open={partCalcOpen}
+        onOpenChange={setPartCalcOpen}
+        initialCost={partForm.unit_cost || 0}
+        initialPrice={partForm.unit_sale || 0}
+        initialMargin={30}
+        initialMarkup={50}
+        defaultMethod="margin"
+        onConfirm={(price) => setPartForm({ ...partForm, unit_sale: price })}
+      />
     </div>
   );
 }
