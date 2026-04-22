@@ -298,6 +298,20 @@ export default function PublicServiceOrderView() {
         termsText,
       );
 
+      // Gera o PDF imutável da OS no exato estado em que está sendo assinado
+      let signedPdfBase64: string | undefined;
+      try {
+        const pdfBlob = await generatePDFBlob(buildPdfData(), DEFAULT_PDF_OPTIONS);
+        signedPdfBase64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(String(reader.result || ''));
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(pdfBlob);
+        });
+      } catch (pdfErr) {
+        console.warn('[signature] falha ao gerar PDF arquivado:', pdfErr);
+      }
+
       const { data: result, error: fnErr } = await supabase.functions.invoke('submit-signature', {
         body: {
           share_token: token,
@@ -305,6 +319,7 @@ export default function PublicServiceOrderView() {
           signature_png_base64: signaturePng,
           document_hash: hash,
           accepted_terms_snapshot: termsText || null,
+          signed_pdf_base64: signedPdfBase64,
         },
       });
 
