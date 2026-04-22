@@ -132,10 +132,16 @@ export default function WhatsAppLogsPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        title="Logs do Webhook WhatsApp"
-        description="Veja toda mensagem que entrou ou saiu via Z-API. Filtre por tipo e status para diagnosticar 'mensagens não reconhecidas'."
-      />
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <PageHeader
+          title="Logs do Webhook WhatsApp"
+          description="Veja toda mensagem que entrou ou saiu via Z-API. Filtre por tipo e status para diagnosticar 'mensagens não reconhecidas'."
+        />
+        <Button onClick={reprocessUnknown} disabled={reprocessing} variant="outline">
+          <Wand2 className={`h-4 w-4 mr-2 ${reprocessing ? 'animate-spin' : ''}`} />
+          {reprocessing ? 'Reprocessando…' : 'Reprocessar não reconhecidas'}
+        </Button>
+      </div>
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
