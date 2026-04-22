@@ -166,11 +166,22 @@ export function generatePDF(data: PDFData, options: PDFOptions): void {
 export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promise<Blob> {
   const html = buildHTMLDocument(data, options);
 
-  // Container off-screen com largura A4 para captura fiel
+  // Container off-screen com largura A4 para captura fiel.
+  // IMPORTANTE: usar `position:absolute` (NÃO `fixed`) e mantê-lo no fluxo de layout.
+  // Com `position:fixed;left:-99999px` o html2canvas calcula altura zero em Chromium
+  // recente, gerando PDF totalmente em branco.
   const container = document.createElement('div');
-  container.style.cssText = 'position:fixed;left:-99999px;top:0;width:794px;background:#fff;';
+  container.style.cssText =
+    'position:absolute;left:-10000px;top:0;width:794px;background:#ffffff;' +
+    'z-index:-1;visibility:visible;';
   container.innerHTML = html;
   document.body.appendChild(container);
+
+  // Aguarda o browser calcular layout + carregar fontes antes da captura
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  if ((document as any).fonts?.ready) {
+    try { await (document as any).fonts.ready; } catch { /* ignore */ }
+  }
 
   try {
     // Import dinâmico para não pesar o bundle inicial
@@ -183,12 +194,29 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
         margin: [10, 10, 10, 10],
         filename: 'documento.pdf',
         image: { type: 'jpeg', quality: 0.92 },
-        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: '#ffffff',
+          // Força altura/largura reais — evita captura zerada em containers off-screen
+          windowWidth: 794,
+          width: 794,
+          height: container.scrollHeight,
+          scrollX: 0,
+          scrollY: 0,
+        },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
         pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
       })
       .outputPdf('blob');
 
+    // Sanity check — blob suspeito (<2KB) costuma significar página em branco
+    if (blob.size < 2000) {
+      console.warn('[generatePDFBlob] PDF suspeito de estar vazio:', {
+        size: blob.size,
+        scrollHeight: container.scrollHeight,
+      });
+    }
     return blob;
   } finally {
     if (document.body.contains(container)) document.body.removeChild(container);
