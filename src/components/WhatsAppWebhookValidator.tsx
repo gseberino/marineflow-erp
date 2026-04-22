@@ -4,7 +4,8 @@ import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { toast } from '@/hooks/use-toast';
-import { Activity, CheckCircle2, AlertTriangle, XCircle, Copy, RefreshCw } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
+import { Activity, CheckCircle2, AlertTriangle, XCircle, Copy, RefreshCw, Wand2 } from 'lucide-react';
 
 type HealthStatus = 'ok' | 'stale' | 'never';
 
@@ -24,8 +25,36 @@ const WEBHOOK_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/whatsapp-
 
 export function WhatsAppWebhookValidator() {
   const [loading, setLoading] = useState(false);
+  const [configuring, setConfiguring] = useState(false);
   const [data, setData] = useState<HealthData | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
+
+  const configureZapi = async () => {
+    setConfiguring(true);
+    try {
+      const { data: result, error } = await supabase.functions.invoke('zapi-configure-webhook');
+      if (error) throw error;
+      if (!result?.ok) {
+        toast({
+          title: 'Configuração parcial',
+          description: 'Alguns webhooks falharam. Veja detalhes no console (F12).',
+          variant: 'destructive',
+        });
+        console.warn('zapi-configure-webhook result', result);
+      } else {
+        toast({
+          title: '✅ Webhook configurado na Z-API',
+          description: 'Todos os eventos (recebida, status, etc) agora apontam para o sistema.',
+        });
+        setTimeout(check, 2000);
+      }
+      console.log('zapi-configure-webhook details:', result);
+    } catch (e: any) {
+      toast({ title: 'Erro ao configurar', description: e.message, variant: 'destructive' });
+    } finally {
+      setConfiguring(false);
+    }
+  };
 
   const check = async () => {
     setLoading(true);
@@ -85,17 +114,31 @@ export function WhatsAppWebhookValidator() {
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <Button onClick={check} disabled={loading}>
+          <Button onClick={configureZapi} disabled={configuring} variant="default">
+            <Wand2 className={`h-4 w-4 mr-2 ${configuring ? 'animate-pulse' : ''}`} />
+            {configuring ? 'Configurando…' : 'Configurar webhook na Z-API automaticamente'}
+          </Button>
+          <Button onClick={check} disabled={loading} variant="outline">
             <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
             {loading ? 'Validando…' : 'Validar webhook agora'}
           </Button>
           <Button
-            variant={autoRefresh ? 'default' : 'outline'}
+            variant={autoRefresh ? 'secondary' : 'outline'}
             onClick={() => setAutoRefresh((v) => !v)}
           >
             {autoRefresh ? '⏸ Parar monitoramento' : '▶ Monitorar ao vivo (5s)'}
           </Button>
         </div>
+
+        <Alert>
+          <Wand2 className="h-4 w-4" />
+          <AlertTitle>Configuração automática</AlertTitle>
+          <AlertDescription>
+            Clique em <strong>"Configurar webhook na Z-API automaticamente"</strong> para apontar todos os eventos
+            (mensagem recebida, status de entrega, mensagens enviadas pelo seu celular) diretamente para este
+            sistema. Não precisa mexer no painel da Z-API.
+          </AlertDescription>
+        </Alert>
 
         {data && (
           <>
