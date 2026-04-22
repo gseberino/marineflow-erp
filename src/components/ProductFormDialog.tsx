@@ -327,6 +327,56 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
               <Label>{t.products.productName} *</Label>
               <Input required value={form.product_name} onChange={e => set('product_name', e.target.value)} />
             </div>
+
+            {/* Foto do produto */}
+            <div className="col-span-2">
+              <Label>Foto do produto</Label>
+              <div className="mt-1 flex items-center gap-3">
+                {(form as any).image_url ? (
+                  <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-md border bg-muted">
+                    <img
+                      src={(form as any).image_url}
+                      alt={form.product_name || 'Produto'}
+                      className="h-full w-full object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleImageRemove}
+                      className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-destructive-foreground shadow hover:opacity-90"
+                      aria-label="Remover imagem"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-md border border-dashed bg-muted/40 text-muted-foreground">
+                    <Package className="h-7 w-7" />
+                  </div>
+                )}
+                <div className="flex flex-col gap-1">
+                  <input
+                    id="product-image-upload"
+                    type="file"
+                    accept="image/jpeg,image/jpg,image/png,image/webp"
+                    className="hidden"
+                    onChange={handleImageUpload}
+                    disabled={uploading}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1"
+                    disabled={uploading}
+                    onClick={() => document.getElementById('product-image-upload')?.click()}
+                  >
+                    <Upload className="h-3.5 w-3.5" />
+                    {uploading ? 'Enviando...' : ((form as any).image_url ? 'Trocar foto' : 'Adicionar foto')}
+                  </Button>
+                  <p className="text-[10px] text-muted-foreground">JPG, PNG ou WEBP, máx 2MB.</p>
+                </div>
+              </div>
+            </div>
             <div>
               <Label>{t.products.sku}</Label>
               <Input value={form.sku ?? ''} onChange={e => set('sku', e.target.value)} />
