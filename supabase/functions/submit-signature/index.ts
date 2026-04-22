@@ -18,6 +18,7 @@ interface Payload {
   signature_png_base64: string; // data URL ou base64 puro
   document_hash: string;
   accepted_terms_snapshot?: string;
+  signed_pdf_base64?: string; // PDF imutável da OS no momento da assinatura (data URL ou base64 puro)
 }
 
 function jsonResponse(body: unknown, status = 200) {
