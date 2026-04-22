@@ -1116,77 +1116,100 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         </Collapsible>
       </section>
 
-      {/* E - Labor Services (edit only) */}
-      {!isNew && (
-        <section className="rounded-xl border bg-card shadow-sm overflow-hidden">
-          <div className="p-5 border-b flex items-center justify-between">
-            <h2 className="font-semibold text-sm">{t.services.laborSection}</h2>
-            <Button variant="outline" size="sm" className="gap-1" onClick={() => setShowSvcForm(!showSvcForm)}>
-              <Plus className="h-3 w-3" /> {t.services.selectService}
-            </Button>
-          </div>
-          {showSvcForm && (
-            <div className="p-4 border-b bg-muted/30 space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <Label>{t.services.selectService}</Label>
-                  <Select value={svcForm.service_id} onValueChange={(v) => {
-                    const svc = services?.find((s) => s.id === v);
-                    if (svc) {
-                      setSvcForm({
-                        ...svcForm,
-                        service_id: v,
-                        service_name_snapshot: svc.service_name,
-                        description_snapshot: svc.description || '',
-                        billing_unit_snapshot: svc.billing_unit,
-                        unit_price: svc.default_price || 0,
-                      });
-                    }
-                  }}>
-                    <SelectTrigger><SelectValue placeholder={t.services.selectService} /></SelectTrigger>
-                    <SelectContent>
-                      {services?.filter((s) => s.active).map((s) => (
-                        <SelectItem key={s.id} value={s.id}>
-                          {s.service_name} ({BILLING_UNIT_LABELS[s.billing_unit] || s.billing_unit} — {formatCurrency(s.default_price || 0)})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <button type="button" className="text-xs text-primary mt-1 hover:underline"
-                    onClick={() => setShowNewServiceDialog(true)}>
-                    {t.services.registerNew}
-                  </button>
-                </div>
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <Label>{t.serviceOrders.qty}</Label>
-                    <Input type="number" min={0.001} step="any" value={svcForm.quantity}
-                      onChange={(e) => setSvcForm({ ...svcForm, quantity: parseFloat(e.target.value) || 1 })} />
-                  </div>
-                  <div>
-                    <Label>{t.serviceOrders.unitPrice}</Label>
-                    <Input type="number" value={svcForm.unit_price}
-                      onChange={(e) => setSvcForm({ ...svcForm, unit_price: parseFloat(e.target.value) || 0 })} />
-                  </div>
-                  <div>
-                    <Label>{t.common.total}</Label>
-                    <Input readOnly value={formatCurrency(svcForm.quantity * svcForm.unit_price)} className="bg-muted" />
-                  </div>
-                </div>
+      {/* E - Labor Services — always visible (with always-on entry row) */}
+      <section className="rounded-xl border bg-card shadow-sm overflow-hidden">
+        <div className="p-5 border-b">
+          <h2 className="font-semibold text-sm">{t.services.laborSection}</h2>
+          {isNew && (
+            <p className="text-xs text-muted-foreground mt-1">
+              Itens adicionados aqui serão salvos quando você criar a OS.
+            </p>
+          )}
+        </div>
+
+        {/* Always-on entry row */}
+        <div className="p-4 border-b bg-muted/30 space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <Label>{t.services.selectService}</Label>
+              <EntityCombobox
+                value={svcForm.service_id}
+                onChange={(v) => {
+                  const svc = services?.find((s) => s.id === v);
+                  if (svc) {
+                    setSvcForm({
+                      ...svcForm,
+                      service_id: v,
+                      service_name_snapshot: svc.service_name,
+                      description_snapshot: svc.description || '',
+                      billing_unit_snapshot: svc.billing_unit,
+                      unit_price: svc.default_price || 0,
+                    });
+                  }
+                }}
+                options={(services || [])
+                  .filter((s) => s.active)
+                  .map<EntityOption>((s) => ({
+                    value: s.id,
+                    label: s.service_name,
+                    description: `${BILLING_UNIT_LABELS[s.billing_unit] || s.billing_unit} — ${formatCurrency(s.default_price || 0)}`,
+                    searchTerms: [s.category || ''],
+                  }))}
+                placeholder={t.services.selectService}
+                searchPlaceholder="Buscar serviço... (digite ao menos 3 letras)"
+                emptyText="Nenhum serviço encontrado"
+                onCreate={() => setShowNewServiceDialog(true)}
+                createLabel={t.services.registerNew}
+              />
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <Label>{t.serviceOrders.qty}</Label>
+                <Input type="number" min={0.001} step="any" value={svcForm.quantity}
+                  onChange={(e) => setSvcForm({ ...svcForm, quantity: parseFloat(e.target.value) || 1 })} />
               </div>
               <div>
-                <Label>{t.common.notes}</Label>
-                <Input value={svcForm.notes} onChange={(e) => setSvcForm({ ...svcForm, notes: e.target.value })} />
+                <Label>{t.serviceOrders.unitPrice}</Label>
+                <Input type="number" value={svcForm.unit_price}
+                  onChange={(e) => setSvcForm({ ...svcForm, unit_price: parseFloat(e.target.value) || 0 })} />
               </div>
-              <div className="flex gap-2">
-                <Button size="sm" onClick={handleAddService} disabled={addService.isPending}>{t.common.save}</Button>
-                <Button size="sm" variant="outline" onClick={() => setShowSvcForm(false)}>{t.common.cancel}</Button>
+              <div>
+                <Label>{t.common.total}</Label>
+                <Input readOnly value={formatCurrency(svcForm.quantity * svcForm.unit_price)} className="bg-muted" />
               </div>
             </div>
-          )}
-          {(!soServices || soServices.length === 0) ? (
-            <p className="text-sm text-muted-foreground p-5">{t.services.noServicesLinked}</p>
-          ) : (
+          </div>
+          <div>
+            <Label>{t.common.notes}</Label>
+            <Input value={svcForm.notes} onChange={(e) => setSvcForm({ ...svcForm, notes: e.target.value })} />
+          </div>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              onClick={handleAddService}
+              disabled={
+                !svcForm.service_name_snapshot ||
+                svcForm.quantity <= 0 ||
+                addService.isPending
+              }
+            >
+              <Plus className="h-3 w-3 mr-1" /> Adicionar serviço
+            </Button>
+          </div>
+        </div>
+
+        {/* List of services already added */}
+        {(() => {
+          const persisted = (soServices || []) as any[];
+          const drafts = isNew ? draftServices : [];
+          if (persisted.length === 0 && drafts.length === 0) {
+            return (
+              <p className="text-sm text-muted-foreground p-5">
+                {t.services.noServicesLinked}
+              </p>
+            );
+          }
+          return (
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/50">
@@ -1199,7 +1222,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {soServices.map((s: any) => (
+                {persisted.map((s: any) => (
                   <tr key={s.id} className="border-b last:border-0">
                     <td className="px-4 py-3 font-medium">
                       {s.service_name_snapshot}
@@ -1217,11 +1240,30 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                     </td>
                   </tr>
                 ))}
+                {drafts.map((d) => (
+                  <tr key={d.tempId} className="border-b last:border-0 bg-amber-50/40">
+                    <td className="px-4 py-3 font-medium">
+                      {d.service_name_snapshot}
+                      <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">rascunho</span>
+                      {d.description_snapshot && <span className="block text-xs text-muted-foreground">{d.description_snapshot}</span>}
+                    </td>
+                    <td className="px-4 py-3 text-center text-muted-foreground">{BILLING_UNIT_LABELS[d.billing_unit_snapshot] || d.billing_unit_snapshot}</td>
+                    <td className="px-4 py-3 text-center">{d.quantity}</td>
+                    <td className="px-4 py-3 text-right">{formatCurrency(d.unit_price_snapshot)}</td>
+                    <td className="px-4 py-3 text-right font-semibold">{formatCurrency(d.unit_price_snapshot * d.quantity)}</td>
+                    <td className="px-4 py-3">
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
+                        onClick={() => setDraftServices((prev) => prev.filter((x) => x.tempId !== d.tempId))}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
-          )}
-        </section>
-      )}
+          );
+        })()}
+      </section>
 
       {/* New Service Dialog */}
       <ServiceFormDialog open={showNewServiceDialog} onOpenChange={setShowNewServiceDialog} />
