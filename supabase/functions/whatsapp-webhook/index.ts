@@ -160,10 +160,27 @@ Deno.serve(async (req) => {
       return jr({ error: "Invalid payload" }, 400);
     }
 
-    // Log mínimo para auditoria de chegada
-    console.log("webhook payload type=", (payload as any).type || (payload as any).event, "phone=", (payload as any).phone);
+    // Log detalhado para auditoria
+    const pAny = payload as any;
+    console.log("webhook IN", JSON.stringify({
+      type: pAny.type || pAny.event,
+      phone: pAny.phone,
+      fromMe: pAny.fromMe,
+      isGroup: pAny.isGroup,
+      messageId: pAny.messageId || pAny.id,
+      hasText: !!pAny.text,
+      hasImage: !!pAny.image,
+      hasAudio: !!pAny.audio,
+      keys: Object.keys(pAny).slice(0, 20),
+    }));
 
-    const fromMe = !!(payload as any).fromMe;
+    // Ignorar mensagens de grupos (a menos que queira tratar depois)
+    if (pAny.isGroup === true) {
+      console.log("ignored group message", pAny.phone);
+      return jr({ ok: true, ignored: "group" });
+    }
+
+    const fromMe = !!pAny.fromMe;
     if (fromMe) {
       // Registra como outbound (echo) para manter histórico unificado
       const phoneOut = normalizePhone((payload as any).phone || (payload as any).chatId);
