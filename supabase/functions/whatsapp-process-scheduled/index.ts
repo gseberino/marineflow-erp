@@ -44,7 +44,7 @@ Deno.serve(async (req) => {
       .select("value")
       .eq("key", "app_public_url")
       .maybeSingle();
-    const baseUrl = String(urlSetting?.value || Deno.env.get("APP_PUBLIC_URL") || "");
+    const baseUrl = String(urlSetting?.value || Deno.env.get("APP_PUBLIC_URL") || "https://hbrmarine.online");
 
     let processed = 0;
     let succeeded = 0;

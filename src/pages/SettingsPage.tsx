@@ -322,7 +322,7 @@ function CompanyTab() {
     bank_agency: '',
     bank_account: '',
     pix_key: '',
-    app_public_url: '',
+    app_public_url: 'https://hbrmarine.online',
   });
 
   useEffect(() => {
@@ -355,7 +355,7 @@ function CompanyTab() {
           bank_agency: map.bank_agency || '',
           bank_account: map.bank_account || '',
           pix_key: map.pix_key || '',
-          app_public_url: map.app_public_url || '',
+          app_public_url: map.app_public_url || 'https://hbrmarine.online',
         }));
       }
       setLoading(false);
@@ -529,7 +529,7 @@ function CompanyTab() {
               type="url"
               value={form.app_public_url}
               onChange={e => set('app_public_url', e.target.value)}
-              placeholder="https://..."
+              placeholder="https://hbrmarine.online"
               className="mt-1"
             />
             <p className="text-xs text-muted-foreground mt-1">
