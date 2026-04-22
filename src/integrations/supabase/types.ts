@@ -134,35 +134,62 @@ export type Database = {
       app_users: {
         Row: {
           active: boolean
+          address_complement: string | null
+          address_line_1: string | null
+          address_number: string | null
           avatar_url: string | null
+          city: string | null
+          country: string | null
           created_at: string
           email: string
           full_name: string
           id: string
+          neighborhood: string | null
+          notes: string | null
           phone: string | null
+          postal_code: string | null
           role: string
+          state: string | null
           updated_at: string
         }
         Insert: {
           active?: boolean
+          address_complement?: string | null
+          address_line_1?: string | null
+          address_number?: string | null
           avatar_url?: string | null
+          city?: string | null
+          country?: string | null
           created_at?: string
           email: string
           full_name: string
           id: string
+          neighborhood?: string | null
+          notes?: string | null
           phone?: string | null
+          postal_code?: string | null
           role: string
+          state?: string | null
           updated_at?: string
         }
         Update: {
           active?: boolean
+          address_complement?: string | null
+          address_line_1?: string | null
+          address_number?: string | null
           avatar_url?: string | null
+          city?: string | null
+          country?: string | null
           created_at?: string
           email?: string
           full_name?: string
           id?: string
+          neighborhood?: string | null
+          notes?: string | null
           phone?: string | null
+          postal_code?: string | null
           role?: string
+          state?: string | null
           updated_at?: string
         }
         Relationships: []

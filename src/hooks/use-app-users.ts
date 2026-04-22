@@ -68,6 +68,10 @@ export function useUpdateAppUser() {
     mutationFn: async ({ id, ...input }: {
       id: string; full_name?: string; email?: string;
       role?: string; phone?: string; active?: boolean;
+      postal_code?: string | null; address_line_1?: string | null;
+      address_number?: string | null; address_complement?: string | null;
+      neighborhood?: string | null; city?: string | null;
+      state?: string | null; country?: string | null; notes?: string | null;
     }) => {
       const { data, error } = await supabase
         .from('app_users')

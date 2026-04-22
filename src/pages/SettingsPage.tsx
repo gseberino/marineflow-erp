@@ -6,10 +6,12 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { MapPin, DollarSign, Users, Globe, Banknote, CreditCard, FileText, Tag, Receipt, Package, Mail, MessageCircle } from 'lucide-react';
+import { MapPin, DollarSign, Users, Globe, Banknote, CreditCard, FileText, Tag, Receipt, Package, Mail, MessageCircle, Pencil } from 'lucide-react';
 import { WhatsAppTemplatesManager } from '@/components/WhatsAppTemplatesManager';
 import { WhatsAppReminderSettings } from '@/components/WhatsAppReminderSettings';
 import { WhatsAppWebhookValidator } from '@/components/WhatsAppWebhookValidator';
+import { AppUserEditDialog } from '@/components/AppUserEditDialog';
+import { useAuth } from '@/hooks/use-auth';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useCardFees, useUpdateCardFee } from '@/hooks/use-card-fees';
 import { useFinancialCategories, useCreateFinancialCategory, useUpdateFinancialCategory } from '@/hooks/use-financial-categories';
@@ -982,10 +984,13 @@ function ProductCategoriesTab() {
 
 function UsersTab() {
   const { t } = useI18n();
+  const { user: currentUser } = useAuth();
+  const isCurrentUserAdmin = currentUser?.role === 'admin';
   const { data: users, isLoading } = useAppUsersHook();
   const createUser = useCreateAppUser();
   const updateUser = useUpdateAppUser();
   const [showNew, setShowNew] = useState(false);
+  const [editingUser, setEditingUser] = useState<any | null>(null);
   const [newForm, setNewForm] = useState({
     full_name: '', email: '', role: 'technician', phone: '',
   });
@@ -1038,23 +1043,33 @@ function UsersTab() {
                   <Switch checked={u.active} onCheckedChange={v => updateUser.mutate({ id: u.id, active: v })} />
                 </td>
                 <td className="px-4 py-2 text-center">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={async () => {
-                      try {
-                        await supabase.auth.resetPasswordForEmail(u.email, {
-                          redirectTo: window.location.origin + '/reset-password',
-                        });
-                        toast.success(`Link enviado para ${u.email}`);
-                      } catch {
-                        toast.error('Erro ao enviar email');
-                      }
-                    }}
-                  >
-                    <Mail className="h-3.5 w-3.5 mr-1" />
-                    Enviar acesso
-                  </Button>
+                  <div className="flex items-center justify-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setEditingUser(u)}
+                    >
+                      <Pencil className="h-3.5 w-3.5 mr-1" />
+                      Editar
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={async () => {
+                        try {
+                          await supabase.auth.resetPasswordForEmail(u.email, {
+                            redirectTo: window.location.origin + '/reset-password',
+                          });
+                          toast.success(`Link enviado para ${u.email}`);
+                        } catch {
+                          toast.error('Erro ao enviar email');
+                        }
+                      }}
+                    >
+                      <Mail className="h-3.5 w-3.5 mr-1" />
+                      Enviar acesso
+                    </Button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -1103,6 +1118,13 @@ function UsersTab() {
           + Novo Usuário
         </Button>
       )}
+
+      <AppUserEditDialog
+        user={editingUser}
+        open={!!editingUser}
+        onOpenChange={(o) => { if (!o) setEditingUser(null); }}
+        isCurrentUserAdmin={isCurrentUserAdmin}
+      />
     </div>
   );
 }
