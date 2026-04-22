@@ -59,6 +59,19 @@ Deno.serve(async (req) => {
         .update({ status: "processing", attempt_count: (job.attempt_count || 0) + 1 })
         .eq("id", job.id);
 
+      // Se baseUrl não foi configurada, marca como failed e pula (sem exceção)
+      if (!baseUrl) {
+        failed++;
+        await admin
+          .from("whatsapp_scheduled_sends")
+          .update({
+            status: "failed",
+            last_error: "APP_PUBLIC_URL não configurada. Configure em Configurações → Empresa.",
+          })
+          .eq("id", job.id);
+        continue;
+      }
+
       try {
         // Chama whatsapp-send via fetch interno
         const sendUrl = `${SUPABASE_URL}/functions/v1/whatsapp-send`;
@@ -82,7 +95,6 @@ Deno.serve(async (req) => {
             shareToken = so?.share_token || null;
           }
           if (!shareToken) throw new Error("share_token indisponível para envio link");
-          const baseUrl = Deno.env.get("APP_PUBLIC_URL") || "";
           payload.kind = "link";
           payload.link_url = `${baseUrl}/view/${shareToken}`;
           payload.link_title = job.link_title || "";
@@ -101,7 +113,6 @@ Deno.serve(async (req) => {
             shareToken = so?.share_token || null;
           }
           if (!shareToken) throw new Error("share_token indisponível");
-          const baseUrl = Deno.env.get("APP_PUBLIC_URL") || "";
           payload.kind = "link";
           payload.link_url = `${baseUrl}/view/${shareToken}`;
           payload.link_title = job.link_title || "";
