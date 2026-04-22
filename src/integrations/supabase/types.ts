@@ -2122,6 +2122,137 @@ export type Database = {
         }
         Relationships: []
       }
+      whatsapp_scheduled_sends: {
+        Row: {
+          attempt_count: number
+          auto_retry: boolean
+          caption: string | null
+          client_id: string | null
+          context: string | null
+          created_at: string
+          created_by: string | null
+          document_type: string | null
+          id: string
+          include_link_in_caption: boolean
+          last_error: string | null
+          last_response: Json | null
+          last_run_at: string | null
+          link_description: string | null
+          link_title: string | null
+          max_attempts: number
+          message: string
+          next_run_at: string
+          pdf_filename: string | null
+          phone: string
+          receivable_id: string | null
+          recurrence_day_of_month: number | null
+          recurrence_days_of_week: number[] | null
+          recurrence_end_date: string | null
+          recurrence_type: string
+          scheduled_at: string
+          send_mode: string
+          service_order_id: string | null
+          status: string
+          target_kind: string
+          updated_at: string
+        }
+        Insert: {
+          attempt_count?: number
+          auto_retry?: boolean
+          caption?: string | null
+          client_id?: string | null
+          context?: string | null
+          created_at?: string
+          created_by?: string | null
+          document_type?: string | null
+          id?: string
+          include_link_in_caption?: boolean
+          last_error?: string | null
+          last_response?: Json | null
+          last_run_at?: string | null
+          link_description?: string | null
+          link_title?: string | null
+          max_attempts?: number
+          message: string
+          next_run_at: string
+          pdf_filename?: string | null
+          phone: string
+          receivable_id?: string | null
+          recurrence_day_of_month?: number | null
+          recurrence_days_of_week?: number[] | null
+          recurrence_end_date?: string | null
+          recurrence_type?: string
+          scheduled_at: string
+          send_mode?: string
+          service_order_id?: string | null
+          status?: string
+          target_kind: string
+          updated_at?: string
+        }
+        Update: {
+          attempt_count?: number
+          auto_retry?: boolean
+          caption?: string | null
+          client_id?: string | null
+          context?: string | null
+          created_at?: string
+          created_by?: string | null
+          document_type?: string | null
+          id?: string
+          include_link_in_caption?: boolean
+          last_error?: string | null
+          last_response?: Json | null
+          last_run_at?: string | null
+          link_description?: string | null
+          link_title?: string | null
+          max_attempts?: number
+          message?: string
+          next_run_at?: string
+          pdf_filename?: string | null
+          phone?: string
+          receivable_id?: string | null
+          recurrence_day_of_month?: number | null
+          recurrence_days_of_week?: number[] | null
+          recurrence_end_date?: string | null
+          recurrence_type?: string
+          scheduled_at?: string
+          send_mode?: string
+          service_order_id?: string | null
+          status?: string
+          target_kind?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whatsapp_scheduled_sends_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_scheduled_sends_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_scheduled_sends_receivable_id_fkey"
+            columns: ["receivable_id"]
+            isOneToOne: false
+            referencedRelation: "receivables"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_scheduled_sends_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       whatsapp_templates: {
         Row: {
           active: boolean
@@ -2160,6 +2291,15 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      compute_next_run: {
+        Args: {
+          _day_of_month: number
+          _days_of_week: number[]
+          _from: string
+          _recurrence_type: string
+        }
+        Returns: string
+      }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
     }
     Enums: {
