@@ -1,0 +1,1 @@
+ALTER TABLE public.service_order_signatures ADD COLUMN IF NOT EXISTS signed_pdf_url text; COMMENT ON COLUMN public.service_order_signatures.signed_pdf_url IS 'URL publica do PDF da OS no exato estado em que foi assinado pelo cliente. Usado como prova juridica imutavel.';

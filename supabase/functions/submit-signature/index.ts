@@ -18,6 +18,7 @@ interface Payload {
   signature_png_base64: string; // data URL ou base64 puro
   document_hash: string;
   accepted_terms_snapshot?: string;
+  signed_pdf_base64?: string; // PDF imutável da OS no momento da assinatura (data URL ou base64 puro)
 }
 
 function jsonResponse(body: unknown, status = 200) {
@@ -104,6 +105,33 @@ Deno.serve(async (req) => {
     const { data: pub } = admin.storage.from('signatures').getPublicUrl(filename);
     const signatureUrl = pub.publicUrl;
 
+    // ---- upload do PDF arquivado (opcional, mas fortemente recomendado) ----
+    let signedPdfUrl: string | null = null;
+    if (body.signed_pdf_base64) {
+      try {
+        const cleanPdf = body.signed_pdf_base64.replace(/^data:application\/pdf;base64,/, '');
+        const bin = atob(cleanPdf);
+        const pdfBytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) pdfBytes[i] = bin.charCodeAt(i);
+        if (pdfBytes.length <= 10_000_000) {
+          const pdfFilename = `${order.id}/signed-${Date.now()}.pdf`;
+          const { error: pdfErr } = await admin.storage
+            .from('signatures')
+            .upload(pdfFilename, pdfBytes, { contentType: 'application/pdf', upsert: false });
+          if (!pdfErr) {
+            const { data: pdfPub } = admin.storage.from('signatures').getPublicUrl(pdfFilename);
+            signedPdfUrl = pdfPub.publicUrl;
+          } else {
+            console.warn('[submit-signature] PDF upload falhou:', pdfErr.message);
+          }
+        } else {
+          console.warn('[submit-signature] PDF muito grande, ignorado.');
+        }
+      } catch (e) {
+        console.warn('[submit-signature] erro ao decodificar PDF:', e);
+      }
+    }
+
     // ---- IP / user-agent ----
     const ip =
       req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
@@ -127,6 +155,7 @@ Deno.serve(async (req) => {
         service_order_id: order.id,
         share_token: body.share_token,
         signature_image_url: signatureUrl,
+        signed_pdf_url: signedPdfUrl,
         accepted_name: body.accepted_name.trim(),
         accepted_terms_snapshot: body.accepted_terms_snapshot || null,
         document_hash: body.document_hash,

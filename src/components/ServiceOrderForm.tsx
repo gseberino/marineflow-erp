@@ -234,7 +234,29 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
 
   const [generatingCollections, setGeneratingCollections] = useState(false);
   const prevSignedAt = useRef<string | null>(null);
+  const topActionsRef = useRef<HTMLDivElement | null>(null);
+  const bottomSaveRef = useRef<HTMLDivElement | null>(null);
+  const [topVisible, setTopVisible] = useState(true);
+  const [bottomVisible, setBottomVisible] = useState(false);
   const { data: osCollections } = useCollectionsByOS(orderId);
+
+  useEffect(() => {
+    const targets: Array<{ el: HTMLElement | null; setter: (v: boolean) => void }> = [
+      { el: topActionsRef.current, setter: setTopVisible },
+      { el: bottomSaveRef.current, setter: setBottomVisible },
+    ];
+    const observers: IntersectionObserver[] = [];
+    for (const { el, setter } of targets) {
+      if (!el) continue;
+      const io = new IntersectionObserver(
+        ([entry]) => setter(entry.isIntersecting),
+        { rootMargin: '0px', threshold: 0.01 },
+      );
+      io.observe(el);
+      observers.push(io);
+    }
+    return () => observers.forEach((o) => o.disconnect());
+  }, [isLoading, orderId]);
 
   const handleGenerateCollections = useCallback(async () => {
     if (!orderId) return;
@@ -699,7 +721,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             </div>
           )}
         </div>
-        <div className="flex gap-2 flex-wrap">
+        <div ref={topActionsRef} className="flex gap-2 flex-wrap">
           {!isNew && (
             <>
               <Button variant="outline" size="sm" onClick={() => setPdfDialogType('quote')} className="gap-1">
@@ -811,14 +833,20 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             </Button>
           )}
           {!isNew && !isLocked && validTransitions.length > 0 && (
-            <Select onValueChange={handleStatusChange}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder={t.serviceOrders.alterStatus} />
+            <Select value={currentStatus} onValueChange={handleStatusChange}>
+              <SelectTrigger className="w-[200px]">
+                <SelectValue>
+                  <span className="text-muted-foreground text-xs mr-1">Status:</span>
+                  <span className="font-medium">{(t.status as Record<string, string>)[currentStatus]}</span>
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value={currentStatus} disabled className="opacity-60">
+                  {(t.status as Record<string, string>)[currentStatus]} (atual)
+                </SelectItem>
                 {validTransitions.map((s) => (
                   <SelectItem key={s} value={s}>
-                    {(t.status as Record<string, string>)[s]}
+                    → {(t.status as Record<string, string>)[s]}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -1936,7 +1964,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
 
       {/* Bottom Save bar (mirrors top action) */}
       {!isLocked && (
-        <div className="flex justify-end pt-2">
+        <div ref={bottomSaveRef} className="flex justify-end pt-2">
           <Button
             onClick={handleSave}
             disabled={createSO.isPending || updateSO.isPending}
@@ -1948,8 +1976,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         </div>
       )}
 
-      {/* Sticky floating Save (mobile/desktop) */}
-      {!isLocked && (
+      {/* Sticky floating Save — visível só quando topo E rodapé estão fora da tela */}
+      {!isLocked && !topVisible && !bottomVisible && (
         <div className="sticky bottom-4 z-30 flex justify-end pointer-events-none">
           <Button
             onClick={handleSave}

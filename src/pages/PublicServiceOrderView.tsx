@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { generatePDF, DEFAULT_PDF_OPTIONS, type PDFData } from '@/lib/pdf-generator';
+import { generatePDF, generatePDFBlob, DEFAULT_PDF_OPTIONS, type PDFData } from '@/lib/pdf-generator';
 import { SignaturePad } from '@/components/SignaturePad';
 import { computeDocumentHash } from '@/lib/document-hash';
 import { toast } from 'sonner';
@@ -191,9 +191,9 @@ export default function PublicServiceOrderView() {
   const isSigned = !!order.signed_at && !order.requires_resignature;
   const needsResignature = !!order.requires_resignature;
 
-  const handleDownloadPDF = () => {
+  const buildPdfData = (): PDFData => {
     const get = (k: string) => company[k] || '';
-    const pdfData: PDFData = {
+    return {
       documentType: 'service_order',
       company: {
         name: get('company_name') || 'MarineFlow',
@@ -259,7 +259,10 @@ export default function PublicServiceOrderView() {
       })),
       terms: termsText || undefined,
     };
-    generatePDF(pdfData, DEFAULT_PDF_OPTIONS);
+  };
+
+  const handleDownloadPDF = () => {
+    generatePDF(buildPdfData(), DEFAULT_PDF_OPTIONS);
   };
 
   const handleSubmitSignature = async () => {
@@ -295,6 +298,20 @@ export default function PublicServiceOrderView() {
         termsText,
       );
 
+      // Gera o PDF imutável da OS no exato estado em que está sendo assinado
+      let signedPdfBase64: string | undefined;
+      try {
+        const pdfBlob = await generatePDFBlob(buildPdfData(), DEFAULT_PDF_OPTIONS);
+        signedPdfBase64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(String(reader.result || ''));
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(pdfBlob);
+        });
+      } catch (pdfErr) {
+        console.warn('[signature] falha ao gerar PDF arquivado:', pdfErr);
+      }
+
       const { data: result, error: fnErr } = await supabase.functions.invoke('submit-signature', {
         body: {
           share_token: token,
@@ -302,6 +319,7 @@ export default function PublicServiceOrderView() {
           signature_png_base64: signaturePng,
           document_hash: hash,
           accepted_terms_snapshot: termsText || null,
+          signed_pdf_base64: signedPdfBase64,
         },
       });
 
