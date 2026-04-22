@@ -17,8 +17,9 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { RefreshCw, Search, Eye, MessageCircle } from 'lucide-react';
+import { RefreshCw, Search, Eye, MessageCircle, Wand2 } from 'lucide-react';
 import { format } from 'date-fns';
+import { toast } from 'sonner';
 
 type WaMessage = {
   id: string;
@@ -72,6 +73,23 @@ export default function WhatsAppLogsPage() {
   const [searchBody, setSearchBody] = useState('');
   const [showOnlyUnknown, setShowOnlyUnknown] = useState(false);
   const [selected, setSelected] = useState<WaMessage | null>(null);
+  const [reprocessing, setReprocessing] = useState(false);
+
+  const reprocessUnknown = async () => {
+    if (!confirm('Reprocessar todas as mensagens marcadas como "não reconhecidas" usando o parser atualizado?')) return;
+    setReprocessing(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('whatsapp-reprocess-messages', { body: {} });
+      if (error) throw error;
+      const r = data as any;
+      toast.success(`Reprocessadas: ${r.updated} atualizadas, ${r.still_unknown} continuam sem identificação.`);
+      refetch();
+    } catch (e: any) {
+      toast.error(e?.message || 'Falha ao reprocessar.');
+    } finally {
+      setReprocessing(false);
+    }
+  };
 
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ['wa-logs', direction, messageType, deliveryStatus, phoneFilter, searchBody, showOnlyUnknown],

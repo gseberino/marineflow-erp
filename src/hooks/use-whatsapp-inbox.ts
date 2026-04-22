@@ -123,10 +123,12 @@ export function useWhatsAppConversations() {
   return useQuery({
     queryKey: ['wa-conversations'],
     queryFn: async () => {
-      // Última mensagem por phone
+      // Inbox mostra apenas mensagens recebidas (inbound) — outbound de lembretes do sistema
+      // não devem poluir o inbox; ficam visíveis na página de Logs.
       const { data: msgs, error } = await supabase
         .from('whatsapp_messages')
         .select('phone_normalized, occurred_at, body, direction, client_id, lead_id, is_broadcast')
+        .eq('direction', 'inbound')
         .order('occurred_at', { ascending: false })
         .limit(1000);
       if (error) throw error;

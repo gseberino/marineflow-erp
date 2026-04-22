@@ -19,16 +19,18 @@ export function useWhatsAppLeads(status?: string) {
   });
 }
 
-export function useWhatsAppLeadMessages(phone?: string) {
+export function useWhatsAppLeadMessages(phone?: string, opts?: { inboundOnly?: boolean }) {
   return useQuery({
-    queryKey: ['whatsapp-messages', phone],
+    queryKey: ['whatsapp-messages', phone, opts?.inboundOnly ? 'inbound' : 'all'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let q = supabase
         .from('whatsapp_messages')
         .select('*')
         .eq('phone_normalized', phone!)
         .order('occurred_at', { ascending: true })
         .limit(500);
+      if (opts?.inboundOnly) q = q.eq('direction', 'inbound');
+      const { data, error } = await q;
       if (error) throw error;
       return data;
     },

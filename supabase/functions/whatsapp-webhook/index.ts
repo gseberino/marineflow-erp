@@ -24,12 +24,69 @@ function jr(body: unknown, status = 200) {
 
 function normalizePhone(raw: string | null | undefined, defaultDDI = "55"): string {
   if (!raw) return "";
-  let d = String(raw).replace(/\D/g, "");
+  // Strip suffix after @ (chatId @c.us, @broadcast, @s.whatsapp.net)
+  const s = String(raw).split("@")[0];
+  let d = s.replace(/\D/g, "");
   if (!d) return "";
+  if (d.length > 14) return ""; // internal id, not a real phone
   if (d.startsWith("00")) d = d.slice(2);
-  if (d.length >= 12) return d;
+  // Brazilian fix: 12 digits with country code 55 + 8-digit cell missing the 9
+  if (d.length === 12 && d.startsWith("55")) {
+    const ddd = d.slice(2, 4);
+    const rest = d.slice(4);
+    if (rest.length === 8 && /^[6-9]/.test(rest)) {
+      d = `55${ddd}9${rest}`;
+    }
+  }
+  if (d.length >= 12 && d.length <= 14) return d;
   if (d.length === 10 || d.length === 11) return `${defaultDDI}${d}`;
   return d;
+}
+
+// Extracts message body and type from a Z-API ReceivedCallback payload.
+// Covers all known variants: text-as-string, text.message, message.conversation,
+// extendedTextMessage, body, caption, media, sticker, reaction, poll, list, buttons, etc.
+function extractBodyAndType(p: any): { body: string; messageType: string; mediaUrl: string | null } {
+  let mediaUrl: string | null = null;
+  if (typeof p?.text === "string") return { body: String(p.text), messageType: "text", mediaUrl };
+  if (p?.text?.message) return { body: String(p.text.message), messageType: "text", mediaUrl };
+  if (typeof p?.message === "string") return { body: String(p.message), messageType: "text", mediaUrl };
+  if (p?.message?.conversation) return { body: String(p.message.conversation), messageType: "text", mediaUrl };
+  if (p?.message?.extendedTextMessage?.text) return { body: String(p.message.extendedTextMessage.text), messageType: "text", mediaUrl };
+  if (p?.body) return { body: String(p.body), messageType: "text", mediaUrl };
+  if (p?.caption) return { body: String(p.caption), messageType: "text", mediaUrl };
+  if (p?.image) {
+    mediaUrl = p.image.imageUrl || p.image.url || null;
+    return { body: p.image.caption || "[imagem]", messageType: "image", mediaUrl };
+  }
+  if (p?.audio) {
+    mediaUrl = p.audio.audioUrl || p.audio.url || null;
+    return { body: "[áudio]", messageType: "audio", mediaUrl };
+  }
+  if (p?.video) {
+    mediaUrl = p.video.videoUrl || p.video.url || null;
+    return { body: p.video.caption || "[vídeo]", messageType: "video", mediaUrl };
+  }
+  if (p?.document) {
+    mediaUrl = p.document.documentUrl || p.document.url || null;
+    return { body: p.document.caption || `[documento] ${p.document.fileName || ""}`.trim(), messageType: "document", mediaUrl };
+  }
+  if (p?.sticker) return { body: "[sticker]", messageType: "sticker", mediaUrl };
+  if (p?.reaction) return { body: `[reação] ${p.reaction.value || ""}`.trim(), messageType: "reaction", mediaUrl };
+  if (p?.poll || p?.pollCreation) return { body: "[enquete]", messageType: "poll", mediaUrl };
+  if (p?.listResponseMessage || p?.message?.listResponseMessage) {
+    const v = p.listResponseMessage?.singleSelectReply?.selectedRowId || "[resposta de lista]";
+    return { body: String(v), messageType: "list_response", mediaUrl };
+  }
+  if (p?.buttonsResponseMessage || p?.message?.buttonsResponseMessage) {
+    const v = p.buttonsResponseMessage?.selectedDisplayText || "[resposta de botão]";
+    return { body: String(v), messageType: "button_response", mediaUrl };
+  }
+  if (p?.location) return { body: `[localização] ${p.location.latitude},${p.location.longitude}`, messageType: "location", mediaUrl };
+  if (p?.contact || p?.contacts || p?.contactsArrayMessage) {
+    return { body: `[contato] ${p.contact?.displayName || ""}`.trim(), messageType: "contact", mediaUrl };
+  }
+  return { body: "[mensagem não reconhecida]", messageType: "other", mediaUrl };
 }
 
 // Detecta indicadores de broadcast / lista de transmissão Z-API
@@ -281,21 +338,9 @@ Deno.serve(async (req) => {
       return jr({ ok: true, ignored: "blocked", phone });
     }
 
-    // Extrai corpo da mensagem
+    // Extrai corpo da mensagem (parser unificado — cobre todas as variantes Z-API)
     const p = payload as any;
-    let body = "";
-    let messageType: string = "text";
-    let mediaUrl: string | null = null;
-
-    if (p.text?.message) { body = String(p.text.message); messageType = "text"; }
-    else if (typeof p.message === "string") { body = p.message; messageType = "text"; }
-    else if (p.image) { body = p.image.caption || "[imagem]"; messageType = "image"; mediaUrl = p.image.imageUrl || p.image.url || null; }
-    else if (p.audio) { body = "[áudio]"; messageType = "audio"; mediaUrl = p.audio.audioUrl || p.audio.url || null; }
-    else if (p.video) { body = p.video.caption || "[vídeo]"; messageType = "video"; mediaUrl = p.video.videoUrl || p.video.url || null; }
-    else if (p.document) { body = p.document.caption || `[documento] ${p.document.fileName || ""}`.trim(); messageType = "document"; mediaUrl = p.document.documentUrl || p.document.url || null; }
-    else if (p.location) { body = `[localização] ${p.location.latitude},${p.location.longitude}`; messageType = "location"; }
-    else if (p.contact) { body = `[contato] ${p.contact.displayName || ""}`.trim(); messageType = "contact"; }
-    else { body = "[mensagem não reconhecida]"; messageType = "other"; }
+    const { body, messageType, mediaUrl } = extractBodyAndType(p);
 
     const senderName = p.senderName || p.notifyName || p.chatName || null;
     const zapiMessageId = p.messageId || p.id || null;
