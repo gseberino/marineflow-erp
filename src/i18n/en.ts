@@ -12,6 +12,7 @@ export const en = {
     inventory: 'Inventory',
     agenda: 'Schedule',
     financial: 'Financial',
+    collections: 'Collections',
     reports: 'Reports',
     auditLog: 'Audit Log',
     settings: 'Settings',

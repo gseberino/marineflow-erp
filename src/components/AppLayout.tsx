@@ -6,7 +6,7 @@ import { useAuth } from '@/hooks/use-auth';
 import {
   LayoutDashboard, Users, Ship, Anchor, Package, ClipboardList,
   DollarSign, BarChart3, Settings, ChevronLeft, ChevronRight, Menu,
-  Warehouse, Building2, Wrench, History, LogOut, CalendarDays, MessageCircle
+  Warehouse, Building2, Wrench, History, LogOut, CalendarDays, MessageCircle, CreditCard
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -34,6 +34,7 @@ const navKeys = [
   { key: 'services' as const, icon: Wrench, path: '/services' },
   { key: 'inventory' as const, icon: Warehouse, path: '/inventory' },
   { key: 'financial' as const, icon: DollarSign, path: '/financial' },
+  { key: 'collections' as const, icon: CreditCard, path: '/collections' },
   { key: 'reports' as const, icon: BarChart3, path: '/reports' },
   { key: 'auditLog' as const, icon: History, path: '/audit-log' },
   { key: 'settings' as const, icon: Settings, path: '/settings' },
@@ -67,6 +68,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const visibleNavKeys = navKeys.filter(item => {
     if (!user) return true;
     if (item.path === '/financial') {
+      return ['admin', 'financial'].includes(user.role);
+    }
+    if (item.path === '/collections') {
       return ['admin', 'financial'].includes(user.role);
     }
     if (item.path === '/audit-log') {

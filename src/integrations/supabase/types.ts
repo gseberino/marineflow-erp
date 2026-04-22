@@ -325,6 +325,194 @@ export type Database = {
         }
         Relationships: []
       }
+      collection_contacts: {
+        Row: {
+          collection_id: string
+          contact_type: string
+          created_at: string
+          created_by: string | null
+          id: string
+          notes: string | null
+          promised_date: string | null
+        }
+        Insert: {
+          collection_id: string
+          contact_type: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          notes?: string | null
+          promised_date?: string | null
+        }
+        Update: {
+          collection_id?: string
+          contact_type?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          notes?: string | null
+          promised_date?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "collection_contacts_collection_id_fkey"
+            columns: ["collection_id"]
+            isOneToOne: false
+            referencedRelation: "collections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "collection_contacts_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      collection_templates: {
+        Row: {
+          body: string
+          created_at: string
+          id: string
+          is_default: boolean | null
+          name: string
+          send_method: string | null
+        }
+        Insert: {
+          body: string
+          created_at?: string
+          id?: string
+          is_default?: boolean | null
+          name: string
+          send_method?: string | null
+        }
+        Update: {
+          body?: string
+          created_at?: string
+          id?: string
+          is_default?: boolean | null
+          name?: string
+          send_method?: string | null
+        }
+        Relationships: []
+      }
+      collections: {
+        Row: {
+          amount: number
+          auto_rule_enabled: boolean | null
+          client_id: string
+          contact_name: string | null
+          contact_phone: string | null
+          contact_whatsapp: string | null
+          created_at: string
+          created_by: string | null
+          description: string | null
+          due_date: string
+          id: string
+          last_auto_sent_at: string | null
+          message_template: string | null
+          notes: string | null
+          paid_amount: number | null
+          paid_at: string | null
+          paid_method: string | null
+          payment_confirmed_by: string | null
+          receivable_id: string | null
+          rule_days_after: number | null
+          rule_days_before: number | null
+          send_method: string | null
+          service_order_id: string | null
+          standalone_amount: number | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          auto_rule_enabled?: boolean | null
+          client_id: string
+          contact_name?: string | null
+          contact_phone?: string | null
+          contact_whatsapp?: string | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          due_date: string
+          id?: string
+          last_auto_sent_at?: string | null
+          message_template?: string | null
+          notes?: string | null
+          paid_amount?: number | null
+          paid_at?: string | null
+          paid_method?: string | null
+          payment_confirmed_by?: string | null
+          receivable_id?: string | null
+          rule_days_after?: number | null
+          rule_days_before?: number | null
+          send_method?: string | null
+          service_order_id?: string | null
+          standalone_amount?: number | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          auto_rule_enabled?: boolean | null
+          client_id?: string
+          contact_name?: string | null
+          contact_phone?: string | null
+          contact_whatsapp?: string | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          due_date?: string
+          id?: string
+          last_auto_sent_at?: string | null
+          message_template?: string | null
+          notes?: string | null
+          paid_amount?: number | null
+          paid_at?: string | null
+          paid_method?: string | null
+          payment_confirmed_by?: string | null
+          receivable_id?: string | null
+          rule_days_after?: number | null
+          rule_days_before?: number | null
+          send_method?: string | null
+          service_order_id?: string | null
+          standalone_amount?: number | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "collections_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "collections_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "collections_receivable_id_fkey"
+            columns: ["receivable_id"]
+            isOneToOne: false
+            referencedRelation: "receivables"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "collections_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       exchange_rates: {
         Row: {
           created_at: string
