@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { EntityCombobox } from '@/components/EntityCombobox';
 import { useI18n } from '@/i18n';
 import { useClients } from '@/hooks/use-clients';
 import { useServiceOrders } from '@/hooks/use-service-orders';
@@ -49,17 +50,29 @@ export function ReceivableFormDialog({ open, onOpenChange }: Props) {
         <DialogHeader><DialogTitle>{t.financial.newReceivable}</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <div><Label>{t.serviceOrders.client} *</Label>
-            <Select value={clientId} onValueChange={setClientId}>
-              <SelectTrigger><SelectValue placeholder={t.serviceOrders.client} /></SelectTrigger>
-              <SelectContent>{(clients || []).map(c => <SelectItem key={c.id} value={c.id}>{c.full_name_or_company_name}</SelectItem>)}</SelectContent>
-            </Select>
+            <EntityCombobox
+              value={clientId}
+              onChange={setClientId}
+              placeholder={t.serviceOrders.client}
+              options={(clients || []).map(c => ({
+                value: c.id,
+                label: c.full_name_or_company_name,
+                description: c.cpf_cnpj || undefined,
+                searchTerms: [c.cpf_cnpj || '', c.email || ''],
+              }))}
+            />
           </div>
           {clientId && clientOrders.length > 0 && (
             <div><Label>{t.financial.linkedOrder}</Label>
-              <Select value={soId} onValueChange={setSoId}>
-                <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
-                <SelectContent>{clientOrders.map(o => <SelectItem key={o.id} value={o.id}>{o.service_order_number}</SelectItem>)}</SelectContent>
-              </Select>
+              <EntityCombobox
+                value={soId}
+                onChange={setSoId}
+                placeholder="—"
+                options={clientOrders.map(o => ({
+                  value: o.id,
+                  label: o.service_order_number,
+                }))}
+              />
             </div>
           )}
           <div><Label>{t.common.description} *</Label><Input value={description} onChange={e => setDescription(e.target.value)} /></div>
