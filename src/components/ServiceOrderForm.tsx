@@ -1964,7 +1964,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
 
       {/* Bottom Save bar (mirrors top action) */}
       {!isLocked && (
-        <div className="flex justify-end pt-2">
+        <div ref={bottomSaveRef} className="flex justify-end pt-2">
           <Button
             onClick={handleSave}
             disabled={createSO.isPending || updateSO.isPending}
@@ -1976,8 +1976,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         </div>
       )}
 
-      {/* Sticky floating Save (mobile/desktop) */}
-      {!isLocked && (
+      {/* Sticky floating Save — visível só quando topo E rodapé estão fora da tela */}
+      {!isLocked && !topVisible && !bottomVisible && (
         <div className="sticky bottom-4 z-30 flex justify-end pointer-events-none">
           <Button
             onClick={handleSave}
