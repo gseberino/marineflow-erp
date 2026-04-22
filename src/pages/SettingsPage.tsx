@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { MapPin, DollarSign, Users, Globe, Banknote, CreditCard, FileText, Tag, Receipt, Package, Mail, MessageCircle, Pencil } from 'lucide-react';
 import { WhatsAppTemplatesManager } from '@/components/WhatsAppTemplatesManager';
 import { WhatsAppReminderSettings } from '@/components/WhatsAppReminderSettings';
+import { WhatsAppQueuePanel } from '@/components/WhatsAppQueuePanel';
 import { WhatsAppWebhookValidator } from '@/components/WhatsAppWebhookValidator';
 import { AppUserEditDialog } from '@/components/AppUserEditDialog';
 import { useAuth } from '@/hooks/use-auth';
@@ -290,6 +291,7 @@ export default function SettingsPage() {
 
         <TabsContent value="whatsapp-reminders" className="mt-4 space-y-4">
           <WhatsAppWebhookValidator />
+          <WhatsAppQueuePanel />
           <WhatsAppReminderSettings />
         </TabsContent>
       </Tabs>
