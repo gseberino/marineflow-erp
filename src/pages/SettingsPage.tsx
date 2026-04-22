@@ -1118,6 +1118,13 @@ function UsersTab() {
           + Novo Usuário
         </Button>
       )}
+
+      <AppUserEditDialog
+        user={editingUser}
+        open={!!editingUser}
+        onOpenChange={(o) => { if (!o) setEditingUser(null); }}
+        isCurrentUserAdmin={isCurrentUserAdmin}
+      />
     </div>
   );
 }
