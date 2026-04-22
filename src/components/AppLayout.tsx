@@ -40,8 +40,9 @@ const navKeys = [
   { key: 'settings' as const, icon: Settings, path: '/settings' },
 ];
 
-const extraNav = [
+const extraNav: { label: string; icon: typeof MessageCircle; path: string; roles?: string[] }[] = [
   { label: 'WhatsApp Leads', icon: MessageCircle, path: '/whatsapp/leads' },
+  { label: 'Logs WhatsApp', icon: MessageCircle, path: '/whatsapp/logs', roles: ['admin'] },
 ];
 
 const roleLabels: Record<string, string> = {
@@ -126,7 +127,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
             {!collapsed && <span>{t.nav[item.key]}</span>}
           </Link>
         ))}
-        {extraNav.map((item) => (
+        {extraNav.filter((item) => !item.roles || (user && item.roles.includes(user.role))).map((item) => (
           <Link
             key={item.path}
             to={item.path}
