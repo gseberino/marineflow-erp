@@ -1167,3 +1167,136 @@ function PaymentConditionsTab() {
   );
 }
 
+interface InstallmentRow {
+  label: string;
+  percent: number;
+  days_after_approval: number;
+}
+
+function PaymentPresetRow({ preset, updatePreset }: { preset: any; updatePreset: ReturnType<typeof useUpdatePaymentConditionPreset> }) {
+  const [open, setOpen] = useState(false);
+  const initial: InstallmentRow[] = Array.isArray(preset.installments) && preset.installments.length > 0
+    ? preset.installments
+    : [];
+  const [rows, setRows] = useState<InstallmentRow[]>(initial);
+  const [autoGenerate, setAutoGenerate] = useState<boolean>(preset.auto_generate_collections !== false);
+
+  const totalPercent = rows.reduce((s, r) => s + (Number(r.percent) || 0), 0);
+  const isValid = Math.abs(totalPercent - 100) < 0.01 && rows.length > 0;
+  const dirty =
+    JSON.stringify(rows) !== JSON.stringify(initial) ||
+    autoGenerate !== (preset.auto_generate_collections !== false);
+
+  const addRow = () => setRows((r) => [...r, { label: '', percent: 0, days_after_approval: 0 }]);
+  const removeRow = (i: number) => setRows((r) => r.filter((_, idx) => idx !== i));
+  const updateRow = (i: number, patch: Partial<InstallmentRow>) =>
+    setRows((r) => r.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
+
+  const handleSave = async () => {
+    if (!isValid) return;
+    await updatePreset.mutateAsync({
+      id: preset.id,
+      patch: { installments: rows, auto_generate_collections: autoGenerate },
+    });
+  };
+
+  return (
+    <div className="rounded-lg border bg-background">
+      <div className="grid grid-cols-[1fr_auto_auto] gap-3 px-3 py-2 items-center">
+        <div className={`text-sm font-medium ${preset.active ? '' : 'text-muted-foreground line-through'}`}>
+          {preset.label}
+          {rows.length > 0 && (
+            <span className="ml-2 text-xs text-muted-foreground">
+              ({rows.length} parcela{rows.length > 1 ? 's' : ''})
+            </span>
+          )}
+        </div>
+        <Button variant="ghost" size="sm" onClick={() => setOpen((v) => !v)} className="h-7 px-2 text-xs">
+          {open ? 'Fechar' : 'Configurar Parcelas'}
+        </Button>
+        <Switch
+          checked={preset.active}
+          onCheckedChange={(v) => updatePreset.mutate({ id: preset.id, patch: { active: v } })}
+        />
+      </div>
+
+      {open && (
+        <div className="border-t px-3 py-3 space-y-3 bg-muted/20">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-medium">Gerar cobranças automaticamente</label>
+            <Switch checked={autoGenerate} onCheckedChange={setAutoGenerate} />
+          </div>
+
+          <div className="space-y-2">
+            <div className="grid grid-cols-[1fr_80px_100px_36px] gap-2 text-[11px] uppercase tracking-wide text-muted-foreground px-1">
+              <div>Descrição</div>
+              <div className="text-center">%</div>
+              <div className="text-center">Dias após aprovação</div>
+              <div></div>
+            </div>
+            {rows.map((row, i) => (
+              <div key={i} className="grid grid-cols-[1fr_80px_100px_36px] gap-2 items-center">
+                <Input
+                  value={row.label}
+                  onChange={(e) => updateRow(i, { label: e.target.value })}
+                  placeholder="Ex: Entrada"
+                  className="h-8 text-sm"
+                />
+                <Input
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  max={100}
+                  value={row.percent}
+                  onChange={(e) => updateRow(i, { percent: parseFloat(e.target.value) || 0 })}
+                  className="h-8 text-sm text-center"
+                />
+                <Input
+                  type="number"
+                  min={0}
+                  value={row.days_after_approval}
+                  onChange={(e) => updateRow(i, { days_after_approval: parseInt(e.target.value, 10) || 0 })}
+                  className="h-8 text-sm text-center"
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-destructive"
+                  onClick={() => removeRow(i)}
+                >
+                  ×
+                </Button>
+              </div>
+            ))}
+            {rows.length === 0 && (
+              <div className="text-xs text-muted-foreground text-center py-3">
+                Nenhuma parcela configurada — fallback será cobrança única do valor total.
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between pt-2 border-t border-dashed">
+            <Button variant="outline" size="sm" onClick={addRow} className="h-7 text-xs">
+              + Adicionar Parcela
+            </Button>
+            <div className={`text-xs font-medium ${isValid || rows.length === 0 ? 'text-muted-foreground' : 'text-destructive'}`}>
+              Total: {totalPercent.toFixed(2)}%
+              {rows.length > 0 && !isValid && ' (deve somar 100%)'}
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              size="sm"
+              onClick={handleSave}
+              disabled={!isValid || !dirty || updatePreset.isPending}
+            >
+              Salvar Parcelas
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
