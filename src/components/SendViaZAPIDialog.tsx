@@ -137,7 +137,7 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
     if (!open || !target) return;
     setPhone(normalizePhoneE164(target.clientPhone || ''));
     setMode('link');
-    setIncludeLinkInCaption(true);
+    setIncludeLinkInCaption(false); // padrão: NÃO duplicar link na legenda; usuário pode marcar
     setTemplateId('');
     setSchedule(defaultScheduleConfig());
     if (clientSetting?.message_body) {
@@ -147,11 +147,11 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
     const name = target.clientName ? ` ${target.clientName}` : '';
     if (target.kind === 'service_order') {
       const label = documentType === 'quote' ? 'Orçamento' : 'Ordem de Serviço';
-      setMessage(
-        publicUrl
-          ? `Olá${name}, segue o link do ${label} ${target.serviceOrderNumber}: ${publicUrl}`
-          : `Olá${name}, segue o ${label} ${target.serviceOrderNumber} em anexo.`,
-      );
+      // NUNCA incluir o URL no corpo da mensagem padrão. Em modo "link" o Z-API já
+      // renderiza um card clicável com o URL embaixo do texto — repetir o URL
+      // gera o "link duplicado" reportado. Em modo "document" o usuário pode
+      // marcar o checkbox "Incluir também o link online na legenda".
+      setMessage(`Olá${name}, segue o ${label} ${target.serviceOrderNumber}.`);
     } else {
       setMessage(`Olá${name}, segue cobrança referente a: ${target.description}.`);
     }
