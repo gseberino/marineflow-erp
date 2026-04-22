@@ -67,7 +67,10 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
     } catch { return 3; }
   });
 
+  const [schedule, setSchedule] = useState<ScheduleConfig>(defaultScheduleConfig());
+
   const { send, sending, attemptInfo } = useZApiSend();
+  const createScheduled = useCreateScheduledSend();
 
   useEffect(() => {
     try { localStorage.setItem('zapi.autoRetry', autoRetry ? '1' : '0'); } catch {}
