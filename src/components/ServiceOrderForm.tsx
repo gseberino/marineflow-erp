@@ -168,14 +168,36 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [extraFieldsOpen, setExtraFieldsOpen] = useState(false);
   const { data: vesselContacts } = useVesselContacts(form.vessel_id || undefined);
 
-  // Part form
+  // Part form (current row being edited inline)
   const [partForm, setPartForm] = useState({ product_id: '', quantity: 1, unit_cost: 0, unit_sale: 0 });
   const [showPartForm, setShowPartForm] = useState(false);
 
-  // Service line form
+  // Service line form (current row being edited inline)
   const [svcForm, setSvcForm] = useState({ service_id: '', quantity: 1, unit_price: 0, notes: '', service_name_snapshot: '', description_snapshot: '', billing_unit_snapshot: 'hour' });
   const [showSvcForm, setShowSvcForm] = useState(false);
   const [showNewServiceDialog, setShowNewServiceDialog] = useState(false);
+
+  // Draft items used while OS is new (no orderId yet) — persisted on save
+  type DraftPart = {
+    tempId: string;
+    product_id: string;
+    product_name: string;
+    quantity: number;
+    unit_cost: number;
+    unit_sale: number;
+  };
+  type DraftService = {
+    tempId: string;
+    service_id?: string;
+    service_name_snapshot: string;
+    description_snapshot?: string;
+    billing_unit_snapshot: string;
+    quantity: number;
+    unit_price_snapshot: number;
+    notes?: string;
+  };
+  const [draftParts, setDraftParts] = useState<DraftPart[]>([]);
+  const [draftServices, setDraftServices] = useState<DraftService[]>([]);
 
   // Time form
   const [timeForm, setTimeForm] = useState({
