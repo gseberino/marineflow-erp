@@ -75,22 +75,6 @@ export default function WhatsAppLogsPage() {
   const [selected, setSelected] = useState<WaMessage | null>(null);
   const [reprocessing, setReprocessing] = useState(false);
 
-  const reprocessUnknown = async () => {
-    if (!confirm('Reprocessar todas as mensagens marcadas como "não reconhecidas" usando o parser atualizado?')) return;
-    setReprocessing(true);
-    try {
-      const { data, error } = await supabase.functions.invoke('whatsapp-reprocess-messages', { body: {} });
-      if (error) throw error;
-      const r = data as any;
-      toast.success(`Reprocessadas: ${r.updated} atualizadas, ${r.still_unknown} continuam sem identificação.`);
-      refetch();
-    } catch (e: any) {
-      toast.error(e?.message || 'Falha ao reprocessar.');
-    } finally {
-      setReprocessing(false);
-    }
-  };
-
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ['wa-logs', direction, messageType, deliveryStatus, phoneFilter, searchBody, showOnlyUnknown],
     queryFn: async () => {
@@ -119,6 +103,22 @@ export default function WhatsAppLogsPage() {
     },
     refetchInterval: 30000,
   });
+
+  const reprocessUnknown = async () => {
+    if (!confirm('Reprocessar todas as mensagens marcadas como "não reconhecidas" usando o parser atualizado?')) return;
+    setReprocessing(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('whatsapp-reprocess-messages', { body: {} });
+      if (error) throw error;
+      const r = data as any;
+      toast.success(`Reprocessadas: ${r.updated} atualizadas, ${r.still_unknown} continuam sem identificação.`);
+      refetch();
+    } catch (e: any) {
+      toast.error(e?.message || 'Falha ao reprocessar.');
+    } finally {
+      setReprocessing(false);
+    }
+  };
 
   const stats = useMemo(() => {
     const list = data || [];
