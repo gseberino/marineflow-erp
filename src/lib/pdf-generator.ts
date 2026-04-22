@@ -9,6 +9,8 @@ export type PDFOptions = {
   showCommission: boolean;
   showTerms: boolean;
   showSignature: boolean;
+  // Optional: include product images in parts table
+  showProductImages?: boolean;
   // Invoice-only
   showBankDetails?: boolean;
   showPaymentInstructions?: boolean;
@@ -26,6 +28,7 @@ export const DEFAULT_PDF_OPTIONS: PDFOptions = {
   showCommission: false,
   showTerms: true,
   showSignature: true,
+  showProductImages: false,
   showBankDetails: true,
   showPaymentInstructions: true,
 };
@@ -101,6 +104,7 @@ export type PDFData = {
     quantity: number;
     unit_price: number;
     line_total: number;
+    image_url?: string | null;
   }>;
   expenses?: Array<{
     category: string;

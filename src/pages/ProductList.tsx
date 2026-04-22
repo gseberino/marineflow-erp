@@ -4,7 +4,7 @@ import { useI18n } from '@/i18n';
 import { useProducts, type Product } from '@/hooks/use-products';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Plus, Search, AlertTriangle, Edit, Upload, Download, Table2 } from 'lucide-react';
+import { Plus, Search, AlertTriangle, Edit, Upload, Download, Table2, Package } from 'lucide-react';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ProductFormDialog } from '@/components/ProductFormDialog';
@@ -82,8 +82,24 @@ export default function ProductList() {
                 return (
                   <tr key={p.id} className={`border-b last:border-0 hover:bg-muted/30 transition-colors ${lowStock ? 'bg-warning/5' : ''}`}>
                     <td className="px-4 py-3">
-                      <p className="font-medium">{p.product_name}</p>
-                      <p className="text-xs text-muted-foreground">{p.sku}</p>
+                      <div className="flex items-center gap-3">
+                        {(p as any).image_url ? (
+                          <img
+                            src={(p as any).image_url}
+                            alt={p.product_name}
+                            className="h-10 w-10 rounded object-cover border bg-muted shrink-0"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded border bg-muted/40 text-muted-foreground">
+                            <Package className="h-5 w-5" />
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <p className="font-medium truncate">{p.product_name}</p>
+                          <p className="text-xs text-muted-foreground truncate">{p.sku}</p>
+                        </div>
+                      </div>
                     </td>
                     <td className="px-4 py-3 hidden md:table-cell">
                       {p.category && <StatusBadge className="bg-secondary text-secondary-foreground">{p.category}</StatusBadge>}
