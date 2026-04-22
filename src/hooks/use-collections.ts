@@ -362,13 +362,23 @@ export function renderTemplate(
   body: string,
   ctx: { nome: string; numero_os: string; valor: number; vencimento: string; pix: string; empresa: string },
 ) {
+  // Aceita {chave} e {{chave}} (retro-compatível) e expõe aliases amigáveis
+  // (cliente, os) iguais aos usados em SendViaZAPIDialog/TEMPLATE_VARIABLES.
+  const replacements: Record<string, string> = {
+    nome: ctx.nome,
+    numero_os: ctx.numero_os,
+    valor: fmtBRL(ctx.valor),
+    vencimento: fmtDateBR(ctx.vencimento),
+    pix: ctx.pix,
+    empresa: ctx.empresa,
+    cliente: ctx.nome,
+    os: ctx.numero_os,
+  };
+  const sub = (key: string) =>
+    replacements[key] !== undefined ? replacements[key] : `{${key}}`;
   return body
-    .replace(/\{\{\s*nome\s*\}\}/g, ctx.nome)
-    .replace(/\{\{\s*numero_os\s*\}\}/g, ctx.numero_os)
-    .replace(/\{\{\s*valor\s*\}\}/g, fmtBRL(ctx.valor))
-    .replace(/\{\{\s*vencimento\s*\}\}/g, fmtDateBR(ctx.vencimento))
-    .replace(/\{\{\s*pix\s*\}\}/g, ctx.pix)
-    .replace(/\{\{\s*empresa\s*\}\}/g, ctx.empresa);
+    .replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, key) => sub(key))
+    .replace(/\{(\w+)\}/g, (_m, key) => sub(key));
 }
 
 async function getAppSettings() {

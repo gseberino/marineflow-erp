@@ -84,12 +84,107 @@ export function useDeleteWhatsAppTemplate() {
 }
 
 /**
- * Substitui placeholders {chave} por valores no texto.
- * Placeholders desconhecidos são preservados.
+ * Substitui placeholders {chave} OU {{chave}} por valores no texto.
+ * - Aceita ambas as sintaxes para retro-compatibilidade.
+ * - Números em campos monetários conhecidos são formatados em BRL (450 → "450,00").
+ * - Datas ISO (YYYY-MM-DD) viram "DD/MM/YYYY".
+ * - Placeholders desconhecidos são preservados intactos.
  */
-export function applyTemplateVariables(body: string, vars: Record<string, string | number | undefined | null>): string {
-  return body.replace(/\{(\w+)\}/g, (_m, key) => {
-    const v = vars[key];
-    return v === undefined || v === null ? `{${key}}` : String(v);
-  });
+export function applyTemplateVariables(
+  body: string,
+  vars: Record<string, string | number | undefined | null>,
+): string {
+  const formatValue = (key: string, v: unknown): string => {
+    if (v === undefined || v === null || v === '') return `{${key}}`;
+    if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) {
+      const [y, m, d] = v.split('T')[0].split('-');
+      return `${d}/${m}/${y}`;
+    }
+    if (typeof v === 'number' || (typeof v === 'string' && /^-?\d+(\.\d+)?$/.test(v))) {
+      const monetaryKeys = ['valor', 'total', 'amount', 'subtotal', 'desconto'];
+      if (monetaryKeys.includes(key.toLowerCase())) {
+        return Number(v).toLocaleString('pt-BR', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        });
+      }
+    }
+    return String(v);
+  };
+  return body
+    .replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, key) => formatValue(key, vars[key]))
+    .replace(/\{(\w+)\}/g, (_m, key) => formatValue(key, vars[key]));
 }
+
+/**
+ * Catálogo central de variáveis suportadas em templates de WhatsApp.
+ * Usado pela UI do editor para mostrar ao usuário quais placeholders existem
+ * e como ficará o resultado ao serem substituídos.
+ */
+export interface TemplateVariableDoc {
+  key: string;
+  label: string;
+  description: string;
+  example: string;
+  contexts: Array<'service_order' | 'quote' | 'billing' | 'general'>;
+}
+
+export const TEMPLATE_VARIABLES: TemplateVariableDoc[] = [
+  {
+    key: 'cliente',
+    label: 'Nome do cliente',
+    description: 'Nome completo ou razão social do cliente.',
+    example: 'José Nelson Seberino da Silva',
+    contexts: ['service_order', 'quote', 'billing', 'general'],
+  },
+  {
+    key: 'os',
+    label: 'Número da OS',
+    description: 'Número da Ordem de Serviço vinculada (sinônimo: numero_os).',
+    example: 'OS-2026-0042',
+    contexts: ['service_order', 'quote', 'billing'],
+  },
+  {
+    key: 'descricao',
+    label: 'Descrição',
+    description: 'Descrição da OS (problema relatado) ou da cobrança.',
+    example: 'Manutenção preventiva do motor',
+    contexts: ['service_order', 'quote', 'billing'],
+  },
+  {
+    key: 'valor',
+    label: 'Valor (R$)',
+    description: 'Valor monetário formatado em reais com 2 casas decimais.',
+    example: '1.250,00',
+    contexts: ['quote', 'billing'],
+  },
+  {
+    key: 'vencimento',
+    label: 'Data de vencimento',
+    description: 'Data de vencimento no formato DD/MM/YYYY.',
+    example: '29/04/2026',
+    contexts: ['billing'],
+  },
+  {
+    key: 'link',
+    label: 'Link público do documento',
+    description: 'URL para o cliente abrir o documento (OS, orçamento ou cobrança) no navegador.',
+    example: 'https://hbrmarine.online/view/abc123…',
+    contexts: ['service_order', 'quote', 'billing'],
+  },
+  {
+    key: 'empresa',
+    label: 'Nome da empresa',
+    description: 'Nome da sua empresa (configurado em Ajustes).',
+    example: 'HBR Marine',
+    contexts: ['service_order', 'quote', 'billing', 'general'],
+  },
+  {
+    key: 'pix',
+    label: 'Chave PIX',
+    description: 'Chave PIX da empresa (apenas em cobranças via PIX/transferência).',
+    example: '12.345.678/0001-90',
+    contexts: ['billing'],
+  },
+];
+
