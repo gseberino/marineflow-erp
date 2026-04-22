@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
+import { MoneyInput } from '@/components/MoneyInput';
 
 interface Props {
   open: boolean;
@@ -109,7 +110,7 @@ export function ServiceFormDialog({ open, onOpenChange, editData, onCreated }: P
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label>{t.services.defaultPrice}</Label>
-              <Input type="number" value={form.default_price} onChange={(e) => set('default_price', parseFloat(e.target.value) || 0)} className="mt-1" />
+              <MoneyInput value={form.default_price} onValueChange={(v) => set('default_price', v)} className="mt-1" />
             </div>
             <div>
               <Label>{t.products.costCurrency}</Label>
