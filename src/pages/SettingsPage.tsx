@@ -1128,24 +1128,12 @@ function PaymentConditionsTab() {
         </p>
       </div>
 
-      <div className="rounded-lg border divide-y">
-        <div className="grid grid-cols-[1fr_80px] gap-3 px-3 py-2 bg-muted/50 text-xs font-medium text-muted-foreground">
-          <div>Descrição</div>
-          <div className="text-right">Ativo</div>
-        </div>
+      <div className="space-y-3">
         {(presets || []).map((p: any) => (
-          <div key={p.id} className="grid grid-cols-[1fr_80px] gap-3 px-3 py-2 items-center text-sm">
-            <div className={p.active ? '' : 'text-muted-foreground line-through'}>{p.label}</div>
-            <div className="flex justify-end">
-              <Switch
-                checked={p.active}
-                onCheckedChange={(v) => updatePreset.mutate({ id: p.id, patch: { active: v } })}
-              />
-            </div>
-          </div>
+          <PaymentPresetRow key={p.id} preset={p} updatePreset={updatePreset} />
         ))}
         {(presets || []).length === 0 && (
-          <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+          <div className="rounded-lg border px-3 py-6 text-center text-sm text-muted-foreground">
             Nenhuma condição cadastrada
           </div>
         )}
