@@ -1601,7 +1601,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 <Select
                   key={presetKey}
                   onValueChange={(v) => {
+                    const preset = (paymentPresets || []).find((p: any) => p.label === v);
                     set('payment_conditions', v);
+                    set('payment_condition_preset_id', preset?.id || '');
                     setPresetKey((k) => k + 1);
                   }}
                   disabled={isLocked}
@@ -1625,6 +1627,48 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   className="flex-1 h-8 text-sm"
                 />
               </div>
+
+              {orderId && grandTotal > 0 && form.payment_conditions &&
+                (form.status === 'completed' || form.status === 'invoiced' || !!form.signed_at) && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleGenerateCollections}
+                  disabled={generatingCollections}
+                  className="gap-2 text-green-700 border-green-300 hover:bg-green-50"
+                >
+                  <CreditCard className="h-4 w-4" />
+                  {generatingCollections ? 'Gerando...' : 'Gerar Cobranças'}
+                </Button>
+              )}
+
+              {orderId && osCollections && osCollections.length > 0 && (
+                <div className="rounded-lg border bg-muted/20 p-3 mt-2">
+                  <div className="flex items-center gap-2 mb-2">
+                    <CreditCard className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm font-medium">
+                      Cobranças Geradas ({osCollections.length})
+                    </span>
+                  </div>
+                  <div className="space-y-1">
+                    {osCollections.map((c) => (
+                      <div
+                        key={c.id}
+                        className="grid grid-cols-[1fr_auto_auto_auto] gap-2 items-center text-xs px-2 py-1.5 rounded bg-background border"
+                      >
+                        <span className="truncate">{c.description || 'Cobrança'}</span>
+                        <span className="font-medium">
+                          R$ {Number(c.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {new Date(c.due_date).toLocaleDateString('pt-BR')}
+                        </span>
+                        <span className="capitalize text-muted-foreground">{c.status}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex justify-between pt-3 border-t-2">
