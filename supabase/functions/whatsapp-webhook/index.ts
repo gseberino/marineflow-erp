@@ -170,15 +170,29 @@ Deno.serve(async (req) => {
       if (phoneOut) {
         const p = payload as any;
         const body = p.text?.message || p.message || "";
-        await admin.from("whatsapp_messages").insert({
-          direction: "outbound",
-          phone_normalized: phoneOut,
-          message_type: "text",
-          body: String(body).slice(0, 4000),
-          zapi_message_id: p.messageId || p.id || null,
-          delivery_status: "sent",
-          raw_payload: payload as any,
-        });
+        const zapiId = p.messageId || p.id || null;
+        // Dedupe via upsert com unique index em zapi_message_id (parcial)
+        if (zapiId) {
+          await admin.from("whatsapp_messages").upsert({
+            direction: "outbound",
+            phone_normalized: phoneOut,
+            message_type: "text",
+            body: String(body).slice(0, 4000),
+            zapi_message_id: String(zapiId),
+            delivery_status: "sent",
+            raw_payload: payload as any,
+          }, { onConflict: "zapi_message_id", ignoreDuplicates: true });
+        } else {
+          await admin.from("whatsapp_messages").insert({
+            direction: "outbound",
+            phone_normalized: phoneOut,
+            message_type: "text",
+            body: String(body).slice(0, 4000),
+            zapi_message_id: null,
+            delivery_status: "sent",
+            raw_payload: payload as any,
+          });
+        }
       }
       return jr({ ok: true, recorded: "outbound_echo" });
     }
@@ -236,6 +250,25 @@ Deno.serve(async (req) => {
     const senderName = p.senderName || p.notifyName || p.chatName || null;
     const zapiMessageId = p.messageId || p.id || null;
     const nowIso = new Date().toISOString();
+
+    // ---- Deduplicação: se essa mensagem já foi processada, retorna idempotente ----
+    if (zapiMessageId) {
+      const { data: dup } = await admin
+        .from("whatsapp_messages")
+        .select("id, lead_id, client_id")
+        .eq("zapi_message_id", String(zapiMessageId))
+        .maybeSingle();
+      if (dup) {
+        console.log("dedup hit zapi_message_id=", zapiMessageId);
+        return jr({
+          ok: true,
+          deduplicated: true,
+          message_id: dup.id,
+          lead_id: dup.lead_id,
+          client_id: dup.client_id,
+        });
+      }
+    }
 
     // ---- Match em clients (TODA mensagem é registrada, mesmo de cliente cadastrado) ----
     const { data: allClients } = await admin
@@ -305,8 +338,8 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ---- Insere mensagem no histórico ----
-    await admin.from("whatsapp_messages").insert({
+    // ---- Insere mensagem no histórico (idempotente via unique zapi_message_id) ----
+    await admin.from("whatsapp_messages").upsert({
       direction: "inbound",
       phone_normalized: phone,
       message_type: messageType,
@@ -314,11 +347,11 @@ Deno.serve(async (req) => {
       media_url: mediaUrl,
       client_id: matched?.id || null,
       lead_id: leadId,
-      zapi_message_id: zapiMessageId,
+      zapi_message_id: zapiMessageId ? String(zapiMessageId) : null,
       delivery_status: "received",
       is_broadcast: isBroadcast,
       raw_payload: payload as any,
-    });
+    }, { onConflict: "zapi_message_id", ignoreDuplicates: true });
 
     // ---- Notificação imediata para LEADS NOVOS (não broadcast) ----
     if (isNewLead && !isBroadcast) {
