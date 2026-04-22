@@ -5,6 +5,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { calculateSalePrice, calculateMarginFromPrice } from '@/lib/price-calculator';
+import { MoneyInput } from '@/components/MoneyInput';
 
 interface Props {
   costPrice: number;
@@ -85,25 +86,23 @@ export function PriceCalculator({
       <div className="grid grid-cols-2 gap-3">
         <div>
           <Label className="text-xs">{p.cost || 'Custo'} (R$)</Label>
-          <Input type="number" value={costPrice} readOnly className="bg-muted/30 text-sm" />
+          <MoneyInput value={costPrice} onValueChange={() => {}} readOnly className="bg-muted/30 text-sm" />
         </div>
         <div>
           <Label className="text-xs">{p.profitMargin || 'Margem %'}</Label>
-          <Input
-            type="number" step="0.01" min="0"
+          <MoneyInput
             value={mode === 'calculate' ? profitMargin : resultingMargin}
             readOnly={mode === 'direct'}
             className={mode === 'direct' ? 'bg-muted/30 text-sm' : 'text-sm'}
-            onChange={e => onProfitMarginChange(parseFloat(e.target.value) || 0)}
+            onValueChange={onProfitMarginChange}
           />
         </div>
         <div>
           <Label className="text-xs">{p.taxRateField || 'Impostos %'}</Label>
-          <Input
-            type="number" step="0.01" min="0"
+          <MoneyInput
             value={taxRate}
             className="text-sm"
-            onChange={e => onTaxRateChange(parseFloat(e.target.value) || 0)}
+            onValueChange={onTaxRateChange}
           />
         </div>
         <div>
@@ -115,22 +114,20 @@ export function PriceCalculator({
               </Badge>
             )}
           </Label>
-          <Input
-            type="number" step="0.01" min="0"
+          <MoneyInput
             value={effectiveCommission}
             className={`text-sm ${!isCommissionable ? 'bg-muted/30 opacity-60' : ''}`}
             disabled={!isCommissionable}
-            onChange={e => onCommissionRateChange(parseFloat(e.target.value) || 0)}
+            onValueChange={onCommissionRateChange}
           />
         </div>
         {mode === 'direct' && (
           <div className="col-span-2">
             <Label className="text-xs">{p.salePrice || 'Preço de Venda'}</Label>
-            <Input
-              type="number" step="0.01" min="0"
+            <MoneyInput
               value={salePrice}
               className="text-sm"
-              onChange={e => onSalePriceChange(parseFloat(e.target.value) || 0)}
+              onValueChange={onSalePriceChange}
             />
           </div>
         )}
