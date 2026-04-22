@@ -40,8 +40,9 @@ const navKeys = [
   { key: 'settings' as const, icon: Settings, path: '/settings' },
 ];
 
-const extraNav = [
+const extraNav: { label: string; icon: typeof MessageCircle; path: string; roles?: string[] }[] = [
   { label: 'WhatsApp Leads', icon: MessageCircle, path: '/whatsapp/leads' },
+  { label: 'Logs WhatsApp', icon: MessageCircle, path: '/whatsapp/logs', roles: ['admin'] },
 ];
 
 const roleLabels: Record<string, string> = {
