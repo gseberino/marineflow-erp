@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useI18n } from '@/i18n';
 import { useClients } from '@/hooks/use-clients';
@@ -26,6 +26,7 @@ import {
 } from '@/hooks/use-service-orders';
 import { useAppUsers, useCommissionableUsers, USER_ROLES } from '@/hooks/use-app-users';
 import { usePaymentConditionPresets } from '@/hooks/use-payment-conditions';
+import { useCollectionsByOS } from '@/hooks/use-collections';
 import { useVesselContacts, VESSEL_CONTACT_ROLES } from '@/hooks/use-vessel-contacts';
 import { ClientCombobox } from '@/components/ClientCombobox';
 import { VesselSelect } from '@/components/VesselSelect';
@@ -157,6 +158,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     commissioned_person: '',
     commissioned_user_id: '',
     payment_conditions: '',
+    payment_condition_preset_id: '',
+    signed_at: '' as string,
   });
 
   const [manualTravel, setManualTravel] = useState(false);
@@ -205,6 +208,48 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [waEditPhone, setWaEditPhone] = useState('');
   const [presetKey, setPresetKey] = useState(0);
 
+  const [generatingCollections, setGeneratingCollections] = useState(false);
+  const prevSignedAt = useRef<string | null>(null);
+  const { data: osCollections } = useCollectionsByOS(orderId);
+
+  const handleGenerateCollections = useCallback(async () => {
+    if (!orderId) return;
+    setGeneratingCollections(true);
+    try {
+      const { generateCollectionsFromOS } = await import('@/lib/generate-collections');
+      const approvalDate = form.signed_at
+        ? form.signed_at.slice(0, 10)
+        : new Date().toISOString().slice(0, 10);
+      const result = await generateCollectionsFromOS({
+        serviceOrderId: orderId,
+        approvalDate,
+        trigger: 'status_change',
+      });
+      if (result.skipped) {
+        toast.info('Cobranças já existem para esta OS ou valor é zero.');
+      } else {
+        toast.success(`${result.created} cobrança(s) gerada(s) e enviadas por WhatsApp!`);
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Erro ao gerar cobranças');
+    } finally {
+      setGeneratingCollections(false);
+    }
+  }, [orderId, form.signed_at]);
+
+  // Auto-generate collections when OS is signed
+  useEffect(() => {
+    if (!orderId || !form.signed_at) return;
+    if (prevSignedAt.current === form.signed_at) return;
+    if (prevSignedAt.current === null) {
+      // first observation — only trigger on transition, not on initial load
+      prevSignedAt.current = form.signed_at;
+      return;
+    }
+    prevSignedAt.current = form.signed_at;
+    handleGenerateCollections();
+  }, [form.signed_at, orderId, handleGenerateCollections]);
+
   useEffect(() => {
     if (orderData) {
       const d = orderData;
@@ -241,6 +286,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         commissioned_person: d.commissioned_person || '',
         commissioned_user_id: d.commissioned_user_id || '',
         payment_conditions: d.payment_conditions || '',
+        payment_condition_preset_id: d.payment_condition_preset_id || '',
+        signed_at: d.signed_at || '',
       });
       if (d.service_order_technicians) {
         setSelectedTechnicians(d.service_order_technicians.map((t: any) => t.user_id));
@@ -303,13 +350,15 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       return;
     }
     try {
+      const { signed_at: _signedAt, ...formForSave } = form;
       const payload = {
-        ...form,
+        ...formForSave,
         scheduled_start_at: form.scheduled_start_at || null,
         scheduled_end_at: form.scheduled_end_at || null,
         commissioned_user_id: form.commissioned_user_id || null,
         requested_by_contact_id: form.requested_by_contact_id || null,
         payment_conditions: form.payment_conditions || null,
+        payment_condition_preset_id: form.payment_condition_preset_id || null,
       };
       if (isNew) {
         const result = await createSO.mutateAsync(payload);
@@ -331,6 +380,22 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           );
         }
         toast.success('Ordem de serviço atualizada');
+
+        // Auto-trigger collection generation when status becomes 'invoiced'
+        if (form.status === 'invoiced') {
+          const { generateCollectionsFromOS } = await import('@/lib/generate-collections');
+          generateCollectionsFromOS({
+            serviceOrderId: orderId!,
+            approvalDate: new Date().toISOString().slice(0, 10),
+            trigger: 'invoice',
+          })
+            .then((res) => {
+              if (res.created > 0) {
+                toast.success(`${res.created} cobrança(s) gerada(s) automaticamente.`);
+              }
+            })
+            .catch((err) => console.error('auto-generate-collections (invoice) failed', err));
+        }
       }
     } catch (e: any) {
       toast.error(e.message || 'Erro ao salvar');
@@ -1536,7 +1601,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 <Select
                   key={presetKey}
                   onValueChange={(v) => {
+                    const preset = (paymentPresets || []).find((p: any) => p.label === v);
                     set('payment_conditions', v);
+                    set('payment_condition_preset_id', preset?.id || '');
                     setPresetKey((k) => k + 1);
                   }}
                   disabled={isLocked}
@@ -1560,6 +1627,48 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   className="flex-1 h-8 text-sm"
                 />
               </div>
+
+              {orderId && grandTotal > 0 && form.payment_conditions &&
+                (form.status === 'completed' || form.status === 'invoiced' || !!form.signed_at) && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleGenerateCollections}
+                  disabled={generatingCollections}
+                  className="gap-2 text-green-700 border-green-300 hover:bg-green-50"
+                >
+                  <CreditCard className="h-4 w-4" />
+                  {generatingCollections ? 'Gerando...' : 'Gerar Cobranças'}
+                </Button>
+              )}
+
+              {orderId && osCollections && osCollections.length > 0 && (
+                <div className="rounded-lg border bg-muted/20 p-3 mt-2">
+                  <div className="flex items-center gap-2 mb-2">
+                    <CreditCard className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm font-medium">
+                      Cobranças Geradas ({osCollections.length})
+                    </span>
+                  </div>
+                  <div className="space-y-1">
+                    {osCollections.map((c) => (
+                      <div
+                        key={c.id}
+                        className="grid grid-cols-[1fr_auto_auto_auto] gap-2 items-center text-xs px-2 py-1.5 rounded bg-background border"
+                      >
+                        <span className="truncate">{c.description || 'Cobrança'}</span>
+                        <span className="font-medium">
+                          R$ {Number(c.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {new Date(c.due_date).toLocaleDateString('pt-BR')}
+                        </span>
+                        <span className="capitalize text-muted-foreground">{c.status}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex justify-between pt-3 border-t-2">
