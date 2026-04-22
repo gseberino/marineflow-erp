@@ -77,6 +77,50 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ---- Test each: consulta o valor atual de CADA endpoint individualmente ----
+    // Z-API expõe GET no mesmo path do PUT para ler o valor configurado.
+    if (action === "test_each") {
+      const tests: Record<string, any> = {};
+      for (const [name, endpoint] of Object.entries(endpoints)) {
+        const startedAt = Date.now();
+        try {
+          const res = await fetch(`${base}/${endpoint}`, { method: "GET", headers });
+          const text = await res.text();
+          let parsed: any = null;
+          try { parsed = JSON.parse(text); } catch { parsed = text; }
+          const currentValue =
+            (parsed && typeof parsed === "object" && (parsed.value || parsed.url || parsed.webhook)) || null;
+          tests[name] = {
+            endpoint,
+            url: `${base}/${endpoint}`,
+            method: "GET",
+            http_status: res.status,
+            ok: res.ok,
+            current_value: currentValue,
+            matches_target: currentValue ? String(currentValue) === webhookUrl : false,
+            response: parsed,
+            duration_ms: Date.now() - startedAt,
+          };
+        } catch (e: any) {
+          tests[name] = {
+            endpoint,
+            url: `${base}/${endpoint}`,
+            method: "GET",
+            ok: false,
+            error: e?.message || String(e),
+            duration_ms: Date.now() - startedAt,
+          };
+        }
+      }
+      const allMatch = Object.values(tests).every((t: any) => t.matches_target);
+      return jr({
+        ok: true,
+        all_match_target: allMatch,
+        target_webhook_url: webhookUrl,
+        tests,
+      });
+    }
+
     // ---- Configura todos os webhooks relevantes ----
     const results: Record<string, any> = {};
     for (const [name, endpoint] of Object.entries(endpoints)) {

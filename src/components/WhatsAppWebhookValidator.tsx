@@ -23,11 +23,42 @@ type HealthData = {
 
 const WEBHOOK_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/whatsapp-webhook`;
 
+type EndpointTest = {
+  endpoint: string;
+  url: string;
+  method: string;
+  http_status?: number;
+  ok: boolean;
+  current_value?: string | null;
+  matches_target?: boolean;
+  response?: unknown;
+  error?: string;
+  duration_ms: number;
+};
+
+type EndpointTestsResult = {
+  ok: boolean;
+  all_match_target: boolean;
+  target_webhook_url: string;
+  tests: Record<string, EndpointTest>;
+};
+
+const ENDPOINT_LABELS: Record<string, string> = {
+  received: 'Mensagem recebida',
+  delivery: 'Status de entrega',
+  messageStatus: 'Status (alternativo)',
+  received_by_me: 'Mensagem enviada pelo celular',
+  disconnected: 'Desconexão',
+};
+
 export function WhatsAppWebhookValidator() {
   const [loading, setLoading] = useState(false);
   const [configuring, setConfiguring] = useState(false);
   const [data, setData] = useState<HealthData | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const [testingEndpoints, setTestingEndpoints] = useState(false);
+  const [endpointTests, setEndpointTests] = useState<EndpointTestsResult | null>(null);
+  const [expandedEndpoint, setExpandedEndpoint] = useState<string | null>(null);
 
   const configureZapi = async () => {
     setConfiguring(true);
@@ -53,6 +84,42 @@ export function WhatsAppWebhookValidator() {
       toast({ title: 'Erro ao configurar', description: e.message, variant: 'destructive' });
     } finally {
       setConfiguring(false);
+    }
+  };
+
+  const testEndpoints = async () => {
+    setTestingEndpoints(true);
+    try {
+      const { data: result, error } = await supabase.functions.invoke('zapi-configure-webhook', {
+        body: {},
+        method: 'GET' as any,
+      });
+      // supabase.functions.invoke nem sempre repassa query string; usar fetch direto
+      const { data: { session } } = await supabase.auth.getSession();
+      const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/zapi-configure-webhook?action=test_each`;
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${session?.access_token ?? ''}`,
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        },
+      });
+      const json = (await res.json()) as EndpointTestsResult & { error?: string };
+      if (!res.ok) throw new Error(json?.error || 'Falha ao testar endpoints');
+      setEndpointTests(json);
+      toast({
+        title: json.all_match_target ? '✅ Todos os endpoints OK' : '⚠️ Divergências encontradas',
+        description: json.all_match_target
+          ? 'Todos os webhooks da Z-API apontam para este sistema.'
+          : 'Algum webhook não está apontando para a URL correta. Veja os detalhes abaixo.',
+        variant: json.all_match_target ? 'default' : 'destructive',
+      });
+      // suprime warning de variável não usada (fallback antigo)
+      void result; void error;
+    } catch (e: any) {
+      toast({ title: 'Erro ao testar endpoints', description: e.message, variant: 'destructive' });
+    } finally {
+      setTestingEndpoints(false);
     }
   };
 
@@ -128,7 +195,85 @@ export function WhatsAppWebhookValidator() {
           >
             {autoRefresh ? '⏸ Parar monitoramento' : '▶ Monitorar ao vivo (5s)'}
           </Button>
+          <Button onClick={testEndpoints} disabled={testingEndpoints} variant="outline">
+            <Activity className={`h-4 w-4 mr-2 ${testingEndpoints ? 'animate-pulse' : ''}`} />
+            {testingEndpoints ? 'Testando endpoints…' : 'Testar cada endpoint Z-API'}
+          </Button>
         </div>
+
+        {endpointTests && (
+          <div className="space-y-2 border rounded-lg p-3 bg-muted/30">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-medium flex items-center gap-2">
+                Resultado por endpoint
+                {endpointTests.all_match_target ? (
+                  <Badge className="bg-primary text-primary-foreground">
+                    <CheckCircle2 className="h-3 w-3 mr-1" /> Todos OK
+                  </Badge>
+                ) : (
+                  <Badge variant="destructive">
+                    <AlertTriangle className="h-3 w-3 mr-1" /> Divergências
+                  </Badge>
+                )}
+              </div>
+              <code className="text-[10px] text-muted-foreground break-all max-w-[60%] text-right">
+                alvo: {endpointTests.target_webhook_url}
+              </code>
+            </div>
+            <div className="divide-y border rounded bg-background">
+              {Object.entries(endpointTests.tests).map(([name, t]) => {
+                const isOpen = expandedEndpoint === name;
+                const statusColor = t.matches_target
+                  ? 'text-primary'
+                  : t.ok
+                  ? 'text-amber-600 dark:text-amber-400'
+                  : 'text-destructive';
+                return (
+                  <div key={name} className="text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setExpandedEndpoint(isOpen ? null : name)}
+                      className="w-full flex items-center gap-2 p-2 hover:bg-muted/50 text-left"
+                    >
+                      {t.matches_target ? (
+                        <CheckCircle2 className={`h-4 w-4 ${statusColor}`} />
+                      ) : t.ok ? (
+                        <AlertTriangle className={`h-4 w-4 ${statusColor}`} />
+                      ) : (
+                        <XCircle className={`h-4 w-4 ${statusColor}`} />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium">
+                          {ENDPOINT_LABELS[name] || name}{' '}
+                          <span className="text-muted-foreground font-mono">/{t.endpoint}</span>
+                        </div>
+                        <div className="text-muted-foreground truncate">
+                          {t.error
+                            ? `Erro: ${t.error}`
+                            : t.current_value
+                            ? `valor: ${t.current_value}`
+                            : 'Sem valor configurado'}
+                        </div>
+                      </div>
+                      <Badge variant="outline" className="font-mono">
+                        {t.http_status ?? '—'}
+                      </Badge>
+                      <span className="text-muted-foreground tabular-nums">{t.duration_ms}ms</span>
+                    </button>
+                    {isOpen && (
+                      <pre className="text-[10px] bg-muted p-2 overflow-x-auto whitespace-pre-wrap break-all border-t">
+                        {JSON.stringify(t, null, 2)}
+                      </pre>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              Cada linha consulta diretamente a Z-API (GET no endpoint do webhook) e compara com a URL alvo do sistema.
+            </p>
+          </div>
+        )}
 
         <Alert>
           <Wand2 className="h-4 w-4" />
