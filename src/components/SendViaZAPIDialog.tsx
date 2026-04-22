@@ -115,9 +115,9 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
     return `${window.location.origin}/view/${token}`;
   }, [target]);
 
-  const templateVars = useMemo<Record<string, string>>(() => {
+  const templateVars = useMemo<Record<string, string | number>>(() => {
     if (!target) return {};
-    const base: Record<string, string> = {
+    const base: Record<string, string | number> = {
       cliente: target.clientName || '',
       link: publicUrl || '',
     };
@@ -126,7 +126,8 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
       base.descricao = target.serviceOrderNumber;
     } else {
       base.descricao = target.description;
-      base.valor = target.amount != null ? String(target.amount) : '';
+      // Passar como NUMBER para que applyTemplateVariables formate como BRL automaticamente
+      if (target.amount != null) base.valor = Number(target.amount);
       base.vencimento = target.dueDate || '';
     }
     return base;
