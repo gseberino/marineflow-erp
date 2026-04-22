@@ -356,7 +356,7 @@ Deno.serve(async (req) => {
     }
 
     // ---- Insere mensagem no histórico (idempotente via unique zapi_message_id) ----
-    await admin.from("whatsapp_messages").upsert({
+    const insertPayload = {
       direction: "inbound",
       phone_normalized: phone,
       message_type: messageType,
@@ -368,17 +368,48 @@ Deno.serve(async (req) => {
       delivery_status: "received",
       is_broadcast: isBroadcast,
       raw_payload: payload as any,
-    }, { onConflict: "zapi_message_id", ignoreDuplicates: true });
+    };
+
+    const insertRes = zapiMessageId
+      ? await admin
+          .from("whatsapp_messages")
+          .upsert(insertPayload, { onConflict: "zapi_message_id", ignoreDuplicates: true })
+          .select("id")
+      : await admin.from("whatsapp_messages").insert(insertPayload).select("id");
+
+    if (insertRes.error) {
+      console.error("FAILED to insert whatsapp_messages", {
+        error: insertRes.error,
+        phone,
+        message_type: messageType,
+        zapiMessageId,
+      });
+      return jr({
+        ok: false,
+        error: "db_insert_failed",
+        details: insertRes.error.message,
+      }, 500);
+    }
+
+    const insertedId = (insertRes.data && insertRes.data[0]?.id) || null;
+    console.log("inbound message saved", {
+      id: insertedId,
+      phone,
+      type: messageType,
+      lead_id: leadId,
+      client_id: matched?.id,
+      is_broadcast: isBroadcast,
+    });
 
     // ---- Notificação imediata para LEADS NOVOS (não broadcast) ----
     if (isNewLead && !isBroadcast) {
-      // não bloqueia a resposta
       notifyAssignedReminder(admin, phone, senderName, body).catch(() => null);
     }
 
     return jr({
       ok: true,
       type: "message_received",
+      message_id: insertedId,
       matched_client_id: matched?.id || null,
       lead_id: leadId,
       is_broadcast: isBroadcast,
