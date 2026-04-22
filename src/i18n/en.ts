@@ -221,6 +221,7 @@ export const en = {
     in_progress: 'In Progress',
     awaiting_parts: 'Awaiting Parts',
     awaiting_client: 'Awaiting Client',
+    approved: 'Approved',
     completed: 'Completed',
     invoiced: 'Invoiced',
     cancelled: 'Cancelled',

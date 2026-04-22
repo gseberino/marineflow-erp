@@ -463,6 +463,7 @@ export const STATUS_TRANSITIONS: Record<string, string[]> = {
   in_progress: ['awaiting_parts', 'awaiting_client', 'completed', 'cancelled'],
   awaiting_parts: ['in_progress', 'cancelled'],
   awaiting_client: ['in_progress', 'completed', 'cancelled'],
+  approved: ['in_progress', 'completed', 'cancelled'],
   completed: ['invoiced'],
   invoiced: [],
   cancelled: [],

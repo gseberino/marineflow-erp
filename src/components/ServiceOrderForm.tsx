@@ -77,7 +77,7 @@ const SERVICE_TYPES = [
 const PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const;
 const STATUSES = [
   'draft', 'scheduled', 'open', 'in_progress', 'awaiting_parts',
-  'awaiting_client', 'completed', 'invoiced', 'cancelled',
+  'awaiting_client', 'approved', 'completed', 'invoiced', 'cancelled',
 ] as const;
 
 const BILLING_UNIT_LABELS: Record<string, string> = {

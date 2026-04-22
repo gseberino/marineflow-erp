@@ -217,6 +217,7 @@ export const ptBR: TranslationKeys = {
     in_progress: 'Em Andamento',
     awaiting_parts: 'Aguardando Peças',
     awaiting_client: 'Aguardando Cliente',
+    approved: 'Aprovada',
     completed: 'Concluída',
     invoiced: 'Faturada',
     cancelled: 'Cancelada',
