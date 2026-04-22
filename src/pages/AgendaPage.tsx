@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { EntityCombobox } from '@/components/EntityCombobox';
 import { ChevronLeft, ChevronRight, CalendarDays, Plus, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAgendaOrders, useTechnicians, useSchedulableOrders, useQuickSchedule } from '@/hooks/use-agenda';
@@ -530,7 +531,7 @@ function QuickScheduleDialog({
               options={technicians.map((t) => ({
                 value: t.id,
                 label: t.full_name,
-                description: t.email || undefined,
+                description: undefined,
               }))}
             />
           </div>
