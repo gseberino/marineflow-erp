@@ -487,37 +487,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
             </div>
           </div>
 
-          {/* Price Calculator Section */}
-          <Collapsible open={priceOpen} onOpenChange={setPriceOpen}>
-            <CollapsibleTrigger className="flex items-center justify-between w-full py-2 text-sm font-semibold hover:text-primary transition-colors">
-              {p.priceCalculator || 'Formação de Preço'}
-              <ChevronDown className={`h-4 w-4 transition-transform ${priceOpen ? 'rotate-180' : ''}`} />
-            </CollapsibleTrigger>
-            <CollapsibleContent className="space-y-3">
-              {selectedCategory && !selectedCategory.is_commissionable && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 flex items-start gap-2">
-                  <span>⚠️</span>
-                  <span>
-                    A categoria <strong>{selectedCategory.name}</strong> não permite comissionamento. O campo comissão será ignorado no cálculo do preço.
-                  </span>
-                </div>
-              )}
-               <PriceCalculator
-                costPrice={Number(form.cost_price) || 0}
-                salePrice={Number(form.sale_price) || 0}
-                profitMargin={Number((form as any).profit_margin) || 0}
-                taxRate={Number((form as any).icms_rate) || 0}
-                commissionRate={Number((form as any).commission_rate) || 0}
-                mode={priceMode}
-                onModeChange={setPriceMode}
-                onSalePriceChange={v => set('sale_price', v)}
-                onProfitMarginChange={v => set('profit_margin', v)}
-                onTaxRateChange={v => set('icms_rate', v)}
-                onCommissionRateChange={v => set('commission_rate', v)}
-                isCommissionable={selectedCategory ? (selectedCategory.is_commissionable ?? true) : true}
-              />
-            </CollapsibleContent>
-          </Collapsible>
+          {/* Price Calculator is now opened via the 💰 button next to Sale Price */}
 
           {/* Fiscal Data Section */}
           <Collapsible open={fiscalOpen} onOpenChange={setFiscalOpen}>
