@@ -137,6 +137,7 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
     setMode('link');
     setIncludeLinkInCaption(true);
     setTemplateId('');
+    setSchedule(defaultScheduleConfig());
     if (clientSetting?.message_body) {
       setMessage(applyTemplateVariables(clientSetting.message_body, templateVars));
       return;
@@ -202,6 +203,49 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
       ? `${message}\n\nLink online: ${publicUrl}`
       : message;
 
+    // Caminho 1: Agendado
+    if (schedule.enabled) {
+      const scheduledIso = new Date(schedule.scheduledAt).toISOString();
+      if (new Date(scheduledIso).getTime() <= Date.now()) {
+        toast.error('Escolha uma data/hora futura para o agendamento.');
+        return;
+      }
+      try {
+        await createScheduled.mutateAsync({
+          target_kind: target.kind,
+          service_order_id:
+            target.kind === 'service_order' ? target.serviceOrderId : target.serviceOrderId || null,
+          receivable_id: target.kind === 'receivable' ? target.receivableId : null,
+          client_id: target.clientId || null,
+          phone,
+          message,
+          send_mode: mode,
+          context: target.kind === 'service_order' ? documentType : 'billing',
+          link_title,
+          link_description,
+          pdf_filename: filename,
+          caption,
+          include_link_in_caption: includeLinkInCaption,
+          scheduled_at: scheduledIso,
+          recurrence_type: schedule.recurrenceType,
+          recurrence_days_of_week:
+            schedule.recurrenceType === 'weekly' ? schedule.daysOfWeek : undefined,
+          recurrence_day_of_month:
+            schedule.recurrenceType === 'monthly' ? schedule.dayOfMonth : undefined,
+          recurrence_end_date: schedule.endDate
+            ? new Date(schedule.endDate).toISOString()
+            : null,
+          auto_retry: autoRetry,
+          max_attempts: maxAttempts,
+        });
+        onOpenChange(false);
+      } catch {
+        /* erro já exibido pelo hook */
+      }
+      return;
+    }
+
+    // Caminho 2: Envio imediato
     const ok = await send(
       {
         phone,
