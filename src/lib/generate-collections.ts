@@ -121,7 +121,7 @@ async function autoSendCollectionWhatsApp(collectionIds: string[]) {
         .select(`
           *,
           client:clients(full_name_or_company_name, phone, whatsapp),
-          service_order:service_orders(service_order_number)
+          service_order:service_orders(service_order_number, payment_method, card_installments)
         `)
         .eq('id', id)
         .single();
