@@ -466,7 +466,26 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   };
 
   const handleAddPart = async () => {
-    if (!orderId || !partForm.product_id || partForm.quantity <= 0) return;
+    if (!partForm.product_id || partForm.quantity <= 0) return;
+    const product = products?.find((p) => p.id === partForm.product_id);
+    if (isNew) {
+      // Buffer in memory until the OS is created
+      setDraftParts((prev) => [
+        ...prev,
+        {
+          tempId: crypto.randomUUID(),
+          product_id: partForm.product_id,
+          product_name: product?.product_name || 'Produto',
+          quantity: partForm.quantity,
+          unit_cost: partForm.unit_cost,
+          unit_sale: partForm.unit_sale,
+        },
+      ]);
+      setPartForm({ product_id: '', quantity: 1, unit_cost: 0, unit_sale: 0 });
+      toast.success('Peça adicionada (será salva ao criar a OS)');
+      return;
+    }
+    if (!orderId) return;
     try {
       await addPart.mutateAsync({
         service_order_id: orderId,
@@ -475,8 +494,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         unit_cost_snapshot: partForm.unit_cost,
         unit_sale_snapshot: partForm.unit_sale,
       });
+      // Reset form so a new blank row appears for the next item
       setPartForm({ product_id: '', quantity: 1, unit_cost: 0, unit_sale: 0 });
-      setShowPartForm(false);
       toast.success('Peça adicionada');
     } catch (e: any) {
       toast.error(e.message || 'Erro ao adicionar peça');
@@ -484,7 +503,26 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   };
 
   const handleAddService = async () => {
-    if (!orderId || !svcForm.service_name_snapshot || svcForm.quantity <= 0) return;
+    if (!svcForm.service_name_snapshot || svcForm.quantity <= 0) return;
+    if (isNew) {
+      setDraftServices((prev) => [
+        ...prev,
+        {
+          tempId: crypto.randomUUID(),
+          service_id: svcForm.service_id || undefined,
+          service_name_snapshot: svcForm.service_name_snapshot,
+          description_snapshot: svcForm.description_snapshot || undefined,
+          billing_unit_snapshot: svcForm.billing_unit_snapshot,
+          quantity: svcForm.quantity,
+          unit_price_snapshot: svcForm.unit_price,
+          notes: svcForm.notes || undefined,
+        },
+      ]);
+      setSvcForm({ service_id: '', quantity: 1, unit_price: 0, notes: '', service_name_snapshot: '', description_snapshot: '', billing_unit_snapshot: 'hour' });
+      toast.success('Serviço adicionado (será salvo ao criar a OS)');
+      return;
+    }
+    if (!orderId) return;
     try {
       await addService.mutateAsync({
         service_order_id: orderId,
@@ -497,7 +535,6 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         notes: svcForm.notes || undefined,
       });
       setSvcForm({ service_id: '', quantity: 1, unit_price: 0, notes: '', service_name_snapshot: '', description_snapshot: '', billing_unit_snapshot: 'hour' });
-      setShowSvcForm(false);
       toast.success('Serviço adicionado');
     } catch (e: any) {
       toast.error(e.message || 'Erro ao adicionar serviço');
