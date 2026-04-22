@@ -61,6 +61,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { normalizePhoneE164 } from '@/lib/masks';
+import { MoneyInput } from '@/components/MoneyInput';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { recordWhatsAppEvent } from '@/lib/diagnostics';
 
@@ -1199,8 +1200,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               </div>
               <div>
                 <Label>{t.serviceOrders.unitPrice}</Label>
-                <Input type="number" value={svcForm.unit_price}
-                  onChange={(e) => setSvcForm({ ...svcForm, unit_price: parseFloat(e.target.value) || 0 })} />
+                <MoneyInput value={svcForm.unit_price}
+                  onValueChange={(v) => setSvcForm({ ...svcForm, unit_price: v })} />
               </div>
               <div>
                 <Label>{t.common.total}</Label>
@@ -1406,8 +1407,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             </div>
             <div>
               <Label>{t.serviceOrders.unitPrice}</Label>
-              <Input type="number" value={partForm.unit_sale}
-                onChange={(e) => setPartForm({ ...partForm, unit_sale: parseFloat(e.target.value) || 0 })} />
+              <MoneyInput value={partForm.unit_sale}
+                onValueChange={(v) => setPartForm({ ...partForm, unit_sale: v })} />
             </div>
           </div>
           <div className="flex gap-2">
@@ -1513,8 +1514,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 </div>
                 <div>
                   <Label>{t.common.amount}</Label>
-                  <Input type="number" min={0} step="0.01" value={expForm.amount}
-                    onChange={(e) => setExpForm({ ...expForm, amount: parseFloat(e.target.value) || 0 })} />
+                  <MoneyInput value={expForm.amount}
+                    onValueChange={(v) => setExpForm({ ...expForm, amount: v })} />
                 </div>
               </div>
               <div>
@@ -1729,18 +1730,18 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             </div>
             <div className="flex justify-between text-sm items-center">
               <span className="text-muted-foreground">{t.serviceOrders.subcontract}</span>
-              <Input type="number" className="w-28 h-7 text-right text-sm" value={form.subcontract_cost_total}
-                onChange={(e) => set('subcontract_cost_total', parseFloat(e.target.value) || 0)} />
+              <MoneyInput className="w-28 h-7 text-right text-sm" value={form.subcontract_cost_total}
+                onValueChange={(v) => set('subcontract_cost_total', v)} />
             </div>
             <div className="flex justify-between text-sm items-center">
               <span className="text-muted-foreground">{t.serviceOrders.discount}</span>
-              <Input type="number" className="w-28 h-7 text-right text-sm" value={form.discount_amount}
-                onChange={(e) => set('discount_amount', parseFloat(e.target.value) || 0)} disabled={isLocked} />
+              <MoneyInput className="w-28 h-7 text-right text-sm" value={form.discount_amount}
+                onValueChange={(v) => set('discount_amount', v)} disabled={isLocked} />
             </div>
             <div className="flex justify-between text-sm items-center">
               <span className="text-muted-foreground">{t.serviceOrders.tax}</span>
-              <Input type="number" className="w-28 h-7 text-right text-sm" value={form.tax_amount}
-                onChange={(e) => set('tax_amount', parseFloat(e.target.value) || 0)} disabled={isLocked} />
+              <MoneyInput className="w-28 h-7 text-right text-sm" value={form.tax_amount}
+                onValueChange={(v) => set('tax_amount', v)} disabled={isLocked} />
             </div>
 
             {/* Commission */}

@@ -12,6 +12,7 @@ import { useSuppliers } from '@/hooks/use-suppliers';
 import { useServiceOrders } from '@/hooks/use-service-orders';
 import { useCreatePayable } from '@/hooks/use-financial';
 import { toast } from 'sonner';
+import { MoneyInput } from '@/components/MoneyInput';
 
 interface Props { open: boolean; onOpenChange: (open: boolean) => void; }
 
@@ -27,7 +28,7 @@ export function PayableFormDialog({ open, onOpenChange }: Props) {
   const [description, setDescription] = useState('');
   const [issueDate, setIssueDate] = useState(new Date().toISOString().split('T')[0]);
   const [dueDate, setDueDate] = useState('');
-  const [amount, setAmount] = useState('');
+  const [amount, setAmount] = useState<number>(0);
   const [currency, setCurrency] = useState('BRL');
   const [soId, setSoId] = useState('');
   const [notes, setNotes] = useState('');
@@ -38,7 +39,7 @@ export function PayableFormDialog({ open, onOpenChange }: Props) {
     try {
       await create.mutateAsync({
         description, issue_date: issueDate, due_date: dueDate,
-        amount: parseFloat(amount), currency,
+        amount, currency,
         expense_category: category || undefined,
         supplier_id: supplierId || undefined,
         supplier_name: selectedSupplier?.supplier_name || supplierName || undefined,
@@ -81,7 +82,7 @@ export function PayableFormDialog({ open, onOpenChange }: Props) {
             <div><Label>{t.financial.dueDate} *</Label><Input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} /></div>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div><Label>{t.common.amount} *</Label><Input type="number" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} /></div>
+            <div><Label>{t.common.amount} *</Label><MoneyInput value={amount} onValueChange={setAmount} /></div>
             <div><Label>Moeda</Label>
               <Select value={currency} onValueChange={setCurrency}>
                 <SelectTrigger><SelectValue /></SelectTrigger>

@@ -11,6 +11,7 @@ import { useClients } from '@/hooks/use-clients';
 import { useServiceOrders } from '@/hooks/use-service-orders';
 import { useCreateReceivable } from '@/hooks/use-financial';
 import { toast } from 'sonner';
+import { MoneyInput } from '@/components/MoneyInput';
 
 interface Props { open: boolean; onOpenChange: (open: boolean) => void; }
 
@@ -25,7 +26,7 @@ export function ReceivableFormDialog({ open, onOpenChange }: Props) {
   const [description, setDescription] = useState('');
   const [issueDate, setIssueDate] = useState(new Date().toISOString().split('T')[0]);
   const [dueDate, setDueDate] = useState('');
-  const [amount, setAmount] = useState('');
+  const [amount, setAmount] = useState<number>(0);
   const [currency, setCurrency] = useState('BRL');
   const [notes, setNotes] = useState('');
 
@@ -34,7 +35,7 @@ export function ReceivableFormDialog({ open, onOpenChange }: Props) {
     try {
       await create.mutateAsync({
         client_id: clientId, description, issue_date: issueDate,
-        due_date: dueDate, amount: parseFloat(amount), currency,
+        due_date: dueDate, amount, currency,
         service_order_id: soId || undefined, notes: notes || undefined,
       });
       toast.success(t.financial.newReceivable);
@@ -81,7 +82,7 @@ export function ReceivableFormDialog({ open, onOpenChange }: Props) {
             <div><Label>{t.financial.dueDate} *</Label><Input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} /></div>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div><Label>{t.common.amount} *</Label><Input type="number" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} /></div>
+            <div><Label>{t.common.amount} *</Label><MoneyInput value={amount} onValueChange={setAmount} /></div>
             <div><Label>Moeda</Label>
               <Select value={currency} onValueChange={setCurrency}>
                 <SelectTrigger><SelectValue /></SelectTrigger>

@@ -20,6 +20,7 @@ import { Plus, Trash2, Star, ChevronDown, ExternalLink, Info } from 'lucide-reac
 import { Skeleton } from '@/components/ui/skeleton';
 import { PriceCalculator } from '@/components/PriceCalculator';
 import { CSOSN_OPTIONS, FISCAL_ORIGIN_OPTIONS } from '@/lib/price-calculator';
+import { MoneyInput } from '@/components/MoneyInput';
 
 interface Props {
   open: boolean;
@@ -312,7 +313,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
             </div>
             <div>
               <Label>{t.products.cost}</Label>
-              <Input type="number" step="0.01" min="0" value={form.cost_price ?? 0} onChange={e => set('cost_price', Number(e.target.value))} />
+              <MoneyInput value={form.cost_price ?? 0} onValueChange={v => set('cost_price', v)} />
             </div>
             <div>
               <Label>{t.products.costCurrency}</Label>
@@ -325,7 +326,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
             </div>
             <div>
               <Label>{t.products.salePrice}</Label>
-              <Input type="number" step="0.01" min="0" value={form.sale_price ?? 0} onChange={e => set('sale_price', Number(e.target.value))} />
+              <MoneyInput value={form.sale_price ?? 0} onValueChange={v => set('sale_price', v)} />
             </div>
             <div>
               <Label>{t.products.saleCurrency}</Label>
