@@ -2194,44 +2194,104 @@ export type Database = {
           },
         ]
       }
+      whatsapp_blocked_numbers: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          phone_normalized: string
+          reason: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          phone_normalized: string
+          reason?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          phone_normalized?: string
+          reason?: string | null
+        }
+        Relationships: []
+      }
+      whatsapp_conversation_assignments: {
+        Row: {
+          assigned_to: string | null
+          notified_at: string | null
+          phone_normalized: string
+          updated_at: string
+        }
+        Insert: {
+          assigned_to?: string | null
+          notified_at?: string | null
+          phone_normalized: string
+          updated_at?: string
+        }
+        Update: {
+          assigned_to?: string | null
+          notified_at?: string | null
+          phone_normalized?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       whatsapp_leads: {
         Row: {
+          assigned_to: string | null
           created_at: string
           display_name: string | null
           first_message: string | null
           id: string
+          is_broadcast: boolean | null
+          last_inbound_at: string | null
           last_message_at: string
+          last_outbound_at: string | null
           linked_client_id: string | null
           message_count: number
           notes: string | null
           phone_normalized: string
           status: string
+          unread_count: number | null
           updated_at: string
         }
         Insert: {
+          assigned_to?: string | null
           created_at?: string
           display_name?: string | null
           first_message?: string | null
           id?: string
+          is_broadcast?: boolean | null
+          last_inbound_at?: string | null
           last_message_at?: string
+          last_outbound_at?: string | null
           linked_client_id?: string | null
           message_count?: number
           notes?: string | null
           phone_normalized: string
           status?: string
+          unread_count?: number | null
           updated_at?: string
         }
         Update: {
+          assigned_to?: string | null
           created_at?: string
           display_name?: string | null
           first_message?: string | null
           id?: string
+          is_broadcast?: boolean | null
+          last_inbound_at?: string | null
           last_message_at?: string
+          last_outbound_at?: string | null
           linked_client_id?: string | null
           message_count?: number
           notes?: string | null
           phone_normalized?: string
           status?: string
+          unread_count?: number | null
           updated_at?: string
         }
         Relationships: [
@@ -2252,12 +2312,14 @@ export type Database = {
           delivery_status: string | null
           direction: string
           id: string
+          is_broadcast: boolean | null
           lead_id: string | null
           media_url: string | null
           message_type: string
           occurred_at: string
           phone_normalized: string
           raw_payload: Json | null
+          sent_by: string | null
           service_order_id: string | null
           zapi_message_id: string | null
         }
@@ -2268,12 +2330,14 @@ export type Database = {
           delivery_status?: string | null
           direction: string
           id?: string
+          is_broadcast?: boolean | null
           lead_id?: string | null
           media_url?: string | null
           message_type?: string
           occurred_at?: string
           phone_normalized: string
           raw_payload?: Json | null
+          sent_by?: string | null
           service_order_id?: string | null
           zapi_message_id?: string | null
         }
@@ -2284,12 +2348,14 @@ export type Database = {
           delivery_status?: string | null
           direction?: string
           id?: string
+          is_broadcast?: boolean | null
           lead_id?: string | null
           media_url?: string | null
           message_type?: string
           occurred_at?: string
           phone_normalized?: string
           raw_payload?: Json | null
+          sent_by?: string | null
           service_order_id?: string | null
           zapi_message_id?: string | null
         }
@@ -2316,6 +2382,33 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      whatsapp_quick_replies: {
+        Row: {
+          active: boolean
+          body: string
+          created_at: string
+          id: string
+          shortcut: string
+          sort_order: number | null
+        }
+        Insert: {
+          active?: boolean
+          body: string
+          created_at?: string
+          id?: string
+          shortcut: string
+          sort_order?: number | null
+        }
+        Update: {
+          active?: boolean
+          body?: string
+          created_at?: string
+          id?: string
+          shortcut?: string
+          sort_order?: number | null
+        }
+        Relationships: []
       }
       whatsapp_read_state: {
         Row: {
