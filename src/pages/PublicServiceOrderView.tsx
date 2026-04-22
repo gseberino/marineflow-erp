@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { generatePDF, DEFAULT_PDF_OPTIONS, type PDFData } from '@/lib/pdf-generator';
+import { generatePDF, generatePDFBlob, DEFAULT_PDF_OPTIONS, type PDFData } from '@/lib/pdf-generator';
 import { SignaturePad } from '@/components/SignaturePad';
 import { computeDocumentHash } from '@/lib/document-hash';
 import { toast } from 'sonner';
