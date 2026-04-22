@@ -1210,6 +1210,7 @@ export type Database = {
           fiscal_origin: number | null
           icms_rate: number | null
           id: string
+          image_url: string | null
           ipi_rate: number | null
           is_commissionable: boolean | null
           location_bin: string | null
@@ -1242,6 +1243,7 @@ export type Database = {
           fiscal_origin?: number | null
           icms_rate?: number | null
           id?: string
+          image_url?: string | null
           ipi_rate?: number | null
           is_commissionable?: boolean | null
           location_bin?: string | null
@@ -1274,6 +1276,7 @@ export type Database = {
           fiscal_origin?: number | null
           icms_rate?: number | null
           id?: string
+          image_url?: string | null
           ipi_rate?: number | null
           is_commissionable?: boolean | null
           location_bin?: string | null
