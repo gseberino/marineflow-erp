@@ -1,10 +1,12 @@
 // Edge Function: whatsapp-webhook
-// Recebe eventos da Z-API (mensagens recebidas, status de entrega).
-// Faz match automático por telefone normalizado contra clients.
-// - Match → vincula mensagem ao cliente
-// - Sem match → cria/atualiza lead em whatsapp_leads (fila de aprovação)
-// Configuração na Z-API:
-//   On Message Received → URL: https://<project>.supabase.co/functions/v1/whatsapp-webhook
+// Recebe TODOS os eventos da Z-API (mensagens recebidas, status de entrega).
+// - Detecta listas de transmissão (broadcast) automaticamente
+// - Aplica blocklist (whatsapp_blocked_numbers)
+// - Match por telefone normalizado contra clients (mesmo já cadastrado registra mensagem)
+// - Cria/atualiza lead em whatsapp_leads se não houver match
+// - Notifica responsável imediatamente quando chega NOVO lead
+// URL para colar na Z-API "On Message Received":
+//   https://<project-ref>.supabase.co/functions/v1/whatsapp-webhook
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders = {
@@ -20,7 +22,6 @@ function jr(body: unknown, status = 200) {
   });
 }
 
-// Normaliza telefone para formato somente dígitos com DDI
 function normalizePhone(raw: string | null | undefined, defaultDDI = "55"): string {
   if (!raw) return "";
   let d = String(raw).replace(/\D/g, "");
@@ -29,6 +30,74 @@ function normalizePhone(raw: string | null | undefined, defaultDDI = "55"): stri
   if (d.length >= 12) return d;
   if (d.length === 10 || d.length === 11) return `${defaultDDI}${d}`;
   return d;
+}
+
+// Detecta indicadores de broadcast / lista de transmissão Z-API
+function isBroadcastPayload(p: any): boolean {
+  // Z-API marca via campos como `broadcast: true`, `isGroup: false` + `participantPhone` ausente,
+  // ou `chatId` terminando em "@broadcast"/"status@broadcast"
+  if (p?.broadcast === true || p?.isBroadcast === true) return true;
+  const chatId = String(p?.chatId || "");
+  if (chatId.endsWith("@broadcast") || chatId.includes("status@broadcast")) return true;
+  if (p?.fromBroadcast === true) return true;
+  return false;
+}
+
+async function notifyAssignedReminder(
+  admin: ReturnType<typeof createClient>,
+  phone: string,
+  senderName: string | null,
+  preview: string,
+) {
+  try {
+    const INSTANCE_ID = Deno.env.get("ZAPI_INSTANCE_ID");
+    const TOKEN = Deno.env.get("ZAPI_TOKEN");
+    const CLIENT_TOKEN = Deno.env.get("ZAPI_CLIENT_TOKEN");
+    if (!INSTANCE_ID || !TOKEN) return;
+
+    // Buscar destinatários: app_settings.whatsapp_reminder_recipients OU app_users admin/financial/manager
+    const { data: setting } = await admin
+      .from("app_settings")
+      .select("value")
+      .eq("key", "whatsapp_reminder_recipients")
+      .maybeSingle();
+
+    let recipients: string[] = String(setting?.value || "")
+      .split(/[,\s]+/)
+      .map((p) => p.replace(/\D/g, ""))
+      .filter((p) => p.length >= 10);
+
+    if (recipients.length === 0) {
+      const { data: users } = await admin
+        .from("app_users")
+        .select("phone")
+        .eq("active", true)
+        .in("role", ["admin", "financial", "manager"]);
+      recipients = (users || [])
+        .map((u: any) => (u.phone || "").replace(/\D/g, ""))
+        .filter((p: string) => p.length >= 10);
+    }
+    if (recipients.length === 0) return;
+
+    const who = senderName ? `${senderName} (+${phone})` : `+${phone}`;
+    const message = `🆕 *Novo lead WhatsApp*\n\n${who}\n"${preview.slice(0, 160)}"\n\nResponda no painel.`;
+
+    const base = `https://api.z-api.io/instances/${INSTANCE_ID}/token/${TOKEN}`;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (CLIENT_TOKEN) headers["Client-Token"] = CLIENT_TOKEN;
+
+    await Promise.all(
+      recipients.map((to) =>
+        fetch(`${base}/send-text`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ phone: to, message }),
+        }).catch(() => null),
+      ),
+    );
+  } catch (e) {
+    console.error("notifyAssignedReminder failed", e);
+  }
 }
 
 Deno.serve(async (req) => {
@@ -46,14 +115,28 @@ Deno.serve(async (req) => {
       return jr({ error: "Invalid payload" }, 400);
     }
 
-    // Z-API envia diferentes formatos por tipo de evento. Eventos comuns:
-    // - ReceivedCallback (mensagem recebida): { phone, fromMe, text:{message}, image:{...}, ... }
-    // - DeliveryCallback / MessageStatusCallback: { messageId, status, phone }
-    const event = (payload as any).type || (payload as any).event || "ReceivedCallback";
-    const fromMe = !!(payload as any).fromMe;
+    // Log mínimo para auditoria de chegada
+    console.log("webhook payload type=", (payload as any).type || (payload as any).event, "phone=", (payload as any).phone);
 
-    // Ignorar mensagens enviadas por nós mesmos (echo)
-    if (fromMe) return jr({ ok: true, ignored: "fromMe" });
+    const fromMe = !!(payload as any).fromMe;
+    if (fromMe) {
+      // Registra como outbound (echo) para manter histórico unificado
+      const phoneOut = normalizePhone((payload as any).phone || (payload as any).chatId);
+      if (phoneOut) {
+        const p = payload as any;
+        const body = p.text?.message || p.message || "";
+        await admin.from("whatsapp_messages").insert({
+          direction: "outbound",
+          phone_normalized: phoneOut,
+          message_type: "text",
+          body: String(body).slice(0, 4000),
+          zapi_message_id: p.messageId || p.id || null,
+          delivery_status: "sent",
+          raw_payload: payload as any,
+        });
+      }
+      return jr({ ok: true, recorded: "outbound_echo" });
+    }
 
     // ---- Status de entrega ----
     if ((payload as any).status && (payload as any).messageId) {
@@ -76,50 +159,40 @@ Deno.serve(async (req) => {
     const phone = normalizePhone(phoneRaw);
     if (!phone) return jr({ error: "Telefone ausente" }, 400);
 
-    // Extrai corpo da mensagem (vários formatos possíveis)
+    const isBroadcast = isBroadcastPayload(payload);
+
+    // ---- Blocklist ----
+    const { data: blocked } = await admin
+      .from("whatsapp_blocked_numbers")
+      .select("id")
+      .eq("phone_normalized", phone)
+      .maybeSingle();
+    if (blocked) {
+      console.log("ignored blocked phone", phone);
+      return jr({ ok: true, ignored: "blocked", phone });
+    }
+
+    // Extrai corpo da mensagem
+    const p = payload as any;
     let body = "";
     let messageType: string = "text";
     let mediaUrl: string | null = null;
 
-    const p = payload as any;
-    if (p.text?.message) {
-      body = String(p.text.message);
-      messageType = "text";
-    } else if (typeof p.message === "string") {
-      body = p.message;
-      messageType = "text";
-    } else if (p.image) {
-      body = p.image.caption || "[imagem]";
-      messageType = "image";
-      mediaUrl = p.image.imageUrl || p.image.url || null;
-    } else if (p.audio) {
-      body = "[áudio]";
-      messageType = "audio";
-      mediaUrl = p.audio.audioUrl || p.audio.url || null;
-    } else if (p.video) {
-      body = p.video.caption || "[vídeo]";
-      messageType = "video";
-      mediaUrl = p.video.videoUrl || p.video.url || null;
-    } else if (p.document) {
-      body = p.document.caption || `[documento] ${p.document.fileName || ""}`.trim();
-      messageType = "document";
-      mediaUrl = p.document.documentUrl || p.document.url || null;
-    } else if (p.location) {
-      body = `[localização] ${p.location.latitude},${p.location.longitude}`;
-      messageType = "location";
-    } else if (p.contact) {
-      body = `[contato] ${p.contact.displayName || ""}`.trim();
-      messageType = "contact";
-    } else {
-      body = "[mensagem não reconhecida]";
-      messageType = "other";
-    }
+    if (p.text?.message) { body = String(p.text.message); messageType = "text"; }
+    else if (typeof p.message === "string") { body = p.message; messageType = "text"; }
+    else if (p.image) { body = p.image.caption || "[imagem]"; messageType = "image"; mediaUrl = p.image.imageUrl || p.image.url || null; }
+    else if (p.audio) { body = "[áudio]"; messageType = "audio"; mediaUrl = p.audio.audioUrl || p.audio.url || null; }
+    else if (p.video) { body = p.video.caption || "[vídeo]"; messageType = "video"; mediaUrl = p.video.videoUrl || p.video.url || null; }
+    else if (p.document) { body = p.document.caption || `[documento] ${p.document.fileName || ""}`.trim(); messageType = "document"; mediaUrl = p.document.documentUrl || p.document.url || null; }
+    else if (p.location) { body = `[localização] ${p.location.latitude},${p.location.longitude}`; messageType = "location"; }
+    else if (p.contact) { body = `[contato] ${p.contact.displayName || ""}`.trim(); messageType = "contact"; }
+    else { body = "[mensagem não reconhecida]"; messageType = "other"; }
 
     const senderName = p.senderName || p.notifyName || p.chatName || null;
     const zapiMessageId = p.messageId || p.id || null;
+    const nowIso = new Date().toISOString();
 
-    // ---- Match automático em clients ----
-    // Tenta achar por whatsapp ou phone normalizado
+    // ---- Match em clients (TODA mensagem é registrada, mesmo de cliente cadastrado) ----
     const { data: allClients } = await admin
       .from("clients")
       .select("id, full_name_or_company_name, phone, whatsapp")
@@ -129,28 +202,20 @@ Deno.serve(async (req) => {
     for (const c of allClients || []) {
       const wa = normalizePhone(c.whatsapp);
       const ph = normalizePhone(c.phone);
-      if (wa === phone || ph === phone) {
+      if ((wa && wa === phone) || (ph && ph === phone)) {
         matched = { id: c.id, full_name_or_company_name: c.full_name_or_company_name };
         break;
       }
     }
 
     let leadId: string | null = null;
-    if (matched) {
-      // Vincular mensagem a cliente existente
-      await admin.from("audit_log").insert({
-        table_name: "clients",
-        record_id: matched.id,
-        action: "whatsapp_received",
-        changed_by: "z-api:webhook",
-        new_value: { phone, message_preview: body.slice(0, 200), zapiMessageId },
-        reason: "Mensagem WhatsApp vinculada automaticamente ao cliente",
-      });
-    } else {
-      // Upsert lead (incrementa message_count se já existir)
+    let isNewLead = false;
+
+    if (!matched) {
+      // Lead existente?
       const { data: existing } = await admin
         .from("whatsapp_leads")
-        .select("id, message_count")
+        .select("id, message_count, unread_count")
         .eq("phone_normalized", phone)
         .maybeSingle();
 
@@ -159,9 +224,12 @@ Deno.serve(async (req) => {
         await admin
           .from("whatsapp_leads")
           .update({
-            last_message_at: new Date().toISOString(),
+            last_message_at: nowIso,
+            last_inbound_at: nowIso,
             message_count: (existing.message_count || 0) + 1,
+            unread_count: (existing.unread_count || 0) + 1,
             display_name: senderName || undefined,
+            is_broadcast: isBroadcast || undefined,
           })
           .eq("id", existing.id);
       } else {
@@ -171,24 +239,28 @@ Deno.serve(async (req) => {
             phone_normalized: phone,
             display_name: senderName,
             first_message: body.slice(0, 500),
-            status: "pending",
+            status: isBroadcast ? "discarded" : "pending",
+            is_broadcast: isBroadcast,
+            unread_count: 1,
+            last_inbound_at: nowIso,
           })
           .select("id")
           .single();
         leadId = created?.id || null;
+        isNewLead = !isBroadcast;
 
         await admin.from("audit_log").insert({
           table_name: "whatsapp_leads",
           record_id: leadId || "00000000-0000-0000-0000-000000000000",
-          action: "lead_created",
+          action: isBroadcast ? "lead_broadcast_ignored" : "lead_created",
           changed_by: "z-api:webhook",
-          new_value: { phone, sender_name: senderName, first_message: body.slice(0, 200) },
-          reason: "Novo lead via WhatsApp aguardando aprovação",
+          new_value: { phone, sender_name: senderName, first_message: body.slice(0, 200), is_broadcast: isBroadcast },
+          reason: isBroadcast ? "Lead vindo de lista de transmissão (auto-descartado)" : "Novo lead via WhatsApp",
         });
       }
     }
 
-    // ---- Inserir mensagem no histórico ----
+    // ---- Insere mensagem no histórico ----
     await admin.from("whatsapp_messages").insert({
       direction: "inbound",
       phone_normalized: phone,
@@ -199,14 +271,23 @@ Deno.serve(async (req) => {
       lead_id: leadId,
       zapi_message_id: zapiMessageId,
       delivery_status: "received",
+      is_broadcast: isBroadcast,
       raw_payload: payload as any,
     });
+
+    // ---- Notificação imediata para LEADS NOVOS (não broadcast) ----
+    if (isNewLead && !isBroadcast) {
+      // não bloqueia a resposta
+      notifyAssignedReminder(admin, phone, senderName, body).catch(() => null);
+    }
 
     return jr({
       ok: true,
       type: "message_received",
       matched_client_id: matched?.id || null,
       lead_id: leadId,
+      is_broadcast: isBroadcast,
+      is_new_lead: isNewLead,
     });
   } catch (err: any) {
     console.error("whatsapp-webhook error", err);
