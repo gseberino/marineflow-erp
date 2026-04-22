@@ -10,7 +10,7 @@ export function WhatsAppBell() {
   return (
     <button
       type="button"
-      onClick={() => navigate('/whatsapp-leads')}
+      onClick={() => navigate('/whatsapp/leads')}
       className="relative rounded-lg p-2 hover:bg-muted transition-colors"
       aria-label="Mensagens do WhatsApp"
       title="Mensagens do WhatsApp"
