@@ -721,7 +721,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             </div>
           )}
         </div>
-        <div className="flex gap-2 flex-wrap">
+        <div ref={topActionsRef} className="flex gap-2 flex-wrap">
           {!isNew && (
             <>
               <Button variant="outline" size="sm" onClick={() => setPdfDialogType('quote')} className="gap-1">
@@ -833,14 +833,20 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             </Button>
           )}
           {!isNew && !isLocked && validTransitions.length > 0 && (
-            <Select onValueChange={handleStatusChange}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder={t.serviceOrders.alterStatus} />
+            <Select value={currentStatus} onValueChange={handleStatusChange}>
+              <SelectTrigger className="w-[200px]">
+                <SelectValue>
+                  <span className="text-muted-foreground text-xs mr-1">Status:</span>
+                  <span className="font-medium">{(t.status as Record<string, string>)[currentStatus]}</span>
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value={currentStatus} disabled className="opacity-60">
+                  {(t.status as Record<string, string>)[currentStatus]} (atual)
+                </SelectItem>
                 {validTransitions.map((s) => (
                   <SelectItem key={s} value={s}>
-                    {(t.status as Record<string, string>)[s]}
+                    → {(t.status as Record<string, string>)[s]}
                   </SelectItem>
                 ))}
               </SelectContent>
