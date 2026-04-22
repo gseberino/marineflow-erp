@@ -1043,23 +1043,33 @@ function UsersTab() {
                   <Switch checked={u.active} onCheckedChange={v => updateUser.mutate({ id: u.id, active: v })} />
                 </td>
                 <td className="px-4 py-2 text-center">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={async () => {
-                      try {
-                        await supabase.auth.resetPasswordForEmail(u.email, {
-                          redirectTo: window.location.origin + '/reset-password',
-                        });
-                        toast.success(`Link enviado para ${u.email}`);
-                      } catch {
-                        toast.error('Erro ao enviar email');
-                      }
-                    }}
-                  >
-                    <Mail className="h-3.5 w-3.5 mr-1" />
-                    Enviar acesso
-                  </Button>
+                  <div className="flex items-center justify-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setEditingUser(u)}
+                    >
+                      <Pencil className="h-3.5 w-3.5 mr-1" />
+                      Editar
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={async () => {
+                        try {
+                          await supabase.auth.resetPasswordForEmail(u.email, {
+                            redirectTo: window.location.origin + '/reset-password',
+                          });
+                          toast.success(`Link enviado para ${u.email}`);
+                        } catch {
+                          toast.error('Erro ao enviar email');
+                        }
+                      }}
+                    >
+                      <Mail className="h-3.5 w-3.5 mr-1" />
+                      Enviar acesso
+                    </Button>
+                  </div>
                 </td>
               </tr>
             ))}
