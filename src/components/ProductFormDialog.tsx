@@ -19,9 +19,10 @@ import type { TablesInsert } from '@/integrations/supabase/types';
 import { Plus, Trash2, Star, ChevronDown, ExternalLink, Info, X, Upload, Package } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { Skeleton } from '@/components/ui/skeleton';
-import { PriceCalculator } from '@/components/PriceCalculator';
+import { PriceCalculatorDialog } from '@/components/PriceCalculatorDialog';
 import { CSOSN_OPTIONS, FISCAL_ORIGIN_OPTIONS } from '@/lib/price-calculator';
 import { MoneyInput } from '@/components/MoneyInput';
+import { Calculator } from 'lucide-react';
 
 interface Props {
   open: boolean;
@@ -81,6 +82,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
   const [useGlobal, setUseGlobal] = useState(true);
   const [fiscalOpen, setFiscalOpen] = useState(false);
   const [priceOpen, setPriceOpen] = useState(true);
+  const [calcOpen, setCalcOpen] = useState(false);
 
   // App settings
   const { data: settings } = useAppSettings();
@@ -438,7 +440,19 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
             </div>
             <div>
               <Label>{t.products.salePrice}</Label>
-              <MoneyInput value={form.sale_price ?? 0} onValueChange={v => set('sale_price', v)} />
+              <div className="flex items-center gap-2">
+                <MoneyInput value={form.sale_price ?? 0} onValueChange={v => set('sale_price', v)} />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="shrink-0"
+                  title="Calcular preço"
+                  onClick={() => setCalcOpen(true)}
+                >
+                  <span aria-hidden>💰</span>
+                </Button>
+              </div>
             </div>
             <div>
               <Label>{t.products.saleCurrency}</Label>
