@@ -322,6 +322,7 @@ function CompanyTab() {
     bank_agency: '',
     bank_account: '',
     pix_key: '',
+    app_public_url: '',
   });
 
   useEffect(() => {
@@ -354,6 +355,7 @@ function CompanyTab() {
           bank_agency: map.bank_agency || '',
           bank_account: map.bank_account || '',
           pix_key: map.pix_key || '',
+          app_public_url: map.app_public_url || '',
         }));
       }
       setLoading(false);
@@ -512,6 +514,27 @@ function CompanyTab() {
             <label className="text-xs font-medium text-muted-foreground">Chave PIX</label>
             <Input value={form.pix_key} onChange={e => set('pix_key', e.target.value)}
               placeholder="CNPJ, e-mail, telefone ou chave aleatória" className="mt-1" />
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-xl border bg-card p-6 shadow-sm">
+        <h3 className="text-sm font-semibold mb-4 flex items-center gap-2">
+          <MapPin className="h-4 w-4" /> Integrações
+        </h3>
+        <div className="grid grid-cols-1 gap-4">
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">URL pública do app</label>
+            <Input
+              type="url"
+              value={form.app_public_url}
+              onChange={e => set('app_public_url', e.target.value)}
+              placeholder="https://..."
+              className="mt-1"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Usada para gerar links nos envios agendados via WhatsApp. Ex: https://seuapp.lovable.app
+            </p>
           </div>
         </div>
       </div>
