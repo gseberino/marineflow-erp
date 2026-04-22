@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { MapPin, DollarSign, Users, Globe, Banknote, CreditCard, FileText, Tag, Receipt, Package, Mail, MessageCircle } from 'lucide-react';
 import { WhatsAppTemplatesManager } from '@/components/WhatsAppTemplatesManager';
+import { WhatsAppReminderSettings } from '@/components/WhatsAppReminderSettings';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useCardFees, useUpdateCardFee } from '@/hooks/use-card-fees';
 import { useFinancialCategories, useCreateFinancialCategory, useUpdateFinancialCategory } from '@/hooks/use-financial-categories';
@@ -109,6 +110,10 @@ export default function SettingsPage() {
           <TabsTrigger value="whatsapp-templates">
             <MessageCircle className="h-3.5 w-3.5 mr-1" />
             Templates WhatsApp
+          </TabsTrigger>
+          <TabsTrigger value="whatsapp-reminders">
+            <MessageCircle className="h-3.5 w-3.5 mr-1" />
+            Lembretes WhatsApp
           </TabsTrigger>
         </TabsList>
 
@@ -278,6 +283,10 @@ export default function SettingsPage() {
 
         <TabsContent value="whatsapp-templates" className="mt-4 space-y-4">
           <WhatsAppTemplatesManager />
+        </TabsContent>
+
+        <TabsContent value="whatsapp-reminders" className="mt-4 space-y-4">
+          <WhatsAppReminderSettings />
         </TabsContent>
       </Tabs>
     </div>
