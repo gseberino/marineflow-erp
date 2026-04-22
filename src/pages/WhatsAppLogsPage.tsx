@@ -17,8 +17,9 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { RefreshCw, Search, Eye, MessageCircle } from 'lucide-react';
+import { RefreshCw, Search, Eye, MessageCircle, Wand2 } from 'lucide-react';
 import { format } from 'date-fns';
+import { toast } from 'sonner';
 
 type WaMessage = {
   id: string;
@@ -72,6 +73,7 @@ export default function WhatsAppLogsPage() {
   const [searchBody, setSearchBody] = useState('');
   const [showOnlyUnknown, setShowOnlyUnknown] = useState(false);
   const [selected, setSelected] = useState<WaMessage | null>(null);
+  const [reprocessing, setReprocessing] = useState(false);
 
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ['wa-logs', direction, messageType, deliveryStatus, phoneFilter, searchBody, showOnlyUnknown],
@@ -102,6 +104,22 @@ export default function WhatsAppLogsPage() {
     refetchInterval: 30000,
   });
 
+  const reprocessUnknown = async () => {
+    if (!confirm('Reprocessar todas as mensagens marcadas como "não reconhecidas" usando o parser atualizado?')) return;
+    setReprocessing(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('whatsapp-reprocess-messages', { body: {} });
+      if (error) throw error;
+      const r = data as any;
+      toast.success(`Reprocessadas: ${r.updated} atualizadas, ${r.still_unknown} continuam sem identificação.`);
+      refetch();
+    } catch (e: any) {
+      toast.error(e?.message || 'Falha ao reprocessar.');
+    } finally {
+      setReprocessing(false);
+    }
+  };
+
   const stats = useMemo(() => {
     const list = data || [];
     const total = list.length;
@@ -114,10 +132,16 @@ export default function WhatsAppLogsPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        title="Logs do Webhook WhatsApp"
-        description="Veja toda mensagem que entrou ou saiu via Z-API. Filtre por tipo e status para diagnosticar 'mensagens não reconhecidas'."
-      />
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <PageHeader
+          title="Logs do Webhook WhatsApp"
+          description="Veja toda mensagem que entrou ou saiu via Z-API. Filtre por tipo e status para diagnosticar 'mensagens não reconhecidas'."
+        />
+        <Button onClick={reprocessUnknown} disabled={reprocessing} variant="outline">
+          <Wand2 className={`h-4 w-4 mr-2 ${reprocessing ? 'animate-spin' : ''}`} />
+          {reprocessing ? 'Reprocessando…' : 'Reprocessar não reconhecidas'}
+        </Button>
+      </div>
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
