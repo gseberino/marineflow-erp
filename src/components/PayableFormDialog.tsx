@@ -65,8 +65,8 @@ export function PayableFormDialog({ open, onOpenChange }: Props) {
                 ...(suppliers || []).map(s => ({
                   value: s.id,
                   label: s.supplier_name,
-                  description: s.cnpj || undefined,
-                  searchTerms: [s.cnpj || '', s.email || ''],
+                  description: s.cnpj_cpf || undefined,
+                  searchTerms: [s.cnpj_cpf || '', s.contact_email || ''],
                 })),
               ]}
             />
