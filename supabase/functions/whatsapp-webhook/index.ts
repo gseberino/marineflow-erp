@@ -338,8 +338,8 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ---- Insere mensagem no histórico ----
-    await admin.from("whatsapp_messages").insert({
+    // ---- Insere mensagem no histórico (idempotente via unique zapi_message_id) ----
+    await admin.from("whatsapp_messages").upsert({
       direction: "inbound",
       phone_normalized: phone,
       message_type: messageType,
@@ -347,11 +347,11 @@ Deno.serve(async (req) => {
       media_url: mediaUrl,
       client_id: matched?.id || null,
       lead_id: leadId,
-      zapi_message_id: zapiMessageId,
+      zapi_message_id: zapiMessageId ? String(zapiMessageId) : null,
       delivery_status: "received",
       is_broadcast: isBroadcast,
       raw_payload: payload as any,
-    });
+    }, { onConflict: "zapi_message_id", ignoreDuplicates: true });
 
     // ---- Notificação imediata para LEADS NOVOS (não broadcast) ----
     if (isNewLead && !isBroadcast) {
