@@ -1,5 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
+
+export interface PaymentInstallment {
+  label: string;
+  percent: number;
+  days_after_approval: number;
+}
 
 export function usePaymentConditionPresets() {
   return useQuery({
@@ -53,12 +60,22 @@ export function useCreatePaymentConditionPreset() {
 export function useUpdatePaymentConditionPreset() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, ...input }: {
-      id: string; label?: string; active?: boolean; sort_order?: number;
+    mutationFn: async ({
+      id,
+      patch,
+    }: {
+      id: string;
+      patch: Partial<{
+        label: string;
+        active: boolean;
+        sort_order: number;
+        installments: PaymentInstallment[];
+        auto_generate_collections: boolean;
+      }>;
     }) => {
       const { data, error } = await supabase
         .from('payment_condition_presets')
-        .update(input)
+        .update(patch as never)
         .eq('id', id)
         .select()
         .single();
@@ -67,6 +84,8 @@ export function useUpdatePaymentConditionPreset() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['payment-condition-presets'] });
+      toast.success('Condição atualizada');
     },
+    onError: (e: any) => toast.error(e.message || 'Erro ao atualizar'),
   });
 }
