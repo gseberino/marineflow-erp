@@ -338,6 +338,22 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           );
         }
         toast.success('Ordem de serviço atualizada');
+
+        // Auto-trigger collection generation when status becomes 'invoiced'
+        if (payload.status === 'invoiced') {
+          const { generateCollectionsFromOS } = await import('@/lib/generate-collections');
+          generateCollectionsFromOS({
+            serviceOrderId: orderId!,
+            approvalDate: new Date().toISOString().slice(0, 10),
+            trigger: 'invoice',
+          })
+            .then((res) => {
+              if (res.created > 0) {
+                toast.success(`${res.created} cobrança(s) gerada(s) automaticamente.`);
+              }
+            })
+            .catch((err) => console.error('auto-generate-collections (invoice) failed', err));
+        }
       }
     } catch (e: any) {
       toast.error(e.message || 'Erro ao salvar');
