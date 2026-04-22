@@ -208,6 +208,48 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [waEditPhone, setWaEditPhone] = useState('');
   const [presetKey, setPresetKey] = useState(0);
 
+  const [generatingCollections, setGeneratingCollections] = useState(false);
+  const prevSignedAt = useRef<string | null>(null);
+  const { data: osCollections } = useCollectionsByOS(orderId);
+
+  const handleGenerateCollections = useCallback(async () => {
+    if (!orderId) return;
+    setGeneratingCollections(true);
+    try {
+      const { generateCollectionsFromOS } = await import('@/lib/generate-collections');
+      const approvalDate = form.signed_at
+        ? form.signed_at.slice(0, 10)
+        : new Date().toISOString().slice(0, 10);
+      const result = await generateCollectionsFromOS({
+        serviceOrderId: orderId,
+        approvalDate,
+        trigger: 'status_change',
+      });
+      if (result.skipped) {
+        toast.info('Cobranças já existem para esta OS ou valor é zero.');
+      } else {
+        toast.success(`${result.created} cobrança(s) gerada(s) e enviadas por WhatsApp!`);
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Erro ao gerar cobranças');
+    } finally {
+      setGeneratingCollections(false);
+    }
+  }, [orderId, form.signed_at]);
+
+  // Auto-generate collections when OS is signed
+  useEffect(() => {
+    if (!orderId || !form.signed_at) return;
+    if (prevSignedAt.current === form.signed_at) return;
+    if (prevSignedAt.current === null) {
+      // first observation — only trigger on transition, not on initial load
+      prevSignedAt.current = form.signed_at;
+      return;
+    }
+    prevSignedAt.current = form.signed_at;
+    handleGenerateCollections();
+  }, [form.signed_at, orderId, handleGenerateCollections]);
+
   useEffect(() => {
     if (orderData) {
       const d = orderData;
