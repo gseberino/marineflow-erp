@@ -188,27 +188,28 @@ Deno.serve(async (req) => {
         const p = payload as any;
         const body = p.text?.message || p.message || "";
         const zapiId = p.messageId || p.id || null;
-        // Dedupe via upsert com unique index em zapi_message_id (parcial)
+        // Dedup manual antes de inserir (PostgREST não suporta onConflict em índice parcial)
         if (zapiId) {
-          await admin.from("whatsapp_messages").upsert({
-            direction: "outbound",
-            phone_normalized: phoneOut,
-            message_type: "text",
-            body: String(body).slice(0, 4000),
-            zapi_message_id: String(zapiId),
-            delivery_status: "sent",
-            raw_payload: payload as any,
-          }, { onConflict: "zapi_message_id", ignoreDuplicates: true });
-        } else {
-          await admin.from("whatsapp_messages").insert({
-            direction: "outbound",
-            phone_normalized: phoneOut,
-            message_type: "text",
-            body: String(body).slice(0, 4000),
-            zapi_message_id: null,
-            delivery_status: "sent",
-            raw_payload: payload as any,
-          });
+          const { data: existingOut } = await admin
+            .from("whatsapp_messages")
+            .select("id")
+            .eq("zapi_message_id", String(zapiId))
+            .maybeSingle();
+          if (existingOut) {
+            return jr({ ok: true, recorded: "outbound_echo_dedup" });
+          }
+        }
+        const outRes = await admin.from("whatsapp_messages").insert({
+          direction: "outbound",
+          phone_normalized: phoneOut,
+          message_type: "text",
+          body: String(body).slice(0, 4000),
+          zapi_message_id: zapiId ? String(zapiId) : null,
+          delivery_status: "sent",
+          raw_payload: payload as any,
+        });
+        if (outRes.error) {
+          console.error("FAILED outbound echo insert", outRes.error);
         }
       }
       return jr({ ok: true, recorded: "outbound_echo" });
