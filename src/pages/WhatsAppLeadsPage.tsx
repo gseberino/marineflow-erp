@@ -1,29 +1,32 @@
-import { useState } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
-} from '@/components/ui/dialog';
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
 import {
-  Tabs, TabsList, TabsTrigger, TabsContent,
-} from '@/components/ui/tabs';
-import { MessageCircle, UserPlus, Link2, Trash2, Phone } from 'lucide-react';
+  MessageCircle, UserPlus, Link2, Trash2, Phone, Send, Ban, Search, ArrowLeft,
+  Plus, Zap, ShieldOff,
+} from 'lucide-react';
 import {
   useWhatsAppLeads, useWhatsAppLeadMessages,
   useConvertLeadToClient, useLinkLeadToClient, useDiscardLead,
 } from '@/hooks/use-whatsapp-leads';
-import { useClients } from '@/hooks/use-clients';
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
+  useWhatsAppConversations, useSendWhatsAppText, useMarkConversationRead,
+  useBlockedNumbers, useAddBlockedNumber, useRemoveBlockedNumber,
+  useQuickReplies, useUpsertQuickReply, useDeleteQuickReply,
+} from '@/hooks/use-whatsapp-inbox';
+import { useClients } from '@/hooks/use-clients';
 import { useI18n } from '@/i18n';
 
 function formatPhone(p: string) {
-  // 5521999998888 → +55 (21) 99999-8888 (best-effort)
   if (!p) return '';
   if (p.length >= 12) {
     const ddi = p.slice(0, 2);
@@ -36,7 +39,210 @@ function formatPhone(p: string) {
   return p;
 }
 
-export default function WhatsAppLeadsPage() {
+// =============== INBOX ===============
+function InboxView() {
+  const { data: conversations, isLoading } = useWhatsAppConversations();
+  const [activePhone, setActivePhone] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [draft, setDraft] = useState('');
+  const sendMut = useSendWhatsAppText();
+  const markRead = useMarkConversationRead();
+  const addBlocked = useAddBlockedNumber();
+  const { data: messages } = useWhatsAppLeadMessages(activePhone || undefined);
+  const { data: quickReplies } = useQuickReplies();
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const filtered = useMemo(() => {
+    const list = conversations || [];
+    if (!search.trim()) return list;
+    const q = search.toLowerCase();
+    return list.filter((c: any) =>
+      (c.display_name || '').toLowerCase().includes(q) ||
+      c.phone.includes(q.replace(/\D/g, '')),
+    );
+  }, [conversations, search]);
+
+  const active = useMemo(
+    () => filtered.find((c: any) => c.phone === activePhone) || null,
+    [filtered, activePhone],
+  );
+
+  useEffect(() => {
+    if (activePhone) markRead.mutate(activePhone);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePhone]);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+  }, [messages]);
+
+  const send = async () => {
+    if (!activePhone || !draft.trim()) return;
+    await sendMut.mutateAsync({ phone: activePhone, message: draft.trim() });
+    setDraft('');
+  };
+
+  const block = async () => {
+    if (!activePhone) return;
+    if (!confirm('Bloquear este número? Não receberá mais mensagens registradas.')) return;
+    await addBlocked.mutateAsync({ phone: activePhone, reason: 'Bloqueado pelo inbox' });
+    setActivePhone(null);
+  };
+
+  return (
+    <div className="grid md:grid-cols-[320px_1fr] gap-3 h-[calc(100vh-220px)] min-h-[500px]">
+      {/* Lista de conversas */}
+      <div className={`rounded-xl border bg-card flex flex-col ${activePhone ? 'hidden md:flex' : 'flex'}`}>
+        <div className="p-3 border-b">
+          <div className="relative">
+            <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Buscar nome ou telefone…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {isLoading ? (
+            <div className="p-3 space-y-2">
+              {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="p-8 text-center text-sm text-muted-foreground">
+              <MessageCircle className="h-8 w-8 mx-auto mb-2 opacity-50" />
+              Nenhuma conversa.
+            </div>
+          ) : (
+            filtered.map((c: any) => (
+              <button
+                key={c.phone}
+                onClick={() => setActivePhone(c.phone)}
+                className={`w-full text-left px-3 py-3 border-b hover:bg-muted/50 transition-colors ${
+                  activePhone === c.phone ? 'bg-muted' : ''
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-sm truncate">
+                    {c.display_name || formatPhone(c.phone)}
+                  </span>
+                  {c.unread_count > 0 && (
+                    <Badge className="bg-primary text-primary-foreground h-5 min-w-5 px-1.5 text-[10px]">
+                      {c.unread_count}
+                    </Badge>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground truncate mt-0.5">
+                  {c.last_direction === 'outbound' ? '✓ ' : ''}
+                  {c.last_body || '—'}
+                </p>
+                <div className="flex items-center gap-1 mt-1">
+                  {c.client_id && <Badge variant="outline" className="text-[9px] py-0">Cliente</Badge>}
+                  {c.lead_status === 'pending' && <Badge variant="outline" className="text-[9px] py-0 border-amber-500 text-amber-700">Lead</Badge>}
+                  {c.is_broadcast && <Badge variant="outline" className="text-[9px] py-0">Broadcast</Badge>}
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* Painel de conversa */}
+      <div className={`rounded-xl border bg-card flex flex-col ${!activePhone ? 'hidden md:flex' : 'flex'}`}>
+        {!active ? (
+          <div className="flex-1 flex items-center justify-center text-muted-foreground">
+            <div className="text-center">
+              <MessageCircle className="h-12 w-12 mx-auto mb-3 opacity-40" />
+              <p>Selecione uma conversa</p>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="p-3 border-b flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setActivePhone(null)}>
+                  <ArrowLeft className="h-4 w-4" />
+                </Button>
+                <div className="min-w-0">
+                  <p className="font-semibold truncate">{active.display_name || formatPhone(active.phone)}</p>
+                  <p className="text-xs text-muted-foreground">{formatPhone(active.phone)}</p>
+                </div>
+              </div>
+              <Button variant="ghost" size="sm" onClick={block} className="text-destructive">
+                <Ban className="h-3.5 w-3.5 mr-1" /> Bloquear
+              </Button>
+            </div>
+
+            <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-2 bg-muted/30">
+              {(messages || []).length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-8">Sem mensagens.</p>
+              )}
+              {(messages || []).map((m: any) => (
+                <div key={m.id} className={`flex ${m.direction === 'outbound' ? 'justify-end' : 'justify-start'}`}>
+                  <div
+                    className={`max-w-[75%] rounded-2xl px-3 py-2 text-sm ${
+                      m.direction === 'outbound'
+                        ? 'bg-primary text-primary-foreground rounded-br-sm'
+                        : 'bg-card border rounded-bl-sm'
+                    }`}
+                  >
+                    <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                    <p className={`text-[10px] mt-1 opacity-70`}>
+                      {new Date(m.occurred_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                      {m.direction === 'outbound' && ` • ${m.delivery_status || 'sent'}`}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Quick replies */}
+            {(quickReplies || []).length > 0 && (
+              <div className="px-3 pt-2 flex gap-1 flex-wrap border-t">
+                {(quickReplies || []).map((q: any) => (
+                  <Button
+                    key={q.id}
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs"
+                    onClick={() => setDraft((d) => (d ? `${d}\n${q.body}` : q.body))}
+                  >
+                    <Zap className="h-3 w-3 mr-1" />
+                    {q.shortcut}
+                  </Button>
+                ))}
+              </div>
+            )}
+
+            {/* Compositor */}
+            <div className="p-3 border-t flex gap-2 items-end">
+              <Textarea
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    send();
+                  }
+                }}
+                placeholder="Escreva uma mensagem… (Enter envia, Shift+Enter quebra linha)"
+                rows={2}
+                className="resize-none"
+              />
+              <Button onClick={send} disabled={!draft.trim() || sendMut.isPending}>
+                <Send className="h-4 w-4" />
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// =============== LEADS (lista clássica) ===============
+function LeadsView() {
   const [tab, setTab] = useState('pending');
   const { data: leads, isLoading } = useWhatsAppLeads(tab);
   const [selected, setSelected] = useState<any | null>(null);
@@ -48,20 +254,9 @@ export default function WhatsAppLeadsPage() {
   const convertMut = useConvertLeadToClient();
   const linkMut = useLinkLeadToClient();
   const discardMut = useDiscardLead();
+  const addBlocked = useAddBlockedNumber();
   const { formatDate } = useI18n();
-
   const { data: messages } = useWhatsAppLeadMessages(selected?.phone_normalized);
-
-  const openConvert = (lead: any) => {
-    setSelected(lead);
-    setConvertName(lead.display_name || '');
-    setConvertOpen(true);
-  };
-  const openLink = (lead: any) => {
-    setSelected(lead);
-    setLinkClientId(null);
-    setLinkOpen(true);
-  };
 
   const statusBadge = (s: string) => {
     const map: Record<string, string> = {
@@ -71,21 +266,13 @@ export default function WhatsAppLeadsPage() {
       discarded: 'bg-muted text-muted-foreground',
     };
     const label: Record<string, string> = {
-      pending: 'Aguardando',
-      linked: 'Vinculado',
-      converted: 'Convertido',
-      discarded: 'Descartado',
+      pending: 'Aguardando', linked: 'Vinculado', converted: 'Convertido', discarded: 'Descartado',
     };
     return <Badge className={map[s] || ''}>{label[s] || s}</Badge>;
   };
 
   return (
-    <div className="space-y-4 animate-fade-in">
-      <PageHeader
-        title="Leads do WhatsApp"
-        description="Mensagens recebidas de números não cadastrados aguardando aprovação."
-      />
-
+    <>
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="pending">Pendentes</TabsTrigger>
@@ -94,16 +281,13 @@ export default function WhatsAppLeadsPage() {
           <TabsTrigger value="discarded">Descartados</TabsTrigger>
           <TabsTrigger value="all">Todos</TabsTrigger>
         </TabsList>
-
         <TabsContent value={tab} className="mt-4">
           {isLoading ? (
-            <div className="space-y-2">
-              {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-20 w-full" />)}
-            </div>
+            <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-20 w-full" />)}</div>
           ) : !leads?.length ? (
             <div className="rounded-xl border bg-card p-12 text-center space-y-2">
               <MessageCircle className="h-10 w-10 mx-auto text-muted-foreground" />
-              <p className="text-muted-foreground">Nenhum lead nesta categoria.</p>
+              <p className="text-muted-foreground">Nenhum lead.</p>
             </div>
           ) : (
             <div className="grid gap-3 md:grid-cols-2">
@@ -111,54 +295,34 @@ export default function WhatsAppLeadsPage() {
                 <div key={lead.id} className="rounded-xl border bg-card p-4 hover:shadow-md transition-shadow">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-semibold truncate">
-                          {lead.display_name || 'Contato sem nome'}
-                        </h3>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="font-semibold truncate">{lead.display_name || 'Contato sem nome'}</h3>
                         {statusBadge(lead.status)}
+                        {lead.is_broadcast && <Badge variant="outline" className="text-[10px]">Broadcast</Badge>}
                       </div>
                       <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-                        <Phone className="h-3 w-3" />
-                        {formatPhone(lead.phone_normalized)}
+                        <Phone className="h-3 w-3" />{formatPhone(lead.phone_normalized)}
                       </p>
                     </div>
                     <div className="text-right shrink-0">
-                      <p className="text-xs text-muted-foreground">
-                        {formatDate(lead.last_message_at)}
-                      </p>
+                      <p className="text-xs text-muted-foreground">{formatDate(lead.last_message_at)}</p>
                       <p className="text-xs text-muted-foreground">{lead.message_count} msgs</p>
                     </div>
                   </div>
                   {lead.first_message && (
-                    <p className="mt-3 text-sm text-muted-foreground line-clamp-2 italic">
-                      "{lead.first_message}"
-                    </p>
+                    <p className="mt-3 text-sm text-muted-foreground line-clamp-2 italic">"{lead.first_message}"</p>
                   )}
                   {lead.linked_client && (
-                    <p className="mt-2 text-xs text-blue-700">
-                      → {lead.linked_client.full_name_or_company_name}
-                    </p>
+                    <p className="mt-2 text-xs text-blue-700">→ {lead.linked_client.full_name_or_company_name}</p>
                   )}
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <Button size="sm" variant="outline" onClick={() => setSelected(lead)}>
-                      Ver mensagens
-                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => setSelected(lead)}>Ver mensagens</Button>
                     {lead.status === 'pending' && (
                       <>
-                        <Button size="sm" onClick={() => openConvert(lead)} className="gap-1">
-                          <UserPlus className="h-3.5 w-3.5" /> Converter
-                        </Button>
-                        <Button size="sm" variant="secondary" onClick={() => openLink(lead)} className="gap-1">
-                          <Link2 className="h-3.5 w-3.5" /> Vincular
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => discardMut.mutate(lead.id)}
-                          className="gap-1 text-destructive hover:text-destructive"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" /> Descartar
-                        </Button>
+                        <Button size="sm" onClick={() => { setSelected(lead); setConvertName(lead.display_name || ''); setConvertOpen(true); }}><UserPlus className="h-3.5 w-3.5 mr-1" />Converter</Button>
+                        <Button size="sm" variant="secondary" onClick={() => { setSelected(lead); setLinkClientId(null); setLinkOpen(true); }}><Link2 className="h-3.5 w-3.5 mr-1" />Vincular</Button>
+                        <Button size="sm" variant="ghost" onClick={() => discardMut.mutate(lead.id)} className="text-destructive"><Trash2 className="h-3.5 w-3.5 mr-1" />Descartar</Button>
+                        <Button size="sm" variant="ghost" onClick={() => addBlocked.mutate({ phone: lead.phone_normalized, reason: 'Bloqueado da lista de leads' })} className="text-destructive"><Ban className="h-3.5 w-3.5 mr-1" />Bloquear</Button>
                       </>
                     )}
                   </div>
@@ -169,108 +333,165 @@ export default function WhatsAppLeadsPage() {
         </TabsContent>
       </Tabs>
 
-      {/* Modal de mensagens */}
       <Dialog open={!!selected && !convertOpen && !linkOpen} onOpenChange={(v) => !v && setSelected(null)}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>
-              {selected?.display_name || 'Contato'} — {formatPhone(selected?.phone_normalized || '')}
-            </DialogTitle>
+            <DialogTitle>{selected?.display_name || 'Contato'} — {formatPhone(selected?.phone_normalized || '')}</DialogTitle>
           </DialogHeader>
           <div className="max-h-[60vh] overflow-y-auto space-y-2 p-1">
-            {messages?.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-8">Sem mensagens.</p>
-            )}
+            {messages?.length === 0 && <p className="text-sm text-muted-foreground text-center py-8">Sem mensagens.</p>}
             {messages?.map((m: any) => (
-              <div
-                key={m.id}
-                className={`p-2 rounded-lg text-sm ${
-                  m.direction === 'inbound'
-                    ? 'bg-muted mr-12'
-                    : 'bg-primary/10 ml-12 text-right'
-                }`}
-              >
+              <div key={m.id} className={`p-2 rounded-lg text-sm ${m.direction === 'inbound' ? 'bg-muted mr-12' : 'bg-primary/10 ml-12 text-right'}`}>
                 <p>{m.body}</p>
-                <p className="text-[10px] text-muted-foreground mt-1">
-                  {new Date(m.occurred_at).toLocaleString('pt-BR')} • {m.delivery_status}
-                </p>
+                <p className="text-[10px] text-muted-foreground mt-1">{new Date(m.occurred_at).toLocaleString('pt-BR')} • {m.delivery_status}</p>
               </div>
             ))}
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Converter em cliente */}
       <Dialog open={convertOpen} onOpenChange={setConvertOpen}>
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Converter lead em cliente</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>Converter lead em cliente</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
-              <Label>Nome / Razão social</Label>
-              <Input
-                value={convertName}
-                onChange={(e) => setConvertName(e.target.value)}
-                placeholder="Nome completo do cliente"
-              />
+              <label className="text-sm font-medium">Nome / Razão social</label>
+              <Input value={convertName} onChange={(e) => setConvertName(e.target.value)} />
             </div>
-            <p className="text-xs text-muted-foreground">
-              O telefone {formatPhone(selected?.phone_normalized || '')} será usado como WhatsApp e telefone principal.
-            </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConvertOpen(false)}>Cancelar</Button>
-            <Button
-              onClick={async () => {
-                if (!selected || !convertName.trim()) return;
-                await convertMut.mutateAsync({ leadId: selected.id, fullName: convertName.trim() });
-                setConvertOpen(false);
-                setSelected(null);
-              }}
-              disabled={!convertName.trim() || convertMut.isPending}
-            >
-              Converter
-            </Button>
+            <Button onClick={async () => { if (!selected) return; await convertMut.mutateAsync({ leadId: selected.id, fullName: convertName.trim() }); setConvertOpen(false); setSelected(null); }} disabled={!convertName.trim()}>Converter</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Vincular a cliente existente */}
       <Dialog open={linkOpen} onOpenChange={setLinkOpen}>
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Vincular a cliente existente</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <Label>Cliente</Label>
-            <Select value={linkClientId || ''} onValueChange={setLinkClientId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Selecione um cliente..." />
-              </SelectTrigger>
-              <SelectContent>
-                {(clients || []).map((c: any) => (
-                  <SelectItem key={c.id} value={c.id}>{c.full_name_or_company_name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <DialogHeader><DialogTitle>Vincular a cliente existente</DialogTitle></DialogHeader>
+          <Select value={linkClientId || ''} onValueChange={setLinkClientId}>
+            <SelectTrigger><SelectValue placeholder="Selecione um cliente..." /></SelectTrigger>
+            <SelectContent>{(clients || []).map((c: any) => <SelectItem key={c.id} value={c.id}>{c.full_name_or_company_name}</SelectItem>)}</SelectContent>
+          </Select>
           <DialogFooter>
             <Button variant="outline" onClick={() => setLinkOpen(false)}>Cancelar</Button>
-            <Button
-              onClick={async () => {
-                if (!selected || !linkClientId) return;
-                await linkMut.mutateAsync({ leadId: selected.id, clientId: linkClientId });
-                setLinkOpen(false);
-                setSelected(null);
-              }}
-              disabled={!linkClientId || linkMut.isPending}
-            >
-              Vincular
-            </Button>
+            <Button onClick={async () => { if (!selected || !linkClientId) return; await linkMut.mutateAsync({ leadId: selected.id, clientId: linkClientId }); setLinkOpen(false); setSelected(null); }} disabled={!linkClientId}>Vincular</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </>
+  );
+}
+
+// =============== BLOCKLIST ===============
+function BlocklistView() {
+  const { data: blocked, isLoading } = useBlockedNumbers();
+  const addMut = useAddBlockedNumber();
+  const removeMut = useRemoveBlockedNumber();
+  const [phone, setPhone] = useState('');
+  const [reason, setReason] = useState('');
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border bg-card p-4">
+        <p className="text-sm font-medium mb-2">Adicionar número à blocklist</p>
+        <p className="text-xs text-muted-foreground mb-3">Mensagens vindas destes números serão ignoradas (não criam leads nem notificam).</p>
+        <div className="grid md:grid-cols-[1fr_2fr_auto] gap-2">
+          <Input placeholder="Ex: 5521999998888" value={phone} onChange={(e) => setPhone(e.target.value)} />
+          <Input placeholder="Motivo (opcional): lista de transmissão de fornecedor X…" value={reason} onChange={(e) => setReason(e.target.value)} />
+          <Button onClick={async () => { await addMut.mutateAsync({ phone, reason }); setPhone(''); setReason(''); }} disabled={!phone || addMut.isPending}>
+            <Plus className="h-4 w-4 mr-1" />Bloquear
+          </Button>
+        </div>
+      </div>
+
+      <div className="rounded-xl border bg-card">
+        {isLoading ? (
+          <div className="p-4 space-y-2">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
+        ) : !blocked?.length ? (
+          <p className="p-8 text-center text-sm text-muted-foreground">Nenhum número bloqueado.</p>
+        ) : (
+          <div className="divide-y">
+            {blocked.map((b: any) => (
+              <div key={b.id} className="p-3 flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-medium text-sm">{formatPhone(b.phone_normalized)}</p>
+                  {b.reason && <p className="text-xs text-muted-foreground truncate">{b.reason}</p>}
+                </div>
+                <Button size="sm" variant="ghost" onClick={() => removeMut.mutate(b.id)} className="text-destructive">
+                  <ShieldOff className="h-3.5 w-3.5 mr-1" />Desbloquear
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// =============== QUICK REPLIES ===============
+function QuickRepliesView() {
+  const { data: items, isLoading } = useQuickReplies();
+  const upsert = useUpsertQuickReply();
+  const del = useDeleteQuickReply();
+  const [shortcut, setShortcut] = useState('');
+  const [body, setBody] = useState('');
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border bg-card p-4 space-y-2">
+        <p className="text-sm font-medium">Nova resposta rápida</p>
+        <div className="grid md:grid-cols-[180px_1fr] gap-2">
+          <Input placeholder="Atalho (ex: ola)" value={shortcut} onChange={(e) => setShortcut(e.target.value)} />
+          <Textarea placeholder="Texto que será inserido…" value={body} onChange={(e) => setBody(e.target.value)} rows={2} />
+        </div>
+        <Button onClick={async () => { await upsert.mutateAsync({ shortcut, body }); setShortcut(''); setBody(''); }} disabled={!shortcut.trim() || !body.trim()}>
+          <Plus className="h-4 w-4 mr-1" />Adicionar
+        </Button>
+      </div>
+
+      <div className="rounded-xl border bg-card">
+        {isLoading ? <div className="p-4 space-y-2">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-12" />)}</div>
+          : !items?.length ? <p className="p-8 text-center text-sm text-muted-foreground">Nenhuma resposta rápida.</p>
+          : <div className="divide-y">{items.map((q: any) => (
+              <div key={q.id} className="p-3 flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-medium text-sm">/{q.shortcut}</p>
+                  <p className="text-xs text-muted-foreground whitespace-pre-wrap">{q.body}</p>
+                </div>
+                <Button size="sm" variant="ghost" onClick={() => del.mutate(q.id)} className="text-destructive">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ))}</div>
+        }
+      </div>
+    </div>
+  );
+}
+
+// =============== PAGE ===============
+export default function WhatsAppLeadsPage() {
+  const [view, setView] = useState('inbox');
+  return (
+    <div className="space-y-4 animate-fade-in">
+      <PageHeader
+        title="WhatsApp"
+        description="Inbox de conversas, leads, blocklist e respostas rápidas."
+      />
+      <Tabs value={view} onValueChange={setView}>
+        <TabsList>
+          <TabsTrigger value="inbox">Inbox</TabsTrigger>
+          <TabsTrigger value="leads">Leads</TabsTrigger>
+          <TabsTrigger value="blocklist">Bloqueados</TabsTrigger>
+          <TabsTrigger value="quick">Respostas rápidas</TabsTrigger>
+        </TabsList>
+        <TabsContent value="inbox" className="mt-4"><InboxView /></TabsContent>
+        <TabsContent value="leads" className="mt-4"><LeadsView /></TabsContent>
+        <TabsContent value="blocklist" className="mt-4"><BlocklistView /></TabsContent>
+        <TabsContent value="quick" className="mt-4"><QuickRepliesView /></TabsContent>
+      </Tabs>
     </div>
   );
 }
