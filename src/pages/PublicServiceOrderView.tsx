@@ -191,9 +191,9 @@ export default function PublicServiceOrderView() {
   const isSigned = !!order.signed_at && !order.requires_resignature;
   const needsResignature = !!order.requires_resignature;
 
-  const handleDownloadPDF = () => {
+  const buildPdfData = (): PDFData => {
     const get = (k: string) => company[k] || '';
-    const pdfData: PDFData = {
+    return {
       documentType: 'service_order',
       company: {
         name: get('company_name') || 'MarineFlow',
@@ -259,7 +259,10 @@ export default function PublicServiceOrderView() {
       })),
       terms: termsText || undefined,
     };
-    generatePDF(pdfData, DEFAULT_PDF_OPTIONS);
+  };
+
+  const handleDownloadPDF = () => {
+    generatePDF(buildPdfData(), DEFAULT_PDF_OPTIONS);
   };
 
   const handleSubmitSignature = async () => {
