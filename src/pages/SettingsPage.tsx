@@ -984,10 +984,13 @@ function ProductCategoriesTab() {
 
 function UsersTab() {
   const { t } = useI18n();
+  const { user: currentUser } = useAuth();
+  const isCurrentUserAdmin = currentUser?.role === 'admin';
   const { data: users, isLoading } = useAppUsersHook();
   const createUser = useCreateAppUser();
   const updateUser = useUpdateAppUser();
   const [showNew, setShowNew] = useState(false);
+  const [editingUser, setEditingUser] = useState<any | null>(null);
   const [newForm, setNewForm] = useState({
     full_name: '', email: '', role: 'technician', phone: '',
   });
