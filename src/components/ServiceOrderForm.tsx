@@ -385,11 +385,41 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       };
       if (isNew) {
         const result = await createSO.mutateAsync(payload);
+        const { supabase } = await import('@/integrations/supabase/client');
         if (selectedTechnicians.length > 0) {
-          const { supabase } = await import('@/integrations/supabase/client');
           await supabase.from('service_order_technicians').insert(
             selectedTechnicians.map((uid) => ({ service_order_id: result.id, user_id: uid }))
           );
+        }
+        // Persist any draft parts entered before the OS existed
+        for (const dp of draftParts) {
+          try {
+            await addPart.mutateAsync({
+              service_order_id: result.id,
+              product_id: dp.product_id,
+              quantity: dp.quantity,
+              unit_cost_snapshot: dp.unit_cost,
+              unit_sale_snapshot: dp.unit_sale,
+            });
+          } catch (err) {
+            console.error('Failed to persist draft part', err);
+          }
+        }
+        for (const ds of draftServices) {
+          try {
+            await addService.mutateAsync({
+              service_order_id: result.id,
+              service_id: ds.service_id || undefined,
+              service_name_snapshot: ds.service_name_snapshot,
+              description_snapshot: ds.description_snapshot || undefined,
+              billing_unit_snapshot: ds.billing_unit_snapshot,
+              quantity: ds.quantity,
+              unit_price_snapshot: ds.unit_price_snapshot,
+              notes: ds.notes || undefined,
+            });
+          } catch (err) {
+            console.error('Failed to persist draft service', err);
+          }
         }
         toast.success('Ordem de serviço criada com sucesso');
         navigate(`/service-orders/${result.id}`);
