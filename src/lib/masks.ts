@@ -36,6 +36,47 @@ export function maskCEP(value: string): string {
   return `${digits.slice(0,5)}-${digits.slice(5)}`;
 }
 
+/**
+ * Máscara monetária estilo "caixa registradora" no padrão BR.
+ * - Aceita apenas dígitos (remove qualquer outro caractere).
+ * - Os 2 últimos dígitos são os centavos.
+ * - Separador decimal: vírgula. Separador de milhar: ponto.
+ * Ex.: "19990" -> "199,90" ; "1299900" -> "12.999,00"
+ */
+export function maskMoney(value: string | number | null | undefined): string {
+  if (value === null || value === undefined || value === '') return '';
+  const digits = String(value).replace(/\D/g, '');
+  if (!digits) return '';
+  const padded = digits.padStart(3, '0');
+  const intPart = padded.slice(0, -2).replace(/^0+(?=\d)/, '');
+  const decPart = padded.slice(-2);
+  const intWithThousands = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return `${intWithThousands},${decPart}`;
+}
+
+/**
+ * Converte string mascarada (ou número) em float.
+ * Ex.: "1.299,90" -> 1299.9 ; "199,90" -> 199.9
+ */
+export function parseMoney(value: string | number | null | undefined): number {
+  if (value === null || value === undefined || value === '') return 0;
+  if (typeof value === 'number') return isFinite(value) ? value : 0;
+  const digits = String(value).replace(/\D/g, '');
+  if (!digits) return 0;
+  return parseInt(digits, 10) / 100;
+}
+
+/**
+ * Formata um número (float) na máscara monetária BR para exibição em inputs.
+ * Ex.: 199.9 -> "199,90"
+ */
+export function formatMoneyFromNumber(n: number | null | undefined): string {
+  if (n === null || n === undefined || !isFinite(Number(n))) return '';
+  if (Number(n) === 0) return '';
+  const cents = Math.round(Number(n) * 100);
+  return maskMoney(String(cents));
+}
+
 export function isValidCPF(value: string): boolean {
   const digits = value.replace(/\D/g, '');
   if (digits.length !== 11) return false;
