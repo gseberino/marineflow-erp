@@ -743,6 +743,17 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
           </div>
         </form>
       </DialogContent>
+      <PriceCalculatorDialog
+        open={calcOpen}
+        onOpenChange={setCalcOpen}
+        initialCost={Number(form.cost_price) || 0}
+        initialPrice={Number(form.sale_price) || 0}
+        initialMargin={Number((form as any).profit_margin) || 30}
+        initialTaxRate={Number((form as any).icms_rate) || 0}
+        initialCommissionRate={Number((form as any).commission_rate) || 0}
+        defaultMethod="margin"
+        onConfirm={(price) => set('sale_price', price)}
+      />
     </Dialog>
   );
 }
