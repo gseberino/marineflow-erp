@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { EntityCombobox } from '@/components/EntityCombobox';
 import { useCreateVessel, useUpdateVessel } from '@/hooks/use-vessels';
 import { useClients } from '@/hooks/use-clients';
 import { useMarinas } from '@/hooks/use-marinas';
@@ -135,14 +136,17 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2">
               <Label>{t.vessels.selectClient} *</Label>
-              <Select value={form.client_id} onValueChange={v => set('client_id', v)} required>
-                <SelectTrigger><SelectValue placeholder={t.vessels.selectClient} /></SelectTrigger>
-                <SelectContent>
-                  {activeClients.map(c => (
-                    <SelectItem key={c.id} value={c.id}>{c.full_name_or_company_name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <EntityCombobox
+                value={form.client_id}
+                onChange={v => set('client_id', v)}
+                placeholder={t.vessels.selectClient}
+                options={activeClients.map(c => ({
+                  value: c.id,
+                  label: c.full_name_or_company_name,
+                  description: c.cpf_cnpj || undefined,
+                  searchTerms: [c.cpf_cnpj || '', c.email || ''],
+                }))}
+              />
             </div>
             <div className="col-span-2">
               <Label>{t.vessels.boatName} *</Label>
@@ -202,15 +206,19 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
             </div>
             <div className="col-span-2">
               <Label>{t.vessels.selectMarina}</Label>
-              <Select value={form.marina_id ?? 'none'} onValueChange={v => set('marina_id', v === 'none' ? null : v)}>
-                <SelectTrigger><SelectValue placeholder={t.vessels.selectMarina} /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">—</SelectItem>
-                  {activeMarinas.map(m => (
-                    <SelectItem key={m.id} value={m.id}>{m.marina_name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <EntityCombobox
+                value={form.marina_id ?? ''}
+                onChange={v => set('marina_id', v || null)}
+                placeholder={t.vessels.selectMarina}
+                options={[
+                  { value: '', label: '—' },
+                  ...activeMarinas.map(m => ({
+                    value: m.id,
+                    label: m.marina_name,
+                    description: m.city || undefined,
+                  })),
+                ]}
+              />
             </div>
             <div>
               <Label>{t.vessels.dockPosition}</Label>

@@ -504,29 +504,35 @@ function QuickScheduleDialog({
         <div className="space-y-4">
           <div className="space-y-2">
             <Label>Ordem de Serviço *</Label>
-            <Select value={orderId} onValueChange={setOrderId}>
-              <SelectTrigger><SelectValue placeholder="Selecione uma OS" /></SelectTrigger>
-              <SelectContent>
-                {schedulable.map((o: any) => (
-                  <SelectItem key={o.id} value={o.id}>
-                    {o.service_order_number} — {o.clients?.full_name_or_company_name || '—'}
-                    {o.vessels?.boat_name ? ` (${o.vessels.boat_name})` : ''}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <EntityCombobox
+              value={orderId}
+              onChange={setOrderId}
+              placeholder="Selecione uma OS"
+              options={schedulable.map((o: any) => ({
+                value: o.id,
+                label: `${o.service_order_number} — ${o.clients?.full_name_or_company_name || '—'}`,
+                description: o.vessels?.boat_name || undefined,
+                searchTerms: [
+                  o.service_order_number,
+                  o.clients?.full_name_or_company_name || '',
+                  o.vessels?.boat_name || '',
+                ],
+              }))}
+            />
           </div>
 
           <div className="space-y-2">
             <Label>Técnico *</Label>
-            <Select value={technicianId} onValueChange={setTechnicianId}>
-              <SelectTrigger><SelectValue placeholder="Selecione um técnico" /></SelectTrigger>
-              <SelectContent>
-                {technicians.map((t) => (
-                  <SelectItem key={t.id} value={t.id}>{t.full_name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <EntityCombobox
+              value={technicianId}
+              onChange={setTechnicianId}
+              placeholder="Selecione um técnico"
+              options={technicians.map((t) => ({
+                value: t.id,
+                label: t.full_name,
+                description: t.email || undefined,
+              }))}
+            />
           </div>
 
           <div className="grid grid-cols-3 gap-3">
