@@ -87,6 +87,42 @@ export function WhatsAppWebhookValidator() {
     }
   };
 
+  const testEndpoints = async () => {
+    setTestingEndpoints(true);
+    try {
+      const { data: result, error } = await supabase.functions.invoke('zapi-configure-webhook', {
+        body: {},
+        method: 'GET' as any,
+      });
+      // supabase.functions.invoke nem sempre repassa query string; usar fetch direto
+      const { data: { session } } = await supabase.auth.getSession();
+      const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/zapi-configure-webhook?action=test_each`;
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${session?.access_token ?? ''}`,
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        },
+      });
+      const json = (await res.json()) as EndpointTestsResult & { error?: string };
+      if (!res.ok) throw new Error(json?.error || 'Falha ao testar endpoints');
+      setEndpointTests(json);
+      toast({
+        title: json.all_match_target ? '✅ Todos os endpoints OK' : '⚠️ Divergências encontradas',
+        description: json.all_match_target
+          ? 'Todos os webhooks da Z-API apontam para este sistema.'
+          : 'Algum webhook não está apontando para a URL correta. Veja os detalhes abaixo.',
+        variant: json.all_match_target ? 'default' : 'destructive',
+      });
+      // suprime warning de variável não usada (fallback antigo)
+      void result; void error;
+    } catch (e: any) {
+      toast({ title: 'Erro ao testar endpoints', description: e.message, variant: 'destructive' });
+    } finally {
+      setTestingEndpoints(false);
+    }
+  };
+
   const check = async () => {
     setLoading(true);
     try {
