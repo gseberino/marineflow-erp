@@ -30,6 +30,7 @@ import { useCollectionsByOS } from '@/hooks/use-collections';
 import { useVesselContacts, VESSEL_CONTACT_ROLES } from '@/hooks/use-vessel-contacts';
 import { ClientCombobox } from '@/components/ClientCombobox';
 import { VesselSelect } from '@/components/VesselSelect';
+import { EntityCombobox, type EntityOption } from '@/components/EntityCombobox';
 import { useServiceOrderExpenses, useAddServiceOrderExpense, useRemoveServiceOrderExpense } from '@/hooks/use-service-order-expenses';
 import { usePDFData } from '@/hooks/use-pdf';
 import { generatePDF, DEFAULT_PDF_OPTIONS } from '@/lib/pdf-generator';
@@ -167,14 +168,36 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [extraFieldsOpen, setExtraFieldsOpen] = useState(false);
   const { data: vesselContacts } = useVesselContacts(form.vessel_id || undefined);
 
-  // Part form
+  // Part form (current row being edited inline)
   const [partForm, setPartForm] = useState({ product_id: '', quantity: 1, unit_cost: 0, unit_sale: 0 });
   const [showPartForm, setShowPartForm] = useState(false);
 
-  // Service line form
+  // Service line form (current row being edited inline)
   const [svcForm, setSvcForm] = useState({ service_id: '', quantity: 1, unit_price: 0, notes: '', service_name_snapshot: '', description_snapshot: '', billing_unit_snapshot: 'hour' });
   const [showSvcForm, setShowSvcForm] = useState(false);
   const [showNewServiceDialog, setShowNewServiceDialog] = useState(false);
+
+  // Draft items used while OS is new (no orderId yet) — persisted on save
+  type DraftPart = {
+    tempId: string;
+    product_id: string;
+    product_name: string;
+    quantity: number;
+    unit_cost: number;
+    unit_sale: number;
+  };
+  type DraftService = {
+    tempId: string;
+    service_id?: string;
+    service_name_snapshot: string;
+    description_snapshot?: string;
+    billing_unit_snapshot: string;
+    quantity: number;
+    unit_price_snapshot: number;
+    notes?: string;
+  };
+  const [draftParts, setDraftParts] = useState<DraftPart[]>([]);
+  const [draftServices, setDraftServices] = useState<DraftService[]>([]);
 
   // Time form
   const [timeForm, setTimeForm] = useState({
@@ -362,11 +385,41 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       };
       if (isNew) {
         const result = await createSO.mutateAsync(payload);
+        const { supabase } = await import('@/integrations/supabase/client');
         if (selectedTechnicians.length > 0) {
-          const { supabase } = await import('@/integrations/supabase/client');
           await supabase.from('service_order_technicians').insert(
             selectedTechnicians.map((uid) => ({ service_order_id: result.id, user_id: uid }))
           );
+        }
+        // Persist any draft parts entered before the OS existed
+        for (const dp of draftParts) {
+          try {
+            await addPart.mutateAsync({
+              service_order_id: result.id,
+              product_id: dp.product_id,
+              quantity: dp.quantity,
+              unit_cost_snapshot: dp.unit_cost,
+              unit_sale_snapshot: dp.unit_sale,
+            });
+          } catch (err) {
+            console.error('Failed to persist draft part', err);
+          }
+        }
+        for (const ds of draftServices) {
+          try {
+            await addService.mutateAsync({
+              service_order_id: result.id,
+              service_id: ds.service_id || undefined,
+              service_name_snapshot: ds.service_name_snapshot,
+              description_snapshot: ds.description_snapshot || undefined,
+              billing_unit_snapshot: ds.billing_unit_snapshot,
+              quantity: ds.quantity,
+              unit_price_snapshot: ds.unit_price_snapshot,
+              notes: ds.notes || undefined,
+            });
+          } catch (err) {
+            console.error('Failed to persist draft service', err);
+          }
         }
         toast.success('Ordem de serviço criada com sucesso');
         navigate(`/service-orders/${result.id}`);
@@ -413,7 +466,26 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   };
 
   const handleAddPart = async () => {
-    if (!orderId || !partForm.product_id || partForm.quantity <= 0) return;
+    if (!partForm.product_id || partForm.quantity <= 0) return;
+    const product = products?.find((p) => p.id === partForm.product_id);
+    if (isNew) {
+      // Buffer in memory until the OS is created
+      setDraftParts((prev) => [
+        ...prev,
+        {
+          tempId: crypto.randomUUID(),
+          product_id: partForm.product_id,
+          product_name: product?.product_name || 'Produto',
+          quantity: partForm.quantity,
+          unit_cost: partForm.unit_cost,
+          unit_sale: partForm.unit_sale,
+        },
+      ]);
+      setPartForm({ product_id: '', quantity: 1, unit_cost: 0, unit_sale: 0 });
+      toast.success('Peça adicionada (será salva ao criar a OS)');
+      return;
+    }
+    if (!orderId) return;
     try {
       await addPart.mutateAsync({
         service_order_id: orderId,
@@ -422,8 +494,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         unit_cost_snapshot: partForm.unit_cost,
         unit_sale_snapshot: partForm.unit_sale,
       });
+      // Reset form so a new blank row appears for the next item
       setPartForm({ product_id: '', quantity: 1, unit_cost: 0, unit_sale: 0 });
-      setShowPartForm(false);
       toast.success('Peça adicionada');
     } catch (e: any) {
       toast.error(e.message || 'Erro ao adicionar peça');
@@ -431,7 +503,26 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   };
 
   const handleAddService = async () => {
-    if (!orderId || !svcForm.service_name_snapshot || svcForm.quantity <= 0) return;
+    if (!svcForm.service_name_snapshot || svcForm.quantity <= 0) return;
+    if (isNew) {
+      setDraftServices((prev) => [
+        ...prev,
+        {
+          tempId: crypto.randomUUID(),
+          service_id: svcForm.service_id || undefined,
+          service_name_snapshot: svcForm.service_name_snapshot,
+          description_snapshot: svcForm.description_snapshot || undefined,
+          billing_unit_snapshot: svcForm.billing_unit_snapshot,
+          quantity: svcForm.quantity,
+          unit_price_snapshot: svcForm.unit_price,
+          notes: svcForm.notes || undefined,
+        },
+      ]);
+      setSvcForm({ service_id: '', quantity: 1, unit_price: 0, notes: '', service_name_snapshot: '', description_snapshot: '', billing_unit_snapshot: 'hour' });
+      toast.success('Serviço adicionado (será salvo ao criar a OS)');
+      return;
+    }
+    if (!orderId) return;
     try {
       await addService.mutateAsync({
         service_order_id: orderId,
@@ -444,7 +535,6 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         notes: svcForm.notes || undefined,
       });
       setSvcForm({ service_id: '', quantity: 1, unit_price: 0, notes: '', service_name_snapshot: '', description_snapshot: '', billing_unit_snapshot: 'hour' });
-      setShowSvcForm(false);
       toast.success('Serviço adicionado');
     } catch (e: any) {
       toast.error(e.message || 'Erro ao adicionar serviço');
@@ -1026,77 +1116,100 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         </Collapsible>
       </section>
 
-      {/* E - Labor Services (edit only) */}
-      {!isNew && (
-        <section className="rounded-xl border bg-card shadow-sm overflow-hidden">
-          <div className="p-5 border-b flex items-center justify-between">
-            <h2 className="font-semibold text-sm">{t.services.laborSection}</h2>
-            <Button variant="outline" size="sm" className="gap-1" onClick={() => setShowSvcForm(!showSvcForm)}>
-              <Plus className="h-3 w-3" /> {t.services.selectService}
-            </Button>
-          </div>
-          {showSvcForm && (
-            <div className="p-4 border-b bg-muted/30 space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <Label>{t.services.selectService}</Label>
-                  <Select value={svcForm.service_id} onValueChange={(v) => {
-                    const svc = services?.find((s) => s.id === v);
-                    if (svc) {
-                      setSvcForm({
-                        ...svcForm,
-                        service_id: v,
-                        service_name_snapshot: svc.service_name,
-                        description_snapshot: svc.description || '',
-                        billing_unit_snapshot: svc.billing_unit,
-                        unit_price: svc.default_price || 0,
-                      });
-                    }
-                  }}>
-                    <SelectTrigger><SelectValue placeholder={t.services.selectService} /></SelectTrigger>
-                    <SelectContent>
-                      {services?.filter((s) => s.active).map((s) => (
-                        <SelectItem key={s.id} value={s.id}>
-                          {s.service_name} ({BILLING_UNIT_LABELS[s.billing_unit] || s.billing_unit} — {formatCurrency(s.default_price || 0)})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <button type="button" className="text-xs text-primary mt-1 hover:underline"
-                    onClick={() => setShowNewServiceDialog(true)}>
-                    {t.services.registerNew}
-                  </button>
-                </div>
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <Label>{t.serviceOrders.qty}</Label>
-                    <Input type="number" min={0.001} step="any" value={svcForm.quantity}
-                      onChange={(e) => setSvcForm({ ...svcForm, quantity: parseFloat(e.target.value) || 1 })} />
-                  </div>
-                  <div>
-                    <Label>{t.serviceOrders.unitPrice}</Label>
-                    <Input type="number" value={svcForm.unit_price}
-                      onChange={(e) => setSvcForm({ ...svcForm, unit_price: parseFloat(e.target.value) || 0 })} />
-                  </div>
-                  <div>
-                    <Label>{t.common.total}</Label>
-                    <Input readOnly value={formatCurrency(svcForm.quantity * svcForm.unit_price)} className="bg-muted" />
-                  </div>
-                </div>
+      {/* E - Labor Services — always visible (with always-on entry row) */}
+      <section className="rounded-xl border bg-card shadow-sm overflow-hidden">
+        <div className="p-5 border-b">
+          <h2 className="font-semibold text-sm">{t.services.laborSection}</h2>
+          {isNew && (
+            <p className="text-xs text-muted-foreground mt-1">
+              Itens adicionados aqui serão salvos quando você criar a OS.
+            </p>
+          )}
+        </div>
+
+        {/* Always-on entry row */}
+        <div className="p-4 border-b bg-muted/30 space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <Label>{t.services.selectService}</Label>
+              <EntityCombobox
+                value={svcForm.service_id}
+                onChange={(v) => {
+                  const svc = services?.find((s) => s.id === v);
+                  if (svc) {
+                    setSvcForm({
+                      ...svcForm,
+                      service_id: v,
+                      service_name_snapshot: svc.service_name,
+                      description_snapshot: svc.description || '',
+                      billing_unit_snapshot: svc.billing_unit,
+                      unit_price: svc.default_price || 0,
+                    });
+                  }
+                }}
+                options={(services || [])
+                  .filter((s) => s.active)
+                  .map<EntityOption>((s) => ({
+                    value: s.id,
+                    label: s.service_name,
+                    description: `${BILLING_UNIT_LABELS[s.billing_unit] || s.billing_unit} — ${formatCurrency(s.default_price || 0)}`,
+                    searchTerms: [s.category || ''],
+                  }))}
+                placeholder={t.services.selectService}
+                searchPlaceholder="Buscar serviço... (digite ao menos 3 letras)"
+                emptyText="Nenhum serviço encontrado"
+                onCreate={() => setShowNewServiceDialog(true)}
+                createLabel={t.services.registerNew}
+              />
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <Label>{t.serviceOrders.qty}</Label>
+                <Input type="number" min={0.001} step="any" value={svcForm.quantity}
+                  onChange={(e) => setSvcForm({ ...svcForm, quantity: parseFloat(e.target.value) || 1 })} />
               </div>
               <div>
-                <Label>{t.common.notes}</Label>
-                <Input value={svcForm.notes} onChange={(e) => setSvcForm({ ...svcForm, notes: e.target.value })} />
+                <Label>{t.serviceOrders.unitPrice}</Label>
+                <Input type="number" value={svcForm.unit_price}
+                  onChange={(e) => setSvcForm({ ...svcForm, unit_price: parseFloat(e.target.value) || 0 })} />
               </div>
-              <div className="flex gap-2">
-                <Button size="sm" onClick={handleAddService} disabled={addService.isPending}>{t.common.save}</Button>
-                <Button size="sm" variant="outline" onClick={() => setShowSvcForm(false)}>{t.common.cancel}</Button>
+              <div>
+                <Label>{t.common.total}</Label>
+                <Input readOnly value={formatCurrency(svcForm.quantity * svcForm.unit_price)} className="bg-muted" />
               </div>
             </div>
-          )}
-          {(!soServices || soServices.length === 0) ? (
-            <p className="text-sm text-muted-foreground p-5">{t.services.noServicesLinked}</p>
-          ) : (
+          </div>
+          <div>
+            <Label>{t.common.notes}</Label>
+            <Input value={svcForm.notes} onChange={(e) => setSvcForm({ ...svcForm, notes: e.target.value })} />
+          </div>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              onClick={handleAddService}
+              disabled={
+                !svcForm.service_name_snapshot ||
+                svcForm.quantity <= 0 ||
+                addService.isPending
+              }
+            >
+              <Plus className="h-3 w-3 mr-1" /> Adicionar serviço
+            </Button>
+          </div>
+        </div>
+
+        {/* List of services already added */}
+        {(() => {
+          const persisted = (soServices || []) as any[];
+          const drafts = isNew ? draftServices : [];
+          if (persisted.length === 0 && drafts.length === 0) {
+            return (
+              <p className="text-sm text-muted-foreground p-5">
+                {t.services.noServicesLinked}
+              </p>
+            );
+          }
+          return (
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/50">
@@ -1109,7 +1222,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {soServices.map((s: any) => (
+                {persisted.map((s: any) => (
                   <tr key={s.id} className="border-b last:border-0">
                     <td className="px-4 py-3 font-medium">
                       {s.service_name_snapshot}
@@ -1127,11 +1240,30 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                     </td>
                   </tr>
                 ))}
+                {drafts.map((d) => (
+                  <tr key={d.tempId} className="border-b last:border-0 bg-amber-50/40">
+                    <td className="px-4 py-3 font-medium">
+                      {d.service_name_snapshot}
+                      <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">rascunho</span>
+                      {d.description_snapshot && <span className="block text-xs text-muted-foreground">{d.description_snapshot}</span>}
+                    </td>
+                    <td className="px-4 py-3 text-center text-muted-foreground">{BILLING_UNIT_LABELS[d.billing_unit_snapshot] || d.billing_unit_snapshot}</td>
+                    <td className="px-4 py-3 text-center">{d.quantity}</td>
+                    <td className="px-4 py-3 text-right">{formatCurrency(d.unit_price_snapshot)}</td>
+                    <td className="px-4 py-3 text-right font-semibold">{formatCurrency(d.unit_price_snapshot * d.quantity)}</td>
+                    <td className="px-4 py-3">
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
+                        onClick={() => setDraftServices((prev) => prev.filter((x) => x.tempId !== d.tempId))}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
-          )}
-        </section>
-      )}
+          );
+        })()}
+      </section>
 
       {/* New Service Dialog */}
       <ServiceFormDialog open={showNewServiceDialog} onOpenChange={setShowNewServiceDialog} />
@@ -1198,58 +1330,80 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         </section>
       )}
 
-      {/* F - Parts (edit only) */}
-      {!isNew && (
-        <section className="rounded-xl border bg-card shadow-sm overflow-hidden">
-          <div className="p-5 border-b flex items-center justify-between">
-            <h2 className="font-semibold text-sm">{t.serviceOrders.parts}</h2>
-            <Button variant="outline" size="sm" className="gap-1" onClick={() => setShowPartForm(!showPartForm)}>
-              <Plus className="h-3 w-3" /> {t.serviceOrders.addPart}
+      {/* F - Parts — always visible (with always-on entry row) */}
+      <section className="rounded-xl border bg-card shadow-sm overflow-hidden">
+        <div className="p-5 border-b">
+          <h2 className="font-semibold text-sm">{t.serviceOrders.parts}</h2>
+          {isNew && (
+            <p className="text-xs text-muted-foreground mt-1">
+              Itens adicionados aqui serão salvos quando você criar a OS.
+            </p>
+          )}
+        </div>
+
+        {/* Always-on entry row */}
+        <div className="p-4 border-b bg-muted/30 space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+            <div className="sm:col-span-2">
+              <Label>{t.serviceOrders.product}</Label>
+              <EntityCombobox
+                value={partForm.product_id}
+                onChange={(v) => {
+                  const prod = products?.find((p) => p.id === v);
+                  setPartForm({
+                    ...partForm,
+                    product_id: v,
+                    unit_cost: prod?.cost_price || 0,
+                    unit_sale: prod?.sale_price || 0,
+                  });
+                }}
+                options={(products || [])
+                  .filter((p) => p.active)
+                  .map<EntityOption>((p) => ({
+                    value: p.id,
+                    label: p.product_name,
+                    description: `Estoque: ${p.stock_quantity}${p.sku ? ` · SKU ${p.sku}` : ''}`,
+                    searchTerms: [p.sku || '', p.barcode || '', p.brand || '', p.category || ''],
+                  }))}
+                placeholder="Selecionar produto"
+                searchPlaceholder="Buscar produto... (digite ao menos 3 letras)"
+                emptyText="Nenhum produto encontrado"
+              />
+            </div>
+            <div>
+              <Label>{t.serviceOrders.qty}</Label>
+              <Input type="number" min={1} value={partForm.quantity}
+                onChange={(e) => setPartForm({ ...partForm, quantity: parseInt(e.target.value) || 1 })} />
+            </div>
+            <div>
+              <Label>{t.serviceOrders.unitPrice}</Label>
+              <Input type="number" value={partForm.unit_sale}
+                onChange={(e) => setPartForm({ ...partForm, unit_sale: parseFloat(e.target.value) || 0 })} />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              onClick={handleAddPart}
+              disabled={!partForm.product_id || partForm.quantity <= 0 || addPart.isPending}
+            >
+              <Plus className="h-3 w-3 mr-1" /> Adicionar peça
             </Button>
           </div>
-          {showPartForm && (
-            <div className="p-4 border-b bg-muted/30 space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                <div className="sm:col-span-2">
-                  <Label>{t.serviceOrders.product}</Label>
-                  <Select value={partForm.product_id} onValueChange={(v) => {
-                    const prod = products?.find((p) => p.id === v);
-                    setPartForm({
-                      ...partForm, product_id: v,
-                      unit_cost: prod?.cost_price || 0,
-                      unit_sale: prod?.sale_price || 0,
-                    });
-                  }}>
-                    <SelectTrigger><SelectValue placeholder="Selecionar produto" /></SelectTrigger>
-                    <SelectContent>
-                      {products?.filter((p) => p.active).map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.product_name} (estoque: {p.stock_quantity})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label>{t.serviceOrders.qty}</Label>
-                  <Input type="number" min={1} value={partForm.quantity}
-                    onChange={(e) => setPartForm({ ...partForm, quantity: parseInt(e.target.value) || 1 })} />
-                </div>
-                <div>
-                  <Label>{t.serviceOrders.unitPrice}</Label>
-                  <Input type="number" value={partForm.unit_sale}
-                    onChange={(e) => setPartForm({ ...partForm, unit_sale: parseFloat(e.target.value) || 0 })} />
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <Button size="sm" onClick={handleAddPart} disabled={addPart.isPending}>{t.common.save}</Button>
-                <Button size="sm" variant="outline" onClick={() => setShowPartForm(false)}>{t.common.cancel}</Button>
-              </div>
-            </div>
-          )}
-          {(!parts || parts.length === 0) ? (
-            <p className="text-sm text-muted-foreground p-5">{t.serviceOrders.noPartsYet}</p>
-          ) : (
+        </div>
+
+        {/* List of parts already added */}
+        {(() => {
+          const persisted = (parts || []) as any[];
+          const drafts = isNew ? draftParts : [];
+          if (persisted.length === 0 && drafts.length === 0) {
+            return (
+              <p className="text-sm text-muted-foreground p-5">
+                {t.serviceOrders.noPartsYet}
+              </p>
+            );
+          }
+          return (
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/50">
@@ -1261,7 +1415,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {parts.map((p: any) => (
+                {persisted.map((p: any) => (
                   <tr key={p.id} className="border-b last:border-0">
                     <td className="px-4 py-3 font-medium">{p.products?.product_name}</td>
                     <td className="px-4 py-3 text-center">{p.quantity}</td>
@@ -1278,11 +1432,28 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                     </td>
                   </tr>
                 ))}
+                {drafts.map((d) => (
+                  <tr key={d.tempId} className="border-b last:border-0 bg-amber-50/40">
+                    <td className="px-4 py-3 font-medium">
+                      {d.product_name}
+                      <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">rascunho</span>
+                    </td>
+                    <td className="px-4 py-3 text-center">{d.quantity}</td>
+                    <td className="px-4 py-3 text-right">{formatCurrency(d.unit_sale)}</td>
+                    <td className="px-4 py-3 text-right font-semibold">{formatCurrency(d.unit_sale * d.quantity)}</td>
+                    <td className="px-4 py-3">
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
+                        onClick={() => setDraftParts((prev) => prev.filter((x) => x.tempId !== d.tempId))}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
-          )}
-        </section>
-      )}
+          );
+        })()}
+      </section>
 
       {/* Expenses section (edit only) */}
       {!isNew && (
