@@ -20,9 +20,10 @@ interface Props {
   onOpenChange: (v: boolean) => void;
   documentType: PDFDocumentType;
   onGenerate: (options: PDFOptions, validity?: ValidityConfig, dueDate?: string) => void;
+  hasProductImages?: boolean;
 }
 
-export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate }: Props) {
+export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate, hasProductImages }: Props) {
   const { t } = useI18n();
   const [options, setOptions] = useState<PDFOptions>({ ...DEFAULT_PDF_OPTIONS });
   const [validityMode, setValidityMode] = useState<'days' | 'date'>('days');
@@ -56,7 +57,7 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate 
   // Different checkbox set per document type
   const checkboxItems: Array<{ key: keyof PDFOptions; label: string }> = (() => {
     if (documentType === 'invoice') {
-      return [
+      const items: Array<{ key: keyof PDFOptions; label: string }> = [
         { key: 'showServicePrices', label: t.pdf.showServicePrices },
         { key: 'showTravelCost', label: t.pdf.showTravelCost },
         { key: 'showDiscount', label: t.pdf.showDiscount },
@@ -65,12 +66,14 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate 
         { key: 'showPaymentInstructions', label: 'Mostrar instruções de pagamento' },
         { key: 'showTerms', label: t.pdf.showTerms },
       ];
+      if (hasProductImages) items.push({ key: 'showProductImages', label: 'Incluir fotos dos produtos' });
+      return items;
     }
     if (documentType === 'receipt') {
       // Receipt has no toggleable line-item options; render no checkboxes.
       return [];
     }
-    return [
+    const items: Array<{ key: keyof PDFOptions; label: string }> = [
       { key: 'showServicePrices', label: t.pdf.showServicePrices },
       { key: 'showPartsPrices', label: t.pdf.showPartsPrices },
       { key: 'showTravelCost', label: t.pdf.showTravelCost },
@@ -80,6 +83,8 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate 
       { key: 'showTerms', label: t.pdf.showTerms },
       { key: 'showSignature', label: t.pdf.showSignature },
     ];
+    if (hasProductImages) items.push({ key: 'showProductImages', label: 'Incluir fotos dos produtos' });
+    return items;
   })();
 
   return (
