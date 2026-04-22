@@ -70,6 +70,16 @@ Deno.serve(async (req) => {
 
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE);
 
+    // Kill switch: se desativado globalmente, não envia nada
+    const enabled = await getSetting(admin, "whatsapp_reminder_enabled", "true");
+    if (enabled !== "true") {
+      return jr({
+        ok: true,
+        skipped: "Lembretes desativados manualmente (whatsapp_reminder_enabled=false).",
+        disabled: true,
+      });
+    }
+
     const reminderMin = parseInt(
       await getSetting(admin, "whatsapp_reminder_minutes", "30"),
       10,
