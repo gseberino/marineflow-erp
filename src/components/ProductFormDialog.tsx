@@ -16,7 +16,8 @@ import { useProductCategories } from '@/hooks/use-product-categories';
 import { useAppSettings } from '@/hooks/use-app-settings';
 import { toast } from 'sonner';
 import type { TablesInsert } from '@/integrations/supabase/types';
-import { Plus, Trash2, Star, ChevronDown, ExternalLink, Info } from 'lucide-react';
+import { Plus, Trash2, Star, ChevronDown, ExternalLink, Info, X, Upload, Package } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PriceCalculator } from '@/components/PriceCalculator';
 import { CSOSN_OPTIONS, FISCAL_ORIGIN_OPTIONS } from '@/lib/price-calculator';
@@ -44,6 +45,7 @@ const empty: TablesInsert<'products'> = {
   barcode: '',
   notes: '',
   active: true,
+  image_url: null,
   ncm: '',
   csosn: '400',
   fiscal_origin: 0,
