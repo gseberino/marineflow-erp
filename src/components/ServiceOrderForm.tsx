@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useI18n } from '@/i18n';
 import { useClients } from '@/hooks/use-clients';
@@ -26,6 +26,7 @@ import {
 } from '@/hooks/use-service-orders';
 import { useAppUsers, useCommissionableUsers, USER_ROLES } from '@/hooks/use-app-users';
 import { usePaymentConditionPresets } from '@/hooks/use-payment-conditions';
+import { useCollectionsByOS } from '@/hooks/use-collections';
 import { useVesselContacts, VESSEL_CONTACT_ROLES } from '@/hooks/use-vessel-contacts';
 import { ClientCombobox } from '@/components/ClientCombobox';
 import { VesselSelect } from '@/components/VesselSelect';
@@ -157,6 +158,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     commissioned_person: '',
     commissioned_user_id: '',
     payment_conditions: '',
+    payment_condition_preset_id: '',
+    signed_at: '' as string,
   });
 
   const [manualTravel, setManualTravel] = useState(false);
@@ -241,6 +244,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         commissioned_person: d.commissioned_person || '',
         commissioned_user_id: d.commissioned_user_id || '',
         payment_conditions: d.payment_conditions || '',
+        payment_condition_preset_id: d.payment_condition_preset_id || '',
+        signed_at: d.signed_at || '',
       });
       if (d.service_order_technicians) {
         setSelectedTechnicians(d.service_order_technicians.map((t: any) => t.user_id));
@@ -303,13 +308,15 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       return;
     }
     try {
+      const { signed_at: _signedAt, ...formForSave } = form;
       const payload = {
-        ...form,
+        ...formForSave,
         scheduled_start_at: form.scheduled_start_at || null,
         scheduled_end_at: form.scheduled_end_at || null,
         commissioned_user_id: form.commissioned_user_id || null,
         requested_by_contact_id: form.requested_by_contact_id || null,
         payment_conditions: form.payment_conditions || null,
+        payment_condition_preset_id: form.payment_condition_preset_id || null,
       };
       if (isNew) {
         const result = await createSO.mutateAsync(payload);
