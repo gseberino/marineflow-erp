@@ -1,12 +1,13 @@
 import { useState } from 'react';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { VesselFormDialog } from '@/components/VesselFormDialog';
-import { Plus } from 'lucide-react';
+import { EntityCombobox } from '@/components/EntityCombobox';
 
 interface VesselOption {
   id: string;
   boat_name: string;
   manufacturer?: string | null;
+  model?: string | null;
+  hull_id_or_registration?: string | null;
   marina_id?: string | null;
   active: boolean;
 }
@@ -23,31 +24,32 @@ interface Props {
 export function VesselSelect({ value, onChange, vessels, clientId, disabled, onVesselCreated }: Props) {
   const [showCreate, setShowCreate] = useState(false);
 
-  const activeVessels = vessels.filter(v => v.active);
+  const options = vessels
+    .filter(v => v.active)
+    .map(v => ({
+      value: v.id,
+      label: v.boat_name,
+      description: [v.manufacturer, v.model].filter(Boolean).join(' ') || undefined,
+      searchTerms: [
+        v.manufacturer || '',
+        v.model || '',
+        v.hull_id_or_registration || '',
+      ],
+    }));
 
   return (
     <>
-      <Select value={value} onValueChange={onChange} disabled={disabled}>
-        <SelectTrigger><SelectValue placeholder="Selecionar embarcação" /></SelectTrigger>
-        <SelectContent>
-          {activeVessels.map(v => (
-            <SelectItem key={v.id} value={v.id}>
-              {v.boat_name} {v.manufacturer ? `(${v.manufacturer})` : ''}
-            </SelectItem>
-          ))}
-          <div
-            className="relative flex w-full cursor-pointer select-none items-center rounded-sm py-1.5 px-2 text-sm text-primary hover:bg-accent outline-none border-t mt-1 pt-2"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              setShowCreate(true);
-            }}
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            Nova Embarcação para este cliente
-          </div>
-        </SelectContent>
-      </Select>
+      <EntityCombobox
+        value={value}
+        onChange={onChange}
+        options={options}
+        disabled={disabled}
+        placeholder="Selecionar embarcação"
+        searchPlaceholder="Buscar embarcação... (digite 3+ letras)"
+        emptyText="Nenhuma embarcação encontrada"
+        onCreate={() => setShowCreate(true)}
+        createLabel="Nova embarcação para este cliente"
+      />
 
       <VesselFormDialog
         open={showCreate}

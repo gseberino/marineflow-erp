@@ -22,12 +22,19 @@ export function ClientCombobox({ value, onChange, clients, disabled }: Props) {
   const filtered = useMemo(() => {
     if (!clients) return [];
     const active = clients.filter(c => c.active);
-    if (!search) return active.slice(0, 30);
-    const q = search.toLowerCase();
-    return active.filter(c =>
-      c.full_name_or_company_name.toLowerCase().includes(q) ||
-      (c.cpf_cnpj || '').includes(q)
-    ).slice(0, 30);
+    const trimmed = search.trim().toLowerCase();
+    // Padrão consistente: lista completa (cap 200) até 3 caracteres; depois filtra por nome/CPF/email/telefone
+    if (trimmed.length < 3) return active.slice(0, 200);
+    return active.filter(c => {
+      const haystack = [
+        c.full_name_or_company_name,
+        c.cpf_cnpj || '',
+        c.email || '',
+        c.phone || '',
+        c.whatsapp || '',
+      ].join(' ').toLowerCase();
+      return haystack.includes(trimmed);
+    }).slice(0, 200);
   }, [clients, search]);
 
   const selectedClient = clients?.find(c => c.id === value);
@@ -52,7 +59,7 @@ export function ClientCombobox({ value, onChange, clients, disabled }: Props) {
         <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
           <Command shouldFilter={false}>
             <CommandInput
-              placeholder="Buscar cliente..."
+              placeholder="Buscar cliente... (digite 3+ letras)"
               value={search}
               onValueChange={setSearch}
             />
