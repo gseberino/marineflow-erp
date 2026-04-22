@@ -195,7 +195,85 @@ export function WhatsAppWebhookValidator() {
           >
             {autoRefresh ? '⏸ Parar monitoramento' : '▶ Monitorar ao vivo (5s)'}
           </Button>
+          <Button onClick={testEndpoints} disabled={testingEndpoints} variant="outline">
+            <Activity className={`h-4 w-4 mr-2 ${testingEndpoints ? 'animate-pulse' : ''}`} />
+            {testingEndpoints ? 'Testando endpoints…' : 'Testar cada endpoint Z-API'}
+          </Button>
         </div>
+
+        {endpointTests && (
+          <div className="space-y-2 border rounded-lg p-3 bg-muted/30">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-medium flex items-center gap-2">
+                Resultado por endpoint
+                {endpointTests.all_match_target ? (
+                  <Badge className="bg-primary text-primary-foreground">
+                    <CheckCircle2 className="h-3 w-3 mr-1" /> Todos OK
+                  </Badge>
+                ) : (
+                  <Badge variant="destructive">
+                    <AlertTriangle className="h-3 w-3 mr-1" /> Divergências
+                  </Badge>
+                )}
+              </div>
+              <code className="text-[10px] text-muted-foreground break-all max-w-[60%] text-right">
+                alvo: {endpointTests.target_webhook_url}
+              </code>
+            </div>
+            <div className="divide-y border rounded bg-background">
+              {Object.entries(endpointTests.tests).map(([name, t]) => {
+                const isOpen = expandedEndpoint === name;
+                const statusColor = t.matches_target
+                  ? 'text-primary'
+                  : t.ok
+                  ? 'text-amber-600 dark:text-amber-400'
+                  : 'text-destructive';
+                return (
+                  <div key={name} className="text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setExpandedEndpoint(isOpen ? null : name)}
+                      className="w-full flex items-center gap-2 p-2 hover:bg-muted/50 text-left"
+                    >
+                      {t.matches_target ? (
+                        <CheckCircle2 className={`h-4 w-4 ${statusColor}`} />
+                      ) : t.ok ? (
+                        <AlertTriangle className={`h-4 w-4 ${statusColor}`} />
+                      ) : (
+                        <XCircle className={`h-4 w-4 ${statusColor}`} />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium">
+                          {ENDPOINT_LABELS[name] || name}{' '}
+                          <span className="text-muted-foreground font-mono">/{t.endpoint}</span>
+                        </div>
+                        <div className="text-muted-foreground truncate">
+                          {t.error
+                            ? `Erro: ${t.error}`
+                            : t.current_value
+                            ? `valor: ${t.current_value}`
+                            : 'Sem valor configurado'}
+                        </div>
+                      </div>
+                      <Badge variant="outline" className="font-mono">
+                        {t.http_status ?? '—'}
+                      </Badge>
+                      <span className="text-muted-foreground tabular-nums">{t.duration_ms}ms</span>
+                    </button>
+                    {isOpen && (
+                      <pre className="text-[10px] bg-muted p-2 overflow-x-auto whitespace-pre-wrap break-all border-t">
+                        {JSON.stringify(t, null, 2)}
+                      </pre>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              Cada linha consulta diretamente a Z-API (GET no endpoint do webhook) e compara com a URL alvo do sistema.
+            </p>
+          </div>
+        )}
 
         <Alert>
           <Wand2 className="h-4 w-4" />
