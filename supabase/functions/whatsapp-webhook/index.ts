@@ -251,6 +251,25 @@ Deno.serve(async (req) => {
     const zapiMessageId = p.messageId || p.id || null;
     const nowIso = new Date().toISOString();
 
+    // ---- Deduplicação: se essa mensagem já foi processada, retorna idempotente ----
+    if (zapiMessageId) {
+      const { data: dup } = await admin
+        .from("whatsapp_messages")
+        .select("id, lead_id, client_id")
+        .eq("zapi_message_id", String(zapiMessageId))
+        .maybeSingle();
+      if (dup) {
+        console.log("dedup hit zapi_message_id=", zapiMessageId);
+        return jr({
+          ok: true,
+          deduplicated: true,
+          message_id: dup.id,
+          lead_id: dup.lead_id,
+          client_id: dup.client_id,
+        });
+      }
+    }
+
     // ---- Match em clients (TODA mensagem é registrada, mesmo de cliente cadastrado) ----
     const { data: allClients } = await admin
       .from("clients")
