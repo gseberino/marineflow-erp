@@ -23,6 +23,28 @@ export function useAgendaOrders(dateFrom: string, dateTo: string) {
   });
 }
 
+export function useAgendaTasks(dateFrom: string, dateTo: string) {
+  return useQuery({
+    queryKey: ['agenda-tasks', dateFrom, dateTo],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('agenda_tasks')
+        .select(`
+          id, title, description, technician_user_id, scheduled_start_at, scheduled_end_at,
+          priority, status, location, client_id, notes,
+          app_users:technician_user_id(id, full_name),
+          clients:client_id(id, full_name_or_company_name)
+        `)
+        .gte('scheduled_start_at', dateFrom)
+        .lte('scheduled_start_at', dateTo)
+        .neq('status', 'cancelled')
+        .order('scheduled_start_at', { ascending: true });
+      if (error) throw error;
+      return data || [];
+    },
+  });
+}
+
 export function useTechnicians() {
   return useQuery({
     queryKey: ['agenda-technicians'],
@@ -109,6 +131,91 @@ export function useQuickSchedule() {
       qc.invalidateQueries({ queryKey: ['agenda-orders'] });
       qc.invalidateQueries({ queryKey: ['agenda-schedulable'] });
       qc.invalidateQueries({ queryKey: ['service-orders'] });
+    },
+  });
+}
+
+export type AgendaTaskInput = {
+  id?: string;
+  title: string;
+  description?: string | null;
+  technician_user_id: string;
+  scheduled_start_at: string;
+  scheduled_end_at: string | null;
+  priority?: string;
+  status?: string;
+  location?: string | null;
+  client_id?: string | null;
+  notes?: string | null;
+};
+
+export function useSaveAgendaTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: AgendaTaskInput) => {
+      if (input.id) {
+        const { error } = await supabase
+          .from('agenda_tasks')
+          .update({
+            title: input.title,
+            description: input.description ?? null,
+            technician_user_id: input.technician_user_id,
+            scheduled_start_at: input.scheduled_start_at,
+            scheduled_end_at: input.scheduled_end_at,
+            priority: input.priority ?? 'normal',
+            status: input.status ?? 'pending',
+            location: input.location ?? null,
+            client_id: input.client_id ?? null,
+            notes: input.notes ?? null,
+          })
+          .eq('id', input.id);
+        if (error) throw error;
+      } else {
+        const { data: u } = await supabase.auth.getUser();
+        const { error } = await supabase.from('agenda_tasks').insert({
+          title: input.title,
+          description: input.description ?? null,
+          technician_user_id: input.technician_user_id,
+          scheduled_start_at: input.scheduled_start_at,
+          scheduled_end_at: input.scheduled_end_at,
+          priority: input.priority ?? 'normal',
+          status: input.status ?? 'pending',
+          location: input.location ?? null,
+          client_id: input.client_id ?? null,
+          notes: input.notes ?? null,
+          created_by: u?.user?.id ?? null,
+        });
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['agenda-tasks'] });
+    },
+  });
+}
+
+export function useUpdateAgendaTaskStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: string }) => {
+      const { error } = await supabase.from('agenda_tasks').update({ status }).eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['agenda-tasks'] });
+    },
+  });
+}
+
+export function useDeleteAgendaTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('agenda_tasks').delete().eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['agenda-tasks'] });
     },
   });
 }

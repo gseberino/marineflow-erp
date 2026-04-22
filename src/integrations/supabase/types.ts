@@ -14,6 +14,72 @@ export type Database = {
   }
   public: {
     Tables: {
+      agenda_tasks: {
+        Row: {
+          client_id: string | null
+          created_at: string
+          created_by: string | null
+          description: string | null
+          id: string
+          location: string | null
+          notes: string | null
+          priority: string
+          scheduled_end_at: string | null
+          scheduled_start_at: string
+          status: string
+          technician_user_id: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          client_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          location?: string | null
+          notes?: string | null
+          priority?: string
+          scheduled_end_at?: string | null
+          scheduled_start_at: string
+          status?: string
+          technician_user_id: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          client_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          location?: string | null
+          notes?: string | null
+          priority?: string
+          scheduled_end_at?: string | null
+          scheduled_start_at?: string
+          status?: string
+          technician_user_id?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agenda_tasks_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agenda_tasks_technician_user_id_fkey"
+            columns: ["technician_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       app_settings: {
         Row: {
           created_at: string
