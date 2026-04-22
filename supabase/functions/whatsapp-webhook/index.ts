@@ -110,6 +110,51 @@ Deno.serve(async (req) => {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
+    const url = new URL(req.url);
+
+    // ---- Healthcheck (GET) ----
+    // Permite validar do app se a Z-API está enviando tráfego para cá.
+    // Retorna últimas mensagens recebidas, contagem total e timestamp da última.
+    if (req.method === "GET" || url.searchParams.get("healthcheck") === "1") {
+      const sinceIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+      const [{ count: totalInbound }, { count: last24h }, { data: lastMsg }, { data: recent }] = await Promise.all([
+        admin.from("whatsapp_messages").select("*", { count: "exact", head: true }).eq("direction", "inbound"),
+        admin.from("whatsapp_messages").select("*", { count: "exact", head: true }).eq("direction", "inbound").gte("created_at", sinceIso),
+        admin.from("whatsapp_messages").select("created_at, phone_normalized, body, is_broadcast").eq("direction", "inbound").order("created_at", { ascending: false }).limit(1).maybeSingle(),
+        admin.from("whatsapp_messages").select("created_at, phone_normalized, body, message_type, is_broadcast").eq("direction", "inbound").order("created_at", { ascending: false }).limit(5),
+      ]);
+
+      const lastAt = lastMsg?.created_at || null;
+      const minutesSinceLast = lastAt ? Math.floor((Date.now() - new Date(lastAt).getTime()) / 60000) : null;
+      const webhookUrl = `${SUPABASE_URL}/functions/v1/whatsapp-webhook`;
+
+      let healthStatus: "ok" | "stale" | "never" = "never";
+      if (lastAt) healthStatus = (minutesSinceLast! < 60) ? "ok" : "stale";
+
+      return jr({
+        ok: true,
+        type: "healthcheck",
+        webhook_url: webhookUrl,
+        health_status: healthStatus,
+        total_inbound: totalInbound || 0,
+        last_24h: last24h || 0,
+        last_message_at: lastAt,
+        minutes_since_last: minutesSinceLast,
+        last_message_preview: lastMsg
+          ? { phone: lastMsg.phone_normalized, body: String(lastMsg.body || "").slice(0, 120), is_broadcast: !!lastMsg.is_broadcast }
+          : null,
+        recent_messages: (recent || []).map((m: any) => ({
+          at: m.created_at,
+          phone: m.phone_normalized,
+          type: m.message_type,
+          body: String(m.body || "").slice(0, 80),
+          is_broadcast: !!m.is_broadcast,
+        })),
+        checked_at: new Date().toISOString(),
+      });
+    }
+
     const payload = await req.json().catch(() => null);
     if (!payload || typeof payload !== "object") {
       return jr({ error: "Invalid payload" }, 400);
