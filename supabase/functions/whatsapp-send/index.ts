@@ -92,11 +92,13 @@ Deno.serve(async (req) => {
       zapiPayload = {
         phone: phoneClean,
         message: body.message,
-        image: body.link_image || "",
         linkUrl: body.link_url,
         title: body.link_title || "",
         linkDescription: body.link_description || "",
       };
+      if (body.link_image && body.link_image.trim() !== "") {
+        zapiPayload.image = body.link_image;
+      }
       messagePreview = `[link] ${body.link_url} — ${body.message.slice(0, 160)}`;
     } else if (body.kind === "document") {
       if (!body.document_url) return jr({ error: "document_url é obrigatório para kind=document" }, 400);

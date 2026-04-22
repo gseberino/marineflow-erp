@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageHeader } from '@/components/PageHeader';
 import { Button } from '@/components/ui/button';
@@ -594,7 +594,7 @@ function QuickScheduleDialog({
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('11:00');
 
-  useMemo(() => {
+  useEffect(() => {
     if (open) {
       setOrderId('');
       setTechnicianId(prefillTechnicianId || '');
