@@ -1139,7 +1139,7 @@ function PaymentConditionsTab() {
             <div className="flex justify-end">
               <Switch
                 checked={p.active}
-                onCheckedChange={(v) => updatePreset.mutate({ id: p.id, active: v })}
+                onCheckedChange={(v) => updatePreset.mutate({ id: p.id, patch: { active: v } })}
               />
             </div>
           </div>

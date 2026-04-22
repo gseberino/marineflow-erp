@@ -163,6 +163,25 @@ export function useCollections(filters: CollectionFilters = {}) {
   });
 }
 
+export function useCollectionsByOS(serviceOrderId: string | undefined) {
+  return useQuery({
+    queryKey: ['collections-by-os', serviceOrderId],
+    enabled: !!serviceOrderId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('collections')
+        .select('id, amount, due_date, status, description')
+        .eq('service_order_id', serviceOrderId!)
+        .neq('status', 'cancelled')
+        .order('due_date', { ascending: true });
+      if (error) throw error;
+      return (data || []) as Array<{
+        id: string; amount: number; due_date: string; status: CollectionStatus; description: string | null;
+      }>;
+    },
+  });
+}
+
 export function useCollection(id: string | undefined) {
   return useQuery({
     queryKey: ['collection', id],
