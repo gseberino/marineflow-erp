@@ -1546,6 +1546,7 @@ export type Database = {
           share_token: string
           signature_image_url: string | null
           signed_at: string
+          signed_pdf_url: string | null
           superseded_at: string | null
           superseded_reason: string | null
           user_agent: string | null
@@ -1561,6 +1562,7 @@ export type Database = {
           share_token: string
           signature_image_url?: string | null
           signed_at?: string
+          signed_pdf_url?: string | null
           superseded_at?: string | null
           superseded_reason?: string | null
           user_agent?: string | null
@@ -1576,6 +1578,7 @@ export type Database = {
           share_token?: string
           signature_image_url?: string | null
           signed_at?: string
+          signed_pdf_url?: string | null
           superseded_at?: string | null
           superseded_reason?: string | null
           user_agent?: string | null
