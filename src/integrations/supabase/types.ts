@@ -1636,6 +1636,7 @@ export type Database = {
         Row: {
           cancellation_reason: string | null
           cancelled_at: string | null
+          card_installments: number | null
           check_in_at: string | null
           check_out_at: string | null
           client_id: string
@@ -1665,6 +1666,7 @@ export type Database = {
           parts_cost_total: number | null
           payment_condition_preset_id: string | null
           payment_conditions: string | null
+          payment_method: string | null
           payment_status: string | null
           priority: string
           problem_description: string | null
@@ -1699,6 +1701,7 @@ export type Database = {
         Insert: {
           cancellation_reason?: string | null
           cancelled_at?: string | null
+          card_installments?: number | null
           check_in_at?: string | null
           check_out_at?: string | null
           client_id: string
@@ -1728,6 +1731,7 @@ export type Database = {
           parts_cost_total?: number | null
           payment_condition_preset_id?: string | null
           payment_conditions?: string | null
+          payment_method?: string | null
           payment_status?: string | null
           priority?: string
           problem_description?: string | null
@@ -1762,6 +1766,7 @@ export type Database = {
         Update: {
           cancellation_reason?: string | null
           cancelled_at?: string | null
+          card_installments?: number | null
           check_in_at?: string | null
           check_out_at?: string | null
           client_id?: string
@@ -1791,6 +1796,7 @@ export type Database = {
           parts_cost_total?: number | null
           payment_condition_preset_id?: string | null
           payment_conditions?: string | null
+          payment_method?: string | null
           payment_status?: string | null
           priority?: string
           problem_description?: string | null

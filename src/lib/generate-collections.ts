@@ -121,7 +121,7 @@ async function autoSendCollectionWhatsApp(collectionIds: string[]) {
         .select(`
           *,
           client:clients(full_name_or_company_name, phone, whatsapp),
-          service_order:service_orders(service_order_number)
+          service_order:service_orders(service_order_number, payment_method, card_installments)
         `)
         .eq('id', id)
         .single();
@@ -157,13 +157,14 @@ async function autoSendCollectionWhatsApp(collectionIds: string[]) {
       const normalized = digits.startsWith('55') ? digits : `55${digits}`;
 
       const { renderTemplate } = await import('@/hooks/use-collections');
-      const message = renderTemplate(template.body, {
-        nome: c.contact_name || c.client?.full_name_or_company_name || 'Cliente',
-        numero_os: c.service_order?.service_order_number || 'Avulso',
-        valor: Number(c.amount),
-        vencimento: c.due_date,
-        pix: settings['pix_key'] || settings['company_pix'] || '',
-        empresa: settings['company_name'] || 'HBR Marine',
+      const { buildCollectionMessage } = await import('@/lib/collection-message');
+      const message = buildCollectionMessage({
+        template: template.body,
+        renderTemplate,
+        collection: c,
+        paymentMethod: c.service_order?.payment_method,
+        cardInstallments: c.service_order?.card_installments,
+        settings,
       });
 
       await supabase.functions.invoke('whatsapp-send', {
