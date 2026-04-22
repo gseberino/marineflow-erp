@@ -234,7 +234,29 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
 
   const [generatingCollections, setGeneratingCollections] = useState(false);
   const prevSignedAt = useRef<string | null>(null);
+  const topActionsRef = useRef<HTMLDivElement | null>(null);
+  const bottomSaveRef = useRef<HTMLDivElement | null>(null);
+  const [topVisible, setTopVisible] = useState(true);
+  const [bottomVisible, setBottomVisible] = useState(false);
   const { data: osCollections } = useCollectionsByOS(orderId);
+
+  useEffect(() => {
+    const targets: Array<{ el: HTMLElement | null; setter: (v: boolean) => void }> = [
+      { el: topActionsRef.current, setter: setTopVisible },
+      { el: bottomSaveRef.current, setter: setBottomVisible },
+    ];
+    const observers: IntersectionObserver[] = [];
+    for (const { el, setter } of targets) {
+      if (!el) continue;
+      const io = new IntersectionObserver(
+        ([entry]) => setter(entry.isIntersecting),
+        { rootMargin: '0px', threshold: 0.01 },
+      );
+      io.observe(el);
+      observers.push(io);
+    }
+    return () => observers.forEach((o) => o.disconnect());
+  }, [isLoading, orderId]);
 
   const handleGenerateCollections = useCallback(async () => {
     if (!orderId) return;
