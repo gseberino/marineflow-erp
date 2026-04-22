@@ -57,7 +57,7 @@ export function WhatsAppWebhookValidator() {
   };
 
   const statusBadge = (s: HealthStatus | undefined) => {
-    if (s === 'ok') return <Badge className="bg-emerald-600"><CheckCircle2 className="h-3 w-3 mr-1" /> Ativo</Badge>;
+    if (s === 'ok') return <Badge className="bg-primary text-primary-foreground"><CheckCircle2 className="h-3 w-3 mr-1" /> Ativo</Badge>;
     if (s === 'stale') return <Badge variant="secondary"><AlertTriangle className="h-3 w-3 mr-1" /> Sem tráfego recente</Badge>;
     return <Badge variant="destructive"><XCircle className="h-3 w-3 mr-1" /> Nunca recebeu</Badge>;
   };
