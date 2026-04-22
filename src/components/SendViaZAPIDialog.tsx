@@ -4,7 +4,8 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Loader2, Send } from 'lucide-react';
+import { Loader2, Send, CalendarClock } from 'lucide-react';
+import { toast } from 'sonner';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { type PDFDocumentType } from '@/lib/pdf-generator';
 import { usePDFData } from '@/hooks/use-pdf';
@@ -326,15 +327,35 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
             attemptInfo={attemptInfo}
             disabled={sending}
           />
+
+          <ScheduleSettings
+            value={schedule}
+            onChange={setSchedule}
+            disabled={sending || createScheduled.isPending}
+          />
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={sending}>
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={sending || createScheduled.isPending}
+          >
             Cancelar
           </Button>
-          <Button onClick={handleSend} disabled={sending} className="gap-2">
-            {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            Enviar agora
+          <Button
+            onClick={handleSend}
+            disabled={sending || createScheduled.isPending}
+            className="gap-2"
+          >
+            {sending || createScheduled.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : schedule.enabled ? (
+              <CalendarClock className="h-4 w-4" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
+            {schedule.enabled ? 'Agendar envio' : 'Enviar agora'}
           </Button>
         </DialogFooter>
       </DialogContent>
