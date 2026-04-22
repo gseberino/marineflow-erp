@@ -2757,6 +2757,9 @@ export type Database = {
         Returns: string
       }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
+      wa_extract_body_text: { Args: { p: Json }; Returns: string }
+      wa_extract_message_type: { Args: { p: Json }; Returns: string }
+      wa_normalize_phone: { Args: { raw: string }; Returns: string }
     }
     Enums: {
       [_ in never]: never
