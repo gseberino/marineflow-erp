@@ -38,6 +38,14 @@ Deno.serve(async (req) => {
     if (dueErr) return jr({ error: dueErr.message }, 500);
     if (!due || due.length === 0) return jr({ processed: 0 });
 
+    // Lê URL pública do app a partir de app_settings (com fallback para env var)
+    const { data: urlSetting } = await admin
+      .from("app_settings")
+      .select("value")
+      .eq("key", "app_public_url")
+      .maybeSingle();
+    const baseUrl = String(urlSetting?.value || Deno.env.get("APP_PUBLIC_URL") || "");
+
     let processed = 0;
     let succeeded = 0;
     let failed = 0;
