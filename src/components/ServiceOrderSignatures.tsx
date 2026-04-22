@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { PenLine, FileSignature, AlertTriangle, ExternalLink } from 'lucide-react';
+import { PenLine, FileSignature, AlertTriangle, ExternalLink, FileText } from 'lucide-react';
 
 interface Props {
   serviceOrderId: string;
@@ -11,6 +11,7 @@ interface SignatureRow {
   accepted_name: string;
   signed_at: string;
   signature_image_url: string | null;
+  signed_pdf_url: string | null;
   document_hash: string;
   ip_address: string | null;
   user_agent: string | null;
@@ -25,7 +26,7 @@ export function ServiceOrderSignatures({ serviceOrderId }: Props) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('service_order_signatures')
-        .select('id, accepted_name, signed_at, signature_image_url, document_hash, ip_address, user_agent, superseded_at, superseded_reason, accepted_terms_snapshot')
+        .select('id, accepted_name, signed_at, signature_image_url, signed_pdf_url, document_hash, ip_address, user_agent, superseded_at, superseded_reason, accepted_terms_snapshot')
         .eq('service_order_id', serviceOrderId)
         .order('signed_at', { ascending: false });
       if (error) throw error;
@@ -117,6 +118,28 @@ function SignatureCard({ sig, status }: { sig: SignatureRow; status: 'active' | 
         </a>
       ) : (
         <p className="text-xs text-muted-foreground italic">Imagem da assinatura indisponível.</p>
+      )}
+
+      {sig.signed_pdf_url ? (
+        <a
+          href={sig.signed_pdf_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center justify-between gap-2 rounded-md border bg-primary/5 hover:bg-primary/10 transition-colors p-3"
+        >
+          <div className="flex items-center gap-2">
+            <FileText className="h-4 w-4 text-primary" />
+            <div>
+              <p className="text-xs font-medium text-foreground">PDF arquivado da OS</p>
+              <p className="text-[11px] text-muted-foreground">Documento imutável no momento da assinatura — prova jurídica</p>
+            </div>
+          </div>
+          <ExternalLink className="h-4 w-4 text-muted-foreground" />
+        </a>
+      ) : (
+        <p className="text-xs text-muted-foreground italic">
+          PDF arquivado indisponível para esta assinatura (assinatura registrada antes da arquivação automática).
+        </p>
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-muted-foreground">
