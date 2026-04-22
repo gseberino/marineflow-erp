@@ -24,17 +24,19 @@ function jr(body: unknown, status = 200) {
 
 function normalizePhone(raw: string | null | undefined, defaultDDI = "55"): string {
   if (!raw) return "";
-  // Strip suffix after @ (chatId @c.us, @broadcast, @s.whatsapp.net)
+  // Strip suffix after @ (chatId @c.us, @broadcast, @s.whatsapp.net, @lid)
   const s = String(raw).split("@")[0];
   let d = s.replace(/\D/g, "");
   if (!d) return "";
-  if (d.length > 14) return ""; // internal id, not a real phone
+  if (d.length > 14) return ""; // internal id (e.g. 96091420795052@lid), not a real phone
   if (d.startsWith("00")) d = d.slice(2);
-  // Brazilian fix: 12 digits with country code 55 + 8-digit cell missing the 9
+  // Brazilian fix: a complete BR mobile is 55 + DD(2) + 9XXXXXXXX(9) = 13 digits.
+  // If we get 12 digits AND the local 8-digit part starts with 6-8 (not 9), the 9 is missing.
+  // If it already starts with 9, the number is complete — DO NOT add another 9.
   if (d.length === 12 && d.startsWith("55")) {
     const ddd = d.slice(2, 4);
-    const rest = d.slice(4);
-    if (rest.length === 8 && /^[6-9]/.test(rest)) {
+    const rest = d.slice(4); // 8 digits
+    if (/^[6-8]/.test(rest)) {
       d = `55${ddd}9${rest}`;
     }
   }

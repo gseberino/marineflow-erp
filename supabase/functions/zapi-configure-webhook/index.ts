@@ -122,18 +122,30 @@ Deno.serve(async (req) => {
     }
 
     // ---- Configura todos os webhooks relevantes ----
+    // Z-API atualmente aceita POST nesses endpoints. Algumas instâncias antigas só aceitam PUT,
+    // por isso aplicamos fallback automático em caso de 405.
     const results: Record<string, any> = {};
     for (const [name, endpoint] of Object.entries(endpoints)) {
       try {
-        const res = await fetch(`${base}/${endpoint}`, {
-          method: "PUT",
+        let res = await fetch(`${base}/${endpoint}`, {
+          method: "POST",
           headers,
           body: JSON.stringify({ value: webhookUrl }),
         });
+        let methodUsed = "POST";
+        if (res.status === 405) {
+          res = await fetch(`${base}/${endpoint}`, {
+            method: "PUT",
+            headers,
+            body: JSON.stringify({ value: webhookUrl }),
+          });
+          methodUsed = "PUT";
+        }
         const data = await res.json().catch(() => ({}));
         results[name] = {
           status: res.status,
           ok: res.ok,
+          method_used: methodUsed,
           response: data,
         };
       } catch (e: any) {
