@@ -117,6 +117,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
         barcode: p.barcode ?? '',
         notes: p.notes ?? '',
         active: p.active,
+        image_url: p.image_url ?? null,
         ncm: p.ncm ?? '',
         csosn: p.csosn ?? '400',
         fiscal_origin: p.fiscal_origin ?? 0,
@@ -156,6 +157,65 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
 
   const set = (key: string, value: any) => setForm(prev => ({ ...prev, [key]: value }));
   const setSF = (key: string, value: any) => setSupplierForm(prev => ({ ...prev, [key]: value }));
+
+  // Image upload state
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = (typeof window !== 'undefined') ? null : null;
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // permite re-selecionar o mesmo arquivo depois
+    if (!file) return;
+
+    const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (!allowed.includes(file.type)) {
+      toast.error('Formato inválido. Use JPG, PNG ou WEBP.');
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('Arquivo muito grande. Máximo 2MB.');
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+      const productFolder = product?.id || 'new';
+      const uuid = (crypto as any).randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const path = `products/${productFolder}/${uuid}.${ext}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('product-images')
+        .upload(path, file, { contentType: file.type, upsert: false });
+      if (uploadError) throw uploadError;
+
+      const { data: pub } = supabase.storage.from('product-images').getPublicUrl(path);
+      set('image_url', pub.publicUrl);
+      toast.success('Imagem enviada.');
+    } catch (err: any) {
+      console.error('Upload error:', err);
+      toast.error(err?.message || 'Erro ao enviar imagem.');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleImageRemove = async () => {
+    const url: string | null | undefined = (form as any).image_url;
+    if (!url) return;
+    try {
+      const marker = '/product-images/';
+      const idx = url.indexOf(marker);
+      if (idx >= 0) {
+        const path = url.substring(idx + marker.length);
+        await supabase.storage.from('product-images').remove([path]);
+      }
+    } catch (err) {
+      console.error('Remove error:', err);
+    } finally {
+      set('image_url', null);
+    }
+  };
 
   // Category change handler
   const handleCategoryChange = (categoryId: string) => {
