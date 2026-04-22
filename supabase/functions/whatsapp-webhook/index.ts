@@ -370,12 +370,12 @@ Deno.serve(async (req) => {
       raw_payload: payload as any,
     };
 
-    const insertRes = zapiMessageId
-      ? await admin
-          .from("whatsapp_messages")
-          .upsert(insertPayload, { onConflict: "zapi_message_id", ignoreDuplicates: true })
-          .select("id")
-      : await admin.from("whatsapp_messages").insert(insertPayload).select("id");
+    // Dedup já feito acima via SELECT em zapi_message_id; insert direto.
+    // (índice unique parcial em zapi_message_id existe, mas PostgREST onConflict não suporta índice parcial)
+    const insertRes = await admin
+      .from("whatsapp_messages")
+      .insert(insertPayload)
+      .select("id");
 
     if (insertRes.error) {
       console.error("FAILED to insert whatsapp_messages", {
