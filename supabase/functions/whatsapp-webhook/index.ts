@@ -215,16 +215,48 @@ Deno.serve(async (req) => {
       return jr({ ok: true, recorded: "outbound_echo" });
     }
 
-    // ---- Status de entrega ----
-    if ((payload as any).status && (payload as any).messageId) {
-      const status = String((payload as any).status).toLowerCase();
-      const allowed = ["sent", "delivered", "read", "failed"];
-      const newStatus = allowed.includes(status) ? status : "sent";
-      await admin
-        .from("whatsapp_messages")
-        .update({ delivery_status: newStatus })
-        .eq("zapi_message_id", String((payload as any).messageId));
-      return jr({ ok: true, type: "status_update", new_status: newStatus });
+    // ---- Status de entrega (MessageStatusCallback ou status simples) ----
+    // Z-API envia callbacks com type=MessageStatusCallback e ids=[...] (não messageId).
+    // Também cobre webhooks de presença (DeliveryCallback, PresenceChatCallback, etc) que não são mensagens.
+    const callbackType = String(pAny.type || pAny.event || "");
+    const isStatusCallback =
+      callbackType === "MessageStatusCallback" ||
+      callbackType === "DeliveryCallback" ||
+      (pAny.status && (pAny.messageId || Array.isArray(pAny.ids)));
+
+    if (isStatusCallback) {
+      const status = String(pAny.status || "sent").toLowerCase();
+      const allowed = ["sent", "delivered", "read", "received", "played", "failed"];
+      const mapped = status === "received" ? "delivered" : (allowed.includes(status) ? status : "sent");
+      const ids: string[] = Array.isArray(pAny.ids)
+        ? pAny.ids.map((x: any) => String(x))
+        : (pAny.messageId ? [String(pAny.messageId)] : []);
+      if (ids.length > 0) {
+        await admin
+          .from("whatsapp_messages")
+          .update({ delivery_status: mapped })
+          .in("zapi_message_id", ids);
+      }
+      return jr({ ok: true, type: "status_update", new_status: mapped, ids_updated: ids.length });
+    }
+
+    // Ignorar outros tipos de callbacks que não são mensagens recebidas
+    const ignoredTypes = new Set([
+      "PresenceChatCallback",
+      "ChatPresenceCallback",
+      "ConnectedCallback",
+      "DisconnectedCallback",
+      "MessageStatusCallback",
+      "NotificationCallback",
+    ]);
+    if (callbackType && ignoredTypes.has(callbackType)) {
+      return jr({ ok: true, ignored: "callback", type: callbackType });
+    }
+
+    // Se não há nenhum conteúdo de mensagem reconhecível, ignora silenciosamente
+    const hasContent = !!(pAny.text || pAny.image || pAny.audio || pAny.video || pAny.document || pAny.location || pAny.contact || typeof pAny.message === "string");
+    if (!hasContent && callbackType !== "ReceivedCallback") {
+      return jr({ ok: true, ignored: "no_message_content", type: callbackType });
     }
 
     // ---- Mensagem recebida ----
