@@ -2652,6 +2652,63 @@ export type Database = {
           },
         ]
       }
+      whatsapp_send_queue: {
+        Row: {
+          attempts: number
+          created_at: string
+          failed_reason: string | null
+          id: string
+          max_attempts: number
+          message: string
+          phone_normalized: string
+          priority: number
+          processing_started_at: string | null
+          scheduled_for: string
+          sent_at: string | null
+          source: string
+          source_ref_id: string | null
+          status: string
+          updated_at: string
+          zapi_message_id: string | null
+        }
+        Insert: {
+          attempts?: number
+          created_at?: string
+          failed_reason?: string | null
+          id?: string
+          max_attempts?: number
+          message: string
+          phone_normalized: string
+          priority?: number
+          processing_started_at?: string | null
+          scheduled_for?: string
+          sent_at?: string | null
+          source?: string
+          source_ref_id?: string | null
+          status?: string
+          updated_at?: string
+          zapi_message_id?: string | null
+        }
+        Update: {
+          attempts?: number
+          created_at?: string
+          failed_reason?: string | null
+          id?: string
+          max_attempts?: number
+          message?: string
+          phone_normalized?: string
+          priority?: number
+          processing_started_at?: string | null
+          scheduled_for?: string
+          sent_at?: string | null
+          source?: string
+          source_ref_id?: string | null
+          status?: string
+          updated_at?: string
+          zapi_message_id?: string | null
+        }
+        Relationships: []
+      }
       whatsapp_templates: {
         Row: {
           active: boolean

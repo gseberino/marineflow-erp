@@ -199,67 +199,54 @@ Deno.serve(async (req) => {
     const message =
       `🔔 *Lembrete WhatsApp* — ${pending.length} conversa(s) sem resposta há mais de ${reminderMin} min:\n\n${lines}${more}\n\nResponda em: ${SUPABASE_URL.replace(".supabase.co", "")}`;
 
-    // Envia para cada destinatário
-    const base = `https://api.z-api.io/instances/${INSTANCE_ID}/token/${TOKEN}`;
-    const zapiHeaders: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (CLIENT_TOKEN) zapiHeaders["Client-Token"] = CLIENT_TOKEN;
+    // Em vez de enviar direto, ENFILEIRA na whatsapp_send_queue (rate limit + worker assíncrono).
+    const queueRows = recipients.map((to, idx) => ({
+      phone_normalized: to,
+      message,
+      source: "unread_reminder",
+      priority: 5,
+      // espalha levemente no tempo (escalonado em segundos) para não chegar ao worker tudo em 1 só lote
+      scheduled_for: new Date(Date.now() + idx * 1000).toISOString(),
+    }));
 
-    const sendResults: Array<{ to: string; ok: boolean; error?: string }> = [];
-    for (const to of recipients) {
-      try {
-        const res = await fetch(`${base}/send-text`, {
-          method: "POST",
-          headers: zapiHeaders,
-          body: JSON.stringify({ phone: to, message }),
-        });
-        const body = await res.json().catch(() => ({}));
-        const ok = res.ok && !(body as any).error;
-        sendResults.push({
-          to,
-          ok,
-          error: ok ? undefined : (body as any).error || `HTTP ${res.status}`,
-        });
-      } catch (e) {
-        sendResults.push({
-          to,
-          ok: false,
-          error: e instanceof Error ? e.message : String(e),
-        });
-      }
+    const { data: enqueued, error: enqErr } = await admin
+      .from("whatsapp_send_queue")
+      .insert(queueRows)
+      .select("id");
+
+    if (enqErr) {
+      console.error("failed to enqueue reminders", enqErr);
+      return jr({ error: enqErr.message }, 500);
     }
 
-    // Atualiza state de cooldown apenas se houve ao menos um envio com sucesso
-    const anySuccess = sendResults.some((r) => r.ok);
-    if (anySuccess) {
-      const now = new Date().toISOString();
-      for (const p of pending) {
-        await setSetting(admin, `whatsapp_reminder_state_${p.phone}`, now);
-      }
+    // Atualiza state de cooldown (assumimos que o worker processará logo)
+    const now = new Date().toISOString();
+    for (const p of pending) {
+      await setSetting(admin, `whatsapp_reminder_state_${p.phone}`, now);
     }
 
     // Audit
     await admin.from("audit_log").insert({
-      table_name: "whatsapp_messages",
+      table_name: "whatsapp_send_queue",
       record_id: "00000000-0000-0000-0000-000000000000",
-      action: "whatsapp_unread_reminder",
+      action: "whatsapp_unread_reminder_enqueued",
       changed_by: "cron",
       new_value: {
         pending_count: pending.length,
         recipients,
-        send_results: sendResults,
+        enqueued_count: enqueued?.length || 0,
         reminder_minutes: reminderMin,
         cooldown_minutes: cooldownMin,
       },
-      reason: `Lembrete enviado para ${sendResults.filter((r) => r.ok).length}/${recipients.length} destinatário(s) sobre ${pending.length} conversa(s).`,
+      reason: `Enfileirados ${enqueued?.length || 0} lembrete(s) na fila de envio (rate-limited).`,
     });
 
     return jr({
       ok: true,
       pending: pending.length,
       recipients: recipients.length,
-      send_results: sendResults,
+      enqueued: enqueued?.length || 0,
+      mode: "queue",
     });
   } catch (err) {
     console.error("whatsapp-unread-reminder error", err);
