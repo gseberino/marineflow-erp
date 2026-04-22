@@ -4,7 +4,8 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Loader2, Send } from 'lucide-react';
+import { Loader2, Send, CalendarClock } from 'lucide-react';
+import { toast } from 'sonner';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { type PDFDocumentType } from '@/lib/pdf-generator';
 import { usePDFData } from '@/hooks/use-pdf';
@@ -17,7 +18,9 @@ import {
 import { ModeSelector, type SendMode } from '@/components/zapi/ModeSelector';
 import { RetrySettings } from '@/components/zapi/RetrySettings';
 import { MessageEditor } from '@/components/zapi/MessageEditor';
+import { ScheduleSettings, defaultScheduleConfig, type ScheduleConfig } from '@/components/zapi/ScheduleSettings';
 import { useZApiSend } from '@/hooks/use-zapi-send';
+import { useCreateScheduledSend } from '@/hooks/use-scheduled-sends';
 
 export type SendViaZAPITarget =
   | {
@@ -65,7 +68,10 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
     } catch { return 3; }
   });
 
+  const [schedule, setSchedule] = useState<ScheduleConfig>(defaultScheduleConfig());
+
   const { send, sending, attemptInfo } = useZApiSend();
+  const createScheduled = useCreateScheduledSend();
 
   useEffect(() => {
     try { localStorage.setItem('zapi.autoRetry', autoRetry ? '1' : '0'); } catch {}
@@ -132,6 +138,7 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
     setMode('link');
     setIncludeLinkInCaption(true);
     setTemplateId('');
+    setSchedule(defaultScheduleConfig());
     if (clientSetting?.message_body) {
       setMessage(applyTemplateVariables(clientSetting.message_body, templateVars));
       return;
@@ -197,6 +204,49 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
       ? `${message}\n\nLink online: ${publicUrl}`
       : message;
 
+    // Caminho 1: Agendado
+    if (schedule.enabled) {
+      const scheduledIso = new Date(schedule.scheduledAt).toISOString();
+      if (new Date(scheduledIso).getTime() <= Date.now()) {
+        toast.error('Escolha uma data/hora futura para o agendamento.');
+        return;
+      }
+      try {
+        await createScheduled.mutateAsync({
+          target_kind: target.kind,
+          service_order_id:
+            target.kind === 'service_order' ? target.serviceOrderId : target.serviceOrderId || null,
+          receivable_id: target.kind === 'receivable' ? target.receivableId : null,
+          client_id: target.clientId || null,
+          phone,
+          message,
+          send_mode: mode,
+          context: target.kind === 'service_order' ? documentType : 'billing',
+          link_title,
+          link_description,
+          pdf_filename: filename,
+          caption,
+          include_link_in_caption: includeLinkInCaption,
+          scheduled_at: scheduledIso,
+          recurrence_type: schedule.recurrenceType,
+          recurrence_days_of_week:
+            schedule.recurrenceType === 'weekly' ? schedule.daysOfWeek : undefined,
+          recurrence_day_of_month:
+            schedule.recurrenceType === 'monthly' ? schedule.dayOfMonth : undefined,
+          recurrence_end_date: schedule.endDate
+            ? new Date(schedule.endDate).toISOString()
+            : null,
+          auto_retry: autoRetry,
+          max_attempts: maxAttempts,
+        });
+        onOpenChange(false);
+      } catch {
+        /* erro já exibido pelo hook */
+      }
+      return;
+    }
+
+    // Caminho 2: Envio imediato
     const ok = await send(
       {
         phone,
@@ -277,15 +327,35 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
             attemptInfo={attemptInfo}
             disabled={sending}
           />
+
+          <ScheduleSettings
+            value={schedule}
+            onChange={setSchedule}
+            disabled={sending || createScheduled.isPending}
+          />
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={sending}>
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={sending || createScheduled.isPending}
+          >
             Cancelar
           </Button>
-          <Button onClick={handleSend} disabled={sending} className="gap-2">
-            {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            Enviar agora
+          <Button
+            onClick={handleSend}
+            disabled={sending || createScheduled.isPending}
+            className="gap-2"
+          >
+            {sending || createScheduled.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : schedule.enabled ? (
+              <CalendarClock className="h-4 w-4" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
+            {schedule.enabled ? 'Agendar envio' : 'Enviar agora'}
           </Button>
         </DialogFooter>
       </DialogContent>

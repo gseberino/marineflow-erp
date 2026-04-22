@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.submit-signature]
 verify_jwt = false
+
+[functions.whatsapp-process-scheduled]
+verify_jwt = false
