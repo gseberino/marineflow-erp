@@ -127,7 +127,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
             {!collapsed && <span>{t.nav[item.key]}</span>}
           </Link>
         ))}
-        {extraNav.map((item) => (
+        {extraNav.filter((item) => !item.roles || (user && item.roles.includes(user.role))).map((item) => (
           <Link
             key={item.path}
             to={item.path}
