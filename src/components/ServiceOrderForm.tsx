@@ -64,6 +64,8 @@ import { normalizePhoneE164 } from '@/lib/masks';
 import { MoneyInput } from '@/components/MoneyInput';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { recordWhatsAppEvent } from '@/lib/diagnostics';
+import { QuickProductDialog } from '@/components/QuickProductDialog';
+import { PriceCalculatorDialog } from '@/components/PriceCalculatorDialog';
 
 interface Props {
   orderId?: string;
@@ -173,6 +175,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   // Part form (current row being edited inline)
   const [partForm, setPartForm] = useState({ product_id: '', quantity: 1, unit_cost: 0, unit_sale: 0 });
   const [showPartForm, setShowPartForm] = useState(false);
+  const [quickProductOpen, setQuickProductOpen] = useState(false);
+  const [quickProductName, setQuickProductName] = useState('');
+  const [partCalcOpen, setPartCalcOpen] = useState(false);
 
   // Service line form (current row being edited inline)
   const [svcForm, setSvcForm] = useState({ service_id: '', quantity: 1, unit_price: 0, notes: '', service_name_snapshot: '', description_snapshot: '', billing_unit_snapshot: 'hour' });
@@ -1398,6 +1403,11 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 placeholder="Selecionar produto"
                 searchPlaceholder="Buscar produto... (digite ao menos 3 letras)"
                 emptyText="Nenhum produto encontrado"
+                onCreate={(typed) => {
+                  setQuickProductName(typed);
+                  setQuickProductOpen(true);
+                }}
+                createLabel="Cadastrar novo produto"
               />
             </div>
             <div>
@@ -1407,8 +1417,20 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             </div>
             <div>
               <Label>{t.serviceOrders.unitPrice}</Label>
-              <MoneyInput value={partForm.unit_sale}
-                onValueChange={(v) => setPartForm({ ...partForm, unit_sale: v })} />
+              <div className="flex items-center gap-2">
+                <MoneyInput value={partForm.unit_sale}
+                  onValueChange={(v) => setPartForm({ ...partForm, unit_sale: v })} />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="shrink-0"
+                  title="Formador de Preço"
+                  onClick={() => setPartCalcOpen(true)}
+                >
+                  <Calculator className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
           </div>
           <div className="flex gap-2">
@@ -2113,6 +2135,31 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         open={!!zapiTarget}
         onOpenChange={v => { if (!v) setZapiTarget(null); }}
         target={zapiTarget}
+      />
+
+      <QuickProductDialog
+        open={quickProductOpen}
+        onOpenChange={setQuickProductOpen}
+        initialName={quickProductName}
+        onCreated={(prod) => {
+          setPartForm({
+            ...partForm,
+            product_id: prod.id,
+            unit_cost: prod.cost_price,
+            unit_sale: prod.sale_price,
+          });
+        }}
+      />
+
+      <PriceCalculatorDialog
+        open={partCalcOpen}
+        onOpenChange={setPartCalcOpen}
+        initialCost={partForm.unit_cost || 0}
+        initialPrice={partForm.unit_sale || 0}
+        initialMargin={30}
+        initialMarkup={50}
+        defaultMethod="margin"
+        onConfirm={(price) => setPartForm({ ...partForm, unit_sale: price })}
       />
     </div>
   );
