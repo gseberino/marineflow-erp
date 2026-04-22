@@ -23,11 +23,42 @@ type HealthData = {
 
 const WEBHOOK_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/whatsapp-webhook`;
 
+type EndpointTest = {
+  endpoint: string;
+  url: string;
+  method: string;
+  http_status?: number;
+  ok: boolean;
+  current_value?: string | null;
+  matches_target?: boolean;
+  response?: unknown;
+  error?: string;
+  duration_ms: number;
+};
+
+type EndpointTestsResult = {
+  ok: boolean;
+  all_match_target: boolean;
+  target_webhook_url: string;
+  tests: Record<string, EndpointTest>;
+};
+
+const ENDPOINT_LABELS: Record<string, string> = {
+  received: 'Mensagem recebida',
+  delivery: 'Status de entrega',
+  messageStatus: 'Status (alternativo)',
+  received_by_me: 'Mensagem enviada pelo celular',
+  disconnected: 'Desconexão',
+};
+
 export function WhatsAppWebhookValidator() {
   const [loading, setLoading] = useState(false);
   const [configuring, setConfiguring] = useState(false);
   const [data, setData] = useState<HealthData | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const [testingEndpoints, setTestingEndpoints] = useState(false);
+  const [endpointTests, setEndpointTests] = useState<EndpointTestsResult | null>(null);
+  const [expandedEndpoint, setExpandedEndpoint] = useState<string | null>(null);
 
   const configureZapi = async () => {
     setConfiguring(true);
