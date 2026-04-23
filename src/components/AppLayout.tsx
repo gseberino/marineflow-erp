@@ -1,4 +1,4 @@
-import { ReactNode, useState } from 'react';
+import { ReactNode, useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useI18n } from '@/i18n';
@@ -6,7 +6,8 @@ import { useAuth } from '@/hooks/use-auth';
 import {
   LayoutDashboard, Users, Ship, Anchor, Package, ClipboardList,
   DollarSign, BarChart3, Settings, ChevronLeft, ChevronRight, Menu,
-  Warehouse, Building2, Wrench, History, LogOut, CalendarDays, MessageCircle, CreditCard
+  Warehouse, Building2, Wrench, History, LogOut, CalendarDays, MessageCircle, CreditCard,
+  Database, ChevronDown
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -16,34 +17,27 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { NotificationBell } from '@/components/NotificationBell';
 import { WhatsAppBell } from '@/components/WhatsAppBell';
 import { PWAInstallPrompt } from '@/components/PWAInstallPrompt';
 import { OfflineIndicator } from '@/components/OfflineIndicator';
 import { DiagnosticExportButton } from '@/components/DiagnosticExportButton';
 
-const navKeys = [
-  { key: 'dashboard' as const, icon: LayoutDashboard, path: '/' },
-  { key: 'serviceOrders' as const, icon: ClipboardList, path: '/service-orders' },
-  { key: 'agenda' as const, icon: CalendarDays, path: '/agenda' },
-  { key: 'clients' as const, icon: Users, path: '/clients' },
-  { key: 'vessels' as const, icon: Ship, path: '/vessels' },
-  { key: 'marinas' as const, icon: Anchor, path: '/marinas' },
-  { key: 'products' as const, icon: Package, path: '/products' },
-  { key: 'suppliers' as const, icon: Building2, path: '/suppliers' },
-  { key: 'services' as const, icon: Wrench, path: '/services' },
-  { key: 'inventory' as const, icon: Warehouse, path: '/inventory' },
-  { key: 'financial' as const, icon: DollarSign, path: '/financial' },
-  { key: 'collections' as const, icon: CreditCard, path: '/collections' },
-  { key: 'reports' as const, icon: BarChart3, path: '/reports' },
-  { key: 'auditLog' as const, icon: History, path: '/audit-log' },
-  { key: 'settings' as const, icon: Settings, path: '/settings' },
-];
+type NavItem = {
+  label: string;
+  icon: typeof LayoutDashboard;
+  path: string;
+  roles?: string[];
+};
 
-const extraNav: { label: string; icon: typeof MessageCircle; path: string; roles?: string[] }[] = [
-  { label: 'WhatsApp Leads', icon: MessageCircle, path: '/whatsapp/leads' },
-  { label: 'Logs WhatsApp', icon: MessageCircle, path: '/whatsapp/logs', roles: ['admin'] },
-];
+type NavGroup = {
+  id: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  roles?: string[];
+  items: NavItem[];
+};
 
 const roleLabels: Record<string, string> = {
   admin: 'Administrador',
@@ -66,23 +60,82 @@ export function AppLayout({ children }: { children: ReactNode }) {
     return location.pathname.startsWith(path);
   };
 
-  const visibleNavKeys = navKeys.filter(item => {
-    if (!user) return true;
-    if (item.path === '/financial') {
-      return ['admin', 'financial'].includes(user.role);
+  const groups: NavGroup[] = [
+    {
+      id: 'operacional',
+      label: 'Operacional',
+      icon: Wrench,
+      items: [
+        { label: 'Ordens de Serviço', icon: ClipboardList, path: '/service-orders' },
+        { label: 'Agenda', icon: CalendarDays, path: '/agenda' },
+        { label: 'Cobranças', icon: CreditCard, path: '/collections', roles: ['admin', 'financial'] },
+      ],
+    },
+    {
+      id: 'cadastros',
+      label: 'Cadastros',
+      icon: Database,
+      items: [
+        { label: 'Clientes', icon: Users, path: '/clients' },
+        { label: 'Embarcações', icon: Ship, path: '/vessels' },
+        { label: 'Marinas', icon: Anchor, path: '/marinas' },
+        { label: 'Produtos', icon: Package, path: '/products' },
+        { label: 'Serviços', icon: Wrench, path: '/services' },
+        { label: 'Fornecedores', icon: Building2, path: '/suppliers' },
+      ],
+    },
+    {
+      id: 'financeiro',
+      label: 'Financeiro',
+      icon: DollarSign,
+      items: [
+        { label: 'Financeiro', icon: DollarSign, path: '/financial', roles: ['admin', 'financial'] },
+        { label: 'Relatórios', icon: BarChart3, path: '/reports', roles: ['admin', 'financial'] },
+      ],
+    },
+    {
+      id: 'whatsapp',
+      label: 'WhatsApp',
+      icon: MessageCircle,
+      items: [
+        { label: 'Leads / Inbox', icon: MessageCircle, path: '/whatsapp/leads' },
+        { label: 'Logs', icon: History, path: '/whatsapp/logs', roles: ['admin'] },
+      ],
+    },
+    {
+      id: 'sistema',
+      label: 'Sistema',
+      icon: Settings,
+      roles: ['admin'],
+      items: [
+        { label: 'Configurações', icon: Settings, path: '/settings' },
+        { label: 'Log de Auditoria', icon: History, path: '/audit-log' },
+      ],
+    },
+  ];
+
+  // Filter items based on roles
+  const visibleGroups = groups
+    .filter((g) => !g.roles || (user && g.roles.includes(user.role)))
+    .map((g) => ({
+      ...g,
+      items: g.items.filter((i) => !i.roles || (user && i.roles.includes(user.role))),
+    }))
+    .filter((g) => g.items.length > 0);
+
+  // Track open/closed state per group. Default: only "operacional" open.
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => ({
+    operacional: true,
+  }));
+
+  // Auto-expand the group that contains the active route
+  useEffect(() => {
+    const activeGroup = visibleGroups.find((g) => g.items.some((i) => isActive(i.path)));
+    if (activeGroup) {
+      setOpenGroups((prev) => (prev[activeGroup.id] ? prev : { ...prev, [activeGroup.id]: true }));
     }
-    if (item.path === '/collections') {
-      return ['admin', 'financial'].includes(user.role);
-    }
-    if (item.path === '/audit-log') {
-      return user.role === 'admin';
-    }
-    if (item.path === '/settings') {
-      return ['admin', 'seller', 'financial', 'other'].includes(user.role)
-        || !user.role;
-    }
-    return true;
-  });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
 
   const initials = user?.full_name
     ?.split(' ')
@@ -96,53 +149,96 @@ export function AppLayout({ children }: { children: ReactNode }) {
     navigate('/login');
   };
 
+  const toggleGroup = (id: string) => setOpenGroups((p) => ({ ...p, [id]: !p[id] }));
+
+  const renderNavItem = (item: NavItem, indent = true) => (
+    <Link
+      key={item.path}
+      to={item.path}
+      onClick={() => setMobileOpen(false)}
+      className={cn(
+        'flex items-center gap-3 rounded-lg py-2 text-sm font-medium transition-colors',
+        indent && !collapsed ? 'pl-9 pr-3' : 'px-3',
+        isActive(item.path)
+          ? 'bg-sidebar-primary/15 text-sidebar-primary'
+          : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+      )}
+      title={collapsed ? item.label : undefined}
+    >
+      <item.icon className="h-4 w-4 shrink-0" />
+      {!collapsed && <span>{item.label}</span>}
+    </Link>
+  );
+
   const sidebarContent = (
     <div className="flex h-full flex-col">
       <div className="flex h-14 items-center gap-2 px-4 border-b border-sidebar-border">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sidebar-primary">
+        <Link to="/" className="flex h-8 w-8 items-center justify-center rounded-lg bg-sidebar-primary shrink-0">
           <Anchor className="h-4 w-4 text-sidebar-primary-foreground" />
-        </div>
+        </Link>
         {!collapsed && (
-          <div className="flex flex-col">
+          <Link to="/" className="flex flex-col">
             <span className="text-sm font-bold text-sidebar-accent-foreground">MarineFlow</span>
             <span className="text-[10px] text-sidebar-foreground">Marine ERP</span>
-          </div>
+          </Link>
         )}
       </div>
 
       <nav className="flex-1 space-y-1 p-2 overflow-y-auto scrollbar-thin">
-        {visibleNavKeys.map((item) => (
-          <Link
-            key={item.path}
-            to={item.path}
-            onClick={() => setMobileOpen(false)}
-            className={cn(
-              'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
-              isActive(item.path)
-                ? 'bg-sidebar-primary/15 text-sidebar-primary'
-                : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-            )}
-          >
-            <item.icon className="h-4 w-4 shrink-0" />
-            {!collapsed && <span>{t.nav[item.key]}</span>}
-          </Link>
-        ))}
-        {extraNav.filter((item) => !item.roles || (user && item.roles.includes(user.role))).map((item) => (
-          <Link
-            key={item.path}
-            to={item.path}
-            onClick={() => setMobileOpen(false)}
-            className={cn(
-              'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
-              isActive(item.path)
-                ? 'bg-sidebar-primary/15 text-sidebar-primary'
-                : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-            )}
-          >
-            <item.icon className="h-4 w-4 shrink-0" />
-            {!collapsed && <span>{item.label}</span>}
-          </Link>
-        ))}
+        {/* Dashboard always visible at top */}
+        <Link
+          to="/"
+          onClick={() => setMobileOpen(false)}
+          className={cn(
+            'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
+            isActive('/')
+              ? 'bg-sidebar-primary/15 text-sidebar-primary'
+              : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+          )}
+          title={collapsed ? t.nav.dashboard : undefined}
+        >
+          <LayoutDashboard className="h-4 w-4 shrink-0" />
+          {!collapsed && <span>{t.nav.dashboard}</span>}
+        </Link>
+
+        {visibleGroups.map((group) => {
+          const groupHasActive = group.items.some((i) => isActive(i.path));
+          const isOpen = openGroups[group.id] ?? false;
+
+          if (collapsed) {
+            // In collapsed mode, render items flat (icon-only) so navigation still works
+            return (
+              <div key={group.id} className="pt-1">
+                {group.items.map((item) => renderNavItem(item, false))}
+              </div>
+            );
+          }
+
+          return (
+            <Collapsible key={group.id} open={isOpen} onOpenChange={() => toggleGroup(group.id)}>
+              <CollapsibleTrigger
+                className={cn(
+                  'flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors',
+                  groupHasActive
+                    ? 'text-sidebar-primary'
+                    : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+                )}
+              >
+                <group.icon className="h-4 w-4 shrink-0" />
+                <span className="flex-1 text-left">{group.label}</span>
+                <ChevronDown
+                  className={cn(
+                    'h-4 w-4 shrink-0 transition-transform',
+                    isOpen ? 'rotate-0' : '-rotate-90'
+                  )}
+                />
+              </CollapsibleTrigger>
+              <CollapsibleContent className="space-y-0.5 pt-0.5">
+                {group.items.map((item) => renderNavItem(item))}
+              </CollapsibleContent>
+            </Collapsible>
+          );
+        })}
       </nav>
 
       <div className="hidden lg:flex border-t border-sidebar-border p-2">
