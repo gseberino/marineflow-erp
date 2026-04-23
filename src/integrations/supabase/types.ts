@@ -1424,11 +1424,13 @@ export type Database = {
           linked_payable_id: string | null
           notes: string | null
           paid_by: string
+          receipt_storage_path: string | null
           receipt_url: string | null
           reimbursed: boolean | null
           reimbursed_at: string | null
           reimbursed_payment_id: string | null
           service_order_id: string | null
+          supplier_id: string | null
           technician_user_id: string | null
           updated_at: string | null
         }
@@ -1444,11 +1446,13 @@ export type Database = {
           linked_payable_id?: string | null
           notes?: string | null
           paid_by?: string
+          receipt_storage_path?: string | null
           receipt_url?: string | null
           reimbursed?: boolean | null
           reimbursed_at?: string | null
           reimbursed_payment_id?: string | null
           service_order_id?: string | null
+          supplier_id?: string | null
           technician_user_id?: string | null
           updated_at?: string | null
         }
@@ -1464,11 +1468,13 @@ export type Database = {
           linked_payable_id?: string | null
           notes?: string | null
           paid_by?: string
+          receipt_storage_path?: string | null
           receipt_url?: string | null
           reimbursed?: boolean | null
           reimbursed_at?: string | null
           reimbursed_payment_id?: string | null
           service_order_id?: string | null
+          supplier_id?: string | null
           technician_user_id?: string | null
           updated_at?: string | null
         }
@@ -1499,6 +1505,13 @@ export type Database = {
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_expenses_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
             referencedColumns: ["id"]
           },
           {
