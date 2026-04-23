@@ -1590,6 +1590,24 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   <Input value={expForm.notes} onChange={(e) => setExpForm({ ...expForm, notes: e.target.value })} />
                 </div>
               </div>
+              <div>
+                <Label>Fornecedor</Label>
+                <EntityCombobox
+                  value={expForm.supplier_id}
+                  onChange={(v) => setExpForm({ ...expForm, supplier_id: v })}
+                  options={(suppliers || []).filter((s) => s.active).map((s) => ({
+                    value: s.id,
+                    label: s.supplier_name,
+                    description: s.cnpj_cpf || undefined,
+                  }))}
+                  placeholder="—"
+                  onCreate={(typed) => {
+                    setQuickSupplierName(typed);
+                    setQuickSupplierOpen(true);
+                  }}
+                  createLabel="+ Cadastrar novo fornecedor"
+                />
+              </div>
               <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <input type="checkbox" checked={expForm.also_create_payable}
                   onChange={(e) => setExpForm({ ...expForm, also_create_payable: e.target.checked })} />
