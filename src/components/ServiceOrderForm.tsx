@@ -622,6 +622,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         expense_date: new Date().toISOString().slice(0, 10),
         paid_by: 'company', technician_user_id: '', receipt_url: '', notes: '',
         also_create_payable: false,
+        supplier_id: '',
       });
       setShowExpForm(false);
       toast.success('Despesa adicionada');
