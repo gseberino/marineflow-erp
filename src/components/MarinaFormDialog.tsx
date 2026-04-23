@@ -16,6 +16,7 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   marina?: Marina | null;
+  onSaved?: (marina: Marina) => void;
 }
 
 const empty = {
@@ -38,7 +39,7 @@ const empty = {
   active: true,
 };
 
-export function MarinaFormDialog({ open, onOpenChange, marina }: Props) {
+export function MarinaFormDialog({ open, onOpenChange, marina, onSaved }: Props) {
   const { t } = useI18n();
   const create = useCreateMarina();
   const update = useUpdateMarina();
@@ -95,11 +96,13 @@ export function MarinaFormDialog({ open, onOpenChange, marina }: Props) {
       };
 
       if (isEdit && marina) {
-        await update.mutateAsync({ id: marina.id, ...payload });
+        const updated = await update.mutateAsync({ id: marina.id, ...payload });
         toast.success(t.marinas.updateSuccess);
+        onSaved?.((updated as Marina) ?? ({ ...marina, ...payload } as Marina));
       } else {
-        await create.mutateAsync(payload);
+        const created = await create.mutateAsync(payload);
         toast.success(t.marinas.createSuccess);
+        onSaved?.(created as Marina);
       }
       onOpenChange(false);
     } catch (err: any) {

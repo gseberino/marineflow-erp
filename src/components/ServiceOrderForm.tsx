@@ -33,7 +33,7 @@ import { ClientCombobox } from '@/components/ClientCombobox';
 import { VesselSelect } from '@/components/VesselSelect';
 import { EntityCombobox, type EntityOption } from '@/components/EntityCombobox';
 import { QuickProductDialog } from '@/components/QuickProductDialog';
-import { QuickMarinaDialog } from '@/components/QuickMarinaDialog';
+import { MarinaFormDialog } from '@/components/MarinaFormDialog';
 import { QuickSupplierDialog } from '@/components/QuickSupplierDialog';
 import { useSuppliers } from '@/hooks/use-suppliers';
 import { useServiceOrderExpenses, useAddServiceOrderExpense, useRemoveServiceOrderExpense } from '@/hooks/use-service-order-expenses';
@@ -2180,11 +2180,14 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         }}
       />
 
-      <QuickMarinaDialog
+      <MarinaFormDialog
         open={quickMarinaOpen}
         onOpenChange={setQuickMarinaOpen}
-        initialName={quickMarinaName}
-        onCreated={(marina) => set('marina_id', marina.id)}
+        marina={null}
+        onSaved={(marina) => {
+          set('marina_id', marina.id);
+          setQuickMarinaOpen(false);
+        }}
       />
 
       <QuickSupplierDialog
