@@ -2004,6 +2004,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         open={!!pdfDialogType}
         onOpenChange={v => { if (!v) setPdfDialogType(null); }}
         documentType={pdfDialogType || 'quote'}
+        hasProductImages={pdfData?.parts?.some((p: any) => !!p.image_url) ?? false}
         onGenerate={(options, validity, dueDate) => {
           if (!pdfData || !pdfDialogType) return;
           generatePDF({ ...pdfData, documentType: pdfDialogType }, { ...options, validity, dueDate });
