@@ -247,8 +247,8 @@ export default function SettingsPage() {
             Documentos
           </TabsTrigger>
           <TabsTrigger value="categories">
-            <Tag className="h-3.5 w-3.5 mr-1" />
-            Categorias
+            <Package className="h-3.5 w-3.5 mr-1" />
+            Categorias de Produto
           </TabsTrigger>
           <TabsTrigger value="whatsapp">
             <MessageCircle className="h-3.5 w-3.5 mr-1" />
@@ -270,6 +270,12 @@ export default function SettingsPage() {
           {cardFeesContent}
           <PaymentConditionsTab />
           <FiscalTab />
+          <div>
+            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+              <Tag className="h-4 w-4" /> Categorias Financeiras
+            </h3>
+            <CategoriesTab />
+          </div>
         </TabsContent>
 
         <TabsContent value="documents" className="mt-4 space-y-6">
@@ -277,19 +283,7 @@ export default function SettingsPage() {
         </TabsContent>
 
         <TabsContent value="categories" className="mt-4 space-y-4">
-          <div className="max-w-2xl">
-            <label className="text-xs font-medium text-muted-foreground">Tipo de categoria</label>
-            <Select value={categoriesSubTab} onValueChange={(v) => setCategoriesSubTab(v as 'service' | 'product')}>
-              <SelectTrigger className="mt-1 w-full max-w-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="service">Categorias de Serviço</SelectItem>
-                <SelectItem value="product">Categorias de Produto</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          {categoriesSubTab === 'service' ? <CategoriesTab /> : <ProductCategoriesTab />}
+          <ProductCategoriesTab />
         </TabsContent>
 
         <TabsContent value="whatsapp" className="mt-4 space-y-6">
