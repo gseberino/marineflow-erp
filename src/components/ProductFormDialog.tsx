@@ -20,6 +20,7 @@ import { Plus, Trash2, Star, ChevronDown, ExternalLink, Info, X, Upload, Package
 import { supabase } from '@/integrations/supabase/client';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PriceCalculator } from '@/components/PriceCalculator';
+import { PriceCalculatorDialog } from '@/components/PriceCalculatorDialog';
 import { CSOSN_OPTIONS, FISCAL_ORIGIN_OPTIONS } from '@/lib/price-calculator';
 import { MoneyInput } from '@/components/MoneyInput';
 
