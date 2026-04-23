@@ -33,6 +33,9 @@ import { ClientCombobox } from '@/components/ClientCombobox';
 import { VesselSelect } from '@/components/VesselSelect';
 import { EntityCombobox, type EntityOption } from '@/components/EntityCombobox';
 import { QuickProductDialog } from '@/components/QuickProductDialog';
+import { QuickMarinaDialog } from '@/components/QuickMarinaDialog';
+import { QuickSupplierDialog } from '@/components/QuickSupplierDialog';
+import { useSuppliers } from '@/hooks/use-suppliers';
 import { useServiceOrderExpenses, useAddServiceOrderExpense, useRemoveServiceOrderExpense } from '@/hooks/use-service-order-expenses';
 import { usePDFData } from '@/hooks/use-pdf';
 import { generatePDF, DEFAULT_PDF_OPTIONS } from '@/lib/pdf-generator';
@@ -183,6 +186,10 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [partForm, setPartForm] = useState({ product_id: '', quantity: 1, unit_cost: 0, unit_sale: 0 });
   const [quickProductOpen, setQuickProductOpen] = useState(false);
   const [quickProductName, setQuickProductName] = useState('');
+  const [quickMarinaOpen, setQuickMarinaOpen] = useState(false);
+  const [quickMarinaName, setQuickMarinaName] = useState('');
+  const [quickSupplierOpen, setQuickSupplierOpen] = useState(false);
+  const [quickSupplierName, setQuickSupplierName] = useState('');
   const [showPartForm, setShowPartForm] = useState(false);
 
   // Service line form (current row being edited inline)
@@ -998,15 +1005,21 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           </div>
           <div>
             <Label>{t.serviceOrders.marina}</Label>
-            <Select value={form.marina_id || 'none'} onValueChange={(v) => set('marina_id', v === 'none' ? '' : v)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">—</SelectItem>
-                {marinas?.filter((m) => m.active).map((m) => (
-                  <SelectItem key={m.id} value={m.id}>{m.marina_name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <EntityCombobox
+              value={form.marina_id}
+              onChange={(v) => set('marina_id', v)}
+              options={(marinas || []).filter((m) => m.active).map((m) => ({
+                value: m.id,
+                label: m.marina_name,
+                description: m.city || undefined,
+              }))}
+              placeholder="—"
+              onCreate={(typed) => {
+                setQuickMarinaName(typed);
+                setQuickMarinaOpen(true);
+              }}
+              createLabel="+ Cadastrar nova marina"
+            />
           </div>
           <div>
             <Label>{t.serviceOrders.requestedBy}</Label>
