@@ -161,6 +161,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
 
   // Image upload state
   const [uploading, setUploading] = useState(false);
+  const [calcOpen, setCalcOpen] = useState(false);
   const fileInputRef = (typeof window !== 'undefined') ? null : null;
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -439,7 +440,18 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
             </div>
             <div>
               <Label>{t.products.salePrice}</Label>
-              <MoneyInput value={form.sale_price ?? 0} onValueChange={v => set('sale_price', v)} />
+              <div className="flex gap-2 items-center">
+                <MoneyInput value={form.sale_price ?? 0} onValueChange={v => set('sale_price', v)} className="flex-1" />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCalcOpen(true)}
+                  title="Formador de preço"
+                >
+                  💰
+                </Button>
+              </div>
             </div>
             <div>
               <Label>{t.products.saleCurrency}</Label>
@@ -761,5 +773,13 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
         </form>
       </DialogContent>
     </Dialog>
+    <PriceCalculatorDialog
+      open={calcOpen}
+      onOpenChange={setCalcOpen}
+      initialCost={Number(form.cost_price) || 0}
+      initialPrice={Number(form.sale_price) || 0}
+      onConfirm={(price) => set('sale_price', price)}
+    />
+    </>
   );
 }
