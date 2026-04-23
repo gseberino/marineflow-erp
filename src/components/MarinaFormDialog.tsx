@@ -96,11 +96,13 @@ export function MarinaFormDialog({ open, onOpenChange, marina, onSaved }: Props)
       };
 
       if (isEdit && marina) {
-        await update.mutateAsync({ id: marina.id, ...payload });
+        const updated = await update.mutateAsync({ id: marina.id, ...payload });
         toast.success(t.marinas.updateSuccess);
+        onSaved?.((updated as Marina) ?? ({ ...marina, ...payload } as Marina));
       } else {
-        await create.mutateAsync(payload);
+        const created = await create.mutateAsync(payload);
         toast.success(t.marinas.createSuccess);
+        onSaved?.(created as Marina);
       }
       onOpenChange(false);
     } catch (err: any) {
