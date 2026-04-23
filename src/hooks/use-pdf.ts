@@ -16,7 +16,7 @@ export function usePDFData(serviceOrderId: string | undefined) {
             vessels(*),
             marinas(*),
             service_order_services(*, services(*)),
-            service_order_parts(*, products(product_name, sku)),
+            service_order_parts(*, products(product_name, sku, image_url)),
             service_order_expenses(category, description, amount, paid_by)
           `)
           .eq('id', serviceOrderId)
@@ -107,6 +107,7 @@ export function usePDFData(serviceOrderId: string | undefined) {
           quantity: p.quantity || 1,
           unit_price: p.unit_sale_snapshot || 0,
           line_total: p.line_total_sale || 0,
+          image_url: p.products?.image_url || null,
         })),
         expenses: ((so as any).service_order_expenses || [])
           .filter((e: any) => e.paid_by === 'company')

@@ -328,6 +328,7 @@ export default function ServiceOrderList() {
         open={!!pdfTarget}
         onOpenChange={v => { if (!v) setPdfTarget(null); }}
         documentType={pdfTarget?.type || 'quote'}
+        hasProductImages={pdfData?.parts?.some((p: any) => !!p.image_url) ?? false}
         onGenerate={handleGeneratePDF}
       />
 
