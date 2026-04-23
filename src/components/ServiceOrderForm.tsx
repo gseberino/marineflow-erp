@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { useI18n } from '@/i18n';
 import { useClients } from '@/hooks/use-clients';
 import { useVessels } from '@/hooks/use-vessels';
@@ -105,6 +106,13 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const { data: cardFees } = useCardFees();
   const { data: paymentPresets } = usePaymentConditionPresets();
   const { data: pdfData } = usePDFData(isNew ? undefined : orderId);
+  const queryClient = useQueryClient();
+  const openPdfDialog = (type: 'quote' | 'service_order' | 'invoice') => {
+    if (orderId) {
+      queryClient.invalidateQueries({ queryKey: ['pdf-data', orderId] });
+    }
+    setPdfDialogType(type);
+  };
 
   const createSO = useCreateServiceOrder();
   const updateSO = useUpdateServiceOrder();
@@ -728,16 +736,16 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         <div ref={topActionsRef} className="flex gap-2 flex-wrap">
           {!isNew && (
             <>
-              <Button variant="outline" size="sm" onClick={() => setPdfDialogType('quote')} className="gap-1">
+              <Button variant="outline" size="sm" onClick={() => openPdfDialog('quote')} className="gap-1">
                 <FileText className="h-4 w-4" />
                 {t.pdf.quote}
               </Button>
-              <Button variant="outline" size="sm" onClick={() => setPdfDialogType('service_order')} className="gap-1">
+              <Button variant="outline" size="sm" onClick={() => openPdfDialog('service_order')} className="gap-1">
                 <Printer className="h-4 w-4" />
                 OS
               </Button>
               {(currentStatus === 'completed' || currentStatus === 'invoiced') && (
-                <Button variant="outline" size="sm" onClick={() => setPdfDialogType('invoice')} className="gap-1">
+                <Button variant="outline" size="sm" onClick={() => openPdfDialog('invoice')} className="gap-1">
                   <Receipt className="h-4 w-4" />
                   Fatura
                 </Button>
@@ -2001,7 +2009,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
 
       {/* PDF Options Dialog */}
       <PDFOptionsDialog
-        open={!!pdfDialogType}
+        open={!!pdfDialogType && !!pdfData}
         onOpenChange={v => { if (!v) setPdfDialogType(null); }}
         documentType={pdfDialogType || 'quote'}
         hasProductImages={pdfData?.parts?.some((p: any) => !!p.image_url) ?? false}
