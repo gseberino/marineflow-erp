@@ -19,10 +19,10 @@ import type { TablesInsert } from '@/integrations/supabase/types';
 import { Plus, Trash2, Star, ChevronDown, ExternalLink, Info, X, Upload, Package } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { Skeleton } from '@/components/ui/skeleton';
+import { PriceCalculator } from '@/components/PriceCalculator';
 import { PriceCalculatorDialog } from '@/components/PriceCalculatorDialog';
 import { CSOSN_OPTIONS, FISCAL_ORIGIN_OPTIONS } from '@/lib/price-calculator';
 import { MoneyInput } from '@/components/MoneyInput';
-import { Calculator } from 'lucide-react';
 
 interface Props {
   open: boolean;
@@ -82,7 +82,6 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
   const [useGlobal, setUseGlobal] = useState(true);
   const [fiscalOpen, setFiscalOpen] = useState(false);
   const [priceOpen, setPriceOpen] = useState(true);
-  const [calcOpen, setCalcOpen] = useState(false);
 
   // App settings
   const { data: settings } = useAppSettings();
@@ -162,6 +161,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
 
   // Image upload state
   const [uploading, setUploading] = useState(false);
+  const [calcOpen, setCalcOpen] = useState(false);
   const fileInputRef = (typeof window !== 'undefined') ? null : null;
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -318,6 +318,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
   const p = t.products as any;
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
@@ -440,17 +441,16 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
             </div>
             <div>
               <Label>{t.products.salePrice}</Label>
-              <div className="flex items-center gap-2">
-                <MoneyInput value={form.sale_price ?? 0} onValueChange={v => set('sale_price', v)} />
+              <div className="flex gap-2 items-center">
+                <MoneyInput value={form.sale_price ?? 0} onValueChange={v => set('sale_price', v)} className="flex-1" />
                 <Button
                   type="button"
                   variant="outline"
-                  size="icon"
-                  className="shrink-0"
-                  title="Calcular preço"
+                  size="sm"
                   onClick={() => setCalcOpen(true)}
+                  title="Formador de preço"
                 >
-                  <span aria-hidden>💰</span>
+                  💰
                 </Button>
               </div>
             </div>
@@ -487,7 +487,37 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
             </div>
           </div>
 
-          {/* Price Calculator is now opened via the 💰 button next to Sale Price */}
+          {/* Price Calculator Section */}
+          <Collapsible open={priceOpen} onOpenChange={setPriceOpen}>
+            <CollapsibleTrigger className="flex items-center justify-between w-full py-2 text-sm font-semibold hover:text-primary transition-colors">
+              {p.priceCalculator || 'Formação de Preço'}
+              <ChevronDown className={`h-4 w-4 transition-transform ${priceOpen ? 'rotate-180' : ''}`} />
+            </CollapsibleTrigger>
+            <CollapsibleContent className="space-y-3">
+              {selectedCategory && !selectedCategory.is_commissionable && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 flex items-start gap-2">
+                  <span>⚠️</span>
+                  <span>
+                    A categoria <strong>{selectedCategory.name}</strong> não permite comissionamento. O campo comissão será ignorado no cálculo do preço.
+                  </span>
+                </div>
+              )}
+               <PriceCalculator
+                costPrice={Number(form.cost_price) || 0}
+                salePrice={Number(form.sale_price) || 0}
+                profitMargin={Number((form as any).profit_margin) || 0}
+                taxRate={Number((form as any).icms_rate) || 0}
+                commissionRate={Number((form as any).commission_rate) || 0}
+                mode={priceMode}
+                onModeChange={setPriceMode}
+                onSalePriceChange={v => set('sale_price', v)}
+                onProfitMarginChange={v => set('profit_margin', v)}
+                onTaxRateChange={v => set('icms_rate', v)}
+                onCommissionRateChange={v => set('commission_rate', v)}
+                isCommissionable={selectedCategory ? (selectedCategory.is_commissionable ?? true) : true}
+              />
+            </CollapsibleContent>
+          </Collapsible>
 
           {/* Fiscal Data Section */}
           <Collapsible open={fiscalOpen} onOpenChange={setFiscalOpen}>
@@ -743,17 +773,14 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
           </div>
         </form>
       </DialogContent>
-      <PriceCalculatorDialog
-        open={calcOpen}
-        onOpenChange={setCalcOpen}
-        initialCost={Number(form.cost_price) || 0}
-        initialPrice={Number(form.sale_price) || 0}
-        initialMargin={Number((form as any).profit_margin) || 30}
-        initialTaxRate={Number((form as any).icms_rate) || 0}
-        initialCommissionRate={Number((form as any).commission_rate) || 0}
-        defaultMethod="margin"
-        onConfirm={(price) => set('sale_price', price)}
-      />
     </Dialog>
+    <PriceCalculatorDialog
+      open={calcOpen}
+      onOpenChange={setCalcOpen}
+      initialCost={Number(form.cost_price) || 0}
+      initialPrice={Number(form.sale_price) || 0}
+      onConfirm={(price) => set('sale_price', price)}
+    />
+    </>
   );
 }

@@ -23,31 +23,6 @@ export type PriceBreakdown = {
  *
  * sale_price = cost / (1 - margin% - tax% - commission%)
  */
-/**
- * Markup mode: sale_price = cost × (1 + markup/100), with taxes and commission
- * applied as percentage of the resulting sale price (informational).
- */
-export function calculateByMarkup(c: PriceComponents & { markup: number }): PriceBreakdown {
-  const sale_price = c.cost_price * (1 + (c.markup || 0) / 100)
-  const tax_amount = sale_price * (c.tax_rate / 100)
-  const commission_amount = sale_price * (c.commission_rate / 100)
-  const profit_amount = sale_price - c.cost_price - tax_amount - commission_amount
-  const markup = c.cost_price > 0
-    ? ((sale_price - c.cost_price) / c.cost_price) * 100
-    : 0
-  return {
-    cost_price: round2(c.cost_price),
-    profit_margin: c.profit_margin,
-    tax_rate: c.tax_rate,
-    commission_rate: c.commission_rate,
-    sale_price: round2(sale_price),
-    tax_amount: round2(tax_amount),
-    commission_amount: round2(commission_amount),
-    profit_amount: round2(profit_amount),
-    markup: round2(markup),
-  }
-}
-
 export function calculateSalePrice(c: PriceComponents): PriceBreakdown {
   const marginD = c.profit_margin / 100
   const taxD = c.tax_rate / 100
