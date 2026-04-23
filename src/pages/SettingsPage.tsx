@@ -92,33 +92,169 @@ export default function SettingsPage() {
     }
   };
 
+  const [categoriesSubTab, setCategoriesSubTab] = useState<'service' | 'product'>('service');
+
+  // Currency tab content (extracted to keep below render readable)
+  const currencyContent = (
+    <div className="rounded-xl border bg-card p-6 shadow-sm max-w-2xl">
+      <h3 className="text-sm font-semibold mb-4 flex items-center gap-2"><Banknote className="h-4 w-4" /> {t.settings.currencySettings}</h3>
+      <p className="text-sm text-muted-foreground mb-4">{t.settings.exchangeRateNote}</p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className="text-xs font-medium text-muted-foreground">{t.settings.baseCurrency}</label>
+          <Select value={currency.baseCurrency} onValueChange={(v) => setCurrency({ baseCurrency: v })}>
+            <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="BRL">BRL - Real Brasileiro</SelectItem>
+              <SelectItem value="USD">USD - US Dollar</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <label className="text-xs font-medium text-muted-foreground">{t.settings.displayCurrency}</label>
+          <Select value={currency.displayCurrency} onValueChange={(v) => setCurrency({ displayCurrency: v })}>
+            <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="BRL">BRL - Real Brasileiro</SelectItem>
+              <SelectItem value="USD">USD - US Dollar</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="mt-6">
+        <h4 className="text-sm font-semibold mb-3">{t.settings.exchangeRates}</h4>
+        <div className="rounded-lg border overflow-hidden">
+          <table className="w-full text-sm">
+            <thead><tr className="border-b bg-muted/50">
+              <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.settings.from}</th>
+              <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.settings.to}</th>
+              <th className="px-4 py-2 text-right font-medium text-muted-foreground">{t.settings.rateValue}</th>
+              <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.settings.rateSource}</th>
+            </tr></thead>
+            <tbody>
+              <tr className="border-b">
+                <td className="px-4 py-3">USD</td>
+                <td className="px-4 py-3">BRL</td>
+                <td className="px-4 py-3 text-right font-medium">5.65</td>
+                <td className="px-4 py-3 text-muted-foreground">{t.settings.manual}</td>
+              </tr>
+              <tr>
+                <td className="px-4 py-3">BRL</td>
+                <td className="px-4 py-3">USD</td>
+                <td className="px-4 py-3 text-right font-medium">0.177</td>
+                <td className="px-4 py-3 text-muted-foreground">{t.settings.manual}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+
+  const cardFeesContent = (
+    <div className="rounded-xl border bg-card p-6 shadow-sm max-w-2xl">
+      <h3 className="text-sm font-semibold mb-4 flex items-center gap-2"><CreditCard className="h-4 w-4" /> {t.settings.cardFees}</h3>
+      <p className="text-sm text-muted-foreground mb-4">{t.settings.cardFeesDescription}</p>
+      <div className="rounded-lg border overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b bg-muted/50">
+              <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.settings.installments}</th>
+              <th className="px-4 py-2 text-right font-medium text-muted-foreground">{t.settings.feePercent}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[1, 2, 3, 4, 5, 6].map((n) => (
+              <tr key={n} className="border-b last:border-0">
+                <td className="px-4 py-3 font-medium">{n}x</td>
+                <td className="px-4 py-3 text-right">
+                  <Input
+                    type="number"
+                    step="0.01"
+                    className="w-24 h-8 text-right text-sm ml-auto"
+                    value={localFees[n] ?? ''}
+                    onChange={(e) => setLocalFees((p) => ({ ...p, [n]: e.target.value }))}
+                    onBlur={() => handleFeeBlur(n)}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
+  const termsContent = (
+    <div className="rounded-xl border bg-card p-6 shadow-sm max-w-2xl">
+      <h3 className="text-sm font-semibold mb-4 flex items-center gap-2"><FileText className="h-4 w-4" /> {t.settings.terms}</h3>
+      {termsLoading ? (
+        <p className="text-sm text-muted-foreground">{t.common.loading}</p>
+      ) : (
+        <div className="space-y-4">
+          {TERM_KEYS.map((tk) => (
+            <div key={tk.key}>
+              <label className="text-xs font-medium text-muted-foreground">{t.settings[tk.labelKey]}</label>
+              <Textarea
+                className="mt-1"
+                rows={3}
+                value={terms[tk.key] || ''}
+                onChange={(e) => setTerms((p) => ({ ...p, [tk.key]: e.target.value }))}
+              />
+            </div>
+          ))}
+          <Button onClick={handleSaveTerms} className="bg-accent text-accent-foreground hover:bg-accent/90">
+            {t.common.saveChanges}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+
+  const languageContent = (
+    <div className="rounded-xl border bg-card p-6 shadow-sm max-w-2xl">
+      <h3 className="text-sm font-semibold mb-4 flex items-center gap-2"><Globe className="h-4 w-4" /> {t.settings.languageSettings}</h3>
+      <p className="text-sm text-muted-foreground mb-4">{t.settings.languageNote}</p>
+      <div>
+        <label className="text-xs font-medium text-muted-foreground">{t.settings.selectLanguage}</label>
+        <Select value={locale} onValueChange={(v) => setLocale(v as Locale)}>
+          <SelectTrigger className="mt-1 w-full max-w-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="pt-BR">Português (Brasil)</SelectItem>
+            <SelectItem value="en">English</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  );
+
   return (
     <div className="space-y-6 animate-fade-in">
       <PageHeader title={t.settings.title} description={t.settings.description} />
 
       <Tabs defaultValue={defaultTab}>
         <TabsList className="flex-wrap h-auto gap-1">
-          <TabsTrigger value="company">{t.settings.tabCompany}</TabsTrigger>
-          <TabsTrigger value="users">{t.settings.tabUsers}</TabsTrigger>
-          <TabsTrigger value="language">{t.settings.tabLanguage}</TabsTrigger>
-          <TabsTrigger value="currency">{t.settings.tabCurrency}</TabsTrigger>
-          <TabsTrigger value="cardFees">{t.settings.tabCardFees}</TabsTrigger>
-          <TabsTrigger value="terms">{(t.settings as any).tabTerms}</TabsTrigger>
-          <TabsTrigger value="categories">{(t.settings as any).tabCategories}</TabsTrigger>
-          <TabsTrigger value="product-categories">
-            <Package className="h-3.5 w-3.5 mr-1" />
-            {(t.settings as any).tabProductCategories || 'Categorias de Produto'}
+          <TabsTrigger value="company">Empresa</TabsTrigger>
+          <TabsTrigger value="users">Usuários</TabsTrigger>
+          <TabsTrigger value="financial">
+            <DollarSign className="h-3.5 w-3.5 mr-1" />
+            Financeiro
           </TabsTrigger>
-          <TabsTrigger value="fiscal">{(t.settings as any).tabFiscal || 'Fiscal'}</TabsTrigger>
-          <TabsTrigger value="payment-conditions">Condições de Pagamento</TabsTrigger>
-          <TabsTrigger value="whatsapp-templates">
+          <TabsTrigger value="documents">
+            <FileText className="h-3.5 w-3.5 mr-1" />
+            Documentos
+          </TabsTrigger>
+          <TabsTrigger value="categories">
+            <Tag className="h-3.5 w-3.5 mr-1" />
+            Categorias
+          </TabsTrigger>
+          <TabsTrigger value="whatsapp">
             <MessageCircle className="h-3.5 w-3.5 mr-1" />
-            Templates WhatsApp
+            WhatsApp
           </TabsTrigger>
-          <TabsTrigger value="whatsapp-reminders">
-            <MessageCircle className="h-3.5 w-3.5 mr-1" />
-            Lembretes WhatsApp
-          </TabsTrigger>
+          <TabsTrigger value="system">Sistema</TabsTrigger>
         </TabsList>
 
         <TabsContent value="company" className="mt-4 space-y-4">
@@ -129,170 +265,42 @@ export default function SettingsPage() {
           <UsersTab />
         </TabsContent>
 
-        <TabsContent value="language" className="mt-4 space-y-4">
-          <div className="rounded-xl border bg-card p-6 shadow-sm max-w-2xl">
-            <h3 className="text-sm font-semibold mb-4 flex items-center gap-2"><Globe className="h-4 w-4" /> {t.settings.languageSettings}</h3>
-            <p className="text-sm text-muted-foreground mb-4">{t.settings.languageNote}</p>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">{t.settings.selectLanguage}</label>
-              <Select value={locale} onValueChange={(v) => setLocale(v as Locale)}>
-                <SelectTrigger className="mt-1 w-full max-w-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="pt-BR">Português (Brasil)</SelectItem>
-                  <SelectItem value="en">English</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="currency" className="mt-4 space-y-4">
-          <div className="rounded-xl border bg-card p-6 shadow-sm max-w-2xl">
-            <h3 className="text-sm font-semibold mb-4 flex items-center gap-2"><Banknote className="h-4 w-4" /> {t.settings.currencySettings}</h3>
-            <p className="text-sm text-muted-foreground mb-4">{t.settings.exchangeRateNote}</p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">{t.settings.baseCurrency}</label>
-                <Select value={currency.baseCurrency} onValueChange={(v) => setCurrency({ baseCurrency: v })}>
-                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="BRL">BRL - Real Brasileiro</SelectItem>
-                    <SelectItem value="USD">USD - US Dollar</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">{t.settings.displayCurrency}</label>
-                <Select value={currency.displayCurrency} onValueChange={(v) => setCurrency({ displayCurrency: v })}>
-                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="BRL">BRL - Real Brasileiro</SelectItem>
-                    <SelectItem value="USD">USD - US Dollar</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="mt-6">
-              <h4 className="text-sm font-semibold mb-3">{t.settings.exchangeRates}</h4>
-              <div className="rounded-lg border overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead><tr className="border-b bg-muted/50">
-                    <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.settings.from}</th>
-                    <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.settings.to}</th>
-                    <th className="px-4 py-2 text-right font-medium text-muted-foreground">{t.settings.rateValue}</th>
-                    <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.settings.rateSource}</th>
-                  </tr></thead>
-                  <tbody>
-                    <tr className="border-b">
-                      <td className="px-4 py-3">USD</td>
-                      <td className="px-4 py-3">BRL</td>
-                      <td className="px-4 py-3 text-right font-medium">5.65</td>
-                      <td className="px-4 py-3 text-muted-foreground">{t.settings.manual}</td>
-                    </tr>
-                    <tr>
-                      <td className="px-4 py-3">BRL</td>
-                      <td className="px-4 py-3">USD</td>
-                      <td className="px-4 py-3 text-right font-medium">0.177</td>
-                      <td className="px-4 py-3 text-muted-foreground">{t.settings.manual}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        </TabsContent>
-
-        {/* Card Fees Tab */}
-        <TabsContent value="cardFees" className="mt-4 space-y-4">
-          <div className="rounded-xl border bg-card p-6 shadow-sm max-w-2xl">
-            <h3 className="text-sm font-semibold mb-4 flex items-center gap-2"><CreditCard className="h-4 w-4" /> {t.settings.cardFees}</h3>
-            <p className="text-sm text-muted-foreground mb-4">{t.settings.cardFeesDescription}</p>
-            <div className="rounded-lg border overflow-hidden">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/50">
-                    <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.settings.installments}</th>
-                    <th className="px-4 py-2 text-right font-medium text-muted-foreground">{t.settings.feePercent}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[1, 2, 3, 4, 5, 6].map((n) => (
-                    <tr key={n} className="border-b last:border-0">
-                      <td className="px-4 py-3 font-medium">{n}x</td>
-                      <td className="px-4 py-3 text-right">
-                        <Input
-                          type="number"
-                          step="0.01"
-                          className="w-24 h-8 text-right text-sm ml-auto"
-                          value={localFees[n] ?? ''}
-                          onChange={(e) => setLocalFees((p) => ({ ...p, [n]: e.target.value }))}
-                          onBlur={() => handleFeeBlur(n)}
-                        />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </TabsContent>
-
-        {/* Terms Tab */}
-        <TabsContent value="terms" className="mt-4 space-y-4">
-          <div className="rounded-xl border bg-card p-6 shadow-sm max-w-2xl">
-            <h3 className="text-sm font-semibold mb-4 flex items-center gap-2"><FileText className="h-4 w-4" /> {t.settings.terms}</h3>
-            {termsLoading ? (
-              <p className="text-sm text-muted-foreground">{t.common.loading}</p>
-            ) : (
-              <div className="space-y-4">
-                {TERM_KEYS.map((tk) => (
-                  <div key={tk.key}>
-                    <label className="text-xs font-medium text-muted-foreground">{t.settings[tk.labelKey]}</label>
-                    <Textarea
-                      className="mt-1"
-                      rows={3}
-                      value={terms[tk.key] || ''}
-                      onChange={(e) => setTerms((p) => ({ ...p, [tk.key]: e.target.value }))}
-                    />
-                  </div>
-                ))}
-                <Button onClick={handleSaveTerms} className="bg-accent text-accent-foreground hover:bg-accent/90">
-                  {t.common.saveChanges}
-                </Button>
-              </div>
-            )}
-          </div>
-        </TabsContent>
-
-        {/* Categories Tab */}
-        <TabsContent value="categories" className="mt-4 space-y-4">
-          <CategoriesTab />
-        </TabsContent>
-
-        {/* Product Categories Tab */}
-        <TabsContent value="product-categories" className="mt-4 space-y-4">
-          <ProductCategoriesTab />
-        </TabsContent>
-
-        {/* Fiscal Tab */}
-        <TabsContent value="fiscal" className="mt-4 space-y-4">
+        <TabsContent value="financial" className="mt-4 space-y-6">
+          {currencyContent}
+          {cardFeesContent}
+          <PaymentConditionsTab />
           <FiscalTab />
         </TabsContent>
 
-        <TabsContent value="payment-conditions" className="mt-4 space-y-4">
-          <PaymentConditionsTab />
+        <TabsContent value="documents" className="mt-4 space-y-6">
+          {termsContent}
         </TabsContent>
 
-        <TabsContent value="whatsapp-templates" className="mt-4 space-y-4">
+        <TabsContent value="categories" className="mt-4 space-y-4">
+          <div className="max-w-2xl">
+            <label className="text-xs font-medium text-muted-foreground">Tipo de categoria</label>
+            <Select value={categoriesSubTab} onValueChange={(v) => setCategoriesSubTab(v as 'service' | 'product')}>
+              <SelectTrigger className="mt-1 w-full max-w-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="service">Categorias de Serviço</SelectItem>
+                <SelectItem value="product">Categorias de Produto</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {categoriesSubTab === 'service' ? <CategoriesTab /> : <ProductCategoriesTab />}
+        </TabsContent>
+
+        <TabsContent value="whatsapp" className="mt-4 space-y-6">
           <WhatsAppTemplatesManager />
-        </TabsContent>
-
-        <TabsContent value="whatsapp-reminders" className="mt-4 space-y-4">
           <WhatsAppWebhookValidator />
           <WhatsAppQueuePanel />
           <WhatsAppReminderSettings />
+        </TabsContent>
+
+        <TabsContent value="system" className="mt-4 space-y-4">
+          {languageContent}
         </TabsContent>
       </Tabs>
     </div>
