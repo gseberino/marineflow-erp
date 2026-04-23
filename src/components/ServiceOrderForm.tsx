@@ -31,6 +31,7 @@ import { useVesselContacts, VESSEL_CONTACT_ROLES } from '@/hooks/use-vessel-cont
 import { ClientCombobox } from '@/components/ClientCombobox';
 import { VesselSelect } from '@/components/VesselSelect';
 import { EntityCombobox, type EntityOption } from '@/components/EntityCombobox';
+import { QuickProductDialog } from '@/components/QuickProductDialog';
 import { useServiceOrderExpenses, useAddServiceOrderExpense, useRemoveServiceOrderExpense } from '@/hooks/use-service-order-expenses';
 import { usePDFData } from '@/hooks/use-pdf';
 import { generatePDF, DEFAULT_PDF_OPTIONS } from '@/lib/pdf-generator';
@@ -172,6 +173,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
 
   // Part form (current row being edited inline)
   const [partForm, setPartForm] = useState({ product_id: '', quantity: 1, unit_cost: 0, unit_sale: 0 });
+  const [quickProductOpen, setQuickProductOpen] = useState(false);
+  const [quickProductName, setQuickProductName] = useState('');
   const [showPartForm, setShowPartForm] = useState(false);
 
   // Service line form (current row being edited inline)
@@ -1395,10 +1398,15 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                     description: `Estoque: ${p.stock_quantity}${p.sku ? ` · SKU ${p.sku}` : ''}`,
                     searchTerms: [p.sku || '', p.barcode || '', p.brand || '', p.category || ''],
                   }))}
-                placeholder="Selecionar produto"
-                searchPlaceholder="Buscar produto... (digite ao menos 3 letras)"
-                emptyText="Nenhum produto encontrado"
-              />
+                 placeholder="Selecionar produto"
+                 searchPlaceholder="Buscar produto... (digite ao menos 3 letras)"
+                 emptyText="Nenhum produto encontrado"
+                 onCreate={(typed) => {
+                   setQuickProductName(typed);
+                   setQuickProductOpen(true);
+                 }}
+                 createLabel="+ Cadastrar novo produto"
+               />
             </div>
             <div>
               <Label>{t.serviceOrders.qty}</Label>
@@ -2113,6 +2121,20 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         open={!!zapiTarget}
         onOpenChange={v => { if (!v) setZapiTarget(null); }}
         target={zapiTarget}
+      />
+
+      <QuickProductDialog
+        open={quickProductOpen}
+        onOpenChange={setQuickProductOpen}
+        initialName={quickProductName}
+        onCreated={(prod) => {
+          setPartForm({
+            ...partForm,
+            product_id: prod.id,
+            unit_cost: prod.cost_price ?? 0,
+            unit_sale: prod.sale_price ?? 0,
+          });
+        }}
       />
     </div>
   );
