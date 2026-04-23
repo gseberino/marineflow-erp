@@ -33,6 +33,9 @@ import { ClientCombobox } from '@/components/ClientCombobox';
 import { VesselSelect } from '@/components/VesselSelect';
 import { EntityCombobox, type EntityOption } from '@/components/EntityCombobox';
 import { QuickProductDialog } from '@/components/QuickProductDialog';
+import { QuickMarinaDialog } from '@/components/QuickMarinaDialog';
+import { QuickSupplierDialog } from '@/components/QuickSupplierDialog';
+import { useSuppliers } from '@/hooks/use-suppliers';
 import { useServiceOrderExpenses, useAddServiceOrderExpense, useRemoveServiceOrderExpense } from '@/hooks/use-service-order-expenses';
 import { usePDFData } from '@/hooks/use-pdf';
 import { generatePDF, DEFAULT_PDF_OPTIONS } from '@/lib/pdf-generator';
@@ -100,6 +103,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const { data: allVessels } = useVessels();
   const { data: marinas } = useMarinas();
   const { data: products } = useProducts();
+  const { data: suppliers } = useSuppliers();
   const { data: appUsers } = useAppUsers();
   const { data: commissionableUsers } = useCommissionableUsers();
   const { data: services } = useServices();
@@ -183,6 +187,10 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [partForm, setPartForm] = useState({ product_id: '', quantity: 1, unit_cost: 0, unit_sale: 0 });
   const [quickProductOpen, setQuickProductOpen] = useState(false);
   const [quickProductName, setQuickProductName] = useState('');
+  const [quickMarinaOpen, setQuickMarinaOpen] = useState(false);
+  const [quickMarinaName, setQuickMarinaName] = useState('');
+  const [quickSupplierOpen, setQuickSupplierOpen] = useState(false);
+  const [quickSupplierName, setQuickSupplierName] = useState('');
   const [showPartForm, setShowPartForm] = useState(false);
 
   // Service line form (current row being edited inline)
@@ -225,6 +233,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     paid_by: 'company' as 'company' | 'technician',
     technician_user_id: '', receipt_url: '', notes: '',
     also_create_payable: false,
+    supplier_id: '',
   });
   const [showExpForm, setShowExpForm] = useState(false);
 
@@ -613,6 +622,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         expense_date: new Date().toISOString().slice(0, 10),
         paid_by: 'company', technician_user_id: '', receipt_url: '', notes: '',
         also_create_payable: false,
+        supplier_id: '',
       });
       setShowExpForm(false);
       toast.success('Despesa adicionada');
@@ -998,15 +1008,21 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           </div>
           <div>
             <Label>{t.serviceOrders.marina}</Label>
-            <Select value={form.marina_id || 'none'} onValueChange={(v) => set('marina_id', v === 'none' ? '' : v)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">—</SelectItem>
-                {marinas?.filter((m) => m.active).map((m) => (
-                  <SelectItem key={m.id} value={m.id}>{m.marina_name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <EntityCombobox
+              value={form.marina_id}
+              onChange={(v) => set('marina_id', v)}
+              options={(marinas || []).filter((m) => m.active).map((m) => ({
+                value: m.id,
+                label: m.marina_name,
+                description: m.city || undefined,
+              }))}
+              placeholder="—"
+              onCreate={(typed) => {
+                setQuickMarinaName(typed);
+                setQuickMarinaOpen(true);
+              }}
+              createLabel="+ Cadastrar nova marina"
+            />
           </div>
           <div>
             <Label>{t.serviceOrders.requestedBy}</Label>
@@ -1573,6 +1589,24 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   <Label>{t.common.notes}</Label>
                   <Input value={expForm.notes} onChange={(e) => setExpForm({ ...expForm, notes: e.target.value })} />
                 </div>
+              </div>
+              <div>
+                <Label>Fornecedor</Label>
+                <EntityCombobox
+                  value={expForm.supplier_id}
+                  onChange={(v) => setExpForm({ ...expForm, supplier_id: v })}
+                  options={(suppliers || []).filter((s) => s.active).map((s) => ({
+                    value: s.id,
+                    label: s.supplier_name,
+                    description: s.cnpj_cpf || undefined,
+                  }))}
+                  placeholder="—"
+                  onCreate={(typed) => {
+                    setQuickSupplierName(typed);
+                    setQuickSupplierOpen(true);
+                  }}
+                  createLabel="+ Cadastrar novo fornecedor"
+                />
               </div>
               <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <input type="checkbox" checked={expForm.also_create_payable}
@@ -2144,6 +2178,20 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             unit_sale: prod.sale_price ?? 0,
           });
         }}
+      />
+
+      <QuickMarinaDialog
+        open={quickMarinaOpen}
+        onOpenChange={setQuickMarinaOpen}
+        initialName={quickMarinaName}
+        onCreated={(marina) => set('marina_id', marina.id)}
+      />
+
+      <QuickSupplierDialog
+        open={quickSupplierOpen}
+        onOpenChange={setQuickSupplierOpen}
+        initialName={quickSupplierName}
+        onCreated={(s) => setExpForm((prev) => ({ ...prev, supplier_id: s.id }))}
       />
     </div>
   );

@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { EntityCombobox } from '@/components/EntityCombobox';
 import { CategorySelect } from '@/components/CategorySelect';
+import { QuickSupplierDialog } from '@/components/QuickSupplierDialog';
 import { useI18n } from '@/i18n';
 import { useSuppliers } from '@/hooks/use-suppliers';
 import { useServiceOrders } from '@/hooks/use-service-orders';
@@ -32,6 +33,8 @@ export function PayableFormDialog({ open, onOpenChange }: Props) {
   const [currency, setCurrency] = useState('BRL');
   const [soId, setSoId] = useState('');
   const [notes, setNotes] = useState('');
+  const [quickSupplierOpen, setQuickSupplierOpen] = useState(false);
+  const [quickSupplierName, setQuickSupplierName] = useState('');
 
   const handleSave = async () => {
     if (!description || !dueDate || !amount) return;
@@ -61,15 +64,17 @@ export function PayableFormDialog({ open, onOpenChange }: Props) {
               value={supplierId}
               onChange={v => { setSupplierId(v); setSupplierName(''); }}
               placeholder="—"
-              options={[
-                { value: '', label: '—' },
-                ...(suppliers || []).map(s => ({
-                  value: s.id,
-                  label: s.supplier_name,
-                  description: s.cnpj_cpf || undefined,
-                  searchTerms: [s.cnpj_cpf || '', s.contact_email || ''],
-                })),
-              ]}
+              options={(suppliers || []).map(s => ({
+                value: s.id,
+                label: s.supplier_name,
+                description: s.cnpj_cpf || undefined,
+                searchTerms: [s.cnpj_cpf || '', s.contact_email || ''],
+              }))}
+              onCreate={(typed) => {
+                setQuickSupplierName(typed);
+                setQuickSupplierOpen(true);
+              }}
+              createLabel="+ Cadastrar novo fornecedor"
             />
           </div>
           {!supplierId && <div><Label>Nome do fornecedor</Label><Input value={supplierName} onChange={e => setSupplierName(e.target.value)} /></div>}
@@ -108,6 +113,15 @@ export function PayableFormDialog({ open, onOpenChange }: Props) {
         </div>
         <DialogFooter><Button onClick={handleSave} disabled={create.isPending}>{t.common.save}</Button></DialogFooter>
       </DialogContent>
+      <QuickSupplierDialog
+        open={quickSupplierOpen}
+        onOpenChange={setQuickSupplierOpen}
+        initialName={quickSupplierName}
+        onCreated={(s) => {
+          setSupplierId(s.id);
+          setSupplierName('');
+        }}
+      />
     </Dialog>
   );
 }
