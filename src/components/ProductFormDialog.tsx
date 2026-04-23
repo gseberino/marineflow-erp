@@ -318,6 +318,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
   const p = t.products as any;
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
