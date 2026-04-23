@@ -233,6 +233,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     paid_by: 'company' as 'company' | 'technician',
     technician_user_id: '', receipt_url: '', notes: '',
     also_create_payable: false,
+    supplier_id: '',
   });
   const [showExpForm, setShowExpForm] = useState(false);
 
