@@ -39,7 +39,7 @@ const empty = {
   active: true,
 };
 
-export function MarinaFormDialog({ open, onOpenChange, marina }: Props) {
+export function MarinaFormDialog({ open, onOpenChange, marina, onSaved }: Props) {
   const { t } = useI18n();
   const create = useCreateMarina();
   const update = useUpdateMarina();
