@@ -16,6 +16,7 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   marina?: Marina | null;
+  onSaved?: (marina: Marina) => void;
 }
 
 const empty = {
