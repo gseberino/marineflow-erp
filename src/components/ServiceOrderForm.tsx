@@ -103,6 +103,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const { data: allVessels } = useVessels();
   const { data: marinas } = useMarinas();
   const { data: products } = useProducts();
+  const { data: suppliers } = useSuppliers();
   const { data: appUsers } = useAppUsers();
   const { data: commissionableUsers } = useCommissionableUsers();
   const { data: services } = useServices();
