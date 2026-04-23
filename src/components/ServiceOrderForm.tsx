@@ -2179,6 +2179,20 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           });
         }}
       />
+
+      <QuickMarinaDialog
+        open={quickMarinaOpen}
+        onOpenChange={setQuickMarinaOpen}
+        initialName={quickMarinaName}
+        onCreated={(marina) => set('marina_id', marina.id)}
+      />
+
+      <QuickSupplierDialog
+        open={quickSupplierOpen}
+        onOpenChange={setQuickSupplierOpen}
+        initialName={quickSupplierName}
+        onCreated={(s) => setExpForm((prev) => ({ ...prev, supplier_id: s.id }))}
+      />
     </div>
   );
 }
