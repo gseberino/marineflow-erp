@@ -2180,11 +2180,14 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         }}
       />
 
-      <QuickMarinaDialog
+      <MarinaFormDialog
         open={quickMarinaOpen}
         onOpenChange={setQuickMarinaOpen}
-        initialName={quickMarinaName}
-        onCreated={(marina) => set('marina_id', marina.id)}
+        marina={null}
+        onSaved={(marina) => {
+          set('marina_id', marina.id);
+          setQuickMarinaOpen(false);
+        }}
       />
 
       <QuickSupplierDialog
