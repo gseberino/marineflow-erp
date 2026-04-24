@@ -1,14 +1,14 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { PageHeader } from '@/components/PageHeader';
 import { StatusBadge } from '@/components/StatusBadge';
 import { useI18n } from '@/i18n';
-import { useServiceOrders } from '@/hooks/use-service-orders';
+import { useServiceOrders, useDuplicateServiceOrder } from '@/hooks/use-service-orders';
 import { statusConfig, priorityConfig } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Plus, Search, Filter, ClipboardList, MoreHorizontal, FileText, Printer, MessageCircle, Send, CheckCircle2, XCircle, History } from 'lucide-react';
+import { Plus, Search, Filter, ClipboardList, MoreHorizontal, FileText, Printer, MessageCircle, Send, CheckCircle2, XCircle, History, Copy } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -31,6 +31,18 @@ export default function ServiceOrderList() {
   const { t, formatCurrency, formatDate } = useI18n();
   const { data: orders, isLoading, error } = useServiceOrders();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const duplicate = useDuplicateServiceOrder();
+
+  const handleDuplicate = async (soId: string) => {
+    try {
+      const newSO = await duplicate.mutateAsync(soId);
+      toast.success('OS duplicada com sucesso!');
+      navigate(`/service-orders/${(newSO as any).id}`);
+    } catch (e: any) {
+      toast.error(e?.message || 'Erro ao duplicar OS');
+    }
+  };
 
   const [pdfTarget, setPdfTarget] = useState<{ id: string; type: 'quote' | 'service_order' } | null>(null);
   const [historyTarget, setHistoryTarget] = useState<{ id: string; number: string } | null>(null);
@@ -261,6 +273,10 @@ export default function ServiceOrderList() {
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem asChild>
                               <Link to={`/service-orders/${so.id}`}>Abrir</Link>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleDuplicate(so.id)} className="gap-2">
+                              <Copy className="h-4 w-4" />
+                              Duplicar OS
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem

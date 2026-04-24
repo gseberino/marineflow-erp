@@ -533,3 +533,117 @@ export function useRemoveServiceOrderService() {
     },
   });
 }
+
+export function useDuplicateServiceOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (sourceId: string) => {
+      // 1. Fetch the source SO with all related data
+      const { data: source, error: soErr } = await supabase
+        .from('service_orders')
+        .select(`
+          *,
+          service_order_parts(*),
+          service_order_services(*),
+          service_order_expenses(*)
+        `)
+        .eq('id', sourceId)
+        .single();
+      if (soErr) throw soErr;
+
+      // 2. Strip sensitive/derived fields and related arrays
+      const {
+        id, created_at, updated_at, service_order_number,
+        scheduled_start_at, scheduled_end_at,
+        check_in_at, check_out_at,
+        client_signature_url, signed_at, signed_by_name, signed_document_hash,
+        requires_resignature, resignature_requested_at,
+        share_token,
+        payment_status, payment_method, payment_condition_preset_id,
+        payment_conditions, card_installments,
+        invoicing_status, reopen_reason, reopened_at,
+        cancellation_reason, cancelled_at,
+        grand_total, labor_cost_total, parts_cost_total,
+        operational_cost_total, travel_cost_total,
+        subcontract_cost_total, labor_hours_total,
+        commissioned_user_id, commission_amount,
+        service_order_parts, service_order_services, service_order_expenses,
+        ...copyFields
+      } = source as any;
+
+      const newNumber = await generateSONumber();
+
+      const { data: newSO, error: createErr } = await supabase
+        .from('service_orders')
+        .insert({
+          ...copyFields,
+          service_order_number: newNumber,
+          status: 'draft',
+          priority: source.priority || 'normal',
+          discount_amount: source.discount_amount || 0,
+          tax_amount: source.tax_amount || 0,
+        })
+        .select()
+        .single();
+      if (createErr) throw createErr;
+
+      const newId = (newSO as any).id;
+
+      // 3. Copy services (uses snapshot column names per schema)
+      if (source.service_order_services?.length > 0) {
+        const svcs = source.service_order_services.map((s: any) => ({
+          service_order_id: newId,
+          service_id: s.service_id,
+          service_name_snapshot: s.service_name_snapshot,
+          description_snapshot: s.description_snapshot,
+          billing_unit_snapshot: s.billing_unit_snapshot,
+          quantity: s.quantity,
+          unit_price_snapshot: s.unit_price_snapshot,
+          line_total: s.line_total,
+          notes: s.notes,
+        }));
+        await supabase.from('service_order_services').insert(svcs);
+      }
+
+      // 4. Copy parts
+      if (source.service_order_parts?.length > 0) {
+        const parts = source.service_order_parts.map((p: any) => ({
+          service_order_id: newId,
+          product_id: p.product_id,
+          quantity: p.quantity,
+          unit_cost_snapshot: p.unit_cost_snapshot,
+          unit_sale_snapshot: p.unit_sale_snapshot,
+          line_total_cost: p.line_total_cost,
+          line_total_sale: p.line_total_sale,
+          currency_snapshot: p.currency_snapshot,
+          notes: p.notes,
+        }));
+        await supabase.from('service_order_parts').insert(parts);
+      }
+
+      // 5. Copy expenses (without receipts and without linked payable)
+      if (source.service_order_expenses?.length > 0) {
+        const exps = source.service_order_expenses.map((e: any) => ({
+          service_order_id: newId,
+          category: e.category,
+          description: e.description,
+          amount: e.amount,
+          currency: e.currency || 'BRL',
+          expense_date: new Date().toISOString().slice(0, 10),
+          paid_by: e.paid_by,
+          supplier_id: e.supplier_id || null,
+          notes: e.notes || null,
+        }));
+        await supabase.from('service_order_expenses').insert(exps);
+      }
+
+      return newSO;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['service-orders'] });
+    },
+    onError: (error: any) => {
+      console.error('useDuplicateServiceOrder error:', error);
+    },
+  });
+}
