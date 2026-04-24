@@ -1995,9 +1995,18 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 if (isEditing) {
                   return (
                     <div key={s.id} className="border-b last:border-0">
-                      <ServiceCardForm
+                      <ServiceCardFormComponent
                         cardKey={s.id}
-                        isNewCard={false}
+                        draft={editingSvc[s.id]}
+                        services={services || []}
+                        appUsers={appUsers || []}
+                        formatCurrency={formatCurrency}
+                        onUpdate={(patch) =>
+                          setEditingSvc((prev) => ({
+                            ...prev,
+                            [s.id]: { ...prev[s.id], ...patch },
+                          }))
+                        }
                         onConfirm={() => handleConfirmEditSvc(s.id)}
                         onCancel={() => cancelSvcCard(s.id, false)}
                         confirmDisabled={updateSvcLine.isPending}
