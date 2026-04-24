@@ -598,6 +598,22 @@ ${options.showSignature ? `
 </div>
 ` : ''}
 
+${(() => {
+    const bank = data.bank || {};
+    const hasBank = !!(bank.bank_name || bank.bank_agency || bank.bank_account || bank.pix_key);
+    return options.showBankDetails !== false && hasBank ? `
+<div style="border:1px solid #e5e7eb;border-radius:6px;padding:12px;margin-bottom:16px;background:#f9fafb;">
+  <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:8px;">Dados Bancários</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;">
+    ${bank.bank_name ? `<div><strong>Banco:</strong> ${esc(bank.bank_name)}</div>` : ''}
+    ${bank.bank_agency ? `<div><strong>Agência:</strong> ${esc(bank.bank_agency)}</div>` : ''}
+    ${bank.bank_account ? `<div><strong>Conta:</strong> ${esc(bank.bank_account)}</div>` : ''}
+    ${bank.pix_key ? `<div style="grid-column:span 2;"><strong>PIX:</strong> ${esc(bank.pix_key)}</div>` : ''}
+  </div>
+</div>
+` : '';
+  })()}
+
 ${options.showTerms && data.terms ? `
 <div style="border-top:1px solid #e5e7eb;padding-top:10px;margin-top:16px;">
   <div style="font-weight:700;font-size:10px;color:#1e3a5f;text-transform:uppercase;margin-bottom:4px;">Termos e Condições</div>
