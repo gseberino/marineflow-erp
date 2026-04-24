@@ -37,6 +37,7 @@ import { MarinaFormDialog } from '@/components/MarinaFormDialog';
 import { QuickSupplierDialog } from '@/components/QuickSupplierDialog';
 import { useSuppliers } from '@/hooks/use-suppliers';
 import { useServiceOrderExpenses, useAddServiceOrderExpense, useUpdateServiceOrderExpense, useRemoveServiceOrderExpense } from '@/hooks/use-service-order-expenses';
+import { useUpdateServiceOrderService } from '@/hooks/use-service-order-services';
 import { supabase } from '@/integrations/supabase/client';
 import { usePDFData } from '@/hooks/use-pdf';
 import { generatePDF, DEFAULT_PDF_OPTIONS } from '@/lib/pdf-generator';
