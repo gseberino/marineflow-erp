@@ -548,12 +548,12 @@ export default function FinancialPage() {
                     {payableTableHead}
                     <tbody>
                       {filteredPayables.length === 0 ? (
-                        <tr><td colSpan={11} className="text-center py-8 text-muted-foreground">{t.common.noResults}</td></tr>
+                        <tr><td colSpan={12} className="text-center py-8 text-muted-foreground">{t.common.noResults}</td></tr>
                       ) : filteredPayables.map(renderPayableRow)}
                     </tbody>
                     <tfoot>
                       <tr className="bg-muted/50 border-t-2 font-medium">
-                        <td colSpan={6} className="px-4 py-3">{t.common.total}: {filteredPayables.length} itens</td>
+                        <td colSpan={7} className="px-4 py-3">{t.common.total}: {filteredPayables.length} itens</td>
                         <td className="px-4 py-3 text-right">{formatCurrency(filteredPayables.reduce((s, p) => s + Number(p.amount), 0))}</td>
                         <td className="px-4 py-3 text-right hidden md:table-cell text-success">{formatCurrency(payTotalPaid)}</td>
                         <td className="px-4 py-3 text-right hidden md:table-cell">{formatCurrency(payTotalBalance)}</td>
