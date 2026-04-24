@@ -36,7 +36,8 @@ import { QuickProductDialog } from '@/components/QuickProductDialog';
 import { MarinaFormDialog } from '@/components/MarinaFormDialog';
 import { QuickSupplierDialog } from '@/components/QuickSupplierDialog';
 import { useSuppliers } from '@/hooks/use-suppliers';
-import { useServiceOrderExpenses, useAddServiceOrderExpense, useRemoveServiceOrderExpense } from '@/hooks/use-service-order-expenses';
+import { useServiceOrderExpenses, useAddServiceOrderExpense, useUpdateServiceOrderExpense, useRemoveServiceOrderExpense } from '@/hooks/use-service-order-expenses';
+import { supabase } from '@/integrations/supabase/client';
 import { usePDFData } from '@/hooks/use-pdf';
 import { generatePDF, DEFAULT_PDF_OPTIONS } from '@/lib/pdf-generator';
 import type { PDFOptions } from '@/lib/pdf-generator';
@@ -63,7 +64,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle, Pencil, Paperclip, X, FileImage, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { MoneyInput } from '@/components/MoneyInput';
@@ -138,6 +139,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
 
   const { data: soExpenses } = useServiceOrderExpenses(orderId);
   const addExpense = useAddServiceOrderExpense();
+  const updateExpense = useUpdateServiceOrderExpense();
   const removeExpense = useRemoveServiceOrderExpense();
 
   // Form state
@@ -231,11 +233,14 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     category: '', description: '', amount: 0, currency: 'BRL',
     expense_date: new Date().toISOString().slice(0, 10),
     paid_by: 'company' as 'company' | 'technician',
-    technician_user_id: '', receipt_url: '', notes: '',
+    technician_user_id: '', receipt_url: '', receipt_storage_path: '', notes: '',
     also_create_payable: false,
     supplier_id: '',
   });
   const [showExpForm, setShowExpForm] = useState(false);
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
+  const [uploadingReceipt, setUploadingReceipt] = useState(false);
+  const receiptInputRef = useRef<HTMLInputElement | null>(null);
 
   // Card installments
   const [selectedInstallments, setSelectedInstallments] = useState(1);
@@ -601,33 +606,119 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     }
   };
 
+  const resetExpForm = () => {
+    setExpForm({
+      category: '', description: '', amount: 0, currency: 'BRL',
+      expense_date: new Date().toISOString().slice(0, 10),
+      paid_by: 'company', technician_user_id: '', receipt_url: '', receipt_storage_path: '', notes: '',
+      also_create_payable: false,
+      supplier_id: '',
+    });
+    setEditingExpenseId(null);
+  };
+
+  const handleEditExpense = (exp: any) => {
+    setExpForm({
+      category: exp.category || '',
+      description: exp.description || '',
+      amount: Number(exp.amount) || 0,
+      currency: exp.currency || 'BRL',
+      expense_date: exp.expense_date || new Date().toISOString().slice(0, 10),
+      paid_by: (exp.paid_by as 'company' | 'technician') || 'company',
+      technician_user_id: exp.technician_user_id || '',
+      receipt_url: exp.receipt_url || '',
+      receipt_storage_path: exp.receipt_storage_path || '',
+      notes: exp.notes || '',
+      also_create_payable: false,
+      supplier_id: exp.supplier_id || '',
+    });
+    setEditingExpenseId(exp.id);
+    setShowExpForm(true);
+  };
+
+  const handleUploadReceipt = async (file: File) => {
+    if (!orderId) {
+      toast.error('Salve a OS primeiro antes de anexar comprovantes');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Arquivo excede 5MB');
+      return;
+    }
+    setUploadingReceipt(true);
+    try {
+      const ext = file.name.split('.').pop() || 'bin';
+      const uuid = (crypto as any).randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const path = `expenses/${orderId}/${uuid}.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from('expense-receipts')
+        .upload(path, file, { contentType: file.type, upsert: false });
+      if (upErr) throw upErr;
+      const { data: urlData } = supabase.storage.from('expense-receipts').getPublicUrl(path);
+      setExpForm((prev) => ({ ...prev, receipt_url: urlData.publicUrl, receipt_storage_path: path }));
+      toast.success('Comprovante anexado');
+    } catch (e: any) {
+      toast.error(e.message || 'Erro ao enviar comprovante');
+    } finally {
+      setUploadingReceipt(false);
+      if (receiptInputRef.current) receiptInputRef.current.value = '';
+    }
+  };
+
+  const handleRemoveReceipt = async () => {
+    const path = expForm.receipt_storage_path;
+    if (path) {
+      try {
+        await supabase.storage.from('expense-receipts').remove([path]);
+      } catch {
+        /* swallow — still clear form */
+      }
+    }
+    setExpForm((prev) => ({ ...prev, receipt_url: '', receipt_storage_path: '' }));
+  };
+
   const handleAddExpense = async () => {
     if (!orderId || !expForm.category || !expForm.description || expForm.amount <= 0) return;
     try {
-      await addExpense.mutateAsync({
-        service_order_id: orderId,
-        category: expForm.category,
-        description: expForm.description,
-        amount: expForm.amount,
-        currency: expForm.currency,
-        expense_date: expForm.expense_date,
-        paid_by: expForm.paid_by,
-        technician_user_id: expForm.paid_by === 'technician' ? expForm.technician_user_id || undefined : undefined,
-        receipt_url: expForm.receipt_url || undefined,
-        notes: expForm.notes || undefined,
-        also_create_payable: expForm.also_create_payable,
-      });
-      setExpForm({
-        category: '', description: '', amount: 0, currency: 'BRL',
-        expense_date: new Date().toISOString().slice(0, 10),
-        paid_by: 'company', technician_user_id: '', receipt_url: '', notes: '',
-        also_create_payable: false,
-        supplier_id: '',
-      });
+      if (editingExpenseId) {
+        await updateExpense.mutateAsync({
+          id: editingExpenseId,
+          service_order_id: orderId,
+          category: expForm.category,
+          description: expForm.description,
+          amount: expForm.amount,
+          currency: expForm.currency,
+          expense_date: expForm.expense_date,
+          paid_by: expForm.paid_by,
+          technician_user_id: expForm.paid_by === 'technician' ? expForm.technician_user_id || null : null,
+          receipt_url: expForm.receipt_url || null,
+          receipt_storage_path: expForm.receipt_storage_path || null,
+          supplier_id: expForm.supplier_id || null,
+          notes: expForm.notes || null,
+        });
+        toast.success('Despesa atualizada');
+      } else {
+        await addExpense.mutateAsync({
+          service_order_id: orderId,
+          category: expForm.category,
+          description: expForm.description,
+          amount: expForm.amount,
+          currency: expForm.currency,
+          expense_date: expForm.expense_date,
+          paid_by: expForm.paid_by,
+          technician_user_id: expForm.paid_by === 'technician' ? expForm.technician_user_id || undefined : undefined,
+          receipt_url: expForm.receipt_url || undefined,
+          receipt_storage_path: expForm.receipt_storage_path || undefined,
+          supplier_id: expForm.supplier_id || undefined,
+          notes: expForm.notes || undefined,
+          also_create_payable: expForm.also_create_payable,
+        });
+        toast.success('Despesa adicionada');
+      }
+      resetExpForm();
       setShowExpForm(false);
-      toast.success('Despesa adicionada');
     } catch (e: any) {
-      toast.error(e.message || 'Erro ao adicionar despesa');
+      toast.error(e.message || 'Erro ao salvar despesa');
     }
   };
 
@@ -1582,8 +1673,62 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <Label>{t.serviceOrders.receiptUrl}</Label>
-                  <Input value={expForm.receipt_url} onChange={(e) => setExpForm({ ...expForm, receipt_url: e.target.value })} placeholder="https://..." />
+                  <Label>Comprovante</Label>
+                  <input
+                    ref={receiptInputRef}
+                    type="file"
+                    accept="image/*,application/pdf"
+                    capture="environment"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleUploadReceipt(f);
+                    }}
+                  />
+                  {expForm.receipt_url ? (
+                    <div className="flex items-center gap-2 mt-1 p-2 rounded-md border bg-background">
+                      {/\.(png|jpe?g|gif|webp|svg)$/i.test(expForm.receipt_url) ? (
+                        <img
+                          src={expForm.receipt_url}
+                          alt="Comprovante"
+                          className="h-[60px] w-[60px] object-cover rounded border"
+                        />
+                      ) : (
+                        <div className="h-[60px] w-[60px] flex items-center justify-center rounded border bg-muted">
+                          <FileText className="h-6 w-6 text-muted-foreground" />
+                        </div>
+                      )}
+                      <a
+                        href={expForm.receipt_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-primary hover:underline truncate flex-1"
+                      >
+                        Ver comprovante
+                      </a>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={handleRemoveReceipt}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="w-full gap-2 mt-1"
+                      onClick={() => receiptInputRef.current?.click()}
+                      disabled={uploadingReceipt}
+                    >
+                      <Paperclip className="h-3.5 w-3.5" />
+                      {uploadingReceipt ? 'Enviando...' : '📎 Anexar comprovante'}
+                    </Button>
+                  )}
                 </div>
                 <div>
                   <Label>{t.common.notes}</Label>
@@ -1608,29 +1753,38 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   createLabel="+ Cadastrar novo fornecedor"
                 />
               </div>
-              <label className="flex items-center gap-2 text-sm cursor-pointer">
-                <input type="checkbox" checked={expForm.also_create_payable}
-                  onChange={(e) => setExpForm({ ...expForm, also_create_payable: e.target.checked })} />
-                {t.serviceOrders.alsoCreatePayable}
-              </label>
+              {!editingExpenseId && (
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input type="checkbox" checked={expForm.also_create_payable}
+                    onChange={(e) => setExpForm({ ...expForm, also_create_payable: e.target.checked })} />
+                  {t.serviceOrders.alsoCreatePayable}
+                </label>
+              )}
               <div className="flex gap-2">
-                <Button size="sm" onClick={handleAddExpense} disabled={addExpense.isPending}>{t.common.save}</Button>
-                <Button size="sm" variant="outline" onClick={() => setShowExpForm(false)}>{t.common.cancel}</Button>
+                <Button size="sm" onClick={handleAddExpense} disabled={addExpense.isPending || updateExpense.isPending}>
+                  {editingExpenseId ? 'Atualizar' : t.common.save}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => { resetExpForm(); setShowExpForm(false); }}>
+                  {t.common.cancel}
+                </Button>
               </div>
             </div>
           )}
           {(!soExpenses || soExpenses.length === 0) ? (
             <p className="text-sm text-muted-foreground p-5">{t.serviceOrders.noExpensesYet}</p>
           ) : (
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/50">
                   <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.common.date}</th>
                   <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.products.category}</th>
                   <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.common.description}</th>
+                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Fornecedor</th>
                   <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.serviceOrders.paidBy}</th>
+                  <th className="px-4 py-2 text-center font-medium text-muted-foreground">Comprovante</th>
                   <th className="px-4 py-2 text-right font-medium text-muted-foreground">{t.common.amount}</th>
-                  <th className="px-4 py-2 w-10"></th>
+                  <th className="px-4 py-2 w-20"></th>
                 </tr>
               </thead>
               <tbody>
@@ -1639,6 +1793,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                     <td className="px-4 py-3 text-muted-foreground">{formatDate(exp.expense_date)}</td>
                     <td className="px-4 py-3"><StatusBadge className="bg-secondary text-secondary-foreground">{exp.category}</StatusBadge></td>
                     <td className="px-4 py-3 font-medium">{exp.description}</td>
+                    <td className="px-4 py-3 text-muted-foreground">
+                      {exp.suppliers?.supplier_name || '—'}
+                    </td>
                     <td className="px-4 py-3">
                       {exp.paid_by === 'technician' ? (
                         <span className="text-warning">{exp.app_users?.full_name || t.serviceOrders.paidByTechnician}
@@ -1647,17 +1804,40 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                         </span>
                       ) : t.serviceOrders.paidByCompany}
                     </td>
+                    <td className="px-4 py-3 text-center">
+                      {exp.receipt_url ? (
+                        /\.(png|jpe?g|gif|webp|svg)$/i.test(exp.receipt_url) ? (
+                          <a href={exp.receipt_url} target="_blank" rel="noopener noreferrer" className="inline-block">
+                            <img src={exp.receipt_url} alt="Comprovante" className="h-8 w-8 object-cover rounded border inline-block" />
+                          </a>
+                        ) : (
+                          <a href={exp.receipt_url} target="_blank" rel="noopener noreferrer" className="text-primary inline-flex items-center gap-1 hover:underline">
+                            <FileImage className="h-4 w-4" />
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        )
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-right font-semibold">{formatCurrency(Number(exp.amount))}</td>
                     <td className="px-4 py-3">
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
-                        onClick={() => removeExpense.mutate({ id: exp.id, service_order_id: orderId! })}>
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        <Button variant="ghost" size="icon" className="h-7 w-7"
+                          onClick={() => handleEditExpense(exp)}>
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
+                          onClick={() => removeExpense.mutate({ id: exp.id, service_order_id: orderId! })}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </section>
       )}
