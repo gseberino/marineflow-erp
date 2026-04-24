@@ -1256,7 +1256,7 @@ function PaymentPresetRow({ preset, updatePreset }: { preset: any; updatePreset:
     JSON.stringify(rows) !== JSON.stringify(initial) ||
     autoGenerate !== (preset.auto_generate_collections !== false);
 
-  const addRow = () => setRows((r) => [...r, { label: '', services_pct: 0, parts_pct: 0, expenses_pct: 0, days_after_approval: 0 }]);
+  const addRow = () => setRows((r) => [...r, { label: '', services_pct: 0, parts_pct: 0, expenses_pct: 0, days_after_approval: 0, tipo: 'aprovacao' }]);
   const removeRow = (i: number) => setRows((r) => r.filter((_, idx) => idx !== i));
   const updateRow = (i: number, patch: Partial<InstallmentRow>) =>
     setRows((r) => r.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
