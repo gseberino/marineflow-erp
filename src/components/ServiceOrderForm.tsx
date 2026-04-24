@@ -611,7 +611,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       .select('id')
       .single();
     if (error) throw error;
-    qc.invalidateQueries({ queryKey: ['services'] });
+    queryClient.invalidateQueries({ queryKey: ['services'] });
     return data.id as string;
   };
 
