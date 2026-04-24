@@ -71,6 +71,9 @@ export function usePDFData(serviceOrderId: string | undefined) {
           operational_cost_total: so.operational_cost_total || 0,
           extra_notes: so.extra_notes ?? undefined,
           payment_conditions: (so as any).payment_conditions ?? undefined,
+          payment_condition_label: (so as any).payment_condition_presets?.label ?? null,
+          payment_condition_installments: (so as any).payment_condition_presets?.installments ?? null,
+          subcontract_cost_total: (so as any).subcontract_cost_total || 0,
         },
         client: {
           name: (so.clients as any)?.full_name_or_company_name || '—',
