@@ -8,6 +8,7 @@ export interface PaymentInstallment {
   parts_pct: number;
   expenses_pct: number;
   days_after_approval: number;
+  tipo?: 'aprovacao' | 'entrega' | 'prazo';
   /** @deprecated use services_pct/parts_pct/expenses_pct instead */
   percent?: number;
 }

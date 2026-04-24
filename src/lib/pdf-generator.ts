@@ -365,6 +365,7 @@ function buildPaymentSection(so: any): string {
         parts_pct: Number(r.parts_pct ?? r.percent ?? 0),
         expenses_pct: Number(r.expenses_pct ?? 0),
         days_after_approval: Number(r.days_after_approval ?? 0),
+        tipo: r.tipo,
       }))
     : [];
   if (installments.length === 0 && !so.payment_conditions) return '';
@@ -378,9 +379,11 @@ function buildPaymentSection(so: any): string {
     const amount = (laborCost * row.services_pct / 100)
                  + (partsCost * row.parts_pct / 100)
                  + (expensesTotal * row.expenses_pct / 100);
-    const daysLabel = row.days_after_approval === 0
-      ? 'na aprovação'
-      : `em ${row.days_after_approval} dias`;
+    const daysLabel = row.tipo === 'entrega'
+      ? 'na entrega'
+      : row.tipo === 'prazo' || row.days_after_approval > 0
+      ? `em ${row.days_after_approval} dias`
+      : 'na aprovação';
     return `<tr>
       <td style="padding:4px 0;font-size:12px;font-weight:600;">${esc(row.label || `Parcela ${i + 1}`)} <span style="font-weight:400;color:#888;font-size:11px;">(${daysLabel})</span></td>
       <td style="text-align:right;padding:4px 0;font-size:13px;font-weight:700;">${fmt(amount)}</td>

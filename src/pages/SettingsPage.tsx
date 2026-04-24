@@ -1233,6 +1233,7 @@ interface InstallmentRow {
   parts_pct: number;
   expenses_pct: number;
   days_after_approval: number;
+  tipo: 'aprovacao' | 'entrega' | 'prazo';
 }
 
 function PaymentPresetRow({ preset, updatePreset }: { preset: any; updatePreset: ReturnType<typeof useUpdatePaymentConditionPreset> }) {
@@ -1244,6 +1245,7 @@ function PaymentPresetRow({ preset, updatePreset }: { preset: any; updatePreset:
         parts_pct: r.parts_pct ?? r.percent ?? 0,
         expenses_pct: r.expenses_pct ?? 0,
         days_after_approval: r.days_after_approval ?? 0,
+        tipo: r.tipo || (r.days_after_approval > 0 ? 'prazo' : 'aprovacao'),
       }))
     : [];
   const [rows, setRows] = useState<InstallmentRow[]>(initial);
@@ -1254,7 +1256,7 @@ function PaymentPresetRow({ preset, updatePreset }: { preset: any; updatePreset:
     JSON.stringify(rows) !== JSON.stringify(initial) ||
     autoGenerate !== (preset.auto_generate_collections !== false);
 
-  const addRow = () => setRows((r) => [...r, { label: '', services_pct: 0, parts_pct: 0, expenses_pct: 0, days_after_approval: 0 }]);
+  const addRow = () => setRows((r) => [...r, { label: '', services_pct: 0, parts_pct: 0, expenses_pct: 0, days_after_approval: 0, tipo: 'aprovacao' }]);
   const removeRow = (i: number) => setRows((r) => r.filter((_, idx) => idx !== i));
   const updateRow = (i: number, patch: Partial<InstallmentRow>) =>
     setRows((r) => r.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
@@ -1295,8 +1297,9 @@ function PaymentPresetRow({ preset, updatePreset }: { preset: any; updatePreset:
           </div>
 
           <div className="space-y-2">
-            <div className="grid grid-cols-[1fr_70px_70px_70px_70px_36px] gap-2 text-[11px] uppercase tracking-wide text-muted-foreground px-1">
+            <div className="grid grid-cols-[1fr_130px_70px_70px_70px_90px_36px] gap-2 text-[11px] uppercase tracking-wide text-muted-foreground px-1">
               <div>Descrição</div>
+              <div className="text-center">Tipo</div>
               <div className="text-center">% Serv.</div>
               <div className="text-center">% Peças</div>
               <div className="text-center">% Desp.</div>
@@ -1304,13 +1307,26 @@ function PaymentPresetRow({ preset, updatePreset }: { preset: any; updatePreset:
               <div></div>
             </div>
             {rows.map((row, i) => (
-              <div key={i} className="grid grid-cols-[1fr_70px_70px_70px_70px_36px] gap-2 items-center">
+              <div key={i} className="grid grid-cols-[1fr_130px_70px_70px_70px_90px_36px] gap-2 items-center">
                 <Input
                   value={row.label}
                   onChange={(e) => updateRow(i, { label: e.target.value })}
                   placeholder="Ex: Sinal"
                   className="h-8 text-sm"
                 />
+                <Select
+                  value={row.tipo || 'aprovacao'}
+                  onValueChange={(v) => updateRow(i, { tipo: v as any, days_after_approval: v === 'prazo' ? (row.days_after_approval || 30) : 0 })}
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="aprovacao">Na aprovação</SelectItem>
+                    <SelectItem value="entrega">Na entrega</SelectItem>
+                    <SelectItem value="prazo">Em X dias</SelectItem>
+                  </SelectContent>
+                </Select>
                 <Input
                   type="number"
                   step="0.01"
@@ -1344,6 +1360,8 @@ function PaymentPresetRow({ preset, updatePreset }: { preset: any; updatePreset:
                   value={row.days_after_approval}
                   onChange={(e) => updateRow(i, { days_after_approval: parseInt(e.target.value, 10) || 0 })}
                   className="h-8 text-sm text-center"
+                  disabled={row.tipo !== 'prazo'}
+                  placeholder={row.tipo === 'prazo' ? '30' : '—'}
                 />
                 <Button
                   variant="ghost"
