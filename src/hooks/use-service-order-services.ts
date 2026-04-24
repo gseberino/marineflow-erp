@@ -27,17 +27,7 @@ export function useUpdateServiceOrderService() {
         .update(patch as any)
         .eq('id', id);
       if (error) throw error;
-
-      // Recalc totals on parent OS
-      try {
-        const mod = await import('@/hooks/use-service-orders');
-        const recalc = (mod as any).recalcTotals;
-        if (typeof recalc === 'function') {
-          await recalc(service_order_id);
-        }
-      } catch {
-        // recalcTotals may not be exported; the parent invalidation will refetch
-      }
+      await recalcTotals(service_order_id);
     },
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ['so-services', vars.service_order_id] });
