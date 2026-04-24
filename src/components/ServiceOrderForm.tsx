@@ -188,15 +188,36 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [extraFieldsOpen, setExtraFieldsOpen] = useState(false);
   const { data: vesselContacts } = useVesselContacts(form.vessel_id || undefined);
 
-  // Part form (current row being edited inline)
-  const [partForm, setPartForm] = useState({ product_id: '', quantity: 1, unit_cost: 0, unit_sale: 0 });
+  // Part inline-card state (matches the services pattern)
+  type PartCardDraft = {
+    product_id: string;
+    product_name: string;
+    unit: string;
+    quantity: number;
+    unit_cost: number;
+    unit_sale: number;
+    notes: string;
+  };
+  const emptyPartCard = (): PartCardDraft => ({
+    product_id: '',
+    product_name: '',
+    unit: 'un',
+    quantity: 1,
+    unit_cost: 0,
+    unit_sale: 0,
+    notes: '',
+  });
+  const [editingPart, setEditingPart] = useState<Record<string, PartCardDraft>>({});
+  const [openNewPartCards, setOpenNewPartCards] = useState<string[]>([]);
+  const [priceCalcCardKey, setPriceCalcCardKey] = useState<string | null>(null);
+  const updatePartLine = useUpdateServiceOrderPart();
+  // Kept for backwards compatibility (no longer opened from the parts row)
   const [quickProductOpen, setQuickProductOpen] = useState(false);
   const [quickProductName, setQuickProductName] = useState('');
   const [quickMarinaOpen, setQuickMarinaOpen] = useState(false);
   const [quickMarinaName, setQuickMarinaName] = useState('');
   const [quickSupplierOpen, setQuickSupplierOpen] = useState(false);
   const [quickSupplierName, setQuickSupplierName] = useState('');
-  const [showPartForm, setShowPartForm] = useState(false);
 
   // Service line cards (inline expanding cards)
   type SvcCardDraft = {
