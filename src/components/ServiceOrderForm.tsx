@@ -510,6 +510,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               quantity: ds.quantity,
               unit_price_snapshot: ds.unit_price_snapshot,
               notes: ds.notes || undefined,
+              technician_user_id: (ds as any).technician_user_id || null,
             });
           } catch (err) {
             console.error('Failed to persist draft service', err);
