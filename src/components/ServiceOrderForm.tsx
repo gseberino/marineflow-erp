@@ -3086,6 +3086,20 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         }}
       />
 
+      <PriceCalculatorDialog
+        open={!!priceCalcCardKey}
+        onOpenChange={(v) => { if (!v) setPriceCalcCardKey(null); }}
+        initialCost={priceCalcCardKey ? (editingPart[priceCalcCardKey]?.unit_cost || 0) : 0}
+        initialPrice={priceCalcCardKey ? (editingPart[priceCalcCardKey]?.unit_sale || 0) : 0}
+        onConfirm={(price) => {
+          if (!priceCalcCardKey) return;
+          setEditingPart((prev) => ({
+            ...prev,
+            [priceCalcCardKey]: { ...prev[priceCalcCardKey], unit_sale: price },
+          }));
+        }}
+      />
+
       <MarinaFormDialog
         open={quickMarinaOpen}
         onOpenChange={setQuickMarinaOpen}
