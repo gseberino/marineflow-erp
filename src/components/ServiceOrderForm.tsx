@@ -596,44 +596,151 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     }
   };
 
-  const handleAddService = async () => {
-    if (!svcForm.service_name_snapshot || svcForm.quantity <= 0) return;
-    if (isNew) {
-      setDraftServices((prev) => [
-        ...prev,
-        {
-          tempId: crypto.randomUUID(),
-          service_id: svcForm.service_id || undefined,
-          service_name_snapshot: svcForm.service_name_snapshot,
-          description_snapshot: svcForm.description_snapshot || undefined,
-          billing_unit_snapshot: svcForm.billing_unit_snapshot,
-          quantity: svcForm.quantity,
-          unit_price_snapshot: svcForm.unit_price,
-          notes: svcForm.notes || undefined,
-        },
-      ]);
-      setSvcForm({ service_id: '', quantity: 1, unit_price: 0, notes: '', service_name_snapshot: '', description_snapshot: '', billing_unit_snapshot: 'hour' });
-      toast.success('Serviço adicionado (será salvo ao criar a OS)');
+  // Ensure the service exists in the catalog. If service_id is empty,
+  // create a new entry in `services` and return the new id.
+  const ensureServiceInCatalog = async (draft: SvcCardDraft): Promise<string> => {
+    if (draft.service_id) return draft.service_id;
+    const { data, error } = await supabase
+      .from('services')
+      .insert({
+        service_name: draft.service_name_snapshot,
+        default_price: draft.unit_price,
+        billing_unit: draft.billing_unit_snapshot,
+        active: true,
+      } as any)
+      .select('id')
+      .single();
+    if (error) throw error;
+    qc.invalidateQueries({ queryKey: ['services'] });
+    return data.id as string;
+  };
+
+  // Confirm a service card (insert new line on the OS)
+  const handleConfirmNewSvcCard = async (cardKey: string) => {
+    const draft = editingSvc[cardKey];
+    if (!draft) return;
+    if (!draft.service_name_snapshot.trim() || draft.quantity <= 0) {
+      toast.error('Preencha descrição e quantidade');
       return;
     }
-    if (!orderId) return;
     try {
-      await addService.mutateAsync({
-        service_order_id: orderId,
-        service_id: svcForm.service_id || undefined,
-        service_name_snapshot: svcForm.service_name_snapshot,
-        description_snapshot: svcForm.description_snapshot || undefined,
-        billing_unit_snapshot: svcForm.billing_unit_snapshot,
-        quantity: svcForm.quantity,
-        unit_price_snapshot: svcForm.unit_price,
-        notes: svcForm.notes || undefined,
+      let serviceId = draft.service_id;
+      // For non-draft (persisted OS) we always sync catalog. For draft OS we
+      // also create the catalog entry so it becomes reusable immediately.
+      if (!serviceId) {
+        serviceId = await ensureServiceInCatalog(draft);
+      }
+      if (isNew) {
+        setDraftServices((prev) => [
+          ...prev,
+          {
+            tempId: crypto.randomUUID(),
+            service_id: serviceId || undefined,
+            service_name_snapshot: draft.service_name_snapshot,
+            description_snapshot: draft.description_snapshot || undefined,
+            billing_unit_snapshot: draft.billing_unit_snapshot,
+            quantity: draft.quantity,
+            unit_price_snapshot: draft.unit_price,
+            notes: draft.notes || undefined,
+            // technician_user_id is held client-side until OS is created
+            ...(draft.technician_user_id ? { technician_user_id: draft.technician_user_id } : {}),
+          } as any,
+        ]);
+        toast.success('Serviço adicionado (será salvo ao criar a OS)');
+      } else {
+        if (!orderId) return;
+        await addService.mutateAsync({
+          service_order_id: orderId,
+          service_id: serviceId || undefined,
+          service_name_snapshot: draft.service_name_snapshot,
+          description_snapshot: draft.description_snapshot || undefined,
+          billing_unit_snapshot: draft.billing_unit_snapshot,
+          quantity: draft.quantity,
+          unit_price_snapshot: draft.unit_price,
+          notes: draft.notes || undefined,
+          technician_user_id: draft.technician_user_id || null,
+        });
+        toast.success('Serviço adicionado');
+      }
+      // Close the card
+      setOpenNewSvcCards((prev) => prev.filter((k) => k !== cardKey));
+      setEditingSvc((prev) => {
+        const next = { ...prev };
+        delete next[cardKey];
+        return next;
       });
-      setSvcForm({ service_id: '', quantity: 1, unit_price: 0, notes: '', service_name_snapshot: '', description_snapshot: '', billing_unit_snapshot: 'hour' });
-      toast.success('Serviço adicionado');
     } catch (e: any) {
       toast.error(e.message || 'Erro ao adicionar serviço');
     }
   };
+
+  // Confirm an edit on an existing persisted line
+  const handleConfirmEditSvc = async (rowId: string) => {
+    const draft = editingSvc[rowId];
+    if (!draft || !orderId) return;
+    if (!draft.service_name_snapshot.trim() || draft.quantity <= 0) {
+      toast.error('Preencha descrição e quantidade');
+      return;
+    }
+    try {
+      let serviceId = draft.service_id;
+      if (!serviceId) serviceId = await ensureServiceInCatalog(draft);
+      await updateSvcLine.mutateAsync({
+        id: rowId,
+        service_order_id: orderId,
+        service_id: serviceId || null,
+        service_name_snapshot: draft.service_name_snapshot,
+        description_snapshot: draft.description_snapshot || null,
+        billing_unit_snapshot: draft.billing_unit_snapshot,
+        quantity: draft.quantity,
+        unit_price_snapshot: draft.unit_price,
+        notes: draft.notes || null,
+        technician_user_id: draft.technician_user_id || null,
+      });
+      setEditingSvc((prev) => {
+        const next = { ...prev };
+        delete next[rowId];
+        return next;
+      });
+      toast.success('Serviço atualizado');
+    } catch (e: any) {
+      toast.error(e.message || 'Erro ao atualizar serviço');
+    }
+  };
+
+  const addNewSvcCard = () => {
+    const key = `new-${crypto.randomUUID()}`;
+    setEditingSvc((prev) => ({ ...prev, [key]: emptySvcCard() }));
+    setOpenNewSvcCards((prev) => [...prev, key]);
+  };
+
+  const cancelSvcCard = (key: string, isNewCard: boolean) => {
+    setEditingSvc((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+    if (isNewCard) {
+      setOpenNewSvcCards((prev) => prev.filter((k) => k !== key));
+    }
+  };
+
+  const startEditPersisted = (row: any) => {
+    setEditingSvc((prev) => ({
+      ...prev,
+      [row.id]: {
+        service_id: row.service_id || '',
+        service_name_snapshot: row.service_name_snapshot || '',
+        description_snapshot: row.description_snapshot || '',
+        billing_unit_snapshot: row.billing_unit_snapshot || 'hour',
+        quantity: Number(row.quantity) || 1,
+        unit_price: Number(row.unit_price_snapshot) || 0,
+        notes: row.notes || '',
+        technician_user_id: row.technician_user_id || '',
+      },
+    }));
+  };
+
 
   const handleAddTime = async () => {
     if (!orderId || !timeForm.technician_user_id || !timeForm.started_at) return;
