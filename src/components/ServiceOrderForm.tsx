@@ -2307,6 +2307,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             unitPrice: number;
             total: number;
             isDraft?: boolean;
+            image_url?: string | null;
             onExpand: () => void;
             onDelete: () => void;
           }) => (
@@ -2317,13 +2318,26 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               }`}
             >
               <div className="flex-1 min-w-0">
-                <div className="font-medium truncate">
-                  {opts.name}
-                  {opts.isDraft && (
-                    <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
-                      rascunho
-                    </span>
+                <div className="flex items-center gap-2">
+                  {opts.image_url ? (
+                    <img
+                      src={opts.image_url}
+                      alt={opts.name}
+                      className="h-8 w-8 rounded object-cover flex-shrink-0"
+                    />
+                  ) : (
+                    <div className="h-8 w-8 rounded bg-muted flex items-center justify-center flex-shrink-0">
+                      <Package className="h-4 w-4 text-muted-foreground" />
+                    </div>
                   )}
+                  <div>
+                    <div className="font-medium text-sm">{opts.name}</div>
+                    {opts.isDraft && (
+                      <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
+                        rascunho
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
               {opts.unit && (
