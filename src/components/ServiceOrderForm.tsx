@@ -2122,48 +2122,6 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   </div>
                 </div>
             )}
-
-            {selectedPreset && installmentRows.length > 0 && (
-              <div className="mt-4 pt-4 border-t space-y-2">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Condições — {selectedPreset.label}
-                </p>
-                <div className="space-y-1">
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>Serviços</span>
-                    <span>{formatCurrency(laborCost)}</span>
-                  </div>
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>Peças / Produtos</span>
-                    <span>{formatCurrency(partsCost)}</span>
-                  </div>
-                  {expensesTotal > 0 && (
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>Despesas e Deslocamento</span>
-                      <span>{formatCurrency(expensesTotal)}</span>
-                    </div>
-                  )}
-                  <div className="border-t my-1" />
-                  {installmentRows.map((row, i) => {
-                    const amount = calcInstallmentAmount(row);
-                    const daysLabel = row.days_after_approval === 0
-                      ? 'na aprovação'
-                      : `em ${row.days_after_approval} dias`;
-                    return (
-                      <div key={i} className="flex justify-between text-sm">
-                        <span className="font-medium">
-                          {row.label || `Parcela ${i + 1}`}
-                          <span className="ml-1 text-xs text-muted-foreground">({daysLabel})</span>
-                        </span>
-                        <span className="font-semibold">{formatCurrency(amount)}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-
             <div className="flex justify-between pt-3 border-t-2">
               <span className="font-bold text-lg">{t.serviceOrders.grandTotal}</span>
               <span className="font-bold text-lg text-accent">{formatCurrency(grandTotal)}</span>
