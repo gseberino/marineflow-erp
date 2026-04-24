@@ -1,0 +1,1 @@
+ALTER TABLE public.service_order_services ADD COLUMN IF NOT EXISTS technician_user_id uuid;

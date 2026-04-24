@@ -1595,6 +1595,7 @@ export type Database = {
           service_id: string | null
           service_name_snapshot: string
           service_order_id: string
+          technician_user_id: string | null
           unit_price_snapshot: number
           updated_at: string | null
         }
@@ -1609,6 +1610,7 @@ export type Database = {
           service_id?: string | null
           service_name_snapshot: string
           service_order_id: string
+          technician_user_id?: string | null
           unit_price_snapshot?: number
           updated_at?: string | null
         }
@@ -1623,6 +1625,7 @@ export type Database = {
           service_id?: string | null
           service_name_snapshot?: string
           service_order_id?: string
+          technician_user_id?: string | null
           unit_price_snapshot?: number
           updated_at?: string | null
         }
