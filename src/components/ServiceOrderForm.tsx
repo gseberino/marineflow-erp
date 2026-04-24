@@ -606,33 +606,119 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     }
   };
 
+  const resetExpForm = () => {
+    setExpForm({
+      category: '', description: '', amount: 0, currency: 'BRL',
+      expense_date: new Date().toISOString().slice(0, 10),
+      paid_by: 'company', technician_user_id: '', receipt_url: '', receipt_storage_path: '', notes: '',
+      also_create_payable: false,
+      supplier_id: '',
+    });
+    setEditingExpenseId(null);
+  };
+
+  const handleEditExpense = (exp: any) => {
+    setExpForm({
+      category: exp.category || '',
+      description: exp.description || '',
+      amount: Number(exp.amount) || 0,
+      currency: exp.currency || 'BRL',
+      expense_date: exp.expense_date || new Date().toISOString().slice(0, 10),
+      paid_by: (exp.paid_by as 'company' | 'technician') || 'company',
+      technician_user_id: exp.technician_user_id || '',
+      receipt_url: exp.receipt_url || '',
+      receipt_storage_path: exp.receipt_storage_path || '',
+      notes: exp.notes || '',
+      also_create_payable: false,
+      supplier_id: exp.supplier_id || '',
+    });
+    setEditingExpenseId(exp.id);
+    setShowExpForm(true);
+  };
+
+  const handleUploadReceipt = async (file: File) => {
+    if (!orderId) {
+      toast.error('Salve a OS primeiro antes de anexar comprovantes');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Arquivo excede 5MB');
+      return;
+    }
+    setUploadingReceipt(true);
+    try {
+      const ext = file.name.split('.').pop() || 'bin';
+      const uuid = (crypto as any).randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const path = `expenses/${orderId}/${uuid}.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from('expense-receipts')
+        .upload(path, file, { contentType: file.type, upsert: false });
+      if (upErr) throw upErr;
+      const { data: urlData } = supabase.storage.from('expense-receipts').getPublicUrl(path);
+      setExpForm((prev) => ({ ...prev, receipt_url: urlData.publicUrl, receipt_storage_path: path }));
+      toast.success('Comprovante anexado');
+    } catch (e: any) {
+      toast.error(e.message || 'Erro ao enviar comprovante');
+    } finally {
+      setUploadingReceipt(false);
+      if (receiptInputRef.current) receiptInputRef.current.value = '';
+    }
+  };
+
+  const handleRemoveReceipt = async () => {
+    const path = expForm.receipt_storage_path;
+    if (path) {
+      try {
+        await supabase.storage.from('expense-receipts').remove([path]);
+      } catch {
+        /* swallow — still clear form */
+      }
+    }
+    setExpForm((prev) => ({ ...prev, receipt_url: '', receipt_storage_path: '' }));
+  };
+
   const handleAddExpense = async () => {
     if (!orderId || !expForm.category || !expForm.description || expForm.amount <= 0) return;
     try {
-      await addExpense.mutateAsync({
-        service_order_id: orderId,
-        category: expForm.category,
-        description: expForm.description,
-        amount: expForm.amount,
-        currency: expForm.currency,
-        expense_date: expForm.expense_date,
-        paid_by: expForm.paid_by,
-        technician_user_id: expForm.paid_by === 'technician' ? expForm.technician_user_id || undefined : undefined,
-        receipt_url: expForm.receipt_url || undefined,
-        notes: expForm.notes || undefined,
-        also_create_payable: expForm.also_create_payable,
-      });
-      setExpForm({
-        category: '', description: '', amount: 0, currency: 'BRL',
-        expense_date: new Date().toISOString().slice(0, 10),
-        paid_by: 'company', technician_user_id: '', receipt_url: '', notes: '',
-        also_create_payable: false,
-        supplier_id: '',
-      });
+      if (editingExpenseId) {
+        await updateExpense.mutateAsync({
+          id: editingExpenseId,
+          service_order_id: orderId,
+          category: expForm.category,
+          description: expForm.description,
+          amount: expForm.amount,
+          currency: expForm.currency,
+          expense_date: expForm.expense_date,
+          paid_by: expForm.paid_by,
+          technician_user_id: expForm.paid_by === 'technician' ? expForm.technician_user_id || null : null,
+          receipt_url: expForm.receipt_url || null,
+          receipt_storage_path: expForm.receipt_storage_path || null,
+          supplier_id: expForm.supplier_id || null,
+          notes: expForm.notes || null,
+        });
+        toast.success('Despesa atualizada');
+      } else {
+        await addExpense.mutateAsync({
+          service_order_id: orderId,
+          category: expForm.category,
+          description: expForm.description,
+          amount: expForm.amount,
+          currency: expForm.currency,
+          expense_date: expForm.expense_date,
+          paid_by: expForm.paid_by,
+          technician_user_id: expForm.paid_by === 'technician' ? expForm.technician_user_id || undefined : undefined,
+          receipt_url: expForm.receipt_url || undefined,
+          receipt_storage_path: expForm.receipt_storage_path || undefined,
+          supplier_id: expForm.supplier_id || undefined,
+          notes: expForm.notes || undefined,
+          also_create_payable: expForm.also_create_payable,
+        });
+        toast.success('Despesa adicionada');
+      }
+      resetExpForm();
       setShowExpForm(false);
-      toast.success('Despesa adicionada');
     } catch (e: any) {
-      toast.error(e.message || 'Erro ao adicionar despesa');
+      toast.error(e.message || 'Erro ao salvar despesa');
     }
   };
 
