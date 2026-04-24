@@ -196,10 +196,32 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [quickSupplierName, setQuickSupplierName] = useState('');
   const [showPartForm, setShowPartForm] = useState(false);
 
-  // Service line form (current row being edited inline)
-  const [svcForm, setSvcForm] = useState({ service_id: '', quantity: 1, unit_price: 0, notes: '', service_name_snapshot: '', description_snapshot: '', billing_unit_snapshot: 'hour' });
-  const [showSvcForm, setShowSvcForm] = useState(false);
+  // Service line cards (inline expanding cards)
+  type SvcCardDraft = {
+    service_id: string;
+    service_name_snapshot: string;
+    description_snapshot: string;
+    billing_unit_snapshot: string;
+    quantity: number;
+    unit_price: number;
+    notes: string;
+    technician_user_id: string;
+  };
+  const emptySvcCard = (): SvcCardDraft => ({
+    service_id: '',
+    service_name_snapshot: '',
+    description_snapshot: '',
+    billing_unit_snapshot: 'hour',
+    quantity: 1,
+    unit_price: 0,
+    notes: '',
+    technician_user_id: '',
+  });
+  // Editing state per row id (persisted: row.id, draft: tempId, new: 'new-N')
+  const [editingSvc, setEditingSvc] = useState<Record<string, SvcCardDraft>>({});
+  const [openNewSvcCards, setOpenNewSvcCards] = useState<string[]>([]);
   const [showNewServiceDialog, setShowNewServiceDialog] = useState(false);
+  const updateSvcLine = useUpdateServiceOrderService();
 
   // Draft items used while OS is new (no orderId yet) — persisted on save
   type DraftPart = {
