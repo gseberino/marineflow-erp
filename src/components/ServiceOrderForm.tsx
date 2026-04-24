@@ -544,6 +544,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     unit_cost: number;
     unit_sale: number;
     notes: string;
+    image_url?: string | null;
   };
   const emptyPartCard = (): PartCardDraft => ({
     product_id: '',
