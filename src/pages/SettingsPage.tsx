@@ -1233,6 +1233,7 @@ interface InstallmentRow {
   parts_pct: number;
   expenses_pct: number;
   days_after_approval: number;
+  tipo: 'aprovacao' | 'entrega' | 'prazo';
 }
 
 function PaymentPresetRow({ preset, updatePreset }: { preset: any; updatePreset: ReturnType<typeof useUpdatePaymentConditionPreset> }) {
