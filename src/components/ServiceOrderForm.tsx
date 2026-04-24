@@ -139,6 +139,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
 
   const { data: soExpenses } = useServiceOrderExpenses(orderId);
   const addExpense = useAddServiceOrderExpense();
+  const updateExpense = useUpdateServiceOrderExpense();
   const removeExpense = useRemoveServiceOrderExpense();
 
   // Form state
