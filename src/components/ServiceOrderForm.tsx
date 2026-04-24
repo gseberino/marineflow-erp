@@ -1673,8 +1673,62 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <Label>{t.serviceOrders.receiptUrl}</Label>
-                  <Input value={expForm.receipt_url} onChange={(e) => setExpForm({ ...expForm, receipt_url: e.target.value })} placeholder="https://..." />
+                  <Label>Comprovante</Label>
+                  <input
+                    ref={receiptInputRef}
+                    type="file"
+                    accept="image/*,application/pdf"
+                    capture="environment"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleUploadReceipt(f);
+                    }}
+                  />
+                  {expForm.receipt_url ? (
+                    <div className="flex items-center gap-2 mt-1 p-2 rounded-md border bg-background">
+                      {/\.(png|jpe?g|gif|webp|svg)$/i.test(expForm.receipt_url) ? (
+                        <img
+                          src={expForm.receipt_url}
+                          alt="Comprovante"
+                          className="h-[60px] w-[60px] object-cover rounded border"
+                        />
+                      ) : (
+                        <div className="h-[60px] w-[60px] flex items-center justify-center rounded border bg-muted">
+                          <FileText className="h-6 w-6 text-muted-foreground" />
+                        </div>
+                      )}
+                      <a
+                        href={expForm.receipt_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-primary hover:underline truncate flex-1"
+                      >
+                        Ver comprovante
+                      </a>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={handleRemoveReceipt}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="w-full gap-2 mt-1"
+                      onClick={() => receiptInputRef.current?.click()}
+                      disabled={uploadingReceipt}
+                    >
+                      <Paperclip className="h-3.5 w-3.5" />
+                      {uploadingReceipt ? 'Enviando...' : '📎 Anexar comprovante'}
+                    </Button>
+                  )}
                 </div>
                 <div>
                   <Label>{t.common.notes}</Label>
@@ -1699,29 +1753,38 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   createLabel="+ Cadastrar novo fornecedor"
                 />
               </div>
-              <label className="flex items-center gap-2 text-sm cursor-pointer">
-                <input type="checkbox" checked={expForm.also_create_payable}
-                  onChange={(e) => setExpForm({ ...expForm, also_create_payable: e.target.checked })} />
-                {t.serviceOrders.alsoCreatePayable}
-              </label>
+              {!editingExpenseId && (
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input type="checkbox" checked={expForm.also_create_payable}
+                    onChange={(e) => setExpForm({ ...expForm, also_create_payable: e.target.checked })} />
+                  {t.serviceOrders.alsoCreatePayable}
+                </label>
+              )}
               <div className="flex gap-2">
-                <Button size="sm" onClick={handleAddExpense} disabled={addExpense.isPending}>{t.common.save}</Button>
-                <Button size="sm" variant="outline" onClick={() => setShowExpForm(false)}>{t.common.cancel}</Button>
+                <Button size="sm" onClick={handleAddExpense} disabled={addExpense.isPending || updateExpense.isPending}>
+                  {editingExpenseId ? 'Atualizar' : t.common.save}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => { resetExpForm(); setShowExpForm(false); }}>
+                  {t.common.cancel}
+                </Button>
               </div>
             </div>
           )}
           {(!soExpenses || soExpenses.length === 0) ? (
             <p className="text-sm text-muted-foreground p-5">{t.serviceOrders.noExpensesYet}</p>
           ) : (
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/50">
                   <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.common.date}</th>
                   <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.products.category}</th>
                   <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.common.description}</th>
+                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Fornecedor</th>
                   <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.serviceOrders.paidBy}</th>
+                  <th className="px-4 py-2 text-center font-medium text-muted-foreground">Comprovante</th>
                   <th className="px-4 py-2 text-right font-medium text-muted-foreground">{t.common.amount}</th>
-                  <th className="px-4 py-2 w-10"></th>
+                  <th className="px-4 py-2 w-20"></th>
                 </tr>
               </thead>
               <tbody>
@@ -1730,6 +1793,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                     <td className="px-4 py-3 text-muted-foreground">{formatDate(exp.expense_date)}</td>
                     <td className="px-4 py-3"><StatusBadge className="bg-secondary text-secondary-foreground">{exp.category}</StatusBadge></td>
                     <td className="px-4 py-3 font-medium">{exp.description}</td>
+                    <td className="px-4 py-3 text-muted-foreground">
+                      {exp.suppliers?.supplier_name || '—'}
+                    </td>
                     <td className="px-4 py-3">
                       {exp.paid_by === 'technician' ? (
                         <span className="text-warning">{exp.app_users?.full_name || t.serviceOrders.paidByTechnician}
@@ -1738,17 +1804,40 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                         </span>
                       ) : t.serviceOrders.paidByCompany}
                     </td>
+                    <td className="px-4 py-3 text-center">
+                      {exp.receipt_url ? (
+                        /\.(png|jpe?g|gif|webp|svg)$/i.test(exp.receipt_url) ? (
+                          <a href={exp.receipt_url} target="_blank" rel="noopener noreferrer" className="inline-block">
+                            <img src={exp.receipt_url} alt="Comprovante" className="h-8 w-8 object-cover rounded border inline-block" />
+                          </a>
+                        ) : (
+                          <a href={exp.receipt_url} target="_blank" rel="noopener noreferrer" className="text-primary inline-flex items-center gap-1 hover:underline">
+                            <FileImage className="h-4 w-4" />
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        )
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-right font-semibold">{formatCurrency(Number(exp.amount))}</td>
                     <td className="px-4 py-3">
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
-                        onClick={() => removeExpense.mutate({ id: exp.id, service_order_id: orderId! })}>
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        <Button variant="ghost" size="icon" className="h-7 w-7"
+                          onClick={() => handleEditExpense(exp)}>
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
+                          onClick={() => removeExpense.mutate({ id: exp.id, service_order_id: orderId! })}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </section>
       )}
