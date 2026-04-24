@@ -1428,140 +1428,347 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           )}
         </div>
 
-        {/* Always-on entry row */}
-        <div className="p-4 border-b bg-muted/30 space-y-3">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <Label>{t.services.selectService}</Label>
-              <EntityCombobox
-                value={svcForm.service_id}
-                onChange={(v) => {
-                  const svc = services?.find((s) => s.id === v);
-                  if (svc) {
-                    setSvcForm({
-                      ...svcForm,
-                      service_id: v,
-                      service_name_snapshot: svc.service_name,
-                      description_snapshot: svc.description || '',
-                      billing_unit_snapshot: svc.billing_unit,
-                      unit_price: svc.default_price || 0,
-                    });
-                  }
-                }}
-                options={(services || [])
-                  .filter((s) => s.active)
-                  .map<EntityOption>((s) => ({
-                    value: s.id,
-                    label: s.service_name,
-                    description: `${BILLING_UNIT_LABELS[s.billing_unit] || s.billing_unit} — ${formatCurrency(s.default_price || 0)}`,
-                    searchTerms: [s.category || ''],
-                  }))}
-                placeholder={t.services.selectService}
-                searchPlaceholder="Buscar serviço... (digite ao menos 3 letras)"
-                emptyText="Nenhum serviço encontrado"
-                onCreate={() => setShowNewServiceDialog(true)}
-                createLabel={t.services.registerNew}
-              />
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <Label>{t.serviceOrders.qty}</Label>
-                <Input type="number" min={0.001} step="any" value={svcForm.quantity}
-                  onChange={(e) => setSvcForm({ ...svcForm, quantity: parseFloat(e.target.value) || 1 })} />
-              </div>
-              <div>
-                <Label>{t.serviceOrders.unitPrice}</Label>
-                <MoneyInput value={svcForm.unit_price}
-                  onValueChange={(v) => setSvcForm({ ...svcForm, unit_price: v })} />
-              </div>
-              <div>
-                <Label>{t.common.total}</Label>
-                <Input readOnly value={formatCurrency(svcForm.quantity * svcForm.unit_price)} className="bg-muted" />
-              </div>
-            </div>
-          </div>
-          <div>
-            <Label>{t.common.notes}</Label>
-            <Input value={svcForm.notes} onChange={(e) => setSvcForm({ ...svcForm, notes: e.target.value })} />
-          </div>
-          <div className="flex gap-2">
-            <Button
-              size="sm"
-              onClick={handleAddService}
-              disabled={
-                !svcForm.service_name_snapshot ||
-                svcForm.quantity <= 0 ||
-                addService.isPending
-              }
-            >
-              <Plus className="h-3 w-3 mr-1" /> Adicionar serviço
-            </Button>
-          </div>
-        </div>
-
-        {/* List of services already added */}
+        {/* List of services as collapsible cards + add button */}
         {(() => {
           const persisted = (soServices || []) as any[];
           const drafts = isNew ? draftServices : [];
-          if (persisted.length === 0 && drafts.length === 0) {
+          const technicians = (appUsers || []).filter(
+            (u: any) => u.role === 'technician' || u.role === 'admin'
+          );
+
+          const ServiceCardForm = ({
+            cardKey,
+            isNewCard,
+            onConfirm,
+            onCancel,
+            confirmDisabled,
+          }: {
+            cardKey: string;
+            isNewCard: boolean;
+            onConfirm: () => void;
+            onCancel: () => void;
+            confirmDisabled?: boolean;
+          }) => {
+            const draft = editingSvc[cardKey];
+            if (!draft) return null;
+            const update = (patch: Partial<SvcCardDraft>) =>
+              setEditingSvc((prev) => ({ ...prev, [cardKey]: { ...prev[cardKey], ...patch } }));
+            const nameQuery = draft.service_name_snapshot.toLowerCase();
+            const suggestions = (services || [])
+              .filter((s: any) => s.active)
+              .filter((s: any) => {
+                if (!nameQuery) return false;
+                if (s.id === draft.service_id) return false;
+                return (
+                  (s.service_name || '').toLowerCase().includes(nameQuery) ||
+                  (s.description || '').toLowerCase().includes(nameQuery)
+                );
+              })
+              .slice(0, 6);
+            const total = draft.quantity * draft.unit_price;
             return (
-              <p className="text-sm text-muted-foreground p-5">
-                {t.services.noServicesLinked}
-              </p>
+              <div className="p-4 space-y-3 bg-muted/20">
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+                  <div className="md:col-span-6 relative">
+                    <Label>Descrição</Label>
+                    <Input
+                      value={draft.service_name_snapshot}
+                      onChange={(e) =>
+                        update({ service_name_snapshot: e.target.value, service_id: '' })
+                      }
+                      placeholder="Digite ou selecione um serviço"
+                      autoComplete="off"
+                    />
+                    {suggestions.length > 0 && (
+                      <div className="absolute z-20 mt-1 w-full rounded-md border bg-popover shadow-md max-h-60 overflow-auto">
+                        {suggestions.map((s: any) => (
+                          <button
+                            key={s.id}
+                            type="button"
+                            className="w-full text-left px-3 py-2 text-sm hover:bg-accent"
+                            onClick={() =>
+                              update({
+                                service_id: s.id,
+                                service_name_snapshot: s.service_name,
+                                description_snapshot: s.description || '',
+                                billing_unit_snapshot: s.billing_unit || 'hour',
+                                unit_price: Number(s.default_price) || 0,
+                              })
+                            }
+                          >
+                            <div className="font-medium">{s.service_name}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {BILLING_UNIT_LABELS[s.billing_unit] || s.billing_unit} —{' '}
+                              {formatCurrency(s.default_price || 0)}
+                              {s.description ? ` · ${s.description}` : ''}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="md:col-span-2">
+                    <Label>Quantidade</Label>
+                    <Input
+                      type="number"
+                      min={0.001}
+                      step="any"
+                      value={draft.quantity}
+                      onChange={(e) =>
+                        update({ quantity: parseFloat(e.target.value) || 0 })
+                      }
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <Label>Unidade</Label>
+                    <Select
+                      value={draft.billing_unit_snapshot}
+                      onValueChange={(v) => update({ billing_unit_snapshot: v })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="hour">hora</SelectItem>
+                        <SelectItem value="visit">visita</SelectItem>
+                        <SelectItem value="day">dia</SelectItem>
+                        <SelectItem value="unit">unidade</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="md:col-span-2">
+                    <Label>Valor unitário</Label>
+                    <MoneyInput
+                      value={draft.unit_price}
+                      onValueChange={(v) => update({ unit_price: v })}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+                  <div className="md:col-span-6">
+                    <Label>Técnico responsável</Label>
+                    <Select
+                      value={draft.technician_user_id || 'none'}
+                      onValueChange={(v) =>
+                        update({ technician_user_id: v === 'none' ? '' : v })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecionar técnico" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">— Nenhum —</SelectItem>
+                        {technicians.map((u: any) => (
+                          <SelectItem key={u.id} value={u.id}>
+                            {u.full_name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="md:col-span-6">
+                    <Label>Total</Label>
+                    <Input readOnly value={formatCurrency(total)} className="bg-muted" />
+                  </div>
+                </div>
+                <div>
+                  <Label>Observações</Label>
+                  <Textarea
+                    rows={2}
+                    value={draft.notes}
+                    onChange={(e) => update({ notes: e.target.value })}
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={onConfirm} disabled={confirmDisabled}>
+                    <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Confirmar
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={onCancel}>
+                    <X className="h-3.5 w-3.5 mr-1" /> Cancelar
+                  </Button>
+                </div>
+              </div>
             );
-          }
+          };
+
+          const renderCollapsedRow = (opts: {
+            keyId: string;
+            name: string;
+            description?: string;
+            unit: string;
+            quantity: number;
+            unitPrice: number;
+            total: number;
+            isDraft?: boolean;
+            onExpand: () => void;
+            onDelete: () => void;
+          }) => (
+            <div
+              key={opts.keyId}
+              className={`flex items-center gap-3 px-4 py-3 border-b last:border-0 ${
+                opts.isDraft ? 'bg-amber-50/40' : ''
+              }`}
+            >
+              <div className="flex-1 min-w-0">
+                <div className="font-medium truncate">
+                  {opts.name}
+                  {opts.isDraft && (
+                    <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
+                      rascunho
+                    </span>
+                  )}
+                </div>
+                {opts.description && (
+                  <div className="text-xs text-muted-foreground truncate">
+                    {opts.description}
+                  </div>
+                )}
+              </div>
+              <div className="hidden sm:block w-20 text-center text-xs text-muted-foreground">
+                {BILLING_UNIT_LABELS[opts.unit] || opts.unit}
+              </div>
+              <div className="hidden sm:block w-16 text-center text-sm">
+                {opts.quantity}
+              </div>
+              <div className="hidden md:block w-28 text-right text-sm">
+                {formatCurrency(opts.unitPrice)}
+              </div>
+              <div className="w-28 text-right font-semibold">
+                {formatCurrency(opts.total)}
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={opts.onExpand}
+                title="Editar"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-destructive"
+                onClick={opts.onDelete}
+                title="Excluir"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          );
+
           return (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/50">
-                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.services.serviceName}</th>
-                  <th className="px-4 py-2 text-center font-medium text-muted-foreground">{t.services.billingUnit}</th>
-                  <th className="px-4 py-2 text-center font-medium text-muted-foreground">{t.serviceOrders.qty}</th>
-                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">{t.serviceOrders.unitPrice}</th>
-                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">{t.common.total}</th>
-                  <th className="px-4 py-2 w-10"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {persisted.map((s: any) => (
-                  <tr key={s.id} className="border-b last:border-0">
-                    <td className="px-4 py-3 font-medium">
-                      {s.service_name_snapshot}
-                      {s.description_snapshot && <span className="block text-xs text-muted-foreground">{s.description_snapshot}</span>}
-                    </td>
-                    <td className="px-4 py-3 text-center text-muted-foreground">{BILLING_UNIT_LABELS[s.billing_unit_snapshot] || s.billing_unit_snapshot}</td>
-                    <td className="px-4 py-3 text-center">{s.quantity}</td>
-                    <td className="px-4 py-3 text-right">{formatCurrency(s.unit_price_snapshot)}</td>
-                    <td className="px-4 py-3 text-right font-semibold">{formatCurrency(s.line_total)}</td>
-                    <td className="px-4 py-3">
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
-                        onClick={() => removeService.mutate({ id: s.id, service_order_id: orderId! })}>
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-                {drafts.map((d) => (
-                  <tr key={d.tempId} className="border-b last:border-0 bg-amber-50/40">
-                    <td className="px-4 py-3 font-medium">
-                      {d.service_name_snapshot}
-                      <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">rascunho</span>
-                      {d.description_snapshot && <span className="block text-xs text-muted-foreground">{d.description_snapshot}</span>}
-                    </td>
-                    <td className="px-4 py-3 text-center text-muted-foreground">{BILLING_UNIT_LABELS[d.billing_unit_snapshot] || d.billing_unit_snapshot}</td>
-                    <td className="px-4 py-3 text-center">{d.quantity}</td>
-                    <td className="px-4 py-3 text-right">{formatCurrency(d.unit_price_snapshot)}</td>
-                    <td className="px-4 py-3 text-right font-semibold">{formatCurrency(d.unit_price_snapshot * d.quantity)}</td>
-                    <td className="px-4 py-3">
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
-                        onClick={() => setDraftServices((prev) => prev.filter((x) => x.tempId !== d.tempId))}>
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div>
+              {persisted.length === 0 && drafts.length === 0 && openNewSvcCards.length === 0 && (
+                <p className="text-sm text-muted-foreground p-5">
+                  {t.services.noServicesLinked}
+                </p>
+              )}
+
+              {/* Header row labels */}
+              {(persisted.length > 0 || drafts.length > 0) && (
+                <div className="hidden sm:flex items-center gap-3 px-4 py-2 text-xs text-muted-foreground bg-muted/40 border-b">
+                  <div className="flex-1">{t.services.serviceName}</div>
+                  <div className="w-20 text-center">{t.services.billingUnit}</div>
+                  <div className="w-16 text-center">{t.serviceOrders.qty}</div>
+                  <div className="hidden md:block w-28 text-right">{t.serviceOrders.unitPrice}</div>
+                  <div className="w-28 text-right">{t.common.total}</div>
+                  <div className="w-16" />
+                </div>
+              )}
+
+              {/* Persisted rows */}
+              {persisted.map((s: any) => {
+                const isEditing = !!editingSvc[s.id];
+                if (isEditing) {
+                  return (
+                    <div key={s.id} className="border-b last:border-0">
+                      <ServiceCardForm
+                        cardKey={s.id}
+                        isNewCard={false}
+                        onConfirm={() => handleConfirmEditSvc(s.id)}
+                        onCancel={() => cancelSvcCard(s.id, false)}
+                        confirmDisabled={updateSvcLine.isPending}
+                      />
+                    </div>
+                  );
+                }
+                return renderCollapsedRow({
+                  keyId: s.id,
+                  name: s.service_name_snapshot,
+                  description: s.description_snapshot,
+                  unit: s.billing_unit_snapshot,
+                  quantity: s.quantity,
+                  unitPrice: s.unit_price_snapshot,
+                  total: s.line_total,
+                  onExpand: () => startEditPersisted(s),
+                  onDelete: () =>
+                    removeService.mutate({ id: s.id, service_order_id: orderId! }),
+                });
+              })}
+
+              {/* Draft rows (OS not saved yet) */}
+              {drafts.map((d) =>
+                renderCollapsedRow({
+                  keyId: d.tempId,
+                  name: d.service_name_snapshot,
+                  description: d.description_snapshot,
+                  unit: d.billing_unit_snapshot,
+                  quantity: d.quantity,
+                  unitPrice: d.unit_price_snapshot,
+                  total: d.unit_price_snapshot * d.quantity,
+                  isDraft: true,
+                  onExpand: () => {
+                    // Move draft into edit card and remove from drafts list
+                    const key = `new-${d.tempId}`;
+                    setEditingSvc((prev) => ({
+                      ...prev,
+                      [key]: {
+                        service_id: d.service_id || '',
+                        service_name_snapshot: d.service_name_snapshot,
+                        description_snapshot: d.description_snapshot || '',
+                        billing_unit_snapshot: d.billing_unit_snapshot,
+                        quantity: d.quantity,
+                        unit_price: d.unit_price_snapshot,
+                        notes: d.notes || '',
+                        technician_user_id: (d as any).technician_user_id || '',
+                      },
+                    }));
+                    setOpenNewSvcCards((prev) => [...prev, key]);
+                    setDraftServices((prev) => prev.filter((x) => x.tempId !== d.tempId));
+                  },
+                  onDelete: () =>
+                    setDraftServices((prev) => prev.filter((x) => x.tempId !== d.tempId)),
+                })
+              )}
+
+              {/* New (unsaved) cards */}
+              {openNewSvcCards.map((key) => (
+                <div key={key} className="border-b last:border-0">
+                  <ServiceCardForm
+                    cardKey={key}
+                    isNewCard
+                    onConfirm={() => handleConfirmNewSvcCard(key)}
+                    onCancel={() => cancelSvcCard(key, true)}
+                    confirmDisabled={addService.isPending}
+                  />
+                </div>
+              ))}
+
+              {/* Add button */}
+              <div className="p-4 flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" onClick={addNewSvcCard}>
+                  <Plus className="h-3.5 w-3.5 mr-1" /> Adicionar Serviço
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setShowNewServiceDialog(true)}
+                >
+                  {t.services.registerNew}
+                </Button>
+              </div>
+            </div>
           );
         })()}
       </section>
