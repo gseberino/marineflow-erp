@@ -4,8 +4,12 @@ import { toast } from 'sonner';
 
 export interface PaymentInstallment {
   label: string;
-  percent: number;
+  services_pct: number;
+  parts_pct: number;
+  expenses_pct: number;
   days_after_approval: number;
+  /** @deprecated use services_pct/parts_pct/expenses_pct instead */
+  percent?: number;
 }
 
 export function usePaymentConditionPresets() {
