@@ -17,7 +17,8 @@ export function usePDFData(serviceOrderId: string | undefined) {
             marinas(*),
             service_order_services(*, services(*)),
             service_order_parts(*, products(product_name, sku, image_url)),
-            service_order_expenses(category, description, amount, paid_by)
+            service_order_expenses(category, description, amount, paid_by),
+            payment_condition_presets(label, installments)
           `)
           .eq('id', serviceOrderId)
           .single(),
