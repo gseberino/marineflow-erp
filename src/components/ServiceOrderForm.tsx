@@ -553,6 +553,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     unit_cost: 0,
     unit_sale: 0,
     notes: '',
+    image_url: null,
   });
   const [editingPart, setEditingPart] = useState<Record<string, PartCardDraft>>({});
   const [openNewPartCards, setOpenNewPartCards] = useState<string[]>([]);
