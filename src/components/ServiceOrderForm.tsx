@@ -98,6 +98,352 @@ const BILLING_UNIT_LABELS: Record<string, string> = {
   unit: 'un.',
 };
 
+// ===== Types & components for inline service/part cards (module-level to preserve input focus) =====
+type SvcCardState = {
+  service_id: string;
+  service_name_snapshot: string;
+  description_snapshot: string;
+  billing_unit_snapshot: string;
+  quantity: number;
+  unit_price: number;
+  notes: string;
+  technician_user_id: string;
+};
+
+type PartCardState = {
+  product_id: string;
+  product_name: string;
+  unit: string;
+  quantity: number;
+  unit_cost: number;
+  unit_sale: number;
+  notes: string;
+};
+
+interface ServiceCardFormProps {
+  cardKey: string;
+  draft: SvcCardState | undefined;
+  services: any[];
+  appUsers: any[];
+  formatCurrency: (n: number) => string;
+  onUpdate: (patch: Partial<SvcCardState>) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+  confirmDisabled?: boolean;
+}
+
+function ServiceCardFormComponent({
+  draft,
+  services,
+  appUsers,
+  formatCurrency,
+  onUpdate,
+  onConfirm,
+  onCancel,
+  confirmDisabled,
+}: ServiceCardFormProps) {
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  if (!draft) return null;
+  const technicians = (appUsers || []).filter(
+    (u: any) => u.role === 'technician' || u.role === 'admin'
+  );
+  const nameQuery = draft.service_name_snapshot.toLowerCase();
+  const suggestions = (services || [])
+    .filter((s: any) => s.active)
+    .filter((s: any) => {
+      if (!nameQuery) return false;
+      if (s.id === draft.service_id) return false;
+      return (
+        (s.service_name || '').toLowerCase().includes(nameQuery) ||
+        (s.description || '').toLowerCase().includes(nameQuery)
+      );
+    })
+    .slice(0, 6);
+  const total = draft.quantity * draft.unit_price;
+  return (
+    <div className="p-4 space-y-3 bg-muted/20">
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+        <div className="md:col-span-6 relative">
+          <Label>Descrição</Label>
+          <Input
+            value={draft.service_name_snapshot}
+            onChange={(e) =>
+              onUpdate({ service_name_snapshot: e.target.value, service_id: '' })
+            }
+            onFocus={() => setShowSuggestions(true)}
+            onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+            placeholder="Digite ou selecione um serviço"
+            autoComplete="off"
+          />
+          {showSuggestions && suggestions.length > 0 && (
+            <div className="absolute z-20 mt-1 w-full rounded-md border bg-popover shadow-md max-h-60 overflow-auto">
+              {suggestions.map((s: any) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-accent"
+                  onClick={() => {
+                    onUpdate({
+                      service_id: s.id,
+                      service_name_snapshot: s.service_name,
+                      description_snapshot: s.description || '',
+                      billing_unit_snapshot: s.billing_unit || 'hour',
+                      unit_price: Number(s.default_price) || 0,
+                    });
+                    setShowSuggestions(false);
+                  }}
+                >
+                  <div className="font-medium">{s.service_name}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {BILLING_UNIT_LABELS[s.billing_unit] || s.billing_unit} —{' '}
+                    {formatCurrency(s.default_price || 0)}
+                    {s.description ? ` · ${s.description}` : ''}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="md:col-span-2">
+          <Label>Quantidade</Label>
+          <Input
+            type="number"
+            min={0.001}
+            step="any"
+            value={draft.quantity}
+            onChange={(e) => onUpdate({ quantity: parseFloat(e.target.value) || 0 })}
+          />
+        </div>
+        <div className="md:col-span-2">
+          <Label>Unidade</Label>
+          <Select
+            value={draft.billing_unit_snapshot}
+            onValueChange={(v) => onUpdate({ billing_unit_snapshot: v })}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="hour">hora</SelectItem>
+              <SelectItem value="visit">visita</SelectItem>
+              <SelectItem value="day">dia</SelectItem>
+              <SelectItem value="unit">unidade</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="md:col-span-2">
+          <Label>Valor unitário</Label>
+          <MoneyInput
+            value={draft.unit_price}
+            onValueChange={(v) => onUpdate({ unit_price: v })}
+          />
+        </div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+        <div className="md:col-span-6">
+          <Label>Técnico responsável</Label>
+          <Select
+            value={draft.technician_user_id || 'none'}
+            onValueChange={(v) =>
+              onUpdate({ technician_user_id: v === 'none' ? '' : v })
+            }
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Selecionar técnico" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">— Nenhum —</SelectItem>
+              {technicians.map((u: any) => (
+                <SelectItem key={u.id} value={u.id}>
+                  {u.full_name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="md:col-span-6">
+          <Label>Total</Label>
+          <Input readOnly value={formatCurrency(total)} className="bg-muted" />
+        </div>
+      </div>
+      <div>
+        <Label>Observações</Label>
+        <Textarea
+          rows={2}
+          value={draft.notes}
+          onChange={(e) => onUpdate({ notes: e.target.value })}
+        />
+      </div>
+      <div className="flex gap-2">
+        <Button size="sm" onClick={onConfirm} disabled={confirmDisabled}>
+          <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Confirmar
+        </Button>
+        <Button size="sm" variant="outline" onClick={onCancel}>
+          <X className="h-3.5 w-3.5 mr-1" /> Cancelar
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+const PART_UNITS = ['un', 'm', 'kg', 'l', 'm²', 'hr', 'pcs'];
+
+interface PartCardFormProps {
+  cardKey: string;
+  draft: PartCardState | undefined;
+  products: any[];
+  formatCurrency: (n: number) => string;
+  onUpdate: (patch: Partial<PartCardState>) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+  onOpenPriceCalc: () => void;
+  confirmDisabled?: boolean;
+}
+
+function PartCardFormComponent({
+  draft,
+  products,
+  formatCurrency,
+  onUpdate,
+  onConfirm,
+  onCancel,
+  onOpenPriceCalc,
+  confirmDisabled,
+}: PartCardFormProps) {
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  if (!draft) return null;
+  const nameQuery = draft.product_name.toLowerCase();
+  const suggestions = (products || [])
+    .filter((p: any) => p.active)
+    .filter((p: any) => {
+      if (!nameQuery) return false;
+      if (p.id === draft.product_id) return false;
+      return (
+        (p.product_name || '').toLowerCase().includes(nameQuery) ||
+        (p.sku || '').toLowerCase().includes(nameQuery) ||
+        (p.brand || '').toLowerCase().includes(nameQuery)
+      );
+    })
+    .slice(0, 6);
+  const total = draft.quantity * draft.unit_sale;
+  const unitOptions = Array.from(new Set([...PART_UNITS, draft.unit].filter(Boolean)));
+  return (
+    <div className="p-4 space-y-3 bg-muted/20">
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+        <div className="md:col-span-6 relative">
+          <Label>Nome / Descrição</Label>
+          <Input
+            value={draft.product_name}
+            onChange={(e) => onUpdate({ product_name: e.target.value, product_id: '' })}
+            onFocus={() => setShowSuggestions(true)}
+            onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+            placeholder="Digite ou selecione um produto"
+            autoComplete="off"
+          />
+          {showSuggestions && suggestions.length > 0 && (
+            <div className="absolute z-20 mt-1 w-full rounded-md border bg-popover shadow-md max-h-60 overflow-auto">
+              {suggestions.map((p: any) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-accent"
+                  onClick={() => {
+                    onUpdate({
+                      product_id: p.id,
+                      product_name: p.product_name,
+                      unit: p.unit || 'un',
+                      unit_cost: Number(p.cost_price) || 0,
+                      unit_sale: Number(p.sale_price) || 0,
+                    });
+                    setShowSuggestions(false);
+                  }}
+                >
+                  <div className="font-medium">{p.product_name}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {formatCurrency(p.sale_price || 0)}
+                    {p.sku ? ` · SKU ${p.sku}` : ''}
+                    {p.brand ? ` · ${p.brand}` : ''}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="md:col-span-2">
+          <Label>Quantidade</Label>
+          <Input
+            type="number"
+            min={0.001}
+            step="any"
+            value={draft.quantity}
+            onChange={(e) => onUpdate({ quantity: parseFloat(e.target.value) || 0 })}
+          />
+        </div>
+        <div className="md:col-span-2">
+          <Label>Unidade</Label>
+          <Select value={draft.unit || 'un'} onValueChange={(v) => onUpdate({ unit: v })}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {unitOptions.map((u) => (
+                <SelectItem key={u} value={u}>{u}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="md:col-span-2">
+          <Label>Total</Label>
+          <Input readOnly value={formatCurrency(total)} className="bg-muted" />
+        </div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+        <div className="md:col-span-4">
+          <Label>Preço de custo</Label>
+          <MoneyInput
+            value={draft.unit_cost}
+            onValueChange={(v) => onUpdate({ unit_cost: v })}
+          />
+        </div>
+        <div className="md:col-span-4">
+          <Label>Preço de venda</Label>
+          <MoneyInput
+            value={draft.unit_sale}
+            onValueChange={(v) => onUpdate({ unit_sale: v })}
+          />
+        </div>
+        <div className="md:col-span-4 flex items-end">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={onOpenPriceCalc}
+            title="Formador de preço"
+          >
+            <Calculator className="h-3.5 w-3.5 mr-1" /> Calcular preço
+          </Button>
+        </div>
+      </div>
+      <div>
+        <Label>Observações</Label>
+        <Textarea
+          rows={2}
+          value={draft.notes}
+          onChange={(e) => onUpdate({ notes: e.target.value })}
+        />
+      </div>
+      <div className="flex gap-2">
+        <Button size="sm" onClick={onConfirm} disabled={confirmDisabled}>
+          <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Confirmar
+        </Button>
+        <Button size="sm" variant="outline" onClick={onCancel}>
+          <X className="h-3.5 w-3.5 mr-1" /> Cancelar
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const navigate = useNavigate();
   const { t, formatCurrency, formatDateTime, formatDate } = useI18n();
@@ -1555,160 +1901,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             (u: any) => u.role === 'technician' || u.role === 'admin'
           );
 
-          const ServiceCardForm = ({
-            cardKey,
-            isNewCard,
-            onConfirm,
-            onCancel,
-            confirmDisabled,
-          }: {
-            cardKey: string;
-            isNewCard: boolean;
-            onConfirm: () => void;
-            onCancel: () => void;
-            confirmDisabled?: boolean;
-          }) => {
-            const draft = editingSvc[cardKey];
-            if (!draft) return null;
-            const update = (patch: Partial<SvcCardDraft>) =>
-              setEditingSvc((prev) => ({ ...prev, [cardKey]: { ...prev[cardKey], ...patch } }));
-            const nameQuery = draft.service_name_snapshot.toLowerCase();
-            const suggestions = (services || [])
-              .filter((s: any) => s.active)
-              .filter((s: any) => {
-                if (!nameQuery) return false;
-                if (s.id === draft.service_id) return false;
-                return (
-                  (s.service_name || '').toLowerCase().includes(nameQuery) ||
-                  (s.description || '').toLowerCase().includes(nameQuery)
-                );
-              })
-              .slice(0, 6);
-            const total = draft.quantity * draft.unit_price;
-            return (
-              <div className="p-4 space-y-3 bg-muted/20">
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
-                  <div className="md:col-span-6 relative">
-                    <Label>Descrição</Label>
-                    <Input
-                      value={draft.service_name_snapshot}
-                      onChange={(e) =>
-                        update({ service_name_snapshot: e.target.value, service_id: '' })
-                      }
-                      placeholder="Digite ou selecione um serviço"
-                      autoComplete="off"
-                    />
-                    {suggestions.length > 0 && (
-                      <div className="absolute z-20 mt-1 w-full rounded-md border bg-popover shadow-md max-h-60 overflow-auto">
-                        {suggestions.map((s: any) => (
-                          <button
-                            key={s.id}
-                            type="button"
-                            className="w-full text-left px-3 py-2 text-sm hover:bg-accent"
-                            onClick={() =>
-                              update({
-                                service_id: s.id,
-                                service_name_snapshot: s.service_name,
-                                description_snapshot: s.description || '',
-                                billing_unit_snapshot: s.billing_unit || 'hour',
-                                unit_price: Number(s.default_price) || 0,
-                              })
-                            }
-                          >
-                            <div className="font-medium">{s.service_name}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {BILLING_UNIT_LABELS[s.billing_unit] || s.billing_unit} —{' '}
-                              {formatCurrency(s.default_price || 0)}
-                              {s.description ? ` · ${s.description}` : ''}
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div className="md:col-span-2">
-                    <Label>Quantidade</Label>
-                    <Input
-                      type="number"
-                      min={0.001}
-                      step="any"
-                      value={draft.quantity}
-                      onChange={(e) =>
-                        update({ quantity: parseFloat(e.target.value) || 0 })
-                      }
-                    />
-                  </div>
-                  <div className="md:col-span-2">
-                    <Label>Unidade</Label>
-                    <Select
-                      value={draft.billing_unit_snapshot}
-                      onValueChange={(v) => update({ billing_unit_snapshot: v })}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="hour">hora</SelectItem>
-                        <SelectItem value="visit">visita</SelectItem>
-                        <SelectItem value="day">dia</SelectItem>
-                        <SelectItem value="unit">unidade</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="md:col-span-2">
-                    <Label>Valor unitário</Label>
-                    <MoneyInput
-                      value={draft.unit_price}
-                      onValueChange={(v) => update({ unit_price: v })}
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
-                  <div className="md:col-span-6">
-                    <Label>Técnico responsável</Label>
-                    <Select
-                      value={draft.technician_user_id || 'none'}
-                      onValueChange={(v) =>
-                        update({ technician_user_id: v === 'none' ? '' : v })
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecionar técnico" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">— Nenhum —</SelectItem>
-                        {technicians.map((u: any) => (
-                          <SelectItem key={u.id} value={u.id}>
-                            {u.full_name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="md:col-span-6">
-                    <Label>Total</Label>
-                    <Input readOnly value={formatCurrency(total)} className="bg-muted" />
-                  </div>
-                </div>
-                <div>
-                  <Label>Observações</Label>
-                  <Textarea
-                    rows={2}
-                    value={draft.notes}
-                    onChange={(e) => update({ notes: e.target.value })}
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <Button size="sm" onClick={onConfirm} disabled={confirmDisabled}>
-                    <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Confirmar
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={onCancel}>
-                    <X className="h-3.5 w-3.5 mr-1" /> Cancelar
-                  </Button>
-                </div>
-              </div>
-            );
-          };
+          // ServiceCardFormComponent is defined at module scope to preserve input focus.
 
           const renderCollapsedRow = (opts: {
             keyId: string;
@@ -1802,9 +1995,18 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 if (isEditing) {
                   return (
                     <div key={s.id} className="border-b last:border-0">
-                      <ServiceCardForm
+                      <ServiceCardFormComponent
                         cardKey={s.id}
-                        isNewCard={false}
+                        draft={editingSvc[s.id]}
+                        services={services || []}
+                        appUsers={appUsers || []}
+                        formatCurrency={formatCurrency}
+                        onUpdate={(patch) =>
+                          setEditingSvc((prev) => ({
+                            ...prev,
+                            [s.id]: { ...prev[s.id], ...patch },
+                          }))
+                        }
                         onConfirm={() => handleConfirmEditSvc(s.id)}
                         onCancel={() => cancelSvcCard(s.id, false)}
                         confirmDisabled={updateSvcLine.isPending}
@@ -1864,9 +2066,18 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               {/* New (unsaved) cards */}
               {openNewSvcCards.map((key) => (
                 <div key={key} className="border-b last:border-0">
-                  <ServiceCardForm
+                  <ServiceCardFormComponent
                     cardKey={key}
-                    isNewCard
+                    draft={editingSvc[key]}
+                    services={services || []}
+                    appUsers={appUsers || []}
+                    formatCurrency={formatCurrency}
+                    onUpdate={(patch) =>
+                      setEditingSvc((prev) => ({
+                        ...prev,
+                        [key]: { ...prev[key], ...patch },
+                      }))
+                    }
                     onConfirm={() => handleConfirmNewSvcCard(key)}
                     onCancel={() => cancelSvcCard(key, true)}
                     confirmDisabled={addService.isPending}
@@ -1973,158 +2184,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           const persisted = (parts || []) as any[];
           const drafts = isNew ? draftParts : [];
 
-          const PART_UNITS = ['un', 'm', 'kg', 'l', 'm²', 'hr', 'pcs'];
-
-          const PartCardForm = ({
-            cardKey,
-            onConfirm,
-            onCancel,
-            confirmDisabled,
-          }: {
-            cardKey: string;
-            onConfirm: () => void;
-            onCancel: () => void;
-            confirmDisabled?: boolean;
-          }) => {
-            const draft = editingPart[cardKey];
-            if (!draft) return null;
-            const update = (patch: Partial<PartCardDraft>) =>
-              setEditingPart((prev) => ({ ...prev, [cardKey]: { ...prev[cardKey], ...patch } }));
-            const nameQuery = draft.product_name.toLowerCase();
-            const suggestions = (products || [])
-              .filter((p: any) => p.active)
-              .filter((p: any) => {
-                if (!nameQuery) return false;
-                if (p.id === draft.product_id) return false;
-                return (
-                  (p.product_name || '').toLowerCase().includes(nameQuery) ||
-                  (p.sku || '').toLowerCase().includes(nameQuery) ||
-                  (p.brand || '').toLowerCase().includes(nameQuery)
-                );
-              })
-              .slice(0, 6);
-            const total = draft.quantity * draft.unit_sale;
-            const unitOptions = Array.from(new Set([...PART_UNITS, draft.unit].filter(Boolean)));
-            return (
-              <div className="p-4 space-y-3 bg-muted/20">
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
-                  <div className="md:col-span-6 relative">
-                    <Label>Nome / Descrição</Label>
-                    <Input
-                      value={draft.product_name}
-                      onChange={(e) =>
-                        update({ product_name: e.target.value, product_id: '' })
-                      }
-                      placeholder="Digite ou selecione um produto"
-                      autoComplete="off"
-                    />
-                    {suggestions.length > 0 && (
-                      <div className="absolute z-20 mt-1 w-full rounded-md border bg-popover shadow-md max-h-60 overflow-auto">
-                        {suggestions.map((p: any) => (
-                          <button
-                            key={p.id}
-                            type="button"
-                            className="w-full text-left px-3 py-2 text-sm hover:bg-accent"
-                            onClick={() =>
-                              update({
-                                product_id: p.id,
-                                product_name: p.product_name,
-                                unit: p.unit || 'un',
-                                unit_cost: Number(p.cost_price) || 0,
-                                unit_sale: Number(p.sale_price) || 0,
-                              })
-                            }
-                          >
-                            <div className="font-medium">{p.product_name}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {formatCurrency(p.sale_price || 0)}
-                              {p.sku ? ` · SKU ${p.sku}` : ''}
-                              {p.brand ? ` · ${p.brand}` : ''}
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div className="md:col-span-2">
-                    <Label>Quantidade</Label>
-                    <Input
-                      type="number"
-                      min={0.001}
-                      step="any"
-                      value={draft.quantity}
-                      onChange={(e) =>
-                        update({ quantity: parseFloat(e.target.value) || 0 })
-                      }
-                    />
-                  </div>
-                  <div className="md:col-span-2">
-                    <Label>Unidade</Label>
-                    <Select
-                      value={draft.unit || 'un'}
-                      onValueChange={(v) => update({ unit: v })}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {unitOptions.map((u) => (
-                          <SelectItem key={u} value={u}>{u}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="md:col-span-2">
-                    <Label>Total</Label>
-                    <Input readOnly value={formatCurrency(total)} className="bg-muted" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
-                  <div className="md:col-span-4">
-                    <Label>Preço de custo</Label>
-                    <MoneyInput
-                      value={draft.unit_cost}
-                      onValueChange={(v) => update({ unit_cost: v })}
-                    />
-                  </div>
-                  <div className="md:col-span-4">
-                    <Label>Preço de venda</Label>
-                    <MoneyInput
-                      value={draft.unit_sale}
-                      onValueChange={(v) => update({ unit_sale: v })}
-                    />
-                  </div>
-                  <div className="md:col-span-4 flex items-end">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPriceCalcCardKey(cardKey)}
-                      title="Formador de preço"
-                    >
-                      <Calculator className="h-3.5 w-3.5 mr-1" /> Calcular preço
-                    </Button>
-                  </div>
-                </div>
-                <div>
-                  <Label>Observações</Label>
-                  <Textarea
-                    rows={2}
-                    value={draft.notes}
-                    onChange={(e) => update({ notes: e.target.value })}
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <Button size="sm" onClick={onConfirm} disabled={confirmDisabled}>
-                    <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Confirmar
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={onCancel}>
-                    <X className="h-3.5 w-3.5 mr-1" /> Cancelar
-                  </Button>
-                </div>
-              </div>
-            );
-          };
+          // PartCardFormComponent and PART_UNITS are defined at module scope to preserve input focus.
 
           const renderCollapsedPartRow = (opts: {
             keyId: string;
@@ -2214,10 +2274,20 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 if (isEditing) {
                   return (
                     <div key={p.id} className="border-b last:border-0">
-                      <PartCardForm
+                      <PartCardFormComponent
                         cardKey={p.id}
+                        draft={editingPart[p.id]}
+                        products={products || []}
+                        formatCurrency={formatCurrency}
+                        onUpdate={(patch) =>
+                          setEditingPart((prev) => ({
+                            ...prev,
+                            [p.id]: { ...prev[p.id], ...patch },
+                          }))
+                        }
                         onConfirm={() => handleConfirmEditPart(p.id, p)}
                         onCancel={() => cancelPartCard(p.id, false)}
+                        onOpenPriceCalc={() => setPriceCalcCardKey(p.id)}
                         confirmDisabled={updatePartLine.isPending}
                       />
                     </div>
@@ -2277,10 +2347,20 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               {/* New (unsaved) cards */}
               {openNewPartCards.map((key) => (
                 <div key={key} className="border-b last:border-0">
-                  <PartCardForm
+                  <PartCardFormComponent
                     cardKey={key}
+                    draft={editingPart[key]}
+                    products={products || []}
+                    formatCurrency={formatCurrency}
+                    onUpdate={(patch) =>
+                      setEditingPart((prev) => ({
+                        ...prev,
+                        [key]: { ...prev[key], ...patch },
+                      }))
+                    }
                     onConfirm={() => handleConfirmNewPartCard(key)}
                     onCancel={() => cancelPartCard(key, true)}
+                    onOpenPriceCalc={() => setPriceCalcCardKey(key)}
                     confirmDisabled={addPart.isPending}
                   />
                 </div>
