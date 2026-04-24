@@ -287,6 +287,7 @@ export default function FinancialPage() {
       <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">{t.products.category}</th>
       <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.common.description}</th>
       <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">OS</th>
+      <th className="px-4 py-3 text-center font-medium text-muted-foreground hidden lg:table-cell">Comprovante</th>
       <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden xl:table-cell">Origem</th>
       <th className="px-4 py-3 text-right font-medium text-muted-foreground">{t.common.total}</th>
       <th className="px-4 py-3 text-right font-medium text-muted-foreground hidden md:table-cell">Pago</th>
