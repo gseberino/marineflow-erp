@@ -105,6 +105,42 @@ export function useAddServiceOrderExpense() {
   });
 }
 
+export function useUpdateServiceOrderExpense() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      service_order_id,
+      ...updates
+    }: {
+      id: string;
+      service_order_id: string;
+      category?: string;
+      description?: string;
+      amount?: number;
+      currency?: string;
+      expense_date?: string;
+      paid_by?: 'company' | 'technician';
+      technician_user_id?: string | null;
+      receipt_url?: string | null;
+      receipt_storage_path?: string | null;
+      supplier_id?: string | null;
+      notes?: string | null;
+    }) => {
+      const { error } = await supabase
+        .from('service_order_expenses')
+        .update(updates)
+        .eq('id', id);
+      if (error) throw error;
+      await recalcExpenseTotals(service_order_id);
+    },
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ['so-expenses', vars.service_order_id] });
+      qc.invalidateQueries({ queryKey: ['service-orders', vars.service_order_id] });
+    },
+  });
+}
+
 export function useRemoveServiceOrderExpense() {
   const qc = useQueryClient();
   return useMutation({
