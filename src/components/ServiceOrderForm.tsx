@@ -2216,9 +2216,11 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 <div className="border-t my-1" />
                 {installmentRows.map((row, i) => {
                   const amount = calcInstallmentAmount(row);
-                  const daysLabel = row.days_after_approval === 0
-                    ? 'na aprovação'
-                    : `em ${row.days_after_approval} dias`;
+                  const daysLabel = row.tipo === 'entrega'
+                    ? 'na entrega'
+                    : row.tipo === 'prazo' || row.days_after_approval > 0
+                    ? `em ${row.days_after_approval} dias`
+                    : 'na aprovação';
                   return (
                     <div key={i} className="flex justify-between text-sm">
                       <span className="font-medium">
