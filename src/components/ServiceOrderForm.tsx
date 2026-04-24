@@ -2066,9 +2066,18 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               {/* New (unsaved) cards */}
               {openNewSvcCards.map((key) => (
                 <div key={key} className="border-b last:border-0">
-                  <ServiceCardForm
+                  <ServiceCardFormComponent
                     cardKey={key}
-                    isNewCard
+                    draft={editingSvc[key]}
+                    services={services || []}
+                    appUsers={appUsers || []}
+                    formatCurrency={formatCurrency}
+                    onUpdate={(patch) =>
+                      setEditingSvc((prev) => ({
+                        ...prev,
+                        [key]: { ...prev[key], ...patch },
+                      }))
+                    }
                     onConfirm={() => handleConfirmNewSvcCard(key)}
                     onCancel={() => cancelSvcCard(key, true)}
                     confirmDisabled={addService.isPending}
