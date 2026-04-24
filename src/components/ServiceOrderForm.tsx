@@ -2428,6 +2428,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   quantity: p.quantity,
                   unitPrice: p.unit_sale_snapshot,
                   total: p.line_total_sale,
+                  image_url: p.products?.image_url || null,
                   onExpand: () => startEditPersistedPart(p),
                   onDelete: () =>
                     removePart.mutate({
@@ -2449,6 +2450,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   unitPrice: d.unit_sale,
                   total: d.unit_sale * d.quantity,
                   isDraft: true,
+                  image_url: (products?.find(pr => pr.id === d.product_id) as any)?.image_url || null,
                   onExpand: () => {
                     const key = `new-${d.tempId}`;
                     const prod = products?.find((p) => p.id === d.product_id);
