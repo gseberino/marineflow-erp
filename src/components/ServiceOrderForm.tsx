@@ -2476,6 +2476,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                     onCancel={() => cancelPartCard(key, true)}
                     onOpenPriceCalc={() => setPriceCalcCardKey(key)}
                     confirmDisabled={addPart.isPending}
+                    supabase={supabase}
                   />
                 </div>
               ))}
