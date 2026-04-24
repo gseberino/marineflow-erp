@@ -1245,6 +1245,7 @@ function PaymentPresetRow({ preset, updatePreset }: { preset: any; updatePreset:
         parts_pct: r.parts_pct ?? r.percent ?? 0,
         expenses_pct: r.expenses_pct ?? 0,
         days_after_approval: r.days_after_approval ?? 0,
+        tipo: r.tipo || (r.days_after_approval > 0 ? 'prazo' : 'aprovacao'),
       }))
     : [];
   const [rows, setRows] = useState<InstallmentRow[]>(initial);
