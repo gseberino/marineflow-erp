@@ -70,6 +70,9 @@ export type PDFData = {
     operational_cost_total?: number;
     extra_notes?: string;
     payment_conditions?: string;
+    payment_condition_label?: string | null;
+    payment_condition_installments?: any[] | null;
+    subcontract_cost_total?: number;
   };
   client: {
     name: string;
