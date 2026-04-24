@@ -248,7 +248,7 @@ export function useServiceOrderParts(serviceOrderId: string | undefined) {
   });
 }
 
-async function recalcTotals(soId: string) {
+export async function recalcTotals(soId: string) {
   const { data: parts } = await supabase
     .from('service_order_parts')
     .select('line_total_sale')
