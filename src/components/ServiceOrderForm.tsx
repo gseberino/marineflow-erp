@@ -718,7 +718,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       resetExpForm();
       setShowExpForm(false);
     } catch (e: any) {
-      toast.error(e.message || 'Erro ao salvar despesa');
+      console.error('Erro ao salvar despesa:', e);
+      toast.error(e?.message || e?.details || 'Erro ao salvar despesa');
     }
   };
 
