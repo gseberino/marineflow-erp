@@ -244,6 +244,18 @@ export default function FinancialPage() {
             </button>
           ) : '—'}
         </td>
+        <td className="px-4 py-3 text-center hidden lg:table-cell">
+          {(() => {
+            const soeReceipt = (p as any).service_order_expenses?.find?.((e: any) => e?.receipt_url)?.receipt_url;
+            const url = soeReceipt || (p as any).receipt_url;
+            if (!url) return <span className="text-muted-foreground">—</span>;
+            return (
+              <a href={url} target="_blank" rel="noopener noreferrer" className="text-primary inline-flex items-center justify-center hover:underline" title="Ver comprovante">
+                <Paperclip className="h-4 w-4" />
+              </a>
+            );
+          })()}
+        </td>
         <td className="px-4 py-3 hidden xl:table-cell">
           <StatusBadge className={origin.className}>{origin.label}</StatusBadge>
         </td>
