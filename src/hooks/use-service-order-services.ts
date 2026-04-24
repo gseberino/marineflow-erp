@@ -23,7 +23,7 @@ export function useUpdateServiceOrderService() {
       }
       const { error } = await supabase
         .from('service_order_services')
-        .update(patch)
+        .update(patch as any)
         .eq('id', id);
       if (error) throw error;
 
