@@ -248,7 +248,7 @@ export function useServiceOrderParts(serviceOrderId: string | undefined) {
   });
 }
 
-async function recalcTotals(soId: string) {
+export async function recalcTotals(soId: string) {
   const { data: parts } = await supabase
     .from('service_order_parts')
     .select('line_total_sale')
@@ -498,14 +498,16 @@ export function useAddServiceOrderService() {
       quantity: number;
       unit_price_snapshot: number;
       notes?: string;
+      technician_user_id?: string | null;
     }) => {
       const line_total = Math.round(values.quantity * values.unit_price_snapshot * 100) / 100;
-      const { error } = await supabase.from('service_order_services').insert({
+      const { data, error } = await supabase.from('service_order_services').insert({
         ...values,
         line_total,
-      });
+      } as any).select('id').single();
       if (error) throw error;
       await recalcTotals(values.service_order_id);
+      return data;
     },
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ['so-services', vars.service_order_id] });
