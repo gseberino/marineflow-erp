@@ -233,11 +233,14 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     category: '', description: '', amount: 0, currency: 'BRL',
     expense_date: new Date().toISOString().slice(0, 10),
     paid_by: 'company' as 'company' | 'technician',
-    technician_user_id: '', receipt_url: '', notes: '',
+    technician_user_id: '', receipt_url: '', receipt_storage_path: '', notes: '',
     also_create_payable: false,
     supplier_id: '',
   });
   const [showExpForm, setShowExpForm] = useState(false);
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
+  const [uploadingReceipt, setUploadingReceipt] = useState(false);
+  const receiptInputRef = useRef<HTMLInputElement | null>(null);
 
   // Card installments
   const [selectedInstallments, setSelectedInstallments] = useState(1);
