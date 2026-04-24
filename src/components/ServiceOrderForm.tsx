@@ -2274,10 +2274,20 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 if (isEditing) {
                   return (
                     <div key={p.id} className="border-b last:border-0">
-                      <PartCardForm
+                      <PartCardFormComponent
                         cardKey={p.id}
+                        draft={editingPart[p.id]}
+                        products={products || []}
+                        formatCurrency={formatCurrency}
+                        onUpdate={(patch) =>
+                          setEditingPart((prev) => ({
+                            ...prev,
+                            [p.id]: { ...prev[p.id], ...patch },
+                          }))
+                        }
                         onConfirm={() => handleConfirmEditPart(p.id, p)}
                         onCancel={() => cancelPartCard(p.id, false)}
+                        onOpenPriceCalc={() => setPriceCalcCardKey(p.id)}
                         confirmDisabled={updatePartLine.isPending}
                       />
                     </div>
