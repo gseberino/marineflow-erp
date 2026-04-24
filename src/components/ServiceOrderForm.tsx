@@ -2122,6 +2122,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   </div>
                 </div>
             )}
+            </div>
             <div className="flex justify-between pt-3 border-t-2">
               <span className="font-bold text-lg">{t.serviceOrders.grandTotal}</span>
               <span className="font-bold text-lg text-accent">{formatCurrency(grandTotal)}</span>
