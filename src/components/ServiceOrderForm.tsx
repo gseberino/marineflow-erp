@@ -583,42 +583,137 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     }
   };
 
-  const handleAddPart = async () => {
-    if (!partForm.product_id || partForm.quantity <= 0) return;
-    const product = products?.find((p) => p.id === partForm.product_id);
-    if (isNew) {
-      // Buffer in memory until the OS is created
-      setDraftParts((prev) => [
-        ...prev,
-        {
-          tempId: crypto.randomUUID(),
-          product_id: partForm.product_id,
-          product_name: product?.product_name || 'Produto',
-          quantity: partForm.quantity,
-          unit_cost: partForm.unit_cost,
-          unit_sale: partForm.unit_sale,
-        },
-      ]);
-      setPartForm({ product_id: '', quantity: 1, unit_cost: 0, unit_sale: 0 });
-      toast.success('Peça adicionada (será salva ao criar a OS)');
+  // Ensure the product exists in the catalog. If product_id is empty,
+  // create a new entry in `products` and return the new id.
+  const ensureProductInCatalog = async (draft: PartCardDraft): Promise<string> => {
+    if (draft.product_id) return draft.product_id;
+    const { data, error } = await supabase
+      .from('products')
+      .insert({
+        product_name: draft.product_name,
+        cost_price: draft.unit_cost,
+        sale_price: draft.unit_sale,
+        unit: draft.unit || 'un',
+        active: true,
+        stock_quantity: 0,
+        minimum_stock: 0,
+        cost_currency: 'BRL',
+        sale_currency: 'BRL',
+      } as any)
+      .select('id')
+      .single();
+    if (error) throw error;
+    queryClient.invalidateQueries({ queryKey: ['products'] });
+    return data.id as string;
+  };
+
+  const addNewPartCard = () => {
+    const key = `new-${crypto.randomUUID()}`;
+    setEditingPart((prev) => ({ ...prev, [key]: emptyPartCard() }));
+    setOpenNewPartCards((prev) => [...prev, key]);
+  };
+
+  const cancelPartCard = (key: string, isNewCard: boolean) => {
+    setEditingPart((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+    if (isNewCard) {
+      setOpenNewPartCards((prev) => prev.filter((k) => k !== key));
+    }
+  };
+
+  const startEditPersistedPart = (row: any) => {
+    setEditingPart((prev) => ({
+      ...prev,
+      [row.id]: {
+        product_id: row.product_id || '',
+        product_name: row.products?.product_name || '',
+        unit: row.products?.unit || 'un',
+        quantity: Number(row.quantity) || 1,
+        unit_cost: Number(row.unit_cost_snapshot) || 0,
+        unit_sale: Number(row.unit_sale_snapshot) || 0,
+        notes: row.notes || '',
+      },
+    }));
+  };
+
+  const handleConfirmNewPartCard = async (cardKey: string) => {
+    const draft = editingPart[cardKey];
+    if (!draft) return;
+    if (!draft.product_name.trim() || draft.quantity <= 0) {
+      toast.error('Preencha nome e quantidade');
       return;
     }
-    if (!orderId) return;
     try {
-      await addPart.mutateAsync({
-        service_order_id: orderId,
-        product_id: partForm.product_id,
-        quantity: partForm.quantity,
-        unit_cost_snapshot: partForm.unit_cost,
-        unit_sale_snapshot: partForm.unit_sale,
+      const productId = await ensureProductInCatalog(draft);
+      if (isNew) {
+        setDraftParts((prev) => [
+          ...prev,
+          {
+            tempId: crypto.randomUUID(),
+            product_id: productId,
+            product_name: draft.product_name,
+            quantity: draft.quantity,
+            unit_cost: draft.unit_cost,
+            unit_sale: draft.unit_sale,
+          },
+        ]);
+        toast.success('Peça adicionada (será salva ao criar a OS)');
+      } else {
+        if (!orderId) return;
+        await addPart.mutateAsync({
+          service_order_id: orderId,
+          product_id: productId,
+          quantity: draft.quantity,
+          unit_cost_snapshot: draft.unit_cost,
+          unit_sale_snapshot: draft.unit_sale,
+          notes: draft.notes || undefined,
+        });
+        toast.success('Peça adicionada');
+      }
+      setOpenNewPartCards((prev) => prev.filter((k) => k !== cardKey));
+      setEditingPart((prev) => {
+        const next = { ...prev };
+        delete next[cardKey];
+        return next;
       });
-      // Reset form so a new blank row appears for the next item
-      setPartForm({ product_id: '', quantity: 1, unit_cost: 0, unit_sale: 0 });
-      toast.success('Peça adicionada');
     } catch (e: any) {
       toast.error(e.message || 'Erro ao adicionar peça');
     }
   };
+
+  const handleConfirmEditPart = async (rowId: string, originalRow: any) => {
+    const draft = editingPart[rowId];
+    if (!draft || !orderId) return;
+    if (!draft.product_name.trim() || draft.quantity <= 0) {
+      toast.error('Preencha nome e quantidade');
+      return;
+    }
+    try {
+      const productId = await ensureProductInCatalog(draft);
+      await updatePartLine.mutateAsync({
+        id: rowId,
+        service_order_id: orderId,
+        product_id: productId,
+        previous_quantity: Number(originalRow.quantity) || 0,
+        quantity: draft.quantity,
+        unit_cost_snapshot: draft.unit_cost,
+        unit_sale_snapshot: draft.unit_sale,
+        notes: draft.notes || null,
+      });
+      setEditingPart((prev) => {
+        const next = { ...prev };
+        delete next[rowId];
+        return next;
+      });
+      toast.success('Peça atualizada');
+    } catch (e: any) {
+      toast.error(e.message || 'Erro ao atualizar peça');
+    }
+  };
+
 
   // Ensure the service exists in the catalog. If service_id is empty,
   // create a new entry in `services` and return the new id.
