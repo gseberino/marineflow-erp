@@ -944,6 +944,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         sale_price: draft.unit_sale,
         unit: draft.unit || 'un',
         active: true,
+        fiscal_complete: false,
         stock_quantity: 0,
         minimum_stock: 0,
         cost_currency: 'BRL',
