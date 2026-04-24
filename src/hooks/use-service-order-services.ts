@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { recalcTotals } from '@/hooks/use-service-orders';
 
 export function useUpdateServiceOrderService() {
   const qc = useQueryClient();
