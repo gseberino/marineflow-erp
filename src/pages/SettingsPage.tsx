@@ -1229,25 +1229,32 @@ function PaymentConditionsTab() {
 
 interface InstallmentRow {
   label: string;
-  percent: number;
+  services_pct: number;
+  parts_pct: number;
+  expenses_pct: number;
   days_after_approval: number;
 }
 
 function PaymentPresetRow({ preset, updatePreset }: { preset: any; updatePreset: ReturnType<typeof useUpdatePaymentConditionPreset> }) {
   const [open, setOpen] = useState(false);
   const initial: InstallmentRow[] = Array.isArray(preset.installments) && preset.installments.length > 0
-    ? preset.installments
+    ? (preset.installments as any[]).map((r: any) => ({
+        label: r.label || '',
+        services_pct: r.services_pct ?? r.percent ?? 0,
+        parts_pct: r.parts_pct ?? r.percent ?? 0,
+        expenses_pct: r.expenses_pct ?? 0,
+        days_after_approval: r.days_after_approval ?? 0,
+      }))
     : [];
   const [rows, setRows] = useState<InstallmentRow[]>(initial);
   const [autoGenerate, setAutoGenerate] = useState<boolean>(preset.auto_generate_collections !== false);
 
-  const totalPercent = rows.reduce((s, r) => s + (Number(r.percent) || 0), 0);
-  const isValid = Math.abs(totalPercent - 100) < 0.01 && rows.length > 0;
+  const isValid = rows.length > 0;
   const dirty =
     JSON.stringify(rows) !== JSON.stringify(initial) ||
     autoGenerate !== (preset.auto_generate_collections !== false);
 
-  const addRow = () => setRows((r) => [...r, { label: '', percent: 0, days_after_approval: 0 }]);
+  const addRow = () => setRows((r) => [...r, { label: '', services_pct: 0, parts_pct: 0, expenses_pct: 0, days_after_approval: 0 }]);
   const removeRow = (i: number) => setRows((r) => r.filter((_, idx) => idx !== i));
   const updateRow = (i: number, patch: Partial<InstallmentRow>) =>
     setRows((r) => r.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
@@ -1256,7 +1263,7 @@ function PaymentPresetRow({ preset, updatePreset }: { preset: any; updatePreset:
     if (!isValid) return;
     await updatePreset.mutateAsync({
       id: preset.id,
-      patch: { installments: rows, auto_generate_collections: autoGenerate },
+      patch: { installments: rows as any, auto_generate_collections: autoGenerate },
     });
   };
 
@@ -1288,18 +1295,20 @@ function PaymentPresetRow({ preset, updatePreset }: { preset: any; updatePreset:
           </div>
 
           <div className="space-y-2">
-            <div className="grid grid-cols-[1fr_80px_100px_36px] gap-2 text-[11px] uppercase tracking-wide text-muted-foreground px-1">
+            <div className="grid grid-cols-[1fr_70px_70px_70px_70px_36px] gap-2 text-[11px] uppercase tracking-wide text-muted-foreground px-1">
               <div>Descrição</div>
-              <div className="text-center">%</div>
-              <div className="text-center">Dias após aprovação</div>
+              <div className="text-center">% Serv.</div>
+              <div className="text-center">% Peças</div>
+              <div className="text-center">% Desp.</div>
+              <div className="text-center">Dias</div>
               <div></div>
             </div>
             {rows.map((row, i) => (
-              <div key={i} className="grid grid-cols-[1fr_80px_100px_36px] gap-2 items-center">
+              <div key={i} className="grid grid-cols-[1fr_70px_70px_70px_70px_36px] gap-2 items-center">
                 <Input
                   value={row.label}
                   onChange={(e) => updateRow(i, { label: e.target.value })}
-                  placeholder="Ex: Entrada"
+                  placeholder="Ex: Sinal"
                   className="h-8 text-sm"
                 />
                 <Input
@@ -1307,8 +1316,26 @@ function PaymentPresetRow({ preset, updatePreset }: { preset: any; updatePreset:
                   step="0.01"
                   min={0}
                   max={100}
-                  value={row.percent}
-                  onChange={(e) => updateRow(i, { percent: parseFloat(e.target.value) || 0 })}
+                  value={row.services_pct}
+                  onChange={(e) => updateRow(i, { services_pct: parseFloat(e.target.value) || 0 })}
+                  className="h-8 text-sm text-center"
+                />
+                <Input
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  max={100}
+                  value={row.parts_pct}
+                  onChange={(e) => updateRow(i, { parts_pct: parseFloat(e.target.value) || 0 })}
+                  className="h-8 text-sm text-center"
+                />
+                <Input
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  max={100}
+                  value={row.expenses_pct}
+                  onChange={(e) => updateRow(i, { expenses_pct: parseFloat(e.target.value) || 0 })}
                   className="h-8 text-sm text-center"
                 />
                 <Input
@@ -1333,16 +1360,23 @@ function PaymentPresetRow({ preset, updatePreset }: { preset: any; updatePreset:
                 Nenhuma parcela configurada — fallback será cobrança única do valor total.
               </div>
             )}
+            {(() => {
+              const overS = rows.reduce((s, r) => s + r.services_pct, 0) > 100;
+              const overP = rows.reduce((s, r) => s + r.parts_pct, 0) > 100;
+              const overE = rows.reduce((s, r) => s + r.expenses_pct, 0) > 100;
+              const cols = [overS && 'Serviços', overP && 'Peças', overE && 'Despesas'].filter(Boolean).join(', ');
+              return cols ? (
+                <div className="text-xs text-destructive px-1">
+                  Atenção: soma de % em {cols} ultrapassa 100%.
+                </div>
+              ) : null;
+            })()}
           </div>
 
           <div className="flex items-center justify-between pt-2 border-t border-dashed">
             <Button variant="outline" size="sm" onClick={addRow} className="h-7 text-xs">
               + Adicionar Parcela
             </Button>
-            <div className={`text-xs font-medium ${isValid || rows.length === 0 ? 'text-muted-foreground' : 'text-destructive'}`}>
-              Total: {totalPercent.toFixed(2)}%
-              {rows.length > 0 && !isValid && ' (deve somar 100%)'}
-            </div>
           </div>
 
           <div className="flex justify-end gap-2 pt-2">
