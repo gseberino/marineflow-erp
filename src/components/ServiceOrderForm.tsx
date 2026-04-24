@@ -406,6 +406,27 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const laborCost = orderData?.labor_cost_total || 0;
   const partsCost = orderData?.parts_cost_total || 0;
   const operationalCost = orderData?.operational_cost_total || 0;
+  const expensesTotal = operationalCost
+    + (form.travel_cost_total || 0)
+    + (form.subcontract_cost_total || 0);
+  const selectedPreset = (paymentPresets || []).find(
+    (p: any) =>
+      p.id === form.payment_condition_preset_id ||
+      (p.label === form.payment_conditions && !form.payment_condition_preset_id)
+  );
+  const installmentRows = Array.isArray(selectedPreset?.installments)
+    ? (selectedPreset.installments as any[]).map((r: any) => ({
+        label: r.label || '',
+        services_pct: Number(r.services_pct ?? r.percent ?? 0),
+        parts_pct: Number(r.parts_pct ?? r.percent ?? 0),
+        expenses_pct: Number(r.expenses_pct ?? 0),
+        days_after_approval: Number(r.days_after_approval ?? 0),
+      }))
+    : [];
+  const calcInstallmentAmount = (row: typeof installmentRows[0]) =>
+    (laborCost * row.services_pct / 100)
+    + (partsCost * row.parts_pct / 100)
+    + (expensesTotal * row.expenses_pct / 100);
   const subtotal = laborCost + partsCost + operationalCost + form.travel_cost_total + form.subcontract_cost_total;
   const grandTotal = subtotal - form.discount_amount + form.tax_amount;
 
