@@ -24,7 +24,7 @@ export function usePayables() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('payables')
-        .select('*, suppliers!payables_supplier_id_fkey(supplier_name), service_orders!payables_linked_service_order_id_fkey(service_order_number)')
+        .select('*, suppliers!payables_supplier_id_fkey(supplier_name), service_orders!payables_linked_service_order_id_fkey(service_order_number), service_order_expenses!service_order_expenses_linked_payable_id_fkey(receipt_url)')
         .order('due_date', { ascending: true });
       if (error) throw error;
       return data;

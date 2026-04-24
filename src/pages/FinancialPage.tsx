@@ -3,7 +3,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { KPICard } from '@/components/KPICard';
 import { StatusBadge } from '@/components/StatusBadge';
 import { useI18n } from '@/i18n';
-import { DollarSign, TrendingUp, TrendingDown, AlertTriangle, ArrowUpCircle, ArrowDownCircle, Plus, Info, Receipt as ReceiptIcon } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, AlertTriangle, ArrowUpCircle, ArrowDownCircle, Plus, Info, Receipt as ReceiptIcon, Paperclip } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -244,6 +244,18 @@ export default function FinancialPage() {
             </button>
           ) : '—'}
         </td>
+        <td className="px-4 py-3 text-center hidden lg:table-cell">
+          {(() => {
+            const soeReceipt = (p as any).service_order_expenses?.find?.((e: any) => e?.receipt_url)?.receipt_url;
+            const url = soeReceipt || (p as any).receipt_url;
+            if (!url) return <span className="text-muted-foreground">—</span>;
+            return (
+              <a href={url} target="_blank" rel="noopener noreferrer" className="text-primary inline-flex items-center justify-center hover:underline" title="Ver comprovante">
+                <Paperclip className="h-4 w-4" />
+              </a>
+            );
+          })()}
+        </td>
         <td className="px-4 py-3 hidden xl:table-cell">
           <StatusBadge className={origin.className}>{origin.label}</StatusBadge>
         </td>
@@ -275,6 +287,7 @@ export default function FinancialPage() {
       <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">{t.products.category}</th>
       <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.common.description}</th>
       <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">OS</th>
+      <th className="px-4 py-3 text-center font-medium text-muted-foreground hidden lg:table-cell">Comprovante</th>
       <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden xl:table-cell">Origem</th>
       <th className="px-4 py-3 text-right font-medium text-muted-foreground">{t.common.total}</th>
       <th className="px-4 py-3 text-right font-medium text-muted-foreground hidden md:table-cell">Pago</th>
@@ -535,12 +548,12 @@ export default function FinancialPage() {
                     {payableTableHead}
                     <tbody>
                       {filteredPayables.length === 0 ? (
-                        <tr><td colSpan={11} className="text-center py-8 text-muted-foreground">{t.common.noResults}</td></tr>
+                        <tr><td colSpan={12} className="text-center py-8 text-muted-foreground">{t.common.noResults}</td></tr>
                       ) : filteredPayables.map(renderPayableRow)}
                     </tbody>
                     <tfoot>
                       <tr className="bg-muted/50 border-t-2 font-medium">
-                        <td colSpan={6} className="px-4 py-3">{t.common.total}: {filteredPayables.length} itens</td>
+                        <td colSpan={7} className="px-4 py-3">{t.common.total}: {filteredPayables.length} itens</td>
                         <td className="px-4 py-3 text-right">{formatCurrency(filteredPayables.reduce((s, p) => s + Number(p.amount), 0))}</td>
                         <td className="px-4 py-3 text-right hidden md:table-cell text-success">{formatCurrency(payTotalPaid)}</td>
                         <td className="px-4 py-3 text-right hidden md:table-cell">{formatCurrency(payTotalBalance)}</td>
