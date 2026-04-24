@@ -67,7 +67,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle, Pencil, Paperclip, X, FileImage, ExternalLink } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle, Pencil, Paperclip, X, FileImage, ExternalLink, Package } from 'lucide-react';
 import { toast } from 'sonner';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { MoneyInput } from '@/components/MoneyInput';
@@ -2307,6 +2307,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             unitPrice: number;
             total: number;
             isDraft?: boolean;
+            image_url?: string | null;
             onExpand: () => void;
             onDelete: () => void;
           }) => (
@@ -2317,13 +2318,26 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               }`}
             >
               <div className="flex-1 min-w-0">
-                <div className="font-medium truncate">
-                  {opts.name}
-                  {opts.isDraft && (
-                    <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
-                      rascunho
-                    </span>
+                <div className="flex items-center gap-2">
+                  {opts.image_url ? (
+                    <img
+                      src={opts.image_url}
+                      alt={opts.name}
+                      className="h-8 w-8 rounded object-cover flex-shrink-0"
+                    />
+                  ) : (
+                    <div className="h-8 w-8 rounded bg-muted flex items-center justify-center flex-shrink-0">
+                      <Package className="h-4 w-4 text-muted-foreground" />
+                    </div>
                   )}
+                  <div>
+                    <div className="font-medium text-sm">{opts.name}</div>
+                    {opts.isDraft && (
+                      <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
+                        rascunho
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
               {opts.unit && (
@@ -2414,6 +2428,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   quantity: p.quantity,
                   unitPrice: p.unit_sale_snapshot,
                   total: p.line_total_sale,
+                  image_url: p.products?.image_url || null,
                   onExpand: () => startEditPersistedPart(p),
                   onDelete: () =>
                     removePart.mutate({
@@ -2435,6 +2450,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   unitPrice: d.unit_sale,
                   total: d.unit_sale * d.quantity,
                   isDraft: true,
+                  image_url: (products?.find(pr => pr.id === d.product_id) as any)?.image_url || null,
                   onExpand: () => {
                     const key = `new-${d.tempId}`;
                     const prod = products?.find((p) => p.id === d.product_id);
