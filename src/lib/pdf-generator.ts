@@ -580,12 +580,7 @@ ${data.serviceOrder.extra_notes ? `
   ${isQuote ? `<div style="padding:6px 8px;font-size:10px;color:#6b7280;border-top:1px solid #e5e7eb;">${getValidityText()}</div>` : ''}
 </div>
 
-${data.serviceOrder.payment_conditions ? `
-<div style="border:1px solid #e5e7eb;border-radius:6px;padding:10px;margin-bottom:16px;background:#f9fafb;">
-  <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Condições de Pagamento</div>
-  <div style="white-space:pre-wrap;font-size:12px;">${esc(data.serviceOrder.payment_conditions)}</div>
-</div>
-` : ''}
+${buildPaymentSection(data.serviceOrder)}
 
 ${options.showSignature ? `
 <div style="display:flex;gap:40px;margin-top:40px;margin-bottom:24px;">
