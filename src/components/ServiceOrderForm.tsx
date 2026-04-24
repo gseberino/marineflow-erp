@@ -38,6 +38,8 @@ import { QuickSupplierDialog } from '@/components/QuickSupplierDialog';
 import { useSuppliers } from '@/hooks/use-suppliers';
 import { useServiceOrderExpenses, useAddServiceOrderExpense, useUpdateServiceOrderExpense, useRemoveServiceOrderExpense } from '@/hooks/use-service-order-expenses';
 import { useUpdateServiceOrderService } from '@/hooks/use-service-order-services';
+import { useUpdateServiceOrderPart } from '@/hooks/use-service-order-parts';
+import { PriceCalculatorDialog } from '@/components/PriceCalculatorDialog';
 import { supabase } from '@/integrations/supabase/client';
 import { usePDFData } from '@/hooks/use-pdf';
 import { generatePDF, DEFAULT_PDF_OPTIONS } from '@/lib/pdf-generator';
@@ -186,15 +188,36 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [extraFieldsOpen, setExtraFieldsOpen] = useState(false);
   const { data: vesselContacts } = useVesselContacts(form.vessel_id || undefined);
 
-  // Part form (current row being edited inline)
-  const [partForm, setPartForm] = useState({ product_id: '', quantity: 1, unit_cost: 0, unit_sale: 0 });
+  // Part inline-card state (matches the services pattern)
+  type PartCardDraft = {
+    product_id: string;
+    product_name: string;
+    unit: string;
+    quantity: number;
+    unit_cost: number;
+    unit_sale: number;
+    notes: string;
+  };
+  const emptyPartCard = (): PartCardDraft => ({
+    product_id: '',
+    product_name: '',
+    unit: 'un',
+    quantity: 1,
+    unit_cost: 0,
+    unit_sale: 0,
+    notes: '',
+  });
+  const [editingPart, setEditingPart] = useState<Record<string, PartCardDraft>>({});
+  const [openNewPartCards, setOpenNewPartCards] = useState<string[]>([]);
+  const [priceCalcCardKey, setPriceCalcCardKey] = useState<string | null>(null);
+  const updatePartLine = useUpdateServiceOrderPart();
+  // Kept for backwards compatibility (no longer opened from the parts row)
   const [quickProductOpen, setQuickProductOpen] = useState(false);
   const [quickProductName, setQuickProductName] = useState('');
   const [quickMarinaOpen, setQuickMarinaOpen] = useState(false);
   const [quickMarinaName, setQuickMarinaName] = useState('');
   const [quickSupplierOpen, setQuickSupplierOpen] = useState(false);
   const [quickSupplierName, setQuickSupplierName] = useState('');
-  const [showPartForm, setShowPartForm] = useState(false);
 
   // Service line cards (inline expanding cards)
   type SvcCardDraft = {
@@ -560,42 +583,137 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     }
   };
 
-  const handleAddPart = async () => {
-    if (!partForm.product_id || partForm.quantity <= 0) return;
-    const product = products?.find((p) => p.id === partForm.product_id);
-    if (isNew) {
-      // Buffer in memory until the OS is created
-      setDraftParts((prev) => [
-        ...prev,
-        {
-          tempId: crypto.randomUUID(),
-          product_id: partForm.product_id,
-          product_name: product?.product_name || 'Produto',
-          quantity: partForm.quantity,
-          unit_cost: partForm.unit_cost,
-          unit_sale: partForm.unit_sale,
-        },
-      ]);
-      setPartForm({ product_id: '', quantity: 1, unit_cost: 0, unit_sale: 0 });
-      toast.success('Peça adicionada (será salva ao criar a OS)');
+  // Ensure the product exists in the catalog. If product_id is empty,
+  // create a new entry in `products` and return the new id.
+  const ensureProductInCatalog = async (draft: PartCardDraft): Promise<string> => {
+    if (draft.product_id) return draft.product_id;
+    const { data, error } = await supabase
+      .from('products')
+      .insert({
+        product_name: draft.product_name,
+        cost_price: draft.unit_cost,
+        sale_price: draft.unit_sale,
+        unit: draft.unit || 'un',
+        active: true,
+        stock_quantity: 0,
+        minimum_stock: 0,
+        cost_currency: 'BRL',
+        sale_currency: 'BRL',
+      } as any)
+      .select('id')
+      .single();
+    if (error) throw error;
+    queryClient.invalidateQueries({ queryKey: ['products'] });
+    return data.id as string;
+  };
+
+  const addNewPartCard = () => {
+    const key = `new-${crypto.randomUUID()}`;
+    setEditingPart((prev) => ({ ...prev, [key]: emptyPartCard() }));
+    setOpenNewPartCards((prev) => [...prev, key]);
+  };
+
+  const cancelPartCard = (key: string, isNewCard: boolean) => {
+    setEditingPart((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+    if (isNewCard) {
+      setOpenNewPartCards((prev) => prev.filter((k) => k !== key));
+    }
+  };
+
+  const startEditPersistedPart = (row: any) => {
+    setEditingPart((prev) => ({
+      ...prev,
+      [row.id]: {
+        product_id: row.product_id || '',
+        product_name: row.products?.product_name || '',
+        unit: row.products?.unit || 'un',
+        quantity: Number(row.quantity) || 1,
+        unit_cost: Number(row.unit_cost_snapshot) || 0,
+        unit_sale: Number(row.unit_sale_snapshot) || 0,
+        notes: row.notes || '',
+      },
+    }));
+  };
+
+  const handleConfirmNewPartCard = async (cardKey: string) => {
+    const draft = editingPart[cardKey];
+    if (!draft) return;
+    if (!draft.product_name.trim() || draft.quantity <= 0) {
+      toast.error('Preencha nome e quantidade');
       return;
     }
-    if (!orderId) return;
     try {
-      await addPart.mutateAsync({
-        service_order_id: orderId,
-        product_id: partForm.product_id,
-        quantity: partForm.quantity,
-        unit_cost_snapshot: partForm.unit_cost,
-        unit_sale_snapshot: partForm.unit_sale,
+      const productId = await ensureProductInCatalog(draft);
+      if (isNew) {
+        setDraftParts((prev) => [
+          ...prev,
+          {
+            tempId: crypto.randomUUID(),
+            product_id: productId,
+            product_name: draft.product_name,
+            quantity: draft.quantity,
+            unit_cost: draft.unit_cost,
+            unit_sale: draft.unit_sale,
+          },
+        ]);
+        toast.success('Peça adicionada (será salva ao criar a OS)');
+      } else {
+        if (!orderId) return;
+        await addPart.mutateAsync({
+          service_order_id: orderId,
+          product_id: productId,
+          quantity: draft.quantity,
+          unit_cost_snapshot: draft.unit_cost,
+          unit_sale_snapshot: draft.unit_sale,
+          notes: draft.notes || undefined,
+        });
+        toast.success('Peça adicionada');
+      }
+      setOpenNewPartCards((prev) => prev.filter((k) => k !== cardKey));
+      setEditingPart((prev) => {
+        const next = { ...prev };
+        delete next[cardKey];
+        return next;
       });
-      // Reset form so a new blank row appears for the next item
-      setPartForm({ product_id: '', quantity: 1, unit_cost: 0, unit_sale: 0 });
-      toast.success('Peça adicionada');
     } catch (e: any) {
       toast.error(e.message || 'Erro ao adicionar peça');
     }
   };
+
+  const handleConfirmEditPart = async (rowId: string, originalRow: any) => {
+    const draft = editingPart[rowId];
+    if (!draft || !orderId) return;
+    if (!draft.product_name.trim() || draft.quantity <= 0) {
+      toast.error('Preencha nome e quantidade');
+      return;
+    }
+    try {
+      const productId = await ensureProductInCatalog(draft);
+      await updatePartLine.mutateAsync({
+        id: rowId,
+        service_order_id: orderId,
+        product_id: productId,
+        previous_quantity: Number(originalRow.quantity) || 0,
+        quantity: draft.quantity,
+        unit_cost_snapshot: draft.unit_cost,
+        unit_sale_snapshot: draft.unit_sale,
+        notes: draft.notes || null,
+      });
+      setEditingPart((prev) => {
+        const next = { ...prev };
+        delete next[rowId];
+        return next;
+      });
+      toast.success('Peça atualizada');
+    } catch (e: any) {
+      toast.error(e.message || 'Erro ao atualizar peça');
+    }
+  };
+
 
   // Ensure the service exists in the catalog. If service_id is empty,
   // create a new entry in `services` and return the new id.
@@ -1850,121 +1968,331 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           )}
         </div>
 
-        {/* Always-on entry row */}
-        <div className="p-4 border-b bg-muted/30 space-y-3">
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-            <div className="sm:col-span-2">
-              <Label>{t.serviceOrders.product}</Label>
-              <EntityCombobox
-                value={partForm.product_id}
-                onChange={(v) => {
-                  const prod = products?.find((p) => p.id === v);
-                  setPartForm({
-                    ...partForm,
-                    product_id: v,
-                    unit_cost: prod?.cost_price || 0,
-                    unit_sale: prod?.sale_price || 0,
-                  });
-                }}
-                options={(products || [])
-                  .filter((p) => p.active)
-                  .map<EntityOption>((p) => ({
-                    value: p.id,
-                    label: p.product_name,
-                    description: `Estoque: ${p.stock_quantity}${p.sku ? ` · SKU ${p.sku}` : ''}`,
-                    searchTerms: [p.sku || '', p.barcode || '', p.brand || '', p.category || ''],
-                  }))}
-                 placeholder="Selecionar produto"
-                 searchPlaceholder="Buscar produto... (digite ao menos 3 letras)"
-                 emptyText="Nenhum produto encontrado"
-                 onCreate={(typed) => {
-                   setQuickProductName(typed);
-                   setQuickProductOpen(true);
-                 }}
-                 createLabel="+ Cadastrar novo produto"
-               />
-            </div>
-            <div>
-              <Label>{t.serviceOrders.qty}</Label>
-              <Input type="number" min={1} value={partForm.quantity}
-                onChange={(e) => setPartForm({ ...partForm, quantity: parseInt(e.target.value) || 1 })} />
-            </div>
-            <div>
-              <Label>{t.serviceOrders.unitPrice}</Label>
-              <MoneyInput value={partForm.unit_sale}
-                onValueChange={(v) => setPartForm({ ...partForm, unit_sale: v })} />
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <Button
-              size="sm"
-              onClick={handleAddPart}
-              disabled={!partForm.product_id || partForm.quantity <= 0 || addPart.isPending}
-            >
-              <Plus className="h-3 w-3 mr-1" /> Adicionar peça
-            </Button>
-          </div>
-        </div>
-
-        {/* List of parts already added */}
+        {/* List of parts as collapsible cards + add button */}
         {(() => {
           const persisted = (parts || []) as any[];
           const drafts = isNew ? draftParts : [];
-          if (persisted.length === 0 && drafts.length === 0) {
+
+          const PART_UNITS = ['un', 'm', 'kg', 'l', 'm²', 'hr', 'pcs'];
+
+          const PartCardForm = ({
+            cardKey,
+            onConfirm,
+            onCancel,
+            confirmDisabled,
+          }: {
+            cardKey: string;
+            onConfirm: () => void;
+            onCancel: () => void;
+            confirmDisabled?: boolean;
+          }) => {
+            const draft = editingPart[cardKey];
+            if (!draft) return null;
+            const update = (patch: Partial<PartCardDraft>) =>
+              setEditingPart((prev) => ({ ...prev, [cardKey]: { ...prev[cardKey], ...patch } }));
+            const nameQuery = draft.product_name.toLowerCase();
+            const suggestions = (products || [])
+              .filter((p: any) => p.active)
+              .filter((p: any) => {
+                if (!nameQuery) return false;
+                if (p.id === draft.product_id) return false;
+                return (
+                  (p.product_name || '').toLowerCase().includes(nameQuery) ||
+                  (p.sku || '').toLowerCase().includes(nameQuery) ||
+                  (p.brand || '').toLowerCase().includes(nameQuery)
+                );
+              })
+              .slice(0, 6);
+            const total = draft.quantity * draft.unit_sale;
+            const unitOptions = Array.from(new Set([...PART_UNITS, draft.unit].filter(Boolean)));
             return (
-              <p className="text-sm text-muted-foreground p-5">
-                {t.serviceOrders.noPartsYet}
-              </p>
+              <div className="p-4 space-y-3 bg-muted/20">
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+                  <div className="md:col-span-6 relative">
+                    <Label>Nome / Descrição</Label>
+                    <Input
+                      value={draft.product_name}
+                      onChange={(e) =>
+                        update({ product_name: e.target.value, product_id: '' })
+                      }
+                      placeholder="Digite ou selecione um produto"
+                      autoComplete="off"
+                    />
+                    {suggestions.length > 0 && (
+                      <div className="absolute z-20 mt-1 w-full rounded-md border bg-popover shadow-md max-h-60 overflow-auto">
+                        {suggestions.map((p: any) => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            className="w-full text-left px-3 py-2 text-sm hover:bg-accent"
+                            onClick={() =>
+                              update({
+                                product_id: p.id,
+                                product_name: p.product_name,
+                                unit: p.unit || 'un',
+                                unit_cost: Number(p.cost_price) || 0,
+                                unit_sale: Number(p.sale_price) || 0,
+                              })
+                            }
+                          >
+                            <div className="font-medium">{p.product_name}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {formatCurrency(p.sale_price || 0)}
+                              {p.sku ? ` · SKU ${p.sku}` : ''}
+                              {p.brand ? ` · ${p.brand}` : ''}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="md:col-span-2">
+                    <Label>Quantidade</Label>
+                    <Input
+                      type="number"
+                      min={0.001}
+                      step="any"
+                      value={draft.quantity}
+                      onChange={(e) =>
+                        update({ quantity: parseFloat(e.target.value) || 0 })
+                      }
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <Label>Unidade</Label>
+                    <Select
+                      value={draft.unit || 'un'}
+                      onValueChange={(v) => update({ unit: v })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {unitOptions.map((u) => (
+                          <SelectItem key={u} value={u}>{u}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="md:col-span-2">
+                    <Label>Total</Label>
+                    <Input readOnly value={formatCurrency(total)} className="bg-muted" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+                  <div className="md:col-span-4">
+                    <Label>Preço de custo</Label>
+                    <MoneyInput
+                      value={draft.unit_cost}
+                      onValueChange={(v) => update({ unit_cost: v })}
+                    />
+                  </div>
+                  <div className="md:col-span-4">
+                    <Label>Preço de venda</Label>
+                    <MoneyInput
+                      value={draft.unit_sale}
+                      onValueChange={(v) => update({ unit_sale: v })}
+                    />
+                  </div>
+                  <div className="md:col-span-4 flex items-end">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPriceCalcCardKey(cardKey)}
+                      title="Formador de preço"
+                    >
+                      <Calculator className="h-3.5 w-3.5 mr-1" /> Calcular preço
+                    </Button>
+                  </div>
+                </div>
+                <div>
+                  <Label>Observações</Label>
+                  <Textarea
+                    rows={2}
+                    value={draft.notes}
+                    onChange={(e) => update({ notes: e.target.value })}
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={onConfirm} disabled={confirmDisabled}>
+                    <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Confirmar
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={onCancel}>
+                    <X className="h-3.5 w-3.5 mr-1" /> Cancelar
+                  </Button>
+                </div>
+              </div>
             );
-          }
+          };
+
+          const renderCollapsedPartRow = (opts: {
+            keyId: string;
+            name: string;
+            unit?: string;
+            quantity: number;
+            unitPrice: number;
+            total: number;
+            isDraft?: boolean;
+            onExpand: () => void;
+            onDelete: () => void;
+          }) => (
+            <div
+              key={opts.keyId}
+              className={`flex items-center gap-3 px-4 py-3 border-b last:border-0 ${
+                opts.isDraft ? 'bg-amber-50/40' : ''
+              }`}
+            >
+              <div className="flex-1 min-w-0">
+                <div className="font-medium truncate">
+                  {opts.name}
+                  {opts.isDraft && (
+                    <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
+                      rascunho
+                    </span>
+                  )}
+                </div>
+              </div>
+              {opts.unit && (
+                <div className="hidden sm:block w-16 text-center text-xs text-muted-foreground">
+                  {opts.unit}
+                </div>
+              )}
+              <div className="hidden sm:block w-16 text-center text-sm">
+                {opts.quantity}
+              </div>
+              <div className="hidden md:block w-28 text-right text-sm">
+                {formatCurrency(opts.unitPrice)}
+              </div>
+              <div className="w-28 text-right font-semibold">
+                {formatCurrency(opts.total)}
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={opts.onExpand}
+                title="Editar"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-destructive"
+                onClick={opts.onDelete}
+                title="Excluir"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          );
+
           return (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/50">
-                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.serviceOrders.product}</th>
-                  <th className="px-4 py-2 text-center font-medium text-muted-foreground">{t.serviceOrders.qty}</th>
-                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">{t.serviceOrders.unitPrice}</th>
-                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">{t.common.total}</th>
-                  <th className="px-4 py-2 w-10"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {persisted.map((p: any) => (
-                  <tr key={p.id} className="border-b last:border-0">
-                    <td className="px-4 py-3 font-medium">{p.products?.product_name}</td>
-                    <td className="px-4 py-3 text-center">{p.quantity}</td>
-                    <td className="px-4 py-3 text-right">{formatCurrency(p.unit_sale_snapshot)}</td>
-                    <td className="px-4 py-3 text-right font-semibold">{formatCurrency(p.line_total_sale)}</td>
-                    <td className="px-4 py-3">
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
-                        onClick={() => removePart.mutate({
-                          id: p.id, service_order_id: orderId!, product_id: p.product_id,
-                          quantity: p.quantity, unit_cost_snapshot: p.unit_cost_snapshot,
-                        })}>
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-                {drafts.map((d) => (
-                  <tr key={d.tempId} className="border-b last:border-0 bg-amber-50/40">
-                    <td className="px-4 py-3 font-medium">
-                      {d.product_name}
-                      <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">rascunho</span>
-                    </td>
-                    <td className="px-4 py-3 text-center">{d.quantity}</td>
-                    <td className="px-4 py-3 text-right">{formatCurrency(d.unit_sale)}</td>
-                    <td className="px-4 py-3 text-right font-semibold">{formatCurrency(d.unit_sale * d.quantity)}</td>
-                    <td className="px-4 py-3">
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
-                        onClick={() => setDraftParts((prev) => prev.filter((x) => x.tempId !== d.tempId))}>
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div>
+              {persisted.length === 0 && drafts.length === 0 && openNewPartCards.length === 0 && (
+                <p className="text-sm text-muted-foreground p-5">
+                  {t.serviceOrders.noPartsYet}
+                </p>
+              )}
+
+              {/* Header row labels */}
+              {(persisted.length > 0 || drafts.length > 0) && (
+                <div className="hidden sm:flex items-center gap-3 px-4 py-2 text-xs text-muted-foreground bg-muted/40 border-b">
+                  <div className="flex-1">{t.serviceOrders.product}</div>
+                  <div className="w-16 text-center">Un</div>
+                  <div className="w-16 text-center">{t.serviceOrders.qty}</div>
+                  <div className="hidden md:block w-28 text-right">{t.serviceOrders.unitPrice}</div>
+                  <div className="w-28 text-right">{t.common.total}</div>
+                  <div className="w-16" />
+                </div>
+              )}
+
+              {/* Persisted rows */}
+              {persisted.map((p: any) => {
+                const isEditing = !!editingPart[p.id];
+                if (isEditing) {
+                  return (
+                    <div key={p.id} className="border-b last:border-0">
+                      <PartCardForm
+                        cardKey={p.id}
+                        onConfirm={() => handleConfirmEditPart(p.id, p)}
+                        onCancel={() => cancelPartCard(p.id, false)}
+                        confirmDisabled={updatePartLine.isPending}
+                      />
+                    </div>
+                  );
+                }
+                return renderCollapsedPartRow({
+                  keyId: p.id,
+                  name: p.products?.product_name || 'Produto',
+                  unit: p.products?.unit,
+                  quantity: p.quantity,
+                  unitPrice: p.unit_sale_snapshot,
+                  total: p.line_total_sale,
+                  onExpand: () => startEditPersistedPart(p),
+                  onDelete: () =>
+                    removePart.mutate({
+                      id: p.id,
+                      service_order_id: orderId!,
+                      product_id: p.product_id,
+                      quantity: p.quantity,
+                      unit_cost_snapshot: p.unit_cost_snapshot,
+                    }),
+                });
+              })}
+
+              {/* Draft rows (OS not saved yet) */}
+              {drafts.map((d) =>
+                renderCollapsedPartRow({
+                  keyId: d.tempId,
+                  name: d.product_name,
+                  quantity: d.quantity,
+                  unitPrice: d.unit_sale,
+                  total: d.unit_sale * d.quantity,
+                  isDraft: true,
+                  onExpand: () => {
+                    const key = `new-${d.tempId}`;
+                    const prod = products?.find((p) => p.id === d.product_id);
+                    setEditingPart((prev) => ({
+                      ...prev,
+                      [key]: {
+                        product_id: d.product_id,
+                        product_name: d.product_name,
+                        unit: prod?.unit || 'un',
+                        quantity: d.quantity,
+                        unit_cost: d.unit_cost,
+                        unit_sale: d.unit_sale,
+                        notes: '',
+                      },
+                    }));
+                    setOpenNewPartCards((prev) => [...prev, key]);
+                    setDraftParts((prev) => prev.filter((x) => x.tempId !== d.tempId));
+                  },
+                  onDelete: () =>
+                    setDraftParts((prev) => prev.filter((x) => x.tempId !== d.tempId)),
+                })
+              )}
+
+              {/* New (unsaved) cards */}
+              {openNewPartCards.map((key) => (
+                <div key={key} className="border-b last:border-0">
+                  <PartCardForm
+                    cardKey={key}
+                    onConfirm={() => handleConfirmNewPartCard(key)}
+                    onCancel={() => cancelPartCard(key, true)}
+                    confirmDisabled={addPart.isPending}
+                  />
+                </div>
+              ))}
+
+              {/* Add button */}
+              <div className="p-4">
+                <Button size="sm" variant="outline" onClick={addNewPartCard}>
+                  <Plus className="h-3.5 w-3.5 mr-1" /> Adicionar Peça
+                </Button>
+              </div>
+            </div>
           );
         })()}
       </section>
@@ -2753,13 +3081,22 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         open={quickProductOpen}
         onOpenChange={setQuickProductOpen}
         initialName={quickProductName}
-        onCreated={(prod) => {
-          setPartForm({
-            ...partForm,
-            product_id: prod.id,
-            unit_cost: prod.cost_price ?? 0,
-            unit_sale: prod.sale_price ?? 0,
-          });
+        onCreated={() => {
+          // Kept for backwards compatibility; new flow uses inline part cards.
+        }}
+      />
+
+      <PriceCalculatorDialog
+        open={!!priceCalcCardKey}
+        onOpenChange={(v) => { if (!v) setPriceCalcCardKey(null); }}
+        initialCost={priceCalcCardKey ? (editingPart[priceCalcCardKey]?.unit_cost || 0) : 0}
+        initialPrice={priceCalcCardKey ? (editingPart[priceCalcCardKey]?.unit_sale || 0) : 0}
+        onConfirm={(price) => {
+          if (!priceCalcCardKey) return;
+          setEditingPart((prev) => ({
+            ...prev,
+            [priceCalcCardKey]: { ...prev[priceCalcCardKey], unit_sale: price },
+          }));
         }}
       />
 
