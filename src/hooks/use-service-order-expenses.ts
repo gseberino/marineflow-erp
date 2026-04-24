@@ -120,23 +120,29 @@ export function useUpdateServiceOrderExpense() {
       amount?: number;
       currency?: string;
       expense_date?: string;
-      paid_by?: 'company' | 'technician';
+      paid_by?: string;
       technician_user_id?: string | null;
       receipt_url?: string | null;
       receipt_storage_path?: string | null;
       supplier_id?: string | null;
       notes?: string | null;
     }) => {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('service_order_expenses')
         .update(updates)
-        .eq('id', id);
+        .eq('id', id)
+        .select()
+        .single();
       if (error) throw error;
       await recalcExpenseTotals(service_order_id);
+      return data;
     },
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ['so-expenses', vars.service_order_id] });
       qc.invalidateQueries({ queryKey: ['service-orders', vars.service_order_id] });
+    },
+    onError: (error: any) => {
+      console.error('useUpdateServiceOrderExpense error:', error);
     },
   });
 }
