@@ -299,6 +299,7 @@ interface PartCardFormProps {
   onCancel: () => void;
   onOpenPriceCalc: () => void;
   confirmDisabled?: boolean;
+  supabase: typeof supabase;
 }
 
 function PartCardFormComponent({
@@ -310,8 +311,11 @@ function PartCardFormComponent({
   onCancel,
   onOpenPriceCalc,
   confirmDisabled,
+  supabase: sb,
 }: PartCardFormProps) {
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   if (!draft) return null;
   const nameQuery = draft.product_name.toLowerCase();
   const suggestions = (products || [])
@@ -328,6 +332,63 @@ function PartCardFormComponent({
     .slice(0, 6);
   const total = draft.quantity * draft.unit_sale;
   const unitOptions = Array.from(new Set([...PART_UNITS, draft.unit].filter(Boolean)));
+
+  const handlePickFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !draft.product_id) return;
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('Imagem maior que 2MB');
+      return;
+    }
+    if (!['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(file.type)) {
+      toast.error('Formato inválido. Use JPG, PNG ou WEBP.');
+      return;
+    }
+    setUploading(true);
+    try {
+      const ext = file.name.split('.').pop() || 'jpg';
+      const path = `products/${draft.product_id}/${crypto.randomUUID()}.${ext}`;
+      const { error: upErr } = await sb.storage
+        .from('product-images')
+        .upload(path, file, { contentType: file.type, upsert: false });
+      if (upErr) throw upErr;
+      const { data: pub } = sb.storage.from('product-images').getPublicUrl(path);
+      const publicUrl = pub.publicUrl;
+      const { error: updErr } = await sb
+        .from('products')
+        .update({ image_url: publicUrl })
+        .eq('id', draft.product_id);
+      if (updErr) throw updErr;
+      onUpdate({ image_url: publicUrl });
+      toast.success('Foto adicionada');
+    } catch (err: any) {
+      toast.error(err?.message || 'Erro ao enviar imagem');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleRemoveImage = async () => {
+    if (!draft.product_id || !draft.image_url) return;
+    setUploading(true);
+    try {
+      const url = draft.image_url;
+      const marker = '/product-images/';
+      const idx = url.indexOf(marker);
+      if (idx >= 0) {
+        const path = url.substring(idx + marker.length);
+        await sb.storage.from('product-images').remove([path]);
+      }
+      await sb.from('products').update({ image_url: null }).eq('id', draft.product_id);
+      onUpdate({ image_url: null });
+    } catch (err: any) {
+      toast.error(err?.message || 'Erro ao remover');
+    } finally {
+      setUploading(false);
+    }
+  };
+
   return (
     <div className="p-4 space-y-3 bg-muted/20">
       <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
@@ -355,6 +416,7 @@ function PartCardFormComponent({
                       unit: p.unit || 'un',
                       unit_cost: Number(p.cost_price) || 0,
                       unit_sale: Number(p.sale_price) || 0,
+                      image_url: p.image_url || null,
                     });
                     setShowSuggestions(false);
                   }}
@@ -369,6 +431,53 @@ function PartCardFormComponent({
               ))}
             </div>
           )}
+          {/* Photo upload */}
+          <div className="mt-2">
+            {!draft.product_id ? (
+              <p className="text-xs text-muted-foreground">
+                Salve o produto primeiro para adicionar foto.
+              </p>
+            ) : draft.image_url ? (
+              <div className="flex items-center gap-2">
+                <img
+                  src={draft.image_url}
+                  alt="Foto do produto"
+                  className="h-12 w-12 rounded object-cover border"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={handleRemoveImage}
+                  disabled={uploading}
+                  title="Remover foto"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ) : (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                >
+                  📷 {uploading ? 'Enviando...' : 'Adicionar foto'}
+                </Button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={handlePickFile}
+                />
+              </>
+            )}
+          </div>
         </div>
         <div className="md:col-span-2">
           <Label>Quantidade</Label>
