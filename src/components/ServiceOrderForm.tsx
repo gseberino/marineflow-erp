@@ -2347,10 +2347,20 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               {/* New (unsaved) cards */}
               {openNewPartCards.map((key) => (
                 <div key={key} className="border-b last:border-0">
-                  <PartCardForm
+                  <PartCardFormComponent
                     cardKey={key}
+                    draft={editingPart[key]}
+                    products={products || []}
+                    formatCurrency={formatCurrency}
+                    onUpdate={(patch) =>
+                      setEditingPart((prev) => ({
+                        ...prev,
+                        [key]: { ...prev[key], ...patch },
+                      }))
+                    }
                     onConfirm={() => handleConfirmNewPartCard(key)}
                     onCancel={() => cancelPartCard(key, true)}
+                    onOpenPriceCalc={() => setPriceCalcCardKey(key)}
                     confirmDisabled={addPart.isPending}
                   />
                 </div>
