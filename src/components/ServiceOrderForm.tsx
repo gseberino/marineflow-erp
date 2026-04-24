@@ -118,6 +118,7 @@ type PartCardState = {
   unit_cost: number;
   unit_sale: number;
   notes: string;
+  image_url?: string | null;
 };
 
 interface ServiceCardFormProps {
