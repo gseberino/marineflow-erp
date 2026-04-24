@@ -1207,6 +1207,7 @@ export type Database = {
           cost_price: number | null
           created_at: string
           csosn: string | null
+          fiscal_complete: boolean
           fiscal_origin: number | null
           icms_rate: number | null
           id: string
@@ -1240,6 +1241,7 @@ export type Database = {
           cost_price?: number | null
           created_at?: string
           csosn?: string | null
+          fiscal_complete?: boolean
           fiscal_origin?: number | null
           icms_rate?: number | null
           id?: string
@@ -1273,6 +1275,7 @@ export type Database = {
           cost_price?: number | null
           created_at?: string
           csosn?: string | null
+          fiscal_complete?: boolean
           fiscal_origin?: number | null
           icms_rate?: number | null
           id?: string
