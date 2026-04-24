@@ -352,6 +352,61 @@ function pageWrapper(title: string, body: string): string {
 }
 
 // ============= QUOTE / SERVICE_ORDER (preserved behavior) =============
+function buildPaymentSection(so: any): string {
+  const laborCost = Number(so.labor_cost_total) || 0;
+  const partsCost = Number(so.parts_cost_total) || 0;
+  const expensesTotal = (Number(so.operational_cost_total) || 0)
+    + (Number(so.travel_cost_total) || 0)
+    + (Number(so.subcontract_cost_total) || 0);
+  const installments: any[] = Array.isArray(so.payment_condition_installments)
+    ? so.payment_condition_installments.map((r: any) => ({
+        label: r.label || '',
+        services_pct: Number(r.services_pct ?? r.percent ?? 0),
+        parts_pct: Number(r.parts_pct ?? r.percent ?? 0),
+        expenses_pct: Number(r.expenses_pct ?? 0),
+        days_after_approval: Number(r.days_after_approval ?? 0),
+      }))
+    : [];
+  if (installments.length === 0 && !so.payment_conditions) return '';
+  const fmt = fmtCurrency;
+  const breakdownRows = [
+    laborCost > 0 ? `<tr><td style="padding:3px 0;color:#666;font-size:11px;">Serviços</td><td style="text-align:right;padding:3px 0;color:#666;font-size:11px;">${fmt(laborCost)}</td></tr>` : '',
+    partsCost > 0 ? `<tr><td style="padding:3px 0;color:#666;font-size:11px;">Peças / Produtos</td><td style="text-align:right;padding:3px 0;color:#666;font-size:11px;">${fmt(partsCost)}</td></tr>` : '',
+    expensesTotal > 0 ? `<tr><td style="padding:3px 0;color:#666;font-size:11px;">Despesas e Deslocamento</td><td style="text-align:right;padding:3px 0;color:#666;font-size:11px;">${fmt(expensesTotal)}</td></tr>` : '',
+  ].join('');
+  const installmentRows = installments.map((row, i) => {
+    const amount = (laborCost * row.services_pct / 100)
+                 + (partsCost * row.parts_pct / 100)
+                 + (expensesTotal * row.expenses_pct / 100);
+    const daysLabel = row.days_after_approval === 0
+      ? 'na aprovação'
+      : `em ${row.days_after_approval} dias`;
+    return `<tr>
+      <td style="padding:4px 0;font-size:12px;font-weight:600;">${esc(row.label || `Parcela ${i + 1}`)} <span style="font-weight:400;color:#888;font-size:11px;">(${daysLabel})</span></td>
+      <td style="text-align:right;padding:4px 0;font-size:13px;font-weight:700;">${fmt(amount)}</td>
+    </tr>`;
+  }).join('');
+  const fallbackText = installments.length === 0 && so.payment_conditions
+    ? `<p style="font-size:12px;white-space:pre-wrap;margin:8px 0 0;">${esc(so.payment_conditions)}</p>`
+    : '';
+  return `
+    <div style="margin-top:20px;padding:14px 16px;background:#f8f9fa;border-radius:8px;border:1px solid #e5e7eb;">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;margin-bottom:10px;">
+        Condições de Pagamento${so.payment_condition_label ? ` — ${esc(so.payment_condition_label)}` : ''}
+      </div>
+      ${installments.length > 0 ? `
+        <table style="width:100%;border-collapse:collapse;">
+          <tbody>
+            ${breakdownRows}
+            ${breakdownRows ? '<tr><td colspan="2" style="border-top:1px solid #d1d5db;padding-top:4px;"></td></tr>' : ''}
+            ${installmentRows}
+          </tbody>
+        </table>
+      ` : fallbackText}
+    </div>
+  `;
+}
+
 function buildOrderHTML(data: PDFData, options: PDFOptions): string {
   const isQuote = data.documentType === 'quote';
   const docTitle = isQuote ? 'ORÇAMENTO' : 'ORDEM DE SERVIÇO';
