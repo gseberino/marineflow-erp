@@ -3081,13 +3081,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         open={quickProductOpen}
         onOpenChange={setQuickProductOpen}
         initialName={quickProductName}
-        onCreated={(prod) => {
-          setPartForm({
-            ...partForm,
-            product_id: prod.id,
-            unit_cost: prod.cost_price ?? 0,
-            unit_sale: prod.sale_price ?? 0,
-          });
+        onCreated={() => {
+          // Kept for backwards compatibility; new flow uses inline part cards.
         }}
       />
 
