@@ -421,6 +421,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         parts_pct: Number(r.parts_pct ?? r.percent ?? 0),
         expenses_pct: Number(r.expenses_pct ?? 0),
         days_after_approval: Number(r.days_after_approval ?? 0),
+        tipo: r.tipo as 'aprovacao' | 'entrega' | 'prazo' | undefined,
       }))
     : [];
   const calcInstallmentAmount = (row: typeof installmentRows[0]) =>
