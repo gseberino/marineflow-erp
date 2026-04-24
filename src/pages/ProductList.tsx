@@ -96,7 +96,14 @@ export default function ProductList() {
                           </div>
                         )}
                         <div className="min-w-0">
-                          <p className="font-medium truncate">{p.product_name}</p>
+                          <p className="font-medium truncate">
+                            {p.product_name}
+                            {(p as any).fiscal_complete === false && (
+                              <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                                Incompleto
+                              </span>
+                            )}
+                          </p>
                           <p className="text-xs text-muted-foreground truncate">{p.sku}</p>
                         </div>
                       </div>
