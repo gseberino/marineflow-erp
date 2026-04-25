@@ -370,7 +370,7 @@ function CompanyTab() {
     })();
   }, []);
 
-  const handleLogoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLogoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
@@ -382,11 +382,19 @@ function CompanyTab() {
       toast.error('Arquivo muito grande. Máximo 2MB.');
       return;
     }
+    // SVG: upload as-is (no raster crop). Otherwise open cropper.
+    if (file.type === 'image/svg+xml') {
+      uploadLogoBlob(file, 'svg');
+    } else {
+      setCropFile(file);
+      setCropOpen(true);
+    }
+  };
+
+  const uploadLogoBlob = async (blob: Blob, ext: string) => {
     setLogoUploading(true);
     try {
-      const ext = file.name.split('.').pop()?.toLowerCase() || 'png';
       const path = `company/logo.${ext}`;
-      // Remove any prior logo files with different extension
       try {
         const exts = ['png', 'jpg', 'jpeg', 'webp', 'svg'];
         await supabase.storage.from('company-assets').remove(
@@ -395,7 +403,7 @@ function CompanyTab() {
       } catch {}
       const { error: upErr } = await supabase.storage
         .from('company-assets')
-        .upload(path, file, { upsert: true, contentType: file.type, cacheControl: '3600' });
+        .upload(path, blob, { upsert: true, contentType: blob.type || `image/${ext}`, cacheControl: '3600' });
       if (upErr) throw upErr;
       const { data: pub } = supabase.storage.from('company-assets').getPublicUrl(path);
       const url = `${pub.publicUrl}?t=${Date.now()}`;
@@ -412,7 +420,12 @@ function CompanyTab() {
     }
   };
 
-  const handleLogoRemove = async () => {
+  const handleCropConfirm = (blob: Blob) => {
+    setCropOpen(false);
+    setCropFile(null);
+    uploadLogoBlob(blob, 'png');
+  };
+
     setLogoUploading(true);
     try {
       const exts = ['png', 'jpg', 'jpeg', 'webp', 'svg'];
