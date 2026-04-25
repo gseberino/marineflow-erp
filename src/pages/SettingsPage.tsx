@@ -305,6 +305,8 @@ function CompanyTab() {
   const { t } = useI18n();
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [logoUrl, setLogoUrl] = useState<string>('');
+  const [logoUploading, setLogoUploading] = useState(false);
   const [form, setForm] = useState({
     company_name: '',
     cnpj: '',
