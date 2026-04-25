@@ -47,6 +47,7 @@ interface PublicData {
 export default function PublicServiceOrderView() {
   const { token } = useParams<{ token: string }>();
   const [data, setData] = useState<PublicData | null>(null);
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
