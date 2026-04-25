@@ -103,7 +103,7 @@ function isBroadcastPayload(p: any): boolean {
 }
 
 async function notifyAssignedReminder(
-  admin: ReturnType<typeof createClient>,
+  admin: any,
   phone: string,
   senderName: string | null,
   preview: string,
