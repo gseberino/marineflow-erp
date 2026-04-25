@@ -1,101 +1,155 @@
+## Visão Geral
 
+Implementar um **Agente de IA** integrado ao ERP, com chat flutuante disponível em todas as páginas autenticadas, capaz de **executar ações reais** no banco de dados (criar OS, agendar tarefas, cadastrar clientes, montar orçamentos, **enviar WhatsApp**) via *function calling* da Lovable AI Gateway (Gemini).
 
-## Diagnóstico
-
-Olhei os logs da Z-API e os registros no banco. Identifiquei **três problemas reais** que se misturam e geram a confusão atual:
-
-### 1. "Mensagem não reconhecida" — o webhook não enxerga o campo de texto da Z-API
-A Z-API entrega o payload `ReceivedCallback` com chaves no nível raiz: `text`, `image`, `audio`, `video`, `document`, **mas o campo `text` em algumas variantes vem como string direta** (ex.: `"text": "olá"`) ou como **`message`** dentro de um objeto. Hoje o código só trata `p.text.message`. Quando vem em outro formato (ex.: lista de transmissão, mensagem editada `isEdit`, mensagem com `referenceMessageId` de resposta), o parser cai no `else` e grava `[mensagem não reconhecida]`.
-
-Também não tratamos: `p.body`, `p.caption`, `p.text` quando é string, mensagens de status (`p.status`), `messageContextInfo`, e o tipo `notification` (mudança de nome/foto), que devem ser ignorados em vez de virar mensagem.
-
-### 2. Números incompatíveis (ex.: `+156860829159528`, `554792036481`)
-Dois bugs de normalização:
-
-- **Número truncado** (`554792036481` = 12 dígitos): a função `normalizePhone` adiciona o prefixo `55` apenas quando o input tem 10 ou 11 dígitos. Se a Z-API já manda 12 (`554792036481`), o código devolve como está — mas `4792036481` é só 10, faltando o **9** do celular brasileiro. O número real é `5547992036481` (13 dígitos com nono dígito). Precisamos **inserir o 9** quando detectarmos celular brasileiro de 8 dígitos no terceiro grupo.
-- **Número gigante** (`156860829159528`): vem do `chatId` em formato `<phone>@c.us` ou `<phone>@s.whatsapp.net` em listas de transmissão, onde a Z-API às vezes concatena `participantPhone` + ID interno. Precisamos **extrair só o telefone antes de `@`** e descartar IDs com mais de 14 dígitos.
-
-### 3. Os lembretes outbound estão "poluindo" o inbox
-Os registros que você está vendo com texto `🆕 Novo lead WhatsApp ... [mensagem não reconhecida]` são **mensagens outbound** (lembretes que o sistema enviou aos admins), não mensagens recebidas de clientes. Elas aparecem no inbox porque o filtro atual mostra todas as direções. O texto "mensagem não reconhecida" dentro delas é só o **eco** da primeira mensagem original mal-parseada (problema 1).
+O agente conhece a página atual do usuário, confirma ações de gravação antes de executar e usa busca tolerante a erros de digitação.
 
 ---
 
-## Plano de correção
+## Como o usuário usará
 
-### A) Corrigir o parser de mensagens (`whatsapp-webhook`)
-Reescrever o bloco de extração de texto para cobrir todas as variantes da Z-API:
-```ts
-// pseudocódigo
-if (typeof p.text === 'string') body = p.text;
-else if (p.text?.message) body = p.text.message;
-else if (typeof p.message === 'string') body = p.message;
-else if (p.message?.conversation) body = p.message.conversation;
-else if (p.message?.extendedTextMessage?.text) body = p.message.extendedTextMessage.text;
-else if (p.body) body = p.body;
-else if (p.caption) body = p.caption;
-// ...image/audio/video/document/sticker/reaction/poll/list/buttonsResponse
-```
-Adicionar suporte a: `sticker`, `reaction`, `poll`, `listResponseMessage`, `buttonsResponseMessage`, `templateMessage`, `contactsArrayMessage`. Para tipos sem texto útil (reação, sticker), gravar com `message_type` específico (ex.: `reaction`, `sticker`) em vez de `other`.
+- Botão flutuante (ícone Sparkles/Bot) no canto inferior direito, presente em todas as páginas internas.
+- Clicar abre um painel lateral retrátil (Sheet) com o chat.
+- Usuário escreve em linguagem natural ("crie uma OS para o barco do João amanhã às 10h", "envie um lembrete no WhatsApp para a Maria sobre a cobrança vencida", "cadastre o cliente Carlos, telefone 11 99999-0000").
+- Respostas em **Markdown**, com indicador de "pensando…" enquanto a IA processa.
+- Para ações de gravação/envio, a IA mostra um **resumo estruturado** e botões **Confirmar / Cancelar** antes de executar.
+- Histórico da conversa mantido durante a sessão (memória local).
 
-Ignorar callbacks de sistema que não são mensagem: `notification`, `MessageStatusCallback` (já tratado), `PresenceChatCallback`, e payloads onde `p.notification` está presente.
+---
 
-### B) Corrigir normalização de telefone
-Reescrever `normalizePhone`:
-```ts
-function normalizePhone(raw, defaultDDI = "55") {
-  if (!raw) return "";
-  // Extrai só a parte antes de @ (chatId @c.us / @broadcast)
-  let s = String(raw).split('@')[0];
-  let d = s.replace(/\D/g, "");
-  if (!d) return "";
-  if (d.length > 14) return ""; // ID interno inválido
-  if (d.startsWith("00")) d = d.slice(2);
-  // Brasil: se vier 12 dígitos começando com 55 e o terceiro bloco tiver 8, inserir o 9
-  if (d.length === 12 && d.startsWith("55")) {
-    const ddd = d.slice(2,4);
-    const rest = d.slice(4);
-    if (rest.length === 8 && /^[6-9]/.test(rest)) {
-      d = `55${ddd}9${rest}`;
-    }
-  }
-  if (d.length >= 12 && d.length <= 14) return d;
-  if (d.length === 10 || d.length === 11) return `${defaultDDI}${d}`;
-  return d;
-}
+## Arquitetura
+
+```text
+┌─────────────────────────────┐
+│  AIAgentWidget (frontend)   │
+│  - Sheet flutuante           │
+│  - Markdown + estados        │
+│  - Envia: messages, route,   │
+│    contexto da entidade      │
+└──────────────┬──────────────┘
+               │ supabase.functions.invoke('ai-agent')
+               ▼
+┌─────────────────────────────┐
+│  Edge Function: ai-agent     │
+│  - Lovable AI Gateway        │
+│  - Modelo: gemini-2.5-pro    │
+│  - Tools (function calling)  │
+│  - Loop até resposta final   │
+└──────┬───────────────┬──────┘
+       │               │
+       ▼               ▼
+   Supabase       whatsapp-send-text
+   (com JWT)      (edge function existente)
 ```
 
-### C) Migração para corrigir registros já gravados
-Criar uma migration que:
-1. **Re-normaliza** `phone_normalized` em `whatsapp_messages` e `whatsapp_leads` aplicando a regra do nono dígito (Brasil).
-2. **Funde leads duplicados** (mesmo telefone após renormalização): mantém o lead com mais mensagens, atualiza `whatsapp_messages.lead_id` para apontar pro lead vencedor, deleta o duplicado.
-3. **Re-extrai o body** dos registros com `message_type='other'` ou body=`[mensagem não reconhecida]` reaplicando o novo parser sobre `raw_payload`. (Função plpgsql que lê o JSON e atualiza `body`/`message_type`.)
-4. **Marca como `outbound`** os registros que têm `raw_payload->>'fromMe' = 'true'` mas estão como `inbound` (caso existam).
-
-### D) Filtro no Inbox — separar inbound vs outbound
-No `WhatsAppLeadsPage` (e no `WhatsAppLogsPage`), garantir que o **inbox de leads mostre só `direction='inbound'`** dos clientes. Os lembretes `outbound` ficam visíveis apenas na página de Logs com filtro de direção.
-
-### E) Botão "Reprocessar payloads"
-Na página **Logs WhatsApp**, adicionar botão **"Reprocessar mensagens não reconhecidas"** que chama uma edge function nova (`whatsapp-reprocess-messages`) que itera sobre registros com `message_type='other'` e reaplica o parser corrigido sobre o `raw_payload`. Útil para corrigir histórico sem rodar migration novamente.
+A edge function recebe `{ messages, context }` e roda um **loop de tool calls**: chama o gateway, se a resposta tiver `tool_calls`, executa-as no banco e devolve o resultado ao modelo, repetindo até obter resposta final em texto.
 
 ---
 
-## Arquivos afetados
+## Confirmação em duas etapas (para escritas/envios)
 
-| Arquivo | Mudança |
-|---|---|
-| `supabase/functions/whatsapp-webhook/index.ts` | Reescrever `normalizePhone` + parser de body |
-| `supabase/functions/whatsapp-reprocess-messages/index.ts` | **Novo** — reprocessa registros `other` |
-| `supabase/migrations/<ts>_fix_whatsapp_phones_and_bodies.sql` | Renormaliza telefones + funde leads + re-extrai body |
-| `src/pages/WhatsAppLeadsPage.tsx` | Filtrar `direction='inbound'` no inbox |
-| `src/pages/WhatsAppLogsPage.tsx` | Adicionar botão "Reprocessar não reconhecidas" |
+1. IA chama `propose_action({ action, payload, summary })` — tool **read-only** que apenas devolve o resumo ao chat.
+2. Frontend renderiza um card com resumo + botões "Confirmar"/"Cancelar".
+3. Ao confirmar, o frontend reenvia a conversa adicionando `"Confirmado pelo usuário"`, e a IA chama então a tool real (`create_service_order`, `send_whatsapp_message` etc.).
+
+Tools de **leitura** executam direto, sem confirmação.
 
 ---
 
-## Pergunta antes de implementar
+## Tools expostas ao modelo
 
-A migration de **fusão de leads duplicados** é destrutiva (deleta o lead duplicado e move histórico). Prefere:
-- **(a)** Aplicar fusão automática (recomendado — limpa o inbox)
-- **(b)** Apenas renormalizar telefones e me deixar uma view com os duplicados pra eu mesclar manualmente
+**Leitura (executadas direto):**
+- `search_clients(query)` — busca tolerante (ilike em nome/email/telefone/cnpj).
+- `search_vessels(query, client_id?)`.
+- `search_products(query)`.
+- `list_agenda(date_from, date_to, technician_id?)`.
+- `list_service_orders(status?, client_id?, vessel_id?, limit?)`.
+- `get_service_order(id)` — detalhes + itens + serviços.
+- `get_client_history(client_id)` — OSs anteriores.
+- `list_pending_collections(client_id?)` — cobranças pendentes/atrasadas.
 
-Confirme a escolha (a/b) e digo "implementar" para eu sair do modo plano e aplicar tudo.
+**Escrita (passam por `propose_action` antes):**
+- `create_agenda_task({ title, scheduled_start_at, technician_user_id, client_id?, location?, notes? })`.
+- `update_agenda_task({ id, ...campos })`.
+- `create_service_order({ client_id, vessel_id, problem_description?, scheduled_start_at?, items?, services? })`.
+- `update_service_order_status({ id, status })`.
+- `add_service_order_item({ service_order_id, product_id, quantity })`.
+- `apply_service_order_discount({ id, discount_amount })`.
+- `create_client({ full_name_or_company_name, type, phone?, email?, cpf_cnpj? })`.
+- `create_vessel({ client_id, boat_name, manufacturer?, model?, year?, marina_id? })`.
+- `create_product({ product_name, sku?, sale_price?, cost_price?, unit? })`.
 
+**WhatsApp (passam por `propose_action` antes):**
+- `send_whatsapp_message({ to_phone | client_id, message })` — envia texto livre via Z-API (chama a edge function existente `whatsapp-send-text`).
+- `send_collection_reminder({ collection_id, custom_message? })` — busca dados da cobrança, monta mensagem padrão (template de cobrança) e envia via Z-API; registra no `whatsapp_send_log` se aplicável.
+- `send_service_order_link({ service_order_id, client_id, custom_message? })` — envia o link público da OS (`/view/:share_token`) para o cliente assinar/visualizar.
+
+A diferença "orçamento vs OS" é tratada via `status='draft'` + `quote_validity_date`.
+
+---
+
+## System prompt (resumo)
+
+> Você é o assistente do MarineFlow ERP. Use as ferramentas para consultar e modificar dados. **Antes de qualquer ação de gravação ou envio de WhatsApp, sempre chame `propose_action` primeiro** com um resumo claro em markdown e aguarde confirmação. O usuário está atualmente na rota `{route}` com contexto `{contextId}` — use isso para inferir clientes/embarcações/OS quando ele disser "este", "ele", "essa OS". Para buscas, use `search_*` e seja tolerante a erros de digitação. Mensagens de WhatsApp devem ser cordiais, em português, sem emojis excessivos, e sempre identificar o remetente (empresa). Responda em português, formate com markdown.
+
+---
+
+## Arquivos a criar/editar
+
+**Novos:**
+- `supabase/functions/ai-agent/index.ts` — edge function: loop de tool calling, definição de todas as tools, validação Zod, RLS via JWT do usuário, integração com `whatsapp-send-text`.
+- `src/components/ai/AIAgentWidget.tsx` — botão flutuante + Sheet com chat.
+- `src/components/ai/AIChatMessage.tsx` — renderização com `react-markdown`.
+- `src/components/ai/AIConfirmCard.tsx` — card de confirmação para `propose_action`.
+- `src/hooks/use-ai-agent.ts` — gerencia mensagens, envio, contexto da rota.
+- `src/lib/ai-context.ts` — extrai `{ route, entityId, entityType }` de `useLocation`/`useParams`.
+
+**Editados:**
+- `src/components/AppLayout.tsx` — montar `<AIAgentWidget />` ao lado do `<PWAInstallPrompt />` (apenas para usuários autenticados).
+- `package.json` — adicionar `react-markdown` + `remark-gfm`.
+
+---
+
+## Detalhes técnicos da edge function
+
+- Recebe `Authorization: Bearer <jwt>`; cria cliente Supabase com esse JWT → **todas as escritas respeitam RLS** (auth.uid() do usuário, usado em `created_by`).
+- Usa `LOVABLE_API_KEY` (já configurada) para chamar `https://ai.gateway.lovable.dev/v1/chat/completions`.
+- Modelo padrão: `google/gemini-2.5-pro` (melhor reasoning + tool calling).
+- Cada tool com `parameters` JSON Schema; valida com Zod antes de executar.
+- Limite: **máx. 8 iterações** de tool-calling por requisição.
+- Trata 429 (rate limit) e 402 (créditos) com mensagens amigáveis.
+- Para `send_whatsapp_message` e similares: invoca a edge function `whatsapp-send-text` existente passando o JWT do usuário, garantindo que tokens Z-API permaneçam só no backend.
+- CORS liberado.
+
+---
+
+## Comportamento UX
+
+- Widget só aparece quando `user` está logado (via `useAuth`).
+- Estado "pensando" mostra spinner + texto "Processando…" / "Executando ação…" quando há tool em execução.
+- Após `propose_action`, chat exibe `AIConfirmCard`:
+  - Título da ação (ex.: "Enviar WhatsApp para Maria Silva")
+  - Resumo em markdown (destinatário, prévia da mensagem, valor, etc.)
+  - Botões **Confirmar** / **Cancelar**
+- Ao concluir ação de escrita, invalida queries do React Query relacionadas (clientes, OSs, agenda, cobranças) para refletir mudanças imediatamente.
+- Botão "Nova conversa" limpa histórico.
+
+---
+
+## Segurança
+
+- Edge function valida JWT antes de executar.
+- Operações no banco usam cliente Supabase com JWT do usuário → RLS aplicada.
+- Tools de escrita validam payload com Zod antes de tocar o banco.
+- Nenhum SQL bruto; apenas `supabase-js` tipado.
+- Tokens Z-API permanecem no backend (chamada via edge function existente).
+- Envio de WhatsApp **sempre** exige confirmação humana via `propose_action`.
+
+---
+
+## Fora do escopo (iterações futuras)
+
+- Persistência de histórico de conversas no banco.
+- Streaming token-a-token (a v1 usa resposta não-stream para simplificar tool-calling).
+- Voz (speech-to-text).
+- Envio em lote de WhatsApp (ex.: "lembrar todos os clientes com cobrança vencida") — adicionável depois com salvaguardas extras.
