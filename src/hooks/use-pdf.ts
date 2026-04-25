@@ -45,6 +45,7 @@ export function usePDFData(serviceOrderId: string | undefined) {
           phone: get('phone'),
           email: get('email'),
           cnpj: get('cnpj'),
+          logo_url: get('company_logo_url') || undefined,
         },
         bank: {
           bank_name: get('bank_name') || undefined,
