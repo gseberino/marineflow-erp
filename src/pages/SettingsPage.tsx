@@ -426,6 +426,7 @@ function CompanyTab() {
     uploadLogoBlob(blob, 'png');
   };
 
+  const handleLogoRemove = async () => {
     setLogoUploading(true);
     try {
       const exts = ['png', 'jpg', 'jpeg', 'webp', 'svg'];
