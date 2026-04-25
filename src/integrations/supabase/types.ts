@@ -1771,6 +1771,7 @@ export type Database = {
           discount_amount: number | null
           estimated_hours: number | null
           extra_notes: string | null
+          ferry_cost: number | null
           grand_total: number | null
           hourly_rate: number | null
           id: string
@@ -1813,6 +1814,8 @@ export type Database = {
           travel_cost_per_km: number | null
           travel_cost_total: number | null
           travel_distance_km: number | null
+          travel_hours: number | null
+          travel_type: string | null
           updated_at: string
           vessel_id: string
         }
@@ -1836,6 +1839,7 @@ export type Database = {
           discount_amount?: number | null
           estimated_hours?: number | null
           extra_notes?: string | null
+          ferry_cost?: number | null
           grand_total?: number | null
           hourly_rate?: number | null
           id?: string
@@ -1878,6 +1882,8 @@ export type Database = {
           travel_cost_per_km?: number | null
           travel_cost_total?: number | null
           travel_distance_km?: number | null
+          travel_hours?: number | null
+          travel_type?: string | null
           updated_at?: string
           vessel_id: string
         }
@@ -1901,6 +1907,7 @@ export type Database = {
           discount_amount?: number | null
           estimated_hours?: number | null
           extra_notes?: string | null
+          ferry_cost?: number | null
           grand_total?: number | null
           hourly_rate?: number | null
           id?: string
@@ -1943,6 +1950,8 @@ export type Database = {
           travel_cost_per_km?: number | null
           travel_cost_total?: number | null
           travel_distance_km?: number | null
+          travel_hours?: number | null
+          travel_type?: string | null
           updated_at?: string
           vessel_id?: string
         }
