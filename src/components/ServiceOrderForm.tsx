@@ -1688,6 +1688,16 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleDuplicate}
+                disabled={isNew || duplicate.isPending}
+                className="gap-1"
+              >
+                <Copy className="h-4 w-4" />
+                Duplicar
+              </Button>
             </>
           )}
           {!isNew && !isLocked && currentStatus !== 'cancelled' && (
