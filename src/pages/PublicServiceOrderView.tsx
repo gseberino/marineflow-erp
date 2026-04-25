@@ -107,6 +107,7 @@ export default function PublicServiceOrderView() {
         for (const row of (settingsRes.data || []) as Array<{ key: string; value: string }>) {
           if (row.key) company[row.key] = String(row.value || '');
         }
+        const logoUrl = company.company_logo_url || null;
 
         if (!cancelled) {
           setData({
@@ -371,6 +372,13 @@ export default function PublicServiceOrderView() {
           <CardContent className="pt-6">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div>
+                {logoUrl && (
+                  <img
+                    src={logoUrl}
+                    alt="Logo"
+                    className="h-12 max-w-[160px] object-contain mb-2"
+                  />
+                )}
                 <h1 className="text-2xl font-bold">{company.company_name || 'MarineFlow'}</h1>
                 {company.cnpj && (
                   <p className="text-sm text-muted-foreground">CNPJ: {company.cnpj}</p>
