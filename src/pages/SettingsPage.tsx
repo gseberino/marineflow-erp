@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { MapPin, DollarSign, Users, Globe, Banknote, CreditCard, FileText, Tag, Receipt, Package, Mail, MessageCircle, Pencil } from 'lucide-react';
 import { WhatsAppTemplatesManager } from '@/components/WhatsAppTemplatesManager';
+import { LogoCropDialog } from '@/components/LogoCropDialog';
 import { WhatsAppReminderSettings } from '@/components/WhatsAppReminderSettings';
 import { WhatsAppQueuePanel } from '@/components/WhatsAppQueuePanel';
 import { WhatsAppWebhookValidator } from '@/components/WhatsAppWebhookValidator';
