@@ -739,9 +739,9 @@ Deno.serve(async (req) => {
     const sb = createClient(SUPABASE_URL, ANON, {
       global: { headers: { Authorization: `Bearer ${jwt}` } },
     });
-    const { data: claims, error: claimsErr } = await sb.auth.getClaims(jwt);
-    if (claimsErr || !claims?.claims?.sub) return jr({ error: "Não autenticado" }, 401);
-    const userId = claims.claims.sub as string;
+    const { data: userData, error: userErr } = await sb.auth.getUser(jwt);
+    if (userErr || !userData?.user?.id) return jr({ error: "Não autenticado" }, 401);
+    const userId = userData.user.id;
 
     const admin = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
       auth: { persistSession: false, autoRefreshToken: false },
