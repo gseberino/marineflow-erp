@@ -308,7 +308,8 @@ function CompanyTab() {
   const [loading, setLoading] = useState(true);
   const [logoUrl, setLogoUrl] = useState<string>('');
   const [logoUploading, setLogoUploading] = useState(false);
-  const [form, setForm] = useState({
+  const [cropFile, setCropFile] = useState<File | null>(null);
+  const [cropOpen, setCropOpen] = useState(false);
     company_name: '',
     cnpj: '',
     address_line_1: '',
