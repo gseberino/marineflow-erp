@@ -584,6 +584,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const updateStatus = useUpdateServiceOrderStatus();
   const cancelSO = useCancelServiceOrder();
   const reopenSO = useReopenServiceOrder();
+  const duplicate = useDuplicateServiceOrder();
 
   const { data: parts } = useServiceOrderParts(orderId);
   const addPart = useAddServiceOrderPart();
