@@ -194,7 +194,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
         {!collapsed && (
           <Link to="/" className="flex flex-col">
             {logoSetting ? (
-              <img src={logoSetting} alt="Logo" className="h-8 max-w-[140px] object-contain" />
+              <img src={logoSetting} alt="Logo" className="h-10 w-auto max-w-[140px] object-contain" />
             ) : (
               <>
                 <span className="text-sm font-bold text-sidebar-accent-foreground">MarineFlow</span>
