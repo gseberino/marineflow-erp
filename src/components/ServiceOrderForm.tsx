@@ -2237,53 +2237,161 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               </Button>
             )}
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 gap-3 mt-3">
             <div>
-              <Label>{t.serviceOrders.distance}</Label>
-              <Input type="number" value={form.travel_distance_km}
+              <Label>Distância total (km ida+volta)</Label>
+              <Input type="number" min={0} step="0.1"
+                value={form.travel_distance_km}
                 onChange={(e) => {
                   const km = parseFloat(e.target.value) || 0;
                   set('travel_distance_km', km);
                   if (!manualTravel) {
-                    set('travel_cost_total', km * form.travel_cost_per_km * form.technician_count_for_travel);
+                    set('travel_cost_total', calculateTravelCost({
+                      distance_km: km,
+                      travel_hours: form.travel_hours,
+                      technician_count: form.technician_count_for_travel,
+                      ferry_cost: form.ferry_cost,
+                      travel_type: form.travel_type,
+                    }));
                   }
-                }} />
+                }}
+              />
             </div>
             <div>
-              <Label>Custo/km</Label>
-              <Input type="number" value={form.travel_cost_per_km}
+              <Label>Tempo de deslocamento (horas)</Label>
+              <Input type="number" min={0} step="0.5"
+                value={form.travel_hours}
                 onChange={(e) => {
-                  const cpk = parseFloat(e.target.value) || 0;
-                  set('travel_cost_per_km', cpk);
+                  const hours = parseFloat(e.target.value) || 0;
+                  set('travel_hours', hours);
                   if (!manualTravel) {
-                    set('travel_cost_total', form.travel_distance_km * cpk * form.technician_count_for_travel);
+                    set('travel_cost_total', calculateTravelCost({
+                      distance_km: form.travel_distance_km,
+                      travel_hours: hours,
+                      technician_count: form.technician_count_for_travel,
+                      ferry_cost: form.ferry_cost,
+                      travel_type: form.travel_type,
+                    }));
                   }
-                }} />
+                }}
+              />
             </div>
             <div>
-              <Label>{t.serviceOrders.technicians}</Label>
-              <Input type="number" min={1} value={form.technician_count_for_travel}
-                onChange={(e) => {
-                  const count = parseInt(e.target.value) || 1;
+              <Label>Técnicos no deslocamento</Label>
+              <Select
+                value={String(form.technician_count_for_travel)}
+                onValueChange={(v) => {
+                  const count = parseInt(v) || 1;
                   set('technician_count_for_travel', count);
                   if (!manualTravel) {
-                    set('travel_cost_total', form.travel_distance_km * form.travel_cost_per_km * count);
+                    set('travel_cost_total', calculateTravelCost({
+                      distance_km: form.travel_distance_km,
+                      travel_hours: form.travel_hours,
+                      technician_count: count,
+                      ferry_cost: form.ferry_cost,
+                      travel_type: form.travel_type,
+                    }));
                   }
-                }} />
+                }}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1">1 técnico — R$ 90,00/h</SelectItem>
+                  <SelectItem value="2">2 técnicos — R$ 170,00/h</SelectItem>
+                  <SelectItem value="3">3 técnicos — R$ 250,00/h</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div>
-              <Label className="flex items-center gap-2">
-                {t.serviceOrders.travel} total
-                <label className="flex items-center gap-1 text-xs text-muted-foreground font-normal cursor-pointer">
-                  <input type="checkbox" checked={manualTravel} onChange={(e) => setManualTravel(e.target.checked)} />
-                  Manual
-                </label>
-              </Label>
-              <Input type="number" value={form.travel_cost_total}
-                onChange={(e) => set('travel_cost_total', parseFloat(e.target.value) || 0)}
-                disabled={!manualTravel} className={!manualTravel ? 'bg-muted' : ''} />
+              <Label>Tipo de atendimento</Label>
+              <Select
+                value={form.travel_type}
+                onValueChange={(v: any) => {
+                  set('travel_type', v);
+                  if (!manualTravel) {
+                    set('travel_cost_total', calculateTravelCost({
+                      distance_km: form.travel_distance_km,
+                      travel_hours: form.travel_hours,
+                      technician_count: form.technician_count_for_travel,
+                      ferry_cost: form.ferry_cost,
+                      travel_type: v,
+                    }));
+                  }
+                }}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="comercial">Comercial (sem acréscimo)</SelectItem>
+                  <SelectItem value="urgencia">Urgência fora do horário (+50%)</SelectItem>
+                  <SelectItem value="fds_feriado">Final de semana / Feriado (+30%)</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
+
+          {/* Travessia de balsa */}
+          <div className="mt-3 space-y-2">
+            <div>
+              <Label>Valor da travessia de balsa / ferry (R$)</Label>
+              <MoneyInput
+                value={form.ferry_cost}
+                onValueChange={(v) => {
+                  set('ferry_cost', v);
+                  if (!manualTravel) {
+                    set('travel_cost_total', calculateTravelCost({
+                      distance_km: form.travel_distance_km,
+                      travel_hours: form.travel_hours,
+                      technician_count: form.technician_count_for_travel,
+                      ferry_cost: v,
+                      travel_type: form.travel_type,
+                    }));
+                  }
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Total calculado */}
+          <div className="mt-4 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Label>Total deslocamento</Label>
+              <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                <input type="checkbox" checked={manualTravel}
+                  onChange={(e) => setManualTravel(e.target.checked)} />
+                Ajuste manual
+              </label>
+            </div>
+            {manualTravel ? (
+              <MoneyInput
+                value={form.travel_cost_total}
+                onValueChange={(v) => set('travel_cost_total', v)}
+              />
+            ) : (
+              <span className="text-lg font-semibold">
+                {formatCurrency(form.travel_cost_total)}
+              </span>
+            )}
+          </div>
+
+          {/* Breakdown do cálculo */}
+          {!manualTravel && form.travel_cost_total > 0 && (
+            <div className="mt-2 text-xs text-muted-foreground space-y-0.5">
+              <div>• Km: {form.travel_distance_km} km × R$ 1,10 = {formatCurrency(form.travel_distance_km * 1.10)}</div>
+              {form.travel_hours > 0 && (
+                <div>• Horas: {form.travel_hours}h × {formatCurrency(
+                  form.technician_count_for_travel === 1 ? 90 :
+                  form.technician_count_for_travel === 2 ? 170 : 250
+                )}/h = {formatCurrency(form.travel_hours * (
+                  form.technician_count_for_travel === 1 ? 90 :
+                  form.technician_count_for_travel === 2 ? 170 : 250
+                ))}</div>
+              )}
+              {form.ferry_cost > 0 && <div>• Balsa: {formatCurrency(form.ferry_cost)}</div>}
+              {form.travel_type !== 'comercial' && (
+                <div>• Acréscimo {form.travel_type === 'urgencia' ? '50% (urgência)' : '30% (FDS/feriado)'}</div>
+              )}
+            </div>
+          )}
         </section>
       )}
 
