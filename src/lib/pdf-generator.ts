@@ -65,6 +65,9 @@ export type PDFData = {
     labor_cost_total: number;
     parts_cost_total: number;
     travel_cost_total: number;
+    travel_hours?: number;
+    ferry_cost?: number;
+    travel_type?: string;
     discount_amount: number;
     tax_amount: number;
     operational_cost_total?: number;
@@ -465,7 +468,7 @@ function buildOrderHTML(data: PDFData, options: PDFOptions): string {
     data.parts.length > 0
       ? `<tr><td style="padding:4px 8px;">Peças e materiais</td><td style="padding:4px 8px;text-align:right;">${fmtCurrency(data.serviceOrder.parts_cost_total)}</td></tr>` : '',
     options.showTravelCost && data.serviceOrder.travel_cost_total > 0
-      ? `<tr><td style="padding:4px 8px;">Deslocamento</td><td style="padding:4px 8px;text-align:right;">${fmtCurrency(data.serviceOrder.travel_cost_total)}</td></tr>` : '',
+      ? `<tr><td style="padding:4px 8px;">Deslocamento${data.serviceOrder.travel_type === 'urgencia' ? ' <span style="font-size:10px;color:#888;">(+50% urgência)</span>' : ''}${data.serviceOrder.travel_type === 'fds_feriado' ? ' <span style="font-size:10px;color:#888;">(+30% FDS/feriado)</span>' : ''}</td><td style="padding:4px 8px;text-align:right;">${fmtCurrency(data.serviceOrder.travel_cost_total)}</td></tr>` : '',
     (data.serviceOrder.operational_cost_total ?? 0) > 0
       ? `<tr><td style="padding:4px 8px;">Despesas operacionais</td><td style="padding:4px 8px;text-align:right;">${fmtCurrency(data.serviceOrder.operational_cost_total!)}</td></tr>` : '',
     options.showDiscount && data.serviceOrder.discount_amount > 0
@@ -677,7 +680,7 @@ function buildInvoiceHTML(data: PDFData, options: PDFOptions): string {
     data.parts.length > 0
       ? `<tr><td style="padding:4px 8px;">Peças e materiais</td><td style="padding:4px 8px;text-align:right;">${fmtCurrency(data.serviceOrder.parts_cost_total)}</td></tr>` : '',
     options.showTravelCost && data.serviceOrder.travel_cost_total > 0
-      ? `<tr><td style="padding:4px 8px;">Deslocamento</td><td style="padding:4px 8px;text-align:right;">${fmtCurrency(data.serviceOrder.travel_cost_total)}</td></tr>` : '',
+      ? `<tr><td style="padding:4px 8px;">Deslocamento${data.serviceOrder.travel_type === 'urgencia' ? ' <span style="font-size:10px;color:#888;">(+50% urgência)</span>' : ''}${data.serviceOrder.travel_type === 'fds_feriado' ? ' <span style="font-size:10px;color:#888;">(+30% FDS/feriado)</span>' : ''}</td><td style="padding:4px 8px;text-align:right;">${fmtCurrency(data.serviceOrder.travel_cost_total)}</td></tr>` : '',
     options.showDiscount && data.serviceOrder.discount_amount > 0
       ? `<tr><td style="padding:4px 8px;">Desconto</td><td style="padding:4px 8px;text-align:right;color:#dc2626;">− ${fmtCurrency(data.serviceOrder.discount_amount)}</td></tr>` : '',
     options.showTax && data.serviceOrder.tax_amount > 0
