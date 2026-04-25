@@ -1049,6 +1049,17 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     }
   };
 
+  const handleDuplicate = async () => {
+    if (!orderId) return;
+    try {
+      const newSO = await duplicate.mutateAsync(orderId);
+      toast.success('OS duplicada com sucesso!');
+      navigate(`/service-orders/${(newSO as any).id}`);
+    } catch (e: any) {
+      toast.error(e?.message || 'Erro ao duplicar OS');
+    }
+  };
+
   // Ensure the product exists in the catalog. If product_id is empty,
   // create a new entry in `products` and return the new id.
   const ensureProductInCatalog = async (draft: PartCardDraft): Promise<string> => {
