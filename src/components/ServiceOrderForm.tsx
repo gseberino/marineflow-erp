@@ -24,6 +24,7 @@ import {
   STATUS_TRANSITIONS,
   useCancelServiceOrder,
   useReopenServiceOrder,
+  useDuplicateServiceOrder,
 } from '@/hooks/use-service-orders';
 import { useAppUsers, useCommissionableUsers, USER_ROLES } from '@/hooks/use-app-users';
 import { usePaymentConditionPresets } from '@/hooks/use-payment-conditions';
