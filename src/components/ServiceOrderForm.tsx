@@ -46,7 +46,7 @@ import { generatePDF, DEFAULT_PDF_OPTIONS } from '@/lib/pdf-generator';
 import type { PDFOptions } from '@/lib/pdf-generator';
 import { PDFOptionsDialog } from '@/components/PDFOptionsDialog';
 import { OPERATIONAL_EXPENSE_CATEGORIES } from '@/lib/expense-categories';
-import { calculateDisplacement } from '@/lib/displacement';
+import { calculateDisplacement, calculateTravelCost } from '@/lib/displacement';
 import { statusConfig, priorityConfig } from '@/lib/constants';
 import { StatusBadge } from '@/components/StatusBadge';
 import { ServiceFormDialog } from '@/components/ServiceFormDialog';
@@ -627,6 +627,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     travel_cost_per_km: 3.5,
     technician_count_for_travel: 1,
     travel_cost_total: 0,
+    travel_hours: 0,
+    ferry_cost: 0,
+    travel_type: 'comercial' as 'comercial' | 'urgencia' | 'fds_feriado',
     discount_amount: 0,
     tax_amount: 0,
     subcontract_cost_total: 0,
@@ -854,6 +857,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         travel_cost_per_km: d.travel_cost_per_km || 3.5,
         technician_count_for_travel: d.technician_count_for_travel || 1,
         travel_cost_total: d.travel_cost_total || 0,
+        travel_hours: d.travel_hours || 0,
+        ferry_cost: d.ferry_cost || 0,
+        travel_type: (d.travel_type as any) || 'comercial',
         discount_amount: d.discount_amount || 0,
         tax_amount: d.tax_amount || 0,
         subcontract_cost_total: d.subcontract_cost_total || 0,
