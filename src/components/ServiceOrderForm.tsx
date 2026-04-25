@@ -24,6 +24,7 @@ import {
   STATUS_TRANSITIONS,
   useCancelServiceOrder,
   useReopenServiceOrder,
+  useDuplicateServiceOrder,
 } from '@/hooks/use-service-orders';
 import { useAppUsers, useCommissionableUsers, USER_ROLES } from '@/hooks/use-app-users';
 import { usePaymentConditionPresets } from '@/hooks/use-payment-conditions';
@@ -67,7 +68,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle, Pencil, Paperclip, X, FileImage, ExternalLink, Package } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle, Pencil, Paperclip, X, FileImage, ExternalLink, Package, Copy } from 'lucide-react';
 import { toast } from 'sonner';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { MoneyInput } from '@/components/MoneyInput';
@@ -583,6 +584,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const updateStatus = useUpdateServiceOrderStatus();
   const cancelSO = useCancelServiceOrder();
   const reopenSO = useReopenServiceOrder();
+  const duplicate = useDuplicateServiceOrder();
 
   const { data: parts } = useServiceOrderParts(orderId);
   const addPart = useAddServiceOrderPart();
@@ -1044,6 +1046,17 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       toast.success(`Status alterado para ${(t.status as Record<string, string>)[newStatus]}`);
     } catch (e: any) {
       toast.error(e.message || 'Erro ao alterar status');
+    }
+  };
+
+  const handleDuplicate = async () => {
+    if (!orderId) return;
+    try {
+      const newSO = await duplicate.mutateAsync(orderId);
+      toast.success('OS duplicada com sucesso!');
+      navigate(`/service-orders/${(newSO as any).id}`);
+    } catch (e: any) {
+      toast.error(e?.message || 'Erro ao duplicar OS');
     }
   };
 
@@ -1675,6 +1688,16 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleDuplicate}
+                disabled={isNew || duplicate.isPending}
+                className="gap-1"
+              >
+                <Copy className="h-4 w-4" />
+                Duplicar
+              </Button>
             </>
           )}
           {!isNew && !isLocked && currentStatus !== 'cancelled' && (
