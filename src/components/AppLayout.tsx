@@ -23,6 +23,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { NotificationBell } from '@/components/NotificationBell';
 import { WhatsAppBell } from '@/components/WhatsAppBell';
 import { PWAInstallPrompt } from '@/components/PWAInstallPrompt';
+import { AIAgentWidget } from '@/components/ai/AIAgentWidget';
 import { OfflineIndicator } from '@/components/OfflineIndicator';
 import { DiagnosticExportButton } from '@/components/DiagnosticExportButton';
 
@@ -348,6 +349,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
         </main>
       </div>
       <PWAInstallPrompt />
+      <AIAgentWidget />
     </div>
   );
 }
