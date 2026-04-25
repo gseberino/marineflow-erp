@@ -361,10 +361,70 @@ function CompanyTab() {
           pix_key: map.pix_key || '',
           app_public_url: map.app_public_url || 'https://hbrmarine.online',
         }));
+        setLogoUrl(map.company_logo_url || '');
       }
       setLoading(false);
     })();
   }, []);
+
+  const handleLogoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!/^image\/(png|jpeg|jpg|webp|svg\+xml)$/.test(file.type)) {
+      toast.error('Formato inválido. Use PNG, JPG, WEBP ou SVG.');
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('Arquivo muito grande. Máximo 2MB.');
+      return;
+    }
+    setLogoUploading(true);
+    try {
+      const ext = file.name.split('.').pop()?.toLowerCase() || 'png';
+      const path = `company/logo.${ext}`;
+      // Remove any prior logo files with different extension
+      try {
+        const exts = ['png', 'jpg', 'jpeg', 'webp', 'svg'];
+        await supabase.storage.from('company-assets').remove(
+          exts.filter(x => x !== ext).map(x => `company/logo.${x}`)
+        );
+      } catch {}
+      const { error: upErr } = await supabase.storage
+        .from('company-assets')
+        .upload(path, file, { upsert: true, contentType: file.type, cacheControl: '3600' });
+      if (upErr) throw upErr;
+      const { data: pub } = supabase.storage.from('company-assets').getPublicUrl(path);
+      const url = `${pub.publicUrl}?t=${Date.now()}`;
+      const { error: dbErr } = await supabase
+        .from('app_settings')
+        .upsert({ key: 'company_logo_url', value: url }, { onConflict: 'key' });
+      if (dbErr) throw dbErr;
+      setLogoUrl(url);
+      toast.success('Logo enviado com sucesso');
+    } catch (err: any) {
+      toast.error(err?.message || 'Erro ao enviar logo');
+    } finally {
+      setLogoUploading(false);
+    }
+  };
+
+  const handleLogoRemove = async () => {
+    setLogoUploading(true);
+    try {
+      const exts = ['png', 'jpg', 'jpeg', 'webp', 'svg'];
+      await supabase.storage.from('company-assets').remove(
+        exts.map(x => `company/logo.${x}`)
+      );
+      await supabase.from('app_settings').delete().eq('key', 'company_logo_url');
+      setLogoUrl('');
+      toast.success('Logo removido');
+    } catch (err: any) {
+      toast.error(err?.message || 'Erro ao remover logo');
+    } finally {
+      setLogoUploading(false);
+    }
+  };
 
   const set = (key: string, value: string) =>
     setForm(prev => ({ ...prev, [key]: value }));
