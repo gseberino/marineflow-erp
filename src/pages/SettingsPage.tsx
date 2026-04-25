@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { MapPin, DollarSign, Users, Globe, Banknote, CreditCard, FileText, Tag, Receipt, Package, Mail, MessageCircle, Pencil } from 'lucide-react';
 import { WhatsAppTemplatesManager } from '@/components/WhatsAppTemplatesManager';
+import { LogoCropDialog } from '@/components/LogoCropDialog';
 import { WhatsAppReminderSettings } from '@/components/WhatsAppReminderSettings';
 import { WhatsAppQueuePanel } from '@/components/WhatsAppQueuePanel';
 import { WhatsAppWebhookValidator } from '@/components/WhatsAppWebhookValidator';
@@ -307,6 +308,8 @@ function CompanyTab() {
   const [loading, setLoading] = useState(true);
   const [logoUrl, setLogoUrl] = useState<string>('');
   const [logoUploading, setLogoUploading] = useState(false);
+  const [cropFile, setCropFile] = useState<File | null>(null);
+  const [cropOpen, setCropOpen] = useState(false);
   const [form, setForm] = useState({
     company_name: '',
     cnpj: '',
@@ -367,7 +370,7 @@ function CompanyTab() {
     })();
   }, []);
 
-  const handleLogoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLogoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
@@ -379,11 +382,19 @@ function CompanyTab() {
       toast.error('Arquivo muito grande. Máximo 2MB.');
       return;
     }
+    // SVG: upload as-is (no raster crop). Otherwise open cropper.
+    if (file.type === 'image/svg+xml') {
+      uploadLogoBlob(file, 'svg');
+    } else {
+      setCropFile(file);
+      setCropOpen(true);
+    }
+  };
+
+  const uploadLogoBlob = async (blob: Blob, ext: string) => {
     setLogoUploading(true);
     try {
-      const ext = file.name.split('.').pop()?.toLowerCase() || 'png';
       const path = `company/logo.${ext}`;
-      // Remove any prior logo files with different extension
       try {
         const exts = ['png', 'jpg', 'jpeg', 'webp', 'svg'];
         await supabase.storage.from('company-assets').remove(
@@ -392,7 +403,7 @@ function CompanyTab() {
       } catch {}
       const { error: upErr } = await supabase.storage
         .from('company-assets')
-        .upload(path, file, { upsert: true, contentType: file.type, cacheControl: '3600' });
+        .upload(path, blob, { upsert: true, contentType: blob.type || `image/${ext}`, cacheControl: '3600' });
       if (upErr) throw upErr;
       const { data: pub } = supabase.storage.from('company-assets').getPublicUrl(path);
       const url = `${pub.publicUrl}?t=${Date.now()}`;
@@ -407,6 +418,12 @@ function CompanyTab() {
     } finally {
       setLogoUploading(false);
     }
+  };
+
+  const handleCropConfirm = (blob: Blob) => {
+    setCropOpen(false);
+    setCropFile(null);
+    uploadLogoBlob(blob, 'png');
   };
 
   const handleLogoRemove = async () => {
@@ -465,7 +482,8 @@ function CompanyTab() {
           <FileText className="h-4 w-4" /> Logo da empresa
         </h3>
         <p className="text-xs text-muted-foreground mb-4">
-          Aparece no cabeçalho dos PDFs. Recomendado: PNG transparente, mín. 200px de largura.
+          Aparece no cabeçalho dos PDFs, no menu, no login e na página pública.
+          Proporção 2:1 (recomendado 320×160px). PNG transparente.
         </p>
         <div className="flex items-center gap-4">
           {logoUrl ? (
@@ -473,7 +491,7 @@ function CompanyTab() {
               <img
                 src={logoUrl}
                 alt="Logo da empresa"
-                style={{ width: 120, height: 60, objectFit: 'contain' }}
+                style={{ width: 160, height: 80, objectFit: 'contain' }}
                 className="rounded border bg-white p-1"
               />
               <button
@@ -488,7 +506,7 @@ function CompanyTab() {
             </div>
           ) : (
             <div
-              style={{ width: 120, height: 60 }}
+              style={{ width: 160, height: 80 }}
               className="rounded border border-dashed flex items-center justify-center text-[10px] text-muted-foreground"
             >
               sem logo
@@ -514,6 +532,12 @@ function CompanyTab() {
             </Button>
           </div>
         </div>
+        <LogoCropDialog
+          file={cropFile}
+          open={cropOpen}
+          onOpenChange={(o) => { setCropOpen(o); if (!o) setCropFile(null); }}
+          onConfirm={handleCropConfirm}
+        />
       </div>
 
       <div className="rounded-xl border bg-card p-6 shadow-sm">
