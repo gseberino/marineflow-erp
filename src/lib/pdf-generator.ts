@@ -44,6 +44,7 @@ export type PDFData = {
     phone: string;
     email: string;
     cnpj: string;
+    logo_url?: string;
   };
   bank?: {
     bank_name?: string;
@@ -321,17 +322,30 @@ const esc = (v: unknown): string => {
 
 
 function companyHeaderHTML(company: PDFData['company']): string {
+  const logoHtml = company.logo_url
+    ? `<img src="${esc(company.logo_url)}" alt="${esc(company.name)}"
+        style="max-height:60px;max-width:180px;object-fit:contain;"
+        crossorigin="anonymous" />`
+    : `<div style="font-size:22px;font-weight:800;color:#1e3a5f;letter-spacing:-0.5px;">
+        ${esc(company.name)}
+       </div>`;
+
   return `
-<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #1e3a5f;padding-bottom:12px;margin-bottom:16px;">
-  <div>
-    <h1 style="font-size:20px;color:#1e3a5f;margin:0;">${esc(company.name)}</h1>
-  </div>
-  <div style="text-align:right;font-size:11px;color:#6b7280;">
-    <div>${esc(company.address)}${company.city ? `, ${esc(company.city)}` : ''}${company.state ? ` - ${esc(company.state)}` : ''}</div>
-    <div>${company.postal_code ? `CEP: ${esc(company.postal_code)}` : ''}${company.phone ? ` · Tel: ${esc(company.phone)}` : ''}</div>
-    <div>${company.email ? `Email: ${esc(company.email)}` : ''}${company.cnpj ? ` · CNPJ: ${esc(company.cnpj)}` : ''}</div>
-  </div>
-</div>`;
+    <div style="display:flex;align-items:center;justify-content:space-between;
+                padding-bottom:16px;border-bottom:2px solid #1e3a5f;margin-bottom:20px;">
+      <div style="display:flex;align-items:center;gap:14px;">
+        ${logoHtml}
+        ${company.logo_url ? `<div style="font-size:15px;font-weight:700;color:#1e3a5f;">
+          ${esc(company.name)}
+        </div>` : ''}
+      </div>
+      <div style="text-align:right;font-size:11px;color:#6b7280;line-height:1.6;">
+        <div>${esc(company.address)}${company.city ? `, ${esc(company.city)}` : ''}${company.state ? ` - ${esc(company.state)}` : ''}</div>
+        <div>${company.postal_code ? `CEP: ${esc(company.postal_code)}` : ''}${company.phone ? ` · Tel: ${esc(company.phone)}` : ''}</div>
+        <div>${company.email ? `Email: ${esc(company.email)}` : ''}${company.cnpj ? ` · CNPJ: ${esc(company.cnpj)}` : ''}</div>
+      </div>
+    </div>
+  `;
 }
 
 function pageWrapper(title: string, body: string): string {

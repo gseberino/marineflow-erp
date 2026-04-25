@@ -305,6 +305,8 @@ function CompanyTab() {
   const { t } = useI18n();
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [logoUrl, setLogoUrl] = useState<string>('');
+  const [logoUploading, setLogoUploading] = useState(false);
   const [form, setForm] = useState({
     company_name: '',
     cnpj: '',
@@ -359,10 +361,70 @@ function CompanyTab() {
           pix_key: map.pix_key || '',
           app_public_url: map.app_public_url || 'https://hbrmarine.online',
         }));
+        setLogoUrl(map.company_logo_url || '');
       }
       setLoading(false);
     })();
   }, []);
+
+  const handleLogoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!/^image\/(png|jpeg|jpg|webp|svg\+xml)$/.test(file.type)) {
+      toast.error('Formato inválido. Use PNG, JPG, WEBP ou SVG.');
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('Arquivo muito grande. Máximo 2MB.');
+      return;
+    }
+    setLogoUploading(true);
+    try {
+      const ext = file.name.split('.').pop()?.toLowerCase() || 'png';
+      const path = `company/logo.${ext}`;
+      // Remove any prior logo files with different extension
+      try {
+        const exts = ['png', 'jpg', 'jpeg', 'webp', 'svg'];
+        await supabase.storage.from('company-assets').remove(
+          exts.filter(x => x !== ext).map(x => `company/logo.${x}`)
+        );
+      } catch {}
+      const { error: upErr } = await supabase.storage
+        .from('company-assets')
+        .upload(path, file, { upsert: true, contentType: file.type, cacheControl: '3600' });
+      if (upErr) throw upErr;
+      const { data: pub } = supabase.storage.from('company-assets').getPublicUrl(path);
+      const url = `${pub.publicUrl}?t=${Date.now()}`;
+      const { error: dbErr } = await supabase
+        .from('app_settings')
+        .upsert({ key: 'company_logo_url', value: url }, { onConflict: 'key' });
+      if (dbErr) throw dbErr;
+      setLogoUrl(url);
+      toast.success('Logo enviado com sucesso');
+    } catch (err: any) {
+      toast.error(err?.message || 'Erro ao enviar logo');
+    } finally {
+      setLogoUploading(false);
+    }
+  };
+
+  const handleLogoRemove = async () => {
+    setLogoUploading(true);
+    try {
+      const exts = ['png', 'jpg', 'jpeg', 'webp', 'svg'];
+      await supabase.storage.from('company-assets').remove(
+        exts.map(x => `company/logo.${x}`)
+      );
+      await supabase.from('app_settings').delete().eq('key', 'company_logo_url');
+      setLogoUrl('');
+      toast.success('Logo removido');
+    } catch (err: any) {
+      toast.error(err?.message || 'Erro ao remover logo');
+    } finally {
+      setLogoUploading(false);
+    }
+  };
 
   const set = (key: string, value: string) =>
     setForm(prev => ({ ...prev, [key]: value }));
@@ -398,6 +460,62 @@ function CompanyTab() {
 
   return (
     <div className="space-y-6 max-w-2xl">
+      <div className="rounded-xl border bg-card p-6 shadow-sm">
+        <h3 className="text-sm font-semibold mb-1 flex items-center gap-2">
+          <FileText className="h-4 w-4" /> Logo da empresa
+        </h3>
+        <p className="text-xs text-muted-foreground mb-4">
+          Aparece no cabeçalho dos PDFs. Recomendado: PNG transparente, mín. 200px de largura.
+        </p>
+        <div className="flex items-center gap-4">
+          {logoUrl ? (
+            <div className="relative inline-block">
+              <img
+                src={logoUrl}
+                alt="Logo da empresa"
+                style={{ width: 120, height: 60, objectFit: 'contain' }}
+                className="rounded border bg-white p-1"
+              />
+              <button
+                type="button"
+                onClick={handleLogoRemove}
+                disabled={logoUploading}
+                className="absolute -top-2 -right-2 h-5 w-5 rounded-full bg-destructive text-destructive-foreground text-xs leading-none flex items-center justify-center shadow disabled:opacity-50"
+                aria-label="Remover logo"
+              >
+                ×
+              </button>
+            </div>
+          ) : (
+            <div
+              style={{ width: 120, height: 60 }}
+              className="rounded border border-dashed flex items-center justify-center text-[10px] text-muted-foreground"
+            >
+              sem logo
+            </div>
+          )}
+          <div>
+            <input
+              id="company-logo-upload"
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/svg+xml"
+              className="hidden"
+              onChange={handleLogoSelect}
+              disabled={logoUploading}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => document.getElementById('company-logo-upload')?.click()}
+              disabled={logoUploading}
+            >
+              {logoUploading ? 'Enviando...' : (logoUrl ? 'Trocar logo' : 'Enviar logo')}
+            </Button>
+          </div>
+        </div>
+      </div>
+
       <div className="rounded-xl border bg-card p-6 shadow-sm">
         <h3 className="text-sm font-semibold mb-4 flex items-center gap-2">
           <MapPin className="h-4 w-4" /> Dados da Empresa
