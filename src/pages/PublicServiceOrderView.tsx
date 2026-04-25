@@ -377,7 +377,7 @@ export default function PublicServiceOrderView() {
                   <img
                     src={logoUrl}
                     alt="Logo"
-                    className="h-12 max-w-[160px] object-contain mb-2"
+                    className="h-12 sm:h-14 w-auto max-w-[200px] object-contain mb-3"
                   />
                 )}
                 <h1 className="text-2xl font-bold">{company.company_name || 'MarineFlow'}</h1>
