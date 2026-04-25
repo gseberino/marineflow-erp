@@ -482,7 +482,8 @@ function CompanyTab() {
           <FileText className="h-4 w-4" /> Logo da empresa
         </h3>
         <p className="text-xs text-muted-foreground mb-4">
-          Aparece no cabeçalho dos PDFs. Recomendado: PNG transparente, mín. 200px de largura.
+          Aparece no cabeçalho dos PDFs, no menu, no login e na página pública.
+          Proporção 2:1 (recomendado 320×160px). PNG transparente.
         </p>
         <div className="flex items-center gap-4">
           {logoUrl ? (
@@ -490,7 +491,7 @@ function CompanyTab() {
               <img
                 src={logoUrl}
                 alt="Logo da empresa"
-                style={{ width: 120, height: 60, objectFit: 'contain' }}
+                style={{ width: 160, height: 80, objectFit: 'contain' }}
                 className="rounded border bg-white p-1"
               />
               <button
@@ -505,7 +506,7 @@ function CompanyTab() {
             </div>
           ) : (
             <div
-              style={{ width: 120, height: 60 }}
+              style={{ width: 160, height: 80 }}
               className="rounded border border-dashed flex items-center justify-center text-[10px] text-muted-foreground"
             >
               sem logo
@@ -531,6 +532,12 @@ function CompanyTab() {
             </Button>
           </div>
         </div>
+        <LogoCropDialog
+          file={cropFile}
+          open={cropOpen}
+          onOpenChange={(o) => { setCropOpen(o); if (!o) setCropFile(null); }}
+          onConfirm={handleCropConfirm}
+        />
       </div>
 
       <div className="rounded-xl border bg-card p-6 shadow-sm">
