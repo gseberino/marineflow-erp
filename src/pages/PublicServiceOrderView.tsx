@@ -47,6 +47,7 @@ interface PublicData {
 export default function PublicServiceOrderView() {
   const { token } = useParams<{ token: string }>();
   const [data, setData] = useState<PublicData | null>(null);
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
@@ -109,6 +110,7 @@ export default function PublicServiceOrderView() {
         }
 
         if (!cancelled) {
+          setLogoUrl(company.company_logo_url || null);
           setData({
             order,
             client: clientRes.data,
@@ -371,6 +373,13 @@ export default function PublicServiceOrderView() {
           <CardContent className="pt-6">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div>
+                {logoUrl && (
+                  <img
+                    src={logoUrl}
+                    alt="Logo"
+                    className="h-12 max-w-[160px] object-contain mb-2"
+                  />
+                )}
                 <h1 className="text-2xl font-bold">{company.company_name || 'MarineFlow'}</h1>
                 {company.cnpj && (
                   <p className="text-sm text-muted-foreground">CNPJ: {company.cnpj}</p>

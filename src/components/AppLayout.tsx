@@ -3,6 +3,8 @@ import { cn } from '@/lib/utils';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useI18n } from '@/i18n';
 import { useAuth } from '@/hooks/use-auth';
+import { useQuery } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
 import {
   LayoutDashboard, Users, Ship, Anchor, Package, ClipboardList,
   DollarSign, BarChart3, Settings, ChevronLeft, ChevronRight, Menu,
@@ -54,6 +56,19 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const { t } = useI18n();
   const { user, signOut } = useAuth();
+
+  const { data: logoSetting } = useQuery({
+    queryKey: ['company-logo'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('app_settings')
+        .select('value')
+        .eq('key', 'company_logo_url')
+        .maybeSingle();
+      return data?.value || null;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
 
   const isActive = (path: string) => {
     if (path === '/') return location.pathname === '/';
@@ -178,8 +193,14 @@ export function AppLayout({ children }: { children: ReactNode }) {
         </Link>
         {!collapsed && (
           <Link to="/" className="flex flex-col">
-            <span className="text-sm font-bold text-sidebar-accent-foreground">MarineFlow</span>
-            <span className="text-[10px] text-sidebar-foreground">Marine ERP</span>
+            {logoSetting ? (
+              <img src={logoSetting} alt="Logo" className="h-8 max-w-[140px] object-contain" />
+            ) : (
+              <>
+                <span className="text-sm font-bold text-sidebar-accent-foreground">MarineFlow</span>
+                <span className="text-[10px] text-sidebar-foreground">Marine ERP</span>
+              </>
+            )}
           </Link>
         )}
       </div>

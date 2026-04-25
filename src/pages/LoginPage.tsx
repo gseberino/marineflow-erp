@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/use-auth';
 import { supabase } from '@/integrations/supabase/client';
+import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -22,6 +23,19 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  const { data: logoUrl } = useQuery({
+    queryKey: ['company-logo'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('app_settings')
+        .select('value')
+        .eq('key', 'company_logo_url')
+        .maybeSingle();
+      return data?.value || null;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
 
   const [showForgot, setShowForgot] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
@@ -74,15 +88,21 @@ export default function LoginPage() {
       <div className="w-full max-w-sm space-y-8">
         {/* Logo */}
         <div className="flex flex-col items-center gap-2">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary">
-            <Anchor className="h-7 w-7 text-primary-foreground" />
-          </div>
-          <div className="text-center">
-            <h1 className="text-2xl font-bold tracking-tight">MarineFlow</h1>
-            <p className="text-sm text-muted-foreground">
-              Sistema de Gestão Náutica
-            </p>
-          </div>
+          {logoUrl ? (
+            <img src={logoUrl} alt="Logo" className="h-16 max-w-[200px] object-contain" />
+          ) : (
+            <>
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary">
+                <Anchor className="h-7 w-7 text-primary-foreground" />
+              </div>
+              <div className="text-center">
+                <h1 className="text-2xl font-bold tracking-tight">MarineFlow</h1>
+                <p className="text-sm text-muted-foreground">
+                  Sistema de Gestão Náutica
+                </p>
+              </div>
+            </>
+          )}
         </div>
 
         {/* Form */}
