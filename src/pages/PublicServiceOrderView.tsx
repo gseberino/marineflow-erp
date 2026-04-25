@@ -108,9 +108,9 @@ export default function PublicServiceOrderView() {
         for (const row of (settingsRes.data || []) as Array<{ key: string; value: string }>) {
           if (row.key) company[row.key] = String(row.value || '');
         }
-        const logoUrl = company.company_logo_url || null;
 
         if (!cancelled) {
+          setLogoUrl(company.company_logo_url || null);
           setData({
             order,
             client: clientRes.data,
