@@ -461,6 +461,62 @@ function CompanyTab() {
   return (
     <div className="space-y-6 max-w-2xl">
       <div className="rounded-xl border bg-card p-6 shadow-sm">
+        <h3 className="text-sm font-semibold mb-1 flex items-center gap-2">
+          <FileText className="h-4 w-4" /> Logo da empresa
+        </h3>
+        <p className="text-xs text-muted-foreground mb-4">
+          Aparece no cabeçalho dos PDFs. Recomendado: PNG transparente, mín. 200px de largura.
+        </p>
+        <div className="flex items-center gap-4">
+          {logoUrl ? (
+            <div className="relative inline-block">
+              <img
+                src={logoUrl}
+                alt="Logo da empresa"
+                style={{ width: 120, height: 60, objectFit: 'contain' }}
+                className="rounded border bg-white p-1"
+              />
+              <button
+                type="button"
+                onClick={handleLogoRemove}
+                disabled={logoUploading}
+                className="absolute -top-2 -right-2 h-5 w-5 rounded-full bg-destructive text-destructive-foreground text-xs leading-none flex items-center justify-center shadow disabled:opacity-50"
+                aria-label="Remover logo"
+              >
+                ×
+              </button>
+            </div>
+          ) : (
+            <div
+              style={{ width: 120, height: 60 }}
+              className="rounded border border-dashed flex items-center justify-center text-[10px] text-muted-foreground"
+            >
+              sem logo
+            </div>
+          )}
+          <div>
+            <input
+              id="company-logo-upload"
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/svg+xml"
+              className="hidden"
+              onChange={handleLogoSelect}
+              disabled={logoUploading}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => document.getElementById('company-logo-upload')?.click()}
+              disabled={logoUploading}
+            >
+              {logoUploading ? 'Enviando...' : (logoUrl ? 'Trocar logo' : 'Enviar logo')}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-xl border bg-card p-6 shadow-sm">
         <h3 className="text-sm font-semibold mb-4 flex items-center gap-2">
           <MapPin className="h-4 w-4" /> Dados da Empresa
         </h3>
