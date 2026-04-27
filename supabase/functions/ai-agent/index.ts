@@ -672,10 +672,21 @@ async function executeTool(
     }
 
     case "create_service_order": {
-      // Gera número da OS no formato SO-YYYY-XXXXXX
+      // Gera número sequencial da OS no formato SO-YYYY-NNNNN
       const year = new Date().getFullYear();
-      const rand = Math.floor(100000 + Math.random() * 900000);
-      const num = `SO-${year}-${rand}`;
+      const { data: lastSO } = await sb
+        .from("service_orders")
+        .select("service_order_number")
+        .like("service_order_number", `SO-${year}-%`)
+        .order("service_order_number", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      let seq = 1;
+      if (lastSO?.service_order_number) {
+        const match = lastSO.service_order_number.match(/(\d+)$/);
+        if (match) seq = parseInt(match[1], 10) + 1;
+      }
+      const num = `SO-${year}-${String(seq).padStart(5, "0")}`;
       const { items, ...rest } = args;
       const { data, error } = await sb
         .from("service_orders")
