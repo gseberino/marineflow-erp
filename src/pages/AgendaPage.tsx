@@ -188,6 +188,17 @@ export default function AgendaPage() {
               <span className="hidden sm:inline">{view === 'week' ? 'Semana seguinte' : 'Mês seguinte'}</span>
               <ChevronRight className="h-4 w-4" />
             </Button>
+            <Select value={techFilter} onValueChange={setTechFilter}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Filtrar por técnico" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos os técnicos</SelectItem>
+                {technicians.map((tech) => (
+                  <SelectItem key={tech.id} value={tech.id}>{tech.full_name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
@@ -202,8 +213,8 @@ export default function AgendaPage() {
         ) : view === 'week' ? (
           <WeekView
             weekStart={range.from}
-            orders={orders}
-            tasks={tasks}
+            orders={filteredOrders}
+            tasks={filteredTasks}
             technicians={technicians}
             onCardClick={(id) => navigate(`/service-orders/${id}`)}
             onCellClick={openQuickSchedule}
@@ -212,8 +223,8 @@ export default function AgendaPage() {
         ) : (
           <MonthView
             cursor={cursor}
-            orders={orders}
-            tasks={tasks}
+            orders={filteredOrders}
+            tasks={filteredTasks}
             selectedDay={selectedDay}
             onSelectDay={setSelectedDay}
             onCardClick={(id) => navigate(`/service-orders/${id}`)}
