@@ -39,6 +39,9 @@ export function useAIAgent(context: AIContext) {
     async (msgs: ChatMessage[]) => {
       setLoading(true);
       setError(null);
+      setLoadingMsg('Consultando dados...');
+      const progressTimer = setTimeout(() => setLoadingMsg('Processando...'), 2000);
+      const progressTimer2 = setTimeout(() => setLoadingMsg('Quase lá...'), 5000);
       try {
         const { data, error } = await supabase.functions.invoke('ai-agent', {
           body: { messages: msgs, context },
@@ -73,6 +76,9 @@ export function useAIAgent(context: AIContext) {
         setError(msg);
         setDisplay((d) => [...d, { kind: 'message', role: 'assistant', content: `❌ ${msg}` }]);
       } finally {
+        clearTimeout(progressTimer);
+        clearTimeout(progressTimer2);
+        setLoadingMsg('');
         setLoading(false);
       }
     },
