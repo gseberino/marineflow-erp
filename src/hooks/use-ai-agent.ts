@@ -25,6 +25,7 @@ export function useAIAgent(context: AIContext) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [display, setDisplay] = useState<DisplayItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMsg, setLoadingMsg] = useState<string>('');
   const [activeProposal, setActiveProposal] = useState<{ idx: number; proposal: Proposal } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
