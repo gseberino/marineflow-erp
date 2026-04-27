@@ -14,7 +14,7 @@ export function AIAgentWidget() {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
   const context = useAIContext();
-  const { display, loading, sendMessage, confirmProposal, cancelProposal, reset, activeProposal } =
+  const { display, loading, loadingMsg, sendMessage, confirmProposal, cancelProposal, reset, activeProposal } =
     useAIAgent(context);
   const scrollRef = useRef<HTMLDivElement>(null);
 
