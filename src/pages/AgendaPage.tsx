@@ -200,6 +200,15 @@ export default function AgendaPage() {
                 ))}
               </SelectContent>
             </Select>
+            <FilterPresets
+              filterType="agenda"
+              currentConfig={{ view, techFilter }}
+              hasActiveFilters={techFilter !== 'all' || view !== 'week'}
+              onApply={(c: any) => {
+                if (c.view) setView(c.view);
+                setTechFilter(c.techFilter ?? 'all');
+              }}
+            />
           </div>
         </div>
 
