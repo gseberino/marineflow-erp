@@ -19,7 +19,7 @@ const jr = (b: unknown, s = 200) =>
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON = Deno.env.get("SUPABASE_ANON_KEY")!;
 const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
-const MODEL_FAST = "google/gemini-2.0-flash";
+const MODEL_FAST = "google/gemini-2.5-flash";
 const MODEL_SMART = "google/gemini-2.5-pro";
 const MODEL = MODEL_SMART;
 const MAX_ITERATIONS = 8;
