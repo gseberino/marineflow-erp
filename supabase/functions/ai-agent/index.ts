@@ -672,10 +672,21 @@ async function executeTool(
     }
 
     case "create_service_order": {
-      // Gera número da OS no formato SO-YYYY-XXXXXX
+      // Gera número sequencial da OS no formato SO-YYYY-NNNNN
       const year = new Date().getFullYear();
-      const rand = Math.floor(100000 + Math.random() * 900000);
-      const num = `SO-${year}-${rand}`;
+      const { data: lastSO } = await sb
+        .from("service_orders")
+        .select("service_order_number")
+        .like("service_order_number", `SO-${year}-%`)
+        .order("service_order_number", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      let seq = 1;
+      if (lastSO?.service_order_number) {
+        const match = lastSO.service_order_number.match(/(\d+)$/);
+        if (match) seq = parseInt(match[1], 10) + 1;
+      }
+      const num = `SO-${year}-${String(seq).padStart(5, "0")}`;
       const { items, ...rest } = args;
       const { data, error } = await sb
         .from("service_orders")
@@ -983,6 +994,16 @@ REGRAS CRÍTICAS:
 - Tools de leitura (search_*, list_*, get_*) podem ser chamadas livremente.
 - Use as tools de busca para resolver nomes em IDs. Seja tolerante a erros de digitação.
 - NUNCA peça ao usuário para fornecer IDs — descubra você mesmo via search_*.
+- NUNCA crie uma nova OS se o usuário não pediu explicitamente uma nova OS.
+- Se o usuário pedir para adicionar serviços/itens a uma OS existente, use add_service_to_order ou add_service_order_item com o ID da OS existente.
+- Após criar uma OS com create_service_order, use o ID retornado para adicionar serviços com add_service_to_order — NUNCA crie outra OS.
+- Se não conseguir adicionar um serviço/item de primeira, tente novamente com o MESMO ID de OS, não crie uma nova.
+- Ao criar um orçamento completo, o fluxo CORRETO é:
+  1. propose_action mostrando tudo que será feito
+  2. Após confirmação: create_service_order (salva o ID retornado)
+  3. Para cada serviço: add_service_to_order com o ID da OS criada
+  4. Para cada produto: add_service_order_item com o ID da OS criada
+  5. Confirmar ao usuário que tudo foi criado.
 
 CONTEXTO ATUAL:
 - Data/hora: ${today.toISOString()} (${today.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })})

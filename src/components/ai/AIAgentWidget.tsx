@@ -60,13 +60,17 @@ export function AIAgentWidget() {
                   Assistente IA
                 </SheetTitle>
                 {context.entityType && context.entityType !== 'unknown' && (
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Contexto: {
-                      context.entityType === 'service_order' ? '📋 Ordem de Serviço' :
-                      context.entityType === 'client' ? '👤 Cliente' :
-                      context.entityType === 'vessel' ? '⛵ Embarcação' : context.entityType
-                    }
-                  </p>
+                  <div className="flex items-center gap-1.5 mt-1 px-2 py-1 rounded-md bg-primary/10 w-fit">
+                    <span className="text-xs font-medium text-primary">
+                      {context.entityType === 'service_order' ? '📋 Ordem de Serviço em contexto' :
+                       context.entityType === 'client' ? '👤 Cliente em contexto' :
+                       context.entityType === 'vessel' ? '⛵ Embarcação em contexto' :
+                       context.entityType === 'agenda' ? '📅 Agenda em contexto' :
+                       context.entityType === 'products' ? '📦 Produtos em contexto' :
+                       context.entityType === 'financial' ? '💰 Financeiro em contexto' :
+                       `${context.entityType} em contexto`}
+                    </span>
+                  </div>
                 )}
               </div>
               <Button variant="ghost" size="sm" onClick={reset} title="Nova conversa">
