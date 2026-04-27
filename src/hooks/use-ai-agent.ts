@@ -130,5 +130,5 @@ export function useAIAgent(context: AIContext) {
     setError(null);
   }, []);
 
-  return { display, loading, error, activeProposal, sendMessage, confirmProposal, cancelProposal, reset };
+  return { display, loading, loadingMsg, error, activeProposal, sendMessage, confirmProposal, cancelProposal, reset };
 }
