@@ -1397,6 +1397,7 @@ export type Database = {
           filter_type: string
           id: string
           name: string
+          user_id: string | null
         }
         Insert: {
           created_at?: string | null
@@ -1404,6 +1405,7 @@ export type Database = {
           filter_type: string
           id?: string
           name: string
+          user_id?: string | null
         }
         Update: {
           created_at?: string | null
@@ -1411,6 +1413,7 @@ export type Database = {
           filter_type?: string
           id?: string
           name?: string
+          user_id?: string | null
         }
         Relationships: []
       }
