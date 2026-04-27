@@ -14,7 +14,7 @@ export function AIAgentWidget() {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
   const context = useAIContext();
-  const { display, loading, sendMessage, confirmProposal, cancelProposal, reset, activeProposal } =
+  const { display, loading, loadingMsg, sendMessage, confirmProposal, cancelProposal, reset, activeProposal } =
     useAIAgent(context);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -138,7 +138,7 @@ export function AIAgentWidget() {
             {loading && (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Processando…
+                {loadingMsg || 'Processando…'}
               </div>
             )}
           </div>

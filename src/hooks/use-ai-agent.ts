@@ -25,6 +25,7 @@ export function useAIAgent(context: AIContext) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [display, setDisplay] = useState<DisplayItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMsg, setLoadingMsg] = useState<string>('');
   const [activeProposal, setActiveProposal] = useState<{ idx: number; proposal: Proposal } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,6 +39,9 @@ export function useAIAgent(context: AIContext) {
     async (msgs: ChatMessage[]) => {
       setLoading(true);
       setError(null);
+      setLoadingMsg('Consultando dados...');
+      const progressTimer = setTimeout(() => setLoadingMsg('Processando...'), 2000);
+      const progressTimer2 = setTimeout(() => setLoadingMsg('Quase lá...'), 5000);
       try {
         const limitedMsgs = msgs.length > 30 ? msgs.slice(msgs.length - 30) : msgs;
         const { data, error } = await supabase.functions.invoke('ai-agent', {
@@ -73,6 +77,9 @@ export function useAIAgent(context: AIContext) {
         setError(msg);
         setDisplay((d) => [...d, { kind: 'message', role: 'assistant', content: `❌ ${msg}` }]);
       } finally {
+        clearTimeout(progressTimer);
+        clearTimeout(progressTimer2);
+        setLoadingMsg('');
         setLoading(false);
       }
     },
@@ -124,5 +131,5 @@ export function useAIAgent(context: AIContext) {
     setError(null);
   }, []);
 
-  return { display, loading, error, activeProposal, sendMessage, confirmProposal, cancelProposal, reset };
+  return { display, loading, loadingMsg, error, activeProposal, sendMessage, confirmProposal, cancelProposal, reset };
 }

@@ -19,7 +19,9 @@ const jr = (b: unknown, s = 200) =>
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON = Deno.env.get("SUPABASE_ANON_KEY")!;
 const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
-const MODEL = "google/gemini-2.5-pro";
+const MODEL_FAST = "google/gemini-2.0-flash";
+const MODEL_SMART = "google/gemini-2.5-pro";
+const MODEL = MODEL_SMART;
 const MAX_ITERATIONS = 8;
 
 // ---------------- TOOL DEFINITIONS ----------------
@@ -995,6 +997,11 @@ Quando o usuário disser "este cliente", "esta OS", "este barco", use o ID em co
     let toolEvents: any[] = [];
 
     for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
+      // Detecta se é consulta simples (usa modelo rápido) ou ação complexa (usa modelo inteligente)
+      const lastUserMsg = messages.filter((m: any) => m.role === "user").pop()?.content || "";
+      const isComplexTask = /cri(ar?|e)|cadastr|atualiz|envi(ar?|e)|agendar?|otimiz|desconto|duplicar?|cancel/i.test(lastUserMsg);
+      const modelToUse = isComplexTask ? MODEL_SMART : MODEL_FAST;
+
       const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -1002,7 +1009,7 @@ Quando o usuário disser "este cliente", "esta OS", "este barco", use o ID em co
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: MODEL,
+          model: modelToUse,
           messages,
           tools: TOOLS,
           tool_choice: "auto",
