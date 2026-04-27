@@ -750,6 +750,81 @@ async function executeTool(
       return { ok: true, part: data };
     }
 
+    case "add_service_to_order": {
+      const { data: svc } = args.service_id
+        ? await sb.from("services").select("service_name, billing_unit, default_price").eq("id", args.service_id).maybeSingle()
+        : { data: null };
+      const qty = Number(args.quantity) || 1;
+      const price = Number(args.unit_price) || svc?.default_price || 0;
+      const { data, error } = await sb
+        .from("service_order_services")
+        .insert({
+          service_order_id: args.service_order_id,
+          service_id: args.service_id || null,
+          service_name_snapshot: args.service_name || svc?.service_name || "",
+          billing_unit_snapshot: args.billing_unit || svc?.billing_unit || "visit",
+          quantity: qty,
+          unit_price_snapshot: price,
+          line_total: qty * price,
+          notes: args.notes || null,
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      await sb.rpc("recalc_so_totals", { so_id: args.service_order_id }).catch(() => null);
+      return { ok: true, service: data };
+    }
+
+    case "schedule_service_order": {
+      const update: any = { scheduled_start_at: args.scheduled_start_at };
+      if (args.scheduled_end_at) update.scheduled_end_at = args.scheduled_end_at;
+      if (args.technician_user_id) update.status = "scheduled";
+      const { data, error } = await sb
+        .from("service_orders")
+        .update(update)
+        .eq("id", args.service_order_id)
+        .select()
+        .single();
+      if (error) throw error;
+      if (args.technician_user_id) {
+        await sb.from("service_order_technicians")
+          .upsert({ service_order_id: args.service_order_id, technician_user_id: args.technician_user_id }, { onConflict: "service_order_id,technician_user_id" })
+          .catch(() => null);
+      }
+      return { ok: true, service_order: data };
+    }
+
+    case "optimize_text": {
+      const contextLabels: Record<string, string> = {
+        problem_description: "descrição de problema técnico em embarcação",
+        service_notes: "observações de serviço técnico náutico",
+        proposal: "proposta comercial de serviço náutico",
+        observation: "observação técnica",
+      };
+      const label = contextLabels[args.context] || args.context;
+      const optimizeRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          messages: [
+            {
+              role: "system",
+              content: `Você é um especialista em comunicação técnica náutica. Reescreva o texto a seguir como ${label}, mantendo as informações originais mas tornando-o mais claro, profissional e preciso. Responda APENAS com o texto reescrito, sem explicações.`,
+            },
+            { role: "user", content: args.text },
+          ],
+          tool_choice: "none",
+        }),
+      });
+      const optimizeJson = await optimizeRes.json();
+      const optimized = optimizeJson.choices?.[0]?.message?.content || args.text;
+      return { original: args.text, optimized };
+    }
+
     case "apply_service_order_discount": {
       const { data, error } = await sb
         .from("service_orders")
