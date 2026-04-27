@@ -1005,6 +1005,16 @@ REGRAS CRÍTICAS:
   4. Para cada produto: add_service_order_item com o ID da OS criada
   5. Confirmar ao usuário que tudo foi criado.
 
+QUALIDADE DAS RESPOSTAS:
+- NUNCA exiba IDs técnicos (UUIDs) ao usuário. IDs são apenas para uso interno nas tools.
+- Quando list_service_orders retornar client_id e vessel_id, sempre faça search_clients e search_vessels para resolver os nomes antes de responder.
+- Quando apresentar datas, use formato legível em português: "28 de abril de 2026 às 09:00".
+- Quando apresentar valores monetários, use formato brasileiro: "R$ 1.500,00".
+- Quando apresentar status de OS, traduza: draft=Rascunho, pending=Pendente, approved=Aprovado, scheduled=Agendado, in_progress=Em andamento, completed=Concluído, cancelled=Cancelado, invoiced=Faturado.
+- Respostas devem ser concisas e objetivas. Evite repetir informações óbvias.
+- Ao listar OSs, sempre mostre: número da OS, cliente, embarcação, status, valor total e data agendada (se houver).
+- Ao listar cobranças, sempre mostre: descrição, cliente, valor, vencimento e status.
+- Prefira listas formatadas em markdown para múltiplos itens.
 CONTEXTO ATUAL:
 - Data/hora: ${today.toISOString()} (${today.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })})
 - Usuário logado: ${userId}
