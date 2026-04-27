@@ -782,6 +782,11 @@ Quando o usuário disser "este cliente", "esta OS", "este barco", use o ID em co
     let toolEvents: any[] = [];
 
     for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
+      // Detecta se é consulta simples (usa modelo rápido) ou ação complexa (usa modelo inteligente)
+      const lastUserMsg = messages.filter((m: any) => m.role === "user").pop()?.content || "";
+      const isComplexTask = /cri(ar?|e)|cadastr|atualiz|envi(ar?|e)|agendar?|otimiz|desconto|duplicar?|cancel/i.test(lastUserMsg);
+      const modelToUse = isComplexTask ? MODEL_SMART : MODEL_FAST;
+
       const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -789,7 +794,7 @@ Quando o usuário disser "este cliente", "esta OS", "este barco", use o ID em co
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: MODEL,
+          model: modelToUse,
           messages,
           tools: TOOLS,
           tool_choice: "auto",
