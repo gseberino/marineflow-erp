@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import { useI18n } from '@/i18n';
 import { useProducts, type Product } from '@/hooks/use-products';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Plus, Search, AlertTriangle, Edit, Upload, Download, Table2, Package } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ProductFormDialog } from '@/components/ProductFormDialog';
@@ -18,15 +19,27 @@ export default function ProductList() {
   const [editProduct, setEditProduct] = useState<Product | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [activeFilter, setActiveFilter] = useState<'all'|'active'|'inactive'>('all');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [incompleteFilter, setIncompleteFilter] = useState(false);
   const { t, formatCurrency } = useI18n();
   const { data: products, isLoading, error } = useProducts();
 
-  const filtered = (products ?? []).filter(p =>
-    !search ||
-    p.product_name.toLowerCase().includes(search.toLowerCase()) ||
-    (p.sku ?? '').toLowerCase().includes(search.toLowerCase()) ||
-    (p.category ?? '').toLowerCase().includes(search.toLowerCase())
-  );
+  const categories = useMemo(() =>
+    [...new Set((products ?? []).map(p => p.category).filter(Boolean))].sort() as string[],
+  [products]);
+
+  const filtered = (products ?? []).filter(p => {
+    const matchesSearch = !search ||
+      p.product_name.toLowerCase().includes(search.toLowerCase()) ||
+      (p.sku ?? '').toLowerCase().includes(search.toLowerCase()) ||
+      (p.category ?? '').toLowerCase().includes(search.toLowerCase());
+    const matchesActive = activeFilter === 'all' ||
+      (activeFilter === 'active' ? (p as any).active : !(p as any).active);
+    const matchesCategory = categoryFilter === 'all' || p.category === categoryFilter;
+    const matchesIncomplete = !incompleteFilter || (p as any).fiscal_complete === false;
+    return matchesSearch && matchesActive && matchesCategory && matchesIncomplete;
+  });
 
   if (error) return <div className="py-20 text-center text-destructive">{(error as Error).message}</div>;
 
