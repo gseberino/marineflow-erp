@@ -54,10 +54,21 @@ export function AIAgentWidget() {
         <SheetContent side="right" className="w-full sm:max-w-md flex flex-col p-0 gap-0">
           <SheetHeader className="px-4 py-3 border-b">
             <div className="flex items-center justify-between">
-              <SheetTitle className="flex items-center gap-2">
-                <Sparkles className="h-5 w-5 text-primary" />
-                Assistente IA
-              </SheetTitle>
+              <div className="min-w-0">
+                <SheetTitle className="flex items-center gap-2">
+                  <Sparkles className="h-5 w-5 text-primary" />
+                  Assistente IA
+                </SheetTitle>
+                {context.entityType && context.entityType !== 'unknown' && (
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Contexto: {
+                      context.entityType === 'service_order' ? '📋 Ordem de Serviço' :
+                      context.entityType === 'client' ? '👤 Cliente' :
+                      context.entityType === 'vessel' ? '⛵ Embarcação' : context.entityType
+                    }
+                  </p>
+                )}
+              </div>
               <Button variant="ghost" size="sm" onClick={reset} title="Nova conversa">
                 <RotateCcw className="h-4 w-4" />
               </Button>
@@ -65,19 +76,45 @@ export function AIAgentWidget() {
           </SheetHeader>
 
           <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
-            {display.length === 0 && !loading && (
-              <div className="text-sm text-muted-foreground space-y-2">
-                <p className="font-medium text-foreground">Olá! Como posso ajudar?</p>
-                <p>Exemplos:</p>
-                <ul className="list-disc pl-5 space-y-1">
-                  <li>"Crie uma OS para o barco do João amanhã às 10h"</li>
-                  <li>"Quais minhas tarefas de hoje?"</li>
-                  <li>"Envie um lembrete de cobrança para a Maria"</li>
-                  <li>"Cadastre o cliente Carlos, telefone 11 99999-0000"</li>
-                  <li>"Liste as OSs em andamento"</li>
-                </ul>
-              </div>
-            )}
+            {display.length === 0 && !loading && (() => {
+              const suggestions = context.entityType === 'service_order' ? [
+                "Adicione um serviço de mão de obra nesta OS",
+                "Qual o valor total desta OS?",
+                "Agende esta OS para amanhã às 9h",
+                "Otimize a descrição do problema desta OS",
+                "Envie o link desta OS para o cliente",
+              ] : context.entityType === 'client' ? [
+                "Mostre o histórico de OSs deste cliente",
+                "Crie uma nova OS para este cliente",
+                "Quais cobranças estão pendentes para este cliente?",
+                "Envie uma mensagem para este cliente",
+              ] : context.entityType === 'vessel' ? [
+                "Mostre o histórico de serviços desta embarcação",
+                "Crie uma OS para esta embarcação",
+              ] : [
+                "Crie uma OS para o barco do João",
+                "Quais tarefas tenho hoje na agenda?",
+                "Liste as OSs em andamento",
+                "Envie um lembrete de cobrança para a Maria",
+                "Cadastre o cliente Carlos, telefone 47 99999-0000",
+              ];
+              return (
+                <div className="space-y-3">
+                  <p className="text-sm font-medium text-foreground">Como posso ajudar?</p>
+                  <div className="flex flex-col gap-1.5">
+                    {suggestions.map((s, i) => (
+                      <button
+                        key={i}
+                        onClick={() => sendMessage(s)}
+                        className="text-left text-sm px-3 py-2 rounded-lg bg-muted hover:bg-muted/80 transition-colors text-muted-foreground hover:text-foreground"
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
 
             {display.map((item, i) => {
               if (item.kind === 'message') {

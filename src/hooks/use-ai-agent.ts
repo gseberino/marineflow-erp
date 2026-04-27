@@ -39,8 +39,9 @@ export function useAIAgent(context: AIContext) {
       setLoading(true);
       setError(null);
       try {
+        const limitedMsgs = msgs.length > 30 ? msgs.slice(msgs.length - 30) : msgs;
         const { data, error } = await supabase.functions.invoke('ai-agent', {
-          body: { messages: msgs, context },
+          body: { messages: limitedMsgs, context },
         });
         if (error) throw error;
         if ((data as any)?.error) throw new Error((data as any).error);
