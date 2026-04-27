@@ -84,6 +84,7 @@ export default function AgendaPage() {
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<ExistingTask | null>(null);
   const [prefill, setPrefill] = useState<{ technicianId?: string; date?: string }>({});
+  const [techFilter, setTechFilter] = useState<string>('all');
 
   const range = useMemo(() => {
     if (view === 'week') {
@@ -107,6 +108,19 @@ export default function AgendaPage() {
   const { data: technicians = [] } = useTechnicians();
 
   const isLoading = loadingOrders || loadingTasks;
+
+  const filteredOrders = useMemo(() => (
+    techFilter === 'all'
+      ? orders
+      : (orders || []).filter((o: any) =>
+          (o.service_order_technicians || []).some((t: any) => t.user_id === techFilter || t.technician_user_id === techFilter)
+        )
+  ), [orders, techFilter]);
+  const filteredTasks = useMemo(() => (
+    techFilter === 'all'
+      ? tasks
+      : (tasks || []).filter((t: any) => t.technician_user_id === techFilter)
+  ), [tasks, techFilter]);
 
   const handleNav = (delta: number) => {
     if (view === 'week') setCursor(addDays(cursor, delta * 7));
