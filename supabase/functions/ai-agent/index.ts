@@ -128,8 +128,47 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "search_services",
+      description: "Busca serviços de mão de obra no catálogo por nome ou descrição.",
+      parameters: {
+        type: "object",
+        properties: { query: { type: "string" }, limit: { type: "number" } },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_technicians",
+      description: "Lista os técnicos disponíveis no sistema.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_marinas",
+      description: "Lista marinas cadastradas.",
+      parameters: { type: "object", properties: { query: { type: "string" } } },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_vessel_history",
+      description: "Retorna o histórico completo de serviços realizados em uma embarcação.",
+      parameters: {
+        type: "object",
+        properties: { vessel_id: { type: "string" } },
+        required: ["vessel_id"],
+      },
+    },
+  },
 
-  // ====== PROPOSE (preview/confirmation) ======
   {
     type: "function",
     function: {
@@ -250,6 +289,58 @@ const TOOLS = [
           quantity: { type: "number" },
         },
         required: ["service_order_id", "product_id", "quantity"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "add_service_to_order",
+      description: "Adiciona um serviço de mão de obra a uma OS existente.",
+      parameters: {
+        type: "object",
+        properties: {
+          service_order_id: { type: "string" },
+          service_name: { type: "string", description: "Nome/descrição do serviço" },
+          service_id: { type: "string", description: "ID do serviço cadastrado (opcional)" },
+          quantity: { type: "number", default: 1 },
+          unit_price: { type: "number" },
+          billing_unit: { type: "string", enum: ["hour", "visit", "day", "unit"] },
+          notes: { type: "string" },
+        },
+        required: ["service_order_id", "service_name", "unit_price"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "schedule_service_order",
+      description: "Agenda uma OS definindo data/hora de início, fim e técnico responsável.",
+      parameters: {
+        type: "object",
+        properties: {
+          service_order_id: { type: "string" },
+          scheduled_start_at: { type: "string", description: "ISO datetime" },
+          scheduled_end_at: { type: "string", description: "ISO datetime" },
+          technician_user_id: { type: "string" },
+        },
+        required: ["service_order_id", "scheduled_start_at"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "optimize_text",
+      description: "Melhora/reescreve um texto de observação, descrição de problema ou proposta usando IA. Retorna o texto otimizado.",
+      parameters: {
+        type: "object",
+        properties: {
+          text: { type: "string", description: "Texto original a ser melhorado" },
+          context: { type: "string", description: "Contexto: 'problem_description', 'service_notes', 'proposal', 'observation'" },
+        },
+        required: ["text", "context"],
       },
     },
   },
