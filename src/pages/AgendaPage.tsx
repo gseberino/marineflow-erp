@@ -28,6 +28,7 @@ import {
 import { toast } from 'sonner';
 import { useI18n } from '@/i18n';
 import { statusConfig } from '@/lib/constants';
+import { FilterPresets } from '@/components/FilterPresets';
 
 type ViewMode = 'week' | 'month';
 

@@ -9,6 +9,7 @@ import { Plus, Search, Anchor, Ship } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { VesselFormDialog } from '@/components/VesselFormDialog';
+import { FilterPresets } from '@/components/FilterPresets';
 
 export default function VesselList() {
   const [search, setSearch] = useState('');
@@ -55,6 +56,15 @@ export default function VesselList() {
             </SelectContent>
           </Select>
         )}
+        <FilterPresets
+          filterType="vessels"
+          currentConfig={{ search, typeFilter }}
+          hasActiveFilters={!!search || typeFilter !== 'all'}
+          onApply={(c: any) => {
+            setSearch(c.search ?? '');
+            setTypeFilter(c.typeFilter ?? 'all');
+          }}
+        />
       </div>
 
       {isLoading ? (
