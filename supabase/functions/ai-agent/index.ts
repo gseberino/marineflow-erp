@@ -530,11 +530,10 @@ async function executeTool(
     }
 
     case "create_service_order": {
-      // Gera número da OS
-      const { count } = await sb
-        .from("service_orders")
-        .select("*", { count: "exact", head: true });
-      const num = `OS-${String((count || 0) + 1).padStart(5, "0")}`;
+      // Gera número da OS no formato SO-YYYY-XXXXXX
+      const year = new Date().getFullYear();
+      const rand = Math.floor(100000 + Math.random() * 900000);
+      const num = `SO-${year}-${rand}`;
       const { items, ...rest } = args;
       const { data, error } = await sb
         .from("service_orders")
@@ -570,6 +569,7 @@ async function executeTool(
         }
         if (partsRows.length) await sb.from("service_order_parts").insert(partsRows);
       }
+      await sb.rpc("recalc_so_totals", { so_id: data.id }).catch(() => null);
       return { ok: true, service_order: data };
     }
 
@@ -606,6 +606,7 @@ async function executeTool(
         .select()
         .single();
       if (error) throw error;
+      await sb.rpc("recalc_so_totals", { so_id: args.service_order_id || args.id }).catch(() => null);
       return { ok: true, part: data };
     }
 
@@ -617,6 +618,7 @@ async function executeTool(
         .select()
         .single();
       if (error) throw error;
+      await sb.rpc("recalc_so_totals", { so_id: args.service_order_id || args.id }).catch(() => null);
       return { ok: true, service_order: data };
     }
 
