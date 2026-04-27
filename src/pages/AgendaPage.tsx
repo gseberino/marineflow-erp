@@ -84,6 +84,7 @@ export default function AgendaPage() {
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<ExistingTask | null>(null);
   const [prefill, setPrefill] = useState<{ technicianId?: string; date?: string }>({});
+  const [techFilter, setTechFilter] = useState<string>('all');
 
   const range = useMemo(() => {
     if (view === 'week') {
@@ -107,6 +108,19 @@ export default function AgendaPage() {
   const { data: technicians = [] } = useTechnicians();
 
   const isLoading = loadingOrders || loadingTasks;
+
+  const filteredOrders = useMemo(() => (
+    techFilter === 'all'
+      ? orders
+      : (orders || []).filter((o: any) =>
+          (o.service_order_technicians || []).some((t: any) => t.user_id === techFilter || t.technician_user_id === techFilter)
+        )
+  ), [orders, techFilter]);
+  const filteredTasks = useMemo(() => (
+    techFilter === 'all'
+      ? tasks
+      : (tasks || []).filter((t: any) => t.technician_user_id === techFilter)
+  ), [tasks, techFilter]);
 
   const handleNav = (delta: number) => {
     if (view === 'week') setCursor(addDays(cursor, delta * 7));
@@ -174,6 +188,17 @@ export default function AgendaPage() {
               <span className="hidden sm:inline">{view === 'week' ? 'Semana seguinte' : 'Mês seguinte'}</span>
               <ChevronRight className="h-4 w-4" />
             </Button>
+            <Select value={techFilter} onValueChange={setTechFilter}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Filtrar por técnico" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos os técnicos</SelectItem>
+                {technicians.map((tech) => (
+                  <SelectItem key={tech.id} value={tech.id}>{tech.full_name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
@@ -188,8 +213,8 @@ export default function AgendaPage() {
         ) : view === 'week' ? (
           <WeekView
             weekStart={range.from}
-            orders={orders}
-            tasks={tasks}
+            orders={filteredOrders}
+            tasks={filteredTasks}
             technicians={technicians}
             onCardClick={(id) => navigate(`/service-orders/${id}`)}
             onCellClick={openQuickSchedule}
@@ -198,8 +223,8 @@ export default function AgendaPage() {
         ) : (
           <MonthView
             cursor={cursor}
-            orders={orders}
-            tasks={tasks}
+            orders={filteredOrders}
+            tasks={filteredTasks}
             selectedDay={selectedDay}
             onSelectDay={setSelectedDay}
             onCardClick={(id) => navigate(`/service-orders/${id}`)}

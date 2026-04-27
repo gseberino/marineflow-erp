@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PageHeader } from '@/components/PageHeader';
 import { useI18n } from '@/i18n';
@@ -7,20 +7,27 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Plus, Search, Anchor, Ship } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { VesselFormDialog } from '@/components/VesselFormDialog';
 
 export default function VesselList() {
   const [search, setSearch] = useState('');
   const [formOpen, setFormOpen] = useState(false);
+  const [typeFilter, setTypeFilter] = useState('all');
   const { t } = useI18n();
   const { data: vessels, isLoading, error } = useVessels();
 
+  const types = useMemo(() =>
+    [...new Set((vessels ?? []).map((v: any) => v.boat_type).filter(Boolean))].sort() as string[],
+  [vessels]);
+
   const filtered = (vessels ?? []).filter((v: any) =>
-    !search ||
-    v.boat_name.toLowerCase().includes(search.toLowerCase()) ||
-    (v.manufacturer ?? '').toLowerCase().includes(search.toLowerCase()) ||
-    (v.model ?? '').toLowerCase().includes(search.toLowerCase()) ||
-    (v.clients?.full_name_or_company_name ?? '').toLowerCase().includes(search.toLowerCase())
+    (!search ||
+      v.boat_name.toLowerCase().includes(search.toLowerCase()) ||
+      (v.manufacturer ?? '').toLowerCase().includes(search.toLowerCase()) ||
+      (v.model ?? '').toLowerCase().includes(search.toLowerCase()) ||
+      (v.clients?.full_name_or_company_name ?? '').toLowerCase().includes(search.toLowerCase())
+    ) && (typeFilter === 'all' || v.boat_type === typeFilter)
   );
 
   if (error) return <div className="py-20 text-center text-destructive">{(error as Error).message}</div>;
@@ -32,9 +39,22 @@ export default function VesselList() {
           <Plus className="h-4 w-4" /> {t.vessels.newVessel}
         </Button>
       </PageHeader>
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input placeholder={t.vessels.searchPlaceholder} value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input placeholder={t.vessels.searchPlaceholder} value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
+        </div>
+        {types.length > 0 && (
+          <Select value={typeFilter} onValueChange={setTypeFilter}>
+            <SelectTrigger className="w-full sm:w-[170px]">
+              <SelectValue placeholder="Tipo" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos os tipos</SelectItem>
+              {types.map(tp => <SelectItem key={tp} value={tp}>{tp}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
       </div>
 
       {isLoading ? (

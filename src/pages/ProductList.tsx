@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import { useI18n } from '@/i18n';
 import { useProducts, type Product } from '@/hooks/use-products';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Plus, Search, AlertTriangle, Edit, Upload, Download, Table2, Package } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ProductFormDialog } from '@/components/ProductFormDialog';
@@ -18,15 +19,27 @@ export default function ProductList() {
   const [editProduct, setEditProduct] = useState<Product | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [activeFilter, setActiveFilter] = useState<'all'|'active'|'inactive'>('all');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [incompleteFilter, setIncompleteFilter] = useState(false);
   const { t, formatCurrency } = useI18n();
   const { data: products, isLoading, error } = useProducts();
 
-  const filtered = (products ?? []).filter(p =>
-    !search ||
-    p.product_name.toLowerCase().includes(search.toLowerCase()) ||
-    (p.sku ?? '').toLowerCase().includes(search.toLowerCase()) ||
-    (p.category ?? '').toLowerCase().includes(search.toLowerCase())
-  );
+  const categories = useMemo(() =>
+    [...new Set((products ?? []).map(p => p.category).filter(Boolean))].sort() as string[],
+  [products]);
+
+  const filtered = (products ?? []).filter(p => {
+    const matchesSearch = !search ||
+      p.product_name.toLowerCase().includes(search.toLowerCase()) ||
+      (p.sku ?? '').toLowerCase().includes(search.toLowerCase()) ||
+      (p.category ?? '').toLowerCase().includes(search.toLowerCase());
+    const matchesActive = activeFilter === 'all' ||
+      (activeFilter === 'active' ? (p as any).active : !(p as any).active);
+    const matchesCategory = categoryFilter === 'all' || p.category === categoryFilter;
+    const matchesIncomplete = !incompleteFilter || (p as any).fiscal_complete === false;
+    return matchesSearch && matchesActive && matchesCategory && matchesIncomplete;
+  });
 
   if (error) return <div className="py-20 text-center text-destructive">{(error as Error).message}</div>;
 
@@ -48,9 +61,41 @@ export default function ProductList() {
           </Button>
         </div>
       </PageHeader>
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input placeholder={t.products.searchPlaceholder} value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input placeholder={t.products.searchPlaceholder} value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
+        </div>
+        <Select value={activeFilter} onValueChange={(v) => setActiveFilter(v as any)}>
+          <SelectTrigger className="w-full sm:w-[130px]">
+            <SelectValue placeholder="Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos</SelectItem>
+            <SelectItem value="active">Ativos</SelectItem>
+            <SelectItem value="inactive">Inativos</SelectItem>
+          </SelectContent>
+        </Select>
+        {categories.length > 0 && (
+          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <SelectTrigger className="w-full sm:w-[170px]">
+              <SelectValue placeholder="Categoria" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todas categorias</SelectItem>
+              {categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
+        <Button
+          variant={incompleteFilter ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setIncompleteFilter(v => !v)}
+          className="gap-1"
+        >
+          <AlertTriangle className="h-3 w-3" />
+          Incompletos
+        </Button>
       </div>
 
       {isLoading ? (

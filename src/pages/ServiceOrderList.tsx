@@ -28,6 +28,8 @@ import { useQueryClient } from '@tanstack/react-query';
 export default function ServiceOrderList() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [priorityFilter, setPriorityFilter] = useState<string>('all');
+  const [periodFilter, setPeriodFilter] = useState<string>('all');
   const { t, formatCurrency, formatDate } = useI18n();
   const { data: orders, isLoading, error } = useServiceOrders();
   const queryClient = useQueryClient();
@@ -128,7 +130,24 @@ export default function ServiceOrderList() {
       clientName.toLowerCase().includes(search.toLowerCase()) ||
       vesselName.toLowerCase().includes(search.toLowerCase());
     const matchesStatus = statusFilter === 'all' || so.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    const matchesPriority = priorityFilter === 'all' || so.priority === priorityFilter;
+    const now = new Date();
+    const soDate = new Date(so.created_at);
+    const matchesPeriod = (() => {
+      if (periodFilter === 'all') return true;
+      if (periodFilter === 'today') return soDate.toDateString() === now.toDateString();
+      if (periodFilter === 'week') {
+        const weekAgo = new Date(now); weekAgo.setDate(now.getDate() - 7);
+        return soDate >= weekAgo;
+      }
+      if (periodFilter === 'month') return soDate.getMonth() === now.getMonth() && soDate.getFullYear() === now.getFullYear();
+      if (periodFilter === 'last_month') {
+        const lm = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        return soDate.getMonth() === lm.getMonth() && soDate.getFullYear() === lm.getFullYear();
+      }
+      return true;
+    })();
+    return matchesSearch && matchesStatus && matchesPriority && matchesPeriod;
   });
 
   return (
@@ -158,6 +177,40 @@ export default function ServiceOrderList() {
             ))}
           </SelectContent>
         </Select>
+        <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+          <SelectTrigger className="w-full sm:w-[140px]">
+            <SelectValue placeholder="Prioridade" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todas</SelectItem>
+            <SelectItem value="low">Baixa</SelectItem>
+            <SelectItem value="normal">Normal</SelectItem>
+            <SelectItem value="high">Alta</SelectItem>
+            <SelectItem value="urgent">Urgente</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={periodFilter} onValueChange={setPeriodFilter}>
+          <SelectTrigger className="w-full sm:w-[160px]">
+            <SelectValue placeholder="Período" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos os períodos</SelectItem>
+            <SelectItem value="today">Hoje</SelectItem>
+            <SelectItem value="week">Esta semana</SelectItem>
+            <SelectItem value="month">Este mês</SelectItem>
+            <SelectItem value="last_month">Mês passado</SelectItem>
+          </SelectContent>
+        </Select>
+        {(statusFilter !== 'all' || priorityFilter !== 'all' || periodFilter !== 'all' || search) && (
+          <Button variant="ghost" size="sm" onClick={() => {
+            setSearch('');
+            setStatusFilter('all');
+            setPriorityFilter('all');
+            setPeriodFilter('all');
+          }}>
+            Limpar filtros
+          </Button>
+        )}
       </div>
 
       {isLoading ? (
