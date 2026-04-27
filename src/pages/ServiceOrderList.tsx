@@ -24,6 +24,7 @@ import { writeAuditLog } from '@/hooks/use-audit-log';
 import { toast } from 'sonner';
 import { recordWhatsAppEvent } from '@/lib/diagnostics';
 import { useQueryClient } from '@tanstack/react-query';
+import { FilterPresets } from '@/components/FilterPresets';
 
 export default function ServiceOrderList() {
   const [search, setSearch] = useState('');
@@ -201,6 +202,17 @@ export default function ServiceOrderList() {
             <SelectItem value="last_month">Mês passado</SelectItem>
           </SelectContent>
         </Select>
+        <FilterPresets
+          filterType="service_orders"
+          currentConfig={{ search, statusFilter, priorityFilter, periodFilter }}
+          hasActiveFilters={statusFilter !== 'all' || priorityFilter !== 'all' || periodFilter !== 'all' || !!search}
+          onApply={(c: any) => {
+            setSearch(c.search ?? '');
+            setStatusFilter(c.statusFilter ?? 'all');
+            setPriorityFilter(c.priorityFilter ?? 'all');
+            setPeriodFilter(c.periodFilter ?? 'all');
+          }}
+        />
         {(statusFilter !== 'all' || priorityFilter !== 'all' || periodFilter !== 'all' || search) && (
           <Button variant="ghost" size="sm" onClick={() => {
             setSearch('');

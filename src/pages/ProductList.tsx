@@ -12,6 +12,7 @@ import { ProductFormDialog } from '@/components/ProductFormDialog';
 import { ImportWizard } from '@/components/ImportWizard';
 import { BulkEditor } from '@/components/BulkEditor';
 import { exportToCSV, PRODUCTS_COLUMNS } from '@/lib/export-utils';
+import { FilterPresets } from '@/components/FilterPresets';
 
 export default function ProductList() {
   const [search, setSearch] = useState('');
@@ -96,6 +97,17 @@ export default function ProductList() {
           <AlertTriangle className="h-3 w-3" />
           Incompletos
         </Button>
+        <FilterPresets
+          filterType="products"
+          currentConfig={{ search, activeFilter, categoryFilter, incompleteFilter }}
+          hasActiveFilters={!!search || activeFilter !== 'all' || categoryFilter !== 'all' || incompleteFilter}
+          onApply={(c: any) => {
+            setSearch(c.search ?? '');
+            setActiveFilter(c.activeFilter ?? 'all');
+            setCategoryFilter(c.categoryFilter ?? 'all');
+            setIncompleteFilter(!!c.incompleteFilter);
+          }}
+        />
       </div>
 
       {isLoading ? (

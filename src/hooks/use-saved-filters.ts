@@ -1,7 +1,15 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 
-export function useSavedFilters(filterType: 'payable' | 'receivable') {
+export type SavedFilterType =
+  | 'payable'
+  | 'receivable'
+  | 'service_orders'
+  | 'products'
+  | 'vessels'
+  | 'agenda';
+
+export function useSavedFilters(filterType: SavedFilterType) {
   return useQuery({
     queryKey: ['saved-filters', filterType],
     queryFn: async () => {
@@ -19,12 +27,12 @@ export function useSavedFilters(filterType: 'payable' | 'receivable') {
 export function useCreateSavedFilter() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (f: { name: string; filter_type: 'payable' | 'receivable'; filter_config: any }) => {
+    mutationFn: async (f: { name: string; filter_type: SavedFilterType; filter_config: any }) => {
       const { data, error } = await supabase.from('saved_filters').insert(f).select().single();
       if (error) throw error;
       return data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['saved-filters'] }),
+    onSuccess: (_d, vars) => qc.invalidateQueries({ queryKey: ['saved-filters', vars.filter_type] }),
   });
 }
 
