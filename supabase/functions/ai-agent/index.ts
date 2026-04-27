@@ -128,8 +128,47 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "search_services",
+      description: "Busca serviços de mão de obra no catálogo por nome ou descrição.",
+      parameters: {
+        type: "object",
+        properties: { query: { type: "string" }, limit: { type: "number" } },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_technicians",
+      description: "Lista os técnicos disponíveis no sistema.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_marinas",
+      description: "Lista marinas cadastradas.",
+      parameters: { type: "object", properties: { query: { type: "string" } } },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_vessel_history",
+      description: "Retorna o histórico completo de serviços realizados em uma embarcação.",
+      parameters: {
+        type: "object",
+        properties: { vessel_id: { type: "string" } },
+        required: ["vessel_id"],
+      },
+    },
+  },
 
-  // ====== PROPOSE (preview/confirmation) ======
   {
     type: "function",
     function: {
@@ -250,6 +289,58 @@ const TOOLS = [
           quantity: { type: "number" },
         },
         required: ["service_order_id", "product_id", "quantity"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "add_service_to_order",
+      description: "Adiciona um serviço de mão de obra a uma OS existente.",
+      parameters: {
+        type: "object",
+        properties: {
+          service_order_id: { type: "string" },
+          service_name: { type: "string", description: "Nome/descrição do serviço" },
+          service_id: { type: "string", description: "ID do serviço cadastrado (opcional)" },
+          quantity: { type: "number", default: 1 },
+          unit_price: { type: "number" },
+          billing_unit: { type: "string", enum: ["hour", "visit", "day", "unit"] },
+          notes: { type: "string" },
+        },
+        required: ["service_order_id", "service_name", "unit_price"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "schedule_service_order",
+      description: "Agenda uma OS definindo data/hora de início, fim e técnico responsável.",
+      parameters: {
+        type: "object",
+        properties: {
+          service_order_id: { type: "string" },
+          scheduled_start_at: { type: "string", description: "ISO datetime" },
+          scheduled_end_at: { type: "string", description: "ISO datetime" },
+          technician_user_id: { type: "string" },
+        },
+        required: ["service_order_id", "scheduled_start_at"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "optimize_text",
+      description: "Melhora/reescreve um texto de observação, descrição de problema ou proposta usando IA. Retorna o texto otimizado.",
+      parameters: {
+        type: "object",
+        properties: {
+          text: { type: "string", description: "Texto original a ser melhorado" },
+          context: { type: "string", description: "Contexto: 'problem_description', 'service_notes', 'proposal', 'observation'" },
+        },
+        required: ["text", "context"],
       },
     },
   },
@@ -495,6 +586,55 @@ async function executeTool(
       return { results: data };
     }
 
+    case "search_services": {
+      const q = String(args.query || "").trim();
+      const limit = Math.min(Number(args.limit) || 10, 25);
+      const { data, error } = await sb
+        .from("services")
+        .select("id, service_name, description, billing_unit, default_price")
+        .eq("active", true)
+        .or(`service_name.ilike.%${q}%,description.ilike.%${q}%`)
+        .limit(limit);
+      if (error) throw error;
+      return { results: data };
+    }
+
+    case "list_technicians": {
+      const { data, error } = await sb
+        .from("app_users")
+        .select("id, full_name, role")
+        .in("role", ["technician", "admin"])
+        .eq("active", true)
+        .order("full_name");
+      if (error) throw error;
+      return { results: data };
+    }
+
+    case "list_marinas": {
+      const q = String(args.query || "").trim();
+      let query = sb
+        .from("marinas")
+        .select("id, marina_name, city, state")
+        .eq("active", true)
+        .order("marina_name")
+        .limit(20);
+      if (q) query = query.ilike("marina_name", `%${q}%`);
+      const { data, error } = await query;
+      if (error) throw error;
+      return { results: data };
+    }
+
+    case "get_vessel_history": {
+      const { data, error } = await sb
+        .from("service_orders")
+        .select("id, service_order_number, status, scheduled_start_at, grand_total, created_at, problem_description")
+        .eq("vessel_id", args.vessel_id)
+        .order("created_at", { ascending: false })
+        .limit(30);
+      if (error) throw error;
+      return { history: data };
+    }
+
     case "propose_action": {
       // Read-only: apenas devolve o resumo. O frontend renderiza o card.
       return {
@@ -608,6 +748,81 @@ async function executeTool(
       if (error) throw error;
       await sb.rpc("recalc_so_totals", { so_id: args.service_order_id || args.id }).catch(() => null);
       return { ok: true, part: data };
+    }
+
+    case "add_service_to_order": {
+      const { data: svc } = args.service_id
+        ? await sb.from("services").select("service_name, billing_unit, default_price").eq("id", args.service_id).maybeSingle()
+        : { data: null };
+      const qty = Number(args.quantity) || 1;
+      const price = Number(args.unit_price) || svc?.default_price || 0;
+      const { data, error } = await sb
+        .from("service_order_services")
+        .insert({
+          service_order_id: args.service_order_id,
+          service_id: args.service_id || null,
+          service_name_snapshot: args.service_name || svc?.service_name || "",
+          billing_unit_snapshot: args.billing_unit || svc?.billing_unit || "visit",
+          quantity: qty,
+          unit_price_snapshot: price,
+          line_total: qty * price,
+          notes: args.notes || null,
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      await sb.rpc("recalc_so_totals", { so_id: args.service_order_id }).catch(() => null);
+      return { ok: true, service: data };
+    }
+
+    case "schedule_service_order": {
+      const update: any = { scheduled_start_at: args.scheduled_start_at };
+      if (args.scheduled_end_at) update.scheduled_end_at = args.scheduled_end_at;
+      if (args.technician_user_id) update.status = "scheduled";
+      const { data, error } = await sb
+        .from("service_orders")
+        .update(update)
+        .eq("id", args.service_order_id)
+        .select()
+        .single();
+      if (error) throw error;
+      if (args.technician_user_id) {
+        await sb.from("service_order_technicians")
+          .upsert({ service_order_id: args.service_order_id, technician_user_id: args.technician_user_id }, { onConflict: "service_order_id,technician_user_id" })
+          .catch(() => null);
+      }
+      return { ok: true, service_order: data };
+    }
+
+    case "optimize_text": {
+      const contextLabels: Record<string, string> = {
+        problem_description: "descrição de problema técnico em embarcação",
+        service_notes: "observações de serviço técnico náutico",
+        proposal: "proposta comercial de serviço náutico",
+        observation: "observação técnica",
+      };
+      const label = contextLabels[args.context] || args.context;
+      const optimizeRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          messages: [
+            {
+              role: "system",
+              content: `Você é um especialista em comunicação técnica náutica. Reescreva o texto a seguir como ${label}, mantendo as informações originais mas tornando-o mais claro, profissional e preciso. Responda APENAS com o texto reescrito, sem explicações.`,
+            },
+            { role: "user", content: args.text },
+          ],
+          tool_choice: "none",
+        }),
+      });
+      const optimizeJson = await optimizeRes.json();
+      const optimized = optimizeJson.choices?.[0]?.message?.content || args.text;
+      return { original: args.text, optimized };
     }
 
     case "apply_service_order_discount": {
