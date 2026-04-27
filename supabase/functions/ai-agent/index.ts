@@ -586,6 +586,55 @@ async function executeTool(
       return { results: data };
     }
 
+    case "search_services": {
+      const q = String(args.query || "").trim();
+      const limit = Math.min(Number(args.limit) || 10, 25);
+      const { data, error } = await sb
+        .from("services")
+        .select("id, service_name, description, billing_unit, default_price")
+        .eq("active", true)
+        .or(`service_name.ilike.%${q}%,description.ilike.%${q}%`)
+        .limit(limit);
+      if (error) throw error;
+      return { results: data };
+    }
+
+    case "list_technicians": {
+      const { data, error } = await sb
+        .from("app_users")
+        .select("id, full_name, role")
+        .in("role", ["technician", "admin"])
+        .eq("active", true)
+        .order("full_name");
+      if (error) throw error;
+      return { results: data };
+    }
+
+    case "list_marinas": {
+      const q = String(args.query || "").trim();
+      let query = sb
+        .from("marinas")
+        .select("id, marina_name, city, state")
+        .eq("active", true)
+        .order("marina_name")
+        .limit(20);
+      if (q) query = query.ilike("marina_name", `%${q}%`);
+      const { data, error } = await query;
+      if (error) throw error;
+      return { results: data };
+    }
+
+    case "get_vessel_history": {
+      const { data, error } = await sb
+        .from("service_orders")
+        .select("id, service_order_number, status, scheduled_start_at, grand_total, created_at, problem_description")
+        .eq("vessel_id", args.vessel_id)
+        .order("created_at", { ascending: false })
+        .limit(30);
+      if (error) throw error;
+      return { history: data };
+    }
+
     case "propose_action": {
       // Read-only: apenas devolve o resumo. O frontend renderiza o card.
       return {
