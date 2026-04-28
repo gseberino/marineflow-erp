@@ -142,7 +142,7 @@ export default function ImportFiscalXML() {
     if (!parsed?.noteId) return;
     setConfirming(true);
     try {
-      const { data, error } = await supabase.rpc('confirm_nfe_import', {
+      const { data, error } = await (supabase.rpc as any)('confirm_nfe_import', {
         p_note_id:     parsed.noteId,
         p_supplier_id: supplierId === '__none' ? null : supplierId,
         p_manual_mappings: Object.entries(manualMappings).map(([sku, prodId]) => ({
@@ -447,19 +447,20 @@ export default function ImportFiscalXML() {
                                 .eq('id', note.id)
                                 .single();
                               if (data) {
+                                const d = data as any;
                                 setParsed({
-                                  noteId:     data.id,
-                                  nfeKey:     data.nfe_key,
-                                  nfeNumber:  data.nfe_number,
-                                  issueDate:  data.issued_at,
-                                  issuerName: data.issuer_name,
-                                  issuerCNPJ: data.issuer_cnpj,
-                                  totalNF:    data.total_amount,
-                                  totalICMS:  data.tax_icms,
-                                  totalIPI:   data.tax_ipi,
-                                  totalPIS:   data.tax_pis,
-                                  totalCOFINS: data.tax_cofins,
-                                  items:      data.items || [],
+                                  noteId:     d.id,
+                                  nfeKey:     d.nfe_key,
+                                  nfeNumber:  d.nfe_number,
+                                  issueDate:  d.issued_at ?? d.issue_date,
+                                  issuerName: d.issuer_name,
+                                  issuerCNPJ: d.issuer_cnpj,
+                                  totalNF:    d.total_amount ?? d.total_value,
+                                  totalICMS:  d.tax_icms,
+                                  totalIPI:   d.tax_ipi,
+                                  totalPIS:   d.tax_pis,
+                                  totalCOFINS: d.tax_cofins,
+                                  items:      d.items || [],
                                 });
                                 setShowConfirm(true);
                               }

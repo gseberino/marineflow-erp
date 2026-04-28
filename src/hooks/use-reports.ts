@@ -221,8 +221,8 @@ export function useTechnicianProductivityReport() {
       const times = timesRes.data ?? [];
       const profitabilityData = profitabilityRes.data ?? [];
       
-      const profitMap = new Map(profitabilityData.map(o => [o.os_id, { revenue: Number(o.revenue || 0), profit: Number(o.net_profit || 0) }]));
-      const completedIds = new Set(profitabilityData.map(o => o.os_id));
+      const profitMap = new Map<string, { revenue: number; profit: number }>((profitabilityData as any[]).map((o: any) => [o.os_id, { revenue: Number(o.revenue || 0), profit: Number(o.net_profit || 0) }]));
+      const completedIds = new Set((profitabilityData as any[]).map((o: any) => o.os_id));
 
       const rows = techs.map(t => {
         const myAssigns = assigns.filter(a => a.user_id === t.id && completedIds.has(a.service_order_id));
