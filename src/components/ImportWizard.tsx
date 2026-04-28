@@ -83,28 +83,29 @@ export function ImportWizard({ entityType, open, onOpenChange, onComplete }: Imp
       });
 
     let content = await readWithEncoding('UTF-8');
-    const parsed = parseCSVContent(content, 'utf-8');
+    let parsed = parseCSVContent(content, 'utf-8');
 
-    // Check for garbled chars and retry with latin-1
-    const hasGarbled = parsed.headers.some(h => h.includes('�') || h.includes('Ã'));
-    if (hasGarbled) {
+    // Check for garbled chars in headers OR first few rows
+    const checkGarbled = (p: ParsedFile) => {
+      const sample = [
+        ...p.headers,
+        ...p.rows.slice(0, 50).flatMap(r => Object.values(r))
+      ].join(' ');
+      return sample.includes('\ufffd') || sample.includes('Ã') || sample.includes('â');
+    };
+
+    if (checkGarbled(parsed)) {
       content = await readWithEncoding('ISO-8859-1');
-      const reParsed = parseCSVContent(content, 'iso-8859-1');
-      setParsedFile(reParsed);
-      const det = detectFormat(reParsed);
-      setDetection(det);
-      setMapping(det.suggestedMapping);
-      if (det.entityType !== 'mixed') setResolvedType(det.entityType);
-      else setResolvedType('mixed');
-    } else {
-      setParsedFile(parsed);
-      const det = detectFormat(parsed);
-      setDetection(det);
-      setMapping(det.suggestedMapping);
-      if (entityType === 'auto' || det.confidence >= 80) {
-        if (det.entityType !== 'mixed') setResolvedType(det.entityType);
-        else setResolvedType('mixed');
-      }
+      parsed = parseCSVContent(content, 'iso-8859-1');
+    }
+
+    setParsedFile(parsed);
+    const det = detectFormat(parsed);
+    setDetection(det);
+    setMapping(det.suggestedMapping);
+    
+    if (entityType === 'auto' || det.confidence >= 80) {
+      setResolvedType(det.entityType === 'mixed' ? 'mixed' : det.entityType);
     }
   };
 

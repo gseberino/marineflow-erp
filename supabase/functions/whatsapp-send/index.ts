@@ -44,35 +44,36 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const INSTANCE_ID = Deno.env.get("ZAPI_INSTANCE_ID");
-    const TOKEN = Deno.env.get("ZAPI_TOKEN");
-    const CLIENT_TOKEN = Deno.env.get("ZAPI_CLIENT_TOKEN");
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    if (!INSTANCE_ID || !TOKEN) {
-      return jr({ error: "Z-API credentials not configured" }, 500);
-    }
-
-    // Auth
+    // Auth first (needed before reading DB)
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) return jr({ error: "Unauthorized" }, 401);
+    const supabaseAdmin = createClient(SUPABASE_URL, SERVICE_ROLE);
     const supabaseAuth = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_ANON_KEY")!, {
       global: { headers: { Authorization: authHeader } },
     });
     const { data: userData, error: userErr } = await supabaseAuth.auth.getUser();
     if (userErr || !userData.user) return jr({ error: "Invalid session" }, 401);
 
+    // Load credentials from app_settings (DB) with env fallback
+    const { data: settings } = await supabaseAdmin.from("app_settings").select("key, value");
+    const settingsMap = Object.fromEntries((settings || []).map((s: any) => [s.key, s.value]));
+
+    const INSTANCE_ID = settingsMap["zapi_instance_id"] || Deno.env.get("ZAPI_INSTANCE_ID");
+    const TOKEN = settingsMap["zapi_token"] || Deno.env.get("ZAPI_TOKEN");
+    const CLIENT_TOKEN = settingsMap["zapi_client_token"] || Deno.env.get("ZAPI_CLIENT_TOKEN");
+
+    if (!INSTANCE_ID || !TOKEN) {
+      return jr({ error: "Z-API credentials not configured. Configure em Configurações → WhatsApp." }, 500);
+    }
+
     const json = await req.json().catch(() => null);
     const parsed = BodySchema.safeParse(json);
     if (!parsed.success) return jr({ error: parsed.error.flatten().fieldErrors }, 400);
     const body = parsed.data;
 
-    // Check Test Mode and Test Number in app_settings
-    const supabaseAdmin = createClient(SUPABASE_URL, SERVICE_ROLE);
-    const { data: settings } = await supabaseAdmin.from("app_settings").select("key, value");
-    const settingsMap = Object.fromEntries((settings || []).map(s => [s.key, s.value]));
-    
     const testMode = settingsMap["zapi_test_mode"] === "true";
     const testNumber = settingsMap["zapi_test_number"]?.replace(/\D/g, "");
 

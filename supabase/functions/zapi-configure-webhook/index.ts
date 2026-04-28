@@ -1,8 +1,6 @@
 // Edge Function: zapi-configure-webhook
-// Configura automaticamente o webhook "On Message Received" na Z-API
-// apontando para nossa função whatsapp-webhook.
-// Também permite consultar o status atual e configurar os outros webhooks
-// (status de entrega, mensagem enviada por mim, presença).
+// Configura automaticamente os webhooks na Z-API.
+// Lê credenciais do app_settings (DB) com fallback para variáveis de ambiente.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders = {
@@ -24,19 +22,13 @@ Deno.serve(async (req) => {
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const INSTANCE_ID = Deno.env.get("ZAPI_INSTANCE_ID");
-    const TOKEN = Deno.env.get("ZAPI_TOKEN");
-    const CLIENT_TOKEN = Deno.env.get("ZAPI_CLIENT_TOKEN");
+    const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 
-    if (!INSTANCE_ID || !TOKEN) {
-      return jr({ error: "ZAPI_INSTANCE_ID ou ZAPI_TOKEN não configurados" }, 400);
-    }
-
-    // Validar usuário autenticado (admin)
+    // Validar usuário autenticado
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) return jr({ error: "Não autenticado" }, 401);
 
-    const userClient = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_ANON_KEY")!, {
+    const userClient = createClient(SUPABASE_URL, ANON_KEY, {
       global: { headers: { Authorization: authHeader } },
     });
     const { data: { user } } = await userClient.auth.getUser();
@@ -48,80 +40,98 @@ Deno.serve(async (req) => {
       return jr({ error: "Permissão negada" }, 403);
     }
 
-    const webhookUrl = `${SUPABASE_URL}/functions/v1/whatsapp-webhook?apikey=${Deno.env.get("SUPABASE_ANON_KEY")}`;
-    const base = `https://api.z-api.io/instances/${INSTANCE_ID}/token/${TOKEN}`;
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (CLIENT_TOKEN) headers["Client-Token"] = CLIENT_TOKEN;
+    // ---- Carregar credenciais do banco (app_settings) com fallback para env ----
+    const { data: settings } = await admin
+      .from("app_settings")
+      .select("key, value")
+      .in("key", ["zapi_instance_id", "zapi_token", "zapi_client_token"]);
 
-    // Endpoints da Z-API para cada tipo de webhook
-    const endpoints = {
-      received: "update-webhook-received",         // Mensagem recebida
-      delivery: "update-webhook-delivery",         // Status de entrega
-      messageStatus: "update-webhook-message-status", // Status alternativo
-      received_by_me: "update-webhook-receive-by-me", // Mensagens que ENVIO via celular
-      disconnected: "update-webhook-disconnected", // Desconexão
+    const settingsMap: Record<string, string> = {};
+    for (const s of settings || []) {
+      settingsMap[s.key] = String(s.value || "");
+    }
+
+    const INSTANCE_ID = settingsMap["zapi_instance_id"] || Deno.env.get("ZAPI_INSTANCE_ID") || "";
+    const TOKEN = settingsMap["zapi_token"] || Deno.env.get("ZAPI_TOKEN") || "";
+    const CLIENT_TOKEN = settingsMap["zapi_client_token"] || Deno.env.get("ZAPI_CLIENT_TOKEN") || "";
+
+    if (!INSTANCE_ID || !TOKEN) {
+      return jr({
+        error: "Credenciais Z-API não configuradas.",
+        hint: "Vá em Configurações → WhatsApp → Credenciais Z-API e salve o Instance ID e Token.",
+        from_db: { instance_id: !!settingsMap["zapi_instance_id"], token: !!settingsMap["zapi_token"] },
+        from_env: { instance_id: !!Deno.env.get("ZAPI_INSTANCE_ID"), token: !!Deno.env.get("ZAPI_TOKEN") },
+      }, 400);
+    }
+
+    const webhookUrl = `${SUPABASE_URL}/functions/v1/whatsapp-webhook?apikey=${ANON_KEY}`;
+    const base = `https://api.z-api.io/instances/${INSTANCE_ID}/token/${TOKEN}`;
+    const zapiHeaders: Record<string, string> = { "Content-Type": "application/json" };
+    if (CLIENT_TOKEN) zapiHeaders["Client-Token"] = CLIENT_TOKEN;
+
+    // Endpoints da Z-API
+    const endpoints: Record<string, string> = {
+      received: "update-webhook-received",
+      delivery: "update-webhook-delivery",
+      messageStatus: "update-webhook-message-status",
+      received_by_me: "update-webhook-receive-by-me",
+      disconnected: "update-webhook-disconnected",
     };
 
     const url = new URL(req.url);
     const action = url.searchParams.get("action") || "configure_all";
 
-    // ---- Status: consulta os webhooks atuais configurados na Z-API ----
-    if (action === "status") {
-      const statusRes = await fetch(`${base}/webhooks`, { method: "GET", headers });
-      const statusData = await statusRes.json().catch(() => null);
-      return jr({
-        ok: statusRes.ok,
-        target_webhook_url: webhookUrl,
-        zapi_response: statusData,
-        zapi_status_code: statusRes.status,
-      });
-    }
-
-    // ---- Test each: consulta o valor atual de CADA endpoint individualmente ----
+    // ---- Test each: consulta o estado atual via GET /webhooks ----
     if (action === "test_each") {
       const startedAt = Date.now();
-      const tests: Record<string, any> = {};
-      
-      try {
-        // Z-API centralized webhooks status
-        const res = await fetch(`${base}/webhooks`, { method: "GET", headers });
-        const webhooks = await res.json().catch(() => ({}));
-        
-        // Mapping Z-API response keys to our internal names
-        // Note: keys vary by Z-API version, we try common ones.
-        const zapiMapping: Record<string, string[]> = {
-          received: ["onMessageReceived", "value", "received"],
-          delivery: ["onMessageDelivery", "delivery"],
-          messageStatus: ["onMessageStatus", "messageStatus"],
-          received_by_me: ["onMessageReceivedByMe", "receivedByMe"],
-          disconnected: ["onDisconnected", "disconnected"],
-        };
 
-        for (const [name, endpoint] of Object.entries(endpoints)) {
-          const possibleKeys = zapiMapping[name] || [];
-          let currentValue = null;
-          
-          for (const k of possibleKeys) {
-            if (webhooks[k]) {
-              currentValue = webhooks[k];
+      const res = await fetch(`${base}/webhooks`, { method: "GET", headers: zapiHeaders });
+      const rawWebhooks = await res.json().catch(() => ({}));
+
+      console.log("Z-API /webhooks raw response:", JSON.stringify(rawWebhooks));
+
+      // Z-API retorna um objeto; tentamos mapear todos os campos possíveis
+      const tests: Record<string, any> = {};
+      for (const [name, endpoint] of Object.entries(endpoints)) {
+        // Busca o valor em qualquer chave do objeto que contenha "http"
+        let currentValue: string | null = null;
+
+        // Tentativa por chaves conhecidas
+        const knownKeys = [
+          "onMessageReceived", "deliveryWebhook", "onMessageStatus",
+          "onMessageReceivedByMe", "onDisconnect",
+          "received", "delivery", "messageStatus", "receivedByMe", "disconnected",
+          "value", "url", "webhook",
+        ];
+
+        // Também tenta buscar por string parcial do endpoint
+        const endpointPart = endpoint.replace("update-webhook-", "");
+
+        for (const [k, v] of Object.entries(rawWebhooks)) {
+          if (typeof v === "string" && v.startsWith("http")) {
+            const keyLower = k.toLowerCase();
+            if (
+              knownKeys.includes(k) ||
+              keyLower.includes(endpointPart.replace("-", "")) ||
+              keyLower.includes("webhook")
+            ) {
+              currentValue = v;
               break;
             }
           }
-
-          tests[name] = {
-            endpoint,
-            url: `${base}/${endpoint}`,
-            method: "GET (via /webhooks)",
-            http_status: res.status,
-            ok: res.ok,
-            current_value: currentValue,
-            matches_target: currentValue ? String(currentValue).startsWith(webhookUrl) : false,
-            response: webhooks,
-            duration_ms: Date.now() - startedAt,
-          };
         }
-      } catch (e: any) {
-        return jr({ error: "Falha ao consultar lista de webhooks: " + e.message }, 500);
+
+        tests[name] = {
+          endpoint,
+          http_status: res.status,
+          ok: res.ok,
+          current_value: currentValue,
+          matches_target: currentValue
+            ? currentValue.includes("/whatsapp-webhook")
+            : false,
+          raw_zapi_response: rawWebhooks,
+          duration_ms: Date.now() - startedAt,
+        };
       }
 
       const allMatch = Object.values(tests).every((t: any) => t.matches_target);
@@ -129,36 +139,51 @@ Deno.serve(async (req) => {
         ok: true,
         all_match_target: allMatch,
         target_webhook_url: webhookUrl,
+        instance_id: INSTANCE_ID,
+        credential_source: settingsMap["zapi_instance_id"] ? "database" : "environment",
         tests,
+        raw_zapi_webhooks: rawWebhooks,
       });
     }
 
-    // ---- Configura todos os webhooks relevantes ----
-    // Z-API atualmente aceita POST nesses endpoints. Algumas instâncias antigas só aceitam PUT,
-    // por isso aplicamos fallback automático em caso de 405.
+    // ---- Configura todos os webhooks (configure_all) ----
     const results: Record<string, any> = {};
     for (const [name, endpoint] of Object.entries(endpoints)) {
       try {
+        // Tenta POST primeiro, fallback para PATCH e depois PUT
         let res = await fetch(`${base}/${endpoint}`, {
           method: "POST",
-          headers,
+          headers: zapiHeaders,
           body: JSON.stringify({ value: webhookUrl }),
         });
         let methodUsed = "POST";
+
+        if (res.status === 405) {
+          res = await fetch(`${base}/${endpoint}`, {
+            method: "PATCH",
+            headers: zapiHeaders,
+            body: JSON.stringify({ value: webhookUrl }),
+          });
+          methodUsed = "PATCH";
+        }
         if (res.status === 405) {
           res = await fetch(`${base}/${endpoint}`, {
             method: "PUT",
-            headers,
+            headers: zapiHeaders,
             body: JSON.stringify({ value: webhookUrl }),
           });
           methodUsed = "PUT";
         }
-        const data = await res.json().catch(() => ({}));
+
+        const responseText = await res.text();
+        let responseData: any;
+        try { responseData = JSON.parse(responseText); } catch { responseData = responseText; }
+
         results[name] = {
           status: res.status,
           ok: res.ok,
           method_used: methodUsed,
-          response: data,
+          response: responseData,
         };
       } catch (e: any) {
         results[name] = { ok: false, error: e?.message || String(e) };
@@ -169,11 +194,14 @@ Deno.serve(async (req) => {
     return jr({
       ok: allOk,
       webhook_url: webhookUrl,
+      instance_id: INSTANCE_ID,
+      credential_source: settingsMap["zapi_instance_id"] ? "database" : "environment",
       configured: results,
       message: allOk
         ? "Todos os webhooks da Z-API foram apontados para o sistema."
-        : "Alguns webhooks falharam. Verifique os detalhes em 'configured'.",
+        : "Alguns webhooks falharam. Veja detalhes em 'configured'.",
     });
+
   } catch (err: any) {
     console.error("zapi-configure-webhook error", err);
     return jr({ error: err?.message || "internal error" }, 500);
