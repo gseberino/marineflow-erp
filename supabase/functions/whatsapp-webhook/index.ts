@@ -132,31 +132,37 @@ async function notifyAssignedReminder(
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  const admin = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    { auth: { persistSession: false, autoRefreshToken: false } }
+  );
+
   try {
-    const admin = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-      { auth: { persistSession: false, autoRefreshToken: false } }
-    );
-
     const url = new URL(req.url);
-
+    
     // ---- Healthcheck (GET) ----
     if (req.method === "GET" || url.searchParams.get("healthcheck") === "1") {
-      const { count: totalInbound } = await admin.from("whatsapp_messages").select("*", { count: "exact", head: true }).eq("direction", "inbound");
-      const { data: recent } = await admin.from("whatsapp_messages").select("*").eq("direction", "inbound").order("created_at", { ascending: false }).limit(5);
-      
-      return jr({
-        ok: true,
-        type: "healthcheck",
-        total_inbound: totalInbound || 0,
-        recent_messages: (recent || []).map(m => ({ at: m.created_at, phone: m.phone_normalized, body: m.body })),
-        checked_at: new Date().toISOString(),
-      });
+      return jr({ ok: true, status: "alive", timestamp: new Date().toISOString() });
     }
 
     const payload = await req.json().catch(() => null);
-    if (!payload) return jr({ error: "No payload" }, 400);
+    
+    // LOG DE DEPURAÇÃO NO BANCO (app_settings)
+    // Isso nos dirá se a Z-API chegou aqui, mesmo que o resto falhe.
+    await admin.from("app_settings").upsert({ 
+      key: "debug_last_webhook", 
+      value: JSON.stringify({
+        received_at: new Date().toISOString(),
+        method: req.method,
+        payload: payload
+      })
+    }, { onConflict: 'key' });
+
+    if (!payload) {
+      console.error("[Webhook] Payload vazio");
+      return jr({ error: "No payload" }, 400);
+    }
 
     const pAny = payload as any;
     const type = String(pAny.type || pAny.event || "");
@@ -171,16 +177,16 @@ Deno.serve(async (req) => {
       return jr({ ok: true, ignored: "group" });
     }
 
-    // 2. Buscar Credenciais Z-API (para notificações e logs)
+    // 2. Buscar Credenciais Z-API
     const { data: settings } = await admin.from("app_settings").select("key, value").in("key", ["zapi_instance_id", "zapi_token", "zapi_client_token"]);
     const sMap = Object.fromEntries((settings || []).map(s => [s.key, s.value]));
     const zapiCreds = {
-      id: sMap.zapi_instance_id || Deno.env.get("ZAPI_INSTANCE_ID") || "",
-      token: sMap.zapi_token || Deno.env.get("ZAPI_TOKEN") || "",
-      client: sMap.zapi_client_token || Deno.env.get("ZAPI_CLIENT_TOKEN") || null
+      id: sMap.zapi_instance_id || "",
+      token: sMap.zapi_token || "",
+      client: sMap.zapi_client_token || null
     };
 
-    // 3. Tratar Status de Mensagem (Entregue/Lida)
+    // 3. Status de Entrega
     if (type === "MessageStatusCallback" || pAny.status) {
       const status = String(pAny.status).toLowerCase();
       const zapiId = pAny.messageId || (Array.isArray(pAny.ids) ? pAny.ids[0] : null);
@@ -190,30 +196,20 @@ Deno.serve(async (req) => {
       return jr({ ok: true, type: "status_update" });
     }
 
-    // 4. Tratar Mensagem Recebida (ou Enviada pelo Celular - Echo)
-    const fromMe = !!pAny.fromMe;
-    const phoneRaw = pAny.phone || pAny.chatId || "";
-    const phone = normalizePhone(phoneRaw);
-    
-    if (!phone) {
-      console.log("Ignorado: Telefone não normalizável", phoneRaw);
-      return jr({ ok: true, ignored: "invalid_phone" });
-    }
-
+    // 4. Salvar Mensagem
     const { body, messageType, mediaUrl } = extractBodyAndType(pAny);
     const zapiId = pAny.messageId || pAny.id || null;
 
-    // Dedup
     if (zapiId) {
-      const { data: existing } = await admin.from("whatsapp_messages").select("id").eq("zapi_message_id", String(zapiId)).maybeSingle();
-      if (existing) return jr({ ok: true, dedup: true });
+      const { data: dup } = await admin.from("whatsapp_messages").select("id").eq("zapi_message_id", String(zapiId)).maybeSingle();
+      if (dup) return jr({ ok: true, dedup: true });
     }
 
-    // Identificar Cliente ou Criar Lead
     let clientId = null;
     let leadId = null;
     let isNewLead = false;
 
+    // Busca cliente
     const { data: client } = await admin.from("clients").select("id").or(`phone.ilike.%${phone}%,whatsapp.ilike.%${phone}%`).eq("active", true).maybeSingle();
     
     if (client) {
@@ -222,22 +218,19 @@ Deno.serve(async (req) => {
       const { data: lead } = await admin.from("whatsapp_leads").select("id").eq("phone_normalized", phone).maybeSingle();
       if (lead) {
         leadId = lead.id;
-        await admin.from("whatsapp_leads").update({ last_inbound_at: new Date().toISOString() }).eq("id", lead.id);
       } else if (!fromMe) {
         const { data: newLead } = await admin.from("whatsapp_leads").insert({
           phone_normalized: phone,
           display_name: pAny.senderName || pAny.notifyName || null,
-          status: "pending",
-          last_inbound_at: new Date().toISOString()
+          status: "pending"
         }).select("id").single();
         leadId = newLead?.id;
         isNewLead = true;
       }
     }
 
-    // Salvar Mensagem
     const direction = fromMe ? "outbound" : "inbound";
-    const { data: insertedMsg } = await admin.from("whatsapp_messages").insert({
+    const { data: msg, error: insErr } = await admin.from("whatsapp_messages").insert({
       direction,
       phone_normalized: phone,
       message_type: messageType,
@@ -250,15 +243,19 @@ Deno.serve(async (req) => {
       raw_payload: pAny
     }).select("id").single();
 
-    // Notificar se for Lead Novo
+    if (insErr) {
+      console.error("[Webhook] Erro no insert:", insErr);
+      return jr({ error: "db_error", details: insErr.message }, 500);
+    }
+
     if (isNewLead && direction === "inbound") {
       notifyAssignedReminder(admin, phone, pAny.senderName || null, body, zapiCreds).catch(console.error);
     }
 
-    return jr({ ok: true, message_id: insertedMsg?.id, direction });
+    return jr({ ok: true, message_id: msg?.id });
 
   } catch (err: any) {
-    console.error("Webhook Error:", err);
+    console.error("[Webhook Fatal Error]:", err);
     return jr({ error: err.message }, 500);
   }
 });
