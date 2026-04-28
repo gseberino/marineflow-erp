@@ -82,7 +82,6 @@ export function PayableFormDialog({ open, onOpenChange }: Props) {
             />
           </div>
           {!supplierId && <div><Label>Nome do fornecedor</Label><Input value={supplierName} onChange={e => setSupplierName(e.target.value)} /></div>}
-          </div>
           <div className="grid grid-cols-2 gap-3">
             <div><Label>{t.financial.expenseCategory}</Label>
               <CategorySelect type="payable" value={category} onChange={setCategory} placeholder="—" />
