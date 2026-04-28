@@ -36,6 +36,7 @@ import ResetPasswordPage from "./pages/ResetPasswordPage";
 import PublicServiceOrderView from "./pages/PublicServiceOrderView";
 import ClientPortal from "./pages/ClientPortal";
 import ActiveProspectingPage from "./pages/ActiveProspectingPage";
+import ProspectingPage from "./pages/ProspectingPage";
 import ImportFiscalXML from "./pages/ImportFiscalXML";
 import CommissionsPage from "./pages/CommissionsPage";
 import SmartPurchasePage from "./pages/SmartPurchasePage";
@@ -81,6 +82,9 @@ const App = () => (
                             <SmartPurchasePage />
                           </ProtectedRoute>
                         } />
+                        <Route path="/inventory/import-xml" element={<ImportFiscalXML />} />
+                        <Route path="/prospecting" element={<ProspectingPage />} />
+                        <Route path="/active-prospecting" element={<ActiveProspectingPage />} />
                         <Route path="/agenda" element={<AgendaPage />} />
                         <Route path="/financial" element={
                           <ProtectedRoute roles={['admin', 'financial']}>

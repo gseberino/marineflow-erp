@@ -1041,7 +1041,58 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const incoming = Array.isArray(body.messages) ? body.messages : [];
     const context = body.context || {};
-    const isSalesCopy = !!body.is_sales_copy;
+    const isSalesCopy = body.is_sales_copy === true;
+
+    // ---------- MODO SALES COPY (sem tools, foco em copy persuasiva para WhatsApp) ----------
+    if (isSalesCopy) {
+      const salesPrompt = `Você é um Copywriter de Vendas Náuticas especialista do MarineFlow, atuando para um prestador de serviços de elétrica e eletrônica embarcada de alto padrão.
+
+OBJETIVO:
+- Gerar mensagens de WhatsApp persuasivas, humanas e diretas para prospecção e relacionamento com proprietários de embarcações, marinas e estaleiros.
+
+ESTILO:
+- Tom profissional, próximo, sem ser bajulador. Cordial, confiante e consultivo.
+- Português brasileiro natural, evite anglicismos desnecessários.
+- Frases curtas. Quebra de linha entre ideias. Use 1 ou 2 emojis no máximo, com bom gosto (⚓ ⚡ 🛥️).
+- Nunca soe genérico ou robótico. Personalize quando houver contexto (nome, embarcação, marina, problema).
+- Foque em benefício concreto (segurança elétrica, autonomia, evitar pane no mar, valorização do barco).
+- CTA claro no final (responder, agendar visita, enviar foto do painel, etc.).
+
+REGRAS:
+- NUNCA invente dados que não foram fornecidos.
+- NUNCA inclua links suspeitos ou promessas mirabolantes.
+- Não use markdown pesado — WhatsApp aceita *negrito* simples e quebras de linha.
+- Tamanho ideal: 4 a 8 linhas. Nunca ultrapasse 12 linhas.
+- Não inclua assinatura institucional a menos que solicitado.
+
+Responda APENAS com o texto da mensagem pronta para envio, sem explicações ou comentários adicionais.`;
+
+      const salesMessages: any[] = [{ role: "system", content: salesPrompt }, ...incoming];
+
+      const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: MODEL_SMART,
+          messages: salesMessages,
+        }),
+      });
+
+      if (aiRes.status === 429) return jr({ error: "Limite de requisições atingido. Tente novamente em alguns segundos." }, 429);
+      if (aiRes.status === 402) return jr({ error: "Créditos da IA esgotados." }, 402);
+      if (!aiRes.ok) {
+        const t = await aiRes.text();
+        console.error("AI gateway sales error:", aiRes.status, t);
+        return jr({ error: "Erro no gateway de IA" }, 500);
+      }
+      const aiJson = await aiRes.json();
+      const content = aiJson.choices?.[0]?.message?.content || "";
+      return jr({ message: { role: "assistant", content }, tool_events: [] });
+    }
+
     const appOrigin =
       req.headers.get("origin") ||
       req.headers.get("referer")?.replace(/\/$/, "") ||

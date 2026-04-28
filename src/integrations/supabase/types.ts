@@ -663,6 +663,116 @@ export type Database = {
         }
         Relationships: []
       }
+      fiscal_note_items: {
+        Row: {
+          c_prod: string | null
+          created_at: string
+          fiscal_note_id: string
+          id: string
+          inventory_movement_id: string | null
+          matched_product_id: string | null
+          ncm: string | null
+          q_com: number | null
+          unit: string | null
+          v_prod: number | null
+          v_un_com: number | null
+          x_prod: string | null
+        }
+        Insert: {
+          c_prod?: string | null
+          created_at?: string
+          fiscal_note_id: string
+          id?: string
+          inventory_movement_id?: string | null
+          matched_product_id?: string | null
+          ncm?: string | null
+          q_com?: number | null
+          unit?: string | null
+          v_prod?: number | null
+          v_un_com?: number | null
+          x_prod?: string | null
+        }
+        Update: {
+          c_prod?: string | null
+          created_at?: string
+          fiscal_note_id?: string
+          id?: string
+          inventory_movement_id?: string | null
+          matched_product_id?: string | null
+          ncm?: string | null
+          q_com?: number | null
+          unit?: string | null
+          v_prod?: number | null
+          v_un_com?: number | null
+          x_prod?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fiscal_note_items_fiscal_note_id_fkey"
+            columns: ["fiscal_note_id"]
+            isOneToOne: false
+            referencedRelation: "fiscal_notes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      fiscal_notes: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          issue_date: string | null
+          issuer_cnpj: string | null
+          issuer_name: string | null
+          nfe_key: string
+          nfe_number: string | null
+          notes: string | null
+          payable_id: string | null
+          raw_xml: string | null
+          status: string
+          supplier_id: string | null
+          total_value: number | null
+          updated_at: string
+          xml_url: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          issue_date?: string | null
+          issuer_cnpj?: string | null
+          issuer_name?: string | null
+          nfe_key: string
+          nfe_number?: string | null
+          notes?: string | null
+          payable_id?: string | null
+          raw_xml?: string | null
+          status?: string
+          supplier_id?: string | null
+          total_value?: number | null
+          updated_at?: string
+          xml_url?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          issue_date?: string | null
+          issuer_cnpj?: string | null
+          issuer_name?: string | null
+          nfe_key?: string
+          nfe_number?: string | null
+          notes?: string | null
+          payable_id?: string | null
+          raw_xml?: string | null
+          status?: string
+          supplier_id?: string | null
+          total_value?: number | null
+          updated_at?: string
+          xml_url?: string | null
+        }
+        Relationships: []
+      }
       import_sessions: {
         Row: {
           column_mapping: Json | null
@@ -1207,6 +1317,7 @@ export type Database = {
           cost_price: number | null
           created_at: string
           csosn: string | null
+          default_warranty_days: number | null
           fiscal_complete: boolean
           fiscal_origin: number | null
           icms_rate: number | null
@@ -1241,6 +1352,7 @@ export type Database = {
           cost_price?: number | null
           created_at?: string
           csosn?: string | null
+          default_warranty_days?: number | null
           fiscal_complete?: boolean
           fiscal_origin?: number | null
           icms_rate?: number | null
@@ -1275,6 +1387,7 @@ export type Database = {
           cost_price?: number | null
           created_at?: string
           csosn?: string | null
+          default_warranty_days?: number | null
           fiscal_complete?: boolean
           fiscal_origin?: number | null
           icms_rate?: number | null
@@ -1543,6 +1656,7 @@ export type Database = {
           unit_cost_snapshot: number
           unit_sale_snapshot: number
           updated_at: string
+          warranty_days: number | null
         }
         Insert: {
           created_at?: string
@@ -1557,6 +1671,7 @@ export type Database = {
           unit_cost_snapshot: number
           unit_sale_snapshot: number
           updated_at?: string
+          warranty_days?: number | null
         }
         Update: {
           created_at?: string
@@ -1571,6 +1686,7 @@ export type Database = {
           unit_cost_snapshot?: number
           unit_sale_snapshot?: number
           updated_at?: string
+          warranty_days?: number | null
         }
         Relationships: [
           {
@@ -1604,6 +1720,7 @@ export type Database = {
           technician_user_id: string | null
           unit_price_snapshot: number
           updated_at: string | null
+          warranty_days: number | null
         }
         Insert: {
           billing_unit_snapshot?: string
@@ -1619,6 +1736,7 @@ export type Database = {
           technician_user_id?: string | null
           unit_price_snapshot?: number
           updated_at?: string | null
+          warranty_days?: number | null
         }
         Update: {
           billing_unit_snapshot?: string
@@ -1634,6 +1752,7 @@ export type Database = {
           technician_user_id?: string | null
           unit_price_snapshot?: number
           updated_at?: string | null
+          warranty_days?: number | null
         }
         Relationships: [
           {
@@ -2018,6 +2137,7 @@ export type Database = {
           created_at: string | null
           currency: string | null
           default_price: number | null
+          default_warranty_days: number | null
           description: string | null
           id: string
           service_name: string
@@ -2030,6 +2150,7 @@ export type Database = {
           created_at?: string | null
           currency?: string | null
           default_price?: number | null
+          default_warranty_days?: number | null
           description?: string | null
           id?: string
           service_name: string
@@ -2042,6 +2163,7 @@ export type Database = {
           created_at?: string | null
           currency?: string | null
           default_price?: number | null
+          default_warranty_days?: number | null
           description?: string | null
           id?: string
           service_name?: string
