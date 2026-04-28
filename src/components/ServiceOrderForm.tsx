@@ -2105,9 +2105,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         </Collapsible>
 
         {/* Photos (Only if editing existing OS) */}
-        {initialData?.id && (
+        {orderData?.id && (
           <div className="pt-4 border-t mt-4">
-            <ServiceOrderPhotos orderId={initialData.id} initialPhotos={initialData.photos || []} />
+            <ServiceOrderPhotos orderId={orderData.id} initialPhotos={(orderData as any).photos || []} />
           </div>
         )}
       </section>
