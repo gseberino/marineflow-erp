@@ -83,14 +83,24 @@ async function notifyAssignedReminder(
 ) {
   try {
     if (!zapiCreds.id || !zapiCreds.token) return;
+    
+    // 1. Verificar se notificações estão ativadas
+    const { data: settings } = await admin.from("app_settings").select("key, value").in("key", ["whatsapp_reminder_enabled", "whatsapp_reminder_recipients"]);
+    const sMap = Object.fromEntries((settings || []).map(s => [s.key, s.value]));
+    
+    const isEnabled = String(sMap.whatsapp_reminder_enabled).toLowerCase() === "true" || sMap.whatsapp_reminder_enabled === "1";
+    if (!isEnabled) {
+      console.log("[Notify] Notificação desativada nas configurações.");
+      return;
+    }
 
-    const { data: setting } = await admin
-      .from("app_settings")
-      .select("value")
-      .eq("key", "whatsapp_reminder_recipients")
-      .maybeSingle();
+    // 2. Ignorar LIDs (IDs internos do WhatsApp que poluem o celular)
+    if (phone.length > 15) {
+      console.log("[Notify] Ignorando LID:", phone);
+      return;
+    }
 
-    let recipients: string[] = String(setting?.value || "")
+    let recipients: string[] = String(sMap.whatsapp_reminder_recipients || "")
       .split(/[,\s]+/)
       .map((p) => p.replace(/\D/g, ""))
       .filter((p) => p.length >= 10);
@@ -184,7 +194,13 @@ Deno.serve(async (req) => {
 
     console.log(`[Webhook Audit] Type: ${type} | FromMe: ${fromMe} | Raw: ${phoneRaw} | Normalized: ${phone}`);
 
-    // 1. Ignorar Grupos
+    // 1. Ignorar o que não é mensagem ou status
+    // Lista de tipos para ignorar: Presence, ChatState, etc.
+    const ignoredTypes = ["PresenceChatCallback", "ChatStateCallback", "PresenceCallback"];
+    if (ignoredTypes.includes(type)) {
+      return jr({ ok: true, ignored: "system_callback" });
+    }
+
     if (pAny.isGroup === true || String(pAny.chatId || "").includes("-")) {
       return jr({ ok: true, ignored: "group" });
     }
