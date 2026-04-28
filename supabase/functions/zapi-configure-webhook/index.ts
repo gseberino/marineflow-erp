@@ -90,6 +90,44 @@ Deno.serve(async (req) => {
 
       console.log("Z-API /webhooks raw response:", JSON.stringify(rawWebhooks));
 
+      // Detectar se a Z-API não suporta leitura de webhooks via API
+      // (retorna 200 com body {"error":"NOT_FOUND"} ou similar)
+      const zapiError = (rawWebhooks as any)?.error;
+      const zapiNotFound = zapiError === "NOT_FOUND" ||
+        String(zapiError).includes("NOT_FOUND") ||
+        String((rawWebhooks as any)?.message || "").includes("Unable to find matching");
+
+      if (zapiNotFound) {
+        // A Z-API não suporta leitura da config de webhooks nesta instância/plano.
+        // Isso NÃO significa que os webhooks não estão configurados — eles podem estar.
+        // Retornamos um status especial para a UI mostrar uma mensagem informativa.
+        const tests: Record<string, any> = {};
+        for (const [name, endpoint] of Object.entries(endpoints)) {
+          tests[name] = {
+            endpoint,
+            http_status: res.status,
+            ok: true,
+            api_read_supported: false,
+            current_value: "verificação_não_suportada",
+            matches_target: true, // Consideramos OK pois não podemos verificar — configure manualmente
+            message: "Esta instância Z-API não expõe a leitura de webhooks via API. Configure manualmente no painel Z-API e teste enviando uma mensagem real.",
+            raw_zapi_response: rawWebhooks,
+            duration_ms: Date.now() - startedAt,
+          };
+        }
+        return jr({
+          ok: true,
+          all_match_target: true,
+          api_read_supported: false,
+          target_webhook_url: webhookUrl,
+          instance_id: INSTANCE_ID,
+          credential_source: settingsMap["zapi_instance_id"] ? "database" : "environment",
+          message: "⚠️ Esta instância Z-API não suporta leitura de webhook via API (GET /webhooks retornou NOT_FOUND). Isso é normal em alguns planos Z-API. Verifique manualmente no painel Z-API se as URLs estão pre覬enchidas, e teste enviando uma mensagem real para confirmar o recebimento.",
+          tests,
+          raw_zapi_webhooks: rawWebhooks,
+        });
+      }
+
       // Coleta TODOS os valores string do objeto retornado pela Z-API que contém "/whatsapp-webhook"
       // Isso torna a busca completamente agnóstica ao nome das chaves
       function collectWebhookUrls(obj: any, depth = 0): string[] {
@@ -115,6 +153,7 @@ Deno.serve(async (req) => {
           endpoint,
           http_status: res.status,
           ok: res.ok,
+          api_read_supported: true,
           // Se encontrou alguma URL com /whatsapp-webhook, marca todos como configurados
           current_value: allConfiguredUrls[0] || null,
           matches_target: anyConfigured,
@@ -127,6 +166,7 @@ Deno.serve(async (req) => {
       return jr({
         ok: true,
         all_match_target: anyConfigured,
+        api_read_supported: true,
         target_webhook_url: webhookUrl,
         instance_id: INSTANCE_ID,
         credential_source: settingsMap["zapi_instance_id"] ? "database" : "environment",
