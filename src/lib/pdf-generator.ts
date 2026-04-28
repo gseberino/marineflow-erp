@@ -787,21 +787,6 @@ ${options.showBankDetails !== false && hasBank ? `
   return pageWrapper(`FATURA ${docNumber}`, body);
 }
 
-${buildPaymentSection(data.serviceOrder)}
-
-${options.showTerms && data.terms ? `
-<div style="border-top:1px solid #e5e7eb;padding-top:10px;margin-top:16px;">
-  <div style="font-weight:700;font-size:10px;color:#1e3a5f;text-transform:uppercase;margin-bottom:4px;">Termos e Condições</div>
-  <div style="font-size:9px;color:#6b7280;white-space:pre-wrap;">${esc(data.terms)}</div>
-</div>
-` : ''}
-
-<div style="text-align:center;font-size:9px;color:#9ca3af;margin-top:20px;border-top:1px solid #e5e7eb;padding-top:8px;">
-  FATURA gerada em ${today} · ${esc(docNumber)}
-</div>`;
-
-  return pageWrapper(`FATURA ${esc(docNumber)}`, body);
-}
 
 // ============= RECEIPT (RECIBO) =============
 function buildReceiptHTML(data: PDFData, options: PDFOptions): string {
