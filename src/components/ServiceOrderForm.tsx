@@ -2097,6 +2097,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                     onClick={async () => set('customer_visible_report', await optimizeText(form.customer_visible_report))} disabled={isOptimizing || !form.customer_visible_report || isLocked}>
                     <Sparkles className="h-3 w-3 mr-1" /> IA
                   </Button>
+                </div>
                 <Textarea value={form.customer_visible_report} onChange={(e) => set('customer_visible_report', e.target.value)} rows={2} disabled={isLocked} />
               </div>
             </div>
