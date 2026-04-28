@@ -18,7 +18,8 @@ const SO_DETAIL_SELECT = `
   marinas!service_orders_marina_id_fkey(marina_name, latitude, longitude),
   service_order_parts(*, products(*)),
   service_order_technicians(*, app_users(*)),
-  time_entries(*, app_users!time_entries_technician_user_id_fkey(*))
+  time_entries(*, app_users!time_entries_technician_user_id_fkey(*)),
+  payment_condition_presets(*)
 `;
 
 export function useServiceOrders() {

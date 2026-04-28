@@ -27,13 +27,23 @@ Deno.serve(async (req) => {
 
     if (error) throw error;
 
+    const { data: settings } = await supabase.from("app_settings").select("key, value");
+    const settingsMap = Object.fromEntries((settings || []).map(s => [s.key, s.value]));
+    const testMode = settingsMap["zapi_test_mode"] === "true";
+    const testNumber = settingsMap["zapi_test_number"]?.replace(/\D/g, "");
+
     let sentCount = 0;
 
     for (const order of (orders || [])) {
       const client = order.clients;
-      const phone = client?.whatsapp || client?.phone;
+      let phone = (client?.whatsapp || client?.phone || "").replace(/\D/g, "");
       
-      if (phone) {
+      if (testMode && testNumber) {
+        console.log(`Scheduling Automation: Test Mode Active. Redirecting from ${phone} to ${testNumber}`);
+        phone = testNumber;
+      }
+      
+      if (phone && phone.length >= 10) {
         // Enviar via Z-API (usando a lógica que já temos no sistema)
         // Nota: Precisamos das credenciais Z-API configuradas no Secrets do Supabase
         const instanceId = Deno.env.get("ZAPI_INSTANCE_ID");

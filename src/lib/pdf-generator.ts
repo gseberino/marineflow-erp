@@ -449,31 +449,23 @@ function pageWrapper(title: string, body: string): string {
 // ============= QUOTE / SERVICE_ORDER (preserved behavior) =============
 function buildPaymentSection(so: PDFData['service_order']): string {
   const installments = so.payment_condition_installments;
-  if (!installments || !Array.isArray(installments) || installments.length === 0) {
-    if (!so.payment_conditions) return '';
-    return `
-      <div class="card" style="margin-top:20px;border-left:4px solid var(--secondary);">
-        <div class="section-title">Condições de Pagamento</div>
-        <div style="font-size:11px; white-space:pre-wrap;">${esc(so.payment_conditions)}</div>
-      </div>
-    `;
-  }
+  const hasInstallments = installments && Array.isArray(installments) && installments.length > 0;
+  const hasText = !!so.payment_conditions;
 
-  const rows = installments.map((inst, idx) => `
-    <tr>
-      <td style="font-weight:600;padding:6px 12px;">Parcela ${idx + 1}</td>
-      <td style="padding:6px 12px;">${inst.due_date ? fmtDate(inst.due_date) : (inst.label || '—')}</td>
-      <td style="text-align:right;font-weight:700;padding:6px 12px;">${fmtCurrency(inst.amount)}</td>
-    </tr>
-  `).join('');
+  if (!hasInstallments && !hasText) return '';
 
-  return `
-    <div class="card" style="margin-top:20px;border-left:4px solid var(--secondary);">
-      <div class="section-title">
-        <span>Programação de Pagamento</span>
-        <span style="color:var(--text-muted);font-size:8px;">${esc(so.payment_condition_label || 'Condição Definida')}</span>
-      </div>
-      <table style="margin-bottom:0;">
+  let installmentsHtml = '';
+  if (hasInstallments) {
+    const rows = installments.map((inst, idx) => `
+      <tr>
+        <td style="font-weight:600;padding:6px 12px;">Parcela ${idx + 1}</td>
+        <td style="padding:6px 12px;">${inst.due_date ? fmtDate(inst.due_date) : (inst.label || '—')}</td>
+        <td style="text-align:right;font-weight:700;padding:6px 12px;">${fmtCurrency(inst.amount)}</td>
+      </tr>
+    `).join('');
+
+    installmentsHtml = `
+      <table style="margin-bottom:0; width:100%; border-collapse:collapse;">
         <thead>
           <tr style="background:rgba(212, 175, 55, 0.05);color:var(--primary);">
             <th style="background:transparent;color:var(--primary);width:30%;">Vencimento</th>
@@ -483,7 +475,17 @@ function buildPaymentSection(so: PDFData['service_order']): string {
         </thead>
         <tbody>${rows}</tbody>
       </table>
-      ${so.payment_conditions ? `<div style="font-size:9px;color:var(--text-muted);margin-top:8px;border-top:1px dashed var(--border);padding-top:4px;">${esc(so.payment_conditions)}</div>` : ''}
+    `;
+  }
+
+  return `
+    <div class="card" style="margin-top:20px;border-left:4px solid var(--secondary); background:#fff;">
+      <div class="section-title">
+        <span>Programação de Pagamento</span>
+        <span style="color:var(--text-muted);font-size:8px;">${esc(so.payment_condition_label || 'Condição Comercial')}</span>
+      </div>
+      ${installmentsHtml}
+      ${hasText ? `<div style="font-size:10px;color:var(--text-main);margin-top:8px;padding:8px;background:var(--bg-light);border-radius:4px;border:1px dashed var(--border);white-space:pre-wrap;">${esc(so.payment_conditions)}</div>` : ''}
     </div>
   `;
 }
@@ -648,6 +650,26 @@ ${!isQuote && data.serviceOrder.technical_notes ? `
 </div>
 
 ${buildPaymentSection(data.serviceOrder)}
+
+${options.showBankDetails !== false && data.bank && (data.bank.bank_name || data.bank.pix_key) ? `
+<div class="card" style="margin-top:20px; background:rgba(212, 175, 55, 0.03); border:1px solid rgba(212, 175, 55, 0.2);">
+  <div class="section-title">Informações para Pagamento / Transferência</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;font-size:10px;">
+    <div>
+      <strong style="color:var(--primary);display:block;margin-bottom:4px;">DADOS BANCÁRIOS</strong>
+      ${data.bank.bank_name ? `Banco: ${esc(data.bank.bank_name)}<br/>` : ''}
+      ${data.bank.bank_agency ? `Agência: ${esc(data.bank.bank_agency)} · ` : ''}${data.bank.bank_account ? `Conta: ${esc(data.bank.bank_account)}` : ''}<br/>
+      Favorecido: ${esc(data.company.name)}<br/>
+      CNPJ: ${esc(data.company.cnpj || '—')}
+    </div>
+    <div style="border-left:1px solid rgba(212, 175, 55, 0.2);padding-left:20px;">
+      <strong style="color:var(--primary);display:block;margin-bottom:4px;">PAGAMENTO VIA PIX</strong>
+      Chave: <span style="font-size:12px;font-weight:800;color:var(--secondary);">${esc(data.bank.pix_key || '—')}</span><br/>
+      <span style="font-size:9px;color:var(--text-muted);display:block;margin-top:6px;">Por favor, envie o comprovante para <strong>${esc(data.company.email)}</strong> para agilizar a baixa.</span>
+    </div>
+  </div>
+</div>
+` : ''}
 
 <div class="grid" style="margin-top:40px;">
   <div style="text-align:center;">

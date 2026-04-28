@@ -68,7 +68,21 @@ Deno.serve(async (req) => {
     if (!parsed.success) return jr({ error: parsed.error.flatten().fieldErrors }, 400);
     const body = parsed.data;
 
-    const phoneClean = body.phone.replace(/\D/g, "");
+    // Check Test Mode and Test Number in app_settings
+    const supabaseAdmin = createClient(SUPABASE_URL, SERVICE_ROLE);
+    const { data: settings } = await supabaseAdmin.from("app_settings").select("key, value");
+    const settingsMap = Object.fromEntries((settings || []).map(s => [s.key, s.value]));
+    
+    const testMode = settingsMap["zapi_test_mode"] === "true";
+    const testNumber = settingsMap["zapi_test_number"]?.replace(/\D/g, "");
+
+    let phoneClean = body.phone.replace(/\D/g, "");
+    
+    if (testMode && testNumber) {
+      console.log(`Z-API: Test Mode Active. Redirecting from ${phoneClean} to ${testNumber}`);
+      phoneClean = testNumber;
+    }
+
     if (phoneClean.length < 10) {
       return jr({ error: "Telefone inválido (precisa incluir DDI+DDD)" }, 400);
     }
@@ -146,7 +160,7 @@ Deno.serve(async (req) => {
         http_status: zapiRes.status,
       },
       reason: success
-        ? `Envio Z-API (${body.kind}) realizado com sucesso`
+        ? `Envio Z-API (${body.kind}) realizado com sucesso${testMode ? " [TEST MODE ACTIVE]" : ""}`
         : `Falha no envio Z-API (${body.kind}): ${(zapiBody as any).error || zapiRes.status}`,
     });
 

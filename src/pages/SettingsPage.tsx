@@ -12,6 +12,7 @@ import { LogoCropDialog } from '@/components/LogoCropDialog';
 import { WhatsAppReminderSettings } from '@/components/WhatsAppReminderSettings';
 import { WhatsAppQueuePanel } from '@/components/WhatsAppQueuePanel';
 import { WhatsAppWebhookValidator } from '@/components/WhatsAppWebhookValidator';
+import { WhatsAppZApiSettings } from '@/components/WhatsAppZApiSettings';
 import { AppUserEditDialog } from '@/components/AppUserEditDialog';
 import { useAuth } from '@/hooks/use-auth';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -288,6 +289,7 @@ export default function SettingsPage() {
         </TabsContent>
 
         <TabsContent value="whatsapp" className="mt-4 space-y-6">
+          <WhatsAppZApiSettings />
           <WhatsAppTemplatesManager />
           <WhatsAppWebhookValidator />
           <WhatsAppQueuePanel />
