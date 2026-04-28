@@ -208,7 +208,7 @@ export function useTechnicianProductivityReport() {
         supabase.from('app_users').select('id, full_name, role').eq('role', 'technician'),
         supabase.from('service_order_technicians').select('user_id, service_order_id'),
         supabase.from('time_entries').select('technician_user_id, duration_minutes, billable'),
-        supabase.from('vw_os_profitability').select('os_id, status, revenue, net_profit').in('status', ['completed', 'invoiced']),
+        (supabase.from as any)('vw_os_profitability').select('os_id, status, revenue, net_profit').in('status', ['completed', 'invoiced']),
       ]);
 
       if (techsRes.error) throw techsRes.error;
@@ -255,8 +255,7 @@ export function useProfitabilityReport() {
   return useQuery({
     queryKey: ['reports', 'profitability'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('vw_os_profitability')
+      const { data, error } = await (supabase.from as any)('vw_os_profitability')
         .select('*')
         .order('created_at', { ascending: false });
 

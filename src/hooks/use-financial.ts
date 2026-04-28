@@ -39,6 +39,7 @@ export function useCreateReceivable() {
       client_id: string; description: string; issue_date: string;
       due_date: string; amount: number; currency?: string;
       service_order_id?: string; notes?: string;
+      cost_center_id?: string; sub_category?: string;
     }) => {
       const { data, error } = await supabase.from('receivables').insert({
         ...rec, balance_amount: rec.amount, paid_amount: 0, status: 'pending',
@@ -59,6 +60,7 @@ export function useCreatePayable() {
       supplier_id?: string; supplier_name?: string;
       linked_service_order_id?: string; notes?: string;
       origin?: string; bank_transaction_id?: string;
+      cost_center_id?: string; sub_category?: string;
     }) => {
       const { data, error } = await supabase.from('payables').insert({
         ...p, balance_amount: p.amount, paid_amount: 0, status: 'pending',

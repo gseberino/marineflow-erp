@@ -111,6 +111,7 @@ type SvcCardState = {
   unit_price: number;
   notes: string;
   technician_user_id: string;
+  warranty_days?: number;
 };
 
 type PartCardState = {
@@ -122,6 +123,7 @@ type PartCardState = {
   unit_sale: number;
   notes: string;
   image_url?: string | null;
+  warranty_days?: number;
 };
 
 interface ServiceCardFormProps {
