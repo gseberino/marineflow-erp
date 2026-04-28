@@ -21,7 +21,7 @@ type HealthData = {
   checked_at: string;
 };
 
-const WEBHOOK_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/whatsapp-webhook`;
+const WEBHOOK_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/whatsapp-webhook?apikey=${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`;
 
 type EndpointTest = {
   endpoint: string;

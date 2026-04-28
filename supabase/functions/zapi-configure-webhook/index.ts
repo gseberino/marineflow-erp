@@ -48,7 +48,7 @@ Deno.serve(async (req) => {
       return jr({ error: "Permissão negada" }, 403);
     }
 
-    const webhookUrl = `${SUPABASE_URL}/functions/v1/whatsapp-webhook`;
+    const webhookUrl = `${SUPABASE_URL}/functions/v1/whatsapp-webhook?apikey=${Deno.env.get("SUPABASE_ANON_KEY")}`;
     const base = `https://api.z-api.io/instances/${INSTANCE_ID}/token/${TOKEN}`;
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (CLIENT_TOKEN) headers["Client-Token"] = CLIENT_TOKEN;
@@ -78,40 +78,52 @@ Deno.serve(async (req) => {
     }
 
     // ---- Test each: consulta o valor atual de CADA endpoint individualmente ----
-    // Z-API expõe GET no mesmo path do PUT para ler o valor configurado.
     if (action === "test_each") {
+      const startedAt = Date.now();
       const tests: Record<string, any> = {};
-      for (const [name, endpoint] of Object.entries(endpoints)) {
-        const startedAt = Date.now();
-        try {
-          const res = await fetch(`${base}/${endpoint}`, { method: "GET", headers });
-          const text = await res.text();
-          let parsed: any = null;
-          try { parsed = JSON.parse(text); } catch { parsed = text; }
-          const currentValue =
-            (parsed && typeof parsed === "object" && (parsed.value || parsed.url || parsed.webhook)) || null;
+      
+      try {
+        // Z-API centralized webhooks status
+        const res = await fetch(`${base}/webhooks`, { method: "GET", headers });
+        const webhooks = await res.json().catch(() => ({}));
+        
+        // Mapping Z-API response keys to our internal names
+        // Note: keys vary by Z-API version, we try common ones.
+        const zapiMapping: Record<string, string[]> = {
+          received: ["onMessageReceived", "value", "received"],
+          delivery: ["onMessageDelivery", "delivery"],
+          messageStatus: ["onMessageStatus", "messageStatus"],
+          received_by_me: ["onMessageReceivedByMe", "receivedByMe"],
+          disconnected: ["onDisconnected", "disconnected"],
+        };
+
+        for (const [name, endpoint] of Object.entries(endpoints)) {
+          const possibleKeys = zapiMapping[name] || [];
+          let currentValue = null;
+          
+          for (const k of possibleKeys) {
+            if (webhooks[k]) {
+              currentValue = webhooks[k];
+              break;
+            }
+          }
+
           tests[name] = {
             endpoint,
             url: `${base}/${endpoint}`,
-            method: "GET",
+            method: "GET (via /webhooks)",
             http_status: res.status,
             ok: res.ok,
             current_value: currentValue,
-            matches_target: currentValue ? String(currentValue) === webhookUrl : false,
-            response: parsed,
-            duration_ms: Date.now() - startedAt,
-          };
-        } catch (e: any) {
-          tests[name] = {
-            endpoint,
-            url: `${base}/${endpoint}`,
-            method: "GET",
-            ok: false,
-            error: e?.message || String(e),
+            matches_target: currentValue ? String(currentValue).startsWith(webhookUrl) : false,
+            response: webhooks,
             duration_ms: Date.now() - startedAt,
           };
         }
+      } catch (e: any) {
+        return jr({ error: "Falha ao consultar lista de webhooks: " + e.message }, 500);
       }
+
       const allMatch = Object.values(tests).every((t: any) => t.matches_target);
       return jr({
         ok: true,
