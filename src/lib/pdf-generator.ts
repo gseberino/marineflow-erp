@@ -127,6 +127,7 @@ export type PDFData = {
     notes?: string;
   };
   terms?: string;
+  photos?: string[];
 };
 
 export function generatePDF(data: PDFData, options: PDFOptions): void {
@@ -446,60 +447,43 @@ function pageWrapper(title: string, body: string): string {
 }
 
 // ============= QUOTE / SERVICE_ORDER (preserved behavior) =============
-function buildPaymentSection(so: any): string {
-  const laborCost = Number(so.labor_cost_total) || 0;
-  const partsCost = Number(so.parts_cost_total) || 0;
-  const expensesTotal = (Number(so.operational_cost_total) || 0)
-    + (Number(so.travel_cost_total) || 0)
-    + (Number(so.subcontract_cost_total) || 0);
-  const installments: any[] = Array.isArray(so.payment_condition_installments)
-    ? so.payment_condition_installments.map((r: any) => ({
-        label: r.label || '',
-        services_pct: Number(r.services_pct ?? r.percent ?? 0),
-        parts_pct: Number(r.parts_pct ?? r.percent ?? 0),
-        expenses_pct: Number(r.expenses_pct ?? 0),
-        days_after_approval: Number(r.days_after_approval ?? 0),
-        tipo: r.tipo,
-      }))
-    : [];
-  if (installments.length === 0 && !so.payment_conditions) return '';
-  const fmt = fmtCurrency;
-  const breakdownRows = [
-    laborCost > 0 ? `<tr><td style="padding:3px 0;color:#666;font-size:11px;">Serviços</td><td style="text-align:right;padding:3px 0;color:#666;font-size:11px;">${fmt(laborCost)}</td></tr>` : '',
-    partsCost > 0 ? `<tr><td style="padding:3px 0;color:#666;font-size:11px;">Peças / Produtos</td><td style="text-align:right;padding:3px 0;color:#666;font-size:11px;">${fmt(partsCost)}</td></tr>` : '',
-    expensesTotal > 0 ? `<tr><td style="padding:3px 0;color:#666;font-size:11px;">Despesas e Deslocamento</td><td style="text-align:right;padding:3px 0;color:#666;font-size:11px;">${fmt(expensesTotal)}</td></tr>` : '',
-  ].join('');
-  const installmentRows = installments.map((row, i) => {
-    const amount = (laborCost * row.services_pct / 100)
-                 + (partsCost * row.parts_pct / 100)
-                 + (expensesTotal * row.expenses_pct / 100);
-    const daysLabel = row.tipo === 'entrega'
-      ? 'na entrega'
-      : row.tipo === 'prazo' || row.days_after_approval > 0
-      ? `em ${row.days_after_approval} dias`
-      : 'na aprovação';
-    return `<tr>
-      <td style="padding:4px 0;font-size:12px;font-weight:600;">${esc(row.label || `Parcela ${i + 1}`)} <span style="font-weight:400;color:#888;font-size:11px;">(${daysLabel})</span></td>
-      <td style="text-align:right;padding:4px 0;font-size:13px;font-weight:700;">${fmt(amount)}</td>
-    </tr>`;
-  }).join('');
-  const fallbackText = installments.length === 0 && so.payment_conditions
-    ? `<p style="font-size:12px;white-space:pre-wrap;margin:8px 0 0;">${esc(so.payment_conditions)}</p>`
-    : '';
-  return `
-    <div style="margin-top:20px;padding:14px 16px;background:#f8f9fa;border-radius:8px;border:1px solid #e5e7eb;">
-      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;margin-bottom:10px;">
-        Condições de Pagamento${so.payment_condition_label ? ` — ${esc(so.payment_condition_label)}` : ''}
+function buildPaymentSection(so: PDFData['service_order']): string {
+  const installments = so.payment_condition_installments;
+  if (!installments || !Array.isArray(installments) || installments.length === 0) {
+    if (!so.payment_conditions) return '';
+    return `
+      <div class="card" style="margin-top:20px;border-left:4px solid var(--secondary);">
+        <div class="section-title">Condições de Pagamento</div>
+        <div style="font-size:11px; white-space:pre-wrap;">${esc(so.payment_conditions)}</div>
       </div>
-      ${installments.length > 0 ? `
-        <table style="width:100%;border-collapse:collapse;">
-          <tbody>
-            ${breakdownRows}
-            ${breakdownRows ? '<tr><td colspan="2" style="border-top:1px solid #d1d5db;padding-top:4px;"></td></tr>' : ''}
-            ${installmentRows}
-          </tbody>
-        </table>
-      ` : fallbackText}
+    `;
+  }
+
+  const rows = installments.map((inst, idx) => `
+    <tr>
+      <td style="font-weight:600;padding:6px 12px;">Parcela ${idx + 1}</td>
+      <td style="padding:6px 12px;">${inst.due_date ? fmtDate(inst.due_date) : (inst.label || '—')}</td>
+      <td style="text-align:right;font-weight:700;padding:6px 12px;">${fmtCurrency(inst.amount)}</td>
+    </tr>
+  `).join('');
+
+  return `
+    <div class="card" style="margin-top:20px;border-left:4px solid var(--secondary);">
+      <div class="section-title">
+        <span>Programação de Pagamento</span>
+        <span style="color:var(--text-muted);font-size:8px;">${esc(so.payment_condition_label || 'Condição Definida')}</span>
+      </div>
+      <table style="margin-bottom:0;">
+        <thead>
+          <tr style="background:rgba(212, 175, 55, 0.05);color:var(--primary);">
+            <th style="background:transparent;color:var(--primary);width:30%;">Vencimento</th>
+            <th style="background:transparent;color:var(--primary);width:40%;">Data/Evento</th>
+            <th style="background:transparent;color:var(--primary);text-align:right;">Valor</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+      ${so.payment_conditions ? `<div style="font-size:9px;color:var(--text-muted);margin-top:8px;border-top:1px dashed var(--border);padding-top:4px;">${esc(so.payment_conditions)}</div>` : ''}
     </div>
   `;
 }
@@ -537,14 +521,43 @@ function buildOrderHTML(data: PDFData, options: PDFOptions): string {
     </tr>
   `).join('');
 
-  const partsRows = data.parts.map(p => `
+  const partsRows = data.parts.map(p => {
+    const showImg = !!options.showProductImages && !!p.image_url;
+    const itemCell = showImg 
+      ? `<div style="display:flex;align-items:center;gap:10px;">
+           <img src="${esc(p.image_url!)}" style="width:40px;height:40px;object-fit:cover;border-radius:4px;border:1px solid var(--border);" crossorigin="anonymous" />
+           <div>
+             <div style="font-weight:600;">${esc(p.product_name)}</div>
+             ${p.sku ? `<div style="font-size:9px;color:var(--text-muted);">#${esc(p.sku)}</div>` : ''}
+           </div>
+         </div>`
+      : `<div style="font-weight:600;">${esc(p.product_name)}</div>
+         ${p.sku ? `<div style="font-size:9px;color:var(--text-muted);">#${esc(p.sku)}</div>` : ''}`;
+
+    return `
     <tr>
-      <td style="font-weight:600;">${esc(p.product_name)}${p.sku ? ` <span style="font-weight:400;color:var(--text-muted);font-size:9px;">#${esc(p.sku)}</span>` : ''}</td>
+      <td>${itemCell}</td>
       <td style="text-align:center;">${p.quantity}</td>
       ${options.showPartsPrices ? `<td style="text-align:right;">${fmtCurrency(p.unit_price)}</td>` : ''}
       <td style="text-align:right;font-weight:600;">${fmtCurrency(p.line_total)}</td>
     </tr>
-  `).join('');
+  `;}).join('');
+
+  const photoGallery = (data.photos && data.photos.length > 0) ? `
+    <div style="page-break-before: always; margin-top: 40px;">
+      <div class="section-title">Galeria Técnica / Evidências do Serviço</div>
+      <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-top: 10px;">
+        ${data.photos.map(url => `
+          <div style="border:1px solid var(--border); border-radius:8px; overflow:hidden; background:var(--bg-light);">
+            <img src="${esc(url)}" style="width:100%; height:200px; object-fit:cover;" crossorigin="anonymous" />
+          </div>
+        `).join('')}
+      </div>
+      <div style="font-size:9px; color:var(--text-muted); margin-top:8px; text-align:center;">
+        As imagens acima servem como registro técnico das etapas e componentes analisados/substituídos.
+      </div>
+    </div>
+  ` : '';
 
   const summaryRows = [
     data.services.length > 0 ? `<tr><td>Subtotal Serviços</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.labor_cost_total)}</td></tr>` : '',
@@ -653,6 +666,8 @@ ${buildPaymentSection(data.serviceOrder)}
   </div>
 </div>
 
+${photoGallery}
+
 ${options.showTerms && data.terms ? `
 <div style="margin-top:30px;padding-top:10px;border-top:1px dashed var(--border);">
   <div style="font-size:9px;font-weight:700;color:var(--primary-light);text-transform:uppercase;margin-bottom:4px;">Condições Gerais e Garantia</div>
@@ -660,8 +675,10 @@ ${options.showTerms && data.terms ? `
 </div>
 ` : ''}
 
-<footer style="margin-top:30px;text-align:center;font-size:9px;color:var(--text-muted);border-top:1px solid var(--border);padding-top:10px;">
-  Este documento é parte integrante do sistema de gestão MarineFlow ERP. Gerado eletronicamente em ${new Date().toLocaleString('pt-BR')}.
+<footer style="margin-top:30px;text-align:center;font-size:9px;color:var(--text-muted);border-top:1px solid var(--border);padding-top:10px; display:flex; justify-content:space-between; align-items:center;">
+  <span>MarineFlow ERP · Documento Digital Autenticado</span>
+  <span>Página 01 / 01</span>
+  <span>Emitido em ${new Date().toLocaleString('pt-BR')}</span>
 </footer>
 `;
 

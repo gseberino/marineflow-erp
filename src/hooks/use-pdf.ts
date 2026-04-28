@@ -131,6 +131,7 @@ export function usePDFData(serviceOrderId: string | undefined) {
           get('terms_delivery'),
           get('terms_responsibilities'),
         ].filter(Boolean).join('\n\n') || undefined,
+        photos: (so as any).photos?.map((p: any) => p.url) || [],
       };
 
       return pdfData;
