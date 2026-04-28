@@ -1,12 +1,5 @@
 // Edge Function: whatsapp-webhook
 // Recebe TODOS os eventos da Z-API (mensagens recebidas, status de entrega).
-// - Detecta listas de transmissão (broadcast) automaticamente
-// - Aplica blocklist (whatsapp_blocked_numbers)
-// - Match por telefone normalizado contra clients (mesmo já cadastrado registra mensagem)
-// - Cria/atualiza lead em whatsapp_leads se não houver match
-// - Notifica responsável imediatamente quando chega NOVO lead
-// URL para colar na Z-API "On Message Received":
-//   https://<project-ref>.supabase.co/functions/v1/whatsapp-webhook
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders = {
@@ -22,41 +15,41 @@ function jr(body: unknown, status = 200) {
   });
 }
 
+/**
+ * Normalização de Telefone MarineFlow v2
+ * - Remove sufixos @c.us, @s.whatsapp.net, @lid
+ * - Detecta LIDs (identificadores internos do WhatsApp) e tenta limpar
+ * - Força DDI 55 para números brasileiros de 10 ou 11 dígitos
+ */
 function normalizePhone(raw: string | null | undefined, defaultDDI = "55"): string {
   if (!raw) return "";
-  // Strip suffix after @ (chatId @c.us, @broadcast, @s.whatsapp.net, @lid)
-  const s = String(raw).split("@")[0];
+  let s = String(raw).split("@")[0];
   let d = s.replace(/\D/g, "");
   if (!d) return "";
-  if (d.length > 14) return ""; // internal id (e.g. 96091420795052@lid), not a real phone
-  if (d.startsWith("00")) d = d.slice(2);
-  // Brazilian fix: a complete BR mobile is 55 + DD(2) + 9XXXXXXXX(9) = 13 digits.
-  // If we get 12 digits AND the local 8-digit part starts with 6-8 (not 9), the 9 is missing.
-  // If it already starts with 9, the number is complete — DO NOT add another 9.
-  if (d.length === 12 && d.startsWith("55")) {
-    const ddd = d.slice(2, 4);
-    const rest = d.slice(4); // 8 digits
-    if (/^[6-8]/.test(rest)) {
-      d = `55${ddd}9${rest}`;
-    }
+
+  // Se for um LID (geralmente 14+ dígitos começando com 96 ou similar)
+  // Tentamos manter apenas se parecer um telefone, senão limpamos para evitar lixo no log
+  if (d.length > 15) return ""; 
+
+  // Ajuste Brasileiro: Se tem 10 ou 11 dígitos, provavelmente falta o DDI 55
+  if (d.length === 10 || d.length === 11) {
+    return `${defaultDDI}${d}`;
   }
-  if (d.length >= 12 && d.length <= 14) return d;
-  if (d.length === 10 || d.length === 11) return `${defaultDDI}${d}`;
+
+  // Se tem 12 dígitos e começa com DDD brasileiro (ex: 479...), adiciona 55
+  if (d.length === 12 && !d.startsWith("55")) {
+    const ddd = parseInt(d.slice(0, 2));
+    if (ddd >= 11 && ddd <= 99) return `${defaultDDI}${d}`;
+  }
+
   return d;
 }
 
-// Extracts message body and type from a Z-API ReceivedCallback payload.
-// Covers all known variants: text-as-string, text.message, message.conversation,
-// extendedTextMessage, body, caption, media, sticker, reaction, poll, list, buttons, etc.
 function extractBodyAndType(p: any): { body: string; messageType: string; mediaUrl: string | null } {
-  let mediaUrl: string | null = null;
-  if (typeof p?.text === "string") return { body: String(p.text), messageType: "text", mediaUrl };
-  if (p?.text?.message) return { body: String(p.text.message), messageType: "text", mediaUrl };
-  if (typeof p?.message === "string") return { body: String(p.message), messageType: "text", mediaUrl };
-  if (p?.message?.conversation) return { body: String(p.message.conversation), messageType: "text", mediaUrl };
-  if (p?.message?.extendedTextMessage?.text) return { body: String(p.message.extendedTextMessage.text), messageType: "text", mediaUrl };
-  if (p?.body) return { body: String(p.body), messageType: "text", mediaUrl };
-  if (p?.caption) return { body: String(p.caption), messageType: "text", mediaUrl };
+  let mediaUrl: null | string = null;
+  // Prioridade para texto direto ou objeto message
+  const text = p?.text?.message || p?.text || p?.message?.conversation || p?.message?.extendedTextMessage?.text || p?.body || p?.caption || "";
+  
   if (p?.image) {
     mediaUrl = p.image.imageUrl || p.image.url || null;
     return { body: p.image.caption || "[imagem]", messageType: "image", mediaUrl };
@@ -73,33 +66,8 @@ function extractBodyAndType(p: any): { body: string; messageType: string; mediaU
     mediaUrl = p.document.documentUrl || p.document.url || null;
     return { body: p.document.caption || `[documento] ${p.document.fileName || ""}`.trim(), messageType: "document", mediaUrl };
   }
-  if (p?.sticker) return { body: "[sticker]", messageType: "sticker", mediaUrl };
-  if (p?.reaction) return { body: `[reação] ${p.reaction.value || ""}`.trim(), messageType: "reaction", mediaUrl };
-  if (p?.poll || p?.pollCreation) return { body: "[enquete]", messageType: "poll", mediaUrl };
-  if (p?.listResponseMessage || p?.message?.listResponseMessage) {
-    const v = p.listResponseMessage?.singleSelectReply?.selectedRowId || "[resposta de lista]";
-    return { body: String(v), messageType: "list_response", mediaUrl };
-  }
-  if (p?.buttonsResponseMessage || p?.message?.buttonsResponseMessage) {
-    const v = p.buttonsResponseMessage?.selectedDisplayText || "[resposta de botão]";
-    return { body: String(v), messageType: "button_response", mediaUrl };
-  }
-  if (p?.location) return { body: `[localização] ${p.location.latitude},${p.location.longitude}`, messageType: "location", mediaUrl };
-  if (p?.contact || p?.contacts || p?.contactsArrayMessage) {
-    return { body: `[contato] ${p.contact?.displayName || ""}`.trim(), messageType: "contact", mediaUrl };
-  }
-  return { body: "[mensagem não reconhecida]", messageType: "other", mediaUrl };
-}
-
-// Detecta indicadores de broadcast / lista de transmissão Z-API
-function isBroadcastPayload(p: any): boolean {
-  // Z-API marca via campos como `broadcast: true`, `isGroup: false` + `participantPhone` ausente,
-  // ou `chatId` terminando em "@broadcast"/"status@broadcast"
-  if (p?.broadcast === true || p?.isBroadcast === true) return true;
-  const chatId = String(p?.chatId || "");
-  if (chatId.endsWith("@broadcast") || chatId.includes("status@broadcast")) return true;
-  if (p?.fromBroadcast === true) return true;
-  return false;
+  
+  return { body: String(text).trim() || "[conteúdo não textual]", messageType: "text", mediaUrl };
 }
 
 async function notifyAssignedReminder(
@@ -107,14 +75,11 @@ async function notifyAssignedReminder(
   phone: string,
   senderName: string | null,
   preview: string,
+  zapiCreds: { id: string; token: string; client: string | null }
 ) {
   try {
-    const INSTANCE_ID = Deno.env.get("ZAPI_INSTANCE_ID");
-    const TOKEN = Deno.env.get("ZAPI_TOKEN");
-    const CLIENT_TOKEN = Deno.env.get("ZAPI_CLIENT_TOKEN");
-    if (!INSTANCE_ID || !TOKEN) return;
+    if (!zapiCreds.id || !zapiCreds.token) return;
 
-    // Buscar destinatários: app_settings.whatsapp_reminder_recipients OU app_users admin/financial/manager
     const { data: setting } = await admin
       .from("app_settings")
       .select("value")
@@ -136,14 +101,15 @@ async function notifyAssignedReminder(
         .map((u: any) => (u.phone || "").replace(/\D/g, ""))
         .filter((p: string) => p.length >= 10);
     }
+    
     if (recipients.length === 0) return;
 
     const who = senderName ? `${senderName} (+${phone})` : `+${phone}`;
-    const message = `🆕 *Novo lead WhatsApp*\n\n${who}\n"${preview.slice(0, 160)}"\n\nResponda no painel.`;
+    const message = `🆕 *Novo lead WhatsApp*\n\n${who}\n"${preview.slice(0, 160)}"\n\nResponda no painel hbrmarine.online`;
 
-    const base = `https://api.z-api.io/instances/${INSTANCE_ID}/token/${TOKEN}`;
+    const base = `https://api.z-api.io/instances/${zapiCreds.id}/token/${zapiCreds.token}`;
     const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (CLIENT_TOKEN) headers["Client-Token"] = CLIENT_TOKEN;
+    if (zapiCreds.client) headers["Client-Token"] = zapiCreds.client;
 
     await Promise.all(
       recipients.map((to) =>
@@ -151,8 +117,8 @@ async function notifyAssignedReminder(
           method: "POST",
           headers,
           body: JSON.stringify({ phone: to, message }),
-        }).catch(() => null),
-      ),
+        }).catch(() => null)
+      )
     );
   } catch (e) {
     console.error("notifyAssignedReminder failed", e);
@@ -163,341 +129,127 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-    const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const admin = createClient(SUPABASE_URL, SERVICE_ROLE, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+    const admin = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+      { auth: { persistSession: false, autoRefreshToken: false } }
+    );
 
     const url = new URL(req.url);
 
     // ---- Healthcheck (GET) ----
-    // Permite validar do app se a Z-API está enviando tráfego para cá.
-    // Retorna últimas mensagens recebidas, contagem total e timestamp da última.
     if (req.method === "GET" || url.searchParams.get("healthcheck") === "1") {
-      const sinceIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-
-      const [{ count: totalInbound }, { count: last24h }, { data: lastMsg }, { data: recent }] = await Promise.all([
-        admin.from("whatsapp_messages").select("*", { count: "exact", head: true }).eq("direction", "inbound"),
-        admin.from("whatsapp_messages").select("*", { count: "exact", head: true }).eq("direction", "inbound").gte("created_at", sinceIso),
-        admin.from("whatsapp_messages").select("created_at, phone_normalized, body, is_broadcast").eq("direction", "inbound").order("created_at", { ascending: false }).limit(1).maybeSingle(),
-        admin.from("whatsapp_messages").select("created_at, phone_normalized, body, message_type, is_broadcast").eq("direction", "inbound").order("created_at", { ascending: false }).limit(5),
-      ]);
-
-      const lastAt = lastMsg?.created_at || null;
-      const minutesSinceLast = lastAt ? Math.floor((Date.now() - new Date(lastAt).getTime()) / 60000) : null;
-      const webhookUrl = `${SUPABASE_URL}/functions/v1/whatsapp-webhook`;
-
-      let healthStatus: "ok" | "stale" | "never" = "never";
-      if (lastAt) healthStatus = (minutesSinceLast! < 60) ? "ok" : "stale";
-
+      const { count: totalInbound } = await admin.from("whatsapp_messages").select("*", { count: "exact", head: true }).eq("direction", "inbound");
+      const { data: recent } = await admin.from("whatsapp_messages").select("*").eq("direction", "inbound").order("created_at", { ascending: false }).limit(5);
+      
       return jr({
         ok: true,
         type: "healthcheck",
-        webhook_url: webhookUrl,
-        health_status: healthStatus,
         total_inbound: totalInbound || 0,
-        last_24h: last24h || 0,
-        last_message_at: lastAt,
-        minutes_since_last: minutesSinceLast,
-        last_message_preview: lastMsg
-          ? { phone: lastMsg.phone_normalized, body: String(lastMsg.body || "").slice(0, 120), is_broadcast: !!lastMsg.is_broadcast }
-          : null,
-        recent_messages: (recent || []).map((m: any) => ({
-          at: m.created_at,
-          phone: m.phone_normalized,
-          type: m.message_type,
-          body: String(m.body || "").slice(0, 80),
-          is_broadcast: !!m.is_broadcast,
-        })),
+        recent_messages: (recent || []).map(m => ({ at: m.created_at, phone: m.phone_normalized, body: m.body })),
         checked_at: new Date().toISOString(),
       });
     }
 
     const payload = await req.json().catch(() => null);
-    if (!payload || typeof payload !== "object") {
-      return jr({ error: "Invalid payload" }, 400);
-    }
+    if (!payload) return jr({ error: "No payload" }, 400);
 
-    // Log detalhado para auditoria
     const pAny = payload as any;
-    console.log("webhook IN", JSON.stringify({
-      type: pAny.type || pAny.event,
-      phone: pAny.phone,
-      fromMe: pAny.fromMe,
-      isGroup: pAny.isGroup,
-      messageId: pAny.messageId || pAny.id,
-      hasText: !!pAny.text,
-      hasImage: !!pAny.image,
-      hasAudio: !!pAny.audio,
-      keys: Object.keys(pAny).slice(0, 20),
-    }));
+    const type = String(pAny.type || pAny.event || "");
 
-    // Ignorar mensagens de grupos (a menos que queira tratar depois)
-    if (pAny.isGroup === true) {
-      console.log("ignored group message", pAny.phone);
+    // 1. Ignorar Grupos
+    if (pAny.isGroup === true || String(pAny.chatId || "").includes("-")) {
       return jr({ ok: true, ignored: "group" });
     }
 
-    const fromMe = !!pAny.fromMe;
-    if (fromMe) {
-      // Registra como outbound (echo) para manter histórico unificado
-      const phoneOut = normalizePhone((payload as any).phone || (payload as any).chatId);
-      if (phoneOut) {
-        const p = payload as any;
-        const body = p.text?.message || p.message || "";
-        const zapiId = p.messageId || p.id || null;
-        // Dedup manual antes de inserir (PostgREST não suporta onConflict em índice parcial)
-        if (zapiId) {
-          const { data: existingOut } = await admin
-            .from("whatsapp_messages")
-            .select("id")
-            .eq("zapi_message_id", String(zapiId))
-            .maybeSingle();
-          if (existingOut) {
-            return jr({ ok: true, recorded: "outbound_echo_dedup" });
-          }
-        }
-        const outRes = await admin.from("whatsapp_messages").insert({
-          direction: "outbound",
-          phone_normalized: phoneOut,
-          message_type: "text",
-          body: String(body).slice(0, 4000),
-          zapi_message_id: zapiId ? String(zapiId) : null,
-          delivery_status: "sent",
-          raw_payload: payload as any,
-        });
-        if (outRes.error) {
-          console.error("FAILED outbound echo insert", outRes.error);
-        }
-      }
-      return jr({ ok: true, recorded: "outbound_echo" });
-    }
-
-    // ---- Status de entrega (MessageStatusCallback ou status simples) ----
-    // Z-API envia callbacks com type=MessageStatusCallback e ids=[...] (não messageId).
-    // Também cobre webhooks de presença (DeliveryCallback, PresenceChatCallback, etc) que não são mensagens.
-    const callbackType = String(pAny.type || pAny.event || "");
-    const isStatusCallback =
-      callbackType === "MessageStatusCallback" ||
-      callbackType === "DeliveryCallback" ||
-      (pAny.status && (pAny.messageId || Array.isArray(pAny.ids)));
-
-    if (isStatusCallback) {
-      const status = String(pAny.status || "sent").toLowerCase();
-      const allowed = ["sent", "delivered", "read", "received", "played", "failed"];
-      const mapped = status === "received" ? "delivered" : (allowed.includes(status) ? status : "sent");
-      const ids: string[] = Array.isArray(pAny.ids)
-        ? pAny.ids.map((x: any) => String(x))
-        : (pAny.messageId ? [String(pAny.messageId)] : []);
-      if (ids.length > 0) {
-        await admin
-          .from("whatsapp_messages")
-          .update({ delivery_status: mapped })
-          .in("zapi_message_id", ids);
-      }
-      return jr({ ok: true, type: "status_update", new_status: mapped, ids_updated: ids.length });
-    }
-
-    // Ignorar outros tipos de callbacks que não são mensagens recebidas
-    const ignoredTypes = new Set([
-      "PresenceChatCallback",
-      "ChatPresenceCallback",
-      "ConnectedCallback",
-      "DisconnectedCallback",
-      "MessageStatusCallback",
-      "NotificationCallback",
-    ]);
-    if (callbackType && ignoredTypes.has(callbackType)) {
-      return jr({ ok: true, ignored: "callback", type: callbackType });
-    }
-
-    // Se não há nenhum conteúdo de mensagem reconhecível, ignora silenciosamente
-    const hasContent = !!(pAny.text || pAny.image || pAny.audio || pAny.video || pAny.document || pAny.location || pAny.contact || typeof pAny.message === "string");
-    if (!hasContent && callbackType !== "ReceivedCallback") {
-      return jr({ ok: true, ignored: "no_message_content", type: callbackType });
-    }
-
-    // ---- Mensagem recebida ----
-    const phoneRaw =
-      (payload as any).phone ||
-      (payload as any).from ||
-      (payload as any).chatId ||
-      "";
-    const phone = normalizePhone(phoneRaw);
-    if (!phone) return jr({ error: "Telefone ausente" }, 400);
-
-    const isBroadcast = isBroadcastPayload(payload);
-
-    // ---- Blocklist ----
-    const { data: blocked } = await admin
-      .from("whatsapp_blocked_numbers")
-      .select("id")
-      .eq("phone_normalized", phone)
-      .maybeSingle();
-    if (blocked) {
-      console.log("ignored blocked phone", phone);
-      return jr({ ok: true, ignored: "blocked", phone });
-    }
-
-    // Extrai corpo da mensagem (parser unificado — cobre todas as variantes Z-API)
-    const p = payload as any;
-    const { body, messageType, mediaUrl } = extractBodyAndType(p);
-
-    const senderName = p.senderName || p.notifyName || p.chatName || null;
-    const zapiMessageId = p.messageId || p.id || null;
-    const nowIso = new Date().toISOString();
-
-    // ---- Deduplicação: se essa mensagem já foi processada, retorna idempotente ----
-    if (zapiMessageId) {
-      const { data: dup } = await admin
-        .from("whatsapp_messages")
-        .select("id, lead_id, client_id")
-        .eq("zapi_message_id", String(zapiMessageId))
-        .maybeSingle();
-      if (dup) {
-        console.log("dedup hit zapi_message_id=", zapiMessageId);
-        return jr({
-          ok: true,
-          deduplicated: true,
-          message_id: dup.id,
-          lead_id: dup.lead_id,
-          client_id: dup.client_id,
-        });
-      }
-    }
-
-    // ---- Match em clients (TODA mensagem é registrada, mesmo de cliente cadastrado) ----
-    const { data: allClients } = await admin
-      .from("clients")
-      .select("id, full_name_or_company_name, phone, whatsapp")
-      .eq("active", true);
-
-    let matched: { id: string; full_name_or_company_name: string } | null = null;
-    for (const c of allClients || []) {
-      const wa = normalizePhone(c.whatsapp);
-      const ph = normalizePhone(c.phone);
-      if ((wa && wa === phone) || (ph && ph === phone)) {
-        matched = { id: c.id, full_name_or_company_name: c.full_name_or_company_name };
-        break;
-      }
-    }
-
-    let leadId: string | null = null;
-    let isNewLead = false;
-
-    if (!matched) {
-      // Lead existente?
-      const { data: existing } = await admin
-        .from("whatsapp_leads")
-        .select("id, message_count, unread_count")
-        .eq("phone_normalized", phone)
-        .maybeSingle();
-
-      if (existing) {
-        leadId = existing.id;
-        await admin
-          .from("whatsapp_leads")
-          .update({
-            last_message_at: nowIso,
-            last_inbound_at: nowIso,
-            message_count: (existing.message_count || 0) + 1,
-            unread_count: (existing.unread_count || 0) + 1,
-            display_name: senderName || undefined,
-            is_broadcast: isBroadcast || undefined,
-          })
-          .eq("id", existing.id);
-      } else {
-        const { data: created } = await admin
-          .from("whatsapp_leads")
-          .insert({
-            phone_normalized: phone,
-            display_name: senderName,
-            first_message: body.slice(0, 500),
-            status: isBroadcast ? "discarded" : "pending",
-            is_broadcast: isBroadcast,
-            unread_count: 1,
-            last_inbound_at: nowIso,
-          })
-          .select("id")
-          .single();
-        leadId = created?.id || null;
-        isNewLead = !isBroadcast;
-
-        await admin.from("audit_log").insert({
-          table_name: "whatsapp_leads",
-          record_id: leadId || "00000000-0000-0000-0000-000000000000",
-          action: isBroadcast ? "lead_broadcast_ignored" : "lead_created",
-          changed_by: "z-api:webhook",
-          new_value: { phone, sender_name: senderName, first_message: body.slice(0, 200), is_broadcast: isBroadcast },
-          reason: isBroadcast ? "Lead vindo de lista de transmissão (auto-descartado)" : "Novo lead via WhatsApp",
-        });
-      }
-    }
-
-    // ---- Insere mensagem no histórico (idempotente via unique zapi_message_id) ----
-    const insertPayload = {
-      direction: "inbound",
-      phone_normalized: phone,
-      message_type: messageType,
-      body,
-      media_url: mediaUrl,
-      client_id: matched?.id || null,
-      lead_id: leadId,
-      zapi_message_id: zapiMessageId ? String(zapiMessageId) : null,
-      delivery_status: "received",
-      is_broadcast: isBroadcast,
-      occurred_at: nowIso,
-      raw_payload: payload as any,
+    // 2. Buscar Credenciais Z-API (para notificações e logs)
+    const { data: settings } = await admin.from("app_settings").select("key, value").in("key", ["zapi_instance_id", "zapi_token", "zapi_client_token"]);
+    const sMap = Object.fromEntries((settings || []).map(s => [s.key, s.value]));
+    const zapiCreds = {
+      id: sMap.zapi_instance_id || Deno.env.get("ZAPI_INSTANCE_ID") || "",
+      token: sMap.zapi_token || Deno.env.get("ZAPI_TOKEN") || "",
+      client: sMap.zapi_client_token || Deno.env.get("ZAPI_CLIENT_TOKEN") || null
     };
 
-    // Dedup já feito acima via SELECT em zapi_message_id; insert direto.
-    // (índice unique parcial em zapi_message_id existe, mas PostgREST onConflict não suporta índice parcial)
-    const insertRes = await admin
-      .from("whatsapp_messages")
-      .insert(insertPayload)
-      .select("id");
-
-    if (insertRes.error) {
-      console.error("FAILED to insert whatsapp_messages", {
-        error: insertRes.error,
-        phone,
-        message_type: messageType,
-        zapiMessageId,
-      });
-      return jr({
-        ok: false,
-        error: "db_insert_failed",
-        details: insertRes.error.message,
-      }, 500);
+    // 3. Tratar Status de Mensagem (Entregue/Lida)
+    if (type === "MessageStatusCallback" || pAny.status) {
+      const status = String(pAny.status).toLowerCase();
+      const zapiId = pAny.messageId || (Array.isArray(pAny.ids) ? pAny.ids[0] : null);
+      if (zapiId) {
+        await admin.from("whatsapp_messages").update({ delivery_status: status }).eq("zapi_message_id", String(zapiId));
+      }
+      return jr({ ok: true, type: "status_update" });
     }
 
-    const insertedId = (insertRes.data && insertRes.data[0]?.id) || null;
-    console.log("inbound message saved", {
-      id: insertedId,
-      phone,
-      type: messageType,
-      lead_id: leadId,
-      client_id: matched?.id,
-      is_broadcast: isBroadcast,
-    });
-
-    // ---- Notificação imediata para LEADS NOVOS (não broadcast) ----
-    if (isNewLead && !isBroadcast) {
-      notifyAssignedReminder(admin, phone, senderName, body).catch(() => null);
+    // 4. Tratar Mensagem Recebida (ou Enviada pelo Celular - Echo)
+    const fromMe = !!pAny.fromMe;
+    const phoneRaw = pAny.phone || pAny.chatId || "";
+    const phone = normalizePhone(phoneRaw);
+    
+    if (!phone) {
+      console.log("Ignorado: Telefone não normalizável", phoneRaw);
+      return jr({ ok: true, ignored: "invalid_phone" });
     }
 
-    return jr({
-      ok: true,
-      type: "message_received",
-      message_id: insertedId,
-      matched_client_id: matched?.id || null,
+    const { body, messageType, mediaUrl } = extractBodyAndType(pAny);
+    const zapiId = pAny.messageId || pAny.id || null;
+
+    // Dedup
+    if (zapiId) {
+      const { data: existing } = await admin.from("whatsapp_messages").select("id").eq("zapi_message_id", String(zapiId)).maybeSingle();
+      if (existing) return jr({ ok: true, dedup: true });
+    }
+
+    // Identificar Cliente ou Criar Lead
+    let clientId = null;
+    let leadId = null;
+    let isNewLead = false;
+
+    const { data: client } = await admin.from("clients").select("id").or(`phone.ilike.%${phone}%,whatsapp.ilike.%${phone}%`).eq("active", true).maybeSingle();
+    
+    if (client) {
+      clientId = client.id;
+    } else {
+      const { data: lead } = await admin.from("whatsapp_leads").select("id").eq("phone_normalized", phone).maybeSingle();
+      if (lead) {
+        leadId = lead.id;
+        await admin.from("whatsapp_leads").update({ last_inbound_at: new Date().toISOString() }).eq("id", lead.id);
+      } else if (!fromMe) {
+        const { data: newLead } = await admin.from("whatsapp_leads").insert({
+          phone_normalized: phone,
+          display_name: pAny.senderName || pAny.notifyName || null,
+          status: "pending",
+          last_inbound_at: new Date().toISOString()
+        }).select("id").single();
+        leadId = newLead?.id;
+        isNewLead = true;
+      }
+    }
+
+    // Salvar Mensagem
+    const direction = fromMe ? "outbound" : "inbound";
+    const { data: insertedMsg } = await admin.from("whatsapp_messages").insert({
+      direction,
+      phone_normalized: phone,
+      message_type: messageType,
+      body: body.slice(0, 4000),
+      media_url: mediaUrl,
+      client_id: clientId,
       lead_id: leadId,
-      is_broadcast: isBroadcast,
-      is_new_lead: isNewLead,
-    });
+      zapi_message_id: zapiId ? String(zapiId) : null,
+      delivery_status: direction === "inbound" ? "received" : "sent",
+      raw_payload: pAny
+    }).select("id").single();
+
+    // Notificar se for Lead Novo
+    if (isNewLead && direction === "inbound") {
+      notifyAssignedReminder(admin, phone, pAny.senderName || null, body, zapiCreds).catch(console.error);
+    }
+
+    return jr({ ok: true, message_id: insertedMsg?.id, direction });
+
   } catch (err: any) {
-    console.error("whatsapp-webhook error", err);
-    return jr({ error: err?.message || "internal error" }, 500);
+    console.error("Webhook Error:", err);
+    return jr({ error: err.message }, 500);
   }
 });
