@@ -191,10 +191,6 @@ Deno.serve(async (req) => {
     }
 
     // 4. Tratar Mensagem Recebida (ou Enviada pelo Celular - Echo)
-    const fromMe = !!pAny.fromMe;
-    const phoneRaw = pAny.phone || pAny.chatId || "";
-    const phone = normalizePhone(phoneRaw);
-    
     if (!phone) {
       console.log("Ignorado: Telefone não normalizável", phoneRaw);
       return jr({ ok: true, ignored: "invalid_phone" });
