@@ -521,20 +521,31 @@ async function executeTool(
     case "list_agenda": {
       let query = sb
         .from("agenda_tasks")
-        .select("id, title, scheduled_start_at, scheduled_end_at, status, priority, technician_user_id, client_id, location")
+        .select("id, title, scheduled_start_at, scheduled_end_at, status, priority, location, clients(full_name_or_company_name), app_users!agenda_tasks_technician_user_id_fkey(full_name)")
         .gte("scheduled_start_at", args.date_from)
         .lte("scheduled_start_at", args.date_to)
         .order("scheduled_start_at", { ascending: true });
       if (args.technician_id) query = query.eq("technician_user_id", args.technician_id);
       const { data, error } = await query;
       if (error) throw error;
-      return { results: data };
+      const mapped = (data || []).map((t: any) => ({
+        id: t.id,
+        titulo: t.title,
+        cliente: t.clients?.full_name_or_company_name || "—",
+        tecnico: t.app_users?.full_name || "—",
+        inicio: t.scheduled_start_at,
+        fim: t.scheduled_end_at,
+        status: t.status,
+        prioridade: t.priority,
+        local: t.location || "—",
+      }));
+      return { results: mapped };
     }
 
     case "list_service_orders": {
       let query = sb
         .from("service_orders")
-        .select("id, service_order_number, status, client_id, vessel_id, grand_total, scheduled_start_at, created_at")
+        .select("id, service_order_number, status, grand_total, scheduled_start_at, created_at, clients(full_name_or_company_name), vessels(boat_name)")
         .order("created_at", { ascending: false })
         .limit(Math.min(Number(args.limit) || 20, 50));
       if (args.status) query = query.eq("status", args.status);
@@ -542,7 +553,17 @@ async function executeTool(
       if (args.vessel_id) query = query.eq("vessel_id", args.vessel_id);
       const { data, error } = await query;
       if (error) throw error;
-      return { results: data };
+      const mapped = (data || []).map((so: any) => ({
+        id: so.id,
+        numero: so.service_order_number,
+        status: so.status,
+        cliente: so.clients?.full_name_or_company_name || "—",
+        embarcacao: so.vessels?.boat_name || "—",
+        valor_total: so.grand_total || 0,
+        agendado_para: so.scheduled_start_at || null,
+        criado_em: so.created_at,
+      }));
+      return { results: mapped };
     }
 
     case "get_service_order": {
@@ -567,12 +588,20 @@ async function executeTool(
     case "get_client_history": {
       const { data, error } = await sb
         .from("service_orders")
-        .select("id, service_order_number, status, scheduled_start_at, grand_total, created_at")
+        .select("id, service_order_number, status, scheduled_start_at, grand_total, created_at, vessels(boat_name)")
         .eq("client_id", args.client_id)
         .order("created_at", { ascending: false })
         .limit(20);
       if (error) throw error;
-      return { history: data };
+      const mapped = (data || []).map((so: any) => ({
+        numero: so.service_order_number,
+        status: so.status,
+        embarcacao: so.vessels?.boat_name || "—",
+        valor_total: so.grand_total || 0,
+        agendado_para: so.scheduled_start_at || null,
+        criado_em: so.created_at,
+      }));
+      return { history: mapped };
     }
 
     case "list_pending_collections": {
@@ -629,12 +658,21 @@ async function executeTool(
     case "get_vessel_history": {
       const { data, error } = await sb
         .from("service_orders")
-        .select("id, service_order_number, status, scheduled_start_at, grand_total, created_at, problem_description")
+        .select("id, service_order_number, status, scheduled_start_at, grand_total, created_at, problem_description, clients(full_name_or_company_name)")
         .eq("vessel_id", args.vessel_id)
         .order("created_at", { ascending: false })
         .limit(30);
       if (error) throw error;
-      return { history: data };
+      const mapped = (data || []).map((so: any) => ({
+        numero: so.service_order_number,
+        status: so.status,
+        cliente: so.clients?.full_name_or_company_name || "—",
+        problema: so.problem_description || "—",
+        valor_total: so.grand_total || 0,
+        agendado_para: so.scheduled_start_at || null,
+        criado_em: so.created_at,
+      }));
+      return { history: mapped };
     }
 
     case "propose_action": {
@@ -1006,15 +1044,13 @@ REGRAS CRÍTICAS:
   5. Confirmar ao usuário que tudo foi criado.
 
 QUALIDADE DAS RESPOSTAS:
-- NUNCA exiba IDs técnicos (UUIDs) ao usuário. IDs são apenas para uso interno nas tools.
-- Quando list_service_orders retornar client_id e vessel_id, sempre faça search_clients e search_vessels para resolver os nomes antes de responder.
-- Quando apresentar datas, use formato legível em português: "28 de abril de 2026 às 09:00".
-- Quando apresentar valores monetários, use formato brasileiro: "R$ 1.500,00".
-- Quando apresentar status de OS, traduza: draft=Rascunho, pending=Pendente, approved=Aprovado, scheduled=Agendado, in_progress=Em andamento, completed=Concluído, cancelled=Cancelado, invoiced=Faturado.
-- Respostas devem ser concisas e objetivas. Evite repetir informações óbvias.
-- Ao listar OSs, sempre mostre: número da OS, cliente, embarcação, status, valor total e data agendada (se houver).
-- Ao listar cobranças, sempre mostre: descrição, cliente, valor, vencimento e status.
-- Prefira listas formatadas em markdown para múltiplos itens.
+- Os dados já vêm com nomes de clientes e embarcações — use-os diretamente, nunca faça buscas extras para resolver IDs.
+- NUNCA exiba IDs técnicos (UUIDs) ao usuário.
+- Datas: formato "28 de abril de 2026 às 09:00".
+- Valores: formato "R$ 1.500,00".
+- Status: draft=Rascunho, pending=Pendente, approved=Aprovado, scheduled=Agendado, in_progress=Em andamento, completed=Concluído, cancelled=Cancelado, invoiced=Faturado.
+- Use listas markdown para múltiplos itens.
+- Respostas concisas e objetivas.
 CONTEXTO ATUAL:
 - Data/hora: ${today.toISOString()} (${today.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })})
 - Usuário logado: ${userId}
