@@ -204,24 +204,25 @@ export function useTechnicianProductivityReport() {
   return useQuery({
     queryKey: ['reports', 'tech-productivity'],
     queryFn: async () => {
-      const [techsRes, assignsRes, timesRes, ordersRes] = await Promise.all([
+      const [techsRes, assignsRes, timesRes, profitabilityRes] = await Promise.all([
         supabase.from('app_users').select('id, full_name, role').eq('role', 'technician'),
         supabase.from('service_order_technicians').select('user_id, service_order_id'),
         supabase.from('time_entries').select('technician_user_id, duration_minutes, billable'),
-        supabase.from('service_orders').select('id, status, grand_total').in('status', ['completed', 'invoiced']),
+        supabase.from('vw_os_profitability').select('os_id, status, revenue, net_profit').in('status', ['completed', 'invoiced']),
       ]);
 
       if (techsRes.error) throw techsRes.error;
       if (assignsRes.error) throw assignsRes.error;
       if (timesRes.error) throw timesRes.error;
-      if (ordersRes.error) throw ordersRes.error;
+      if (profitabilityRes.error) throw profitabilityRes.error;
 
       const techs = techsRes.data ?? [];
       const assigns = assignsRes.data ?? [];
       const times = timesRes.data ?? [];
-      const completedOrders = ordersRes.data ?? [];
-      const completedIds = new Set(completedOrders.map(o => o.id));
-      const orderRevenue = new Map(completedOrders.map(o => [o.id, Number(o.grand_total || 0)]));
+      const profitabilityData = profitabilityRes.data ?? [];
+      
+      const profitMap = new Map(profitabilityData.map(o => [o.os_id, { revenue: Number(o.revenue || 0), profit: Number(o.net_profit || 0) }]));
+      const completedIds = new Set(profitabilityData.map(o => o.os_id));
 
       const rows = techs.map(t => {
         const myAssigns = assigns.filter(a => a.user_id === t.id && completedIds.has(a.service_order_id));
@@ -230,17 +231,81 @@ export function useTechnicianProductivityReport() {
           .filter(te => te.technician_user_id === t.id)
           .reduce((s, te) => s + Number(te.duration_minutes || 0), 0);
         const totalHours = totalMinutes / 60;
-        const revenue = myAssigns.reduce((s, a) => s + (orderRevenue.get(a.service_order_id) ?? 0), 0);
+        
+        const revenue = myAssigns.reduce((s, a) => s + (profitMap.get(a.service_order_id)?.revenue ?? 0), 0);
+        const profit = myAssigns.reduce((s, a) => s + (profitMap.get(a.service_order_id)?.profit ?? 0), 0);
+
         return {
           name: t.full_name,
           os_count: osCount,
           hours: Math.round(totalHours * 10) / 10,
           avg_per_os: osCount > 0 ? Math.round((totalHours / osCount) * 10) / 10 : 0,
           revenue,
+          profit,
         };
       }).sort((a, b) => b.os_count - a.os_count);
 
       return { rows };
+    },
+  });
+}
+
+// ============ TAB 5: PROFITABILITY ============
+export function useProfitabilityReport() {
+  return useQuery({
+    queryKey: ['reports', 'profitability'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('vw_os_profitability')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      const all = data ?? [];
+      const completed = all.filter(o => o.status === 'completed' || o.status === 'invoiced');
+      
+      const totalRevenue = completed.reduce((s, o) => s + Number(o.revenue || 0), 0);
+      const totalNetProfit = completed.reduce((s, o) => s + Number(o.net_profit || 0), 0);
+      const avgMargin = completed.length 
+        ? completed.reduce((s, o) => s + Number(o.net_margin_percent || 0), 0) / completed.length 
+        : 0;
+
+      // Top 10 most profitable OS
+      const topOS = [...completed]
+        .sort((a, b) => b.net_profit - a.net_profit)
+        .slice(0, 10);
+
+      // Monthly profit trend (last 6 months)
+      const monthMap = new Map<string, { revenue: number; profit: number }>();
+      for (let i = 5; i >= 0; i--) {
+        const d = new Date();
+        d.setMonth(d.getMonth() - i);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        monthMap.set(key, { revenue: 0, profit: 0 });
+      }
+
+      completed.forEach(o => {
+        const key = String(o.created_at).slice(0, 7);
+        if (monthMap.has(key)) {
+          const cur = monthMap.get(key)!;
+          cur.revenue += Number(o.revenue || 0);
+          cur.profit += Number(o.net_profit || 0);
+          monthMap.set(key, cur);
+        }
+      });
+
+      const trend = Array.from(monthMap.entries()).map(([month, val]) => {
+        const [, m] = month.split('-');
+        const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+        return { 
+          name: monthNames[Number(m) - 1], 
+          revenue: val.revenue, 
+          profit: val.profit 
+        };
+      });
+
+      return { totalRevenue, totalNetProfit, avgMargin, topOS, trend };
     },
   });
 }

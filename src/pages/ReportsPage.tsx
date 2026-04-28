@@ -2,12 +2,14 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PageHeader } from '@/components/PageHeader';
 import { KPICard } from '@/components/KPICard';
+import { AIConsultantDashboard } from '@/components/AIConsultantDashboard';
 import { useI18n } from '@/i18n';
 import {
   useRevenueReport,
   useOsPerformanceReport,
   usePartsUsageReport,
   useTechnicianProductivityReport,
+  useProfitabilityReport,
 } from '@/hooks/use-reports';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -290,6 +292,7 @@ function TechniciansTab() {
               <TableHead className="text-right">Horas</TableHead>
               <TableHead className="text-right">Média h/OS</TableHead>
               <TableHead className="text-right">Receita gerada</TableHead>
+              <TableHead className="text-right text-emerald-600">Lucro Líquido</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -302,11 +305,92 @@ function TechniciansTab() {
                 <TableCell className="text-right font-mono">{r.hours}h</TableCell>
                 <TableCell className="text-right font-mono">{r.avg_per_os}h</TableCell>
                 <TableCell className="text-right font-mono">{formatCurrency(r.revenue)}</TableCell>
+                <TableCell className="text-right font-mono font-bold text-emerald-600">{formatCurrency(r.profit)}</TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
       </ChartCard>
+    </div>
+  );
+}
+
+// =============== TAB 5: REAL PROFITABILITY ===============
+function ProfitabilityTab() {
+  const { formatCurrency } = useI18n();
+  const [period, setPeriod] = useState('30');
+  const { data, isLoading, error, refetch } = useProfitabilityReport(Number(period));
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-end">
+        <Select value={period} onValueChange={setPeriod}>
+          <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="30">Últimos 30 dias</SelectItem>
+            <SelectItem value="90">Últimos 90 dias</SelectItem>
+            <SelectItem value="180">Últimos 180 dias</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {isLoading ? <LoadingBlock /> : error ? <ErrorBlock onRetry={() => refetch()} /> : !data ? <LoadingBlock /> : (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <KPICard title="Faturamento Total" value={formatCurrency(data.totalRevenue)} icon={DollarSign} />
+            <KPICard title="Lucro Bruto Real" value={formatCurrency(data.totalProfit)} icon={TrendingUp} className="border-emerald-200 bg-emerald-50/20" />
+            <KPICard title="Margem Média" value={`${data.avgMargin.toFixed(1)}%`} icon={Percent} />
+          </div>
+
+          <ChartCard title="Lucro vs Custo por OS (Top 10)">
+            <ResponsiveContainer width="100%" height={320}>
+              <BarChart data={data.rows.slice(0, 10)} layout="vertical" margin={{ left: 30 }}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                <XAxis type="number" className="text-xs" tickFormatter={v => formatCurrency(v).replace(/[^\d.,]/g, '')} />
+                <YAxis type="category" dataKey="number" className="text-xs" width={100} />
+                <Tooltip formatter={(v: number) => formatCurrency(v)} />
+                <Legend />
+                <Bar dataKey="profit" name="Lucro" fill="hsl(152,60%,40%)" stackId="a" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="cost" name="Custo Total" fill="hsl(0,72%,51%)" stackId="a" radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          <ChartCard title="Detalhamento de Lucratividade por OS">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>OS / Cliente</TableHead>
+                  <TableHead className="text-right">Faturamento</TableHead>
+                  <TableHead className="text-right">Custo Total</TableHead>
+                  <TableHead className="text-right">Lucro Líquido</TableHead>
+                  <TableHead className="text-right">Margem</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.rows.length === 0 ? (
+                  <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">Sem dados no período</TableCell></TableRow>
+                ) : data.rows.map((r, i) => (
+                  <TableRow key={r.id}>
+                    <TableCell>
+                      <Link to={`/service-orders/${r.id}`} className="font-medium text-primary hover:underline">{r.number}</Link>
+                      <span className="block text-[10px] text-muted-foreground truncate max-w-[200px]">{r.client}</span>
+                    </TableCell>
+                    <TableCell className="text-right font-mono">{formatCurrency(r.revenue)}</TableCell>
+                    <TableCell className="text-right font-mono text-destructive">{formatCurrency(r.cost)}</TableCell>
+                    <TableCell className="text-right font-mono font-bold text-emerald-600">{formatCurrency(r.profit)}</TableCell>
+                    <TableCell className="text-right font-mono">
+                      <Badge variant="outline" className={r.margin > 30 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}>
+                        {r.margin.toFixed(1)}%
+                      </Badge>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </ChartCard>
+        </>
+      )}
     </div>
   );
 }
@@ -319,18 +403,27 @@ export default function ReportsPage() {
     <div className="space-y-6 animate-fade-in">
       <PageHeader title={t.reports.title} description={t.reports.description} />
 
+      <AIConsultantDashboard 
+        data={{
+          profitability: useProfitabilityReport(30).data,
+          performance: useOsPerformanceReport().data
+        }} 
+      />
+
       <Tabs defaultValue="revenue" className="space-y-6">
         <TabsList className="grid w-full grid-cols-2 lg:grid-cols-4 h-auto">
           <TabsTrigger value="revenue" className="gap-2"><DollarSign className="h-4 w-4" />Receita</TabsTrigger>
           <TabsTrigger value="performance" className="gap-2"><BarChart3 className="h-4 w-4" />Performance</TabsTrigger>
           <TabsTrigger value="parts" className="gap-2"><Package className="h-4 w-4" />Peças</TabsTrigger>
           <TabsTrigger value="technicians" className="gap-2"><Users className="h-4 w-4" />Técnicos</TabsTrigger>
+          <TabsTrigger value="profitability" className="gap-2"><TrendingUp className="h-4 w-4 text-emerald-500" />Lucratividade</TabsTrigger>
         </TabsList>
 
         <TabsContent value="revenue"><RevenueTab /></TabsContent>
         <TabsContent value="performance"><PerformanceTab /></TabsContent>
         <TabsContent value="parts"><PartsTab /></TabsContent>
         <TabsContent value="technicians"><TechniciansTab /></TabsContent>
+        <TabsContent value="profitability"><ProfitabilityTab /></TabsContent>
       </Tabs>
     </div>
   );

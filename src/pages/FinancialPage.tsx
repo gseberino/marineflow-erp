@@ -15,6 +15,7 @@ import { ReceivableFormDialog } from '@/components/ReceivableFormDialog';
 import { PayableFormDialog } from '@/components/PayableFormDialog';
 import { BankReconciliation } from '@/components/BankReconciliation';
 import { ReimbursementsPanel } from '@/components/ReimbursementsPanel';
+import { DREPanel } from '@/components/DREPanel';
 import { FinancialFilterPanel, applyFilters, defaultFilters, type FinancialFilters } from '@/components/FinancialFilterPanel';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -304,6 +305,7 @@ export default function FinancialPage() {
       <Tabs defaultValue="overview">
         <TabsList>
           <TabsTrigger value="overview">{t.financial.tabOverview}</TabsTrigger>
+          <TabsTrigger value="dre">DRE / Avançado</TabsTrigger>
           <TabsTrigger value="receivables">{t.financial.tabReceivables}</TabsTrigger>
           <TabsTrigger value="payables">{t.financial.tabPayables}</TabsTrigger>
           <TabsTrigger value="reconciliation">{t.financial.tabReconciliation}</TabsTrigger>
@@ -405,6 +407,11 @@ export default function FinancialPage() {
               )}
             </div>
           </div>
+        </TabsContent>
+
+        {/* === DRE === */}
+        <TabsContent value="dre" className="mt-4 space-y-4 animate-fade-in">
+          <DREPanel />
         </TabsContent>
 
         {/* === RECEIVABLES === */}

@@ -10,6 +10,7 @@ import { useI18n } from '@/i18n';
 import { useClients } from '@/hooks/use-clients';
 import { useServiceOrders } from '@/hooks/use-service-orders';
 import { useCreateReceivable } from '@/hooks/use-financial';
+import { useCostCenters } from '@/hooks/use-cost-centers';
 import { toast } from 'sonner';
 import { MoneyInput } from '@/components/MoneyInput';
 
@@ -19,9 +20,11 @@ export function ReceivableFormDialog({ open, onOpenChange }: Props) {
   const { t } = useI18n();
   const { data: clients } = useClients();
   const { data: orders } = useServiceOrders();
+  const { data: costCenters } = useCostCenters();
   const create = useCreateReceivable();
 
   const [clientId, setClientId] = useState('');
+  const [costCenterId, setCostCenterId] = useState('');
   const [soId, setSoId] = useState('');
   const [description, setDescription] = useState('');
   const [issueDate, setIssueDate] = useState(new Date().toISOString().split('T')[0]);
@@ -36,6 +39,7 @@ export function ReceivableFormDialog({ open, onOpenChange }: Props) {
       await create.mutateAsync({
         client_id: clientId, description, issue_date: issueDate,
         due_date: dueDate, amount, currency,
+        cost_center_id: costCenterId || undefined,
         service_order_id: soId || undefined, notes: notes || undefined,
       });
       toast.success(t.financial.newReceivable);
@@ -76,6 +80,17 @@ export function ReceivableFormDialog({ open, onOpenChange }: Props) {
               />
             </div>
           )}
+          <div><Label>Centro de Custo (Opcional)</Label>
+            <Select value={costCenterId} onValueChange={setCostCenterId}>
+              <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">—</SelectItem>
+                {(costCenters || []).filter(c => c.type !== 'expense').map(c => (
+                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <div><Label>{t.common.description} *</Label><Input value={description} onChange={e => setDescription(e.target.value)} /></div>
           <div className="grid grid-cols-2 gap-3">
             <div><Label>{t.common.date}</Label><Input type="date" value={issueDate} onChange={e => setIssueDate(e.target.value)} /></div>

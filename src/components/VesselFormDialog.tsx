@@ -51,6 +51,7 @@ const empty: TablesInsert<'vessels'> = {
   current_dock_position: '',
   marina_id: undefined,
   active: true,
+  asset_type: 'Lancha',
 };
 
 export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, onCreated }: Props) {
@@ -87,6 +88,7 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
         current_dock_position: vessel.current_dock_position ?? '',
         marina_id: vessel.marina_id ?? undefined,
         active: vessel.active,
+        asset_type: vessel.asset_type ?? 'Lancha',
       });
     } else {
       setForm({ ...empty, client_id: initialClientId || '' });
@@ -130,10 +132,32 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{isEdit ? t.vessels.editVessel : t.vessels.newVessel}</DialogTitle>
+          <DialogTitle>{isEdit ? "Editar Veículo/Embarcação" : "Novo Veículo/Embarcação"}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
+            <div className="col-span-2 sm:col-span-1">
+              <Label>Tipo de Unidade *</Label>
+              <Select value={form.asset_type || 'Lancha'} onValueChange={v => set('asset_type', v)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Lancha">Lancha</SelectItem>
+                  <SelectItem value="Veleiro">Veleiro</SelectItem>
+                  <SelectItem value="Catamarã">Catamarã</SelectItem>
+                  <SelectItem value="Motorhome">Motorhome</SelectItem>
+                  <SelectItem value="Trailer">Trailer</SelectItem>
+                  <SelectItem value="Camper">Camper</SelectItem>
+                  <SelectItem value="Jet Ski">Jet Ski</SelectItem>
+                  <SelectItem value="Outro">Outro</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="col-span-2 sm:col-span-1">
+              <Label>Nome / Placa / ID *</Label>
+              <Input required value={form.boat_name} onChange={e => set('boat_name', e.target.value)} />
+            </div>
             <div className="col-span-2">
               <Label>{t.vessels.selectClient} *</Label>
               <EntityCombobox
@@ -147,10 +171,6 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
                   searchTerms: [c.cpf_cnpj || '', c.email || ''],
                 }))}
               />
-            </div>
-            <div className="col-span-2">
-              <Label>{t.vessels.boatName} *</Label>
-              <Input required value={form.boat_name} onChange={e => set('boat_name', e.target.value)} />
             </div>
             <div>
               <Label>{t.vessels.manufacturer}</Label>

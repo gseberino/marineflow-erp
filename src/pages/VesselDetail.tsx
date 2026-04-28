@@ -24,7 +24,7 @@ export default function VesselDetail() {
       if (!id) return [];
       const { data, error } = await supabase
         .from('service_orders')
-        .select('*')
+        .select('*, service_order_parts(id, products(product_name), quantity, warranty_days), service_order_services(id, service_name_snapshot, quantity, warranty_days)')
         .eq('vessel_id', id)
         .order('created_at', { ascending: false });
       if (error) throw error;
@@ -125,32 +125,102 @@ export default function VesselDetail() {
         </TabsContent>
 
         <TabsContent value="history" className="mt-4">
-          <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
-            <table className="w-full text-sm">
-              <thead><tr className="border-b bg-muted/50">
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.serviceOrders.orderNumber}</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.common.date}</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.common.type}</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.common.status}</th>
-                <th className="px-4 py-3 text-right font-medium text-muted-foreground">{t.common.total}</th>
-              </tr></thead>
-              <tbody>
-                {(orders ?? []).map(o => (
-                  <tr key={o.id} className="border-b last:border-0 hover:bg-muted/30">
-                    <td className="px-4 py-3"><Link to={`/service-orders/${o.id}`} className="text-accent hover:underline">{o.service_order_number}</Link></td>
-                    <td className="px-4 py-3 text-muted-foreground">{formatDate(o.created_at)}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{o.service_type ? (t.serviceType as Record<string, string>)[o.service_type] ?? o.service_type : '—'}</td>
-                    <td className="px-4 py-3">
+          <div className="space-y-8 pl-4 border-l-2 border-border/50 relative py-4">
+            {(!orders || orders.length === 0) && (
+              <div className="text-center py-12 text-muted-foreground bg-card rounded-xl border border-dashed">
+                {t.vessels.noServiceHistory}
+              </div>
+            )}
+            {(orders ?? []).map((o: any) => (
+              <div key={o.id} className="relative pl-6">
+                {/* Timeline dot */}
+                <div className="absolute -left-[29px] top-1 h-4 w-4 rounded-full border-4 border-background bg-accent ring-1 ring-border/50" />
+                
+                <div className="bg-card border rounded-xl p-5 shadow-sm transition-all hover:shadow-md">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 border-b pb-3">
+                    <div>
+                      <Link to={`/service-orders/${o.id}`} className="text-lg font-bold text-accent hover:underline flex items-center gap-2">
+                        {o.service_order_number}
+                        {o.service_type && (
+                          <span className="text-xs font-normal px-2 py-0.5 bg-muted rounded-full text-foreground">
+                            {(t.serviceType as Record<string, string>)[o.service_type] ?? o.service_type}
+                          </span>
+                        )}
+                      </Link>
+                      <p className="text-xs text-muted-foreground mt-1 font-medium">{formatDate(o.created_at)}</p>
+                    </div>
+                    <div className="flex items-center gap-3">
                       <StatusBadge className={statusConfig[o.status as keyof typeof statusConfig]?.className ?? ''}>
                         {(t.status as Record<string, string>)[o.status] ?? o.status}
                       </StatusBadge>
-                    </td>
-                    <td className="px-4 py-3 text-right font-medium">{formatCurrency(o.grand_total ?? 0)}</td>
-                  </tr>
-                ))}
-                {(!orders || orders.length === 0) && <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">{t.vessels.noServiceHistory}</td></tr>}
-              </tbody>
-            </table>
+                      <div className="text-right">
+                        <p className="text-sm font-bold">{formatCurrency(o.grand_total ?? 0)}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {o.problem_description && (
+                    <div className="mb-4">
+                      <p className="text-sm text-muted-foreground leading-relaxed">{o.problem_description}</p>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Services */}
+                    {o.service_order_services && o.service_order_services.length > 0 && (
+                      <div className="bg-muted/30 rounded-lg p-3 border border-border/50">
+                        <h4 className="text-xs font-semibold mb-2 flex items-center gap-1.5">
+                          <Zap className="h-3.5 w-3.5" /> Serviços Realizados ({o.service_order_services.length})
+                        </h4>
+                        <ul className="space-y-1.5">
+                          {o.service_order_services.map((s: any) => (
+                            <li key={s.id} className="text-xs text-muted-foreground flex justify-between items-start">
+                              <div className="min-w-0 pr-2">
+                                <span className="block truncate">• {s.service_name_snapshot}</span>
+                                {s.warranty_days > 0 && (
+                                  <span className="text-[9px] text-accent font-semibold flex items-center gap-0.5">
+                                    <Zap className="h-2 w-2" /> Garantia: {s.warranty_days} dias
+                                  </span>
+                                )}
+                              </div>
+                              <span className="shrink-0 font-medium">x{s.quantity}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    
+                    {/* Parts */}
+                    {o.service_order_parts && o.service_order_parts.length > 0 && (
+                      <div className="bg-muted/30 rounded-lg p-3 border border-border/50">
+                        <h4 className="text-xs font-semibold mb-2 flex items-center gap-1.5">
+                          <Anchor className="h-3.5 w-3.5" /> Peças Trocadas ({o.service_order_parts.length})
+                        </h4>
+                        <ul className="space-y-1.5">
+                          {o.service_order_parts.map((p: any) => (
+                            <li key={p.id} className="text-xs text-muted-foreground flex justify-between items-start">
+                              <div className="min-w-0 pr-2">
+                                <span className="block truncate">• {p.products?.product_name || 'Produto sem nome'}</span>
+                                {p.warranty_days > 0 && (
+                                  <span className="text-[9px] text-accent font-semibold flex items-center gap-0.5">
+                                    <Anchor className="h-2 w-2" /> Garantia: {p.warranty_days} dias
+                                  </span>
+                                )}
+                              </div>
+                              <span className="shrink-0 font-medium">x{p.quantity}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+
+                  {(!o.service_order_services?.length && !o.service_order_parts?.length && !o.problem_description) && (
+                    <p className="text-xs text-muted-foreground italic">Nenhum detalhe adicional registrado nesta OS.</p>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         </TabsContent>
       </Tabs>

@@ -4,7 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Loader2, Ship, User, MapPin, FileText, Wrench, Package, Download, CheckCircle2, AlertTriangle, PenLine } from 'lucide-react';
+import { Loader2, Ship, User, MapPin, FileText, Wrench, Package, Download, CheckCircle2, AlertTriangle, PenLine, Image as ImageIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -563,6 +563,27 @@ export default function PublicServiceOrderView() {
                     {show.partsPrices && (
                       <p className="font-medium tabular-nums">{fmtCurrency(p.line_total_sale)}</p>
                     )}
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Photos Gallery */}
+        {order.photos && order.photos.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <ImageIcon className="h-5 w-5" />
+                Acompanhamento da Obra (Fotos)
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {order.photos.map((url: string, i: number) => (
+                  <div key={i} className="aspect-square rounded-xl overflow-hidden border">
+                    <img src={url} alt={`Acompanhamento ${i+1}`} className="w-full h-full object-cover hover:scale-105 transition-transform" />
                   </div>
                 ))}
               </div>

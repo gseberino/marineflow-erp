@@ -19,7 +19,7 @@ export default function VesselList() {
   const { data: vessels, isLoading, error } = useVessels();
 
   const types = useMemo(() =>
-    [...new Set((vessels ?? []).map((v: any) => v.boat_type).filter(Boolean))].sort() as string[],
+    [...new Set((vessels ?? []).map((v: any) => v.asset_type).filter(Boolean))].sort() as string[],
   [vessels]);
 
   const filtered = (vessels ?? []).filter((v: any) =>
@@ -28,7 +28,7 @@ export default function VesselList() {
       (v.manufacturer ?? '').toLowerCase().includes(search.toLowerCase()) ||
       (v.model ?? '').toLowerCase().includes(search.toLowerCase()) ||
       (v.clients?.full_name_or_company_name ?? '').toLowerCase().includes(search.toLowerCase())
-    ) && (typeFilter === 'all' || v.boat_type === typeFilter)
+    ) && (typeFilter === 'all' || v.asset_type === typeFilter)
   );
 
   if (error) return <div className="py-20 text-center text-destructive">{(error as Error).message}</div>;
@@ -37,7 +37,7 @@ export default function VesselList() {
     <div className="space-y-4 animate-fade-in">
       <PageHeader title={t.vessels.title} description={`${t.vessels.description} (${vessels?.length ?? 0})`}>
         <Button className="gap-2 bg-accent text-accent-foreground hover:bg-accent/90" onClick={() => setFormOpen(true)}>
-          <Plus className="h-4 w-4" /> {t.vessels.newVessel}
+          <Plus className="h-4 w-4" /> Nova Unidade
         </Button>
       </PageHeader>
       <div className="flex flex-col sm:flex-row gap-3">
@@ -82,7 +82,7 @@ export default function VesselList() {
         <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
           <table className="w-full text-sm">
             <thead><tr className="border-b bg-muted/50">
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.vessels.vessel}</th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Unidade / Tipo</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">{t.vessels.owner}</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">{t.serviceOrders.marina}</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">{t.vessels.engine}</th>
@@ -97,7 +97,7 @@ export default function VesselList() {
                       <Ship className="h-4 w-4 text-accent shrink-0" />
                       <div>
                         <p className="font-medium text-accent hover:underline">{v.boat_name}</p>
-                        <p className="text-xs text-muted-foreground">{v.manufacturer} {v.model}</p>
+                        <p className="text-xs text-muted-foreground">{v.asset_type || 'Lancha'} • {v.manufacturer} {v.model}</p>
                       </div>
                     </Link>
                   </td>

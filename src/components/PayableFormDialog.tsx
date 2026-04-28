@@ -12,6 +12,7 @@ import { useI18n } from '@/i18n';
 import { useSuppliers } from '@/hooks/use-suppliers';
 import { useServiceOrders } from '@/hooks/use-service-orders';
 import { useCreatePayable } from '@/hooks/use-financial';
+import { useCostCenters } from '@/hooks/use-cost-centers';
 import { toast } from 'sonner';
 import { MoneyInput } from '@/components/MoneyInput';
 
@@ -21,11 +22,13 @@ export function PayableFormDialog({ open, onOpenChange }: Props) {
   const { t } = useI18n();
   const { data: suppliers } = useSuppliers();
   const { data: orders } = useServiceOrders();
+  const { data: costCenters } = useCostCenters();
   const create = useCreatePayable();
 
   const [supplierId, setSupplierId] = useState('');
   const [supplierName, setSupplierName] = useState('');
   const [category, setCategory] = useState('');
+  const [costCenterId, setCostCenterId] = useState('');
   const [description, setDescription] = useState('');
   const [issueDate, setIssueDate] = useState(new Date().toISOString().split('T')[0]);
   const [dueDate, setDueDate] = useState('');
@@ -44,6 +47,7 @@ export function PayableFormDialog({ open, onOpenChange }: Props) {
         description, issue_date: issueDate, due_date: dueDate,
         amount, currency,
         expense_category: category || undefined,
+        cost_center_id: costCenterId || undefined,
         supplier_id: supplierId || undefined,
         supplier_name: selectedSupplier?.supplier_name || supplierName || undefined,
         linked_service_order_id: soId || undefined,
@@ -78,8 +82,22 @@ export function PayableFormDialog({ open, onOpenChange }: Props) {
             />
           </div>
           {!supplierId && <div><Label>Nome do fornecedor</Label><Input value={supplierName} onChange={e => setSupplierName(e.target.value)} /></div>}
-          <div><Label>{t.financial.expenseCategory}</Label>
-            <CategorySelect type="payable" value={category} onChange={setCategory} placeholder="—" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label>{t.financial.expenseCategory}</Label>
+              <CategorySelect type="payable" value={category} onChange={setCategory} placeholder="—" />
+            </div>
+            <div><Label>Centro de Custo</Label>
+              <Select value={costCenterId} onValueChange={setCostCenterId}>
+                <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">—</SelectItem>
+                  {(costCenters || []).filter(c => c.type !== 'revenue').map(c => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <div><Label>{t.common.description} *</Label><Input value={description} onChange={e => setDescription(e.target.value)} /></div>
           <div className="grid grid-cols-2 gap-3">

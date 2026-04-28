@@ -26,9 +26,11 @@ import {
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import {
-  Package, TrendingDown, AlertTriangle, Plus, DollarSign, ChevronUp, ChevronDown,
+  Package, TrendingDown, AlertTriangle, Plus, DollarSign, ChevronUp, ChevronDown, ScanBarcode
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { PriceSuggestionAlert } from '@/components/PriceSuggestionAlert';
+import { BarcodeScannerModal } from '@/components/BarcodeScannerModal';
 
 // ── Movement labels & colors ──────────────────────────────
 const MOVEMENT_LABELS: Record<string, string> = {
@@ -90,6 +92,7 @@ export default function InventoryPage() {
   const [adjustProduct, setAdjustProduct] = useState<any>(null);
   const [addEntryProduct, setAddEntryProduct] = useState<any>(null);
   const [showAddEntry, setShowAddEntry] = useState(false);
+  const [scannerOpen, setScannerOpen] = useState(false);
 
   // ── Categories list ──
   const categories = useMemo(() => {
@@ -163,10 +166,17 @@ export default function InventoryPage() {
   return (
     <div className="space-y-4 animate-fade-in">
       <PageHeader title={t.inventory.title} description={t.inventory.description}>
-        <Button onClick={() => { setAddEntryProduct(null); setShowAddEntry(true); }}>
-          <Plus className="h-4 w-4 mr-1" /> {t.inventory.addEntry}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setScannerOpen(true)}>
+            <ScanBarcode className="h-4 w-4 mr-2" /> Scanner
+          </Button>
+          <Button onClick={() => { setAddEntryProduct(null); setShowAddEntry(true); }}>
+            <Plus className="h-4 w-4 mr-1" /> {t.inventory.addEntry}
+          </Button>
+        </div>
       </PageHeader>
+
+      <PriceSuggestionAlert />
 
       {/* KPI Cards — clickable filters */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -445,13 +455,22 @@ export default function InventoryPage() {
         formatCurrency={formatCurrency}
       />
 
-      {/* ── AddEntryDialog ── */}
       <AddEntryDialog
         open={showAddEntry}
         onClose={() => { setShowAddEntry(false); setAddEntryProduct(null); }}
         product={addEntryProduct}
         allProducts={allProducts || []}
         formatCurrency={formatCurrency}
+      />
+
+      <BarcodeScannerModal 
+        open={scannerOpen} 
+        onOpenChange={setScannerOpen} 
+        onProductScanned={(p) => {
+          setScannerOpen(false);
+          // Set timeout to avoid dialog unmount conflicts
+          setTimeout(() => setAdjustProduct(p), 100);
+        }} 
       />
     </div>
   );

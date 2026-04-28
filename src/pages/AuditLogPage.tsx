@@ -50,6 +50,33 @@ export default function AuditLogPage() {
 
   const hasFilters = tableFilter || actionFilter || dateFrom || dateTo;
 
+  const FIELD_MAP: Record<string, string> = {
+    status: 'Status', grand_total: 'Valor Total', service_order_number: 'Nº OS',
+    discount_amount: 'Desconto', scheduled_start_at: 'Início', scheduled_end_at: 'Fim',
+    problem_description: 'Problema', quantity: 'Quantidade', unit_price_snapshot: 'Preço',
+    amount: 'Valor (R$)', due_date: 'Vencimento', description: 'Descrição', contact_name: 'Contato',
+    line_total: 'Total da Linha', labor_cost_total: 'Total de Serviços', parts_cost_total: 'Total de Peças',
+    product_id: 'ID do Produto', service_id: 'ID do Serviço',
+  };
+
+  const STATUS_MAP: Record<string, string> = {
+    draft: 'Rascunho', approved: 'Aprovada', scheduled: 'Agendada', in_progress: 'Em Andamento',
+    completed: 'Concluída', cancelled: 'Cancelada', invoiced: 'Faturada',
+    pending: 'Pendente', overdue: 'Atrasada', paid: 'Pago'
+  };
+
+  const formatValue = (k: string, val: any) => {
+    if (val === null || val === undefined) return '—';
+    if (k === 'status' && STATUS_MAP[val]) return STATUS_MAP[val];
+    if (typeof val === 'number' && (k.includes('amount') || k.includes('cost') || k.includes('total') || k.includes('price'))) {
+      return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
+    }
+    if (typeof val === 'string' && val.match(/^\d{4}-\d{2}-\d{2}T/)) {
+      return new Date(val).toLocaleString('pt-BR');
+    }
+    return JSON.stringify(val);
+  };
+
   const renderDiff = (prev: any, next: any) => {
     if (!prev && !next) return <span className="text-muted-foreground text-xs">—</span>;
     const allKeys = new Set([
@@ -57,6 +84,8 @@ export default function AuditLogPage() {
       ...Object.keys(next || {}),
     ]);
     const changedKeys = Array.from(allKeys).filter(k => {
+      // ignore technical keys
+      if (k === 'updated_at' || k === 'created_at' || k === 'id' || k === 'client_id' || k === 'vessel_id') return false;
       return JSON.stringify(prev?.[k]) !== JSON.stringify(next?.[k]);
     });
     if (changedKeys.length === 0) return <span className="text-muted-foreground text-xs">{auditT.noChanges}</span>;
@@ -66,16 +95,18 @@ export default function AuditLogPage() {
         <div className="space-y-1">
           <p className="font-semibold text-destructive">{auditT.before}</p>
           {changedKeys.map(k => (
-            <div key={k} className="bg-destructive/5 rounded px-2 py-1">
-              <span className="font-medium">{k}:</span> {JSON.stringify(prev?.[k] ?? '—')}
+            <div key={k} className="bg-destructive/5 rounded px-2 py-1 flex justify-between items-center">
+              <span className="font-medium text-muted-foreground">{FIELD_MAP[k] || k}:</span>
+              <span className="font-mono">{formatValue(k, prev?.[k])}</span>
             </div>
           ))}
         </div>
         <div className="space-y-1">
           <p className="font-semibold text-emerald-600">{auditT.after}</p>
           {changedKeys.map(k => (
-            <div key={k} className="bg-emerald-50 rounded px-2 py-1">
-              <span className="font-medium">{k}:</span> {JSON.stringify(next?.[k] ?? '—')}
+            <div key={k} className="bg-emerald-50 rounded px-2 py-1 flex justify-between items-center">
+              <span className="font-medium text-muted-foreground">{FIELD_MAP[k] || k}:</span>
+              <span className="font-mono text-emerald-800">{formatValue(k, next?.[k])}</span>
             </div>
           ))}
         </div>

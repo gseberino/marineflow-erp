@@ -42,3 +42,45 @@ export function useUpdateProduct() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['products'] }),
   });
 }
+
+export function usePriceSuggestions() {
+  return useQuery({
+    queryKey: ['price-suggestions'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('price_update_suggestions')
+        .select('*, products(product_name, sku, cost_price)')
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+export function useApplyPriceSuggestion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ suggestionId, productId, newPrice }: { suggestionId: string, productId: string, newPrice: number }) => {
+      // 1. Atualiza o preço do produto
+      const { error: prodErr } = await supabase
+        .from('products')
+        .update({ sale_price: newPrice })
+        .eq('id', productId);
+      
+      if (prodErr) throw prodErr;
+
+      // 2. Marca a sugestão como aplicada
+      const { error: sugErr } = await supabase
+        .from('price_update_suggestions')
+        .update({ status: 'applied' })
+        .eq('id', suggestionId);
+      
+      if (sugErr) throw sugErr;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['price-suggestions'] });
+      qc.invalidateQueries({ queryKey: ['products'] });
+    },
+  });
+}

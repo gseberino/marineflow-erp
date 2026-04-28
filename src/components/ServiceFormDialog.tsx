@@ -31,6 +31,7 @@ export function ServiceFormDialog({ open, onOpenChange, editData, onCreated }: P
     default_price: 0,
     currency: 'BRL',
     active: true,
+    default_warranty_days: 0,
   });
 
   useEffect(() => {
@@ -43,9 +44,10 @@ export function ServiceFormDialog({ open, onOpenChange, editData, onCreated }: P
         default_price: editData.default_price || 0,
         currency: editData.currency || 'BRL',
         active: editData.active ?? true,
+        default_warranty_days: editData.default_warranty_days ?? 0,
       });
     } else {
-      setForm({ service_name: '', description: '', category: '', billing_unit: 'hour', default_price: 0, currency: 'BRL', active: true });
+      setForm({ service_name: '', description: '', category: '', billing_unit: 'hour', default_price: 0, currency: 'BRL', active: true, default_warranty_days: 0 });
     }
   }, [editData, open]);
 
@@ -124,9 +126,15 @@ export function ServiceFormDialog({ open, onOpenChange, editData, onCreated }: P
               </Select>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Switch checked={form.active} onCheckedChange={(v) => set('active', v)} />
-            <Label>{t.common.active}</Label>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <Switch checked={form.active} onCheckedChange={(v) => set('active', v)} />
+              <Label>{t.common.active}</Label>
+            </div>
+            <div className="flex-1">
+              <Label className="text-xs">Garantia Padrão (dias)</Label>
+              <Input type="number" min="0" value={(form as any).default_warranty_days ?? 0} onChange={(e) => set('default_warranty_days', Number(e.target.value))} />
+            </div>
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>{t.common.cancel}</Button>

@@ -130,6 +130,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
         profit_margin: p.profit_margin ?? 0,
         use_global_fiscal: p.use_global_fiscal !== false,
         product_category_id: p.product_category_id ?? null,
+        default_warranty_days: p.default_warranty_days ?? 0,
       });
       setUseGlobal(p.use_global_fiscal !== false);
     } else {
@@ -476,6 +477,10 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
             <div>
               <Label>{t.products.locationBin}</Label>
               <Input value={form.location_bin ?? ''} onChange={e => set('location_bin', e.target.value)} />
+            </div>
+            <div>
+              <Label>Garantia Padrão (dias)</Label>
+              <Input type="number" min="0" value={(form as any).default_warranty_days ?? 0} onChange={e => set('default_warranty_days', Number(e.target.value))} />
             </div>
             <div className="col-span-2">
               <Label>{t.common.notes}</Label>

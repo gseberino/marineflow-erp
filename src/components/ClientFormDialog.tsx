@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { AddressFields } from '@/components/AddressFields';
 import { useCreateClient, useUpdateClient, type Client } from '@/hooks/use-clients';
+import { useCnpj } from '@/hooks/use-cnpj';
 import { toast } from 'sonner';
 import type { TablesInsert } from '@/integrations/supabase/types';
 import { maskCPF, maskCNPJ, maskPhone } from '@/lib/masks';
@@ -20,7 +21,7 @@ import {
   pickClientSetting,
   type ClientWhatsAppContext,
 } from '@/hooks/use-client-whatsapp-settings';
-import { Trash2 } from 'lucide-react';
+import { Trash2, Search, Loader2 } from 'lucide-react';
 
 interface Props {
   open: boolean;
@@ -54,6 +55,7 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
   const { t } = useI18n();
   const create = useCreateClient();
   const update = useUpdateClient();
+  const { cnpjLoading, fetchByCnpj } = useCnpj();
   const [form, setForm] = useState(empty);
   const isEdit = !!client;
 
@@ -125,6 +127,27 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
     }
   };
 
+  const handleCnpjSearch = async () => {
+    if (!form.cpf_cnpj || form.cpf_cnpj.length < 14) return;
+    const data = await fetchByCnpj(form.cpf_cnpj);
+    if (data) {
+      setForm(prev => ({
+        ...prev,
+        full_name_or_company_name: data.nome_fantasia || data.razao_social || prev.full_name_or_company_name,
+        postal_code: data.cep || prev.postal_code,
+        address_line_1: data.logradouro || prev.address_line_1,
+        address_number: data.numero || prev.address_number,
+        address_complement: data.complemento || prev.address_complement,
+        neighborhood: data.bairro || prev.neighborhood,
+        city: data.municipio || prev.city,
+        state: data.uf || prev.state,
+        phone: data.ddd_telefone_1 || prev.phone,
+        email: data.email || prev.email,
+      }));
+      toast.success('Dados preenchidos via Receita Federal');
+    }
+  };
+
   const isPending = create.isPending || update.isPending;
 
   return (
@@ -158,14 +181,21 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
               <Label>{t.clients.fullName} *</Label>
               <Input required value={form.full_name_or_company_name} onChange={e => set('full_name_or_company_name', e.target.value)} />
             </div>
-            <div>
+            <div className="col-span-2">
               <Label>{form.type === 'company' ? t.clients.cnpj : t.clients.cpf}</Label>
-              <Input
-                value={form.cpf_cnpj}
-                onChange={e => set('cpf_cnpj', form.type === 'company' ? maskCNPJ(e.target.value) : maskCPF(e.target.value))}
-                placeholder={form.type === 'company' ? '00.000.000/0001-00' : '000.000.000-00'}
-                maxLength={form.type === 'company' ? 18 : 14}
-              />
+              <div className="flex gap-2">
+                <Input
+                  value={form.cpf_cnpj}
+                  onChange={e => set('cpf_cnpj', form.type === 'company' ? maskCNPJ(e.target.value) : maskCPF(e.target.value))}
+                  placeholder={form.type === 'company' ? '00.000.000/0001-00' : '000.000.000-00'}
+                  maxLength={form.type === 'company' ? 18 : 14}
+                />
+                {form.type === 'company' && (
+                  <Button type="button" variant="outline" onClick={handleCnpjSearch} disabled={cnpjLoading || form.cpf_cnpj.length < 14}>
+                    {cnpjLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                  </Button>
+                )}
+              </div>
             </div>
             <div>
               <Label>{t.clients.email}</Label>

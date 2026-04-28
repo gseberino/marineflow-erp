@@ -53,10 +53,11 @@ import { StatusBadge } from '@/components/StatusBadge';
 import { ServiceFormDialog } from '@/components/ServiceFormDialog';
 import { RecordHistory } from '@/components/RecordHistory';
 import { ServiceOrderSignatures } from '@/components/ServiceOrderSignatures';
+import { ServiceOrderPhotos } from '@/components/ServiceOrderPhotos';
 import { WhatsAppSendHistoryDialog } from '@/components/WhatsAppSendHistoryDialog';
 import { SendViaZAPIDialog, type SendViaZAPITarget } from '@/components/SendViaZAPIDialog';
 import { useWhatsAppSendHistory } from '@/hooks/use-whatsapp-send-log';
-import { CheckCircle2, XCircle, History as HistoryIcon, Send } from 'lucide-react';
+import { CheckCircle2, XCircle, History as HistoryIcon, Send, Sparkles } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -74,6 +75,7 @@ import { normalizePhoneE164 } from '@/lib/masks';
 import { MoneyInput } from '@/components/MoneyInput';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { recordWhatsAppEvent } from '@/lib/diagnostics';
+import { useAITextOptimizer } from '@/hooks/use-ai-text-optimizer';
 
 interface Props {
   orderId?: string;
@@ -191,6 +193,7 @@ function ServiceCardFormComponent({
                       description_snapshot: s.description || '',
                       billing_unit_snapshot: s.billing_unit || 'hour',
                       unit_price: Number(s.default_price) || 0,
+                      warranty_days: s.default_warranty_days || 0,
                     });
                     setShowSuggestions(false);
                   }}
@@ -268,13 +271,24 @@ function ServiceCardFormComponent({
           <Input readOnly value={formatCurrency(total)} className="bg-muted" />
         </div>
       </div>
-      <div>
-        <Label>Observações</Label>
-        <Textarea
-          rows={2}
-          value={draft.notes}
-          onChange={(e) => onUpdate({ notes: e.target.value })}
-        />
+      <div className="grid grid-cols-2 gap-3">
+        <div className="col-span-1">
+          <Label>Garantia (dias)</Label>
+          <Input
+            type="number"
+            min="0"
+            value={(draft as any).warranty_days ?? 0}
+            onChange={(e) => onUpdate({ warranty_days: parseInt(e.target.value) || 0 } as any)}
+          />
+        </div>
+        <div className="col-span-1">
+          <Label>Observações</Label>
+          <Textarea
+            rows={1}
+            value={draft.notes}
+            onChange={(e) => onUpdate({ notes: e.target.value })}
+          />
+        </div>
       </div>
       <div className="flex gap-2">
         <Button size="sm" onClick={onConfirm} disabled={confirmDisabled}>
@@ -361,7 +375,7 @@ function PartCardFormComponent({
         .update({ image_url: publicUrl })
         .eq('id', draft.product_id);
       if (updErr) throw updErr;
-      onUpdate({ image_url: publicUrl });
+      onUpdate({ image_url: publicUrl, warranty_days: (draft as any).warranty_days || 0 });
       toast.success('Foto adicionada');
     } catch (err: any) {
       toast.error(err?.message || 'Erro ao enviar imagem');
@@ -418,6 +432,7 @@ function PartCardFormComponent({
                       unit_cost: Number(p.cost_price) || 0,
                       unit_sale: Number(p.sale_price) || 0,
                       image_url: p.image_url || null,
+                      warranty_days: p.default_warranty_days || 0,
                     });
                     setShowSuggestions(false);
                   }}
@@ -535,13 +550,24 @@ function PartCardFormComponent({
           </Button>
         </div>
       </div>
-      <div>
-        <Label>Observações</Label>
-        <Textarea
-          rows={2}
-          value={draft.notes}
-          onChange={(e) => onUpdate({ notes: e.target.value })}
-        />
+      <div className="grid grid-cols-2 gap-3">
+        <div className="col-span-1">
+          <Label>Garantia (dias)</Label>
+          <Input
+            type="number"
+            min="0"
+            value={(draft as any).warranty_days ?? 0}
+            onChange={(e) => onUpdate({ warranty_days: parseInt(e.target.value) || 0 } as any)}
+          />
+        </div>
+        <div className="col-span-1">
+          <Label>Observações</Label>
+          <Textarea
+            rows={1}
+            value={draft.notes}
+            onChange={(e) => onUpdate({ notes: e.target.value })}
+          />
+        </div>
       </div>
       <div className="flex gap-2">
         <Button size="sm" onClick={onConfirm} disabled={confirmDisabled}>
@@ -602,6 +628,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const addExpense = useAddServiceOrderExpense();
   const updateExpense = useUpdateServiceOrderExpense();
   const removeExpense = useRemoveServiceOrderExpense();
+  
+  const { isOptimizing, optimizeText } = useAITextOptimizer();
 
   // Form state
   const [form, setForm] = useState<Record<string, any>>({
@@ -1965,10 +1993,27 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
 
       {/* D - Problem & Technical (compact with collapsible) */}
       <section className="rounded-xl border bg-card p-5 shadow-sm space-y-4">
-        <h2 className="font-semibold text-sm">{t.serviceOrders.problemDescription}</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold text-sm">{t.serviceOrders.problemDescription}</h2>
+        </div>
         <div>
-          <Label>{t.serviceOrders.problemDescription} *</Label>
-          <Textarea value={form.problem_description} onChange={(e) => set('problem_description', e.target.value)} rows={3} />
+          <div className="flex items-center justify-between mb-1">
+            <Label>{t.serviceOrders.problemDescription} *</Label>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-xs text-primary hover:text-primary hover:bg-primary/10"
+              onClick={async () => {
+                const optimized = await optimizeText(form.problem_description);
+                if (optimized) set('problem_description', optimized);
+              }}
+              disabled={isOptimizing || !form.problem_description || isLocked}
+            >
+              <Sparkles className="h-3 w-3 mr-1" /> IA
+            </Button>
+          </div>
+          <Textarea value={form.problem_description} onChange={(e) => set('problem_description', e.target.value)} rows={3} disabled={isLocked} />
         </div>
         <div className="space-y-2">
           <Label className="flex items-center gap-2 text-sm font-medium">
@@ -1996,32 +2041,74 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           <CollapsibleContent className="space-y-4 pt-3">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <div>
-                <Label>{t.serviceOrders.technicianNotes}</Label>
+                <div className="flex items-center justify-between mb-1">
+                  <Label>{t.serviceOrders.technicianNotes}</Label>
+                  <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs text-primary hover:text-primary hover:bg-primary/10"
+                    onClick={async () => set('technician_notes', await optimizeText(form.technician_notes))} disabled={isOptimizing || !form.technician_notes || isLocked}>
+                    <Sparkles className="h-3 w-3 mr-1" /> IA
+                  </Button>
+                </div>
                 <Textarea value={form.technician_notes} onChange={(e) => set('technician_notes', e.target.value)} rows={2} disabled={isLocked} />
               </div>
               <div>
-                <Label>{t.serviceOrders.initialFindings}</Label>
-                <Textarea value={form.initial_findings} onChange={(e) => set('initial_findings', e.target.value)} rows={2} />
+                <div className="flex items-center justify-between mb-1">
+                  <Label>{t.serviceOrders.initialFindings}</Label>
+                  <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs text-primary hover:text-primary hover:bg-primary/10"
+                    onClick={async () => set('initial_findings', await optimizeText(form.initial_findings))} disabled={isOptimizing || !form.initial_findings || isLocked}>
+                    <Sparkles className="h-3 w-3 mr-1" /> IA
+                  </Button>
+                </div>
+                <Textarea value={form.initial_findings} onChange={(e) => set('initial_findings', e.target.value)} rows={2} disabled={isLocked} />
               </div>
               <div>
-                <Label>{t.serviceOrders.diagnosis}</Label>
-                <Textarea value={form.diagnosis} onChange={(e) => set('diagnosis', e.target.value)} rows={2} />
+                <div className="flex items-center justify-between mb-1">
+                  <Label>{t.serviceOrders.diagnosis}</Label>
+                  <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs text-primary hover:text-primary hover:bg-primary/10"
+                    onClick={async () => set('diagnosis', await optimizeText(form.diagnosis))} disabled={isOptimizing || !form.diagnosis || isLocked}>
+                    <Sparkles className="h-3 w-3 mr-1" /> IA
+                  </Button>
+                </div>
+                <Textarea value={form.diagnosis} onChange={(e) => set('diagnosis', e.target.value)} rows={2} disabled={isLocked} />
               </div>
               <div>
-                <Label>{t.serviceOrders.solutionApplied}</Label>
-                <Textarea value={form.solution_applied} onChange={(e) => set('solution_applied', e.target.value)} rows={2} />
+                <div className="flex items-center justify-between mb-1">
+                  <Label>{t.serviceOrders.solutionApplied}</Label>
+                  <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs text-primary hover:text-primary hover:bg-primary/10"
+                    onClick={async () => set('solution_applied', await optimizeText(form.solution_applied))} disabled={isOptimizing || !form.solution_applied || isLocked}>
+                    <Sparkles className="h-3 w-3 mr-1" /> IA
+                  </Button>
+                </div>
+                <Textarea value={form.solution_applied} onChange={(e) => set('solution_applied', e.target.value)} rows={2} disabled={isLocked} />
               </div>
               <div>
-                <Label>{t.serviceOrders.internalNotes}</Label>
-                <Textarea value={form.internal_notes} onChange={(e) => set('internal_notes', e.target.value)} rows={2} />
+                <div className="flex items-center justify-between mb-1">
+                  <Label>{t.serviceOrders.internalNotes}</Label>
+                  <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs text-primary hover:text-primary hover:bg-primary/10"
+                    onClick={async () => set('internal_notes', await optimizeText(form.internal_notes))} disabled={isOptimizing || !form.internal_notes || isLocked}>
+                    <Sparkles className="h-3 w-3 mr-1" /> IA
+                  </Button>
+                </div>
+                <Textarea value={form.internal_notes} onChange={(e) => set('internal_notes', e.target.value)} rows={2} disabled={isLocked} />
               </div>
               <div>
-                <Label>{t.serviceOrders.customerReport}</Label>
-                <Textarea value={form.customer_visible_report} onChange={(e) => set('customer_visible_report', e.target.value)} rows={2} />
+                <div className="flex items-center justify-between mb-1">
+                  <Label>{t.serviceOrders.customerReport}</Label>
+                  <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs text-primary hover:text-primary hover:bg-primary/10"
+                    onClick={async () => set('customer_visible_report', await optimizeText(form.customer_visible_report))} disabled={isOptimizing || !form.customer_visible_report || isLocked}>
+                    <Sparkles className="h-3 w-3 mr-1" /> IA
+                  </Button>
+                <Textarea value={form.customer_visible_report} onChange={(e) => set('customer_visible_report', e.target.value)} rows={2} disabled={isLocked} />
               </div>
             </div>
           </CollapsibleContent>
         </Collapsible>
+
+        {/* Photos (Only if editing existing OS) */}
+        {initialData?.id && (
+          <div className="pt-4 border-t mt-4">
+            <ServiceOrderPhotos orderId={initialData.id} initialPhotos={initialData.photos || []} />
+          </div>
+        )}
       </section>
 
       {/* E - Labor Services — always visible (with always-on entry row) */}

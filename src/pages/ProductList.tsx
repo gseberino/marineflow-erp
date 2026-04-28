@@ -13,6 +13,7 @@ import { ImportWizard } from '@/components/ImportWizard';
 import { BulkEditor } from '@/components/BulkEditor';
 import { exportToCSV, PRODUCTS_COLUMNS } from '@/lib/export-utils';
 import { FilterPresets } from '@/components/FilterPresets';
+import { PriceSuggestionAlert } from '@/components/PriceSuggestionAlert';
 
 export default function ProductList() {
   const [search, setSearch] = useState('');
@@ -62,6 +63,9 @@ export default function ProductList() {
           </Button>
         </div>
       </PageHeader>
+
+      <PriceSuggestionAlert />
+
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />

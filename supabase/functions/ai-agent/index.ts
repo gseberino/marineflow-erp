@@ -381,18 +381,19 @@ const TOOLS = [
     type: "function",
     function: {
       name: "create_vessel",
-      description: "Cadastra uma nova embarcação para um cliente.",
+      description: "Cadastra uma nova unidade/ativo (embarcação ou motorhome) para um cliente.",
       parameters: {
         type: "object",
         properties: {
           client_id: { type: "string" },
-          boat_name: { type: "string" },
+          boat_name: { type: "string", description: "Nome da embarcação ou identificação do motorhome" },
           manufacturer: { type: "string" },
           model: { type: "string" },
           year: { type: "number" },
+          asset_type: { type: "string", description: "Exemplo: Lancha, Veleiro, Motorhome, Camper, Jet Ski" },
           marina_id: { type: "string" },
         },
-        required: ["client_id", "boat_name"],
+        required: ["client_id", "boat_name", "asset_type"],
       },
     },
   },
@@ -569,20 +570,38 @@ async function executeTool(
     case "get_service_order": {
       const { data: so, error } = await sb
         .from("service_orders")
-        .select("*")
+        .select("*, clients(full_name_or_company_name), vessels(boat_name)")
         .eq("id", args.id)
         .maybeSingle();
       if (error) throw error;
       if (!so) return { error: "OS não encontrada" };
       const { data: parts } = await sb
         .from("service_order_parts")
-        .select("id, product_id, quantity, line_total_sale")
+        .select("id, quantity, line_total_sale, products(product_name)")
         .eq("service_order_id", args.id);
       const { data: services } = await sb
         .from("service_order_services")
         .select("id, service_name_snapshot, quantity, unit_price_snapshot, line_total")
         .eq("service_order_id", args.id);
-      return { service_order: so, parts, services };
+      
+      return { 
+        service_order: {
+          ...so,
+          cliente: so.clients?.full_name_or_company_name || "—",
+          embarcacao: so.vessels?.boat_name || "—"
+        }, 
+        parts: (parts || []).map((p: any) => ({
+          produto: p.products?.product_name || "Desconhecido",
+          quantidade: p.quantity,
+          total: p.line_total_sale
+        })), 
+        services: (services || []).map((s: any) => ({
+          servico: s.service_name_snapshot,
+          quantidade: s.quantity,
+          preco_unitario: s.unit_price_snapshot,
+          total: s.line_total
+        }))
+      };
     }
 
     case "get_client_history": {
@@ -1011,6 +1030,10 @@ Deno.serve(async (req) => {
     if (userErr || !userData?.user?.id) return jr({ error: "Não autenticado" }, 401);
     const userId = userData.user.id;
 
+    const { data: userProfile } = await sb.from("app_users").select("role, full_name").eq("id", userId).maybeSingle();
+    const userRole = userProfile?.role || "unknown";
+    const userName = userProfile?.full_name || "Usuário";
+
     const admin = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
@@ -1018,13 +1041,28 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const incoming = Array.isArray(body.messages) ? body.messages : [];
     const context = body.context || {};
+    const isSalesCopy = !!body.is_sales_copy;
     const appOrigin =
       req.headers.get("origin") ||
       req.headers.get("referer")?.replace(/\/$/, "") ||
       "";
 
     const today = new Date();
-    const systemPrompt = `Você é o assistente do MarineFlow ERP marítimo. Responda em português, formate em markdown.
+    
+    let systemPrompt = "";
+    if (isSalesCopy) {
+      systemPrompt = `Você é um Copywriter Especialista em Vendas focado no mercado náutico. Seu objetivo é escrever mensagens curtas, extremamente persuasivas e educadas para serem enviadas pelo WhatsApp a clientes finais de uma oficina/marina.
+      
+REGRAS:
+- A mensagem vai DIRETAMENTE para o cliente final. NÃO fale sobre o sistema, ERP ou sobre você ser uma IA.
+- Seja amigável, direto e use gatilhos mentais (escassez, urgência, reciprocidade) de forma sutil.
+- Fale como se você fosse o próprio dono/gerente do negócio abordando o cliente.
+- NUNCA use marcadores de markdown pesados (asteriscos duplos, etc) pois no WhatsApp puro pode ficar estranho. Use formatação simples.
+- Limite a mensagem a no máximo 3 parágrafos curtos.
+- Seja caloroso!
+`;
+    } else {
+      systemPrompt = `Você é o assistente do MarineFlow ERP marítimo. Responda em português, formate em markdown.
 
 REGRAS CRÍTICAS:
 - Antes de QUALQUER ação de gravação (criar, atualizar) ou envio de WhatsApp, você DEVE chamar 'propose_action' primeiro com um resumo claro em markdown e o payload exato.
@@ -1053,11 +1091,19 @@ QUALIDADE DAS RESPOSTAS:
 - Respostas concisas e objetivas.
 CONTEXTO ATUAL:
 - Data/hora: ${today.toISOString()} (${today.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })})
-- Usuário logado: ${userId}
+- Usuário logado: ${userName} (ID: ${userId})
+- Cargo/Role do usuário: ${userRole.toUpperCase()}
+
+INSTRUÇÕES DE PERMISSÃO E ACESSO DO USUÁRIO ATUAL:
+- O sistema possui controle de acesso por cargos. Como agente de IA, você DEVE atuar exatamente com as mesmas limitações do cargo do usuário logado.
+- Se o usuário for TECHNICIAN: Você deve responder APENAS a dúvidas técnicas, agendamentos, visualizar OS e inserir dados operacionais. Você está ESTRITAMENTE PROIBIDO de criar, visualizar ou alterar informações de preços, financeiro (cobranças), produtos e configurações do sistema. Se o técnico pedir algo fora do escopo (ex: "me mostre o faturamento" ou "altere o preço"), recuse IMEDIATAMENTE e informe com educação que ele não possui permissão.
+- Se o usuário for ADMIN: O acesso é irrestrito para todas as funções.
+- Como o banco de dados também impõe RLS, operações não permitidas falharão no backend, mas sua principal função é instruir o usuário antes mesmo de tentar executar a tarefa.
 - Rota atual: ${context.route || "desconhecida"}
 - Entidade em contexto: ${context.entityType || "nenhuma"} ${context.entityId ? `(id: ${context.entityId})` : ""}
 
 Quando o usuário disser "este cliente", "esta OS", "este barco", use o ID em contexto se compatível.`;
+    }
 
     const messages: any[] = [{ role: "system", content: systemPrompt }, ...incoming];
 
@@ -1078,8 +1124,8 @@ Quando o usuário disser "este cliente", "esta OS", "este barco", use o ID em co
         body: JSON.stringify({
           model: modelToUse,
           messages,
-          tools: TOOLS,
-          tool_choice: "auto",
+          tools: isSalesCopy ? undefined : TOOLS,
+          tool_choice: isSalesCopy ? undefined : "auto",
         }),
       });
 

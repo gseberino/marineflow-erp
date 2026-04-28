@@ -8,9 +8,11 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { AddressFields } from '@/components/AddressFields';
 import { useCreateSupplier, useUpdateSupplier, type Supplier } from '@/hooks/use-suppliers';
+import { useCnpj } from '@/hooks/use-cnpj';
 import { toast } from 'sonner';
 import type { TablesInsert } from '@/integrations/supabase/types';
 import { maskCPFCNPJ, maskPhone } from '@/lib/masks';
+import { Search, Loader2 } from 'lucide-react';
 
 interface Props {
   open: boolean;
@@ -43,6 +45,7 @@ export function SupplierFormDialog({ open, onOpenChange, supplier }: Props) {
   const { t } = useI18n();
   const create = useCreateSupplier();
   const update = useUpdateSupplier();
+  const { cnpjLoading, fetchByCnpj } = useCnpj();
   const [form, setForm] = useState(empty);
   const isEdit = !!supplier;
 
@@ -116,6 +119,28 @@ export function SupplierFormDialog({ open, onOpenChange, supplier }: Props) {
     }
   };
 
+  const handleCnpjSearch = async () => {
+    if (!form.cnpj_cpf || form.cnpj_cpf.length < 14) return;
+    const data = await fetchByCnpj(form.cnpj_cpf);
+    if (data) {
+      setForm(prev => ({
+        ...prev,
+        supplier_name: data.nome_fantasia || data.razao_social || prev.supplier_name,
+        trade_name: data.nome_fantasia || prev.trade_name,
+        postal_code: data.cep || prev.postal_code,
+        address_line_1: data.logradouro || prev.address_line_1,
+        address_number: data.numero || prev.address_number,
+        address_complement: data.complemento || prev.address_complement,
+        neighborhood: data.bairro || prev.neighborhood,
+        city: data.municipio || prev.city,
+        state: data.uf || prev.state,
+        contact_phone: data.ddd_telefone_1 || prev.contact_phone,
+        contact_email: data.email || prev.contact_email,
+      }));
+      toast.success('Dados preenchidos via Receita Federal');
+    }
+  };
+
   const isPending = create.isPending || update.isPending;
 
   return (
@@ -136,7 +161,12 @@ export function SupplierFormDialog({ open, onOpenChange, supplier }: Props) {
             </div>
             <div>
               <Label>{t.suppliers.cnpj}</Label>
-              <Input value={form.cnpj_cpf} onChange={e => set('cnpj_cpf', maskCPFCNPJ(e.target.value))} placeholder="00.000.000/0001-00" maxLength={18} />
+              <div className="flex gap-2">
+                <Input value={form.cnpj_cpf} onChange={e => set('cnpj_cpf', maskCPFCNPJ(e.target.value))} placeholder="00.000.000/0001-00" maxLength={18} />
+                <Button type="button" variant="outline" onClick={handleCnpjSearch} disabled={cnpjLoading || form.cnpj_cpf.length < 14}>
+                  {cnpjLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                </Button>
+              </div>
             </div>
             <div>
               <Label>{t.suppliers.contactName}</Label>

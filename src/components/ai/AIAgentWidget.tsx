@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Sparkles, Send, Loader2, RotateCcw, X } from 'lucide-react';
+import { Sparkles, Send, Loader2, RotateCcw, X, Mic, MicOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Textarea } from '@/components/ui/textarea';
@@ -8,6 +8,7 @@ import { useAIContext } from '@/lib/ai-context';
 import { useAIAgent } from '@/hooks/use-ai-agent';
 import { AIChatMessage } from './AIChatMessage';
 import { AIConfirmCard } from './AIConfirmCard';
+import { toast } from 'sonner';
 
 export function AIAgentWidget() {
   const { user } = useAuth();
@@ -17,6 +18,67 @@ export function AIAgentWidget() {
   const { display, loading, loadingMsg, sendMessage, confirmProposal, cancelProposal, reset, activeProposal } =
     useAIAgent(context);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Voice Input State
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.continuous = true;
+      recognitionRef.current.interimResults = false;
+      recognitionRef.current.lang = 'pt-BR';
+
+      recognitionRef.current.onresult = (event: any) => {
+        let finalTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            finalTranscript += event.results[i][0].transcript;
+          }
+        }
+        if (finalTranscript) {
+          setInput((prev) => {
+            const separator = prev && !prev.endsWith(' ') ? ' ' : '';
+            return prev + separator + finalTranscript;
+          });
+        }
+      };
+
+      recognitionRef.current.onerror = (event: any) => {
+        console.error("Speech recognition error", event.error);
+        setIsListening(false);
+      };
+
+      recognitionRef.current.onend = () => {
+        setIsListening(false);
+      };
+    }
+    return () => {
+      if (recognitionRef.current) {
+         recognitionRef.current.stop();
+      }
+    };
+  }, []);
+
+  const toggleListening = () => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+    } else {
+      if (!recognitionRef.current) {
+        toast.error('Seu navegador não suporta reconhecimento de voz.');
+        return;
+      }
+      try {
+        recognitionRef.current.start();
+        setIsListening(true);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  };
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -148,7 +210,17 @@ export function AIAgentWidget() {
           </div>
 
           <div className="border-t p-3">
-            <div className="flex gap-2">
+            <div className="flex gap-2 items-end">
+              <Button
+                variant={isListening ? "destructive" : "outline"}
+                size="icon"
+                onClick={toggleListening}
+                disabled={loading}
+                title={isListening ? "Parar de ouvir" : "Falar (Ditado)"}
+                className={`shrink-0 ${isListening ? 'animate-pulse' : ''}`}
+              >
+                {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+              </Button>
               <Textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}

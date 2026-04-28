@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Users, Ship, Anchor, Package, ClipboardList,
   DollarSign, BarChart3, Settings, ChevronLeft, ChevronRight, Menu,
   Warehouse, Building2, Wrench, History, LogOut, CalendarDays, MessageCircle, CreditCard,
-  Database, ChevronDown
+  Database, ChevronDown, Rocket, ShoppingCart, FileDown, Target
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -82,8 +82,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
       label: 'Operacional',
       icon: Wrench,
       items: [
+        { label: 'CRM & Funil', icon: Target, path: '/crm' },
         { label: 'Ordens de Serviço', icon: ClipboardList, path: '/service-orders' },
         { label: 'Agenda', icon: CalendarDays, path: '/agenda' },
+        { label: 'Motor de Vendas', icon: Rocket, path: '/prospecting', roles: ['admin'] },
         { label: 'Cobranças', icon: CreditCard, path: '/collections', roles: ['admin', 'financial'] },
       ],
     },
@@ -97,7 +99,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
         { label: 'Marinas', icon: Anchor, path: '/marinas' },
         { label: 'Produtos', icon: Package, path: '/products' },
         { label: 'Serviços', icon: Wrench, path: '/services' },
+        { label: 'Assistente de Compras', icon: ShoppingCart, path: '/inventory/smart-purchase', roles: ['admin', 'financial'] },
         { label: 'Fornecedores', icon: Building2, path: '/suppliers' },
+        { label: 'Importar XML', icon: FileDown, path: '/inventory/import-xml', roles: ['admin'] },
       ],
     },
     {
@@ -106,6 +110,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
       icon: DollarSign,
       items: [
         { label: 'Financeiro', icon: DollarSign, path: '/financial', roles: ['admin', 'financial'] },
+        { label: 'Comissões', icon: Users, path: '/commissions', roles: ['admin', 'financial'] },
         { label: 'Relatórios', icon: BarChart3, path: '/reports', roles: ['admin', 'financial'] },
       ],
     },
