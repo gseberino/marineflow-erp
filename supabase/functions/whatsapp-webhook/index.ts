@@ -16,39 +16,43 @@ function jr(body: unknown, status = 200) {
 }
 
 /**
- * Normalização de Telefone MarineFlow v2
- * - Remove sufixos @c.us, @s.whatsapp.net, @lid
- * - Detecta LIDs (identificadores internos do WhatsApp) e tenta limpar
- * - Força DDI 55 para números brasileiros de 10 ou 11 dígitos
+ * Normalização de Telefone MarineFlow v3 (LID-Ready)
  */
-function normalizePhone(raw: string | null | undefined, defaultDDI = "55"): string {
+function normalizePhone(raw: string | null | undefined): string {
   if (!raw) return "";
-  let s = String(raw).split("@")[0];
-  let d = s.replace(/\D/g, "");
-  if (!d) return "";
+  
+  // Remove sufixos comuns da Z-API/WhatsApp
+  const clean = String(raw).split("@")[0];
+  const digits = clean.replace(/\D/g, "");
+  
+  if (!digits) return "";
 
-  // Se for um LID (geralmente 14+ dígitos começando com 96 ou similar)
-  // Tentamos manter apenas se parecer um telefone, senão limpamos para evitar lixo no log
-  if (d.length > 15) return ""; 
-
-  // Ajuste Brasileiro: Se tem 10 ou 11 dígitos, provavelmente falta o DDI 55
-  if (d.length === 10 || d.length === 11) {
-    return `${defaultDDI}${d}`;
+  // Se for um LID (identificador interno do WhatsApp Business)
+  // LIDs costumam ser longos (14-16 dígitos) e não seguem a regra do DDI 55
+  if (digits.length >= 14) {
+    return digits; // Retorna o ID puro
   }
 
-  // Se tem 12 dígitos e começa com DDD brasileiro (ex: 479...), adiciona 55
-  if (d.length === 12 && !d.startsWith("55")) {
-    const ddd = parseInt(d.slice(0, 2));
-    if (ddd >= 11 && ddd <= 99) return `${defaultDDI}${d}`;
+  // Se for um número brasileiro padrão (10 ou 11 dígitos), força o 55
+  if (digits.length === 10 || digits.length === 11) {
+    return `55${digits}`;
   }
 
-  return d;
+  // Se já tem 12 ou 13 dígitos, assumimos que já está com DDI ou é internacional
+  return digits;
 }
 
 function extractBodyAndType(p: any): { body: string; messageType: string; mediaUrl: string | null } {
   let mediaUrl: null | string = null;
-  // Prioridade para texto direto ou objeto message
-  const text = p?.text?.message || p?.text || p?.message?.conversation || p?.message?.extendedTextMessage?.text || p?.body || p?.caption || "";
+  
+  // Captura texto de qualquer variante de payload Z-API
+  const text = p?.text?.message || 
+               p?.text || 
+               p?.message?.conversation || 
+               p?.message?.extendedTextMessage?.text || 
+               p?.body || 
+               p?.caption || 
+               "";
   
   if (p?.image) {
     mediaUrl = p.image.imageUrl || p.image.url || null;
@@ -67,7 +71,7 @@ function extractBodyAndType(p: any): { body: string; messageType: string; mediaU
     return { body: p.document.caption || `[documento] ${p.document.fileName || ""}`.trim(), messageType: "document", mediaUrl };
   }
   
-  return { body: String(text).trim() || "[conteúdo não textual]", messageType: "text", mediaUrl };
+  return { body: String(text).trim() || "[conteúdo vazio]", messageType: "text", mediaUrl };
 }
 
 async function notifyAssignedReminder(
@@ -156,6 +160,11 @@ Deno.serve(async (req) => {
 
     const pAny = payload as any;
     const type = String(pAny.type || pAny.event || "");
+    const phoneRaw = pAny.phone || pAny.chatId || pAny.senderLid || "";
+    const phone = normalizePhone(phoneRaw);
+    const fromMe = !!pAny.fromMe;
+
+    console.log(`[Webhook Audit] Type: ${type} | FromMe: ${fromMe} | Raw: ${phoneRaw} | Normalized: ${phone}`);
 
     // 1. Ignorar Grupos
     if (pAny.isGroup === true || String(pAny.chatId || "").includes("-")) {
