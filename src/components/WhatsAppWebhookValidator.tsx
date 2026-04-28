@@ -21,7 +21,11 @@ type HealthData = {
   checked_at: string;
 };
 
-const WEBHOOK_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/whatsapp-webhook?apikey=${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`;
+// URL do webhook — usada para exibição e healthcheck.
+// Nota: o 'apikey' exibido aqui pode diferir do usado pela Edge Function internamente;
+// a comparação de status usa apenas o path /whatsapp-webhook (agnóstica à chave).
+const WEBHOOK_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/whatsapp-webhook`;
+const WEBHOOK_URL_DISPLAY = `${WEBHOOK_URL}?apikey=${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`;
 
 type EndpointTest = {
   endpoint: string;
@@ -126,7 +130,7 @@ export function WhatsAppWebhookValidator() {
   const check = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${WEBHOOK_URL}?healthcheck=1`, { method: 'GET' });
+      const res = await fetch(`${WEBHOOK_URL_DISPLAY}&healthcheck=1`, { method: 'GET' });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || 'Falha no healthcheck');
       setData(json);
@@ -148,7 +152,7 @@ export function WhatsAppWebhookValidator() {
   }, [autoRefresh]);
 
   const copyUrl = async () => {
-    await navigator.clipboard.writeText(WEBHOOK_URL);
+    await navigator.clipboard.writeText(WEBHOOK_URL_DISPLAY);
     toast({ title: 'URL copiada', description: 'Cole no painel da Z-API em "On Message Received".' });
   };
 
@@ -173,7 +177,7 @@ export function WhatsAppWebhookValidator() {
         <div className="space-y-2">
           <div className="text-xs font-medium text-muted-foreground">URL do Webhook (cole na Z-API)</div>
           <div className="flex gap-2">
-            <code className="flex-1 text-xs bg-muted px-3 py-2 rounded border break-all">{WEBHOOK_URL}</code>
+            <code className="flex-1 text-xs bg-muted px-3 py-2 rounded border break-all">{WEBHOOK_URL_DISPLAY}</code>
             <Button size="sm" variant="outline" onClick={copyUrl}>
               <Copy className="h-3 w-3 mr-1" /> Copiar
             </Button>
@@ -270,7 +274,7 @@ export function WhatsAppWebhookValidator() {
               })}
             </div>
             <p className="text-[10px] text-muted-foreground">
-              Cada linha consulta diretamente a Z-API (GET no endpoint do webhook) e compara com a URL alvo do sistema.
+              Cada linha consulta a Z-API via <code>GET /webhooks</code> e verifica se alguma URL configurada contém <code>/whatsapp-webhook</code>.
             </p>
           </div>
         )}

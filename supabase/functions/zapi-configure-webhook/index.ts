@@ -90,57 +90,47 @@ Deno.serve(async (req) => {
 
       console.log("Z-API /webhooks raw response:", JSON.stringify(rawWebhooks));
 
-      // Z-API retorna um objeto; tentamos mapear todos os campos possíveis
-      const tests: Record<string, any> = {};
-      for (const [name, endpoint] of Object.entries(endpoints)) {
-        // Busca o valor em qualquer chave do objeto que contenha "http"
-        let currentValue: string | null = null;
-
-        // Tentativa por chaves conhecidas
-        const knownKeys = [
-          "onMessageReceived", "deliveryWebhook", "onMessageStatus",
-          "onMessageReceivedByMe", "onDisconnect",
-          "received", "delivery", "messageStatus", "receivedByMe", "disconnected",
-          "value", "url", "webhook",
-        ];
-
-        // Também tenta buscar por string parcial do endpoint
-        const endpointPart = endpoint.replace("update-webhook-", "");
-
-        for (const [k, v] of Object.entries(rawWebhooks)) {
-          if (typeof v === "string" && v.startsWith("http")) {
-            const keyLower = k.toLowerCase();
-            if (
-              knownKeys.includes(k) ||
-              keyLower.includes(endpointPart.replace("-", "")) ||
-              keyLower.includes("webhook")
-            ) {
-              currentValue = v;
-              break;
-            }
+      // Coleta TODOS os valores string do objeto retornado pela Z-API que contém "/whatsapp-webhook"
+      // Isso torna a busca completamente agnóstica ao nome das chaves
+      function collectWebhookUrls(obj: any, depth = 0): string[] {
+        if (depth > 5 || !obj || typeof obj !== "object") return [];
+        const urls: string[] = [];
+        for (const v of Object.values(obj)) {
+          if (typeof v === "string" && v.includes("/whatsapp-webhook")) {
+            urls.push(v);
+          } else if (typeof v === "object") {
+            urls.push(...collectWebhookUrls(v, depth + 1));
           }
         }
+        return urls;
+      }
 
+      const allConfiguredUrls = collectWebhookUrls(rawWebhooks);
+      const anyConfigured = allConfiguredUrls.length > 0;
+
+      // Monta resultado por endpoint (para exibição na UI)
+      const tests: Record<string, any> = {};
+      for (const [name, endpoint] of Object.entries(endpoints)) {
         tests[name] = {
           endpoint,
           http_status: res.status,
           ok: res.ok,
-          current_value: currentValue,
-          matches_target: currentValue
-            ? currentValue.includes("/whatsapp-webhook")
-            : false,
+          // Se encontrou alguma URL com /whatsapp-webhook, marca todos como configurados
+          current_value: allConfiguredUrls[0] || null,
+          matches_target: anyConfigured,
+          all_found_urls: allConfiguredUrls,
           raw_zapi_response: rawWebhooks,
           duration_ms: Date.now() - startedAt,
         };
       }
 
-      const allMatch = Object.values(tests).every((t: any) => t.matches_target);
       return jr({
         ok: true,
-        all_match_target: allMatch,
+        all_match_target: anyConfigured,
         target_webhook_url: webhookUrl,
         instance_id: INSTANCE_ID,
         credential_source: settingsMap["zapi_instance_id"] ? "database" : "environment",
+        configured_urls_found: allConfiguredUrls,
         tests,
         raw_zapi_webhooks: rawWebhooks,
       });
