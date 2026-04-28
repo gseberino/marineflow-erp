@@ -198,11 +198,14 @@ Deno.serve(async (req) => {
       client: sMap.zapi_client_token || null
     };
 
-    // 3. Status de Entrega
-    if (type === "MessageStatusCallback" || pAny.status) {
-      const status = String(pAny.status).toLowerCase();
+    // 3. Status de Entrega (Apenas se não for uma mensagem nova)
+    const isStatusUpdate = type === "MessageStatusCallback" || type === "MessageStatus";
+    
+    if (isStatusUpdate) {
+      const status = String(pAny.status || "").toLowerCase();
       const zapiId = pAny.messageId || (Array.isArray(pAny.ids) ? pAny.ids[0] : null);
-      if (zapiId) {
+      if (zapiId && status) {
+        console.log(`[Status] Atualizando ${zapiId} para ${status}`);
         await admin.from("whatsapp_messages").update({ delivery_status: status }).eq("zapi_message_id", String(zapiId));
       }
       return jr({ ok: true, type: "status_update" });
