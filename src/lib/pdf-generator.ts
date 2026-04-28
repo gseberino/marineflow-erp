@@ -447,7 +447,7 @@ function pageWrapper(title: string, body: string): string {
 }
 
 // ============= QUOTE / SERVICE_ORDER (preserved behavior) =============
-function buildPaymentSection(so: PDFData['service_order']): string {
+function buildPaymentSection(so: PDFData['serviceOrder']): string {
   const installments = so.payment_condition_installments;
   const hasInstallments = installments && Array.isArray(installments) && installments.length > 0;
   const hasText = !!so.payment_conditions;
