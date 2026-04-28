@@ -111,6 +111,7 @@ type SvcCardState = {
   unit_price: number;
   notes: string;
   technician_user_id: string;
+  warranty_days?: number;
 };
 
 type PartCardState = {
@@ -122,6 +123,7 @@ type PartCardState = {
   unit_sale: number;
   notes: string;
   image_url?: string | null;
+  warranty_days?: number;
 };
 
 interface ServiceCardFormProps {
@@ -2097,6 +2099,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                     onClick={async () => set('customer_visible_report', await optimizeText(form.customer_visible_report))} disabled={isOptimizing || !form.customer_visible_report || isLocked}>
                     <Sparkles className="h-3 w-3 mr-1" /> IA
                   </Button>
+                </div>
                 <Textarea value={form.customer_visible_report} onChange={(e) => set('customer_visible_report', e.target.value)} rows={2} disabled={isLocked} />
               </div>
             </div>
@@ -2104,9 +2107,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         </Collapsible>
 
         {/* Photos (Only if editing existing OS) */}
-        {initialData?.id && (
+        {orderData?.id && (
           <div className="pt-4 border-t mt-4">
-            <ServiceOrderPhotos orderId={initialData.id} initialPhotos={initialData.photos || []} />
+            <ServiceOrderPhotos orderId={orderData.id} initialPhotos={(orderData as any).photos || []} />
           </div>
         )}
       </section>

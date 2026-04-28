@@ -15,6 +15,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { StatusBadge } from '@/components/StatusBadge';
+import { Badge } from '@/components/ui/badge';
 import {
   BarChart3, Clock, Wrench, DollarSign, TrendingUp, FileCheck,
   AlertTriangle, Percent, Users, Package, Loader2, RefreshCw,
@@ -319,7 +320,8 @@ function TechniciansTab() {
 function ProfitabilityTab() {
   const { formatCurrency } = useI18n();
   const [period, setPeriod] = useState('30');
-  const { data, isLoading, error, refetch } = useProfitabilityReport(Number(period));
+  const { data: rawData, isLoading, error, refetch } = (useProfitabilityReport as any)(Number(period));
+  const data = rawData as any;
 
   return (
     <div className="space-y-6">
@@ -405,7 +407,7 @@ export default function ReportsPage() {
 
       <AIConsultantDashboard 
         data={{
-          profitability: useProfitabilityReport(30).data,
+          profitability: (useProfitabilityReport as any)(30).data,
           performance: useOsPerformanceReport().data
         }} 
       />
