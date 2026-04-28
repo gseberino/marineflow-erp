@@ -261,18 +261,18 @@ export function useProfitabilityReport() {
 
       if (error) throw error;
 
-      const all = data ?? [];
-      const completed = all.filter(o => o.status === 'completed' || o.status === 'invoiced');
+      const all = (data as any[]) ?? [];
+      const completed = all.filter((o: any) => o.status === 'completed' || o.status === 'invoiced');
       
-      const totalRevenue = completed.reduce((s, o) => s + Number(o.revenue || 0), 0);
-      const totalNetProfit = completed.reduce((s, o) => s + Number(o.net_profit || 0), 0);
+      const totalRevenue = completed.reduce((s: number, o: any) => s + Number(o.revenue || 0), 0);
+      const totalNetProfit = completed.reduce((s: number, o: any) => s + Number(o.net_profit || 0), 0);
       const avgMargin = completed.length 
-        ? completed.reduce((s, o) => s + Number(o.net_margin_percent || 0), 0) / completed.length 
+        ? completed.reduce((s: number, o: any) => s + Number(o.net_margin_percent || 0), 0) / completed.length 
         : 0;
 
       // Top 10 most profitable OS
       const topOS = [...completed]
-        .sort((a, b) => b.net_profit - a.net_profit)
+        .sort((a: any, b: any) => b.net_profit - a.net_profit)
         .slice(0, 10);
 
       // Monthly profit trend (last 6 months)
@@ -284,7 +284,7 @@ export function useProfitabilityReport() {
         monthMap.set(key, { revenue: 0, profit: 0 });
       }
 
-      completed.forEach(o => {
+      completed.forEach((o: any) => {
         const key = String(o.created_at).slice(0, 7);
         if (monthMap.has(key)) {
           const cur = monthMap.get(key)!;
