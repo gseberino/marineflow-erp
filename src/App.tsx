@@ -33,6 +33,8 @@ import WhatsAppLogsPage from "./pages/WhatsAppLogsPage";
 import LoginPage from "./pages/LoginPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import PublicServiceOrderView from "./pages/PublicServiceOrderView";
+import ImportFiscalXML from "./pages/ImportFiscalXML";
+import ProspectingPage from "./pages/ProspectingPage";
 import NotFound from "./pages/NotFound";
 
 const App = () => (
@@ -66,6 +68,8 @@ const App = () => (
                         <Route path="/suppliers" element={<SupplierList />} />
                         <Route path="/services" element={<ServiceList />} />
                         <Route path="/inventory" element={<InventoryPage />} />
+                        <Route path="/inventory/import-xml" element={<ImportFiscalXML />} />
+                        <Route path="/prospecting" element={<ProspectingPage />} />
                         <Route path="/agenda" element={<AgendaPage />} />
                         <Route path="/financial" element={
                           <ProtectedRoute roles={['admin', 'financial']}>
