@@ -195,9 +195,16 @@ Deno.serve(async (req) => {
     console.log(`[Webhook Audit] Type: ${type} | FromMe: ${fromMe} | Raw: ${phoneRaw} | Normalized: ${phone}`);
 
     // 1. Ignorar o que não é mensagem ou status
-    // Lista de tipos para ignorar: Presence, ChatState, etc.
-    const ignoredTypes = ["PresenceChatCallback", "ChatStateCallback", "PresenceCallback"];
-    if (ignoredTypes.includes(type)) {
+    const ignoredTypes = [
+      "PresenceChatCallback", 
+      "ChatStateCallback", 
+      "PresenceCallback", 
+      "ChatPresence", 
+      "Presence",
+      "typing",
+      "recording"
+    ];
+    if (ignoredTypes.includes(type) || ignoredTypes.includes(pAny.event)) {
       return jr({ ok: true, ignored: "system_callback" });
     }
 
@@ -281,6 +288,13 @@ Deno.serve(async (req) => {
 
     if (isNewLead && direction === "inbound") {
       notifyAssignedReminder(admin, phone, pAny.senderName || null, body, zapiCreds).catch(console.error);
+    }
+
+    // 6. Atualizar timestamp do Lead/Cliente para o Inbox ordenar em Realtime
+    if (leadId) {
+      await admin.from("whatsapp_leads").update({ updated_at: new Date().toISOString() }).eq("id", leadId);
+    } else if (clientId) {
+      await admin.from("clients").update({ updated_at: new Date().toISOString() }).eq("id", clientId);
     }
 
     return jr({ ok: true, message_id: msg?.id });
