@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Loader2, Send, CalendarClock } from 'lucide-react';
+import { Loader2, Send, CalendarClock, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { type PDFDocumentType } from '@/lib/pdf-generator';
@@ -58,6 +58,8 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
   const [message, setMessage] = useState('');
   const [includeLinkInCaption, setIncludeLinkInCaption] = useState(true);
   const [templateId, setTemplateId] = useState<string>('');
+  const [isGenerating, setIsGenerating] = useState(false);
+
   const [autoRetry, setAutoRetry] = useState<boolean>(() => {
     try { return localStorage.getItem('zapi.autoRetry') !== '0'; } catch { return true; }
   });
@@ -69,7 +71,6 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
   });
 
   const [schedule, setSchedule] = useState<ScheduleConfig>(defaultScheduleConfig());
-
   const { send, sending, attemptInfo } = useZApiSend();
   const createScheduled = useCreateScheduledSend();
 
@@ -80,16 +81,53 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
     try { localStorage.setItem('zapi.maxAttempts', String(maxAttempts)); } catch {}
   }, [maxAttempts]);
 
+  // Modelos de Vendas Embutidos
+  const salesTemplates = useMemo(() => {
+    if (target?.kind !== 'service_order') return [];
+    const name = target.clientName?.split(' ')[0] || 'Cliente';
+    const os = target.serviceOrderNumber;
+    return [
+      {
+        id: 'tpl_follow_up',
+        name: '📢 Lembrete / Follow-up',
+        body: `Olá ${name}, passando para lembrar da proposta ${os} que enviamos. Ficou alguma dúvida ou algo que possamos ajudar?`,
+        category: 'sales'
+      },
+      {
+        id: 'tpl_negotiation',
+        name: '💳 Negociação de Pagamento',
+        body: `Olá ${name}, sobre o orçamento ${os}, podemos conversar sobre as condições de pagamento se necessário. O que fica melhor para você hoje?`,
+        category: 'sales'
+      },
+      {
+        id: 'tpl_scarcity',
+        name: '⏳ Garantia de Vaga (Urgência)',
+        body: `Olá ${name}, nossa agenda para os próximos dias está enchendo rapidamente. Gostaria de garantir sua vaga para a execução do serviço ${os}?`,
+        category: 'sales'
+      }
+    ];
+  }, [target]);
+
   const templateCategory =
     target?.kind === 'service_order'
       ? (target.documentType === 'quote' ? 'quote' : 'service_order')
       : 'billing';
-  const { data: templates } = useWhatsAppTemplates(templateCategory);
+
+  const { data: dbTemplates } = useWhatsAppTemplates(templateCategory);
+  
+  const templates = useMemo(() => {
+    const list = [...(dbTemplates || [])];
+    if (target?.kind === 'service_order') {
+      list.unshift(...salesTemplates);
+    }
+    return list;
+  }, [dbTemplates, salesTemplates, target]);
 
   const clientCtx: ClientWhatsAppContext =
     target?.kind === 'service_order'
       ? (target.documentType === 'quote' ? 'quote' : 'service_order')
       : 'billing';
+  
   const { data: clientSettings } = useClientWhatsAppSettings(
     open ? (target?.clientId ?? null) : null,
   );
@@ -126,7 +164,6 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
       base.descricao = target.serviceOrderNumber;
     } else {
       base.descricao = target.description;
-      // Passar como NUMBER para que applyTemplateVariables formate como BRL automaticamente
       if (target.amount != null) base.valor = Number(target.amount);
       base.vencimento = target.dueDate || '';
     }
@@ -137,9 +174,10 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
     if (!open || !target) return;
     setPhone(normalizePhoneE164(target.clientPhone || ''));
     setMode('link');
-    setIncludeLinkInCaption(false); // padrão: NÃO duplicar link na legenda; usuário pode marcar
+    setIncludeLinkInCaption(false);
     setTemplateId('');
     setSchedule(defaultScheduleConfig());
+    
     if (clientSetting?.message_body) {
       setMessage(applyTemplateVariables(clientSetting.message_body, templateVars));
       return;
@@ -147,15 +185,40 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
     const name = target.clientName ? ` ${target.clientName}` : '';
     if (target.kind === 'service_order') {
       const label = documentType === 'quote' ? 'Orçamento' : 'Ordem de Serviço';
-      // NUNCA incluir o URL no corpo da mensagem padrão. Em modo "link" o Z-API já
-      // renderiza um card clicável com o URL embaixo do texto — repetir o URL
-      // gera o "link duplicado" reportado. Em modo "document" o usuário pode
-      // marcar o checkbox "Incluir também o link online na legenda".
       setMessage(`Olá${name}, segue o ${label} ${target.serviceOrderNumber}.`);
     } else {
       setMessage(`Olá${name}, segue cobrança referente a: ${target.description}.`);
     }
   }, [open, target, publicUrl, documentType, clientSetting?.id, templateVars]);
+
+  const handleGenerateAI = async () => {
+    if (!target) return;
+    setIsGenerating(true);
+    try {
+      const clientName = target.clientName?.split(' ')[0] || 'Cliente';
+      const prompt = target.documentType === 'quote' 
+        ? `Crie uma mensagem curta de WhatsApp muito persuasiva e educada para ${clientName}. Ele tem um orçamento (${target.serviceOrderNumber}) pendente. O objetivo é fechar a venda agora. Ofereça de forma sutil uma facilidade ou prioridade na agenda. Use gatilhos mentais. Não pareça desesperado.`
+        : `Crie uma mensagem de follow-up profissional para ${clientName} sobre a OS ${target.serviceOrderNumber}. Seja prestativo e foque na excelência do serviço.`;
+
+      const { data, error } = await supabase.functions.invoke('ai-agent', {
+        body: { 
+          messages: [{ role: 'user', content: prompt }],
+          is_sales_copy: true,
+          context: { route: '/crm', target: target.serviceOrderNumber }
+        }
+      });
+      
+      if (error) throw error;
+      const aiText = data?.message?.content || data?.reply || "";
+      if (aiText) setMessage(aiText.replace(/[*#]/g, ''));
+      toast.success('Mensagem gerada com IA!');
+    } catch (e) {
+      console.error(e);
+      toast.error('Falha ao gerar mensagem com IA');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   const applyTemplate = (id: string) => {
     setTemplateId(id);
@@ -300,15 +363,36 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
             />
           </div>
 
-          <MessageEditor
-            message={message}
-            onMessageChange={setMessage}
-            mode={mode}
-            templates={templates}
-            templateId={templateId}
-            onTemplateChange={applyTemplate}
-            usingClientDefault={!!clientSetting?.message_body}
-          />
+          <div className="space-y-2">
+            <div className="flex justify-between items-center">
+              <Label>Mensagem</Label>
+              {target?.kind === 'service_order' && (
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="h-7 text-xs gap-1.5 text-primary hover:text-primary hover:bg-primary/10"
+                  onClick={handleGenerateAI}
+                  disabled={isGenerating || sending}
+                >
+                  {isGenerating ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-3 w-3" />
+                  )}
+                  Gerar com IA
+                </Button>
+              )}
+            </div>
+            <MessageEditor
+              message={message}
+              onMessageChange={setMessage}
+              mode={mode}
+              templates={templates}
+              templateId={templateId}
+              onTemplateChange={applyTemplate}
+              usingClientDefault={!!clientSetting?.message_body}
+            />
+          </div>
 
           {mode === 'document' && publicUrl && (
             <label className="flex items-center gap-2 text-sm">

@@ -83,8 +83,6 @@ const App = () => (
                           </ProtectedRoute>
                         } />
                         <Route path="/inventory/import-xml" element={<ImportFiscalXML />} />
-                        <Route path="/prospecting" element={<ProspectingPage />} />
-                        <Route path="/active-prospecting" element={<ActiveProspectingPage />} />
                         <Route path="/agenda" element={<AgendaPage />} />
                         <Route path="/financial" element={
                           <ProtectedRoute roles={['admin', 'financial']}>

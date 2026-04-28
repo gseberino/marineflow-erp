@@ -73,9 +73,14 @@ export default function CRMKanbanPage() {
                         
                         <div className="flex items-center gap-2 mb-3">
                           <Button size="icon" variant="ghost" className="h-7 w-7 text-green-600 hover:text-green-700 hover:bg-green-50" onClick={() => setZapiTarget({
-                            phone: (order as any).clients?.whatsapp || (order as any).clients?.phone,
-                            name: (order as any).clients?.full_name_or_company_name,
-                            context: `Follow-up OS #${order.service_order_number}`
+                            kind: 'service_order',
+                            serviceOrderId: order.id,
+                            serviceOrderNumber: order.service_order_number,
+                            clientPhone: (order as any).clients?.whatsapp || (order as any).clients?.phone,
+                            clientName: (order as any).clients?.full_name_or_company_name,
+                            clientId: (order as any).clients?.id,
+                            documentType: order.status === 'draft' ? 'quote' : 'service_order',
+                            shareToken: order.share_token
                           })}>
                             <MessageCircle className="h-4 w-4" />
                           </Button>
