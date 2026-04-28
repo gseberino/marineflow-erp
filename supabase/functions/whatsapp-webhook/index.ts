@@ -157,16 +157,19 @@ Deno.serve(async (req) => {
 
     const payload = await req.json().catch(() => null);
     
-    // LOG DE DEPURAÇÃO NO BANCO (app_settings)
-    // Isso nos dirá se a Z-API chegou aqui, mesmo que o resto falhe.
-    await admin.from("app_settings").upsert({ 
-      key: "debug_last_webhook", 
-      value: JSON.stringify({
-        received_at: new Date().toISOString(),
-        method: req.method,
-        payload: payload
-      })
-    }, { onConflict: 'key' });
+    // LOG DE DEPURAÇÃO (Tenta salvar, mas não trava se falhar)
+    try {
+      await admin.from("app_settings").upsert({ 
+        key: "debug_last_webhook", 
+        value: JSON.stringify({
+          received_at: new Date().toISOString(),
+          method: req.method,
+          payload: payload
+        })
+      }, { onConflict: 'key' });
+    } catch (dbErr) {
+      console.error("[Webhook Debug Log Error]:", dbErr);
+    }
 
     if (!payload) {
       console.error("[Webhook] Payload vazio");
