@@ -47,7 +47,7 @@ export default function ProspectingPage() {
     <div className="space-y-6">
       <PageHeader
         title="Prospecção & Vendas"
-        subtitle="Gere mensagens de WhatsApp persuasivas para captação e relacionamento"
+        description="Gere mensagens de WhatsApp persuasivas para captação e relacionamento"
       />
 
       <Card>

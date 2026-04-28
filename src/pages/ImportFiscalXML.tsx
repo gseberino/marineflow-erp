@@ -69,7 +69,7 @@ export default function ImportFiscalXML() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Importar XML de NFe" subtitle="Entrada de estoque automática a partir do XML do fornecedor" />
+      <PageHeader title="Importar XML de NFe" description="Entrada de estoque automática a partir do XML do fornecedor" />
 
       <Card>
         <CardHeader>
