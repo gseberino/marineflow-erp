@@ -606,6 +606,108 @@ export type Database = {
           },
         ]
       }
+      commissions: {
+        Row: {
+          amount: number
+          base_value: number | null
+          created_at: string | null
+          id: string
+          paid_at: string | null
+          payable_id: string | null
+          percentage: number | null
+          service_order_id: string | null
+          status: string | null
+          updated_at: string | null
+          user_id: string | null
+        }
+        Insert: {
+          amount: number
+          base_value?: number | null
+          created_at?: string | null
+          id?: string
+          paid_at?: string | null
+          payable_id?: string | null
+          percentage?: number | null
+          service_order_id?: string | null
+          status?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          amount?: number
+          base_value?: number | null
+          created_at?: string | null
+          id?: string
+          paid_at?: string | null
+          payable_id?: string | null
+          percentage?: number | null
+          service_order_id?: string | null
+          status?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "commissions_payable_id_fkey"
+            columns: ["payable_id"]
+            isOneToOne: false
+            referencedRelation: "payables"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "commissions_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "commissions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cost_centers: {
+        Row: {
+          active: boolean | null
+          created_at: string | null
+          id: string
+          name: string
+          parent_id: string | null
+          type: string
+          updated_at: string | null
+        }
+        Insert: {
+          active?: boolean | null
+          created_at?: string | null
+          id?: string
+          name: string
+          parent_id?: string | null
+          type: string
+          updated_at?: string | null
+        }
+        Update: {
+          active?: boolean | null
+          created_at?: string | null
+          id?: string
+          name?: string
+          parent_id?: string | null
+          type?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cost_centers_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "cost_centers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       exchange_rates: {
         Row: {
           created_at: string
@@ -1003,6 +1105,7 @@ export type Database = {
           amount: number
           balance_amount: number | null
           bank_transaction_id: string | null
+          cost_center_id: string | null
           created_at: string
           currency: string | null
           description: string
@@ -1016,6 +1119,7 @@ export type Database = {
           paid_amount: number | null
           payment_method: string | null
           status: string | null
+          sub_category: string | null
           supplier_id: string | null
           supplier_name: string | null
           updated_at: string
@@ -1024,6 +1128,7 @@ export type Database = {
           amount: number
           balance_amount?: number | null
           bank_transaction_id?: string | null
+          cost_center_id?: string | null
           created_at?: string
           currency?: string | null
           description: string
@@ -1037,6 +1142,7 @@ export type Database = {
           paid_amount?: number | null
           payment_method?: string | null
           status?: string | null
+          sub_category?: string | null
           supplier_id?: string | null
           supplier_name?: string | null
           updated_at?: string
@@ -1045,6 +1151,7 @@ export type Database = {
           amount?: number
           balance_amount?: number | null
           bank_transaction_id?: string | null
+          cost_center_id?: string | null
           created_at?: string
           currency?: string | null
           description?: string
@@ -1058,6 +1165,7 @@ export type Database = {
           paid_amount?: number | null
           payment_method?: string | null
           status?: string | null
+          sub_category?: string | null
           supplier_id?: string | null
           supplier_name?: string | null
           updated_at?: string
@@ -1068,6 +1176,13 @@ export type Database = {
             columns: ["bank_transaction_id"]
             isOneToOne: false
             referencedRelation: "bank_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payables_cost_center_id_fkey"
+            columns: ["cost_center_id"]
+            isOneToOne: false
+            referencedRelation: "cost_centers"
             referencedColumns: ["id"]
           },
           {
@@ -1182,6 +1297,54 @@ export type Database = {
           },
         ]
       }
+      price_update_suggestions: {
+        Row: {
+          created_at: string | null
+          current_sale_price: number | null
+          fiscal_note_id: string | null
+          id: string
+          margin_percent: number | null
+          product_id: string | null
+          status: string | null
+          suggested_sale_price: number | null
+        }
+        Insert: {
+          created_at?: string | null
+          current_sale_price?: number | null
+          fiscal_note_id?: string | null
+          id?: string
+          margin_percent?: number | null
+          product_id?: string | null
+          status?: string | null
+          suggested_sale_price?: number | null
+        }
+        Update: {
+          created_at?: string | null
+          current_sale_price?: number | null
+          fiscal_note_id?: string | null
+          id?: string
+          margin_percent?: number | null
+          product_id?: string | null
+          status?: string | null
+          suggested_sale_price?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "price_update_suggestions_fiscal_note_id_fkey"
+            columns: ["fiscal_note_id"]
+            isOneToOne: false
+            referencedRelation: "fiscal_notes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_update_suggestions_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       product_categories: {
         Row: {
           active: boolean | null
@@ -1238,6 +1401,48 @@ export type Database = {
           updated_at?: string | null
         }
         Relationships: []
+      }
+      product_price_history: {
+        Row: {
+          created_at: string | null
+          fiscal_note_id: string | null
+          id: string
+          new_cost: number | null
+          old_cost: number | null
+          product_id: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          fiscal_note_id?: string | null
+          id?: string
+          new_cost?: number | null
+          old_cost?: number | null
+          product_id?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          fiscal_note_id?: string | null
+          id?: string
+          new_cost?: number | null
+          old_cost?: number | null
+          product_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_price_history_fiscal_note_id_fkey"
+            columns: ["fiscal_note_id"]
+            isOneToOne: false
+            referencedRelation: "fiscal_notes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_price_history_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       product_suppliers: {
         Row: {
@@ -1325,6 +1530,7 @@ export type Database = {
           image_url: string | null
           ipi_rate: number | null
           is_commissionable: boolean | null
+          last_stock_entry_at: string | null
           location_bin: string | null
           minimum_stock: number | null
           ncm: string | null
@@ -1360,6 +1566,7 @@ export type Database = {
           image_url?: string | null
           ipi_rate?: number | null
           is_commissionable?: boolean | null
+          last_stock_entry_at?: string | null
           location_bin?: string | null
           minimum_stock?: number | null
           ncm?: string | null
@@ -1395,6 +1602,7 @@ export type Database = {
           image_url?: string | null
           ipi_rate?: number | null
           is_commissionable?: boolean | null
+          last_stock_entry_at?: string | null
           location_bin?: string | null
           minimum_stock?: number | null
           ncm?: string | null
@@ -1427,6 +1635,7 @@ export type Database = {
           balance_amount: number | null
           category: string | null
           client_id: string
+          cost_center_id: string | null
           created_at: string
           currency: string | null
           description: string
@@ -1439,6 +1648,7 @@ export type Database = {
           payment_method: string | null
           service_order_id: string | null
           status: string | null
+          sub_category: string | null
           updated_at: string
         }
         Insert: {
@@ -1446,6 +1656,7 @@ export type Database = {
           balance_amount?: number | null
           category?: string | null
           client_id: string
+          cost_center_id?: string | null
           created_at?: string
           currency?: string | null
           description: string
@@ -1458,6 +1669,7 @@ export type Database = {
           payment_method?: string | null
           service_order_id?: string | null
           status?: string | null
+          sub_category?: string | null
           updated_at?: string
         }
         Update: {
@@ -1465,6 +1677,7 @@ export type Database = {
           balance_amount?: number | null
           category?: string | null
           client_id?: string
+          cost_center_id?: string | null
           created_at?: string
           currency?: string | null
           description?: string
@@ -1477,6 +1690,7 @@ export type Database = {
           payment_method?: string | null
           service_order_id?: string | null
           status?: string | null
+          sub_category?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -1485,6 +1699,13 @@ export type Database = {
             columns: ["client_id"]
             isOneToOne: false
             referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "receivables_cost_center_id_fkey"
+            columns: ["cost_center_id"]
+            isOneToOne: false
+            referencedRelation: "cost_centers"
             referencedColumns: ["id"]
           },
           {
@@ -1909,6 +2130,7 @@ export type Database = {
           payment_conditions: string | null
           payment_method: string | null
           payment_status: string | null
+          photos: Json | null
           priority: string
           problem_description: string | null
           quote_validity_date: string | null
@@ -1977,6 +2199,7 @@ export type Database = {
           payment_conditions?: string | null
           payment_method?: string | null
           payment_status?: string | null
+          photos?: Json | null
           priority?: string
           problem_description?: string | null
           quote_validity_date?: string | null
@@ -2045,6 +2268,7 @@ export type Database = {
           payment_conditions?: string | null
           payment_method?: string | null
           payment_status?: string | null
+          photos?: Json | null
           priority?: string
           problem_description?: string | null
           quote_validity_date?: string | null
@@ -2170,6 +2394,51 @@ export type Database = {
           updated_at?: string | null
         }
         Relationships: []
+      }
+      supplier_product_mappings: {
+        Row: {
+          created_at: string | null
+          id: string
+          internal_product_id: string | null
+          supplier_description: string | null
+          supplier_id: string | null
+          supplier_sku: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          internal_product_id?: string | null
+          supplier_description?: string | null
+          supplier_id?: string | null
+          supplier_sku: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          internal_product_id?: string | null
+          supplier_description?: string | null
+          supplier_id?: string | null
+          supplier_sku?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "supplier_product_mappings_internal_product_id_fkey"
+            columns: ["internal_product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_product_mappings_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       suppliers: {
         Row: {
@@ -2344,6 +2613,7 @@ export type Database = {
       vessels: {
         Row: {
           active: boolean
+          asset_type: string | null
           battery_bank_summary: string | null
           beam_feet: number | null
           boat_name: string
@@ -2372,6 +2642,7 @@ export type Database = {
         }
         Insert: {
           active?: boolean
+          asset_type?: string | null
           battery_bank_summary?: string | null
           beam_feet?: number | null
           boat_name: string
@@ -2400,6 +2671,7 @@ export type Database = {
         }
         Update: {
           active?: boolean
+          asset_type?: string | null
           battery_bank_summary?: string | null
           beam_feet?: number | null
           boat_name?: string
