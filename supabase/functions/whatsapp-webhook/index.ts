@@ -143,7 +143,16 @@ Deno.serve(async (req) => {
     
     // ---- Healthcheck (GET) ----
     if (req.method === "GET" || url.searchParams.get("healthcheck") === "1") {
-      return jr({ ok: true, status: "alive", timestamp: new Date().toISOString() });
+      const { count: totalInbound } = await admin.from("whatsapp_messages").select("*", { count: "exact", head: true }).eq("direction", "inbound");
+      const { data: recent } = await admin.from("whatsapp_messages").select("*").eq("direction", "inbound").order("created_at", { ascending: false }).limit(5);
+      
+      return jr({
+        ok: true,
+        type: "healthcheck",
+        total_inbound: totalInbound || 0,
+        recent_messages: (recent || []).map(m => ({ at: m.created_at, phone: m.phone_normalized, body: m.body })),
+        checked_at: new Date().toISOString(),
+      });
     }
 
     const payload = await req.json().catch(() => null);
