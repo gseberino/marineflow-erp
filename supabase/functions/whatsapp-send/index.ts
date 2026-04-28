@@ -139,7 +139,6 @@ Deno.serve(async (req) => {
     const success = zapiRes.ok && !(zapiBody as any).error;
 
     // Log de auditoria
-    const supabaseAdmin = createClient(SUPABASE_URL, SERVICE_ROLE);
     const auditTable = body.receivable_id ? "receivables" : "service_orders";
     const auditId = body.receivable_id || body.service_order_id || "00000000-0000-0000-0000-000000000000";
 
