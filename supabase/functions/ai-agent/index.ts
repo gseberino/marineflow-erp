@@ -170,6 +170,63 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "get_financial_dre",
+      description: "Retorna o DRE (Demonstrativo de Resultados) de um período específico.",
+      parameters: {
+        type: "object",
+        properties: {
+          year: { type: "number" },
+          month: { type: "number" },
+        },
+        required: ["year", "month"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_technician_commissions",
+      description: "Calcula ou lista as comissões de um técnico.",
+      parameters: {
+        type: "object",
+        properties: {
+          technician_id: { type: "string" },
+          status: { type: "string", enum: ["pending", "paid"] },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_os_profitability",
+      description: "Analisa a lucratividade detalhada de uma Ordem de Serviço.",
+      parameters: {
+        type: "object",
+        properties: { service_order_id: { type: "string" } },
+        required: ["service_order_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "adjust_inventory",
+      description: "Realiza um ajuste manual no estoque de um produto.",
+      parameters: {
+        type: "object",
+        properties: {
+          product_id: { type: "string" },
+          new_quantity: { type: "number" },
+          reason: { type: "string" },
+        },
+        required: ["product_id", "new_quantity", "reason"],
+      },
+    },
+  },
 
   {
     type: "function",
@@ -694,6 +751,80 @@ async function executeTool(
       return { history: mapped };
     }
 
+    case "get_financial_dre": {
+      const { year, month } = args;
+      const start = new Date(year, month - 1, 1).toISOString();
+      const end = new Date(year, month, 0, 23, 59, 59).toISOString();
+
+      const { data: rec } = await admin.from("receivables").select("amount, cost_centers(name, type)").gte("due_date", start).lte("due_date", end);
+      const { data: pay } = await admin.from("payables").select("amount, cost_centers(name, type)").gte("due_date", start).lte("due_date", end);
+
+      const summary: Record<string, number> = {};
+      let totalRevenue = 0;
+      let totalExpense = 0;
+
+      (rec || []).forEach((r: any) => {
+        const cat = r.cost_centers?.name || "Outras Receitas";
+        summary[cat] = (summary[cat] || 0) + Number(r.amount);
+        totalRevenue += Number(r.amount);
+      });
+
+      (pay || []).forEach((p: any) => {
+        const cat = p.cost_centers?.name || "Outras Despesas";
+        summary[cat] = (summary[cat] || 0) - Number(p.amount);
+        totalExpense += Number(p.amount);
+      });
+
+      return {
+        periodo: `${month}/${year}`,
+        receita_total: totalRevenue,
+        despesa_total: totalExpense,
+        lucro_liquido: totalRevenue - totalExpense,
+        detalhamento: summary
+      };
+    }
+
+    case "get_technician_commissions": {
+      let query = admin.from("commissions").select("*, service_orders(service_order_number)");
+      if (args.technician_id) query = query.eq("technician_user_id", args.technician_id);
+      if (args.status) query = query.eq("status", args.status);
+      const { data, error } = await query;
+      if (error) throw error;
+      return { results: data };
+    }
+
+    case "get_os_profitability": {
+      const { data: so, error } = await admin.from("service_orders").select("grand_total, labor_cost_total, parts_cost_total, travel_cost_total, operational_cost_total").eq("id", args.service_order_id).single();
+      if (error) throw error;
+      const revenue = Number(so.grand_total);
+      const directCosts = Number(so.parts_cost_total) + Number(so.travel_cost_total) + Number(so.operational_cost_total);
+      const grossProfit = revenue - directCosts;
+      return {
+        receita: revenue,
+        custos_diretos: directCosts,
+        lucro_bruto: grossProfit,
+        margem: revenue > 0 ? (grossProfit / revenue) * 100 : 0
+      };
+    }
+
+    case "adjust_inventory": {
+      const { product_id, new_quantity, reason } = args;
+      const { data: prod } = await admin.from("products").select("stock_quantity").eq("id", product_id).single();
+      const delta = new_quantity - (prod?.stock_quantity || 0);
+      
+      const { error: updateErr } = await admin.from("products").update({ stock_quantity: new_quantity }).eq("id", product_id);
+      if (updateErr) throw updateErr;
+
+      await admin.from("inventory_movements").insert({
+        product_id,
+        quantity_delta: delta,
+        movement_type: "adjustment",
+        notes: reason
+      });
+
+      return { ok: true, new_quantity };
+    }
+
     case "propose_action": {
       // Read-only: apenas devolve o resumo. O frontend renderiza o card.
       return {
@@ -1153,6 +1284,11 @@ INSTRUÇÕES DE PERMISSÃO E ACESSO DO USUÁRIO ATUAL:
 - Rota atual: ${context.route || "desconhecida"}
 - Entidade em contexto: ${context.entityType || "nenhuma"} ${context.entityId ? `(id: ${context.entityId})` : ""}
 
+PROATIVIDADE E NEGÓCIOS:
+- Se você notar que um cliente não tem OS recente ou tem orçamentos parados em 'draft', sugira proativamente um follow-up.
+- Se identificar baixa lucratividade em uma OS (margem < 20%), alerte o ADMIN de forma discreta.
+- Sempre tente resolver ambiguidades buscando no banco antes de perguntar ao usuário.
+
 Quando o usuário disser "este cliente", "esta OS", "este barco", use o ID em contexto se compatível.`;
     }
 
@@ -1163,7 +1299,7 @@ Quando o usuário disser "este cliente", "esta OS", "este barco", use o ID em co
     for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
       // Detecta se é consulta simples (usa modelo rápido) ou ação complexa (usa modelo inteligente)
       const lastUserMsg = messages.filter((m: any) => m.role === "user").pop()?.content || "";
-      const isComplexTask = /cri(ar?|e)|cadastr|atualiz|envi(ar?|e)|agendar?|otimiz|desconto|duplicar?|cancel/i.test(lastUserMsg);
+      const isComplexTask = /cri(ar?|e)|cadastr|atualiz|envi(ar?|e)|agendar?|otimiz|desconto|duplicar?|cancel|ajust|comiss|dre|lucro/i.test(lastUserMsg);
       const modelToUse = isComplexTask ? MODEL_SMART : MODEL_FAST;
 
       const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {

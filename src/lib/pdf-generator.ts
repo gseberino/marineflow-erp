@@ -321,30 +321,35 @@ const esc = (v: unknown): string => {
 };
 
 
-function companyHeaderHTML(company: PDFData['company']): string {
+function companyHeaderHTML(company: PDFData['company'], docTypeLabel: string, docNumber: string): string {
   const logoHtml = company.logo_url
     ? `<img src="${esc(company.logo_url)}" alt="${esc(company.name)}"
-        style="max-height:60px;max-width:180px;object-fit:contain;"
+        style="max-height:80px;max-width:220px;object-fit:contain;"
         crossorigin="anonymous" />`
-    : `<div style="font-size:22px;font-weight:800;color:#1e3a5f;letter-spacing:-0.5px;">
-        ${esc(company.name)}
+    : `<div style="font-size:28px;font-weight:900;color:var(--primary);letter-spacing:-1px;line-height:1;">
+        ${esc(company.name).toUpperCase()}
        </div>`;
 
   return `
-    <div style="display:flex;align-items:center;justify-content:space-between;
-                padding-bottom:16px;border-bottom:2px solid #1e3a5f;margin-bottom:20px;">
-      <div style="display:flex;align-items:center;gap:14px;">
+    <header style="display:flex;justify-content:space-between;margin-bottom:30px;align-items:flex-start;">
+      <div style="flex:1;">
         ${logoHtml}
-        ${company.logo_url ? `<div style="font-size:15px;font-weight:700;color:#1e3a5f;">
-          ${esc(company.name)}
-        </div>` : ''}
+        <div style="margin-top:12px;font-size:10px;color:var(--text-muted);max-width:300px;line-height:1.4;">
+          <strong>${esc(company.name)}</strong><br/>
+          ${esc(company.address)}${company.city ? `, ${esc(company.city)}` : ''}${company.state ? ` - ${esc(company.state)}` : ''}<br/>
+          ${company.cnpj ? `CNPJ: ${esc(company.cnpj)}` : ''}${company.phone ? ` · Tel: ${esc(company.phone)}` : ''}<br/>
+          ${company.email ? `Email: ${esc(company.email)}` : ''}
+        </div>
       </div>
-      <div style="text-align:right;font-size:11px;color:#6b7280;line-height:1.6;">
-        <div>${esc(company.address)}${company.city ? `, ${esc(company.city)}` : ''}${company.state ? ` - ${esc(company.state)}` : ''}</div>
-        <div>${company.postal_code ? `CEP: ${esc(company.postal_code)}` : ''}${company.phone ? ` · Tel: ${esc(company.phone)}` : ''}</div>
-        <div>${company.email ? `Email: ${esc(company.email)}` : ''}${company.cnpj ? ` · CNPJ: ${esc(company.cnpj)}` : ''}</div>
+      <div style="text-align:right;">
+        <h1 style="font-size:24px;margin-bottom:4px;color:var(--primary);">${docTypeLabel}</h1>
+        <div style="font-size:16px;font-weight:700;color:var(--secondary);">${esc(docNumber)}</div>
+        <div style="margin-top:8px;font-size:10px;color:var(--text-muted);">
+          Emissão: ${new Date().toLocaleDateString('pt-BR')}<br/>
+          Página 01 / 01
+        </div>
       </div>
-    </div>
+    </header>
   `;
 }
 
@@ -355,16 +360,88 @@ function pageWrapper(title: string, body: string): string {
 <meta charset="UTF-8"/>
 <title>${title}</title>
 <style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family: 'Segoe UI', Arial, sans-serif; font-size:12px; color:#1f2937; padding:20px; }
-  @media print {
-    body { padding:0; }
-    @page { margin:15mm 20mm; size:A4; }
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+  
+  :root {
+    --primary: #002B5B;
+    --primary-light: #1A4D8B;
+    --secondary: #D4AF37;
+    --text-main: #1E293B;
+    --text-muted: #64748B;
+    --bg-light: #F8FAFC;
+    --border: #E2E8F0;
   }
-  table { border-collapse:collapse; width:100%; }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { 
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+    font-size: 11px; 
+    color: var(--text-main); 
+    line-height: 1.5;
+    background: #fff;
+  }
+
+  .container { padding: 40px; width: 100%; max-width: 800px; margin: 0 auto; }
+  
+  @media print {
+    .container { padding: 0; }
+    @page { margin: 12mm; size: A4; }
+  }
+
+  h1, h2, h3 { color: var(--primary); font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
+  
+  .card { 
+    border: 1px solid var(--border); 
+    border-radius: 8px; 
+    padding: 16px; 
+    margin-bottom: 20px;
+    background: var(--bg-light);
+  }
+
+  .section-title {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--primary-light);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 4px;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+  th { 
+    background: var(--primary); 
+    color: #fff; 
+    text-align: left; 
+    padding: 8px 12px; 
+    font-size: 9px; 
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+
+  .summary-table td { padding: 4px 12px; border: none; }
+  .total-row { background: var(--primary); color: #fff; font-weight: 800; font-size: 14px; }
+  .total-row td { padding: 12px; }
+
+  .badge {
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .badge-primary { background: var(--primary); color: #fff; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
 </style>
 </head>
-<body>${body}</body>
+<body>
+  <div class="container">${body}</div>
+</body>
 </html>`;
 }
 
@@ -429,9 +506,8 @@ function buildPaymentSection(so: any): string {
 
 function buildOrderHTML(data: PDFData, options: PDFOptions): string {
   const isQuote = data.documentType === 'quote';
-  const docTitle = isQuote ? 'ORÇAMENTO' : 'ORDEM DE SERVIÇO';
+  const docTypeLabel = isQuote ? 'Orçamento' : 'Ordem de Serviço';
   const docNumber = data.serviceOrder.service_order_number;
-  const today = new Date().toLocaleDateString('pt-BR');
 
   const billingUnitLabel: Record<string, string> = {
     hour: 'hora', visit: 'visita', day: 'dia', unit: 'un.',
@@ -443,215 +519,158 @@ function buildOrderHTML(data: PDFData, options: PDFOptions): string {
       const days = v?.days || 15;
       const expiry = new Date();
       expiry.setDate(expiry.getDate() + days);
-      return `Validade: ${days} dias (até ${expiry.toLocaleDateString('pt-BR')}).`;
+      return `Válido por ${days} dias (até ${expiry.toLocaleDateString('pt-BR')})`;
     }
     if (v.date) {
       const d = new Date(v.date + 'T12:00:00');
-      return `Válido até: ${d.toLocaleDateString('pt-BR')}.`;
+      return `Válido até ${d.toLocaleDateString('pt-BR')}`;
     }
-    return 'Validade: 15 dias a partir da emissão.';
+    return 'Válido por 15 dias.';
   };
 
   const serviceRows = data.services.map(s => `
     <tr>
-      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">${esc(s.service_name)}${s.description ? `<br/><small style="color:#6b7280;">${esc(s.description)}</small>` : ''}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:center;">${s.quantity} ${esc(billingUnitLabel[s.billing_unit] || s.billing_unit)}</td>
-      ${options.showServicePrices ? `<td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtCurrency(s.unit_price)}</td>` : ''}
-      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtCurrency(s.line_total)}</td>
+      <td style="font-weight:600;">${esc(s.service_name)}${s.description ? `<div style="font-weight:400;color:var(--text-muted);font-size:9px;margin-top:2px;">${esc(s.description)}</div>` : ''}</td>
+      <td style="text-align:center;">${s.quantity} ${esc(billingUnitLabel[s.billing_unit] || s.billing_unit)}</td>
+      ${options.showServicePrices ? `<td style="text-align:right;">${fmtCurrency(s.unit_price)}</td>` : ''}
+      <td style="text-align:right;font-weight:600;">${fmtCurrency(s.line_total)}</td>
     </tr>
   `).join('');
 
-  const partsRows = data.parts.map(p => {
-    const showImg = !!options.showProductImages && !!p.image_url;
-    const nameCell = showImg
-      ? `<div style="display:flex;align-items:center;gap:8px;"><img src="${esc(p.image_url || '')}" alt="" style="width:50px;height:50px;object-fit:cover;border:1px solid #e5e7eb;border-radius:4px;flex-shrink:0;" crossorigin="anonymous"/><span>${esc(p.product_name)}${p.sku ? ` <small style="color:#6b7280;">(${esc(p.sku)})</small>` : ''}</span></div>`
-      : `${esc(p.product_name)}${p.sku ? ` <small style="color:#6b7280;">(${esc(p.sku)})</small>` : ''}`;
-    return `
+  const partsRows = data.parts.map(p => `
     <tr>
-      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;vertical-align:middle;">${nameCell}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:center;vertical-align:middle;">${p.quantity}</td>
-      ${options.showPartsPrices ? `<td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;vertical-align:middle;">${fmtCurrency(p.unit_price)}</td>` : ''}
-      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;vertical-align:middle;">${fmtCurrency(p.line_total)}</td>
+      <td style="font-weight:600;">${esc(p.product_name)}${p.sku ? ` <span style="font-weight:400;color:var(--text-muted);font-size:9px;">#${esc(p.sku)}</span>` : ''}</td>
+      <td style="text-align:center;">${p.quantity}</td>
+      ${options.showPartsPrices ? `<td style="text-align:right;">${fmtCurrency(p.unit_price)}</td>` : ''}
+      <td style="text-align:right;font-weight:600;">${fmtCurrency(p.line_total)}</td>
     </tr>
-  `;
-  }).join('');
+  `).join('');
 
   const summaryRows = [
-    data.services.length > 0
-      ? `<tr><td style="padding:4px 8px;">Mão de obra</td><td style="padding:4px 8px;text-align:right;">${fmtCurrency(data.serviceOrder.labor_cost_total)}</td></tr>` : '',
-    data.parts.length > 0
-      ? `<tr><td style="padding:4px 8px;">Peças e materiais</td><td style="padding:4px 8px;text-align:right;">${fmtCurrency(data.serviceOrder.parts_cost_total)}</td></tr>` : '',
-    options.showTravelCost && data.serviceOrder.travel_cost_total > 0
-      ? `<tr><td style="padding:4px 8px;">Deslocamento${data.serviceOrder.travel_type === 'urgencia' ? ' <span style="font-size:10px;color:#888;">(+50% urgência)</span>' : ''}${data.serviceOrder.travel_type === 'fds_feriado' ? ' <span style="font-size:10px;color:#888;">(+30% FDS/feriado)</span>' : ''}</td><td style="padding:4px 8px;text-align:right;">${fmtCurrency(data.serviceOrder.travel_cost_total)}</td></tr>` : '',
-    (data.serviceOrder.operational_cost_total ?? 0) > 0
-      ? `<tr><td style="padding:4px 8px;">Despesas operacionais</td><td style="padding:4px 8px;text-align:right;">${fmtCurrency(data.serviceOrder.operational_cost_total!)}</td></tr>` : '',
-    options.showDiscount && data.serviceOrder.discount_amount > 0
-      ? `<tr><td style="padding:4px 8px;">Desconto</td><td style="padding:4px 8px;text-align:right;color:#dc2626;">− ${fmtCurrency(data.serviceOrder.discount_amount)}</td></tr>` : '',
-    options.showTax && data.serviceOrder.tax_amount > 0
-      ? `<tr><td style="padding:4px 8px;">Impostos</td><td style="padding:4px 8px;text-align:right;">${fmtCurrency(data.serviceOrder.tax_amount)}</td></tr>` : '',
+    data.services.length > 0 ? `<tr><td>Subtotal Serviços</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.labor_cost_total)}</td></tr>` : '',
+    data.parts.length > 0 ? `<tr><td>Subtotal Peças</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.parts_cost_total)}</td></tr>` : '',
+    options.showTravelCost && data.serviceOrder.travel_cost_total > 0 ? `<tr><td>Deslocamento / Logística</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.travel_cost_total)}</td></tr>` : '',
+    (data.serviceOrder.operational_cost_total ?? 0) > 0 ? `<tr><td>Outras Despesas</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.operational_cost_total!)}</td></tr>` : '',
+    options.showDiscount && data.serviceOrder.discount_amount > 0 ? `<tr><td style="color:#dc2626;">Desconto Especial</td><td style="text-align:right;color:#dc2626;">− ${fmtCurrency(data.serviceOrder.discount_amount)}</td></tr>` : '',
   ].filter(Boolean).join('');
 
-  const commissionRows = options.showCommission && (data.serviceOrder.commission_amount ?? 0) > 0
-    ? `
-      <tr><td style="padding:4px 8px;">Comissão (${data.serviceOrder.commission_rate}%)</td><td style="padding:4px 8px;text-align:right;color:#dc2626;">− ${fmtCurrency(data.serviceOrder.commission_amount ?? 0)}</td></tr>
-      <tr><td style="padding:4px 8px;font-weight:600;">Total líquido</td><td style="padding:4px 8px;text-align:right;font-weight:600;">${fmtCurrency(data.serviceOrder.grand_total - (data.serviceOrder.commission_amount ?? 0))}</td></tr>
-    ` : '';
-
   const body = `
-${companyHeaderHTML(data.company)}
+${companyHeaderHTML(data.company, docTypeLabel, docNumber)}
 
-<div style="text-align:center;margin-bottom:16px;">
-  <h2 style="font-size:16px;letter-spacing:2px;color:#1e3a5f;margin:0;">${docTitle}</h2>
-  <div style="font-size:14px;font-weight:600;margin-top:4px;">${esc(docNumber)}</div>
-  <div style="font-size:11px;color:#6b7280;">Emitido em: ${today}</div>
-  ${!isQuote && data.serviceOrder.scheduled_start_at ? `<div style="font-size:11px;color:#6b7280;">Agendado: ${fmtDate(data.serviceOrder.scheduled_start_at)}</div>` : ''}
-</div>
-
-<div style="display:flex;gap:16px;margin-bottom:16px;">
-  <div style="flex:1;border:1px solid #e5e7eb;border-radius:6px;padding:10px;">
-    <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Cliente</div>
-    <div>
-      <strong>${esc(data.client.name)}</strong><br/>
-      ${data.client.cpf_cnpj ? `CPF/CNPJ: ${esc(data.client.cpf_cnpj)}<br/>` : ''}
-      ${data.client.phone ? `Tel: ${esc(data.client.phone)}<br/>` : ''}
-      ${data.client.email ? `Email: ${esc(data.client.email)}<br/>` : ''}
-      ${esc(data.client.address || '')}
-    </div>
+<div class="grid">
+  <div class="card">
+    <div class="section-title">Informações do Cliente</div>
+    <div style="font-size:12px;font-weight:700;color:var(--primary);">${esc(data.client.name)}</div>
+    ${data.client.cpf_cnpj ? `<div style="font-size:10px;">CPF/CNPJ: ${esc(data.client.cpf_cnpj)}</div>` : ''}
+    ${data.client.phone ? `<div style="font-size:10px;">Fone: ${esc(data.client.phone)}</div>` : ''}
+    ${data.client.email ? `<div style="font-size:10px;">Email: ${esc(data.client.email)}</div>` : ''}
+    ${data.client.address ? `<div style="font-size:10px;margin-top:4px;color:var(--text-muted);">${esc(data.client.address)}</div>` : ''}
   </div>
-  <div style="flex:1;border:1px solid #e5e7eb;border-radius:6px;padding:10px;">
-    <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Embarcação${data.marina ? ' / Marina' : ''}</div>
-    <div>
-      ${data.vessel ? `<strong>${esc(data.vessel.name)}</strong><br/>` : ''}
-      ${data.vessel?.manufacturer ? `${esc(data.vessel.manufacturer)}${data.vessel.model ? ` ${esc(data.vessel.model)}` : ''}${data.vessel.year ? ` (${esc(data.vessel.year)})` : ''}<br/>` : ''}
+  <div class="card">
+    <div class="section-title">Dados do Ativo / Localização</div>
+    ${data.vessel ? `<div style="font-size:12px;font-weight:700;color:var(--primary);">${esc(data.vessel.name)}</div>` : ''}
+    <div style="font-size:10px;">
+      ${data.vessel?.manufacturer ? `${esc(data.vessel.manufacturer)} ${esc(data.vessel.model || '')} (${data.vessel.year || '—'})<br/>` : ''}
       ${data.vessel?.registration ? `Registro: ${data.vessel.registration}<br/>` : ''}
-      ${data.marina ? `Marina: ${esc(data.marina.name)}${data.marina.city ? `, ${esc(data.marina.city)}` : ''}` : ''}
+      ${data.marina ? `<strong>Marina:</strong> ${esc(data.marina.name)}${data.marina.city ? ` (${esc(data.marina.city)})` : ''}` : ''}
     </div>
   </div>
 </div>
 
-${data.serviceOrder.problem_description ? `
-<div style="border:1px solid #e5e7eb;border-radius:6px;padding:10px;margin-bottom:16px;">
-  <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">${isQuote ? 'Escopo do Serviço' : 'Descrição do Problema'}</div>
-  <div style="white-space:pre-wrap;">${esc(data.serviceOrder.problem_description)}</div>
+<div class="card">
+  <div class="section-title">${isQuote ? 'Objetivo do Projeto / Diagnóstico' : 'Relato do Problema'}</div>
+  <div style="white-space:pre-wrap;font-size:11px;line-height:1.6;">${esc(data.serviceOrder.problem_description || 'Nenhuma descrição fornecida.')}</div>
 </div>
-` : ''}
 
 ${data.services.length > 0 ? `
-<div style="margin-bottom:16px;">
-  <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Serviços / Mão de Obra</div>
-  <table>
-    <thead>
-      <tr style="background:#f3f4f6;">
-        <th style="padding:6px 8px;text-align:left;font-size:11px;">Descrição</th>
-        <th style="padding:6px 8px;text-align:center;font-size:11px;">Qtd</th>
-        ${options.showServicePrices ? '<th style="padding:6px 8px;text-align:right;font-size:11px;">Unit.</th>' : ''}
-        <th style="padding:6px 8px;text-align:right;font-size:11px;">Total</th>
-      </tr>
-    </thead>
-    <tbody>${serviceRows}</tbody>
-  </table>
-</div>
+<div class="section-title">Cronograma de Serviços / Mão de Obra</div>
+<table>
+  <thead>
+    <tr>
+      <th style="width:55%;">Descrição Técnica</th>
+      <th style="width:15%;text-align:center;">Qtd/Unid</th>
+      ${options.showServicePrices ? '<th style="width:15%;text-align:right;">Unitário</th>' : ''}
+      <th style="width:15%;text-align:right;">Subtotal</th>
+    </tr>
+  </thead>
+  <tbody>${serviceRows}</tbody>
+</table>
 ` : ''}
 
 ${data.parts.length > 0 ? `
-<div style="margin-bottom:16px;">
-  <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Peças e Materiais</div>
-  <table>
-    <thead>
-      <tr style="background:#f3f4f6;">
-        <th style="padding:6px 8px;text-align:left;font-size:11px;">Item</th>
-        <th style="padding:6px 8px;text-align:center;font-size:11px;">Qtd</th>
-        ${options.showPartsPrices ? '<th style="padding:6px 8px;text-align:right;font-size:11px;">Unit.</th>' : ''}
-        <th style="padding:6px 8px;text-align:right;font-size:11px;">Total</th>
-      </tr>
-    </thead>
-    <tbody>${partsRows}</tbody>
-  </table>
-</div>
+<div class="section-title">Peças, Equipamentos e Materiais</div>
+<table>
+  <thead>
+    <tr>
+      <th style="width:55%;">Item / Especificação</th>
+      <th style="width:15%;text-align:center;">Qtd</th>
+      ${options.showPartsPrices ? '<th style="width:15%;text-align:right;">Unitário</th>' : ''}
+      <th style="width:15%;text-align:right;">Subtotal</th>
+    </tr>
+  </thead>
+  <tbody>${partsRows}</tbody>
+</table>
 ` : ''}
 
 ${!isQuote && data.serviceOrder.technical_notes ? `
-<div style="border:1px solid #e5e7eb;border-radius:6px;padding:10px;margin-bottom:16px;">
-  <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Observações Técnicas</div>
-  <div style="white-space:pre-wrap;">${esc(data.serviceOrder.technical_notes)}</div>
+<div class="card" style="background:#F0F4F8;border-left:4px solid var(--primary);">
+  <div class="section-title">Conclusão Técnica / Recomendações</div>
+  <div style="white-space:pre-wrap;font-size:11px;font-style:italic;">${esc(data.serviceOrder.technical_notes)}</div>
 </div>
 ` : ''}
 
-${data.serviceOrder.extra_notes ? `
-<div style="border:1px solid #e5e7eb;border-radius:6px;padding:10px;margin-bottom:16px;">
-  <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Observações Adicionais</div>
-  <div style="white-space:pre-wrap;">${esc(data.serviceOrder.extra_notes)}</div>
-</div>
-` : ''}
-
-<div style="margin-bottom:16px;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;">
-  <table style="font-size:12px;">
-    <tbody>
-      ${summaryRows}
-      ${commissionRows}
-    </tbody>
-    <tfoot>
-      <tr style="background:#1e3a5f;color:#fff;">
-        <td style="padding:8px;font-weight:700;font-size:14px;">TOTAL</td>
-        <td style="padding:8px;text-align:right;font-weight:700;font-size:14px;">${fmtCurrency(data.serviceOrder.grand_total)}</td>
-      </tr>
-    </tfoot>
-  </table>
-  ${isQuote ? `<div style="padding:6px 8px;font-size:10px;color:#6b7280;border-top:1px solid #e5e7eb;">${getValidityText()}</div>` : ''}
+<div style="display:flex;justify-content:flex-end;">
+  <div style="width:300px;">
+    <table class="summary-table">
+      <tbody>
+        ${summaryRows}
+        <tr class="total-row">
+          <td>VALOR TOTAL</td>
+          <td style="text-align:right;">${fmtCurrency(data.serviceOrder.grand_total)}</td>
+        </tr>
+      </tbody>
+    </table>
+    ${isQuote ? `<div style="text-align:right;font-size:10px;font-weight:700;color:var(--secondary);margin-top:-10px;padding-right:12px;">${getValidityText()}</div>` : ''}
+  </div>
 </div>
 
 ${buildPaymentSection(data.serviceOrder)}
 
-${options.showSignature ? `
-<div style="display:flex;gap:40px;margin-top:40px;margin-bottom:24px;">
-  <div style="flex:1;text-align:center;">
-    <div style="border-top:1px solid #1f2937;padding-top:6px;margin-top:60px;">
-      <strong>${esc(data.company.name)}</strong>
+<div class="grid" style="margin-top:40px;">
+  <div style="text-align:center;">
+    <div style="height:60px;"></div>
+    <div style="border-top:1px solid var(--primary);padding-top:8px;">
+      <div style="font-weight:700;text-transform:uppercase;color:var(--primary);">${esc(data.company.name)}</div>
+      <div style="font-size:9px;color:var(--text-muted);">Responsável Técnico</div>
     </div>
   </div>
-  <div style="flex:1;text-align:center;">
-    <div style="border-top:1px solid #1f2937;padding-top:6px;margin-top:60px;">
-      <div><strong>${esc(data.client.name)}</strong></div>
-      <div style="font-size:10px;color:#6b7280;">${isQuote ? 'Aprovação do Orçamento' : 'Aceite do Serviço Realizado'}</div>
+  <div style="text-align:center;">
+    <div style="height:60px;"></div>
+    <div style="border-top:1px solid var(--primary);padding-top:8px;">
+      <div style="font-weight:700;text-transform:uppercase;color:var(--primary);">${esc(data.client.name)}</div>
+      <div style="font-size:9px;color:var(--text-muted);">${isQuote ? 'Aprovação do Orçamento' : 'Aceite do Serviço Realizado'}</div>
     </div>
   </div>
 </div>
-` : ''}
-
-${(() => {
-    const bank = data.bank || {};
-    const hasBank = !!(bank.bank_name || bank.bank_agency || bank.bank_account || bank.pix_key);
-    return options.showBankDetails !== false && hasBank ? `
-<div style="border:1px solid #e5e7eb;border-radius:6px;padding:12px;margin-bottom:16px;background:#f9fafb;">
-  <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:8px;">Dados Bancários</div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;">
-    ${bank.bank_name ? `<div><strong>Banco:</strong> ${esc(bank.bank_name)}</div>` : ''}
-    ${bank.bank_agency ? `<div><strong>Agência:</strong> ${esc(bank.bank_agency)}</div>` : ''}
-    ${bank.bank_account ? `<div><strong>Conta:</strong> ${esc(bank.bank_account)}</div>` : ''}
-    ${bank.pix_key ? `<div style="grid-column:span 2;"><strong>PIX:</strong> ${esc(bank.pix_key)}</div>` : ''}
-  </div>
-</div>
-` : '';
-  })()}
 
 ${options.showTerms && data.terms ? `
-<div style="border-top:1px solid #e5e7eb;padding-top:10px;margin-top:16px;">
-  <div style="font-weight:700;font-size:10px;color:#1e3a5f;text-transform:uppercase;margin-bottom:4px;">Termos e Condições</div>
-  <div style="font-size:9px;color:#6b7280;white-space:pre-wrap;">${esc(data.terms)}</div>
+<div style="margin-top:30px;padding-top:10px;border-top:1px dashed var(--border);">
+  <div style="font-size:9px;font-weight:700;color:var(--primary-light);text-transform:uppercase;margin-bottom:4px;">Condições Gerais e Garantia</div>
+  <div style="font-size:8.5px;color:var(--text-muted);white-space:pre-wrap;text-align:justify;">${esc(data.terms)}</div>
 </div>
 ` : ''}
 
-<div style="text-align:center;font-size:9px;color:#9ca3af;margin-top:20px;border-top:1px solid #e5e7eb;padding-top:8px;">
-  ${docTitle} gerado em ${today} · ${esc(data.serviceOrder.service_order_number)}
-</div>`;
+<footer style="margin-top:30px;text-align:center;font-size:9px;color:var(--text-muted);border-top:1px solid var(--border);padding-top:10px;">
+  Este documento é parte integrante do sistema de gestão MarineFlow ERP. Gerado eletronicamente em ${new Date().toLocaleString('pt-BR')}.
+</footer>
+`;
 
-  return pageWrapper(`${docTitle} ${esc(docNumber)}`, body);
+  return pageWrapper(`${docTypeLabel} ${docNumber}`, body);
 }
 
 // ============= INVOICE (FATURA) =============
 function buildInvoiceHTML(data: PDFData, options: PDFOptions): string {
   const docNumber = `FAT-${esc(data.serviceOrder.service_order_number)}`;
-  const today = new Date().toLocaleDateString('pt-BR');
   const dueDate = options.dueDate
     ? new Date(options.dueDate + 'T12:00:00').toLocaleDateString('pt-BR')
     : (() => {
@@ -666,147 +685,107 @@ function buildInvoiceHTML(data: PDFData, options: PDFOptions): string {
 
   const serviceRows = data.services.map(s => `
     <tr>
-      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">${esc(s.service_name)}${s.description ? `<br/><small style="color:#6b7280;">${esc(s.description)}</small>` : ''}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:center;">${s.quantity} ${esc(billingUnitLabel[s.billing_unit] || s.billing_unit)}</td>
-      ${options.showServicePrices ? `<td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtCurrency(s.unit_price)}</td>` : ''}
-      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtCurrency(s.line_total)}</td>
+      <td style="font-weight:600;">${esc(s.service_name)}${s.description ? `<div style="font-weight:400;color:var(--text-muted);font-size:9px;">${esc(s.description)}</div>` : ''}</td>
+      <td style="text-align:center;">${s.quantity} ${esc(billingUnitLabel[s.billing_unit] || s.billing_unit)}</td>
+      <td style="text-align:right;font-weight:600;">${fmtCurrency(s.line_total)}</td>
     </tr>
   `).join('');
 
-  const partsRows = data.parts.map(p => {
-    const showImg = !!options.showProductImages && !!p.image_url;
-    const nameCell = showImg
-      ? `<div style="display:flex;align-items:center;gap:8px;"><img src="${esc(p.image_url || '')}" alt="" style="width:50px;height:50px;object-fit:cover;border:1px solid #e5e7eb;border-radius:4px;flex-shrink:0;" crossorigin="anonymous"/><span>${esc(p.product_name)}${p.sku ? ` <small style="color:#6b7280;">(${esc(p.sku)})</small>` : ''}</span></div>`
-      : `${esc(p.product_name)}${p.sku ? ` <small style="color:#6b7280;">(${esc(p.sku)})</small>` : ''}`;
-    return `
+  const partsRows = data.parts.map(p => `
     <tr>
-      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;vertical-align:middle;">${nameCell}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:center;vertical-align:middle;">${p.quantity}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;vertical-align:middle;">${fmtCurrency(p.unit_price)}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;vertical-align:middle;">${fmtCurrency(p.line_total)}</td>
+      <td style="font-weight:600;">${esc(p.product_name)}</td>
+      <td style="text-align:center;">${p.quantity}</td>
+      <td style="text-align:right;font-weight:600;">${fmtCurrency(p.line_total)}</td>
     </tr>
-  `;
-  }).join('');
+  `).join('');
 
   const summaryRows = [
-    data.services.length > 0
-      ? `<tr><td style="padding:4px 8px;">Mão de obra</td><td style="padding:4px 8px;text-align:right;">${fmtCurrency(data.serviceOrder.labor_cost_total)}</td></tr>` : '',
-    data.parts.length > 0
-      ? `<tr><td style="padding:4px 8px;">Peças e materiais</td><td style="padding:4px 8px;text-align:right;">${fmtCurrency(data.serviceOrder.parts_cost_total)}</td></tr>` : '',
-    options.showTravelCost && data.serviceOrder.travel_cost_total > 0
-      ? `<tr><td style="padding:4px 8px;">Deslocamento${data.serviceOrder.travel_type === 'urgencia' ? ' <span style="font-size:10px;color:#888;">(+50% urgência)</span>' : ''}${data.serviceOrder.travel_type === 'fds_feriado' ? ' <span style="font-size:10px;color:#888;">(+30% FDS/feriado)</span>' : ''}</td><td style="padding:4px 8px;text-align:right;">${fmtCurrency(data.serviceOrder.travel_cost_total)}</td></tr>` : '',
-    options.showDiscount && data.serviceOrder.discount_amount > 0
-      ? `<tr><td style="padding:4px 8px;">Desconto</td><td style="padding:4px 8px;text-align:right;color:#dc2626;">− ${fmtCurrency(data.serviceOrder.discount_amount)}</td></tr>` : '',
-    options.showTax && data.serviceOrder.tax_amount > 0
-      ? `<tr><td style="padding:4px 8px;">Impostos</td><td style="padding:4px 8px;text-align:right;">${fmtCurrency(data.serviceOrder.tax_amount)}</td></tr>` : '',
+    data.services.length > 0 ? `<tr><td>Serviços Executados</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.labor_cost_total)}</td></tr>` : '',
+    data.parts.length > 0 ? `<tr><td>Materiais e Peças</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.parts_cost_total)}</td></tr>` : '',
+    options.showTravelCost && data.serviceOrder.travel_cost_total > 0 ? `<tr><td>Custos de Deslocamento</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.travel_cost_total)}</td></tr>` : '',
+    options.showDiscount && data.serviceOrder.discount_amount > 0 ? `<tr><td style="color:#dc2626;">Desconto Especial</td><td style="text-align:right;color:#dc2626;">− ${fmtCurrency(data.serviceOrder.discount_amount)}</td></tr>` : '',
   ].filter(Boolean).join('');
 
   const bank = data.bank || {};
   const hasBank = !!(bank.bank_name || bank.bank_agency || bank.bank_account || bank.pix_key);
 
   const body = `
-${companyHeaderHTML(data.company)}
+${companyHeaderHTML(data.company, 'Fatura de Serviço', docNumber)}
 
-<div style="text-align:center;margin-bottom:20px;">
-  <h2 style="font-size:28px;letter-spacing:6px;color:#1e3a5f;margin:0;font-weight:800;">FATURA</h2>
-  <div style="font-size:14px;font-weight:600;margin-top:6px;">${esc(docNumber)}</div>
-  <div style="font-size:11px;color:#6b7280;margin-top:2px;">Emitida em: ${today} · Vencimento: <strong style="color:#dc2626;">${dueDate}</strong></div>
-</div>
-
-<div style="display:flex;gap:16px;margin-bottom:16px;">
-  <div style="flex:1;border:1px solid #e5e7eb;border-radius:6px;padding:10px;">
-    <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Cliente</div>
-    <div>
-      <strong>${esc(data.client.name)}</strong><br/>
+<div class="grid">
+  <div class="card" style="border-left:4px solid var(--secondary);">
+    <div class="section-title">Resumo Financeiro</div>
+    <div style="font-size:10px;color:var(--text-muted);">Vencimento:</div>
+    <div style="font-size:16px;font-weight:800;color:#dc2626;margin-bottom:8px;">${dueDate}</div>
+    <div style="font-size:10px;color:var(--text-muted);">Total a Pagar:</div>
+    <div style="font-size:18px;font-weight:800;color:var(--primary);">${fmtCurrency(data.serviceOrder.grand_total)}</div>
+  </div>
+  <div class="card">
+    <div class="section-title">Informações do Pagador</div>
+    <div style="font-size:12px;font-weight:700;color:var(--primary);">${esc(data.client.name)}</div>
+    <div style="font-size:10px;color:var(--text-muted);">
       ${data.client.cpf_cnpj ? `CPF/CNPJ: ${esc(data.client.cpf_cnpj)}<br/>` : ''}
-      ${data.client.phone ? `Tel: ${esc(data.client.phone)}<br/>` : ''}
-      ${data.client.email ? `Email: ${esc(data.client.email)}<br/>` : ''}
-      ${esc(data.client.address || '')}
-    </div>
-  </div>
-  <div style="flex:1;border:1px solid #e5e7eb;border-radius:6px;padding:10px;">
-    <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Referência</div>
-    <div>
-      OS: <strong>${esc(data.serviceOrder.service_order_number)}</strong><br/>
-      ${data.vessel ? `Embarcação: ${esc(data.vessel.name)}<br/>` : ''}
-      ${data.marina ? `Marina: ${esc(data.marina.name)}` : ''}
+      ${data.client.email || ''}
     </div>
   </div>
 </div>
 
-${data.services.length > 0 ? `
-<div style="margin-bottom:16px;">
-  <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Serviços</div>
-  <table>
-    <thead>
-      <tr style="background:#f3f4f6;">
-        <th style="padding:6px 8px;text-align:left;font-size:11px;">Descrição</th>
-        <th style="padding:6px 8px;text-align:center;font-size:11px;">Qtd</th>
-        ${options.showServicePrices ? '<th style="padding:6px 8px;text-align:right;font-size:11px;">Unit.</th>' : ''}
-        <th style="padding:6px 8px;text-align:right;font-size:11px;">Total</th>
-      </tr>
-    </thead>
-    <tbody>${serviceRows}</tbody>
-  </table>
-</div>
-` : ''}
+<div class="section-title">Detalhamento dos Itens</div>
+<table>
+  <thead>
+    <tr>
+      <th>Descrição do Serviço / Produto</th>
+      <th style="text-align:center;width:100px;">Qtd</th>
+      <th style="text-align:right;width:120px;">Subtotal</th>
+    </tr>
+  </thead>
+  <tbody>
+    ${serviceRows}
+    ${partsRows}
+  </tbody>
+</table>
 
-${data.parts.length > 0 ? `
-<div style="margin-bottom:16px;">
-  <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Peças e Materiais</div>
-  <table>
-    <thead>
-      <tr style="background:#f3f4f6;">
-        <th style="padding:6px 8px;text-align:left;font-size:11px;">Item</th>
-        <th style="padding:6px 8px;text-align:center;font-size:11px;">Qtd</th>
-        <th style="padding:6px 8px;text-align:right;font-size:11px;">Unit.</th>
-        <th style="padding:6px 8px;text-align:right;font-size:11px;">Total</th>
-      </tr>
-    </thead>
-    <tbody>${partsRows}</tbody>
-  </table>
-</div>
-` : ''}
-
-<div style="margin-bottom:16px;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;">
-  <table style="font-size:12px;">
-    <tbody>${summaryRows}</tbody>
-    <tfoot>
-      <tr style="background:#1e3a5f;color:#fff;">
-        <td style="padding:10px;font-weight:700;font-size:15px;">TOTAL A PAGAR</td>
-        <td style="padding:10px;text-align:right;font-weight:700;font-size:15px;">${fmtCurrency(data.serviceOrder.grand_total)}</td>
-      </tr>
-    </tfoot>
-  </table>
+<div style="display:flex;justify-content:flex-end;margin-bottom:30px;">
+  <div style="width:300px;">
+    <table class="summary-table">
+      <tbody>
+        ${summaryRows}
+        <tr class="total-row">
+          <td>VALOR TOTAL</td>
+          <td style="text-align:right;">${fmtCurrency(data.serviceOrder.grand_total)}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
 </div>
 
 ${options.showBankDetails !== false && hasBank ? `
-<div style="border:1px solid #e5e7eb;border-radius:6px;padding:12px;margin-bottom:16px;background:#f9fafb;">
-  <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:8px;">Dados Bancários</div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;">
-    ${bank.bank_name ? `<div><strong>Banco:</strong> ${esc(bank.bank_name)}</div>` : ''}
-    ${bank.bank_agency ? `<div><strong>Agência:</strong> ${esc(bank.bank_agency)}</div>` : ''}
-    ${bank.bank_account ? `<div><strong>Conta:</strong> ${esc(bank.bank_account)}</div>` : ''}
-    ${bank.pix_key ? `<div><strong>Chave PIX:</strong> ${esc(bank.pix_key)}</div>` : ''}
-    <div><strong>Favorecido:</strong> ${esc(data.company.name)}</div>
-    ${data.company.cnpj ? `<div><strong>CNPJ:</strong> ${esc(data.company.cnpj)}</div>` : ''}
+<div class="card">
+  <div class="section-title">Instruções para Pagamento</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:10px;line-height:1.6;">
+    <div>
+      <strong>Dados Bancários:</strong><br/>
+      ${bank.bank_name ? `Banco: ${esc(bank.bank_name)}<br/>` : ''}
+      ${bank.bank_agency ? `Agência: ${esc(bank.bank_agency)} · ` : ''}${bank.bank_account ? `Conta: ${esc(bank.bank_account)}` : ''}<br/>
+      Favorecido: ${esc(data.company.name)}<br/>
+      ${data.company.cnpj ? `CNPJ: ${esc(data.company.cnpj)}` : ''}
+    </div>
+    <div style="border-left:1px solid var(--border);padding-left:12px;">
+      <strong>Pague via PIX:</strong><br/>
+      Chave: <span style="font-size:11px;font-weight:700;color:var(--primary);">${esc(bank.pix_key || 'N/A')}</span><br/>
+      <span style="font-size:9px;color:var(--text-muted);margin-top:4px;display:block;">Após o pagamento, envie o comprovante para ${data.company.email || 'nosso contato'}.</span>
+    </div>
   </div>
 </div>
 ` : ''}
 
-${options.showPaymentInstructions !== false ? `
-<div style="border:1px solid #e5e7eb;border-radius:6px;padding:10px;margin-bottom:16px;">
-  <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Formas de Pagamento Aceitas</div>
-  <div style="font-size:11px;line-height:1.6;">
-    • <strong>PIX</strong> — pagamento instantâneo usando a chave acima<br/>
-    • <strong>TED / Transferência Bancária</strong> — para os dados bancários informados<br/>
-    • <strong>Boleto</strong> — solicite o boleto pelo telefone ou e-mail de contato
-  </div>
-  <div style="font-size:10px;color:#6b7280;margin-top:8px;">
-    Após o pagamento, envie o comprovante para ${data.company.email || 'o e-mail de contato'} informando o número da fatura <strong>${esc(docNumber)}</strong>.
-  </div>
-</div>
-` : ''}
+<footer style="margin-top:50px;text-align:center;font-size:9px;color:var(--text-muted);">
+  Referente à Ordem de Serviço ${esc(data.serviceOrder.service_order_number)} · Gerado em ${new Date().toLocaleString('pt-BR')}
+</footer>
+`;
+
+  return pageWrapper(`FATURA ${docNumber}`, body);
+}
 
 ${buildPaymentSection(data.serviceOrder)}
 
@@ -826,69 +805,63 @@ ${options.showTerms && data.terms ? `
 
 // ============= RECEIPT (RECIBO) =============
 function buildReceiptHTML(data: PDFData, options: PDFOptions): string {
-  const today = new Date().toLocaleDateString('pt-BR');
   const r = data.receipt || {
     amount: data.serviceOrder.grand_total,
     payment_date: new Date().toISOString(),
     payment_method: 'pix',
     reference: data.serviceOrder.service_order_number,
   };
+  const docNumber = `REC-${esc(r.reference || data.serviceOrder.service_order_number)}`;
   const methodLabel = PAYMENT_METHOD_LABELS[r.payment_method] || r.payment_method;
   const amountWords = numberToWordsBRL(r.amount);
 
   const body = `
-${companyHeaderHTML(data.company)}
+${companyHeaderHTML(data.company, 'Recibo de Quitação', docNumber)}
 
-<div style="text-align:center;margin:30px 0 20px;">
-  <h2 style="font-size:26px;letter-spacing:5px;color:#1e3a5f;margin:0;font-weight:800;">RECIBO DE PAGAMENTO</h2>
-</div>
-
-<div style="text-align:right;font-size:13px;margin-bottom:20px;">
-  <strong>Valor:</strong> <span style="font-size:18px;font-weight:700;color:#1e3a5f;">${fmtCurrency(r.amount)}</span>
-</div>
-
-<div style="border:1px solid #e5e7eb;border-radius:6px;padding:20px;margin-bottom:24px;line-height:1.8;font-size:13px;">
-  Recebemos de <strong>${esc(data.client.name)}</strong>${data.client.cpf_cnpj ? `, inscrito(a) no CPF/CNPJ <strong>${esc(data.client.cpf_cnpj)}</strong>,` : ''}
-  a importância de <strong>${fmtCurrency(r.amount)}</strong>
-  <em>(${esc(amountWords)})</em>,
-  referente a <strong>${esc(r.reference || data.serviceOrder.service_order_number)}</strong>${data.vessel ? ` — embarcação <strong>${esc(data.vessel.name)}</strong>` : ''},
-  pago via <strong>${esc(methodLabel)}</strong> em <strong>${fmtDate(r.payment_date)}</strong>.
-  ${r.notes ? `<br/><br/><span style="color:#6b7280;">Obs.: ${esc(r.notes)}</span>` : ''}
-  <br/><br/>
-  Para clareza e validade, firmamos o presente recibo, dando plena, geral e irrevogável quitação do valor recebido.
-</div>
-
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px;font-size:12px;">
-  <div style="border:1px solid #e5e7eb;border-radius:6px;padding:10px;">
-    <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Pagador</div>
-    <div>
-      <strong>${esc(data.client.name)}</strong><br/>
-      ${data.client.cpf_cnpj ? `CPF/CNPJ: ${esc(data.client.cpf_cnpj)}<br/>` : ''}
-      ${data.client.phone || ''}
-    </div>
+<div class="card" style="margin:30px 0;padding:30px;background:white;position:relative;overflow:hidden;">
+  <div style="position:absolute;top:0;left:0;width:4px;height:100%;background:var(--secondary);"></div>
+  <div style="text-align:right;margin-bottom:20px;">
+    <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;">Valor Recebido</div>
+    <div style="font-size:24px;font-weight:800;color:var(--primary);">${fmtCurrency(r.amount)}</div>
   </div>
-  <div style="border:1px solid #e5e7eb;border-radius:6px;padding:10px;">
-    <div style="font-weight:700;font-size:11px;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px;">Recebedor</div>
-    <div>
+  
+  <div style="font-size:14px;line-height:2;text-align:justify;color:var(--text-main);">
+    Recebemos de <strong>${esc(data.client.name).toUpperCase()}</strong>, 
+    ${data.client.cpf_cnpj ? `inscrito(a) no CPF/CNPJ sob o nº <strong>${esc(data.client.cpf_cnpj)}</strong>, ` : ''}
+    a importância líquida e certa de <strong>${fmtCurrency(r.amount)}</strong> 
+    <span style="font-size:11px;color:var(--text-muted);">(${esc(amountWords)})</span>, 
+    referente ao pagamento de <strong>${esc(r.reference || data.serviceOrder.service_order_number)}</strong>
+    ${data.vessel ? ` (Ativo: ${esc(data.vessel.name)})` : ''}.
+  </div>
+  
+  <div style="margin-top:20px;font-size:12px;color:var(--text-muted);">
+    Forma de Pagamento: <strong>${esc(methodLabel)}</strong><br/>
+    Data da Transação: <strong>${fmtDate(r.payment_date)}</strong>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <div class="section-title">Dados do Emissor</div>
+    <div style="font-size:11px;">
       <strong>${esc(data.company.name)}</strong><br/>
-      ${data.company.cnpj ? `CNPJ: ${esc(data.company.cnpj)}<br/>` : ''}
-      ${data.company.city ? `${esc(data.company.city)}${data.company.state ? ` - ${esc(data.company.state)}` : ''}` : ''}
+      CNPJ: ${esc(data.company.cnpj || '—')}<br/>
+      ${esc(data.company.city || '')} / ${esc(data.company.state || '')}
+    </div>
+  </div>
+  <div style="text-align:center;padding-top:20px;">
+    <div style="height:50px;"></div>
+    <div style="border-top:1px solid var(--primary);padding-top:8px;">
+      <div style="font-weight:700;font-size:11px;">${esc(data.company.name).toUpperCase()}</div>
+      <div style="font-size:9px;color:var(--text-muted);">Assinatura Autorizada</div>
     </div>
   </div>
 </div>
 
-<div style="text-align:center;margin-top:60px;">
-  <div style="display:inline-block;text-align:center;min-width:280px;">
-    <div style="border-top:1px solid #1f2937;padding-top:6px;">
-      <strong>${esc(data.company.name)}</strong>
-      <div style="font-size:10px;color:#6b7280;">${data.company.city || ''}${data.company.city ? ', ' : ''}${today}</div>
-    </div>
-  </div>
-</div>
+<footer style="margin-top:50px;text-align:center;font-size:9px;color:var(--text-muted);">
+  Este recibo confirma a quitação do valor acima descrito para os fins de direito.
+</footer>
+`;
 
-<div style="text-align:center;font-size:9px;color:#9ca3af;margin-top:30px;border-top:1px solid #e5e7eb;padding-top:8px;">
-  RECIBO gerado em ${today} · Ref: ${esc(r.reference || data.serviceOrder.service_order_number)}
-</div>`;
-
-  return pageWrapper(`RECIBO — ${esc(r.reference || data.serviceOrder.service_order_number)}`, body);
+  return pageWrapper(`RECIBO ${docNumber}`, body);
 }
