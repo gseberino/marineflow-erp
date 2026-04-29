@@ -21,6 +21,7 @@ import { MessageEditor } from '@/components/zapi/MessageEditor';
 import { ScheduleSettings, defaultScheduleConfig, type ScheduleConfig } from '@/components/zapi/ScheduleSettings';
 import { useZApiSend } from '@/hooks/use-zapi-send';
 import { useCreateScheduledSend } from '@/hooks/use-scheduled-sends';
+import { supabase } from '@/integrations/supabase/client';
 
 export type SendViaZAPITarget =
   | {
@@ -91,19 +92,25 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
         id: 'tpl_follow_up',
         name: '📢 Lembrete / Follow-up',
         body: `Olá ${name}, passando para lembrar da proposta ${os} que enviamos. Ficou alguma dúvida ou algo que possamos ajudar?`,
-        category: 'sales'
+        category: 'sales',
+        active: true,
+        sort_order: 0,
       },
       {
         id: 'tpl_negotiation',
         name: '💳 Negociação de Pagamento',
         body: `Olá ${name}, sobre o orçamento ${os}, podemos conversar sobre as condições de pagamento se necessário. O que fica melhor para você hoje?`,
-        category: 'sales'
+        category: 'sales',
+        active: true,
+        sort_order: 1,
       },
       {
         id: 'tpl_scarcity',
         name: '⏳ Garantia de Vaga (Urgência)',
         body: `Olá ${name}, nossa agenda para os próximos dias está enchendo rapidamente. Gostaria de garantir sua vaga para a execução do serviço ${os}?`,
-        category: 'sales'
+        category: 'sales',
+        active: true,
+        sort_order: 2,
       }
     ];
   }, [target]);
@@ -192,7 +199,7 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
   }, [open, target, publicUrl, documentType, clientSetting?.id, templateVars]);
 
   const handleGenerateAI = async () => {
-    if (!target) return;
+    if (!target || target.kind !== 'service_order') return;
     setIsGenerating(true);
     try {
       const clientName = target.clientName?.split(' ')[0] || 'Cliente';
