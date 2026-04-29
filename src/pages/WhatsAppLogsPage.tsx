@@ -243,8 +243,8 @@ export default function WhatsAppLogsPage() {
                         {m.direction === 'inbound' ? '←' : '→'} {m.direction}
                       </Badge>
                     </TableCell>
-                    <TableCell className="font-mono text-xs">{m.phone_normalized}</TableCell>
-                    <TableCell>
+                    <TableCell className="font-mono text-xs hidden sm:table-cell">{m.phone_normalized}</TableCell>
+                    <TableCell className="hidden sm:table-cell">
                       <Badge variant={typeVariant(m.message_type)} className="text-xs">{m.message_type}</Badge>
                     </TableCell>
                     <TableCell>
