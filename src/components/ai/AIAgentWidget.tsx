@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Sparkles, Send, Loader2, RotateCcw, X, Mic, MicOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -9,6 +9,59 @@ import { useAIAgent } from '@/hooks/use-ai-agent';
 import { AIChatMessage } from './AIChatMessage';
 import { AIConfirmCard } from './AIConfirmCard';
 import { toast } from 'sonner';
+
+function DraggableAIButton({ onOpen }: { onOpen: () => void }) {
+  const [pos, setPos] = React.useState({ bottom: 24, right: 24 });
+  const isDragging = React.useRef(false);
+  const hasMoved = React.useRef(false);
+  const startRef = React.useRef({ x: 0, y: 0, bottom: 24, right: 24 });
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    isDragging.current = true;
+    hasMoved.current = false;
+    startRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      bottom: pos.bottom,
+      right: pos.right,
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (!isDragging.current) return;
+    const dx = e.clientX - startRef.current.x;
+    const dy = e.clientY - startRef.current.y;
+    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) hasMoved.current = true;
+    const newBottom = Math.max(8, Math.min(window.innerHeight - 64, startRef.current.bottom - dy));
+    const newRight = Math.max(8, Math.min(window.innerWidth - 64, startRef.current.right - dx));
+    setPos({ bottom: newBottom, right: newRight });
+  };
+
+  const handlePointerUp = () => {
+    isDragging.current = false;
+  };
+
+  const handleClick = () => {
+    if (!hasMoved.current) onOpen();
+  };
+
+  return (
+    <button
+      style={{ bottom: pos.bottom, right: pos.right, position: 'fixed' }}
+      className="z-40 h-14 w-14 rounded-full bg-primary text-primary-foreground shadow-lg flex items-center justify-center touch-none select-none cursor-grab active:cursor-grabbing"
+      aria-label="Abrir Assistente de IA"
+      title="Assistente de IA — arraste para mover"
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onClick={handleClick}
+    >
+      <Sparkles className="h-6 w-6" />
+    </button>
+  );
+}
 
 export function AIAgentWidget() {
   const { user } = useAuth();
