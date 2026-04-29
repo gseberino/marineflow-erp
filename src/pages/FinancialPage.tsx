@@ -424,6 +424,7 @@ export default function FinancialPage() {
 
           {loadingRec ? <Skeleton className="h-64 rounded-xl" /> : (
             <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead><tr className="border-b bg-muted/50">
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.financial.dueDate}</th>
@@ -444,7 +445,7 @@ export default function FinancialPage() {
                       <tr key={r.id} className={`border-b last:border-0 hover:bg-muted/30 ${isOverdue ? 'bg-destructive/5' : ''}`}>
                         <td className="px-4 py-3 text-muted-foreground">{formatDate(r.due_date)}</td>
                         <td className="px-4 py-3 hidden md:table-cell">{(r as any).clients?.full_name_or_company_name}</td>
-                        <td className="px-4 py-3 font-medium">{r.description}</td>
+                        <td className="px-4 py-3 font-medium max-w-[180px] truncate">{r.description}</td>
                         <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">{(r as any).service_orders?.service_order_number || '—'}</td>
                         <td className="px-4 py-3 text-right font-medium">{formatCurrency(Number(r.amount))}</td>
                         <td className="px-4 py-3 text-right hidden md:table-cell font-semibold">{formatCurrency(Number(r.balance_amount))}</td>

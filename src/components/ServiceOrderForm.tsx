@@ -1560,8 +1560,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         <Button variant="ghost" size="icon" onClick={() => navigate('/service-orders')}>
           <ArrowLeft className="h-5 w-5" />
         </Button>
-        <div className="flex-1">
-          <h1 className="text-2xl font-bold">
+        <div className="flex-1 min-w-0">
+          <h1 className="text-2xl font-bold truncate">
             {isNew ? t.serviceOrders.newOrder : orderData?.service_order_number}
           </h1>
           {!isNew && (
@@ -2907,9 +2907,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.common.date}</th>
                   <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.products.category}</th>
                   <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.common.description}</th>
-                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Fornecedor</th>
-                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.serviceOrders.paidBy}</th>
-                  <th className="px-4 py-2 text-center font-medium text-muted-foreground">Comprovante</th>
+                  <th className="px-4 py-2 text-left font-medium text-muted-foreground hidden sm:table-cell">Fornecedor</th>
+                  <th className="px-4 py-2 text-left font-medium text-muted-foreground hidden sm:table-cell">{t.serviceOrders.paidBy}</th>
+                  <th className="px-4 py-2 text-center font-medium text-muted-foreground hidden md:table-cell">Comprovante</th>
                   <th className="px-4 py-2 text-right font-medium text-muted-foreground">{t.common.amount}</th>
                   <th className="px-4 py-2 w-20"></th>
                 </tr>
@@ -2920,18 +2920,18 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                     <td className="px-4 py-3 text-muted-foreground">{formatDate(exp.expense_date)}</td>
                     <td className="px-4 py-3"><StatusBadge className="bg-secondary text-secondary-foreground">{exp.category}</StatusBadge></td>
                     <td className="px-4 py-3 font-medium">{exp.description}</td>
-                    <td className="px-4 py-3 text-muted-foreground">
-                      {exp.suppliers?.supplier_name || '—'}
-                    </td>
-                    <td className="px-4 py-3">
-                      {exp.paid_by === 'technician' ? (
-                        <span className="text-warning">{exp.app_users?.full_name || t.serviceOrders.paidByTechnician}
-                          {!exp.reimbursed && <StatusBadge className="bg-warning/15 text-warning ml-1">{t.serviceOrders.pendingReimbursement}</StatusBadge>}
-                          {exp.reimbursed && <StatusBadge className="bg-success/15 text-success ml-1">{t.serviceOrders.reimbursed}</StatusBadge>}
-                        </span>
-                      ) : t.serviceOrders.paidByCompany}
-                    </td>
-                    <td className="px-4 py-3 text-center">
+                     <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">
+                       {exp.suppliers?.supplier_name || '—'}
+                     </td>
+                     <td className="px-4 py-3 hidden sm:table-cell">
+                       {exp.paid_by === 'technician' ? (
+                         <span className="text-warning">{exp.app_users?.full_name || t.serviceOrders.paidByTechnician}
+                           {!exp.reimbursed && <StatusBadge className="bg-warning/15 text-warning ml-1">{t.serviceOrders.pendingReimbursement}</StatusBadge>}
+                           {exp.reimbursed && <StatusBadge className="bg-success/15 text-success ml-1">{t.serviceOrders.reimbursed}</StatusBadge>}
+                         </span>
+                       ) : t.serviceOrders.paidByCompany}
+                     </td>
+                     <td className="px-4 py-3 text-center hidden md:table-cell">
                       {exp.receipt_url ? (
                         /\.(png|jpe?g|gif|webp|svg)$/i.test(exp.receipt_url) ? (
                           <a href={exp.receipt_url} target="_blank" rel="noopener noreferrer" className="inline-block">
