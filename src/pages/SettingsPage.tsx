@@ -1441,7 +1441,10 @@ function PaymentPresetRow({ preset, updatePreset }: { preset: any; updatePreset:
           </div>
 
           <div className="space-y-2">
-            <div className="grid grid-cols-[1fr_130px_70px_70px_70px_90px_36px] gap-2 text-[11px] uppercase tracking-wide text-muted-foreground px-1">
+            <div className="sm:hidden text-[11px] text-muted-foreground px-1 mb-1">
+              Preencha os campos de cada parcela abaixo
+            </div>
+            <div className="hidden sm:grid grid-cols-[1fr_130px_70px_70px_70px_90px_36px] gap-2 text-[11px] uppercase tracking-wide text-muted-foreground px-1">
               <div>Descrição</div>
               <div className="text-center">Tipo</div>
               <div className="text-center">% Serv.</div>
@@ -1451,66 +1454,84 @@ function PaymentPresetRow({ preset, updatePreset }: { preset: any; updatePreset:
               <div></div>
             </div>
             {rows.map((row, i) => (
-              <div key={i} className="grid grid-cols-[1fr_130px_70px_70px_70px_90px_36px] gap-2 items-center">
-                <Input
-                  value={row.label}
-                  onChange={(e) => updateRow(i, { label: e.target.value })}
-                  placeholder="Ex: Sinal"
-                  className="h-8 text-sm"
-                />
-                <Select
-                  value={row.tipo || 'aprovacao'}
-                  onValueChange={(v) => updateRow(i, { tipo: v as any, days_after_approval: v === 'prazo' ? (row.days_after_approval || 30) : 0 })}
-                >
-                  <SelectTrigger className="h-8 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="aprovacao">Na aprovação</SelectItem>
-                    <SelectItem value="entrega">Na entrega</SelectItem>
-                    <SelectItem value="prazo">Em X dias</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min={0}
-                  max={100}
-                  value={row.services_pct}
-                  onChange={(e) => updateRow(i, { services_pct: parseFloat(e.target.value) || 0 })}
-                  className="h-8 text-sm text-center"
-                />
-                <Input
-                  type="number"
-                  step="0.01"
-                  min={0}
-                  max={100}
-                  value={row.parts_pct}
-                  onChange={(e) => updateRow(i, { parts_pct: parseFloat(e.target.value) || 0 })}
-                  className="h-8 text-sm text-center"
-                />
-                <Input
-                  type="number"
-                  step="0.01"
-                  min={0}
-                  max={100}
-                  value={row.expenses_pct}
-                  onChange={(e) => updateRow(i, { expenses_pct: parseFloat(e.target.value) || 0 })}
-                  className="h-8 text-sm text-center"
-                />
-                <Input
-                  type="number"
-                  min={0}
-                  value={row.days_after_approval}
-                  onChange={(e) => updateRow(i, { days_after_approval: parseInt(e.target.value, 10) || 0 })}
-                  className="h-8 text-sm text-center"
-                  disabled={row.tipo !== 'prazo'}
-                  placeholder={row.tipo === 'prazo' ? '30' : '—'}
-                />
+              <div key={i} className="grid grid-cols-1 sm:grid-cols-[1fr_130px_70px_70px_70px_90px_36px] gap-2 items-start sm:items-center border sm:border-0 rounded p-2 sm:p-0">
+                <div>
+                  <label className="text-[10px] text-muted-foreground sm:hidden">Descrição</label>
+                  <Input
+                    value={row.label}
+                    onChange={(e) => updateRow(i, { label: e.target.value })}
+                    placeholder="Ex: Sinal"
+                    className="h-8 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted-foreground sm:hidden">Tipo</label>
+                  <Select
+                    value={row.tipo || 'aprovacao'}
+                    onValueChange={(v) => updateRow(i, { tipo: v as any, days_after_approval: v === 'prazo' ? (row.days_after_approval || 30) : 0 })}
+                  >
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="aprovacao">Na aprovação</SelectItem>
+                      <SelectItem value="entrega">Na entrega</SelectItem>
+                      <SelectItem value="prazo">Em X dias</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted-foreground sm:hidden">% Serv.</label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min={0}
+                    max={100}
+                    value={row.services_pct}
+                    onChange={(e) => updateRow(i, { services_pct: parseFloat(e.target.value) || 0 })}
+                    className="h-8 text-sm text-center"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted-foreground sm:hidden">% Peças</label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min={0}
+                    max={100}
+                    value={row.parts_pct}
+                    onChange={(e) => updateRow(i, { parts_pct: parseFloat(e.target.value) || 0 })}
+                    className="h-8 text-sm text-center"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted-foreground sm:hidden">% Desp.</label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min={0}
+                    max={100}
+                    value={row.expenses_pct}
+                    onChange={(e) => updateRow(i, { expenses_pct: parseFloat(e.target.value) || 0 })}
+                    className="h-8 text-sm text-center"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted-foreground sm:hidden">Dias</label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={row.days_after_approval}
+                    onChange={(e) => updateRow(i, { days_after_approval: parseInt(e.target.value, 10) || 0 })}
+                    className="h-8 text-sm text-center"
+                    disabled={row.tipo !== 'prazo'}
+                    placeholder={row.tipo === 'prazo' ? '30' : '—'}
+                  />
+                </div>
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-8 w-8 text-destructive"
+                  className="h-8 w-8 text-destructive justify-self-end sm:justify-self-auto"
                   onClick={() => removeRow(i)}
                 >
                   ×
