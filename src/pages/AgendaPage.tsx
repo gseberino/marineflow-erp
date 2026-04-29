@@ -190,7 +190,7 @@ export default function AgendaPage() {
               <ChevronRight className="h-4 w-4" />
             </Button>
             <Select value={techFilter} onValueChange={setTechFilter}>
-              <SelectTrigger className="w-[180px]">
+              <SelectTrigger className="w-full sm:w-[180px]">
                 <SelectValue placeholder="Filtrar por técnico" />
               </SelectTrigger>
               <SelectContent>

@@ -273,7 +273,7 @@ function ServiceCardFormComponent({
           <Input readOnly value={formatCurrency(total)} className="bg-muted" />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="col-span-1">
           <Label>Garantia (dias)</Label>
           <Input
@@ -552,7 +552,7 @@ function PartCardFormComponent({
           </Button>
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="col-span-1">
           <Label>Garantia (dias)</Label>
           <Input
@@ -2350,7 +2350,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               </Button>
             )}
           </div>
-          <div className="grid grid-cols-2 gap-3 mt-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
             <div>
               <Label>Distância total (km ida+volta)</Label>
               <Input type="number" min={0} step="0.1"

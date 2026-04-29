@@ -180,7 +180,7 @@ export function AddressFields({ value, onChange, showCoordinates = true, coordin
       </div>
 
       {/* 5. Estado + Cidade */}
-      <div className="grid grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
         <div className="col-span-2">
           <Label>{t.address.state}</Label>
           <Popover open={stateOpen} onOpenChange={setStateOpen}>
