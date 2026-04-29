@@ -21,6 +21,7 @@ import { MessageEditor } from '@/components/zapi/MessageEditor';
 import { ScheduleSettings, defaultScheduleConfig, type ScheduleConfig } from '@/components/zapi/ScheduleSettings';
 import { useZApiSend } from '@/hooks/use-zapi-send';
 import { useCreateScheduledSend } from '@/hooks/use-scheduled-sends';
+import { supabase } from '@/integrations/supabase/client';
 
 export type SendViaZAPITarget =
   | {
