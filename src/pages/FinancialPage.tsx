@@ -553,6 +553,7 @@ export default function FinancialPage() {
             <>
               {groupBy === 'none' ? (
                 <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
+                  <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     {payableTableHead}
                     <tbody>
