@@ -508,6 +508,7 @@ export default function FinancialPage() {
                   })}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
         </TabsContent>
