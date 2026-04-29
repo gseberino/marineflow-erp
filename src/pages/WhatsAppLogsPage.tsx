@@ -223,8 +223,8 @@ export default function WhatsAppLogsPage() {
                 <TableRow>
                   <TableHead className="w-[140px]">Data/Hora</TableHead>
                   <TableHead className="w-[80px]">Direção</TableHead>
-                  <TableHead className="w-[140px]">Telefone</TableHead>
-                  <TableHead className="w-[100px]">Tipo</TableHead>
+                  <TableHead className="w-[140px] hidden sm:table-cell">Telefone</TableHead>
+                  <TableHead className="w-[100px] hidden sm:table-cell">Tipo</TableHead>
                   <TableHead className="w-[110px]">Status</TableHead>
                   <TableHead>Corpo</TableHead>
                   <TableHead className="w-[60px]"></TableHead>
