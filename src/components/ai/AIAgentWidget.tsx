@@ -84,11 +84,11 @@ export function AIAgentWidget() {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [display, loading]);
 
-  if (!user) return null;
-
   const [pos, setPos] = useState({ bottom: 24, right: 24 });
   const dragging = useRef(false);
   const startPos = useRef({ x: 0, y: 0, bottom: 24, right: 24 });
+
+  if (!user) return null;
 
   const onPointerDown = (e: React.PointerEvent) => {
     dragging.current = true;
