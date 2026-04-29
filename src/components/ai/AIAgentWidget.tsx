@@ -143,38 +143,6 @@ export function AIAgentWidget() {
 
   if (!user) return null;
 
-  const onPointerDown = (e: React.PointerEvent) => {
-    dragging.current = true;
-    startPos.current = {
-      x: e.clientX,
-      y: e.clientY,
-      bottom: pos.bottom,
-      right: pos.right,
-    };
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  };
-
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (!dragging.current) return;
-    const dx = e.clientX - startPos.current.x;
-    const dy = e.clientY - startPos.current.y;
-    setPos({
-      bottom: Math.max(8, startPos.current.bottom - dy),
-      right: Math.max(8, startPos.current.right - dx),
-    });
-  };
-
-  const onPointerUp = (e: React.PointerEvent) => {
-    dragging.current = false;
-  };
-
-  const onClick = (e: React.MouseEvent) => {
-    const dx = Math.abs(e.clientX - startPos.current.x);
-    const dy = Math.abs(e.clientY - startPos.current.y);
-    if (dx > 5 || dy > 5) return;
-    setOpen(true);
-  };
-
   const handleSend = () => {
     const txt = input.trim();
     if (!txt || loading) return;
