@@ -314,7 +314,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
             <WhatsAppBell />
             <NotificationBell />
             <div className="text-right hidden sm:block">
-              <p className="text-sm font-medium leading-none">
+              <p className="text-sm font-medium leading-none truncate max-w-[120px]">
                 {user?.full_name || 'Usuário'}
               </p>
               <p className="text-xs text-muted-foreground mt-0.5">

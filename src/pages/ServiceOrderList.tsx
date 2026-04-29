@@ -270,7 +270,9 @@ export default function ServiceOrderList() {
                       <td className="px-4 py-3">
                         <Link to={`/service-orders/${so.id}`} className="font-medium text-accent hover:underline">{so.service_order_number}</Link>
                       </td>
-                      <td className="px-4 py-3 font-medium">{so.clients?.full_name_or_company_name || '—'}</td>
+                      <td className="px-4 py-3 font-medium max-w-[150px]">
+                        <span className="block truncate">{so.clients?.full_name_or_company_name || '—'}</span>
+                      </td>
                       <td className="px-4 py-3 hidden md:table-cell text-muted-foreground">{so.vessels?.boat_name || '—'}</td>
                       <td className="px-4 py-3">
                         {sc && <StatusBadge className={sc.className}>{(t.status as Record<string, string>)[so.status]}</StatusBadge>}

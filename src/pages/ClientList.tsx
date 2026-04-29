@@ -103,7 +103,7 @@ export default function ClientList() {
                   return (
                     <tr key={client.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
                       <td className="px-4 py-3">
-                        <Link to={`/clients/${client.id}`} className="font-medium text-accent hover:underline block">
+                        <Link to={`/clients/${client.id}`} className="font-medium text-accent hover:underline block truncate max-w-[160px]">
                           {client.full_name_or_company_name}
                         </Link>
                         <span className="text-xs text-muted-foreground">
