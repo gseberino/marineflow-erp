@@ -84,7 +84,43 @@ export function AIAgentWidget() {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [display, loading]);
 
+  const [pos, setPos] = useState({ bottom: 24, right: 24 });
+  const dragging = useRef(false);
+  const startPos = useRef({ x: 0, y: 0, bottom: 24, right: 24 });
+
   if (!user) return null;
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    dragging.current = true;
+    startPos.current = {
+      x: e.clientX,
+      y: e.clientY,
+      bottom: pos.bottom,
+      right: pos.right,
+    };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  };
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!dragging.current) return;
+    const dx = e.clientX - startPos.current.x;
+    const dy = e.clientY - startPos.current.y;
+    setPos({
+      bottom: Math.max(8, startPos.current.bottom - dy),
+      right: Math.max(8, startPos.current.right - dx),
+    });
+  };
+
+  const onPointerUp = (e: React.PointerEvent) => {
+    dragging.current = false;
+  };
+
+  const onClick = (e: React.MouseEvent) => {
+    const dx = Math.abs(e.clientX - startPos.current.x);
+    const dy = Math.abs(e.clientY - startPos.current.y);
+    if (dx > 5 || dy > 5) return;
+    setOpen(true);
+  };
 
   const handleSend = () => {
     const txt = input.trim();
@@ -104,10 +140,14 @@ export function AIAgentWidget() {
     <>
       {/* Floating button */}
       <button
-        onClick={() => setOpen(true)}
-        className="fixed bottom-6 right-6 z-40 h-14 w-14 rounded-full bg-primary text-primary-foreground shadow-lg hover:scale-105 transition-transform flex items-center justify-center"
+        style={{ bottom: pos.bottom, right: pos.right }}
+        className="fixed z-40 h-14 w-14 rounded-full bg-primary text-primary-foreground shadow-lg hover:scale-105 transition-transform flex items-center justify-center touch-none select-none cursor-grab active:cursor-grabbing"
         aria-label="Abrir Assistente de IA"
-        title="Assistente de IA"
+        title="Assistente de IA — arraste para mover"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onClick={onClick}
       >
         <Sparkles className="h-6 w-6" />
       </button>
