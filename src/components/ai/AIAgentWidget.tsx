@@ -159,19 +159,8 @@ export function AIAgentWidget() {
 
   return (
     <>
-      {/* Floating button */}
-      <button
-        style={{ bottom: pos.bottom, right: pos.right }}
-        className="fixed z-40 h-14 w-14 rounded-full bg-primary text-primary-foreground shadow-lg hover:scale-105 transition-transform flex items-center justify-center touch-none select-none cursor-grab active:cursor-grabbing"
-        aria-label="Abrir Assistente de IA"
-        title="Assistente de IA — arraste para mover"
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onClick={onClick}
-      >
-        <Sparkles className="h-6 w-6" />
-      </button>
+      {/* Floating button — draggable */}
+      <DraggableAIButton onOpen={() => setOpen(true)} />
 
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent side="right" className="w-full sm:max-w-md flex flex-col p-0 gap-0">
