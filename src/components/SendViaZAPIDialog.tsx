@@ -199,7 +199,7 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
   }, [open, target, publicUrl, documentType, clientSetting?.id, templateVars]);
 
   const handleGenerateAI = async () => {
-    if (!target) return;
+    if (!target || target.kind !== 'service_order') return;
     setIsGenerating(true);
     try {
       const clientName = target.clientName?.split(' ')[0] || 'Cliente';
