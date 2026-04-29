@@ -140,10 +140,14 @@ export function AIAgentWidget() {
     <>
       {/* Floating button */}
       <button
-        onClick={() => setOpen(true)}
-        className="fixed bottom-6 right-6 z-40 h-14 w-14 rounded-full bg-primary text-primary-foreground shadow-lg hover:scale-105 transition-transform flex items-center justify-center"
+        style={{ bottom: pos.bottom, right: pos.right }}
+        className="fixed z-40 h-14 w-14 rounded-full bg-primary text-primary-foreground shadow-lg hover:scale-105 transition-transform flex items-center justify-center touch-none select-none cursor-grab active:cursor-grabbing"
         aria-label="Abrir Assistente de IA"
-        title="Assistente de IA"
+        title="Assistente de IA — arraste para mover"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onClick={onClick}
       >
         <Sparkles className="h-6 w-6" />
       </button>
