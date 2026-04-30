@@ -1,6 +1,37 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 
+export interface AppUser {
+  id: string;
+  full_name: string;
+  email: string;
+  role: string;
+  phone?: string | null;
+  active: boolean;
+  avatar_url?: string | null;
+  postal_code?: string | null;
+  address_line_1?: string | null;
+  address_number?: string | null;
+  address_complement?: string | null;
+  neighborhood?: string | null;
+  city?: string | null;
+  state?: string | null;
+  country?: string | null;
+  notes?: string | null;
+  // Novos campos de RH
+  cpf?: string | null;
+  rg?: string | null;
+  birth_date?: string | null;
+  hiring_date?: string | null;
+  resignation_date?: string | null;
+  department?: string | null;
+  salary_base?: number | null;
+  pix_key?: string | null;
+  emergency_contact_name?: string | null;
+  emergency_contact_phone?: string | null;
+  metadata?: any;
+}
+
 export const USER_ROLES = [
   { value: 'admin', label: 'Administrador' },
   { value: 'technician', label: 'Técnico' },
@@ -17,10 +48,9 @@ export function useAppUsers() {
       const { data, error } = await supabase
         .from('app_users')
         .select('*')
-        .eq('active', true)
         .order('full_name');
       if (error) throw error;
-      return data || [];
+      return data as AppUser[];
     },
     staleTime: 5 * 60 * 1000,
   });
@@ -43,40 +73,32 @@ export function useCommissionableUsers() {
 }
 
 export function useCreateAppUser() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (input: {
-      full_name: string; email: string; role: string; phone?: string;
-    }) => {
+    mutationFn: async (user: Omit<AppUser, 'id' | 'active'>) => {
       const { data, error } = await supabase
         .from('app_users')
-        .insert({ ...input, id: crypto.randomUUID() })
+        .insert([{ ...user, id: crypto.randomUUID(), active: true }])
         .select()
         .single();
       if (error) throw error;
       return data;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['app-users'] });
-      qc.invalidateQueries({ queryKey: ['app-users-commissionable'] });
+      queryClient.invalidateQueries({ queryKey: ['app-users'] });
+      queryClient.invalidateQueries({ queryKey: ['app-users-commissionable'] });
     },
   });
 }
 
 export function useUpdateAppUser() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, ...input }: {
-      id: string; full_name?: string; email?: string;
-      role?: string; phone?: string; active?: boolean;
-      postal_code?: string | null; address_line_1?: string | null;
-      address_number?: string | null; address_complement?: string | null;
-      neighborhood?: string | null; city?: string | null;
-      state?: string | null; country?: string | null; notes?: string | null;
-    }) => {
+    mutationFn: async (user: Partial<AppUser> & { id: string }) => {
+      const { id, ...changes } = user;
       const { data, error } = await supabase
         .from('app_users')
-        .update(input)
+        .update(changes)
         .eq('id', id)
         .select()
         .single();
@@ -84,8 +106,8 @@ export function useUpdateAppUser() {
       return data;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['app-users'] });
-      qc.invalidateQueries({ queryKey: ['app-users-commissionable'] });
+      queryClient.invalidateQueries({ queryKey: ['app-users'] });
+      queryClient.invalidateQueries({ queryKey: ['app-users-commissionable'] });
     },
   });
 }
