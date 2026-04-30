@@ -162,6 +162,7 @@ Deno.serve(async (req) => {
         }
       });
       const report: any = {
+        version: "v1.2",
         duplicates: [],
         weird_numbers: [],
         summary: { total: leads?.length || 0, suspicious: 0 }
