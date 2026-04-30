@@ -332,9 +332,11 @@ export function AppLayout({ children }: { children: ReactNode }) {
               <p className="text-sm font-medium leading-none truncate max-w-[120px]">
                 {user?.full_name || 'Usuário'}
               </p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {roleLabels[user?.role || ''] || ''}
-              </p>
+              <div className="flex justify-end gap-1 mt-1">
+                <Badge variant="outline" className="text-[10px] py-0 h-4 bg-primary/5 border-primary/20 text-primary">
+                  {roleLabels[user?.role || ''] || user?.role || ''}
+                </Badge>
+              </div>
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
