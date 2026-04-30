@@ -153,9 +153,14 @@ Deno.serve(async (req) => {
     try {
       console.log("[Audit] Iniciando auditoria profunda de leads...");
       const { data: leads } = await admin.from("whatsapp_leads").select("*").order("display_name");
-      const { data: messages } = await admin.from("whatsapp_messages").select("whatsapp_lead_id, count()").group("whatsapp_lead_id");
+      const { data: messages } = await admin.from("whatsapp_messages").select("whatsapp_lead_id");
       
-      const msgCountMap = new Map(messages?.map(m => [m.whatsapp_lead_id, m.count]));
+      const msgCountMap = new Map<string, number>();
+      messages?.forEach(m => {
+        if (m.whatsapp_lead_id) {
+          msgCountMap.set(m.whatsapp_lead_id, (msgCountMap.get(m.whatsapp_lead_id) || 0) + 1);
+        }
+      });
       const report: any = {
         duplicates: [],
         weird_numbers: [],
