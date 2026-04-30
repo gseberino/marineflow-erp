@@ -38,118 +38,28 @@ export default function Dashboard() {
   }
 
   if (error) {
-    // ... existing error view ...
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-4">
+        <p className="text-sm text-destructive">Erro ao carregar dashboard.</p>
+        <Button onClick={() => refetch()} variant="outline" size="sm">
+          <RefreshCw className="h-4 w-4 mr-2" /> Tentar novamente
+        </Button>
+      </div>
+    );
   }
 
   if (isLoading) {
-    // ... existing loading view ...
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-20 w-full" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-28" />)}
+        </div>
+        <Skeleton className="h-64 w-full" />
+      </div>
+    );
   }
 
-  // ... (keeping the rest of the existing dashboard for staff/admin) ...
-}
-
-function ExternalSellerDashboard({ greeting, dateStr }: { greeting: string, dateStr: string }) {
-  const navigate = useNavigate();
-  const { user } = useAuth();
-  const { formatCurrency } = useI18n();
-
-  // Fetch external seller specific stats
-  const { data: stats, isLoading } = useQuery({
-    queryKey: ['external-seller-stats', user?.id],
-    queryFn: async () => {
-      const { data: quotes } = await supabase
-        .from('external_quotes')
-        .select('status, grand_total')
-        .eq('created_by', user?.id);
-      
-      const { count: leadsCount } = await supabase
-        .from('external_quote_leads')
-        .select('*', { count: 'exact', head: true })
-        .eq('created_by', user?.id);
-
-      const approved = quotes?.filter(q => q.status === 'approved') || [];
-      const pending = quotes?.filter(q => q.status === 'pending_approval') || [];
-      
-      return {
-        totalApproved: approved.reduce((s, q) => s + (q.grand_total || 0), 0),
-        approvedCount: approved.length,
-        pendingCount: pending.length,
-        leadsCount: leadsCount || 0
-      };
-    },
-    enabled: !!user?.id
-  });
-
-  return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">{greeting}, {user?.full_name?.split(' ')[0]}</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">{dateStr}</p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPIBox
-          title="Vendas Aprovadas"
-          value={formatCurrency(stats?.totalApproved || 0)}
-          icon={<TrendingUp className="h-5 w-5 text-emerald-600" />}
-          iconBg="bg-emerald-100 dark:bg-emerald-900/30"
-          subtext={`${stats?.approvedCount || 0} orçamentos aprovados`}
-        />
-        <KPIBox
-          title="Aguardando Aprovação"
-          value={String(stats?.pendingCount || 0)}
-          icon={<Clock className="h-5 w-5 text-amber-600" />}
-          iconBg="bg-amber-100 dark:bg-amber-900/30"
-          onClick={() => navigate('/external-quotes')}
-        />
-        <KPIBox
-          title="Meus Prospectos"
-          value={String(stats?.leadsCount || 0)}
-          icon={<Users className="h-5 w-5 text-blue-600" />}
-          iconBg="bg-blue-100 dark:bg-blue-900/30"
-          onClick={() => navigate('/external-quotes/leads')}
-        />
-        <KPIBox
-          title="Produtos no Catálogo"
-          value="Ver todos"
-          icon={<Package className="h-5 w-5 text-purple-600" />}
-          iconBg="bg-purple-100 dark:bg-purple-900/30"
-          onClick={() => navigate('/external-quotes/catalog')}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card className="p-6 space-y-4">
-          <h3 className="font-bold flex items-center gap-2">
-            <ShoppingCart className="h-5 w-5 text-primary" /> Atalhos Rápidos
-          </h3>
-          <div className="grid grid-cols-1 gap-2">
-            <Button onClick={() => navigate('/external-quotes/new')} className="w-full justify-start gap-2 h-12 text-base">
-              <Plus className="h-5 w-5" /> Criar Novo Orçamento
-            </Button>
-            <Button variant="outline" onClick={() => navigate('/external-quotes/leads')} className="w-full justify-start gap-2 h-12 text-base">
-              <Users className="h-5 w-5" /> Gerenciar Prospectos
-            </Button>
-          </div>
-        </Card>
-
-        <Card className="p-6 bg-primary text-primary-foreground">
-          <h3 className="font-bold text-lg mb-2">Dica de Venda</h3>
-          <p className="text-sm opacity-90">
-            Mantenha seus prospectos sempre atualizados. Leads com informações completas de embarcação têm 40% mais chance de aprovação.
-          </p>
-          <div className="mt-4 pt-4 border-t border-primary-foreground/20">
-            <Button variant="secondary" size="sm" onClick={() => navigate('/external-quotes/catalog')} className="w-full">
-              Ver Catálogo de Produtos
-            </Button>
-          </div>
-        </Card>
-      </div>
-    </div>
-  );
-}
 
   if (!data) {
     return (
@@ -431,5 +341,107 @@ function KPIBox({ title, value, icon, iconBg, badge, subtext, onClick }: {
         </div>
       </div>
     </Wrapper>
+  );
+}
+
+function ExternalSellerDashboard({ greeting, dateStr }: { greeting: string, dateStr: string }) {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const { formatCurrency } = useI18n();
+
+  const { data: stats } = useQuery({
+    queryKey: ['external-seller-stats', user?.id],
+    queryFn: async () => {
+      const { data: quotes } = await supabase
+        .from('external_quotes')
+        .select('status, grand_total')
+        .eq('created_by', user?.id);
+
+      const { count: leadsCount } = await supabase
+        .from('external_quote_leads')
+        .select('*', { count: 'exact', head: true })
+        .eq('created_by', user?.id);
+
+      const approved = quotes?.filter((q: any) => q.status === 'approved') || [];
+      const pending = quotes?.filter((q: any) => q.status === 'pending_approval') || [];
+
+      return {
+        totalApproved: approved.reduce((s: number, q: any) => s + (q.grand_total || 0), 0),
+        approvedCount: approved.length,
+        pendingCount: pending.length,
+        leadsCount: leadsCount || 0,
+      };
+    },
+    enabled: !!user?.id,
+  });
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">{greeting}, {user?.full_name?.split(' ')[0]}</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">{dateStr}</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <KPIBox
+          title="Vendas Aprovadas"
+          value={formatCurrency(stats?.totalApproved || 0)}
+          icon={<TrendingUp className="h-5 w-5 text-emerald-600" />}
+          iconBg="bg-emerald-100 dark:bg-emerald-900/30"
+          subtext={`${stats?.approvedCount || 0} orçamentos aprovados`}
+        />
+        <KPIBox
+          title="Aguardando Aprovação"
+          value={String(stats?.pendingCount || 0)}
+          icon={<Clock className="h-5 w-5 text-amber-600" />}
+          iconBg="bg-amber-100 dark:bg-amber-900/30"
+          onClick={() => navigate('/external-quotes')}
+        />
+        <KPIBox
+          title="Meus Prospectos"
+          value={String(stats?.leadsCount || 0)}
+          icon={<Users className="h-5 w-5 text-blue-600" />}
+          iconBg="bg-blue-100 dark:bg-blue-900/30"
+          onClick={() => navigate('/external-quotes/leads')}
+        />
+        <KPIBox
+          title="Produtos no Catálogo"
+          value="Ver todos"
+          icon={<Package className="h-5 w-5 text-purple-600" />}
+          iconBg="bg-purple-100 dark:bg-purple-900/30"
+          onClick={() => navigate('/external-quotes/catalog')}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <Card className="p-6 space-y-4">
+          <h3 className="font-bold flex items-center gap-2">
+            <ShoppingCart className="h-5 w-5 text-primary" /> Atalhos Rápidos
+          </h3>
+          <div className="grid grid-cols-1 gap-2">
+            <Button onClick={() => navigate('/external-quotes/new')} className="w-full justify-start gap-2 h-12 text-base">
+              <Plus className="h-5 w-5" /> Criar Novo Orçamento
+            </Button>
+            <Button variant="outline" onClick={() => navigate('/external-quotes/leads')} className="w-full justify-start gap-2 h-12 text-base">
+              <Users className="h-5 w-5" /> Gerenciar Prospectos
+            </Button>
+          </div>
+        </Card>
+
+        <Card className="p-6 bg-primary text-primary-foreground">
+          <h3 className="font-bold text-lg mb-2">Dica de Venda</h3>
+          <p className="text-sm opacity-90">
+            Mantenha seus prospectos sempre atualizados. Leads com informações completas de embarcação têm 40% mais chance de aprovação.
+          </p>
+          <div className="mt-4 pt-4 border-t border-primary-foreground/20">
+            <Button variant="secondary" size="sm" onClick={() => navigate('/external-quotes/catalog')} className="w-full">
+              Ver Catálogo de Produtos
+            </Button>
+          </div>
+        </Card>
+      </div>
+    </div>
   );
 }
