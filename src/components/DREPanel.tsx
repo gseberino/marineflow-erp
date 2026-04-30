@@ -144,8 +144,8 @@ export function DREPanel() {
       </Card>
 
       <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left">
+        <div className="overflow-x-auto scrollbar-thin">
+          <table className="w-full text-sm text-left min-w-[1200px]">
             <thead className="bg-muted/50 text-muted-foreground">
               <tr>
                 <th className="px-4 py-3 font-medium">Conta</th>

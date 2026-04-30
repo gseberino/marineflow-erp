@@ -225,8 +225,8 @@ export default function Dashboard() {
           {openOrders.length === 0 ? (
             <p className="text-sm text-muted-foreground p-8 text-center">Nenhuma OS em aberto</p>
           ) : (
-            <div className="overflow-auto">
-              <table className="w-full text-sm">
+            <div className="overflow-x-auto scrollbar-thin">
+              <table className="w-full text-sm min-w-[600px]">
                 <thead>
                   <tr className="border-b">
                     <th className="px-4 py-2 text-left font-medium text-muted-foreground">OS</th>

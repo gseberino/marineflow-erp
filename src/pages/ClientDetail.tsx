@@ -132,8 +132,8 @@ export default function ClientDetail() {
           )}
         </TabsContent>
         <TabsContent value="orders" className="mt-4">
-          <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="rounded-xl border bg-card shadow-sm overflow-x-auto scrollbar-thin">
+            <table className="w-full text-sm min-w-[600px]">
               <thead><tr className="border-b bg-muted/50">
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.serviceOrders.orderNumber}</th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.common.type}</th>
@@ -159,8 +159,8 @@ export default function ClientDetail() {
           </div>
         </TabsContent>
         <TabsContent value="financial" className="mt-4">
-          <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="rounded-xl border bg-card shadow-sm overflow-x-auto scrollbar-thin">
+            <table className="w-full text-sm min-w-[600px]">
               <thead><tr className="border-b bg-muted/50">
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.common.description}</th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.financial.dueDate}</th>

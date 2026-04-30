@@ -999,8 +999,8 @@ function ProductCategoriesTab() {
         {st.productCategoriesInfo || 'As categorias definem margens e comissões padrão para grupos de produtos. Produtos herdam estas configurações mas podem ter valores personalizados individualmente.'}
       </div>
 
-      <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="rounded-xl border bg-card shadow-sm overflow-x-auto scrollbar-thin">
+        <table className="w-full text-sm min-w-[700px]">
           <thead>
             <tr className="border-b bg-muted/50">
               <th className="px-4 py-2 text-left font-medium text-muted-foreground">Nome</th>
@@ -1195,8 +1195,8 @@ function UsersTab() {
         </div>
       </div>
 
-      <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="rounded-xl border bg-card shadow-sm overflow-x-auto scrollbar-thin">
+        <table className="w-full text-sm min-w-[700px]">
           <thead>
             <tr className="border-b bg-muted/50">
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Nome / Departamento</th>

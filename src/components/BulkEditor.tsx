@@ -209,8 +209,8 @@ export function BulkEditor({ entityType, open, onOpenChange }: BulkEditorProps) 
         )}
 
         {/* Table */}
-        <div className="flex-1 overflow-auto border rounded">
-          <table className="text-xs w-full">
+        <div className="flex-1 overflow-x-auto scrollbar-thin border rounded">
+          <table className="text-xs w-full min-w-[1000px]">
             <thead className="sticky top-0 bg-card z-10">
               <tr className="border-b bg-muted/50">
                 <th className="px-2 py-2 w-8"><Checkbox checked={selected.size === filtered.length && filtered.length > 0} onCheckedChange={toggleAll} /></th>

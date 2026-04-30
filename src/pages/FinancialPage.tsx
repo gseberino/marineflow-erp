@@ -423,9 +423,8 @@ export default function FinancialPage() {
           <FinancialFilterPanel type="receivable" filters={recFilters} onChange={setRecFilters} />
 
           {loadingRec ? <Skeleton className="h-64 rounded-xl" /> : (
-            <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
-              <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+            <div className="rounded-xl border bg-card shadow-sm overflow-x-auto scrollbar-thin">
+              <table className="w-full text-sm min-w-[900px]">
                 <thead><tr className="border-b bg-muted/50">
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.financial.dueDate}</th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">{t.serviceOrders.client}</th>
@@ -552,9 +551,8 @@ export default function FinancialPage() {
           {loadingPay ? <Skeleton className="h-64 rounded-xl" /> : (
             <>
               {groupBy === 'none' ? (
-                <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
-                  <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+                <div className="rounded-xl border bg-card shadow-sm overflow-x-auto scrollbar-thin">
+                  <table className="w-full text-sm min-w-[900px]">
                     {payableTableHead}
                     <tbody>
                       {filteredPayables.length === 0 ? (
@@ -585,8 +583,8 @@ export default function FinancialPage() {
                           <span className="font-semibold">{t.financial.subtotal}: {formatCurrency(groupBalance)}</span>
                         </CollapsibleTrigger>
                         <CollapsibleContent>
-                          <div className="rounded-b-xl border border-t-0 bg-card shadow-sm overflow-hidden">
-                            <table className="w-full text-sm">
+                          <div className="rounded-b-xl border border-t-0 bg-card shadow-sm overflow-x-auto scrollbar-thin">
+                            <table className="w-full text-sm min-w-[900px]">
                               {payableTableHead}
                               <tbody>{items.map(renderPayableRow)}</tbody>
                               <tfoot>

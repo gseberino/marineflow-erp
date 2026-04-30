@@ -263,8 +263,8 @@ export default function InventoryPage() {
           </div>
 
           {/* Products table with sortable headers */}
-          <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="rounded-xl border bg-card shadow-sm overflow-x-auto scrollbar-thin">
+            <table className="w-full text-sm min-w-[900px]">
               <thead>
                 <tr className="border-b bg-muted/50">
                   {([
@@ -384,8 +384,8 @@ export default function InventoryPage() {
             )}
           </div>
 
-          <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="rounded-xl border bg-card shadow-sm overflow-x-auto scrollbar-thin">
+            <table className="w-full text-sm min-w-[900px]">
               <thead>
                 <tr className="border-b bg-muted/50">
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">Data/Hora</th>

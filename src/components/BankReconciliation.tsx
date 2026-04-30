@@ -308,8 +308,8 @@ export function BankReconciliation() {
             </div>
           )}
           <p className="font-medium">{preview.length} transações encontradas</p>
-          <div className="max-h-48 overflow-y-auto">
-            <table className="w-full text-sm">
+          <div className="max-h-48 overflow-x-auto scrollbar-thin">
+            <table className="w-full text-sm min-w-[600px]">
               <thead><tr className="border-b"><th className="text-left py-1 px-2">{t.common.date}</th><th className="text-left py-1 px-2">{t.common.description}</th><th className="text-left py-1 px-2">{t.common.type}</th><th className="text-right py-1 px-2">{t.common.amount}</th></tr></thead>
               <tbody>
                 {preview.slice(0, 10).map((tx, i) => (
@@ -569,8 +569,8 @@ export function BankReconciliation() {
           {reconciledTx.length === 0 ? (
             <p className="text-sm text-muted-foreground py-4 text-center">{t.common.noResults}</p>
           ) : (
-            <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
-              <table className="w-full text-sm">
+            <div className="rounded-xl border bg-card shadow-sm overflow-x-auto scrollbar-thin">
+              <table className="w-full text-sm min-w-[800px]">
                 <thead><tr className="border-b bg-muted/50">
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.common.date}</th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.common.description}</th>
@@ -612,8 +612,8 @@ export function BankReconciliation() {
           {ignoredTx.length === 0 ? (
             <p className="text-sm text-muted-foreground py-4 text-center">{t.common.noResults}</p>
           ) : (
-            <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
-              <table className="w-full text-sm">
+            <div className="rounded-xl border bg-card shadow-sm overflow-x-auto scrollbar-thin">
+              <table className="w-full text-sm min-w-[800px]">
                 <thead><tr className="border-b bg-muted/50">
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.common.date}</th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.common.description}</th>

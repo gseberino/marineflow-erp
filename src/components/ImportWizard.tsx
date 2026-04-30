@@ -209,8 +209,8 @@ export function ImportWizard({ entityType, open, onOpenChange, onComplete }: Imp
             )}
 
             {parsedFile && parsedFile.rows.length > 0 && (
-              <div className="overflow-x-auto max-h-40 rounded border">
-                <table className="text-xs w-full">
+              <div className="overflow-x-auto scrollbar-thin max-h-40 rounded border">
+                <table className="text-xs w-full min-w-[600px]">
                   <thead><tr className="bg-muted/50">
                     {parsedFile.headers.slice(0, 6).map(h => <th key={h} className="px-2 py-1 text-left font-medium">{h}</th>)}
                     {parsedFile.headers.length > 6 && <th className="px-2 py-1">...</th>}
@@ -260,8 +260,8 @@ export function ImportWizard({ entityType, open, onOpenChange, onComplete }: Imp
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">{t.imports.configMappingDesc}</p>
 
-            <div className="overflow-x-auto max-h-[400px] rounded border">
-              <table className="text-sm w-full">
+            <div className="overflow-x-auto scrollbar-thin max-h-[400px] rounded border">
+              <table className="text-sm w-full min-w-[500px]">
                 <thead><tr className="bg-muted/50">
                   <th className="px-3 py-2 text-left font-medium">{t.imports.sourceColumn}</th>
                   <th className="px-3 py-2 text-left font-medium">{t.imports.sampleValue}</th>

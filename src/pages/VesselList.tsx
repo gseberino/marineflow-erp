@@ -79,8 +79,8 @@ export default function VesselList() {
           )}
         </div>
       ) : (
-        <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="rounded-xl border bg-card shadow-sm overflow-x-auto scrollbar-thin">
+          <table className="w-full text-sm min-w-[800px]">
             <thead><tr className="border-b bg-muted/50">
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Unidade / Tipo</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">{t.vessels.owner}</th>
