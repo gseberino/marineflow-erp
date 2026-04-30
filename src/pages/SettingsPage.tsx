@@ -1163,7 +1163,7 @@ function UsersTab() {
   const [showNew, setShowNew] = useState(false);
   const [editingUser, setEditingUser] = useState<any | null>(null);
   const [newForm, setNewForm] = useState({
-    full_name: '', email: '', role: 'technician', phone: '',
+    full_name: '', email: '', role: 'technician', phone: '', department: '',
   });
 
   const handleCreate = async () => {

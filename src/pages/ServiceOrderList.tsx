@@ -403,8 +403,7 @@ export default function ServiceOrderList() {
               </tbody>
             </table>
           </div>
-        </div>
-      )}
+        )}
 
       <PDFOptionsDialog
         open={!!pdfTarget}

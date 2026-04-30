@@ -508,7 +508,6 @@ export default function FinancialPage() {
                 </tbody>
               </table>
               </div>
-            </div>
           )}
         </TabsContent>
 
@@ -570,7 +569,6 @@ export default function FinancialPage() {
                     </tfoot>
                   </table>
                   </div>
-                </div>
               ) : (
                 <div className="space-y-4">
                   {Object.entries(grouped).map(([groupName, rawItems]) => {
