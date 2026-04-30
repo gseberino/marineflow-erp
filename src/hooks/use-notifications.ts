@@ -149,10 +149,6 @@ async function generateNotifications(userId: string, role: string): Promise<AppN
   return notifications.slice(0, 20);
 }
 
-  notifications.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
-  return notifications.slice(0, 20);
-}
-
 export function useNotifications() {
   const { user } = useAuth();
   
