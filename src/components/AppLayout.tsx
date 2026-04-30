@@ -20,6 +20,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Badge } from '@/components/ui/badge';
 import { NotificationBell } from '@/components/NotificationBell';
 import { WhatsAppBell } from '@/components/WhatsAppBell';
 import { PWAInstallPrompt } from '@/components/PWAInstallPrompt';

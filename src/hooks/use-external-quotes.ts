@@ -46,7 +46,7 @@ export function useExternalQuotes(filters?: { status?: string; created_by?: stri
 
       const { data, error } = await query;
       if (error) throw error;
-      return (data as unknown) as ExternalQuote[];
+      return data as unknown as ExternalQuote[];
     },
   });
 }
@@ -71,7 +71,7 @@ export function useExternalQuote(id: string) {
         .single();
 
       if (error) throw error;
-      return (data as unknown) as ExternalQuote;
+      return data as unknown as ExternalQuote;
     },
     enabled: !!id,
   });

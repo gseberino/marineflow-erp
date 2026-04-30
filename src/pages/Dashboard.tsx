@@ -360,7 +360,6 @@ function ExternalSellerDashboard({ greeting, dateStr }: { greeting: string, date
   const { user } = useAuth();
   const { formatCurrency } = useI18n();
 
-  // Fetch external seller specific stats
   const { data: stats } = useQuery({
     queryKey: ['external-seller-stats', user?.id],
     queryFn: async () => {
@@ -368,7 +367,7 @@ function ExternalSellerDashboard({ greeting, dateStr }: { greeting: string, date
         .from('external_quotes')
         .select('status, grand_total')
         .eq('created_by', user?.id);
-      
+
       const { count: leadsCount } = await supabase
         .from('external_quote_leads')
         .select('*', { count: 'exact', head: true })
@@ -376,15 +375,15 @@ function ExternalSellerDashboard({ greeting, dateStr }: { greeting: string, date
 
       const approved = quotes?.filter((q: any) => q.status === 'approved') || [];
       const pending = quotes?.filter((q: any) => q.status === 'pending_approval') || [];
-      
+
       return {
         totalApproved: approved.reduce((s: number, q: any) => s + (q.grand_total || 0), 0),
         approvedCount: approved.length,
         pendingCount: pending.length,
-        leadsCount: leadsCount || 0
+        leadsCount: leadsCount || 0,
       };
     },
-    enabled: !!user?.id
+    enabled: !!user?.id,
   });
 
   return (
