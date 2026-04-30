@@ -148,32 +148,68 @@ Deno.serve(async (req) => {
     { auth: { persistSession: false, autoRefreshToken: false } }
   );
 
-  // --- MODO DETETIVE: CAÇANDO OS ÚLTIMOS SOBREVIVENTES ---
+  // --- CORREÇÃO FINAL V5.0 (THE FINISHER) ---
   if (req.method === "GET") {
     try {
-      console.log("[Inspect] Procurando pelos últimos erros...");
+      console.log("[Fix] Iniciando Reconstrução Final V5.0...");
+      const f = "\uFFFD";
+      
+      const patterns = [
+        // Cidades e Endereços
+        { from: `Jo${f}o`, to: "João" }, { from: `Palho${f}a`, to: "Palhoça" },
+        { from: `Aruj${f}`, to: "Arujá" }, { from: `Mour${f}o`, to: "Mourão" },
+        { from: `Bar${f}o`, to: "Barão" }, { from: `Jundia${f}`, to: "Jundiaí" },
+        { from: `Tr${f}s`, to: "Três" }, { from: `Maring${f}`, to: "Maringá" },
+        { from: `Gusm${f}o`, to: "Gusmão" }, { from: `J${f}nio`, to: "Júnio" },
+        
+        // Nomes e Termos em MAIÚSCULO
+        { from: `L${f}GIA`, to: "LÍGIA" }, { from: `VE${f}CULO`, to: "VEÍCULO" },
+        { from: `ARA${f}JO`, to: "ARAÚJO" }, { from: `ALC${f}NTARA`, to: "ALCÂNTARA" },
+        { from: `PE${f}AS`, to: "PEÇAS" }, { from: `IND${f}STRIA`, to: "INDÚSTRIA" },
+        { from: `COM${f}RCIO`, to: "COMÉRCIO" }, { from: `N${f}UTICA`, to: "NÁUTICA" },
+        { from: `N${f}UTICOS`, to: "NÁUTICOS" }, { from: `CORPORA${f}${f}O`, to: "CORPORAÇÃO" },
+        
+        // Nomes Próprios e Termos Técnicos
+        { from: `Lu${f}s`, to: "Luís" }, { from: `Imobili${f}rios`, to: "Imobiliários" },
+        { from: `Ep${f}xi`, to: "Epóxi" }, { from: `Gusm${f}o`, to: "Gusmão" },
+        { from: `Galvaniza${f}${f}o`, to: "Galvanização" }
+      ];
+
+      let count = 0;
       const tables = [
         { name: "clients", cols: ["full_name_or_company_name", "city", "neighborhood", "address"] },
         { name: "marinas", cols: ["name", "city"] },
         { name: "vessels", cols: ["boat_name", "home_port"] }
       ];
 
-      const survivors: any[] = [];
-      for (const t of tables) {
-        const { data } = await admin.from(t.name).select("*");
-        data?.forEach(row => {
-          t.cols.forEach(col => {
-            const val = row[col];
-            if (val && (val.includes("?") || val.includes("\uFFFD"))) {
-              survivors.push({ table: t.name, column: col, text: val, hex: Array.from(val).map(c => `U+${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}`).join(" ") });
+      for (const table of tables) {
+        const { data: rows } = await admin.from(table.name).select("*");
+        if (!rows) continue;
+
+        for (const row of rows) {
+          let updateObj: any = {};
+          let changed = false;
+
+          for (const col of table.cols) {
+            let val = row[col] || "";
+            let oldVal = val;
+            if (val.includes(f) || val.includes("?")) {
+              for (const p of patterns) {
+                const regex = new RegExp(p.from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+                if (regex.test(val)) { val = val.replace(regex, p.to); changed = true; }
+              }
             }
-          });
-        });
+            if (oldVal !== val) updateObj[col] = val;
+          }
+
+          if (changed) {
+            await admin.from(table.name).update(updateObj).eq("id", row.id);
+            count++;
+          }
+        }
       }
 
-      return new Response(JSON.stringify(survivors, null, 2), { 
-        headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" } 
-      });
+      return new Response(`Limpeza Final Concluída! ${count} registros restaurados.`, { headers: { ...corsHeaders, "Content-Type": "text/plain; charset=utf-8" } });
     } catch (e) {
       return new Response("Erro: " + e.message, { status: 500, headers: corsHeaders });
     }
