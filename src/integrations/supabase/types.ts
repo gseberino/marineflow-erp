@@ -738,6 +738,373 @@ export type Database = {
         }
         Relationships: []
       }
+      external_quote_leads: {
+        Row: {
+          address_line_1: string | null
+          address_line_2: string | null
+          boat_length_feet: number | null
+          boat_manufacturer: string | null
+          boat_model: string | null
+          boat_name: string | null
+          boat_year: number | null
+          city: string | null
+          country: string | null
+          cpf_cnpj: string | null
+          created_at: string
+          created_by: string
+          email: string | null
+          full_name_or_company_name: string
+          id: string
+          marina_name: string | null
+          notes: string | null
+          phone: string | null
+          postal_code: string | null
+          promoted_at: string | null
+          promoted_client_id: string | null
+          state: string | null
+          type: string
+          updated_at: string
+          whatsapp: string | null
+        }
+        Insert: {
+          address_line_1?: string | null
+          address_line_2?: string | null
+          boat_length_feet?: number | null
+          boat_manufacturer?: string | null
+          boat_model?: string | null
+          boat_name?: string | null
+          boat_year?: number | null
+          city?: string | null
+          country?: string | null
+          cpf_cnpj?: string | null
+          created_at?: string
+          created_by: string
+          email?: string | null
+          full_name_or_company_name: string
+          id?: string
+          marina_name?: string | null
+          notes?: string | null
+          phone?: string | null
+          postal_code?: string | null
+          promoted_at?: string | null
+          promoted_client_id?: string | null
+          state?: string | null
+          type?: string
+          updated_at?: string
+          whatsapp?: string | null
+        }
+        Update: {
+          address_line_1?: string | null
+          address_line_2?: string | null
+          boat_length_feet?: number | null
+          boat_manufacturer?: string | null
+          boat_model?: string | null
+          boat_name?: string | null
+          boat_year?: number | null
+          city?: string | null
+          country?: string | null
+          cpf_cnpj?: string | null
+          created_at?: string
+          created_by?: string
+          email?: string | null
+          full_name_or_company_name?: string
+          id?: string
+          marina_name?: string | null
+          notes?: string | null
+          phone?: string | null
+          postal_code?: string | null
+          promoted_at?: string | null
+          promoted_client_id?: string | null
+          state?: string | null
+          type?: string
+          updated_at?: string
+          whatsapp?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "external_quote_leads_promoted_client_id_fkey"
+            columns: ["promoted_client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      external_quote_parts: {
+        Row: {
+          created_at: string
+          currency_snapshot: string | null
+          external_quote_id: string
+          id: string
+          line_total_cost: number
+          line_total_sale: number
+          notes: string | null
+          product_id: string | null
+          product_name_snapshot: string
+          quantity: number
+          unit_cost_snapshot: number
+          unit_sale_snapshot: number
+          updated_at: string
+          warranty_days: number | null
+        }
+        Insert: {
+          created_at?: string
+          currency_snapshot?: string | null
+          external_quote_id: string
+          id?: string
+          line_total_cost?: number
+          line_total_sale?: number
+          notes?: string | null
+          product_id?: string | null
+          product_name_snapshot: string
+          quantity?: number
+          unit_cost_snapshot?: number
+          unit_sale_snapshot?: number
+          updated_at?: string
+          warranty_days?: number | null
+        }
+        Update: {
+          created_at?: string
+          currency_snapshot?: string | null
+          external_quote_id?: string
+          id?: string
+          line_total_cost?: number
+          line_total_sale?: number
+          notes?: string | null
+          product_id?: string | null
+          product_name_snapshot?: string
+          quantity?: number
+          unit_cost_snapshot?: number
+          unit_sale_snapshot?: number
+          updated_at?: string
+          warranty_days?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "external_quote_parts_external_quote_id_fkey"
+            columns: ["external_quote_id"]
+            isOneToOne: false
+            referencedRelation: "external_quotes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "external_quote_parts_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      external_quote_services: {
+        Row: {
+          billing_unit_snapshot: string
+          created_at: string
+          description_snapshot: string | null
+          external_quote_id: string
+          id: string
+          line_total: number
+          notes: string | null
+          quantity: number
+          service_id: string | null
+          service_name_snapshot: string
+          unit_price_snapshot: number
+          updated_at: string
+          warranty_days: number | null
+        }
+        Insert: {
+          billing_unit_snapshot?: string
+          created_at?: string
+          description_snapshot?: string | null
+          external_quote_id: string
+          id?: string
+          line_total?: number
+          notes?: string | null
+          quantity?: number
+          service_id?: string | null
+          service_name_snapshot: string
+          unit_price_snapshot?: number
+          updated_at?: string
+          warranty_days?: number | null
+        }
+        Update: {
+          billing_unit_snapshot?: string
+          created_at?: string
+          description_snapshot?: string | null
+          external_quote_id?: string
+          id?: string
+          line_total?: number
+          notes?: string | null
+          quantity?: number
+          service_id?: string | null
+          service_name_snapshot?: string
+          unit_price_snapshot?: number
+          updated_at?: string
+          warranty_days?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "external_quote_services_external_quote_id_fkey"
+            columns: ["external_quote_id"]
+            isOneToOne: false
+            referencedRelation: "external_quotes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      external_quotes: {
+        Row: {
+          client_id: string | null
+          converted_at: string | null
+          converted_service_order_id: string | null
+          created_at: string
+          created_by: string
+          currency: string | null
+          customer_visible_report: string | null
+          discount_amount: number | null
+          estimated_hours: number | null
+          grand_total: number | null
+          hourly_rate: number | null
+          id: string
+          initial_findings: string | null
+          internal_notes: string | null
+          labor_cost_total: number | null
+          lead_id: string | null
+          marina_id: string | null
+          parts_cost_total: number | null
+          payment_conditions: string | null
+          problem_description: string | null
+          quote_number: string
+          quote_validity_date: string | null
+          quote_validity_days: number | null
+          rejection_reason: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          service_type: string | null
+          status: string
+          subcontract_cost_total: number | null
+          submitted_at: string | null
+          tax_amount: number | null
+          travel_cost_per_km: number | null
+          travel_cost_total: number | null
+          travel_distance_km: number | null
+          updated_at: string
+          vessel_id: string | null
+        }
+        Insert: {
+          client_id?: string | null
+          converted_at?: string | null
+          converted_service_order_id?: string | null
+          created_at?: string
+          created_by: string
+          currency?: string | null
+          customer_visible_report?: string | null
+          discount_amount?: number | null
+          estimated_hours?: number | null
+          grand_total?: number | null
+          hourly_rate?: number | null
+          id?: string
+          initial_findings?: string | null
+          internal_notes?: string | null
+          labor_cost_total?: number | null
+          lead_id?: string | null
+          marina_id?: string | null
+          parts_cost_total?: number | null
+          payment_conditions?: string | null
+          problem_description?: string | null
+          quote_number?: string
+          quote_validity_date?: string | null
+          quote_validity_days?: number | null
+          rejection_reason?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          service_type?: string | null
+          status?: string
+          subcontract_cost_total?: number | null
+          submitted_at?: string | null
+          tax_amount?: number | null
+          travel_cost_per_km?: number | null
+          travel_cost_total?: number | null
+          travel_distance_km?: number | null
+          updated_at?: string
+          vessel_id?: string | null
+        }
+        Update: {
+          client_id?: string | null
+          converted_at?: string | null
+          converted_service_order_id?: string | null
+          created_at?: string
+          created_by?: string
+          currency?: string | null
+          customer_visible_report?: string | null
+          discount_amount?: number | null
+          estimated_hours?: number | null
+          grand_total?: number | null
+          hourly_rate?: number | null
+          id?: string
+          initial_findings?: string | null
+          internal_notes?: string | null
+          labor_cost_total?: number | null
+          lead_id?: string | null
+          marina_id?: string | null
+          parts_cost_total?: number | null
+          payment_conditions?: string | null
+          problem_description?: string | null
+          quote_number?: string
+          quote_validity_date?: string | null
+          quote_validity_days?: number | null
+          rejection_reason?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          service_type?: string | null
+          status?: string
+          subcontract_cost_total?: number | null
+          submitted_at?: string | null
+          tax_amount?: number | null
+          travel_cost_per_km?: number | null
+          travel_cost_total?: number | null
+          travel_distance_km?: number | null
+          updated_at?: string
+          vessel_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "external_quotes_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "external_quotes_converted_service_order_id_fkey"
+            columns: ["converted_service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "external_quotes_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "external_quote_leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "external_quotes_marina_id_fkey"
+            columns: ["marina_id"]
+            isOneToOne: false
+            referencedRelation: "marinas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "external_quotes_vessel_id_fkey"
+            columns: ["vessel_id"]
+            isOneToOne: false
+            referencedRelation: "vessels"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       financial_categories: {
         Row: {
           active: boolean | null
@@ -3184,7 +3551,13 @@ export type Database = {
         }
         Returns: string
       }
+      convert_external_quote_to_so: {
+        Args: { _quote_id: string }
+        Returns: string
+      }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
+      is_admin_or_financial: { Args: { _user_id: string }; Returns: boolean }
+      is_external_seller: { Args: { _user_id: string }; Returns: boolean }
       wa_extract_body_text: { Args: { p: Json }; Returns: string }
       wa_extract_message_type: { Args: { p: Json }; Returns: string }
       wa_normalize_phone: { Args: { raw: string }; Returns: string }
