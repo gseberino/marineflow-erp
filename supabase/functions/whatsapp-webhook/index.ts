@@ -148,45 +148,64 @@ Deno.serve(async (req) => {
     { auth: { persistSession: false, autoRefreshToken: false } }
   );
 
-  // --- FERRAMENTA DE CORREÇÃO DE ACENTOS (TEMPORÁRIA) ---
+  // --- FERRAMENTA DE CORREÇÃO DE ACENTOS (TEMPORÁRIA V2.0) ---
   if (req.method === "GET") {
     try {
-      console.log("[Fix] Iniciando correção global de acentos...");
-      const corrections = [
-        { from: "Tubar?o", to: "Tubarão" }, { from: "Can?ado", to: "Cançado" },
-        { from: "Jo?o", to: "João" }, { from: "Jos?", to: "José" },
-        { from: "S?o ", to: "São " }, { from: "Concei??o", to: "Conceição" },
-        { from: "Vit?ria", to: "Vitória" }, { from: "Ant?nio", to: "Antônio" },
-        { from: "M?rio", to: "Mário" }, { from: "Ribeir?o", to: "Ribeirão" },
-        { from: "Goi?s", to: "Goiás" }, { from: "Macei?", to: "Maceió" }
+      console.log("[Fix] Iniciando correção global de acentos V2.0...");
+      // Tentamos corrigir tanto o '?' quanto o caractere especial de erro ''
+      const chars = ["?", ""];
+      const mapping = [
+        { from: "Tubar{char}o", to: "Tubarão" }, { from: "Can{char}ado", to: "Cançado" },
+        { from: "S{char}o ", to: "São " }, { from: "Concei{char}{char}o", to: "Conceição" },
+        { from: "Jo{char}o", to: "João" }, { from: "Jos{char}", to: "José" },
+        { from: "Ant{char}nio", to: "Antônio" }, { from: "Vit{char}ria", to: "Vitória" },
+        { from: "Ribeir{char}o", to: "Ribeirão" }, { from: "Goi{char}s", to: "Goiás" }
       ];
 
       let count = 0;
-      const { data: clients } = await admin.from("clients").select("id, full_name_or_company_name, city").or("full_name_or_company_name.ilike.%?%,city.ilike.%?%");
+      // Busca ampla em clientes (Nomes, Cidades, Bairros, Endereços)
+      const { data: clients } = await admin.from("clients").select("*");
       if (clients) {
         for (const c of clients) {
           let n = c.full_name_or_company_name || "";
           let ct = c.city || "";
+          let b = c.neighborhood || "";
+          let a = c.address || "";
           let ch = false;
-          for (const corr of corrections) {
-            if (n.includes(corr.from)) { n = n.replace(corr.from, corr.to); ch = true; }
-            if (ct.includes(corr.from)) { ct = ct.replace(corr.from, corr.to); ch = true; }
+
+          for (const char of chars) {
+            for (const m of mapping) {
+              const find = m.from.replace(/{char}/g, char);
+              if (n.includes(find)) { n = n.replace(find, m.to); ch = true; }
+              if (ct.includes(find)) { ct = ct.replace(find, m.to); ch = true; }
+              if (b.includes(find)) { b = b.replace(find, m.to); ch = true; }
+              if (a.includes(find)) { a = a.replace(find, m.to); ch = true; }
+            }
           }
-          if (ch) { await admin.from("clients").update({ full_name_or_company_name: n, city: ct }).eq("id", c.id); count++; }
+
+          if (ch) {
+            await admin.from("clients").update({ full_name_or_company_name: n, city: ct, neighborhood: b, address: a }).eq("id", c.id);
+            count++;
+          }
         }
       }
 
-      const { data: leads } = await admin.from("whatsapp_leads").select("id, display_name").ilike("display_name", "%?%");
+      const { data: leads } = await admin.from("whatsapp_leads").select("*");
       if (leads) {
         for (const l of leads) {
           let n = l.display_name || "";
           let ch = false;
-          for (const corr of corrections) { if (n.includes(corr.from)) { n = n.replace(corr.from, corr.to); ch = true; } }
+          for (const char of chars) {
+            for (const m of mapping) {
+              const find = m.from.replace(/{char}/g, char);
+              if (n.includes(find)) { n = n.replace(find, m.to); ch = true; }
+            }
+          }
           if (ch) { await admin.from("whatsapp_leads").update({ display_name: n }).eq("id", l.id); count++; }
         }
       }
 
-      return new Response(`Sucesso! ${count} registros corrigidos. Pode fechar esta aba.`, { headers: { ...corsHeaders, "Content-Type": "text/plain; charset=utf-8" } });
+      return new Response(`Sucesso! ${count} registros corrigidos na V2.0.`, { headers: { ...corsHeaders, "Content-Type": "text/plain; charset=utf-8" } });
     } catch (e) {
       return new Response("Erro: " + e.message, { status: 500, headers: corsHeaders });
     }
