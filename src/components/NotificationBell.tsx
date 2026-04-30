@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, DollarSign, Package, Clock, AlertTriangle, Check, CheckCheck } from 'lucide-react';
+import { Bell, DollarSign, Package, Clock, AlertTriangle, Check, CheckCheck, XCircle } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,8 @@ const typeConfig: Record<NotificationType, { Icon: typeof Bell; className: strin
   LOW_STOCK: { Icon: Package, className: 'text-amber-600 bg-amber-500/10' },
   OS_UPCOMING: { Icon: Clock, className: 'text-blue-600 bg-blue-500/10' },
   OS_STALE: { Icon: AlertTriangle, className: 'text-amber-600 bg-amber-500/10' },
+  QUOTE_APPROVED: { Icon: Check, className: 'text-emerald-600 bg-emerald-500/10' },
+  QUOTE_REJECTED: { Icon: XCircle, className: 'text-destructive bg-destructive/10' },
 };
 
 function timeAgo(iso: string): string {

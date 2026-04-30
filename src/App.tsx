@@ -69,7 +69,11 @@ const App = () => (
                   <QueryGate>
                     <AppLayout>
                       <Routes>
-                        <Route path="/" element={<Dashboard />} />
+                        <Route path="/" element={
+                          <ProtectedRoute roles={['admin', 'financial', 'technician', 'seller']}>
+                            <Dashboard />
+                          </ProtectedRoute>
+                        } />
                         <Route path="/crm" element={<ProtectedRoute roles={['admin','financial','technician','seller']}><CRMKanbanPage /></ProtectedRoute>} />
                         <Route path="/service-orders" element={<ProtectedRoute roles={['admin','financial','technician','seller']}><ServiceOrderList /></ProtectedRoute>} />
                         <Route path="/service-orders/new" element={<ProtectedRoute roles={['admin','financial','technician','seller']}><ServiceOrderDetail /></ProtectedRoute>} />
