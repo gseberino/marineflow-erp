@@ -148,84 +148,32 @@ Deno.serve(async (req) => {
     { auth: { persistSession: false, autoRefreshToken: false } }
   );
 
-  // --- FERRAMENTA DE CORREÇÃO CONTEXTUAL (V4.0 FINAL) ---
+  // --- MODO DETETIVE: CAÇANDO OS ÚLTIMOS SOBREVIVENTES ---
   if (req.method === "GET") {
     try {
-      console.log("[Fix] Iniciando Reconstrução Contextual V4.0...");
-      const f = "\uFFFD"; // O símbolo corrompido
-      
-      const patterns = [
-        // Cidades e Nomes Específicos
-        { from: `Itaja${f}`, to: "Itajaí" },
-        { from: `S${f}o`, to: "São" },
-        { from: `Arma${f}${f}o`, to: "Armação" },
-        { from: `Embarca${f}${f}es`, to: "Embarcações" },
-        { from: `Corpora${f}${f}o`, to: "Corporação" },
-        { from: `Florian${f}polis`, to: "Florianópolis" },
-        { from: `Jos${f}`, to: "José" },
-        { from: `Ant${f}nio`, to: "Antônio" },
-        { from: `Bigua${f}u`, to: "Biguaçu" },
-        { from: `Bras${f}lia`, to: "Brasília" },
-        { from: `Paranagu${f}`, to: "Paranaguá" },
-        { from: `Paran${f}`, to: "Paraná" },
-        { from: `Andr${f}`, to: "André" },
-        { from: `B${f}zios`, to: "Búzios" },
-        { from: `Cambori${f}`, to: "Camboriú" },
-        { from: `Balne${f}rio`, to: "Balneário" },
-        { from: `N${f}utico`, to: "Náutico" },
-        { from: `Servi${f}o`, to: "Serviço" },
-        { from: `Cobi${f}a`, to: "Cobiça" },
-        { from: `Vit${f}ria`, to: "Vitória" },
-        { from: `Ribeir${f}o`, to: "Ribeirão" },
-        { from: `Tubar${f}o`, to: "Tubarão" },
-        { from: `Goi${f}s`, to: "Goiás" },
-        { from: `Macei${f}`, to: "Maceió" },
-        // Padrões Gerais
-        { from: `${f}${f}o`, to: "ção" },
-        { from: `${f}${f}es`, to: "ções" }
-      ];
-
-      let count = 0;
+      console.log("[Inspect] Procurando pelos últimos erros...");
       const tables = [
         { name: "clients", cols: ["full_name_or_company_name", "city", "neighborhood", "address"] },
         { name: "marinas", cols: ["name", "city"] },
-        { name: "vessels", cols: ["boat_name", "home_port"] },
-        { name: "products", cols: ["name", "category"] },
-        { name: "services", cols: ["name", "category"] },
-        { name: "whatsapp_leads", cols: ["display_name"] }
+        { name: "vessels", cols: ["boat_name", "home_port"] }
       ];
 
-      for (const table of tables) {
-        const { data: rows } = await admin.from(table.name).select("*");
-        if (!rows) continue;
-
-        for (const row of rows) {
-          let updateObj: any = {};
-          let changed = false;
-
-          for (const col of table.cols) {
-            let val = row[col] || "";
-            let oldVal = val;
-            if (val.includes(f)) {
-              for (const p of patterns) {
-                const regex = new RegExp(p.from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
-                if (regex.test(val)) { 
-                  val = val.replace(regex, p.to); 
-                  changed = true; 
-                }
-              }
+      const survivors: any[] = [];
+      for (const t of tables) {
+        const { data } = await admin.from(t.name).select("*");
+        data?.forEach(row => {
+          t.cols.forEach(col => {
+            const val = row[col];
+            if (val && (val.includes("?") || val.includes("\uFFFD"))) {
+              survivors.push({ table: t.name, column: col, text: val, hex: Array.from(val).map(c => `U+${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}`).join(" ") });
             }
-            if (oldVal !== val) updateObj[col] = val;
-          }
-
-          if (changed) {
-            await admin.from(table.name).update(updateObj).eq("id", row.id);
-            count++;
-          }
-        }
+          });
+        });
       }
 
-      return new Response(`Sucesso Final! ${count} registros reconstruídos com base no contexto.`, { headers: { ...corsHeaders, "Content-Type": "text/plain; charset=utf-8" } });
+      return new Response(JSON.stringify(survivors, null, 2), { 
+        headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" } 
+      });
     } catch (e) {
       return new Response("Erro: " + e.message, { status: 500, headers: corsHeaders });
     }
