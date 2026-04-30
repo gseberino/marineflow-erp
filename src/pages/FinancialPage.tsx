@@ -568,7 +568,6 @@ export default function FinancialPage() {
                       </tr>
                     </tfoot>
                   </table>
-                  </div>
                 </div>
               ) : (
                 <div className="space-y-4">
