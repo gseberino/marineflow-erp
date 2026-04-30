@@ -81,23 +81,39 @@ export default function ExternalQuoteDetailPage() {
               {getStatusBadge(quote.status)}
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                {quote.items?.map((item, index) => (
-                  <div key={item.id} className="flex justify-between items-start py-3 border-b last:border-0">
-                    <div>
-                      <p className="font-medium">{item.product_name_manual || 'Produto sem nome'}</p>
-                      <p className="text-xs text-muted-foreground">Qtd: {item.quantity}</p>
+                <div className="space-y-4">
+                  {quote.parts?.map((item, index) => (
+                    <div key={item.id} className="flex justify-between items-start py-3 border-b last:border-0">
+                      <div>
+                        <p className="font-medium">{item.product_name_snapshot || 'Peça sem nome'}</p>
+                        <p className="text-xs text-muted-foreground">Qtd: {item.quantity}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-semibold">
+                          {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.line_total_sale)}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.unit_sale_snapshot)} /un
+                        </p>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <p className="font-semibold">
-                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.line_total)}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground">
-                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.unit_price)} /un
-                      </p>
+                  ))}
+                  {quote.services?.map((item, index) => (
+                    <div key={item.id} className="flex justify-between items-start py-3 border-b last:border-0">
+                      <div>
+                        <p className="font-medium">{item.service_name_snapshot || 'Serviço sem nome'}</p>
+                        <p className="text-xs text-muted-foreground">Qtd: {item.quantity}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-semibold">
+                          {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.line_total)}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.unit_price_snapshot)} /un
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
 
                 <div className="pt-4 space-y-2">
                   <div className="flex justify-between text-sm">
@@ -112,12 +128,12 @@ export default function ExternalQuoteDetailPage() {
                   )}
                   <div className="flex justify-between text-xl font-bold border-t pt-2">
                     <span>Total</span>
-                    <span className="text-primary">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(quote.grand_total)}</span>
+                    <span className="text-primary">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(quote.grand_total || 0)}</span>
                   </div>
                 </div>
               </div>
 
-              {quote.items?.some((it: any) => !it.product_id) && (
+              {quote.parts?.some((it: any) => !it.product_id) && (
                 <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2 text-sm text-amber-800">
                   <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
                   <div>
@@ -154,18 +170,18 @@ export default function ExternalQuoteDetailPage() {
                   <User className="h-4 w-4 text-primary" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium">{quote.client_name}</p>
-                  <p className="text-xs text-muted-foreground">{quote.client_phone}</p>
+                  <p className="text-sm font-medium">{quote.client?.full_name_or_company_name || '—'}</p>
+                  <p className="text-xs text-muted-foreground">{quote.client?.phone || '—'}</p>
                 </div>
               </div>
-              {quote.vessel_name && (
+              {quote.vessel?.boat_name && (
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-blue-100 rounded-full">
                     <Anchor className="h-4 w-4 text-blue-600" />
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Embarcação/Unidade</p>
-                    <p className="text-sm font-medium">{quote.vessel_name}</p>
+                    <p className="text-sm font-medium">{quote.vessel.boat_name}</p>
                   </div>
                 </div>
               )}

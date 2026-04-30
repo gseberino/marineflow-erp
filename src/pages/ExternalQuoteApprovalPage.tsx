@@ -83,7 +83,7 @@ export default function ExternalQuoteApprovalPage() {
                       </div>
                       <h3 className="text-xl font-bold flex items-center gap-2">
                         <User className="h-5 w-5 text-muted-foreground" />
-                        {quote.client_name}
+                        {quote.client?.full_name_or_company_name || '—'}
                       </h3>
                     </div>
                     <div className="text-right">
@@ -97,12 +97,12 @@ export default function ExternalQuoteApprovalPage() {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm bg-muted/30 p-3 rounded-lg">
                     <div className="flex items-center gap-2">
                       <Phone className="h-4 w-4 text-muted-foreground" />
-                      {quote.client_phone}
+                      {quote.client?.phone || '—'}
                     </div>
-                    {quote.vessel_name && (
+                    {quote.vessel?.boat_name && (
                       <div className="flex items-center gap-2">
                         <Anchor className="h-4 w-4 text-muted-foreground" />
-                        {quote.vessel_name}
+                        {quote.vessel.boat_name}
                       </div>
                     )}
                     <div className="flex items-center gap-2">
@@ -114,9 +114,15 @@ export default function ExternalQuoteApprovalPage() {
                   <div className="space-y-2">
                     <Label className="text-xs text-muted-foreground uppercase">Itens Solicitados</Label>
                     <div className="space-y-1">
-                      {quote.items?.map((item: any) => (
+                      {quote.parts?.map((item: any) => (
                         <div key={item.id} className="flex justify-between text-sm py-1 border-b border-dashed last:border-0">
-                          <span>{item.quantity}x {item.product_name_manual || 'Item s/ nome'}</span>
+                          <span>{item.quantity}x {item.product_name_snapshot || 'Item s/ nome'} (Peça)</span>
+                          <span className="font-medium">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.line_total_sale)}</span>
+                        </div>
+                      ))}
+                      {quote.services?.map((item: any) => (
+                        <div key={item.id} className="flex justify-between text-sm py-1 border-b border-dashed last:border-0">
+                          <span>{item.quantity}x {item.service_name_snapshot || 'Item s/ nome'} (Serviço)</span>
                           <span className="font-medium">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.line_total)}</span>
                         </div>
                       ))}

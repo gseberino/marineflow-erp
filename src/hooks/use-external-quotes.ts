@@ -1,60 +1,20 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import type { Database } from '@/integrations/supabase/types';
 
-export type ExternalQuoteStatus = 
-  | 'draft' 
-  | 'pending_approval' 
-  | 'pending_product' 
-  | 'approved' 
-  | 'sent' 
-  | 'converted' 
-  | 'cancelled';
-
-export type ClientType = 'person' | 'vessel' | 'motorhome';
-
-export interface ExternalQuote {
-  id: string;
-  created_at: string;
-  updated_at: string;
-  seller_user_id: string;
-  status: ExternalQuoteStatus;
-  client_name: string;
-  client_phone: string;
-  client_type: ClientType;
-  vessel_name?: string;
-  converted_service_order_id?: string;
-  commission_rate: number;
-  commission_amount: number;
-  commission_status: 'pending' | 'approved' | 'paid';
-  commission_paid_at?: string;
-  approved_by?: string;
-  approved_at?: string;
-  rejection_reason?: string;
-  internal_notes?: string;
-  subtotal: number;
-  discount_amount: number;
-  grand_total: number;
+export type ExternalQuote = Database['public']['Tables']['external_quotes']['Row'] & {
   seller?: {
     id: string;
     full_name: string;
   };
-  items?: ExternalQuoteItem[];
-}
+  parts?: Database['public']['Tables']['external_quote_parts']['Row'][];
+  services?: Database['public']['Tables']['external_quote_services']['Row'][];
+  client?: Database['public']['Tables']['clients']['Row'];
+  vessel?: Database['public']['Tables']['vessels']['Row'];
+};
 
-export interface ExternalQuoteItem {
-  id: string;
-  external_quote_id: string;
-  product_id?: string;
-  product_name_manual?: string;
-  product_description?: string;
-  quantity: number;
-  unit_price: number;
-  line_total: number;
-  status: 'ok' | 'pending_product_registration';
-}
-
-export function useExternalQuotes(filters?: { status?: string; seller_id?: string }) {
+export function useExternalQuotes(filters?: { status?: string; created_by?: string }) {
   return useQuery({
     queryKey: ['external-quotes', filters],
     queryFn: async () => {
@@ -62,13 +22,14 @@ export function useExternalQuotes(filters?: { status?: string; seller_id?: strin
         .from('external_quotes')
         .select(`
           *,
-          seller:app_users!seller_user_id(id, full_name),
-          items:external_quote_items(*)
+          seller:app_users!created_by(id, full_name),
+          client:clients(id, full_name_or_company_name, phone),
+          vessel:vessels(id, boat_name)
         `)
         .order('created_at', { ascending: false });
 
       if (filters?.status) query = query.eq('status', filters.status);
-      if (filters?.seller_id) query = query.eq('seller_user_id', filters.seller_id);
+      if (filters?.created_by) query = query.eq('created_by', filters.created_by);
 
       const { data, error } = await query;
       if (error) throw error;
@@ -86,8 +47,11 @@ export function useExternalQuote(id: string) {
         .from('external_quotes')
         .select(`
           *,
-          seller:app_users!seller_user_id(id, full_name),
-          items:external_quote_items(*)
+          seller:app_users!created_by(id, full_name),
+          client:clients(*),
+          vessel:vessels(*),
+          parts:external_quote_parts(*),
+          services:external_quote_services(*)
         `)
         .eq('id', id)
         .single();
@@ -102,10 +66,9 @@ export function useExternalQuote(id: string) {
 export function useCreateExternalQuote() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (quote: Partial<ExternalQuote> & { items: Partial<ExternalQuoteItem>[] }) => {
-      const { items, ...quoteData } = quote;
+    mutationFn: async (quote: any) => {
+      const { parts, services, ...quoteData } = quote;
       
-      // 1. Inserir orçamento
       const { data: newQuote, error: quoteError } = await supabase
         .from('external_quotes')
         .insert([quoteData])
@@ -114,19 +77,18 @@ export function useCreateExternalQuote() {
 
       if (quoteError) throw quoteError;
 
-      // 2. Inserir itens
-      if (items && items.length > 0) {
-        const itemsToInsert = items.map(item => ({
-          ...item,
-          external_quote_id: newQuote.id,
-          line_total: (item.quantity || 0) * (item.unit_price || 0)
-        }));
+      if (parts && parts.length > 0) {
+        const { error: partsError } = await supabase
+          .from('external_quote_parts')
+          .insert(parts.map((p: any) => ({ ...p, external_quote_id: newQuote.id })));
+        if (partsError) throw partsError;
+      }
 
-        const { error: itemsError } = await supabase
-          .from('external_quote_items')
-          .insert(itemsToInsert);
-
-        if (itemsError) throw itemsError;
+      if (services && services.length > 0) {
+        const { error: servicesError } = await supabase
+          .from('external_quote_services')
+          .insert(services.map((s: any) => ({ ...s, external_quote_id: newQuote.id })));
+        if (servicesError) throw servicesError;
       }
 
       return newQuote;
@@ -144,15 +106,15 @@ export function useCreateExternalQuote() {
 export function useUpdateExternalQuoteStatus() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, status, rejection_reason }: { id: string; status: ExternalQuoteStatus; rejection_reason?: string }) => {
+    mutationFn: async ({ id, status, rejection_reason }: { id: string; status: string; rejection_reason?: string }) => {
       const { data, error } = await supabase
         .from('external_quotes')
         .update({ 
           status, 
           rejection_reason,
-          approved_at: status === 'approved' ? new Date().toISOString() : undefined,
-          approved_by: status === 'approved' ? (await supabase.auth.getUser()).data.user?.id : undefined
-        })
+          reviewed_at: (status === 'approved' || status === 'rejected') ? new Date().toISOString() : undefined,
+          reviewed_by: (status === 'approved' || status === 'rejected') ? (await supabase.auth.getUser()).data.user?.id : undefined
+        } as any)
         .eq('id', id)
         .select()
         .single();

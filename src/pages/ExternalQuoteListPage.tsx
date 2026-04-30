@@ -145,7 +145,7 @@ export default function ExternalQuoteListPage() {
                     {getStatusIcon(quote.status)}
                   </div>
                   <div>
-                    <CardTitle className="text-sm font-medium">{quote.client_name}</CardTitle>
+                    <CardTitle className="text-sm font-medium">{quote.client?.full_name_or_company_name || '—'}</CardTitle>
                     <p className="text-xs text-muted-foreground">
                       {format(new Date(quote.created_at), "dd 'de' MMMM", { locale: ptBR })}
                     </p>
@@ -173,7 +173,7 @@ export default function ExternalQuoteListPage() {
                 )}
 
                 <div className="mt-4 pt-4 border-t flex justify-between items-center text-[10px] text-muted-foreground">
-                  <span>{quote.items?.length || 0} itens</span>
+                  <span>{(quote.parts?.length || 0) + (quote.services?.length || 0)} itens</span>
                   <Link to={`/external-quotes/${quote.id}`}>
                     <Button variant="ghost" size="sm" className="h-7 text-xs">Ver Detalhes</Button>
                   </Link>
