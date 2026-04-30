@@ -3,6 +3,15 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import type { Database } from '@/integrations/supabase/types';
 
+export type ExternalQuoteStatus =
+  | 'draft'
+  | 'pending_approval'
+  | 'pending_product'
+  | 'approved'
+  | 'sent'
+  | 'converted'
+  | 'cancelled';
+
 export type ExternalQuote = Database['public']['Tables']['external_quotes']['Row'] & {
   seller?: {
     id: string;
@@ -11,6 +20,7 @@ export type ExternalQuote = Database['public']['Tables']['external_quotes']['Row
   parts?: Database['public']['Tables']['external_quote_parts']['Row'][];
   services?: Database['public']['Tables']['external_quote_services']['Row'][];
   client?: Database['public']['Tables']['clients']['Row'];
+  lead?: Database['public']['Tables']['external_quote_leads']['Row'];
   vessel?: Database['public']['Tables']['vessels']['Row'];
 };
 
@@ -24,6 +34,7 @@ export function useExternalQuotes(filters?: { status?: string; created_by?: stri
           *,
           seller:app_users!created_by(id, full_name),
           client:clients(id, full_name_or_company_name, phone),
+          lead:external_quote_leads(id, full_name_or_company_name, phone),
           vessel:vessels(id, boat_name)
         `)
         .order('created_at', { ascending: false });
@@ -49,6 +60,7 @@ export function useExternalQuote(id: string) {
           *,
           seller:app_users!created_by(id, full_name),
           client:clients(*),
+          lead:external_quote_leads(*),
           vessel:vessels(*),
           parts:external_quote_parts(*),
           services:external_quote_services(*)
@@ -68,10 +80,11 @@ export function useCreateExternalQuote() {
   return useMutation({
     mutationFn: async (quote: any) => {
       const { parts, services, ...quoteData } = quote;
+      const quoteNumber = quoteData.quote_number || `EXT-${Date.now().toString().slice(-6)}`;
       
       const { data: newQuote, error: quoteError } = await supabase
         .from('external_quotes')
-        .insert([quoteData])
+        .insert([{ ...quoteData, quote_number: quoteNumber }])
         .select()
         .single();
 

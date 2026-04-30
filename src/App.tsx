@@ -68,26 +68,22 @@ const App = () => (
                     <AppLayout>
                       <Routes>
                         <Route path="/" element={<Dashboard />} />
-                        <Route path="/crm" element={<CRMKanbanPage />} />
-                        <Route path="/service-orders" element={<ServiceOrderList />} />
-                        <Route path="/service-orders/new" element={<ServiceOrderDetail />} />
-                        <Route path="/service-orders/:id" element={<ServiceOrderDetail />} />
-                        <Route path="/clients" element={<ClientList />} />
-                        <Route path="/clients/:id" element={<ClientDetail />} />
-                        <Route path="/vessels" element={<VesselList />} />
-                        <Route path="/vessels/:id" element={<VesselDetail />} />
-                        <Route path="/marinas" element={<MarinaList />} />
-                        <Route path="/products" element={<ProductList />} />
-                        <Route path="/suppliers" element={<SupplierList />} />
-                        <Route path="/services" element={<ServiceList />} />
-                        <Route path="/inventory" element={<InventoryPage />} />
-                        <Route path="/inventory/smart-purchase" element={
-                          <ProtectedRoute roles={['admin', 'financial']}>
-                            <SmartPurchasePage />
-                          </ProtectedRoute>
-                        } />
-                        <Route path="/inventory/import-xml" element={<ImportFiscalXML />} />
-                        <Route path="/agenda" element={<AgendaPage />} />
+                        <Route path="/crm" element={<ProtectedRoute roles={['admin','financial','technician','seller']}><CRMKanbanPage /></ProtectedRoute>} />
+                        <Route path="/service-orders" element={<ProtectedRoute roles={['admin','financial','technician','seller']}><ServiceOrderList /></ProtectedRoute>} />
+                        <Route path="/service-orders/new" element={<ProtectedRoute roles={['admin','financial','technician','seller']}><ServiceOrderDetail /></ProtectedRoute>} />
+                        <Route path="/service-orders/:id" element={<ProtectedRoute roles={['admin','financial','technician','seller']}><ServiceOrderDetail /></ProtectedRoute>} />
+                        <Route path="/clients" element={<ProtectedRoute roles={['admin','financial','technician','seller']}><ClientList /></ProtectedRoute>} />
+                        <Route path="/clients/:id" element={<ProtectedRoute roles={['admin','financial','technician','seller']}><ClientDetail /></ProtectedRoute>} />
+                        <Route path="/vessels" element={<ProtectedRoute roles={['admin','financial','technician','seller']}><VesselList /></ProtectedRoute>} />
+                        <Route path="/vessels/:id" element={<ProtectedRoute roles={['admin','financial','technician','seller']}><VesselDetail /></ProtectedRoute>} />
+                        <Route path="/marinas" element={<ProtectedRoute roles={['admin','financial','technician','seller']}><MarinaList /></ProtectedRoute>} />
+                        <Route path="/products" element={<ProtectedRoute roles={['admin','financial','technician','seller']}><ProductList /></ProtectedRoute>} />
+                        <Route path="/suppliers" element={<ProtectedRoute roles={['admin','financial','technician','seller']}><SupplierList /></ProtectedRoute>} />
+                        <Route path="/services" element={<ProtectedRoute roles={['admin','financial','technician','seller']}><ServiceList /></ProtectedRoute>} />
+                        <Route path="/inventory" element={<ProtectedRoute roles={['admin','financial','technician','seller']}><InventoryPage /></ProtectedRoute>} />
+                        <Route path="/inventory/smart-purchase" element={<ProtectedRoute roles={['admin','financial']}><SmartPurchasePage /></ProtectedRoute>} />
+                        <Route path="/inventory/import-xml" element={<ProtectedRoute roles={['admin']}><ImportFiscalXML /></ProtectedRoute>} />
+                        <Route path="/agenda" element={<ProtectedRoute roles={['admin','financial','technician','seller']}><AgendaPage /></ProtectedRoute>} />
                         <Route path="/financial" element={
                           <ProtectedRoute roles={['admin', 'financial']}>
                             <FinancialPage />
@@ -117,7 +113,7 @@ const App = () => (
                             <ActiveProspectingPage />
                           </ProtectedRoute>
                         } />
-                        <Route path="/whatsapp/leads" element={<WhatsAppLeadsPage />} />
+                        <Route path="/whatsapp/leads" element={<ProtectedRoute roles={['admin','financial','seller']}><WhatsAppLeadsPage /></ProtectedRoute>} />
                         <Route path="/whatsapp/logs" element={
                           <ProtectedRoute roles={['admin']}>
                             <WhatsAppLogsPage />

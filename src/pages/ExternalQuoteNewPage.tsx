@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageHeader } from '@/components/PageHeader';
 import { Card, CardContent } from '@/components/ui/card';
@@ -8,21 +8,54 @@ import { Label } from '@/components/ui/label';
 import { MoneyInput } from '@/components/MoneyInput';
 import { useCreateExternalQuote } from '@/hooks/use-external-quotes';
 import { useProducts } from '@/hooks/use-products';
-import { useClients } from '@/hooks/use-clients';
-import { Plus, Trash2, Save, ShoppingCart, User, Search } from 'lucide-react';
+import { Plus, Trash2, Save, ShoppingCart, User, Phone, Anchor } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useQuery } from '@tanstack/react-query';
 
 export default function ExternalQuoteNewPage() {
   const navigate = useNavigate();
   const createQuote = useCreateExternalQuote();
   const { data: products } = useProducts();
-  const { data: clients } = useClients();
 
-  const [clientId, setClientId] = useState('');
-  const [vesselId, setVesselId] = useState('');
+  const [leadName, setLeadName] = useState('');
+  const [leadPhone, setLeadPhone] = useState('');
+  const [leadId, setLeadId] = useState<string | 'new'>('new');
+  const [vesselName, setVesselName] = useState('');
   const [items, setItems] = useState<any[]>([]);
+
+  // Fetch only leads created by the current user
+  const { data: myLeads } = useQuery({
+    queryKey: ['my-leads'],
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return [];
+      const { data, error } = await supabase
+        .from('external_quote_leads')
+        .select('*')
+        .eq('created_by', user.id)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data;
+    }
+  });
+
+  // Autofill if existing lead is selected
+  useEffect(() => {
+    if (leadId !== 'new' && myLeads) {
+      const l = myLeads.find(x => x.id === leadId);
+      if (l) {
+        setLeadName(l.full_name_or_company_name);
+        setLeadPhone(l.phone || '');
+        setVesselName(l.boat_name || '');
+      }
+    } else {
+      setLeadName('');
+      setLeadPhone('');
+      setVesselName('');
+    }
+  }, [leadId, myLeads]);
 
   const addItem = () => {
     setItems([...items, { product_id: '', quantity: 1, unit_price: 0, product_name: '' }]);
@@ -52,8 +85,8 @@ export default function ExternalQuoteNewPage() {
   };
 
   const handleSave = async () => {
-    if (!clientId || items.length === 0) {
-      toast.error('Selecione um cliente e adicione pelo menos um item.');
+    if (!leadName || items.length === 0) {
+      toast.error('Informe o nome do prospecto e adicione pelo menos um item.');
       return;
     }
 
@@ -61,12 +94,31 @@ export default function ExternalQuoteNewPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Não autenticado');
 
+      let currentLeadId = leadId !== 'new' ? leadId : null;
+
+      // Se for 'new', criamos um novo lead no banco
+      if (leadId === 'new') {
+        const { data: newLead, error: leadError } = await supabase
+          .from('external_quote_leads')
+          .insert([{
+            created_by: user.id,
+            type: 'person',
+            full_name_or_company_name: leadName,
+            phone: leadPhone,
+            boat_name: vesselName
+          }])
+          .select()
+          .single();
+
+        if (leadError) throw leadError;
+        currentLeadId = newLead.id;
+      }
+
       const total = calculateTotal();
       
       await createQuote.mutateAsync({
         created_by: user.id,
-        client_id: clientId,
-        vessel_id: vesselId || null,
+        lead_id: currentLeadId,
         status: 'pending_approval',
         discount_amount: 0,
         grand_total: total,
@@ -83,8 +135,9 @@ export default function ExternalQuoteNewPage() {
       });
 
       navigate('/external-quotes');
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      toast.error('Erro ao salvar: ' + e.message);
     }
   };
 
@@ -92,27 +145,69 @@ export default function ExternalQuoteNewPage() {
     <div className="max-w-3xl mx-auto space-y-6 pb-20 animate-fade-in">
       <PageHeader 
         title="Novo Orçamento Externo" 
-        description="Selecione o cliente e adicione os itens para aprovação."
+        description="Adicione dados do prospecto e os itens para enviar para aprovação."
       />
 
       <Card className="border-primary/10 shadow-sm overflow-hidden">
         <div className="bg-primary/5 p-4 border-b border-primary/10 flex items-center gap-2">
           <User className="h-5 w-5 text-primary" />
-          <h3 className="font-semibold text-primary">Dados do Cliente</h3>
+          <h3 className="font-semibold text-primary">Dados do Cliente/Lead</h3>
         </div>
         <CardContent className="p-6 space-y-4">
+          {myLeads && myLeads.length > 0 && (
+            <div className="space-y-2 mb-4 pb-4 border-b">
+              <Label>Selecionar Prospecto Existente</Label>
+              <Select value={leadId} onValueChange={setLeadId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Criar novo prospecto..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="new">+ Criar Novo Prospecto</SelectItem>
+                  {myLeads.map(l => (
+                    <SelectItem key={l.id} value={l.id}>{l.full_name_or_company_name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Nome do Cliente *</Label>
+              <Input 
+                value={leadName} 
+                onChange={e => setLeadName(e.target.value)} 
+                placeholder="Ex: João Silva"
+                disabled={leadId !== 'new'}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>WhatsApp/Telefone</Label>
+              <div className="relative">
+                <Phone className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                <Input 
+                  className="pl-9"
+                  value={leadPhone} 
+                  onChange={e => setLeadPhone(e.target.value)} 
+                  placeholder="5521999998888"
+                  disabled={leadId !== 'new'}
+                />
+              </div>
+            </div>
+          </div>
+
           <div className="space-y-2">
-            <Label>Cliente *</Label>
-            <Select value={clientId} onValueChange={setClientId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Selecione um cliente..." />
-              </SelectTrigger>
-              <SelectContent>
-                {clients?.map(c => (
-                  <SelectItem key={c.id} value={c.id}>{c.full_name_or_company_name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Label>Embarcação (Opcional)</Label>
+            <div className="relative">
+              <Anchor className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+              <Input 
+                className="pl-9"
+                value={vesselName} 
+                onChange={e => setVesselName(e.target.value)} 
+                placeholder="Ex: My Pearl 300"
+                disabled={leadId !== 'new'}
+              />
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -149,6 +244,7 @@ export default function ExternalQuoteNewPage() {
                           <SelectValue placeholder="Selecione um produto..." />
                         </SelectTrigger>
                         <SelectContent>
+                          <SelectItem value="">-- Produto Manual --</SelectItem>
                           {products?.filter(p => p.active).map(p => (
                             <SelectItem key={p.id} value={p.id}>{p.product_name}</SelectItem>
                           ))}
@@ -164,6 +260,17 @@ export default function ExternalQuoteNewPage() {
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
+
+                  {!item.product_id && (
+                    <div className="space-y-2">
+                      <Label className="text-xs">Descrição do Produto *</Label>
+                      <Input 
+                        value={item.product_name} 
+                        onChange={e => updateItem(index, 'product_name', e.target.value)}
+                        placeholder="Descreva o produto/peça"
+                      />
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">

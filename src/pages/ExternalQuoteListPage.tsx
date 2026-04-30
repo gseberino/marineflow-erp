@@ -20,7 +20,7 @@ export default function ExternalQuoteListPage() {
   
   const { data: quotes, isLoading } = useExternalQuotes({
     status: statusFilter === 'all' ? undefined : statusFilter,
-    seller_id: sellerId
+    created_by: sellerId
   });
 
   const getStatusBadge = (status: ExternalQuoteStatus) => {
@@ -145,7 +145,7 @@ export default function ExternalQuoteListPage() {
                     {getStatusIcon(quote.status)}
                   </div>
                   <div>
-                    <CardTitle className="text-sm font-medium">{quote.client?.full_name_or_company_name || '—'}</CardTitle>
+                    <CardTitle className="text-sm font-medium">{quote.client?.full_name_or_company_name || quote.lead?.full_name_or_company_name || '—'}</CardTitle>
                     <p className="text-xs text-muted-foreground">
                       {format(new Date(quote.created_at), "dd 'de' MMMM", { locale: ptBR })}
                     </p>

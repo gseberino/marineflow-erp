@@ -170,8 +170,8 @@ export default function ExternalQuoteDetailPage() {
                   <User className="h-4 w-4 text-primary" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium">{quote.client?.full_name_or_company_name || '—'}</p>
-                  <p className="text-xs text-muted-foreground">{quote.client?.phone || '—'}</p>
+                  <p className="text-sm font-medium">{quote.client?.full_name_or_company_name || quote.lead?.full_name_or_company_name || '—'}</p>
+                  <p className="text-xs text-muted-foreground">{quote.client?.phone || quote.lead?.phone || '—'}</p>
                 </div>
               </div>
               {quote.vessel?.boat_name && (

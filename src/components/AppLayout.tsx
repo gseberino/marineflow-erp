@@ -82,6 +82,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
       id: 'operacional',
       label: 'Operacional',
       icon: Wrench,
+      roles: ['admin', 'financial', 'technician', 'seller'],
       items: [
         { label: 'CRM & Funil', icon: Target, path: '/crm' },
         { label: 'Ordens de Serviço', icon: ClipboardList, path: '/service-orders' },
@@ -103,6 +104,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
       id: 'cadastros',
       label: 'Cadastros',
       icon: Database,
+      roles: ['admin', 'financial', 'technician', 'seller'],
       items: [
         { label: 'Clientes', icon: Users, path: '/clients' },
         { label: 'Embarcações', icon: Ship, path: '/vessels' },
@@ -128,6 +130,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
       id: 'whatsapp',
       label: 'WhatsApp',
       icon: MessageCircle,
+      roles: ['admin', 'financial', 'seller'],
       items: [
         { label: 'Leads / Inbox', icon: MessageCircle, path: '/whatsapp/leads' },
         { label: 'Logs', icon: History, path: '/whatsapp/logs', roles: ['admin'] },
