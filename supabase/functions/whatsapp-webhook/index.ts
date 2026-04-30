@@ -148,61 +148,28 @@ Deno.serve(async (req) => {
     { auth: { persistSession: false, autoRefreshToken: false } }
   );
 
-  // --- FERRAMENTA DE CORREÇÃO DE ACENTOS (TEMPORÁRIA V3.1) ---
+  // --- FERRAMENTA DE INSPEÇÃO DE ACENTOS (DETECTIVE MODE) ---
   if (req.method === "GET") {
     try {
-      console.log("[Fix] Iniciando correção global V3.1 (Tabelas de Listas)...");
-      const chars = ["?", "\uFFFD"];
-      const mapping = [
-        { from: "Tubar{char}o", to: "Tubarão" }, { from: "Can{char}ado", to: "Cançado" },
-        { from: "S{char}o ", to: "São " }, { from: "Concei{char}{char}o", to: "Conceição" },
-        { from: "Jo{char}o", to: "João" }, { from: "Jos{char}", to: "José" },
-        { from: "Ant{char}nio", to: "Antônio" }, { from: "Vit{char}ria", to: "Vitória" },
-        { from: "Ribeir{char}o", to: "Ribeirão" }, { from: "Goi{char}s", to: "Goiás" },
-        { from: "Itaja{char}", to: "Itajaí" }, { from: "Crici{char}ma", to: "Criciúma" },
-        { from: "Florian{char}polis", to: "Florianópolis" }, { from: "Beltr{char}o", to: "Beltrão" },
-        { from: "m{char}s", to: "mês" }, { from: "at{char}", to: "até" }
-      ];
-
-      let count = 0;
-      const tablesToClean = [
-        { name: "clients", cols: ["full_name_or_company_name", "city", "neighborhood", "address"] },
-        { name: "marinas", cols: ["name", "city"] },
-        { name: "vessels", cols: ["boat_name", "home_port"] },
-        { name: "products", cols: ["name", "category"] },
-        { name: "services", cols: ["name", "category"] },
-        { name: "whatsapp_leads", cols: ["display_name"] }
-      ];
-
-      for (const table of tablesToClean) {
-        const { data: rows } = await admin.from(table.name).select("*");
-        if (!rows) continue;
-
-        for (const row of rows) {
-          let updateObj: any = {};
-          let changed = false;
-
-          for (const col of table.cols) {
-            let val = row[col] || "";
-            let oldVal = val;
-            for (const char of chars) {
-              for (const m of mapping) {
-                const find = m.from.replace(/{char}/g, char);
-                const regex = new RegExp(find.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
-                if (regex.test(val)) { val = val.replace(regex, m.to); changed = true; }
-              }
-            }
-            if (oldVal !== val) updateObj[col] = val;
-          }
-
-          if (changed) {
-            await admin.from(table.name).update(updateObj).eq("id", row.id);
-            count++;
-          }
+      console.log("[Inspect] Iniciando inspeção de caracteres...");
+      const { data: clients } = await admin.from("clients").select("full_name_or_company_name, city").limit(100);
+      const { data: marinas } = await admin.from("marinas").select("name, city").limit(50);
+      
+      const results: any[] = [];
+      const check = (str: string, source: string) => {
+        if (!str) return;
+        if (str.includes("?") || str.includes("\uFFFD")) {
+          const hex = Array.from(str).map(c => `U+${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}`).join(" ");
+          results.push({ source, text: str, hex });
         }
-      }
+      };
 
-      return new Response(`Sucesso! ${count} registros corrigidos em múltiplas tabelas (V3.1).`, { headers: { ...corsHeaders, "Content-Type": "text/plain; charset=utf-8" } });
+      clients?.forEach(c => { check(c.full_name_or_company_name, "client_name"); check(c.city, "client_city"); });
+      marinas?.forEach(m => { check(m.name, "marina_name"); check(m.city, "marina_city"); });
+
+      return new Response(JSON.stringify(results, null, 2), { 
+        headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" } 
+      });
     } catch (e) {
       return new Response("Erro: " + e.message, { status: 500, headers: corsHeaders });
     }
