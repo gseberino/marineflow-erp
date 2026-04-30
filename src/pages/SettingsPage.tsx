@@ -1173,7 +1173,7 @@ function UsersTab() {
     try {
       await createUser.mutateAsync(newForm);
       setShowNew(false);
-      setNewForm({ full_name: '', email: '', role: 'technician', phone: '' });
+      setNewForm({ full_name: '', email: '', role: 'technician', phone: '', department: '' });
       toast.success('Usuário criado com sucesso');
     } catch (e: any) { toast.error(e.message || 'Erro'); }
   };
