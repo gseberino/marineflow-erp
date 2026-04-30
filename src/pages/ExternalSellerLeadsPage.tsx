@@ -170,7 +170,7 @@ export default function ExternalSellerLeadsPage() {
                       {lead.phone || 'Sem telefone'}
                     </div>
                   </div>
-                  <Badge variant={lead.promoted_client_id ? "success" : "secondary"}>
+                  <Badge variant={lead.promoted_client_id ? "default" : "secondary"} className={lead.promoted_client_id ? "bg-emerald-600 hover:bg-emerald-700" : ""}>
                     {lead.promoted_client_id ? "Convertido" : "Lead"}
                   </Badge>
                 </div>
