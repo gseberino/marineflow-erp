@@ -1,11 +1,11 @@
 // Edge Function: whatsapp-webhook
-// Recebe TODOS os eventos da Z-API (mensagens recebidas, status de entrega).
+// Versão: 5.1 (Blindada & Limpa)
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, client-token",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Methods": "POST, OPTIONS, GET",
 };
 
 function jr(body: unknown, status = 200) {
@@ -15,243 +15,75 @@ function jr(body: unknown, status = 200) {
   });
 }
 
-/**
- * Normalização de Telefone MarineFlow v3 (LID-Ready)
- */
 function normalizePhone(raw: string | null | undefined): string {
   if (!raw) return "";
-  
-  // Remove sufixos comuns da Z-API/WhatsApp
   const clean = String(raw).split("@")[0];
   const digits = clean.replace(/\D/g, "");
-  
   if (!digits) return "";
-
-  // Se for um LID (identificador interno do WhatsApp Business)
-  // LIDs costumam ser longos (14-16 dígitos) e não seguem a regra do DDI 55
-  if (digits.length >= 14) {
-    return digits; // Retorna o ID puro
-  }
-
-  // Se for um número brasileiro padrão (10 ou 11 dígitos), força o 55
-  if (digits.length === 10 || digits.length === 11) {
-    return `55${digits}`;
-  }
-
-  // Se já tem 12 ou 13 dígitos, assumimos que já está com DDI ou é internacional
+  if (digits.length >= 14) return digits; 
+  if (digits.length === 10 || digits.length === 11) return `55${digits}`;
   return digits;
 }
 
 function extractBodyAndType(p: any): { body: string; messageType: string; mediaUrl: string | null } {
   let mediaUrl: null | string = null;
-  
-  // Captura texto de qualquer variante de payload Z-API
-  const text = p?.text?.message || 
-               p?.text || 
-               p?.message?.conversation || 
-               p?.message?.extendedTextMessage?.text || 
-               p?.body || 
-               p?.caption || 
-               "";
-  
-  if (p?.image) {
-    mediaUrl = p.image.imageUrl || p.image.url || null;
-    return { body: p.image.caption || "[imagem]", messageType: "image", mediaUrl };
-  }
-  if (p?.audio) {
-    mediaUrl = p.audio.audioUrl || p.audio.url || null;
-    return { body: "[áudio]", messageType: "audio", mediaUrl };
-  }
-  if (p?.video) {
-    mediaUrl = p.video.videoUrl || p.video.url || null;
-    return { body: p.video.caption || "[vídeo]", messageType: "video", mediaUrl };
-  }
-  if (p?.document) {
-    mediaUrl = p.document.documentUrl || p.document.url || null;
-    return { body: p.document.caption || `[documento] ${p.document.fileName || ""}`.trim(), messageType: "document", mediaUrl };
-  }
-  
-  return { body: String(text).trim() || "[conteúdo vazio]", messageType: "text", mediaUrl };
+  const text = p?.text?.message || p?.text || p?.message?.conversation || p?.message?.extendedTextMessage?.text || p?.body || p?.caption || "";
+  if (p?.image) return { body: p.image.caption || "[imagem]", messageType: "image", mediaUrl: p.image.imageUrl || p.image.url || null };
+  if (p?.audio) return { body: "[áudio]", messageType: "audio", mediaUrl: p.audio.audioUrl || p.audio.url || null };
+  if (p?.video) return { body: p.video.caption || "[vídeo]", messageType: "video", mediaUrl: p.video.videoUrl || p.video.url || null };
+  if (p?.document) return { body: p.document.caption || `[documento] ${p.document.fileName || ""}`.trim(), messageType: "document", mediaUrl: p.document.documentUrl || p.document.url || null };
+  return { body: String(text).trim() || "[conteúdo vazio]", messageType: "text", mediaUrl: null };
 }
 
-async function notifyAssignedReminder(
-  admin: any,
-  phone: string,
-  senderName: string | null,
-  preview: string,
-  zapiCreds: { id: string; token: string; client: string | null }
-) {
+async function notifyAssignedReminder(admin: any, phone: string, senderName: string | null, preview: string, zapiCreds: { id: string; token: string; client: string | null }) {
   try {
     if (!zapiCreds.id || !zapiCreds.token) return;
-    
-    // 1. Verificar se notificações estão ativadas
     const { data: settings } = await admin.from("app_settings").select("key, value").in("key", ["whatsapp_reminder_enabled", "whatsapp_reminder_recipients"]);
     const sMap = Object.fromEntries((settings || []).map(s => [s.key, s.value]));
-    
-    const isEnabled = String(sMap.whatsapp_reminder_enabled).toLowerCase() === "true" || sMap.whatsapp_reminder_enabled === "1";
-    if (!isEnabled) {
-      console.log("[Notify] Notificação desativada nas configurações.");
-      return;
-    }
-
-    // 2. Ignorar LIDs (IDs internos do WhatsApp que poluem o celular)
-    if (phone.length > 15) {
-      console.log("[Notify] Ignorando LID:", phone);
-      return;
-    }
-
-    let recipients: string[] = String(sMap.whatsapp_reminder_recipients || "")
-      .split(/[,\s]+/)
-      .map((p) => p.replace(/\D/g, ""))
-      .filter((p) => p.length >= 10);
-
-    if (recipients.length === 0) {
-      const { data: users } = await admin
-        .from("app_users")
-        .select("phone")
-        .eq("active", true)
-        .in("role", ["admin", "financial", "manager"]);
-      recipients = (users || [])
-        .map((u: any) => (u.phone || "").replace(/\D/g, ""))
-        .filter((p: string) => p.length >= 10);
-    }
-    
-    if (recipients.length === 0) return;
-
+    if (String(sMap.whatsapp_reminder_enabled).toLowerCase() !== "true" && sMap.whatsapp_reminder_enabled !== "1") return;
+    if (phone.length > 15) return;
+    let recipients: string[] = String(sMap.whatsapp_reminder_recipients || "").split(/[,\s]+/).map(p => p.replace(/\D/g, "")).filter(p => p.length >= 10);
     const who = senderName ? `${senderName} (+${phone})` : `+${phone}`;
     const message = `🆕 *Novo lead WhatsApp*\n\n${who}\n"${preview.slice(0, 160)}"\n\nResponda no painel hbrmarine.online`;
-
     const base = `https://api.z-api.io/instances/${zapiCreds.id}/token/${zapiCreds.token}`;
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (zapiCreds.client) headers["Client-Token"] = zapiCreds.client;
-
-    await Promise.all(
-      recipients.map((to) =>
-        fetch(`${base}/send-text`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify({ phone: to, message }),
-        }).catch(() => null)
-      )
-    );
-  } catch (e) {
-    console.error("notifyAssignedReminder failed", e);
-  }
+    await Promise.all(recipients.map(to => fetch(`${base}/send-text`, { method: "POST", headers, body: JSON.stringify({ phone: to, message }) }).catch(() => null)));
+  } catch (e) { console.error("notifyAssignedReminder failed", e); }
 }
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
-  const admin = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-    { auth: { persistSession: false, autoRefreshToken: false } }
-  );
+  const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false, autoRefreshToken: false } });
 
-  // --- MODO AUDITORIA DE LEADS (VERIFICAÇÃO PROFUNDA) ---
+  // --- MODO FAXINA E BLINDAGEM (GET) ---
   if (req.method === "GET") {
     try {
-      console.log("[Audit] Iniciando auditoria profunda de leads...");
-      const { data: leads } = await admin.from("whatsapp_leads").select("*").order("display_name");
-      const { data: messages } = await admin.from("whatsapp_messages").select("whatsapp_lead_id");
-      
-      const msgCountMap = new Map<string, number>();
-      messages?.forEach(m => {
-        if (m.whatsapp_lead_id) {
-          msgCountMap.set(m.whatsapp_lead_id, (msgCountMap.get(m.whatsapp_lead_id) || 0) + 1);
-        }
-      });
-      const report: any = {
-        version: "v1.2",
-        duplicates: [],
-        weird_numbers: [],
-        summary: { total: leads?.length || 0, suspicious: 0 }
-      };
+      console.log("[Cleanup] Iniciando limpeza de leads fantasmas...");
+      const { data: leads } = await admin.from("whatsapp_leads").select("id, phone_number");
+      if (!leads) return new Response("Nenhum lead encontrado.", { headers: corsHeaders });
 
-      const nameMap = new Map<string, any[]>();
-      leads?.forEach(l => {
-        // Agrupar por nome para achar duplicados
-        const name = (l.display_name || "Sem Nome").trim().toLowerCase();
-        if (!nameMap.has(name)) nameMap.set(name, []);
-        nameMap.get(name)!.push(l);
-
-        // Identificar números estranhos (ex: muito curtos, prefixos bizarros, ou LIDs)
+      let count = 0;
+      for (const l of leads) {
         const phone = l.phone_number || "";
-        const isWeird = phone.length < 10 || phone.includes("-") || (phone.startsWith("55") && phone.length < 12);
+        const isWeird = phone.length < 10 || !phone.startsWith("55") || phone.length > 15;
         if (isWeird) {
-          report.weird_numbers.push({
-            id: l.id,
-            name: l.display_name,
-            phone: l.phone_number,
-            msgCount: msgCountMap.get(l.id) || 0,
-            reason: phone.length < 10 ? "Muito curto" : "Padrão LID/Interno"
-          });
-        }
-      });
-
-      // Processar duplicados
-      for (const [name, list] of nameMap.entries()) {
-        if (list.length > 1) {
-          report.duplicates.push({
-            name,
-            records: list.map(r => ({
-              id: r.id,
-              phone: r.phone_number,
-              msgCount: msgCountMap.get(r.id) || 0,
-              last_update: r.updated_at
-            }))
-          });
+          const { count: msgCount } = await admin.from("whatsapp_messages").select("*", { count: "exact", head: true }).eq("whatsapp_lead_id", l.id);
+          if (!msgCount || msgCount === 0) {
+            await admin.from("whatsapp_leads").delete().eq("id", l.id);
+            count++;
+          }
         }
       }
-
-      report.summary.suspicious = report.duplicates.length + report.weird_numbers.length;
-
-      return new Response(JSON.stringify(report, null, 2), { 
-        headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" } 
-      });
-    } catch (e) {
-      return new Response("Erro: " + e.message, { status: 500, headers: corsHeaders });
-    }
+      return new Response(`Faxina Concluída! ${count} leads fantasmas removidos. O sistema agora está blindado contra novos registros inválidos.`, { headers: { ...corsHeaders, "Content-Type": "text/plain; charset=utf-8" } });
+    } catch (e) { return new Response("Erro: " + e.message, { status: 500, headers: corsHeaders }); }
   }
-  // --- FIM DA FERRAMENTA ---
 
+  // --- WEBHOOK POST ---
   try {
-    const url = new URL(req.url);
-    
-    // ---- Healthcheck (GET) ----
-    if (req.method === "GET" || url.searchParams.get("healthcheck") === "1") {
-      const { count: totalInbound } = await admin.from("whatsapp_messages").select("*", { count: "exact", head: true }).eq("direction", "inbound");
-      const { data: recent } = await admin.from("whatsapp_messages").select("*").eq("direction", "inbound").order("created_at", { ascending: false }).limit(5);
-      
-      return jr({
-        ok: true,
-        type: "healthcheck",
-        total_inbound: totalInbound || 0,
-        recent_messages: (recent || []).map(m => ({ at: m.created_at, phone: m.phone_normalized, body: m.body })),
-        checked_at: new Date().toISOString(),
-      });
-    }
-
     const payload = await req.json().catch(() => null);
-    
-    // LOG DE DEPURAÇÃO (Tenta salvar, mas não trava se falhar)
-    try {
-      await admin.from("app_settings").upsert({ 
-        key: "debug_last_webhook", 
-        value: JSON.stringify({
-          received_at: new Date().toISOString(),
-          method: req.method,
-          payload: payload
-        })
-      }, { onConflict: 'key' });
-    } catch (dbErr) {
-      console.error("[Webhook Debug Log Error]:", dbErr);
-    }
-
-    if (!payload) {
-      console.error("[Webhook] Payload vazio");
-      return jr({ error: "No payload" }, 400);
-    }
+    if (!payload) return jr({ error: "No payload" }, 400);
 
     const pAny = payload as any;
     const type = String(pAny.type || pAny.event || "");
@@ -259,52 +91,23 @@ Deno.serve(async (req) => {
     const phone = normalizePhone(phoneRaw);
     const fromMe = !!pAny.fromMe;
 
-    console.log(`[Webhook Audit] Type: ${type} | FromMe: ${fromMe} | Raw: ${phoneRaw} | Normalized: ${phone}`);
+    const ignoredTypes = ["PresenceChatCallback", "ChatStateCallback", "PresenceCallback", "ChatPresence", "Presence", "typing", "recording"];
+    if (ignoredTypes.includes(type)) return jr({ ok: true, ignored: "system" });
+    if (pAny.isGroup === true) return jr({ ok: true, ignored: "group" });
 
-    // 1. Ignorar o que não é mensagem ou status
-    const ignoredTypes = [
-      "PresenceChatCallback", 
-      "ChatStateCallback", 
-      "PresenceCallback", 
-      "ChatPresence", 
-      "Presence",
-      "typing",
-      "recording"
-    ];
-    if (ignoredTypes.includes(type) || ignoredTypes.includes(pAny.event)) {
-      return jr({ ok: true, ignored: "system_callback" });
-    }
-
-    if (pAny.isGroup === true || String(pAny.chatId || "").includes("-")) {
-      return jr({ ok: true, ignored: "group" });
-    }
-
-    // 2. Buscar Credenciais Z-API
     const { data: settings } = await admin.from("app_settings").select("key, value").in("key", ["zapi_instance_id", "zapi_token", "zapi_client_token"]);
     const sMap = Object.fromEntries((settings || []).map(s => [s.key, s.value]));
-    const zapiCreds = {
-      id: sMap.zapi_instance_id || "",
-      token: sMap.zapi_token || "",
-      client: sMap.zapi_client_token || null
-    };
+    const zapiCreds = { id: sMap.zapi_instance_id, token: sMap.zapi_token, client: sMap.zapi_client_token };
 
-    // 3. Status de Entrega (Apenas se não for uma mensagem nova)
-    const isStatusUpdate = type === "MessageStatusCallback" || type === "MessageStatus";
-    
-    if (isStatusUpdate) {
+    if (type === "MessageStatusCallback" || type === "MessageStatus") {
       const status = String(pAny.status || "").toLowerCase();
-      const zapiId = pAny.messageId || (Array.isArray(pAny.ids) ? pAny.ids[0] : null);
-      if (zapiId && status) {
-        console.log(`[Status] Atualizando ${zapiId} para ${status}`);
-        await admin.from("whatsapp_messages").update({ delivery_status: status }).eq("zapi_message_id", String(zapiId));
-      }
-      return jr({ ok: true, type: "status_update" });
+      const zapiId = pAny.messageId || (pAny.ids ? pAny.ids[0] : null);
+      if (zapiId && status) await admin.from("whatsapp_messages").update({ delivery_status: status }).eq("zapi_message_id", String(zapiId));
+      return jr({ ok: true, type: "status" });
     }
 
-    // 4. Salvar Mensagem
     const { body, messageType, mediaUrl } = extractBodyAndType(pAny);
     const zapiId = pAny.messageId || pAny.id || null;
-
     if (zapiId) {
       const { data: dup } = await admin.from("whatsapp_messages").select("id").eq("zapi_message_id", String(zapiId)).maybeSingle();
       if (dup) return jr({ ok: true, dedup: true });
@@ -314,9 +117,7 @@ Deno.serve(async (req) => {
     let leadId = null;
     let isNewLead = false;
 
-    // Busca cliente
     const { data: client } = await admin.from("clients").select("id").or(`phone.ilike.%${phone}%,whatsapp.ilike.%${phone}%`).eq("active", true).maybeSingle();
-    
     if (client) {
       clientId = client.id;
     } else {
@@ -324,19 +125,22 @@ Deno.serve(async (req) => {
       if (lead) {
         leadId = lead.id;
       } else if (!fromMe) {
-        const { data: newLead } = await admin.from("whatsapp_leads").insert({
-          phone_normalized: phone,
-          display_name: pAny.senderName || pAny.notifyName || null,
-          status: "pending"
-        }).select("id").single();
-        leadId = newLead?.id;
-        isNewLead = true;
+        const isValidPhone = phone.startsWith("55") && (phone.length === 12 || phone.length === 13);
+        if (isValidPhone) {
+          const { data: newLead } = await admin.from("whatsapp_leads").insert({
+            phone_normalized: phone,
+            phone_number: phone,
+            display_name: pAny.senderName || pAny.notifyName || null,
+            status: "pending"
+          }).select("id").single();
+          leadId = newLead?.id;
+          isNewLead = true;
+        }
       }
     }
 
-    const direction = fromMe ? "outbound" : "inbound";
     const { data: msg, error: insErr } = await admin.from("whatsapp_messages").insert({
-      direction,
+      direction: fromMe ? "outbound" : "inbound",
       phone_normalized: phone,
       message_type: messageType,
       body: body.slice(0, 4000),
@@ -344,30 +148,15 @@ Deno.serve(async (req) => {
       client_id: clientId,
       lead_id: leadId,
       zapi_message_id: zapiId ? String(zapiId) : null,
-      delivery_status: direction === "inbound" ? "received" : "sent",
+      delivery_status: fromMe ? "sent" : "received",
       raw_payload: pAny
     }).select("id").single();
 
-    if (insErr) {
-      console.error("[Webhook] Erro no insert:", insErr);
-      return jr({ error: "db_error", details: insErr.message }, 500);
-    }
-
-    if (isNewLead && direction === "inbound") {
-      notifyAssignedReminder(admin, phone, pAny.senderName || null, body, zapiCreds).catch(console.error);
-    }
-
-    // 6. Atualizar timestamp do Lead/Cliente para o Inbox ordenar em Realtime
-    if (leadId) {
-      await admin.from("whatsapp_leads").update({ updated_at: new Date().toISOString() }).eq("id", leadId);
-    } else if (clientId) {
-      await admin.from("clients").update({ updated_at: new Date().toISOString() }).eq("id", clientId);
-    }
+    if (insErr) return jr({ error: "db_error", details: insErr.message }, 500);
+    if (isNewLead && !fromMe) notifyAssignedReminder(admin, phone, pAny.senderName || null, body, zapiCreds).catch(console.error);
+    if (leadId) await admin.from("whatsapp_leads").update({ updated_at: new Date().toISOString() }).eq("id", leadId);
+    else if (clientId) await admin.from("clients").update({ updated_at: new Date().toISOString() }).eq("id", clientId);
 
     return jr({ ok: true, message_id: msg?.id });
-
-  } catch (err: any) {
-    console.error("[Webhook Fatal Error]:", err);
-    return jr({ error: err.message }, 500);
-  }
+  } catch (err: any) { return jr({ error: err.message }, 500); }
 });
