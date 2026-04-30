@@ -118,7 +118,7 @@ export default function ExternalQuoteDetailPage() {
                 <div className="pt-4 space-y-2">
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Subtotal</span>
-                    <span>{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(quote.subtotal)}</span>
+                    <span>{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((quote as any).subtotal ?? quote.grand_total)}</span>
                   </div>
                   {quote.discount_amount > 0 && (
                     <div className="flex justify-between text-sm text-green-600">
@@ -197,10 +197,10 @@ export default function ExternalQuoteDetailPage() {
                 <Calendar className="h-4 w-4" />
                 <span>Criado em: {format(new Date(quote.created_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}</span>
               </div>
-              {quote.approved_at && (
+              {(quote as any).approved_at && (
                 <div className="flex items-center gap-2 text-green-600">
                   <Calendar className="h-4 w-4" />
-                  <span>Aprovado em: {format(new Date(quote.approved_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}</span>
+                  <span>Aprovado em: {format(new Date((quote as any).approved_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}</span>
                 </div>
               )}
             </CardContent>

@@ -9,11 +9,13 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter 
 } from '@/components/ui/dialog';
 import { User, Phone, Anchor, Search, Plus, Filter, AlertCircle, Loader2 } from 'lucide-react';
+import { useAuth } from '@/hooks/use-auth';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
 export default function ExternalSellerLeadsPage() {
+  const { user } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddOpen, setIsAddOpen] = useState(false);
   const queryClient = useQueryClient();
@@ -25,9 +27,8 @@ export default function ExternalSellerLeadsPage() {
   });
 
   const { data: leads, isLoading } = useQuery({
-    queryKey: ['my-leads-full'],
+    queryKey: ['my-leads-full', user?.id],
     queryFn: async () => {
-      const { data: { user } } = await supabase.auth.getUser();
       if (!user) return [];
       const { data, error } = await supabase
         .from('external_quote_leads')
@@ -36,23 +37,24 @@ export default function ExternalSellerLeadsPage() {
         .order('created_at', { ascending: false });
       if (error) throw error;
       return data;
-    }
+    },
+    enabled: !!user
   });
 
   const createLeadMutation = useMutation({
     mutationFn: async (vars: typeof newLead) => {
-      const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Não autenticado');
 
       const { data, error } = await supabase
         .from('external_quote_leads')
         .insert([{
           created_by: user.id,
+          marina_id: user.marina_id,
           type: 'person',
           full_name_or_company_name: vars.name,
           phone: vars.phone,
           boat_name: vars.vessel
-        }])
+        } as any])
         .select()
         .single();
       
@@ -170,7 +172,7 @@ export default function ExternalSellerLeadsPage() {
                       {lead.phone || 'Sem telefone'}
                     </div>
                   </div>
-                  <Badge variant={lead.promoted_client_id ? "success" : "secondary"}>
+                  <Badge variant={lead.promoted_client_id ? "default" : "secondary"} className={lead.promoted_client_id ? "bg-green-600" : ""}>
                     {lead.promoted_client_id ? "Convertido" : "Lead"}
                   </Badge>
                 </div>

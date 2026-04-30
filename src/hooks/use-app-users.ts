@@ -78,7 +78,7 @@ export function useCreateAppUser() {
     mutationFn: async (user: Omit<AppUser, 'id' | 'active'>) => {
       const { data, error } = await supabase
         .from('app_users')
-        .insert([{ ...user, id: crypto.randomUUID(), active: true }])
+        .insert([{ ...user, id: crypto.randomUUID(), active: true } as any])
         .select()
         .single();
       if (error) throw error;
@@ -98,7 +98,7 @@ export function useUpdateAppUser() {
       const { id, ...changes } = user;
       const { data, error } = await supabase
         .from('app_users')
-        .update(changes)
+        .update(changes as any)
         .eq('id', id)
         .select()
         .single();

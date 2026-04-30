@@ -142,7 +142,7 @@ export default function ExternalQuoteListPage() {
               <CardHeader className="pb-3 flex flex-row items-center justify-between space-y-0">
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-muted rounded-lg group-hover:bg-primary/10 transition-colors">
-                    {getStatusIcon(quote.status)}
+                    {getStatusIcon(quote.status as ExternalQuoteStatus)}
                   </div>
                   <div>
                     <CardTitle className="text-sm font-medium">{quote.client?.full_name_or_company_name || quote.lead?.full_name_or_company_name || '—'}</CardTitle>
@@ -151,7 +151,7 @@ export default function ExternalQuoteListPage() {
                     </p>
                   </div>
                 </div>
-                {getStatusBadge(quote.status)}
+                {getStatusBadge(quote.status as ExternalQuoteStatus)}
               </CardHeader>
               <CardContent>
                 <div className="flex justify-between items-end">

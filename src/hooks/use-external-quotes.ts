@@ -22,6 +22,8 @@ export type ExternalQuote = Database['public']['Tables']['external_quotes']['Row
   client?: Database['public']['Tables']['clients']['Row'];
   lead?: Database['public']['Tables']['external_quote_leads']['Row'];
   vessel?: Database['public']['Tables']['vessels']['Row'];
+  subtotal?: number;
+  approved_at?: string;
 };
 
 export function useExternalQuotes(filters?: { status?: string; created_by?: string }) {
@@ -44,7 +46,7 @@ export function useExternalQuotes(filters?: { status?: string; created_by?: stri
 
       const { data, error } = await query;
       if (error) throw error;
-      return data as ExternalQuote[];
+      return (data as unknown) as ExternalQuote[];
     },
   });
 }
@@ -69,7 +71,7 @@ export function useExternalQuote(id: string) {
         .single();
 
       if (error) throw error;
-      return data as ExternalQuote;
+      return (data as unknown) as ExternalQuote;
     },
     enabled: !!id,
   });

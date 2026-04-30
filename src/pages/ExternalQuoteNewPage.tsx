@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { MoneyInput } from '@/components/MoneyInput';
+import { useAuth } from '@/hooks/use-auth';
 import { useCreateExternalQuote } from '@/hooks/use-external-quotes';
 import { useProducts } from '@/hooks/use-products';
 import { Plus, Trash2, Save, ShoppingCart, User, Phone, Anchor, AlertCircle } from 'lucide-react';
@@ -16,6 +17,7 @@ import { useQuery } from '@tanstack/react-query';
 
 export default function ExternalQuoteNewPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const createQuote = useCreateExternalQuote();
   const { data: products } = useProducts();
 
@@ -91,10 +93,11 @@ export default function ExternalQuoteNewPage() {
     }
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Não autenticado');
 
       let currentLeadId = leadId !== 'new' ? leadId : null;
+
+      const marinaId = user?.marina_id;
 
       // Se for 'new', criamos um novo lead no banco
       if (leadId === 'new') {
@@ -102,11 +105,12 @@ export default function ExternalQuoteNewPage() {
           .from('external_quote_leads')
           .insert([{
             created_by: user.id,
+            marina_id: marinaId,
             type: 'person',
             full_name_or_company_name: leadName,
             phone: leadPhone,
             boat_name: vesselName
-          }])
+          } as any])
           .select()
           .single();
 
@@ -118,6 +122,7 @@ export default function ExternalQuoteNewPage() {
       
       await createQuote.mutateAsync({
         created_by: user.id,
+        marina_id: marinaId,
         lead_id: currentLeadId,
         status: 'pending_approval',
         discount_amount: 0,
