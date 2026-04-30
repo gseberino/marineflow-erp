@@ -148,11 +148,10 @@ Deno.serve(async (req) => {
     { auth: { persistSession: false, autoRefreshToken: false } }
   );
 
-  // --- FERRAMENTA DE CORREÇÃO DE ACENTOS (TEMPORÁRIA V3.0) ---
+  // --- FERRAMENTA DE CORREÇÃO DE ACENTOS (TEMPORÁRIA V3.1) ---
   if (req.method === "GET") {
     try {
-      console.log("[Fix] Iniciando correção global de acentos V3.0...");
-      // \uFFFD é o código técnico do símbolo ''
+      console.log("[Fix] Iniciando correção global V3.1 (Tabelas de Listas)...");
       const chars = ["?", "\uFFFD"];
       const mapping = [
         { from: "Tubar{char}o", to: "Tubarão" }, { from: "Can{char}ado", to: "Cançado" },
@@ -166,36 +165,44 @@ Deno.serve(async (req) => {
       ];
 
       let count = 0;
-      const { data: clients } = await admin.from("clients").select("*");
-      if (clients) {
-        for (const c of clients) {
-          let n = c.full_name_or_company_name || "";
-          let ct = c.city || "";
-          let b = c.neighborhood || "";
-          let a = c.address || "";
-          let ch = false;
+      const tablesToClean = [
+        { name: "clients", cols: ["full_name_or_company_name", "city", "neighborhood", "address"] },
+        { name: "marinas", cols: ["name", "city"] },
+        { name: "vessels", cols: ["boat_name", "home_port"] },
+        { name: "products", cols: ["name", "category"] },
+        { name: "services", cols: ["name", "category"] },
+        { name: "whatsapp_leads", cols: ["display_name"] }
+      ];
 
-          for (const char of chars) {
-            for (const m of mapping) {
-              const find = m.from.replace(/{char}/g, char);
-              // Regex para ignorar maiúsculas/minúsculas na busca
-              const regex = new RegExp(find.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
-              
-              if (regex.test(n)) { n = n.replace(regex, m.to); ch = true; }
-              if (regex.test(ct)) { ct = ct.replace(regex, m.to); ch = true; }
-              if (regex.test(b)) { b = b.replace(regex, m.to); ch = true; }
-              if (regex.test(a)) { a = a.replace(regex, m.to); ch = true; }
+      for (const table of tablesToClean) {
+        const { data: rows } = await admin.from(table.name).select("*");
+        if (!rows) continue;
+
+        for (const row of rows) {
+          let updateObj: any = {};
+          let changed = false;
+
+          for (const col of table.cols) {
+            let val = row[col] || "";
+            let oldVal = val;
+            for (const char of chars) {
+              for (const m of mapping) {
+                const find = m.from.replace(/{char}/g, char);
+                const regex = new RegExp(find.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+                if (regex.test(val)) { val = val.replace(regex, m.to); changed = true; }
+              }
             }
+            if (oldVal !== val) updateObj[col] = val;
           }
 
-          if (ch) {
-            await admin.from("clients").update({ full_name_or_company_name: n, city: ct, neighborhood: b, address: a }).eq("id", c.id);
+          if (changed) {
+            await admin.from(table.name).update(updateObj).eq("id", row.id);
             count++;
           }
         }
       }
-      // ... (continua lógica para leads similarmente se necessário)
-      return new Response(`Sucesso! ${count} registros corrigidos na V3.0 (Itajaí e outros).`, { headers: { ...corsHeaders, "Content-Type": "text/plain; charset=utf-8" } });
+
+      return new Response(`Sucesso! ${count} registros corrigidos em múltiplas tabelas (V3.1).`, { headers: { ...corsHeaders, "Content-Type": "text/plain; charset=utf-8" } });
     } catch (e) {
       return new Response("Erro: " + e.message, { status: 500, headers: corsHeaders });
     }
