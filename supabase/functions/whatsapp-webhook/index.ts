@@ -148,68 +148,61 @@ Deno.serve(async (req) => {
     { auth: { persistSession: false, autoRefreshToken: false } }
   );
 
-  // --- CORREÇÃO FINAL V5.0 (THE FINISHER) ---
+  // --- MODO AUDITORIA DE LEADS (VERIFICAÇÃO PROFUNDA) ---
   if (req.method === "GET") {
     try {
-      console.log("[Fix] Iniciando Reconstrução Final V5.0...");
-      const f = "\uFFFD";
+      console.log("[Audit] Iniciando auditoria profunda de leads...");
+      const { data: leads } = await admin.from("whatsapp_leads").select("*").order("display_name");
+      const { data: messages } = await admin.from("whatsapp_messages").select("whatsapp_lead_id, count()").group("whatsapp_lead_id");
       
-      const patterns = [
-        // Cidades e Endereços
-        { from: `Jo${f}o`, to: "João" }, { from: `Palho${f}a`, to: "Palhoça" },
-        { from: `Aruj${f}`, to: "Arujá" }, { from: `Mour${f}o`, to: "Mourão" },
-        { from: `Bar${f}o`, to: "Barão" }, { from: `Jundia${f}`, to: "Jundiaí" },
-        { from: `Tr${f}s`, to: "Três" }, { from: `Maring${f}`, to: "Maringá" },
-        { from: `Gusm${f}o`, to: "Gusmão" }, { from: `J${f}nio`, to: "Júnio" },
-        
-        // Nomes e Termos em MAIÚSCULO
-        { from: `L${f}GIA`, to: "LÍGIA" }, { from: `VE${f}CULO`, to: "VEÍCULO" },
-        { from: `ARA${f}JO`, to: "ARAÚJO" }, { from: `ALC${f}NTARA`, to: "ALCÂNTARA" },
-        { from: `PE${f}AS`, to: "PEÇAS" }, { from: `IND${f}STRIA`, to: "INDÚSTRIA" },
-        { from: `COM${f}RCIO`, to: "COMÉRCIO" }, { from: `N${f}UTICA`, to: "NÁUTICA" },
-        { from: `N${f}UTICOS`, to: "NÁUTICOS" }, { from: `CORPORA${f}${f}O`, to: "CORPORAÇÃO" },
-        
-        // Nomes Próprios e Termos Técnicos
-        { from: `Lu${f}s`, to: "Luís" }, { from: `Imobili${f}rios`, to: "Imobiliários" },
-        { from: `Ep${f}xi`, to: "Epóxi" }, { from: `Gusm${f}o`, to: "Gusmão" },
-        { from: `Galvaniza${f}${f}o`, to: "Galvanização" }
-      ];
+      const msgCountMap = new Map(messages?.map(m => [m.whatsapp_lead_id, m.count]));
+      const report: any = {
+        duplicates: [],
+        weird_numbers: [],
+        summary: { total: leads?.length || 0, suspicious: 0 }
+      };
 
-      let count = 0;
-      const tables = [
-        { name: "clients", cols: ["full_name_or_company_name", "city", "neighborhood", "address"] },
-        { name: "marinas", cols: ["name", "city"] },
-        { name: "vessels", cols: ["boat_name", "home_port"] }
-      ];
+      const nameMap = new Map<string, any[]>();
+      leads?.forEach(l => {
+        // Agrupar por nome para achar duplicados
+        const name = (l.display_name || "Sem Nome").trim().toLowerCase();
+        if (!nameMap.has(name)) nameMap.set(name, []);
+        nameMap.get(name)!.push(l);
 
-      for (const table of tables) {
-        const { data: rows } = await admin.from(table.name).select("*");
-        if (!rows) continue;
+        // Identificar números estranhos (ex: muito curtos, prefixos bizarros, ou LIDs)
+        const phone = l.phone_number || "";
+        const isWeird = phone.length < 10 || phone.includes("-") || (phone.startsWith("55") && phone.length < 12);
+        if (isWeird) {
+          report.weird_numbers.push({
+            id: l.id,
+            name: l.display_name,
+            phone: l.phone_number,
+            msgCount: msgCountMap.get(l.id) || 0,
+            reason: phone.length < 10 ? "Muito curto" : "Padrão LID/Interno"
+          });
+        }
+      });
 
-        for (const row of rows) {
-          let updateObj: any = {};
-          let changed = false;
-
-          for (const col of table.cols) {
-            let val = row[col] || "";
-            let oldVal = val;
-            if (val.includes(f) || val.includes("?")) {
-              for (const p of patterns) {
-                const regex = new RegExp(p.from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
-                if (regex.test(val)) { val = val.replace(regex, p.to); changed = true; }
-              }
-            }
-            if (oldVal !== val) updateObj[col] = val;
-          }
-
-          if (changed) {
-            await admin.from(table.name).update(updateObj).eq("id", row.id);
-            count++;
-          }
+      // Processar duplicados
+      for (const [name, list] of nameMap.entries()) {
+        if (list.length > 1) {
+          report.duplicates.push({
+            name,
+            records: list.map(r => ({
+              id: r.id,
+              phone: r.phone_number,
+              msgCount: msgCountMap.get(r.id) || 0,
+              last_update: r.updated_at
+            }))
+          });
         }
       }
 
-      return new Response(`Limpeza Final Concluída! ${count} registros restaurados.`, { headers: { ...corsHeaders, "Content-Type": "text/plain; charset=utf-8" } });
+      report.summary.suspicious = report.duplicates.length + report.weird_numbers.length;
+
+      return new Response(JSON.stringify(report, null, 2), { 
+        headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" } 
+      });
     } catch (e) {
       return new Response("Erro: " + e.message, { status: 500, headers: corsHeaders });
     }
