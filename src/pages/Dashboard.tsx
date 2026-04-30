@@ -1,6 +1,8 @@
+import { useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '@/hooks/use-auth';
 import { useDashboardData } from '@/hooks/use-dashboard';
 import { useI18n } from '@/i18n';
-import { useNavigate } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { TrendingUp, TrendingDown, AlertTriangle, CheckCircle, DollarSign, Package, ArrowRight, RefreshCw } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -12,8 +14,16 @@ const STATUS_ORDER = ['draft', 'scheduled', 'open', 'in_progress', 'awaiting_par
 export default function Dashboard() {
   const { formatCurrency, t, locale } = useI18n();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { data, isLoading, error, refetch } = useDashboardData();
   const statusLabels = t.status as Record<string, string>;
+
+  // Redirect external sellers away from the global dashboard
+  useEffect(() => {
+    if (user?.role === 'external_seller') {
+      navigate('/external-quotes', { replace: true });
+    }
+  }, [user, navigate]);
 
   const hour = new Date().getHours();
   const d = t.dashboard as any;

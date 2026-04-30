@@ -46,6 +46,8 @@ import ExternalQuoteListPage from "./pages/ExternalQuoteListPage";
 import ExternalQuoteNewPage from "./pages/ExternalQuoteNewPage";
 import ExternalQuoteApprovalPage from "./pages/ExternalQuoteApprovalPage";
 import ExternalQuoteDetailPage from "./pages/ExternalQuoteDetailPage";
+import ExternalSellerLeadsPage from "./pages/ExternalSellerLeadsPage";
+import ExternalProductCatalogPage from "./pages/ExternalProductCatalogPage";
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -106,6 +108,8 @@ const App = () => (
                             <ExternalQuoteApprovalPage />
                           </ProtectedRoute>
                         } />
+                        <Route path="/external-quotes/leads" element={<ExternalSellerLeadsPage />} />
+                        <Route path="/external-quotes/catalog" element={<ExternalProductCatalogPage />} />
                         <Route path="/external-quotes/:id" element={<ExternalQuoteDetailPage />} />
                         <Route path="/reports" element={<ReportsPage />} />
                         <Route path="/prospecting" element={

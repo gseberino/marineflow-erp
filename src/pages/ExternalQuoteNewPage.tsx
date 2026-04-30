@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { MoneyInput } from '@/components/MoneyInput';
 import { useCreateExternalQuote } from '@/hooks/use-external-quotes';
 import { useProducts } from '@/hooks/use-products';
-import { Plus, Trash2, Save, ShoppingCart, User, Phone, Anchor } from 'lucide-react';
+import { Plus, Trash2, Save, ShoppingCart, User, Phone, Anchor, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -141,12 +141,68 @@ export default function ExternalQuoteNewPage() {
     }
   };
 
+  const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
+
+  // Duplicate Check Logic
+  useEffect(() => {
+    const checkDuplicate = async () => {
+      if ((leadName.length < 3 && leadPhone.length < 5) || leadId !== 'new') {
+        setDuplicateWarning(null);
+        return;
+      }
+
+      try {
+        // Check in Clients
+        const { data: existingClients } = await supabase
+          .from('clients')
+          .select('full_name_or_company_name, phone')
+          .or(`full_name_or_company_name.ilike.%${leadName}%,phone.eq.${leadPhone}`)
+          .limit(1);
+
+        if (existingClients && existingClients.length > 0) {
+          setDuplicateWarning(`Atenção: Já existe um CLIENTE cadastrado com nome ou telefone similar: "${existingClients[0].full_name_or_company_name}"`);
+          return;
+        }
+
+        // Check in other Leads
+        const { data: existingLeads } = await supabase
+          .from('external_quote_leads')
+          .select('full_name_or_company_name, phone')
+          .or(`full_name_or_company_name.ilike.%${leadName}%,phone.eq.${leadPhone}`)
+          .neq('id', leadId === 'new' ? '00000000-0000-0000-0000-000000000000' : leadId)
+          .limit(1);
+
+        if (existingLeads && existingLeads.length > 0) {
+          setDuplicateWarning(`Atenção: Já existe um PROSPECTO com dados similares: "${existingLeads[0].full_name_or_company_name}"`);
+        } else {
+          setDuplicateWarning(null);
+        }
+      } catch (e) {
+        console.error('Erro na verificação de duplicidade', e);
+      }
+    };
+
+    const timer = setTimeout(checkDuplicate, 500);
+    return () => clearTimeout(timer);
+  }, [leadName, leadPhone, leadId]);
+
   return (
     <div className="max-w-3xl mx-auto space-y-6 pb-20 animate-fade-in">
       <PageHeader 
         title="Novo Orçamento Externo" 
         description="Adicione dados do prospecto e os itens para enviar para aprovação."
       />
+
+      {duplicateWarning && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3 text-amber-800 animate-in fade-in slide-in-from-top-2">
+          <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
+          <div className="text-sm">
+            <p className="font-bold">Possível Duplicidade</p>
+            <p>{duplicateWarning}</p>
+            <p className="mt-1 text-xs opacity-70 italic">Considere vincular ao registro existente se for a mesma pessoa.</p>
+          </div>
+        </div>
+      )}
 
       <Card className="border-primary/10 shadow-sm overflow-hidden">
         <div className="bg-primary/5 p-4 border-b border-primary/10 flex items-center gap-2">
@@ -237,14 +293,14 @@ export default function ExternalQuoteNewPage() {
                     <div className="flex-1 space-y-2">
                       <Label className="text-xs">Produto do Catálogo</Label>
                       <Select 
-                        value={item.product_id} 
-                        onValueChange={v => updateItem(index, 'product_id', v)}
+                        value={item.product_id || 'manual'} 
+                        onValueChange={v => updateItem(index, 'product_id', v === 'manual' ? '' : v)}
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="Selecione um produto..." />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">-- Produto Manual --</SelectItem>
+                          <SelectItem value="manual">-- Produto Manual --</SelectItem>
                           {products?.filter(p => p.active).map(p => (
                             <SelectItem key={p.id} value={p.id}>{p.product_name}</SelectItem>
                           ))}
