@@ -148,6 +148,51 @@ Deno.serve(async (req) => {
     { auth: { persistSession: false, autoRefreshToken: false } }
   );
 
+  // --- FERRAMENTA DE CORREÇÃO DE ACENTOS (TEMPORÁRIA) ---
+  if (req.method === "GET") {
+    try {
+      console.log("[Fix] Iniciando correção global de acentos...");
+      const corrections = [
+        { from: "Tubar?o", to: "Tubarão" }, { from: "Can?ado", to: "Cançado" },
+        { from: "Jo?o", to: "João" }, { from: "Jos?", to: "José" },
+        { from: "S?o ", to: "São " }, { from: "Concei??o", to: "Conceição" },
+        { from: "Vit?ria", to: "Vitória" }, { from: "Ant?nio", to: "Antônio" },
+        { from: "M?rio", to: "Mário" }, { from: "Ribeir?o", to: "Ribeirão" },
+        { from: "Goi?s", to: "Goiás" }, { from: "Macei?", to: "Maceió" }
+      ];
+
+      let count = 0;
+      const { data: clients } = await admin.from("clients").select("id, full_name_or_company_name, city").or("full_name_or_company_name.ilike.%?%,city.ilike.%?%");
+      if (clients) {
+        for (const c of clients) {
+          let n = c.full_name_or_company_name || "";
+          let ct = c.city || "";
+          let ch = false;
+          for (const corr of corrections) {
+            if (n.includes(corr.from)) { n = n.replace(corr.from, corr.to); ch = true; }
+            if (ct.includes(corr.from)) { ct = ct.replace(corr.from, corr.to); ch = true; }
+          }
+          if (ch) { await admin.from("clients").update({ full_name_or_company_name: n, city: ct }).eq("id", c.id); count++; }
+        }
+      }
+
+      const { data: leads } = await admin.from("whatsapp_leads").select("id, display_name").ilike("display_name", "%?%");
+      if (leads) {
+        for (const l of leads) {
+          let n = l.display_name || "";
+          let ch = false;
+          for (const corr of corrections) { if (n.includes(corr.from)) { n = n.replace(corr.from, corr.to); ch = true; } }
+          if (ch) { await admin.from("whatsapp_leads").update({ display_name: n }).eq("id", l.id); count++; }
+        }
+      }
+
+      return new Response(`Sucesso! ${count} registros corrigidos. Pode fechar esta aba.`, { headers: { ...corsHeaders, "Content-Type": "text/plain; charset=utf-8" } });
+    } catch (e) {
+      return new Response("Erro: " + e.message, { status: 500, headers: corsHeaders });
+    }
+  }
+  // --- FIM DA FERRAMENTA ---
+
   try {
     const url = new URL(req.url);
     
