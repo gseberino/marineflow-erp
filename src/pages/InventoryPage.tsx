@@ -525,7 +525,7 @@ function AdjustStockDialog({ product, onClose, formatCurrency }: {
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
-      <DialogContent>
+      <DialogContent className="max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Ajustar Estoque</DialogTitle>
         </DialogHeader>
@@ -609,7 +609,7 @@ function AddEntryDialog({ open, onClose, product, allProducts, formatCurrency }:
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Entrada de Estoque</DialogTitle>
         </DialogHeader>

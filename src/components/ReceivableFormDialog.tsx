@@ -51,7 +51,7 @@ export function ReceivableFormDialog({ open, onOpenChange }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle>{t.financial.newReceivable}</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <div><Label>{t.serviceOrders.client} *</Label>

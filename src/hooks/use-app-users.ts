@@ -6,6 +6,7 @@ export const USER_ROLES = [
   { value: 'technician', label: 'Técnico' },
   { value: 'financial', label: 'Financeiro' },
   { value: 'seller', label: 'Vendedor / Indicador' },
+  { value: 'external_seller', label: 'Vendedor Externo' },
   { value: 'other', label: 'Outro' },
 ];
 

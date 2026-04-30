@@ -66,7 +66,7 @@ export function PriceCalculatorDialog({ open, onOpenChange, initialCost = 0, ini
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>💰 Formador de Preço</DialogTitle>
         </DialogHeader>

@@ -14,7 +14,7 @@ type AuthUser = {
   id: string;
   email: string;
   full_name: string;
-  role: 'admin' | 'technician' | 'financial' | 'seller' | 'other';
+  role: 'admin' | 'technician' | 'financial' | 'seller' | 'external_seller' | 'other';
 };
 
 type AuthContextType = {
@@ -39,7 +39,7 @@ function buildMinimalUser(authUser: { id: string; email?: string }): AuthUser {
     id: authUser.id,
     email: authUser.email || '',
     full_name: authUser.email || '',
-    role: 'admin',
+    role: 'other',
   };
 }
 
@@ -68,7 +68,7 @@ async function loadProfile(
       id: authUser.id,
       email: authUser.email || '',
       full_name: data.full_name || authUser.email || '',
-      role: (data.role as AuthUser['role']) || 'admin',
+      role: (data.role as AuthUser['role']) || 'other',
     };
   } catch {
     return buildMinimalUser(authUser);

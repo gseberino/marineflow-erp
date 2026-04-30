@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Users, Ship, Anchor, Package, ClipboardList,
   DollarSign, BarChart3, Settings, ChevronLeft, ChevronRight, Menu,
   Warehouse, Building2, Wrench, History, LogOut, CalendarDays, MessageCircle, CreditCard,
-  Database, ChevronDown, Rocket, ShoppingCart, FileDown, Target
+  Database, ChevronDown, Rocket, ShoppingCart, FileDown, Target, CheckCircle2
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -47,6 +47,7 @@ const roleLabels: Record<string, string> = {
   technician: 'Técnico',
   financial: 'Financeiro',
   seller: 'Vendedor',
+  external_seller: 'Vendedor Externo',
   other: 'Usuário',
 };
 
@@ -87,6 +88,15 @@ export function AppLayout({ children }: { children: ReactNode }) {
         { label: 'Agenda', icon: CalendarDays, path: '/agenda' },
         { label: 'Motor de Vendas', icon: Rocket, path: '/prospecting', roles: ['admin'] },
         { label: 'Cobranças', icon: CreditCard, path: '/collections', roles: ['admin', 'financial'] },
+      ],
+    },
+    {
+      id: 'vendas-externas',
+      label: 'Vendas Externas',
+      icon: ShoppingCart,
+      items: [
+        { label: 'Meus Orçamentos', icon: ClipboardList, path: '/external-quotes' },
+        { label: 'Aprovar Orçamentos', icon: CheckCircle2, path: '/external-quotes/approval', roles: ['admin', 'financial'] },
       ],
     },
     {

@@ -49,7 +49,7 @@ export function QuickSupplierDialog({ open, onOpenChange, initialName = '', onCr
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-sm">
+      <DialogContent className="max-w-sm max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Cadastro rápido de fornecedor</DialogTitle>
         </DialogHeader>

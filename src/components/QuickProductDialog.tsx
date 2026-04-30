@@ -53,7 +53,7 @@ export function QuickProductDialog({ open, onOpenChange, initialName = '', onCre
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-sm">
+      <DialogContent className="max-w-sm max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Cadastro rápido de produto</DialogTitle>
         </DialogHeader>

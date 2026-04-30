@@ -344,7 +344,7 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(v) => !sending && onOpenChange(v)}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Send className="h-5 w-5" /> Enviar via Z-API

@@ -79,7 +79,7 @@ export function ServiceFormDialog({ open, onOpenChange, editData, onCreated }: P
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{editData ? t.services.editService : t.services.newService}</DialogTitle>
         </DialogHeader>

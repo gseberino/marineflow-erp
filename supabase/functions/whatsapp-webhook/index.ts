@@ -61,15 +61,15 @@ Deno.serve(async (req) => {
   if (req.method === "GET") {
     try {
       console.log("[Cleanup] Iniciando limpeza de leads fantasmas...");
-      const { data: leads } = await admin.from("whatsapp_leads").select("id, phone_number");
+      const { data: leads } = await admin.from("whatsapp_leads").select("id, phone_normalized");
       if (!leads) return new Response("Nenhum lead encontrado.", { headers: corsHeaders });
 
       let count = 0;
       for (const l of leads) {
-        const phone = l.phone_number || "";
+        const phone = l.phone_normalized || "";
         const isWeird = phone.length < 10 || !phone.startsWith("55") || phone.length > 15;
         if (isWeird) {
-          const { count: msgCount } = await admin.from("whatsapp_messages").select("*", { count: "exact", head: true }).eq("whatsapp_lead_id", l.id);
+          const { count: msgCount } = await admin.from("whatsapp_messages").select("*", { count: "exact", head: true }).eq("lead_id", l.id);
           if (!msgCount || msgCount === 0) {
             await admin.from("whatsapp_leads").delete().eq("id", l.id);
             count++;
@@ -129,7 +129,6 @@ Deno.serve(async (req) => {
         if (isValidPhone) {
           const { data: newLead } = await admin.from("whatsapp_leads").insert({
             phone_normalized: phone,
-            phone_number: phone,
             display_name: pAny.senderName || pAny.notifyName || null,
             status: "pending"
           }).select("id").single();

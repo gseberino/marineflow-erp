@@ -1182,9 +1182,17 @@ function UsersTab() {
 
   return (
     <div className="space-y-4 max-w-3xl">
-      <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm">
-        <Users className="h-4 w-4 inline mr-1.5 text-primary" />
-        Cadastre técnicos, vendedores e outros membros da equipe. Eles aparecerão como opções nas OS.
+      <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 text-sm space-y-2">
+        <div className="flex items-center gap-2 font-semibold text-primary">
+          <Users className="h-4 w-4" />
+          Gestão de Equipe
+        </div>
+        <p className="text-muted-foreground">
+          Cadastre técnicos, vendedores e outros membros da equipe. Eles aparecerão como opções nas OS.
+        </p>
+        <div className="pt-2 border-t border-primary/10 mt-2 text-xs text-primary/80">
+          <strong>💡 Como convidar:</strong> Primeiro crie o perfil abaixo. Depois, clique no botão <strong>"Enviar acesso"</strong> na lista para que o usuário receba o link de criação de senha por e-mail.
+        </div>
       </div>
 
       <div className="rounded-xl border bg-card shadow-sm overflow-hidden">

@@ -42,6 +42,10 @@ import CommissionsPage from "./pages/CommissionsPage";
 import SmartPurchasePage from "./pages/SmartPurchasePage";
 import NotFound from "./pages/NotFound";
 import CRMKanbanPage from "./pages/CRMKanbanPage";
+import ExternalQuoteListPage from "./pages/ExternalQuoteListPage";
+import ExternalQuoteNewPage from "./pages/ExternalQuoteNewPage";
+import ExternalQuoteApprovalPage from "./pages/ExternalQuoteApprovalPage";
+import ExternalQuoteDetailPage from "./pages/ExternalQuoteDetailPage";
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -99,6 +103,14 @@ const App = () => (
                             <CommissionsPage />
                           </ProtectedRoute>
                         } />
+                        <Route path="/external-quotes" element={<ExternalQuoteListPage />} />
+                        <Route path="/external-quotes/new" element={<ExternalQuoteNewPage />} />
+                        <Route path="/external-quotes/approval" element={
+                          <ProtectedRoute roles={['admin', 'financial']}>
+                            <ExternalQuoteApprovalPage />
+                          </ProtectedRoute>
+                        } />
+                        <Route path="/external-quotes/:id" element={<ExternalQuoteDetailPage />} />
                         <Route path="/reports" element={<ReportsPage />} />
                         <Route path="/prospecting" element={
                           <ProtectedRoute roles={['admin']}>
