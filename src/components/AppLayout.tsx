@@ -99,8 +99,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
       icon: ShoppingCart,
       items: [
         { label: 'Meus Orçamentos', icon: ClipboardList, path: '/external-quotes' },
-        { label: 'Meus Prospectos', icon: Users, path: '/external-quotes/leads', roles: ['external_seller', 'admin'] },
-        { label: 'Catálogo de Produtos', icon: Package, path: '/external-quotes/catalog', roles: ['external_seller', 'admin'] },
+        { label: 'Meus Prospectos', icon: Users, path: '/external-quotes/leads', roles: ['external_seller', 'seller', 'admin'] },
+        { label: 'Catálogo de Produtos', icon: Package, path: '/external-quotes/catalog', roles: ['external_seller', 'seller', 'admin'] },
         { label: 'Aprovar Orçamentos', icon: CheckCircle2, path: '/external-quotes/approval', roles: ['admin', 'financial'] },
       ],
     },
