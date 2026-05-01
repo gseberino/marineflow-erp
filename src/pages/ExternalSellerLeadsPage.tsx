@@ -49,7 +49,6 @@ export default function ExternalSellerLeadsPage() {
         .from('external_quote_leads')
         .insert([{
           created_by: user.id,
-          marina_id: user.marina_id,
           type: 'person',
           full_name_or_company_name: vars.name,
           phone: vars.phone,

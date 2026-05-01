@@ -27,7 +27,6 @@ import { PWAInstallPrompt } from '@/components/PWAInstallPrompt';
 import { AIAgentWidget } from '@/components/ai/AIAgentWidget';
 import { OfflineIndicator } from '@/components/OfflineIndicator';
 import { DiagnosticExportButton } from '@/components/DiagnosticExportButton';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 
 type NavItem = {

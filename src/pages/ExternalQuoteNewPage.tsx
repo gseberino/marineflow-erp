@@ -97,7 +97,6 @@ export default function ExternalQuoteNewPage() {
 
       let currentLeadId = leadId !== 'new' ? leadId : null;
 
-      const marinaId = user?.marina_id;
 
       // Se for 'new', criamos um novo lead no banco
       if (leadId === 'new') {
@@ -105,7 +104,6 @@ export default function ExternalQuoteNewPage() {
           .from('external_quote_leads')
           .insert([{
             created_by: user.id,
-            marina_id: marinaId,
             type: 'person',
             full_name_or_company_name: leadName,
             phone: leadPhone,
@@ -122,7 +120,6 @@ export default function ExternalQuoteNewPage() {
       
       await createQuote.mutateAsync({
         created_by: user.id,
-        marina_id: marinaId,
         lead_id: currentLeadId,
         status: 'pending_approval',
         discount_amount: 0,

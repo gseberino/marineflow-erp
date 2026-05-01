@@ -15,7 +15,6 @@ type AuthUser = {
   email: string;
   full_name: string;
   role: 'admin' | 'technician' | 'financial' | 'seller' | 'external_seller' | 'other';
-  marina_id?: string | null;
 };
 
 type AuthContextType = {
@@ -50,14 +49,14 @@ async function loadProfile(
   try {
     let { data } = await supabase
       .from('app_users')
-      .select('full_name, role, marina_id')
+      .select('full_name, role')
       .ilike('email', authUser.email || '')
       .maybeSingle();
 
     if (!data) {
       const res = await supabase
         .from('app_users')
-        .select('full_name, role, marina_id')
+        .select('full_name, role')
         .eq('id', authUser.id)
         .maybeSingle();
       data = res.data;
@@ -70,7 +69,6 @@ async function loadProfile(
       email: authUser.email || '',
       full_name: data.full_name || authUser.email || '',
       role: (data.role as AuthUser['role']) || 'other',
-      marina_id: data.marina_id,
     };
   } catch {
     return buildMinimalUser(authUser);
