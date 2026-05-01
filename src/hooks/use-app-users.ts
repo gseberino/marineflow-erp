@@ -45,11 +45,16 @@ export function useAppUsers() {
   return useQuery({
     queryKey: ['app-users'],
     queryFn: async () => {
+      console.log('[useAppUsers] Fetching users from Supabase');
       const { data, error } = await supabase
         .from('app_users')
         .select('*')
         .order('full_name');
-      if (error) throw error;
+      if (error) {
+        console.error('[useAppUsers] Error fetching users:', error);
+        throw error;
+      }
+      console.log('[useAppUsers] Users fetched:', data?.length);
       return data as AppUser[];
     },
     staleTime: 5 * 60 * 1000,
@@ -96,13 +101,20 @@ export function useUpdateAppUser() {
   return useMutation({
     mutationFn: async (user: Partial<AppUser> & { id: string }) => {
       const { id, ...changes } = user;
+      console.log('[useUpdateAppUser] Saving changes for ID:', id, changes);
       const { data, error } = await supabase
         .from('app_users')
         .update(changes as any)
         .eq('id', id)
         .select()
         .single();
-      if (error) throw error;
+      
+      if (error) {
+        console.error('[useUpdateAppUser] Error:', error);
+        throw error;
+      }
+      
+      console.log('[useUpdateAppUser] Success:', data);
       return data;
     },
     onSuccess: () => {

@@ -22,6 +22,8 @@ interface Props {
 }
 
 export function AppUserEditDialog({ user, open, onOpenChange, isCurrentUserAdmin }: Props) {
+  const { user: currentUser, refreshProfile } = useAuth();
+  const queryClient = useQueryClient();
   const updateUser = useUpdateAppUser();
   const { fetchByCep, cepLoading } = useAddress();
   const [form, setForm] = useState<AppUser | null>(null);
@@ -56,15 +58,26 @@ export function AppUserEditDialog({ user, open, onOpenChange, isCurrentUserAdmin
       return;
     }
     try {
+      console.log('[AppUserEditDialog] Saving form state:', form);
+      
       await updateUser.mutateAsync({
         ...form,
-        full_name: form.full_name.trim(),
-        email: form.email.trim(),
+        id: user.id
       });
-      toast.success('Usuário atualizado');
+      
+      console.log('[AppUserEditDialog] Save successful');
+      
+      // If we updated our own profile, refresh it
+      if (currentUser?.id === user.id) {
+        console.log('[AppUserEditDialog] Refreshing current user profile...');
+        await refreshProfile();
+      }
+
+      toast.success('Usuário atualizado com sucesso');
       onOpenChange(false);
-    } catch (e: any) {
-      toast.error(e.message || 'Erro ao salvar');
+    } catch (error) {
+      console.error('[AppUserEditDialog] Save error:', error);
+      toast.error('Erro ao atualizar usuário');
     }
   };
 
@@ -335,6 +348,7 @@ export function AppUserEditDialog({ user, open, onOpenChange, isCurrentUserAdmin
                                   : currentAreas.filter((p: string) => p !== area.id);
                                 
                                 newAreas = [...new Set(newAreas.filter((p: any) => p))];
+                                console.log(`[AppUserEditDialog] Toggling area ${area.id}:`, checked, 'New areas:', newAreas);
                                 set('metadata', { ...metadata, visible_areas: newAreas });
                               }} 
                             />

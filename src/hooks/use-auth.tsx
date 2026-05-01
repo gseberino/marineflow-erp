@@ -26,6 +26,7 @@ type AuthContextType = {
   authReady: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  refreshProfile: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -64,7 +65,9 @@ async function loadProfile(
       data = res.data;
     }
 
-    if (!data) return buildMinimalUser(authUser);
+    if (data) {
+      console.log('[Auth] Profile loaded successfully:', { role: data.role, hasMetadata: !!data.metadata, metadata: data.metadata });
+    }
 
     return {
       id: authUser.id,
@@ -74,7 +77,8 @@ async function loadProfile(
       department: data.department,
       metadata: data.metadata,
     };
-  } catch {
+  } catch (err) {
+    console.error('[Auth] Profile load error:', err);
     return buildMinimalUser(authUser);
   }
 }
@@ -202,9 +206,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     queryClient.clear();
   };
 
+  const refreshProfile = async () => {
+    if (session?.user) {
+      const profile = await loadProfile(session.user);
+      setUser(profile);
+    }
+  };
+
   return (
     <AuthContext.Provider
-      value={{ user, session, loading: !authReady, authReady, signIn, signOut }}
+      value={{ user, session, loading: !authReady, authReady, signIn, signOut, refreshProfile }}
     >
       {children}
     </AuthContext.Provider>
