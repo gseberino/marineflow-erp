@@ -33,7 +33,13 @@ export default function Dashboard() {
     { day: 'numeric', month: 'long', year: 'numeric' }
   )}`;
 
-  if (user?.role === 'external_seller') {
+  const isExternalSeller = user?.role === 'external_seller';
+  const allowedGroups = user?.department ? user.department.split(',').map(s => s.trim()) : [];
+  const hasExtendedAccess = allowedGroups.includes('operacional') || 
+                           allowedGroups.includes('financeiro') || 
+                           allowedGroups.includes('cadastros');
+
+  if (isExternalSeller && !hasExtendedAccess) {
     return <ExternalSellerDashboard greeting={greeting} dateStr={dateStr} />;
   }
 
