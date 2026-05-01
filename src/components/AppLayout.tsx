@@ -157,6 +157,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
   const visibleGroups = groups
     .filter((g) => {
+      // Admins always see everything
+      if (user?.role === 'admin') return true;
+
       // If user has specific group permissions in department field, use them
       if (allowedGroups && allowedGroups.length > 0) {
         return allowedGroups.includes(g.id);
