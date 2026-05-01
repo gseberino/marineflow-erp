@@ -279,7 +279,7 @@ export function AppUserEditDialog({ user, open, onOpenChange, isCurrentUserAdmin
                 </Select>
               </div>
 
-              <div className="grid grid-cols-1 gap-2">
+              <div className="grid grid-cols-1 gap-4">
                 <p className="text-xs font-semibold text-muted-foreground uppercase">Capacidades deste cargo:</p>
                 <div className="space-y-2">
                   {form.role === 'admin' && (
@@ -308,6 +308,46 @@ export function AppUserEditDialog({ user, open, onOpenChange, isCurrentUserAdmin
                     </div>
                   )}
                 </div>
+
+                {isCurrentUserAdmin && (
+                  <div className="space-y-3 pt-2 border-t">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase">Liberar Áreas do Menu (Personalizado):</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { id: 'operacional', label: 'Operacional' },
+                        { id: 'vendas-externas', label: 'Vendas Externas' },
+                        { id: 'cadastros', label: 'Cadastros' },
+                        { id: 'financeiro', label: 'Financeiro' },
+                        { id: 'whatsapp', label: 'WhatsApp' },
+                        { id: 'sistema', label: 'Sistema' },
+                      ].map((area) => {
+                        const metadata = form.metadata || {};
+                        const currentAreas = metadata.visible_areas || [];
+                        const isChecked = currentAreas.includes(area.id);
+                        
+                        return (
+                          <div key={area.id} className="flex items-center gap-2 p-2 rounded border bg-muted/20">
+                            <Switch 
+                              checked={isChecked} 
+                              onCheckedChange={(checked) => {
+                                let newAreas = checked 
+                                  ? [...currentAreas, area.id]
+                                  : currentAreas.filter((p: string) => p !== area.id);
+                                
+                                newAreas = [...new Set(newAreas.filter((p: any) => p))];
+                                set('metadata', { ...metadata, visible_areas: newAreas });
+                              }} 
+                            />
+                            <span className="text-[11px] font-medium">{area.label}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground italic">
+                      * Se nenhuma área for selecionada, o sistema usará as permissões padrão do cargo.
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="rounded-lg border bg-amber-50/50 border-amber-100 p-4 space-y-3">

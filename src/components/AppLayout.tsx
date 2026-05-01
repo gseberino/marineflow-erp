@@ -152,8 +152,24 @@ export function AppLayout({ children }: { children: ReactNode }) {
     },
   ];
 
+  // Filter items based on roles and dynamic permissions (metadata.visible_areas)
+  const visibleAreas = (user?.metadata as any)?.visible_areas as string[] | undefined;
+  // Support legacy department field too just in case
+  const legacyAreas = user?.department ? user.department.split(',').map(s => s.trim()) : [];
+  const allowedGroups = visibleAreas || (legacyAreas.length > 0 ? legacyAreas : null);
+
   const visibleGroups = groups
-    .filter((g) => !g.roles || (user && g.roles.includes(user.role)))
+    .filter((g) => {
+      // Admins always see everything
+      if (user?.role === 'admin') return true;
+
+      // If user has specific group permissions, use them
+      if (allowedGroups && allowedGroups.length > 0) {
+        return allowedGroups.includes(g.id);
+      }
+      // Fallback to role-based filtering
+      return !g.roles || (user && g.roles.includes(user.role));
+    })
     .map((g) => ({
       ...g,
       items: g.items.filter((i) => !i.roles || (user && i.roles.includes(user.role))),
