@@ -213,16 +213,14 @@ export function AppUserEditDialog({ user, open, onOpenChange, isCurrentUserAdmin
                 <Label htmlFor="resignation_date">Data de Desligamento</Label>
                 <Input id="resignation_date" type="date" value={form.resignation_date || ''} onChange={e => set('resignation_date', e.target.value)} />
               </div>
-              {!isCurrentUserAdmin && (
-                <div className="col-span-2">
-                  <Label>Departamento / Área</Label>
-                  <Input 
-                    value={form.department || ''} 
-                    onChange={e => set('department', e.target.value)} 
-                    placeholder="Ex: Comercial, Manutenção, Financeiro"
-                  />
-                </div>
-              )}
+              <div className="col-span-2">
+                <Label>Departamento / Área</Label>
+                <Input 
+                  value={form.department || ''} 
+                  onChange={e => set('department', e.target.value)} 
+                  placeholder="Ex: Comercial, Manutenção, Financeiro"
+                />
+              </div>
             </div>
           </TabsContent>
 
@@ -281,7 +279,7 @@ export function AppUserEditDialog({ user, open, onOpenChange, isCurrentUserAdmin
                 </Select>
               </div>
 
-              <div className="grid grid-cols-1 gap-4">
+              <div className="grid grid-cols-1 gap-2">
                 <p className="text-xs font-semibold text-muted-foreground uppercase">Capacidades deste cargo:</p>
                 <div className="space-y-2">
                   {form.role === 'admin' && (
@@ -310,46 +308,6 @@ export function AppUserEditDialog({ user, open, onOpenChange, isCurrentUserAdmin
                     </div>
                   )}
                 </div>
-
-                {isCurrentUserAdmin && (
-                  <div className="space-y-3 pt-2 border-t">
-                    <p className="text-xs font-semibold text-muted-foreground uppercase">Liberar Áreas do Menu (Personalizado):</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      {[
-                        { id: 'operacional', label: 'Operacional' },
-                        { id: 'vendas-externas', label: 'Vendas Externas' },
-                        { id: 'cadastros', label: 'Cadastros' },
-                        { id: 'financeiro', label: 'Financeiro' },
-                        { id: 'whatsapp', label: 'WhatsApp' },
-                        { id: 'sistema', label: 'Sistema' },
-                      ].map((area) => {
-                        const currentPerms = (form.department || '').split(',').map(s => s.trim());
-                        const isChecked = currentPerms.includes(area.id);
-                        
-                        return (
-                          <div key={area.id} className="flex items-center gap-2 p-2 rounded border bg-muted/20">
-                            <Switch 
-                              checked={isChecked} 
-                              onCheckedChange={(checked) => {
-                                let newPerms = checked 
-                                  ? [...currentPerms, area.id]
-                                  : currentPerms.filter(p => p !== area.id);
-                                
-                                // Clean up empty strings and duplicates
-                                newPerms = [...new Set(newPerms.filter(p => p))];
-                                set('department', newPerms.join(','));
-                              }} 
-                            />
-                            <span className="text-[11px] font-medium">{area.label}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <p className="text-[10px] text-muted-foreground italic">
-                      * Se nenhuma área for selecionada, o sistema usará as permissões padrão do cargo.
-                    </p>
-                  </div>
-                )}
               </div>
 
               <div className="rounded-lg border bg-amber-50/50 border-amber-100 p-4 space-y-3">
