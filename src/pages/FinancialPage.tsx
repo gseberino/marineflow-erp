@@ -118,6 +118,45 @@ export default function FinancialPage() {
   const [groupBy, setGroupBy] = useState<'none' | 'category' | 'supplier' | 'month'>('none');
   const { data: pendingReimb } = usePendingReimbursements();
 
+  const { data: cashflow } = useQuery({
+    queryKey: ['cashflow-projection'],
+    queryFn: async () => {
+      const today = new Date();
+      const in60 = new Date(Date.now() + 60 * 86400000).toISOString().split('T')[0];
+      const todayStr = today.toISOString().split('T')[0];
+      const [recv, pay] = await Promise.all([
+        supabase.from('receivables')
+          .select('due_date, balance_amount')
+          .not('status', 'in', '("paid","cancelled")')
+          .gte('due_date', todayStr)
+          .lte('due_date', in60),
+        supabase.from('payables')
+          .select('due_date, balance_amount')
+          .not('status', 'in', '("paid","cancelled")')
+          .gte('due_date', todayStr)
+          .lte('due_date', in60),
+      ]);
+      const weeks: Record<string, { in: number; out: number; label: string }> = {};
+      const addWeek = (date: string, amount: number, type: 'in' | 'out') => {
+        const d = new Date(date);
+        const weekStart = new Date(d);
+        weekStart.setDate(d.getDate() - d.getDay());
+        const key = weekStart.toISOString().slice(0, 10);
+        if (!weeks[key]) weeks[key] = {
+          in: 0, out: 0,
+          label: weekStart.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }),
+        };
+        weeks[key][type] += Number(amount) || 0;
+      };
+      (recv.data || []).forEach((r: any) => addWeek(r.due_date, r.balance_amount, 'in'));
+      (pay.data || []).forEach((p: any) => addWeek(p.due_date, p.balance_amount, 'out'));
+      return Object.entries(weeks)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([_, v]) => ({ ...v, net: v.in - v.out }));
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
   const filteredReceivables = applyFilters(receivables || [], recFilters, 'receivable');
   const filteredPayables = applyFilters(payables || [], payFilters, 'payable');
 
