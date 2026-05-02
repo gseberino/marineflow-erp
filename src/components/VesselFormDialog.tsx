@@ -318,7 +318,7 @@ function VesselContactsSection({ vesselId }: { vesselId: string }) {
       </div>
 
       {showForm && (
-        <div className="grid grid-cols-2 gap-3 p-3 rounded-lg border bg-muted/30">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-lg border bg-muted/30">
           <div>
             <Label className="text-xs">Nome *</Label>
             <Input value={contactForm.full_name} onChange={e => setContactForm(p => ({ ...p, full_name: e.target.value }))} />
