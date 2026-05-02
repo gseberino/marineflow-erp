@@ -138,17 +138,28 @@ export type Database = {
           address_line_1: string | null
           address_number: string | null
           avatar_url: string | null
+          birth_date: string | null
           city: string | null
           country: string | null
+          cpf: string | null
           created_at: string
+          department: string | null
           email: string
+          emergency_contact_name: string | null
+          emergency_contact_phone: string | null
           full_name: string
+          hiring_date: string | null
           id: string
+          metadata: Json | null
           neighborhood: string | null
           notes: string | null
           phone: string | null
+          pix_key: string | null
           postal_code: string | null
+          resignation_date: string | null
+          rg: string | null
           role: string
+          salary_base: number | null
           state: string | null
           updated_at: string
         }
@@ -158,17 +169,28 @@ export type Database = {
           address_line_1?: string | null
           address_number?: string | null
           avatar_url?: string | null
+          birth_date?: string | null
           city?: string | null
           country?: string | null
+          cpf?: string | null
           created_at?: string
+          department?: string | null
           email: string
+          emergency_contact_name?: string | null
+          emergency_contact_phone?: string | null
           full_name: string
+          hiring_date?: string | null
           id: string
+          metadata?: Json | null
           neighborhood?: string | null
           notes?: string | null
           phone?: string | null
+          pix_key?: string | null
           postal_code?: string | null
+          resignation_date?: string | null
+          rg?: string | null
           role: string
+          salary_base?: number | null
           state?: string | null
           updated_at?: string
         }
@@ -178,17 +200,28 @@ export type Database = {
           address_line_1?: string | null
           address_number?: string | null
           avatar_url?: string | null
+          birth_date?: string | null
           city?: string | null
           country?: string | null
+          cpf?: string | null
           created_at?: string
+          department?: string | null
           email?: string
+          emergency_contact_name?: string | null
+          emergency_contact_phone?: string | null
           full_name?: string
+          hiring_date?: string | null
           id?: string
+          metadata?: Json | null
           neighborhood?: string | null
           notes?: string | null
           phone?: string | null
+          pix_key?: string | null
           postal_code?: string | null
+          resignation_date?: string | null
+          rg?: string | null
           role?: string
+          salary_base?: number | null
           state?: string | null
           updated_at?: string
         }
