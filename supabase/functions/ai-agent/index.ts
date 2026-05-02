@@ -1009,7 +1009,7 @@ async function executeTool(
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: MODEL,
+          model: MODEL_SMART,
           messages: [
             {
               role: "system",
