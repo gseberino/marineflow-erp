@@ -2615,6 +2615,11 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                         rascunho
                       </span>
                     )}
+                    {opts.warranty_expires_at && new Date(opts.warranty_expires_at) > new Date() && (
+                      <span className="ml-2 text-[10px] text-green-700 bg-green-100 rounded px-1">
+                        Garantia até {new Date(opts.warranty_expires_at).toLocaleDateString('pt-BR')}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
