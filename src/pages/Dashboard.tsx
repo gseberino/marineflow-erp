@@ -128,6 +128,30 @@ export default function Dashboard() {
         </Button>
       </div>
 
+      {lowStockProducts && lowStockProducts.length > 0 && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <AlertTriangle className="h-5 w-5 text-red-600" />
+            <h3 className="font-semibold text-red-800 text-sm">
+              {lowStockProducts.length} produto{lowStockProducts.length > 1 ? 's' : ''} com estoque baixo
+            </h3>
+          </div>
+          <div className="space-y-1">
+            {lowStockProducts.map(p => (
+              <div key={p.id} className="flex justify-between text-xs text-red-700">
+                <span className="truncate max-w-[180px]">{p.product_name}</span>
+                <span className="font-medium flex-shrink-0">
+                  {p.stock_quantity} / {p.minimum_stock} {p.unit}
+                </span>
+              </div>
+            ))}
+          </div>
+          <Link to="/products" className="text-xs text-red-600 hover:underline mt-2 block">
+            Ver produtos →
+          </Link>
+        </div>
+      )}
+
       {/* ROW 1 — Financial KPIs */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KPIBox
