@@ -1312,6 +1312,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             quantity: draft.quantity,
             unit_price_snapshot: draft.unit_price,
             notes: draft.notes || undefined,
+            warranty_months: draft.warranty_months || 0,
             // technician_user_id is held client-side until OS is created
             ...(draft.technician_user_id ? { technician_user_id: draft.technician_user_id } : {}),
           } as any,
