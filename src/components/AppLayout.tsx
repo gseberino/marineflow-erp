@@ -28,6 +28,7 @@ import { AIAgentWidget } from '@/components/ai/AIAgentWidget';
 import { OfflineIndicator } from '@/components/OfflineIndicator';
 import { DiagnosticExportButton } from '@/components/DiagnosticExportButton';
 import { Button } from '@/components/ui/button';
+import { usePushNotifications } from '@/hooks/use-push-notifications';
 
 type NavItem = {
   label: string;
@@ -60,6 +61,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const { t } = useI18n();
   const { user, signOut } = useAuth();
+  usePushNotifications();
 
   const { data: logoSetting } = useQuery({
     queryKey: ['company-logo'],
