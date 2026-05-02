@@ -295,6 +295,23 @@ function ServiceCardFormComponent({
           />
         </div>
       </div>
+      <div>
+        <Label>Garantia (meses)</Label>
+        <Input
+          type="number"
+          min={0}
+          max={60}
+          value={draft.warranty_months || 0}
+          onChange={(e) => onUpdate({ warranty_months: parseInt(e.target.value) || 0 })}
+          placeholder="0 = sem garantia"
+          className="h-8"
+        />
+        {(draft.warranty_months || 0) > 0 && (
+          <p className="text-xs text-muted-foreground mt-1">
+            Vence em: {new Date(Date.now() + (draft.warranty_months || 0) * 30 * 86400000).toLocaleDateString('pt-BR')}
+          </p>
+        )}
+      </div>
       <div className="flex gap-2">
         <Button size="sm" onClick={onConfirm} disabled={confirmDisabled}>
           <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Confirmar
