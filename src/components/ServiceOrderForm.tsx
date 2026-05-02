@@ -112,6 +112,7 @@ type SvcCardState = {
   notes: string;
   technician_user_id: string;
   warranty_days?: number;
+  warranty_months?: number;
 };
 
 type PartCardState = {
@@ -124,6 +125,8 @@ type PartCardState = {
   notes: string;
   image_url?: string | null;
   warranty_days?: number;
+  warranty_months?: number;
+  serial_number?: string;
 };
 
 interface ServiceCardFormProps {
