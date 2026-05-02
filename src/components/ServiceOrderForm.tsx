@@ -2196,6 +2196,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             isDraft?: boolean;
             onExpand: () => void;
             onDelete: () => void;
+            extra?: React.ReactNode;
           }) => (
             <div
               key={opts.keyId}
