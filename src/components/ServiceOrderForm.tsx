@@ -1335,7 +1335,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           unit_price_snapshot: draft.unit_price,
           notes: draft.notes || undefined,
           technician_user_id: draft.technician_user_id || null,
-        });
+          warranty_months: draft.warranty_months || 0,
+        } as any);
         toast.success('Serviço adicionado');
       }
       // Close the card
