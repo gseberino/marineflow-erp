@@ -2712,6 +2712,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   unitPrice: p.unit_sale_snapshot,
                   total: p.line_total_sale,
                   image_url: p.products?.image_url || null,
+                  warranty_expires_at: p.warranty_expires_at || null,
                   onExpand: () => startEditPersistedPart(p),
                   onDelete: () =>
                     removePart.mutate({
