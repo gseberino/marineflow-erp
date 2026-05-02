@@ -21,6 +21,23 @@ export default function Dashboard() {
   const { data, isLoading, error, refetch } = useDashboardData();
   const statusLabels = t.status as Record<string, string>;
 
+  const { data: lowStockProducts } = useQuery({
+    queryKey: ['low-stock-alert'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('products')
+        .select('id, product_name, stock_quantity, minimum_stock, unit')
+        .eq('active', true)
+        .gt('minimum_stock', 0)
+        .filter('stock_quantity', 'lte', 'minimum_stock')
+        .order('stock_quantity', { ascending: true })
+        .limit(5);
+      if (error) throw error;
+      return data;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
   const hour = new Date().getHours();
   const d = t.dashboard as any;
   const greeting = hour < 12 ? d.greeting.morning
