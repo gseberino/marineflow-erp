@@ -166,7 +166,7 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
 
           <TabsContent value="data">
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="col-span-2">
               <Label>{t.common.type}</Label>
               <Select value={form.type} onValueChange={v => set('type', v)}>
@@ -348,7 +348,7 @@ function ZapiSettingsTab({ clientId }: { clientId: string }) {
             placeholder="Olá {cliente}, segue {descricao}…"
           />
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <Label>Título do link (preview)</Label>
             <Input

@@ -1111,7 +1111,7 @@ function ProductCategoriesTab() {
       {showNew ? (
         <div className="rounded-xl border bg-card p-4 shadow-sm space-y-3">
           <h4 className="text-sm font-semibold">{st.newProductCategory || 'Nova Categoria'}</h4>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="col-span-2">
               <label className="text-xs font-medium text-muted-foreground">Nome *</label>
               <Input value={newForm.name} onChange={e => setNewForm(p => ({ ...p, name: e.target.value }))} className="mt-1" />
@@ -1268,7 +1268,7 @@ function UsersTab() {
       {showNew ? (
         <div className="rounded-xl border bg-card p-4 shadow-sm space-y-3">
           <h4 className="text-sm font-semibold">Novo Usuário</h4>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-medium text-muted-foreground">Nome *</label>
               <Input value={newForm.full_name} onChange={e => setNewForm(p => ({ ...p, full_name: e.target.value }))} className="mt-1" />

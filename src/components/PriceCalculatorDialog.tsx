@@ -78,7 +78,7 @@ export function PriceCalculatorDialog({ open, onOpenChange, initialCost = 0, ini
           </TabsList>
         </Tabs>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="col-span-2">
             <Label className="text-xs">Preço de Custo (R$)</Label>
             <MoneyInput value={cost} onValueChange={setCost} />

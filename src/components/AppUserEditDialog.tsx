@@ -102,7 +102,7 @@ export function AppUserEditDialog({ user, open, onOpenChange, isCurrentUserAdmin
         </DialogHeader>
 
         <Tabs defaultValue="basic" className="w-full">
-          <TabsList className="grid w-full grid-cols-5 h-auto py-1">
+          <TabsList className="grid w-full grid-cols-3 sm:grid-cols-5 h-auto py-1">
             <TabsTrigger value="basic" className="flex flex-col py-2 gap-1">
               <User className="h-4 w-4" />
               <span className="text-[10px]">Básico</span>

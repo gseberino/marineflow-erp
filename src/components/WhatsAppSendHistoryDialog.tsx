@@ -66,7 +66,7 @@ export function WhatsAppSendHistoryDialog({ serviceOrderId, serviceOrderNumber, 
                       </div>
                       <span className="text-xs text-muted-foreground">{e.changed_by}</span>
                     </div>
-                    <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                       <div><span className="text-muted-foreground">Telefone:</span> {phone || '—'}</div>
                       <div><span className="text-muted-foreground">HTTP:</span> {httpStatus ?? '—'}</div>
                     </div>

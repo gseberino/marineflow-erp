@@ -135,7 +135,7 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
           <DialogTitle>{isEdit ? "Editar Veículo/Embarcação" : "Novo Veículo/Embarcação"}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="col-span-2 sm:col-span-1">
               <Label>Tipo de Unidade *</Label>
               <Select value={form.asset_type || 'Lancha'} onValueChange={v => set('asset_type', v)}>
@@ -318,7 +318,7 @@ function VesselContactsSection({ vesselId }: { vesselId: string }) {
       </div>
 
       {showForm && (
-        <div className="grid grid-cols-2 gap-3 p-3 rounded-lg border bg-muted/30">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-lg border bg-muted/30">
           <div>
             <Label className="text-xs">Nome *</Label>
             <Input value={contactForm.full_name} onChange={e => setContactForm(p => ({ ...p, full_name: e.target.value }))} />

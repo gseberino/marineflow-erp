@@ -122,7 +122,7 @@ export function MarinaFormDialog({ open, onOpenChange, marina, onSaved }: Props)
           <DialogTitle>{isEdit ? t.marinas.editMarina : t.marinas.newMarina}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="col-span-2">
               <Label>{t.marinas.marinaName} *</Label>
               <Input required value={form.marina_name} onChange={e => set('marina_name', e.target.value)} />
