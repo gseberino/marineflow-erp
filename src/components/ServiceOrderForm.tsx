@@ -2160,7 +2160,11 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         {/* Photos (Only if editing existing OS) */}
         {orderData?.id && (
           <div className="pt-4 border-t mt-4">
-            <ServiceOrderPhotos orderId={orderData.id} initialPhotos={(orderData as any).photos || []} />
+            <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
+              <Camera className="h-4 w-4" />
+              Fotos da OS
+            </h2>
+            <ServiceOrderPhotos serviceOrderId={orderData.id} />
           </div>
         )}
       </section>
