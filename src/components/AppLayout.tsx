@@ -28,6 +28,7 @@ import { AIAgentWidget } from '@/components/ai/AIAgentWidget';
 import { OfflineIndicator } from '@/components/OfflineIndicator';
 import { DiagnosticExportButton } from '@/components/DiagnosticExportButton';
 import { Button } from '@/components/ui/button';
+import { usePushNotifications } from '@/hooks/use-push-notifications';
 
 type NavItem = {
   label: string;
