@@ -11,7 +11,7 @@ export function useFinancialCategories(type?: 'payable' | 'receivable') {
       if (error) throw error;
       return data;
     },
-    staleTime: 5 * 60 * 1000,
+    staleTime: 10 * 60 * 1000,
   });
 }
 

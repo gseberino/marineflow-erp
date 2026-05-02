@@ -33,6 +33,7 @@ export function useServiceOrders() {
       if (error) throw error;
       return data;
     },
+    staleTime: 30 * 1000,
   });
 }
 
@@ -50,6 +51,7 @@ export function useServiceOrder(id: string | undefined) {
       return data;
     },
     enabled: !!id,
+    staleTime: 30 * 1000,
   });
 }
 
