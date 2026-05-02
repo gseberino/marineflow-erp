@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
+import { ServiceTimer } from '@/components/ServiceTimer';
 import { useI18n } from '@/i18n';
 import { useClients } from '@/hooks/use-clients';
 import { useVessels } from '@/hooks/use-vessels';
@@ -2196,6 +2197,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             isDraft?: boolean;
             onExpand: () => void;
             onDelete: () => void;
+            extra?: React.ReactNode;
           }) => (
             <div
               key={opts.keyId}
@@ -2230,6 +2232,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               <div className="w-28 text-right font-semibold">
                 {formatCurrency(opts.total)}
               </div>
+              {opts.extra}
               <Button
                 variant="ghost"
                 size="icon"
@@ -2307,6 +2310,18 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   onExpand: () => startEditPersisted(s),
                   onDelete: () =>
                     removeService.mutate({ id: s.id, service_order_id: orderId! }),
+                  extra: orderId ? (
+                    <ServiceTimer
+                      serviceLineId={s.id}
+                      serviceOrderId={orderId}
+                      startedAt={s.started_at || null}
+                      finishedAt={s.finished_at || null}
+                      elapsedMinutes={s.elapsed_minutes || 0}
+                      onUpdate={() =>
+                        queryClient.invalidateQueries({ queryKey: ['so-services', orderId] })
+                      }
+                    />
+                  ) : undefined,
                 });
               })}
 
