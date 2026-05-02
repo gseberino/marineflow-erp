@@ -2273,11 +2273,14 @@ export type Database = {
           notes: string | null
           product_id: string
           quantity: number
+          serial_number: string | null
           service_order_id: string
           unit_cost_snapshot: number
           unit_sale_snapshot: number
           updated_at: string
           warranty_days: number | null
+          warranty_expires_at: string | null
+          warranty_months: number | null
         }
         Insert: {
           created_at?: string
@@ -2288,11 +2291,14 @@ export type Database = {
           notes?: string | null
           product_id: string
           quantity: number
+          serial_number?: string | null
           service_order_id: string
           unit_cost_snapshot: number
           unit_sale_snapshot: number
           updated_at?: string
           warranty_days?: number | null
+          warranty_expires_at?: string | null
+          warranty_months?: number | null
         }
         Update: {
           created_at?: string
@@ -2303,11 +2309,14 @@ export type Database = {
           notes?: string | null
           product_id?: string
           quantity?: number
+          serial_number?: string | null
           service_order_id?: string
           unit_cost_snapshot?: number
           unit_sale_snapshot?: number
           updated_at?: string
           warranty_days?: number | null
+          warranty_expires_at?: string | null
+          warranty_months?: number | null
         }
         Relationships: [
           {
@@ -2342,6 +2351,8 @@ export type Database = {
           unit_price_snapshot: number
           updated_at: string | null
           warranty_days: number | null
+          warranty_expires_at: string | null
+          warranty_months: number | null
         }
         Insert: {
           billing_unit_snapshot?: string
@@ -2358,6 +2369,8 @@ export type Database = {
           unit_price_snapshot?: number
           updated_at?: string | null
           warranty_days?: number | null
+          warranty_expires_at?: string | null
+          warranty_months?: number | null
         }
         Update: {
           billing_unit_snapshot?: string
@@ -2374,6 +2387,8 @@ export type Database = {
           unit_price_snapshot?: number
           updated_at?: string | null
           warranty_days?: number | null
+          warranty_expires_at?: string | null
+          warranty_months?: number | null
         }
         Relationships: [
           {
