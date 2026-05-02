@@ -2309,6 +2309,18 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   onExpand: () => startEditPersisted(s),
                   onDelete: () =>
                     removeService.mutate({ id: s.id, service_order_id: orderId! }),
+                  extra: orderId ? (
+                    <ServiceTimer
+                      serviceLineId={s.id}
+                      serviceOrderId={orderId}
+                      startedAt={s.started_at || null}
+                      finishedAt={s.finished_at || null}
+                      elapsedMinutes={s.elapsed_minutes || 0}
+                      onUpdate={() =>
+                        queryClient.invalidateQueries({ queryKey: ['so-services', orderId] })
+                      }
+                    />
+                  ) : undefined,
                 });
               })}
 
