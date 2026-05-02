@@ -20,7 +20,8 @@ import { DREPanel } from '@/components/DREPanel';
 import { FinancialFilterPanel, applyFilters, defaultFilters, type FinancialFilters } from '@/components/FinancialFilterPanel';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip } from 'recharts';
+import { ResponsiveContainer, ComposedChart, BarChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip } from 'recharts';
+import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { generatePDF, DEFAULT_PDF_OPTIONS, type PDFData } from '@/lib/pdf-generator';
@@ -116,6 +117,45 @@ export default function FinancialPage() {
   const [paySubTab, setPaySubTab] = useState<'list' | 'reimbursements'>('list');
   const [groupBy, setGroupBy] = useState<'none' | 'category' | 'supplier' | 'month'>('none');
   const { data: pendingReimb } = usePendingReimbursements();
+
+  const { data: cashflow } = useQuery({
+    queryKey: ['cashflow-projection'],
+    queryFn: async () => {
+      const today = new Date();
+      const in60 = new Date(Date.now() + 60 * 86400000).toISOString().split('T')[0];
+      const todayStr = today.toISOString().split('T')[0];
+      const [recv, pay] = await Promise.all([
+        supabase.from('receivables')
+          .select('due_date, balance_amount')
+          .not('status', 'in', '("paid","cancelled")')
+          .gte('due_date', todayStr)
+          .lte('due_date', in60),
+        supabase.from('payables')
+          .select('due_date, balance_amount')
+          .not('status', 'in', '("paid","cancelled")')
+          .gte('due_date', todayStr)
+          .lte('due_date', in60),
+      ]);
+      const weeks: Record<string, { in: number; out: number; label: string }> = {};
+      const addWeek = (date: string, amount: number, type: 'in' | 'out') => {
+        const d = new Date(date);
+        const weekStart = new Date(d);
+        weekStart.setDate(d.getDate() - d.getDay());
+        const key = weekStart.toISOString().slice(0, 10);
+        if (!weeks[key]) weeks[key] = {
+          in: 0, out: 0,
+          label: weekStart.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }),
+        };
+        weeks[key][type] += Number(amount) || 0;
+      };
+      (recv.data || []).forEach((r: any) => addWeek(r.due_date, r.balance_amount, 'in'));
+      (pay.data || []).forEach((p: any) => addWeek(p.due_date, p.balance_amount, 'out'));
+      return Object.entries(weeks)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([_, v]) => ({ ...v, net: v.in - v.out }));
+    },
+    staleTime: 5 * 60 * 1000,
+  });
 
   const filteredReceivables = applyFilters(receivables || [], recFilters, 'receivable');
   const filteredPayables = applyFilters(payables || [], payFilters, 'payable');
@@ -302,6 +342,37 @@ export default function FinancialPage() {
   return (
     <div className="space-y-6 animate-fade-in">
       <PageHeader title={t.financial.title} description={t.financial.description} />
+
+      {cashflow && cashflow.length > 0 && (
+        <div className="rounded-xl border bg-card p-4">
+          <h3 className="font-semibold text-sm mb-3">
+            Fluxo de Caixa Projetado — Próximos 60 dias
+          </h3>
+          <ResponsiveContainer width="100%" height={180}>
+            <BarChart data={cashflow} barSize={20}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+              <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`} />
+              <RechartsTooltip
+                formatter={(v: number, name: string) => [
+                  v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+                  name === 'in' ? 'Entradas' : name === 'out' ? 'Saídas' : 'Saldo',
+                ]}
+              />
+              <Bar dataKey="in" fill="#22c55e" name="in" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="out" fill="#ef4444" name="out" radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+          <div className="flex gap-4 mt-2 text-xs text-muted-foreground justify-center">
+            <span className="flex items-center gap-1">
+              <span className="h-2 w-4 rounded bg-green-500 inline-block" /> Entradas previstas
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="h-2 w-4 rounded bg-red-500 inline-block" /> Saídas previstas
+            </span>
+          </div>
+        </div>
+      )}
 
       <Tabs defaultValue="overview">
         <TabsList>
