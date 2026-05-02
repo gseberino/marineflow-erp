@@ -2585,6 +2585,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             total: number;
             isDraft?: boolean;
             image_url?: string | null;
+            warranty_expires_at?: string | null;
             onExpand: () => void;
             onDelete: () => void;
           }) => (
