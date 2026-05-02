@@ -112,6 +112,7 @@ type SvcCardState = {
   notes: string;
   technician_user_id: string;
   warranty_days?: number;
+  warranty_months?: number;
 };
 
 type PartCardState = {
@@ -124,6 +125,8 @@ type PartCardState = {
   notes: string;
   image_url?: string | null;
   warranty_days?: number;
+  warranty_months?: number;
+  serial_number?: string;
 };
 
 interface ServiceCardFormProps {
@@ -291,6 +294,23 @@ function ServiceCardFormComponent({
             onChange={(e) => onUpdate({ notes: e.target.value })}
           />
         </div>
+      </div>
+      <div>
+        <Label>Garantia (meses)</Label>
+        <Input
+          type="number"
+          min={0}
+          max={60}
+          value={draft.warranty_months || 0}
+          onChange={(e) => onUpdate({ warranty_months: parseInt(e.target.value) || 0 })}
+          placeholder="0 = sem garantia"
+          className="h-8"
+        />
+        {(draft.warranty_months || 0) > 0 && (
+          <p className="text-xs text-muted-foreground mt-1">
+            Vence em: {new Date(Date.now() + (draft.warranty_months || 0) * 30 * 86400000).toLocaleDateString('pt-BR')}
+          </p>
+        )}
       </div>
       <div className="flex gap-2">
         <Button size="sm" onClick={onConfirm} disabled={confirmDisabled}>
@@ -571,6 +591,29 @@ function PartCardFormComponent({
           />
         </div>
       </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <Label>Número de série (opcional)</Label>
+          <Input
+            value={draft.serial_number || ''}
+            onChange={(e) => onUpdate({ serial_number: e.target.value })}
+            placeholder="Ex: VE123456"
+            className="h-8 text-sm"
+          />
+        </div>
+        <div>
+          <Label>Garantia (meses)</Label>
+          <Input
+            type="number"
+            min={0}
+            max={60}
+            value={draft.warranty_months || 0}
+            onChange={(e) => onUpdate({ warranty_months: parseInt(e.target.value) || 0 })}
+            placeholder="0 = sem garantia"
+            className="h-8 text-sm"
+          />
+        </div>
+      </div>
       <div className="flex gap-2">
         <Button size="sm" onClick={onConfirm} disabled={confirmDisabled}>
           <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Confirmar
@@ -722,6 +765,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     unit_price: number;
     notes: string;
     technician_user_id: string;
+    warranty_months?: number;
   };
   const emptySvcCard = (): SvcCardDraft => ({
     service_id: '',
@@ -732,6 +776,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     unit_price: 0,
     notes: '',
     technician_user_id: '',
+    warranty_months: 0,
   });
   // Editing state per row id (persisted: row.id, draft: tempId, new: 'new-N')
   const [editingSvc, setEditingSvc] = useState<Record<string, SvcCardDraft>>({});
@@ -747,6 +792,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     quantity: number;
     unit_cost: number;
     unit_sale: number;
+    warranty_months?: number;
+    serial_number?: string;
   };
   type DraftService = {
     tempId: string;
@@ -757,6 +804,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     quantity: number;
     unit_price_snapshot: number;
     notes?: string;
+    warranty_months?: number;
   };
   const [draftParts, setDraftParts] = useState<DraftPart[]>([]);
   const [draftServices, setDraftServices] = useState<DraftService[]>([]);
@@ -1269,6 +1317,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             quantity: draft.quantity,
             unit_price_snapshot: draft.unit_price,
             notes: draft.notes || undefined,
+            warranty_months: draft.warranty_months || 0,
             // technician_user_id is held client-side until OS is created
             ...(draft.technician_user_id ? { technician_user_id: draft.technician_user_id } : {}),
           } as any,
@@ -1286,7 +1335,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           unit_price_snapshot: draft.unit_price,
           notes: draft.notes || undefined,
           technician_user_id: draft.technician_user_id || null,
-        });
+          warranty_months: draft.warranty_months || 0,
+        } as any);
         toast.success('Serviço adicionado');
       }
       // Close the card
@@ -2535,6 +2585,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             total: number;
             isDraft?: boolean;
             image_url?: string | null;
+            warranty_expires_at?: string | null;
             onExpand: () => void;
             onDelete: () => void;
           }) => (
@@ -2562,6 +2613,11 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                     {opts.isDraft && (
                       <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
                         rascunho
+                      </span>
+                    )}
+                    {opts.warranty_expires_at && new Date(opts.warranty_expires_at) > new Date() && (
+                      <span className="ml-2 text-[10px] text-green-700 bg-green-100 rounded px-1">
+                        Garantia até {new Date(opts.warranty_expires_at).toLocaleDateString('pt-BR')}
                       </span>
                     )}
                   </div>
@@ -2656,6 +2712,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   unitPrice: p.unit_sale_snapshot,
                   total: p.line_total_sale,
                   image_url: p.products?.image_url || null,
+                  warranty_expires_at: p.warranty_expires_at || null,
                   onExpand: () => startEditPersistedPart(p),
                   onDelete: () =>
                     removePart.mutate({
