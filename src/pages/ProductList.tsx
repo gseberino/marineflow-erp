@@ -164,6 +164,12 @@ export default function ProductList() {
                                 Incompleto
                               </span>
                             )}
+                            {(p.minimum_stock ?? 0) > 0 && (p.stock_quantity ?? 0) <= (p.minimum_stock ?? 0) && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700 ml-2">
+                                <AlertTriangle className="h-3 w-3" />
+                                Estoque baixo
+                              </span>
+                            )}
                           </p>
                           <p className="text-xs text-muted-foreground truncate">{p.sku}</p>
                         </div>
