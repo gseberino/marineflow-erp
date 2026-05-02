@@ -61,6 +61,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const { t } = useI18n();
   const { user, signOut } = useAuth();
+  usePushNotifications();
 
   const { data: logoSetting } = useQuery({
     queryKey: ['company-logo'],
