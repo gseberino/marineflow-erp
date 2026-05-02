@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/hooks/use-auth';
 import { useDashboardData } from '@/hooks/use-dashboard';
 import { useI18n } from '@/i18n';
