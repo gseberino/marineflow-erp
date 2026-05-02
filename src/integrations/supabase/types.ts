@@ -2335,6 +2335,54 @@ export type Database = {
           },
         ]
       }
+      service_order_photos: {
+        Row: {
+          caption: string | null
+          created_at: string
+          id: string
+          photo_type: string
+          public_url: string
+          service_order_id: string
+          storage_path: string
+          uploaded_by: string | null
+        }
+        Insert: {
+          caption?: string | null
+          created_at?: string
+          id?: string
+          photo_type?: string
+          public_url: string
+          service_order_id: string
+          storage_path: string
+          uploaded_by?: string | null
+        }
+        Update: {
+          caption?: string | null
+          created_at?: string
+          id?: string
+          photo_type?: string
+          public_url?: string
+          service_order_id?: string
+          storage_path?: string
+          uploaded_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_order_photos_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_photos_uploaded_by_fkey"
+            columns: ["uploaded_by"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       service_order_services: {
         Row: {
           billing_unit_snapshot: string

@@ -70,7 +70,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle, Pencil, Paperclip, X, FileImage, ExternalLink, Package, Copy } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle, Pencil, Paperclip, X, FileImage, ExternalLink, Package, Copy, Camera } from 'lucide-react';
 import { toast } from 'sonner';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { MoneyInput } from '@/components/MoneyInput';
@@ -2160,7 +2160,11 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         {/* Photos (Only if editing existing OS) */}
         {orderData?.id && (
           <div className="pt-4 border-t mt-4">
-            <ServiceOrderPhotos orderId={orderData.id} initialPhotos={(orderData as any).photos || []} />
+            <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
+              <Camera className="h-4 w-4" />
+              Fotos da OS
+            </h2>
+            <ServiceOrderPhotos serviceOrderId={orderData.id} />
           </div>
         )}
       </section>
