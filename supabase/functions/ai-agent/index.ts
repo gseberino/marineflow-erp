@@ -1229,10 +1229,15 @@ Responda APENAS com o texto da mensagem pronta para envio, sem explicações ou 
       "";
 
     const today = new Date();
+    const now = today;
+    const dateStr = now.toLocaleDateString('pt-BR', {
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+    });
+    const timeStr = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     
     let systemPrompt = "";
     if (isSalesCopy) {
-      systemPrompt = `Você é um Copywriter Especialista em Vendas focado no mercado náutico. Seu objetivo é escrever mensagens curtas, extremamente persuasivas e educadas para serem enviadas pelo WhatsApp a clientes finais de uma oficina/marina.
+      systemPrompt = `Hoje é ${dateStr}, ${timeStr} (horário de Brasília).\n\nVocê é um Copywriter Especialista em Vendas focado no mercado náutico. Seu objetivo é escrever mensagens curtas, extremamente persuasivas e educadas para serem enviadas pelo WhatsApp a clientes finais de uma oficina/marina.
       
 REGRAS:
 - A mensagem vai DIRETAMENTE para o cliente final. NÃO fale sobre o sistema, ERP ou sobre você ser uma IA.
@@ -1243,7 +1248,7 @@ REGRAS:
 - Seja caloroso!
 `;
     } else {
-      systemPrompt = `Você é o assistente do MarineFlow ERP marítimo. Responda em português, formate em markdown.
+      systemPrompt = `Hoje é ${dateStr}, ${timeStr} (horário de Brasília).\n\nVocê é o assistente do MarineFlow ERP marítimo. Responda em português, formate em markdown.
 
 REGRAS CRÍTICAS:
 - Antes de QUALQUER ação de gravação (criar, atualizar) ou envio de WhatsApp, você DEVE chamar 'propose_action' primeiro com um resumo claro em markdown e o payload exato.
