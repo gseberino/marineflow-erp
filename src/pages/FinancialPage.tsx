@@ -3,7 +3,8 @@ import { PageHeader } from '@/components/PageHeader';
 import { KPICard } from '@/components/KPICard';
 import { StatusBadge } from '@/components/StatusBadge';
 import { useI18n } from '@/i18n';
-import { DollarSign, TrendingUp, TrendingDown, AlertTriangle, ArrowUpCircle, ArrowDownCircle, Plus, Info, Receipt as ReceiptIcon, Paperclip } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, AlertTriangle, ArrowUpCircle, ArrowDownCircle, Plus, Info, Receipt as ReceiptIcon, Paperclip, Download } from 'lucide-react';
+import { exportToCSV } from '@/lib/export';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -418,7 +419,25 @@ export default function FinancialPage() {
         <TabsContent value="receivables" className="mt-4 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="font-semibold text-lg">{t.financial.receivables}</h3>
-            <Button onClick={() => setShowNewReceivable(true)}><Plus className="h-4 w-4 mr-1" />{t.financial.newReceivable}</Button>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1"
+                onClick={() =>
+                  exportToCSV(filteredReceivables as any[], 'recebiveis', [
+                    { key: 'description', label: 'Descrição' },
+                    { key: 'amount', label: 'Valor', format: (v) => Number(v || 0).toFixed(2).replace('.', ',') },
+                    { key: 'due_date', label: 'Vencimento', format: (v) => v ? new Date(v).toLocaleDateString('pt-BR') : '' },
+                    { key: 'status', label: 'Status' },
+                    { key: 'clients', label: 'Cliente', format: (v) => v?.full_name_or_company_name || '' },
+                  ])
+                }
+              >
+                <Download className="h-4 w-4" /> Exportar CSV
+              </Button>
+              <Button onClick={() => setShowNewReceivable(true)}><Plus className="h-4 w-4 mr-1" />{t.financial.newReceivable}</Button>
+            </div>
           </div>
           <FinancialFilterPanel type="receivable" filters={recFilters} onChange={setRecFilters} />
 
@@ -525,7 +544,25 @@ export default function FinancialPage() {
                 </Button>
               </div>
             </div>
-            <Button onClick={() => setShowNewPayable(true)}><Plus className="h-4 w-4 mr-1" />{t.financial.newPayable}</Button>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1"
+                onClick={() =>
+                  exportToCSV(filteredPayables as any[], 'pagaveis', [
+                    { key: 'description', label: 'Descrição' },
+                    { key: 'amount', label: 'Valor', format: (v) => Number(v || 0).toFixed(2).replace('.', ',') },
+                    { key: 'due_date', label: 'Vencimento', format: (v) => v ? new Date(v).toLocaleDateString('pt-BR') : '' },
+                    { key: 'status', label: 'Status' },
+                    { key: 'supplier_name', label: 'Fornecedor' },
+                  ])
+                }
+              >
+                <Download className="h-4 w-4" /> Exportar CSV
+              </Button>
+              <Button onClick={() => setShowNewPayable(true)}><Plus className="h-4 w-4 mr-1" />{t.financial.newPayable}</Button>
+            </div>
           </div>
 
           {paySubTab === 'reimbursements' ? (

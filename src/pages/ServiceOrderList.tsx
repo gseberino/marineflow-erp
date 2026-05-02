@@ -8,7 +8,8 @@ import { statusConfig, priorityConfig } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Plus, Search, Filter, ClipboardList, MoreHorizontal, FileText, Printer, MessageCircle, Send, CheckCircle2, XCircle, History, Copy } from 'lucide-react';
+import { Plus, Search, Filter, ClipboardList, MoreHorizontal, FileText, Printer, MessageCircle, Send, CheckCircle2, XCircle, History, Copy, Download } from 'lucide-react';
+import { exportToCSV } from '@/lib/export';
 import { supabase } from '@/integrations/supabase/client';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -223,6 +224,25 @@ export default function ServiceOrderList() {
             Limpar filtros
           </Button>
         )}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() =>
+            exportToCSV(filtered, 'ordens_servico', [
+              { key: 'service_order_number', label: 'Número' },
+              { key: 'status', label: 'Status' },
+              { key: 'clients', label: 'Cliente', format: (v) => v?.full_name_or_company_name || '' },
+              { key: 'vessels', label: 'Embarcação', format: (v) => v?.boat_name || '' },
+              { key: 'grand_total', label: 'Valor Total', format: (v) => Number(v || 0).toFixed(2).replace('.', ',') },
+              { key: 'created_at', label: 'Data Criação', format: (v) => v ? new Date(v).toLocaleDateString('pt-BR') : '' },
+              { key: 'scheduled_start_at', label: 'Agendado Para', format: (v) => v ? new Date(v).toLocaleDateString('pt-BR') : '' },
+            ])
+          }
+          className="gap-1"
+        >
+          <Download className="h-4 w-4" />
+          Exportar CSV
+        </Button>
       </div>
 
       {isLoading ? (
