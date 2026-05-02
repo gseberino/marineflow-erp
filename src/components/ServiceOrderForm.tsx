@@ -2231,6 +2231,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               <div className="w-28 text-right font-semibold">
                 {formatCurrency(opts.total)}
               </div>
+              {opts.extra}
               <Button
                 variant="ghost"
                 size="icon"
