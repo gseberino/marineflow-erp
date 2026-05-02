@@ -128,6 +128,10 @@ export function useUpdateServiceOrder() {
       qc.invalidateQueries({ queryKey: ['service-orders'] });
       qc.invalidateQueries({ queryKey: ['service-orders', vars.id] });
       qc.invalidateQueries({ queryKey: ['receivables'] });
+      if (vars?.status === 'completed') {
+        qc.invalidateQueries({ queryKey: ['products'] });
+        qc.invalidateQueries({ queryKey: ['inventory'] });
+      }
     },
   });
 }
