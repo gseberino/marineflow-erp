@@ -591,6 +591,29 @@ function PartCardFormComponent({
           />
         </div>
       </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <Label>Número de série (opcional)</Label>
+          <Input
+            value={draft.serial_number || ''}
+            onChange={(e) => onUpdate({ serial_number: e.target.value })}
+            placeholder="Ex: VE123456"
+            className="h-8 text-sm"
+          />
+        </div>
+        <div>
+          <Label>Garantia (meses)</Label>
+          <Input
+            type="number"
+            min={0}
+            max={60}
+            value={draft.warranty_months || 0}
+            onChange={(e) => onUpdate({ warranty_months: parseInt(e.target.value) || 0 })}
+            placeholder="0 = sem garantia"
+            className="h-8 text-sm"
+          />
+        </div>
+      </div>
       <div className="flex gap-2">
         <Button size="sm" onClick={onConfirm} disabled={confirmDisabled}>
           <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Confirmar
