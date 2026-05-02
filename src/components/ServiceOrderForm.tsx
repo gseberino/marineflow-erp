@@ -765,6 +765,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     unit_price: number;
     notes: string;
     technician_user_id: string;
+    warranty_months?: number;
   };
   const emptySvcCard = (): SvcCardDraft => ({
     service_id: '',
@@ -775,6 +776,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     unit_price: 0,
     notes: '',
     technician_user_id: '',
+    warranty_months: 0,
   });
   // Editing state per row id (persisted: row.id, draft: tempId, new: 'new-N')
   const [editingSvc, setEditingSvc] = useState<Record<string, SvcCardDraft>>({});
@@ -790,6 +792,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     quantity: number;
     unit_cost: number;
     unit_sale: number;
+    warranty_months?: number;
+    serial_number?: string;
   };
   type DraftService = {
     tempId: string;
@@ -800,6 +804,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     quantity: number;
     unit_price_snapshot: number;
     notes?: string;
+    warranty_months?: number;
   };
   const [draftParts, setDraftParts] = useState<DraftPart[]>([]);
   const [draftServices, setDraftServices] = useState<DraftService[]>([]);
