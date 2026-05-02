@@ -273,7 +273,7 @@ export default function WhatsAppLogsPage() {
           {selected && (
             <ScrollArea className="max-h-[70vh] pr-4">
               <div className="space-y-3 text-sm">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div><div className="text-xs text-muted-foreground">ID</div><div className="font-mono text-xs break-all">{selected.id}</div></div>
                   <div><div className="text-xs text-muted-foreground">Z-API ID</div><div className="font-mono text-xs break-all">{selected.zapi_message_id || '—'}</div></div>
                   <div><div className="text-xs text-muted-foreground">Data</div><div>{format(new Date(selected.occurred_at), 'dd/MM/yyyy HH:mm:ss')}</div></div>

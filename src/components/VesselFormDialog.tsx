@@ -135,7 +135,7 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
           <DialogTitle>{isEdit ? "Editar Veículo/Embarcação" : "Novo Veículo/Embarcação"}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="col-span-2 sm:col-span-1">
               <Label>Tipo de Unidade *</Label>
               <Select value={form.asset_type || 'Lancha'} onValueChange={v => set('asset_type', v)}>

@@ -92,11 +92,11 @@ export function ReceivableFormDialog({ open, onOpenChange }: Props) {
             </Select>
           </div>
           <div><Label>{t.common.description} *</Label><Input value={description} onChange={e => setDescription(e.target.value)} /></div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div><Label>{t.common.date}</Label><Input type="date" value={issueDate} onChange={e => setIssueDate(e.target.value)} /></div>
             <div><Label>{t.financial.dueDate} *</Label><Input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} /></div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div><Label>{t.common.amount} *</Label><MoneyInput value={amount} onValueChange={setAmount} /></div>
             <div><Label>Moeda</Label>
               <Select value={currency} onValueChange={setCurrency}>

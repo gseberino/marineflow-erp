@@ -91,7 +91,7 @@ export default function AuditLogPage() {
     if (changedKeys.length === 0) return <span className="text-muted-foreground text-xs">{auditT.noChanges}</span>;
 
     return (
-      <div className="grid grid-cols-2 gap-4 text-xs">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
         <div className="space-y-1">
           <p className="font-semibold text-destructive">{auditT.before}</p>
           {changedKeys.map(k => (
