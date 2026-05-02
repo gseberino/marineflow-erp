@@ -544,7 +544,25 @@ export default function FinancialPage() {
                 </Button>
               </div>
             </div>
-            <Button onClick={() => setShowNewPayable(true)}><Plus className="h-4 w-4 mr-1" />{t.financial.newPayable}</Button>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1"
+                onClick={() =>
+                  exportToCSV(filteredPayables as any[], 'pagaveis', [
+                    { key: 'description', label: 'Descrição' },
+                    { key: 'amount', label: 'Valor', format: (v) => Number(v || 0).toFixed(2).replace('.', ',') },
+                    { key: 'due_date', label: 'Vencimento', format: (v) => v ? new Date(v).toLocaleDateString('pt-BR') : '' },
+                    { key: 'status', label: 'Status' },
+                    { key: 'supplier_name', label: 'Fornecedor' },
+                  ])
+                }
+              >
+                <Download className="h-4 w-4" /> Exportar CSV
+              </Button>
+              <Button onClick={() => setShowNewPayable(true)}><Plus className="h-4 w-4 mr-1" />{t.financial.newPayable}</Button>
+            </div>
           </div>
 
           {paySubTab === 'reimbursements' ? (
