@@ -105,16 +105,36 @@ const App = () => (
                             <CommissionsPage />
                           </ProtectedRoute>
                         } />
-                        <Route path="/external-quotes" element={<ExternalQuoteListPage />} />
-                        <Route path="/external-quotes/new" element={<ExternalQuoteNewPage />} />
+                        <Route path="/external-quotes" element={
+                          <ProtectedRoute roles={['external_seller','admin','financial','seller']}>
+                            <ExternalQuoteListPage />
+                          </ProtectedRoute>
+                        } />
+                        <Route path="/external-quotes/new" element={
+                          <ProtectedRoute roles={['external_seller','admin','financial','seller']}>
+                            <ExternalQuoteNewPage />
+                          </ProtectedRoute>
+                        } />
                         <Route path="/external-quotes/approval" element={
                           <ProtectedRoute roles={['admin', 'financial']} groupId="vendas-externas">
                             <ExternalQuoteApprovalPage />
                           </ProtectedRoute>
                         } />
-                        <Route path="/external-quotes/leads" element={<ExternalSellerLeadsPage />} />
-                        <Route path="/external-quotes/catalog" element={<ExternalProductCatalogPage />} />
-                        <Route path="/external-quotes/:id" element={<ExternalQuoteDetailPage />} />
+                        <Route path="/external-quotes/leads" element={
+                          <ProtectedRoute roles={['admin','financial']}>
+                            <ExternalSellerLeadsPage />
+                          </ProtectedRoute>
+                        } />
+                        <Route path="/external-quotes/catalog" element={
+                          <ProtectedRoute roles={['external_seller','admin','financial','seller']}>
+                            <ExternalProductCatalogPage />
+                          </ProtectedRoute>
+                        } />
+                        <Route path="/external-quotes/:id" element={
+                          <ProtectedRoute roles={['external_seller','admin','financial','seller']}>
+                            <ExternalQuoteDetailPage />
+                          </ProtectedRoute>
+                        } />
                         <Route path="/reports" element={<ProtectedRoute roles={['admin', 'financial']} groupId="financeiro"><ReportsPage /></ProtectedRoute>} />
                         <Route path="/prospecting" element={
                           <ProtectedRoute roles={['admin']} groupId="operacional">
