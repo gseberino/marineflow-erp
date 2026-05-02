@@ -51,6 +51,7 @@ export function useServiceOrder(id: string | undefined) {
       return data;
     },
     enabled: !!id,
+    staleTime: 30 * 1000,
   });
 }
 
