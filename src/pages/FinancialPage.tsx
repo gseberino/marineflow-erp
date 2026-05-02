@@ -343,6 +343,37 @@ export default function FinancialPage() {
     <div className="space-y-6 animate-fade-in">
       <PageHeader title={t.financial.title} description={t.financial.description} />
 
+      {cashflow && cashflow.length > 0 && (
+        <div className="rounded-xl border bg-card p-4">
+          <h3 className="font-semibold text-sm mb-3">
+            Fluxo de Caixa Projetado — Próximos 60 dias
+          </h3>
+          <ResponsiveContainer width="100%" height={180}>
+            <BarChart data={cashflow} barSize={20}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+              <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`} />
+              <RechartsTooltip
+                formatter={(v: number, name: string) => [
+                  v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+                  name === 'in' ? 'Entradas' : name === 'out' ? 'Saídas' : 'Saldo',
+                ]}
+              />
+              <Bar dataKey="in" fill="#22c55e" name="in" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="out" fill="#ef4444" name="out" radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+          <div className="flex gap-4 mt-2 text-xs text-muted-foreground justify-center">
+            <span className="flex items-center gap-1">
+              <span className="h-2 w-4 rounded bg-green-500 inline-block" /> Entradas previstas
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="h-2 w-4 rounded bg-red-500 inline-block" /> Saídas previstas
+            </span>
+          </div>
+        </div>
+      )}
+
       <Tabs defaultValue="overview">
         <TabsList>
           <TabsTrigger value="overview">{t.financial.tabOverview}</TabsTrigger>
