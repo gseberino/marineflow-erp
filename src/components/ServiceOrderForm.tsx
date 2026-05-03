@@ -1112,6 +1112,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           );
           const newlyAssigned = selectedTechnicians.filter((uid) => !existingIds.has(uid));
           for (const uid of newlyAssigned) {
+            if (!uid || uid.trim() === '') continue;
             supabase.functions.invoke('send-push-notification', {
               body: {
                 user_id: uid,
