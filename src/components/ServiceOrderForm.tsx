@@ -1053,6 +1053,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             selectedTechnicians.map((uid) => ({ service_order_id: result.id, user_id: uid }))
           );
           for (const uid of selectedTechnicians) {
+            if (!uid || uid.trim() === '') continue;
             supabase.functions.invoke('send-push-notification', {
               body: {
                 user_id: uid,
