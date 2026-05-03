@@ -423,6 +423,35 @@ export function AppLayout({ children }: { children: ReactNode }) {
       </div>
       <PWAInstallPrompt />
       <AIAgentWidget />
+      {showPushBanner && (
+        <div className="fixed bottom-20 left-4 right-4 z-50 bg-primary text-primary-foreground rounded-xl p-3 flex items-center justify-between shadow-lg sm:hidden">
+          <div className="flex items-center gap-2 text-sm min-w-0">
+            <Bell className="h-4 w-4 flex-shrink-0" />
+            <span className="truncate">Ativar notificações de OS</span>
+          </div>
+          <div className="flex gap-2 ml-2 flex-shrink-0">
+            <Button
+              size="sm"
+              variant="secondary"
+              className="h-7 text-xs"
+              onClick={handleEnablePush}
+            >
+              Ativar
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0 text-primary-foreground/70"
+              onClick={() => {
+                setShowPushBanner(false);
+                localStorage.setItem('push_banner_dismissed', '1');
+              }}
+            >
+              ×
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
