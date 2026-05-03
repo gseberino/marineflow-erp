@@ -64,6 +64,37 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const { user, signOut } = useAuth();
   usePushNotifications();
 
+  const [showPushBanner, setShowPushBanner] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    if (localStorage.getItem('push_banner_dismissed') === '1') return;
+    if (localStorage.getItem('push_registered') === '1') return;
+    if (!('PushManager' in window)) return;
+    const isMobile = window.innerWidth < 640;
+    if (!isMobile) return;
+    supabase
+      .from('push_subscriptions')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!data) setShowPushBanner(true);
+      });
+  }, [user?.id]);
+
+  const handleEnablePush = async () => {
+    if (!user) return;
+    const ok = await requestPushPermission(user.id);
+    if (ok) {
+      localStorage.setItem('push_registered', '1');
+      setShowPushBanner(false);
+      toast.success('Notificações ativadas!');
+    } else {
+      toast.error('Permissão negada. Ative nas configurações do iPhone em Safari → MarineFlow.');
+    }
+  };
+
   const { data: logoSetting } = useQuery({
     queryKey: ['company-logo'],
     queryFn: async () => {
