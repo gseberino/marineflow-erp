@@ -1052,6 +1052,16 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           await supabase.from('service_order_technicians').insert(
             selectedTechnicians.map((uid) => ({ service_order_id: result.id, user_id: uid }))
           );
+          for (const uid of selectedTechnicians) {
+            supabase.functions.invoke('send-push-notification', {
+              body: {
+                user_id: uid,
+                title: 'Nova OS atribuída',
+                body: `Você foi atribuído à OS ${result.service_order_number ?? ''}`,
+                url: `/service-orders/${result.id}`,
+              },
+            }).catch((e) => console.warn('push notify failed', e));
+          }
         }
         // Persist any draft parts entered before the OS existed
         for (const dp of draftParts) {
