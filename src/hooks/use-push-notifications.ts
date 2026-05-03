@@ -48,3 +48,32 @@ export function usePushNotifications() {
     })();
   }, [user?.id]);
 }
+
+export async function requestPushPermission(userId: string): Promise<boolean> {
+  try {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return false;
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      });
+    }
+    const { endpoint, keys } = sub.toJSON() as any;
+    const { error } = await supabase.from('push_subscriptions').upsert(
+      {
+        user_id: userId,
+        endpoint,
+        p256dh: keys.p256dh,
+        auth: keys.auth,
+        user_agent: navigator.userAgent.slice(0, 200),
+      },
+      { onConflict: 'endpoint' }
+    );
+    return !error;
+  } catch (e) {
+    console.warn('requestPushPermission failed:', e);
+    return false;
+  }
+}
