@@ -1048,10 +1048,13 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       if (isNew) {
         const result = await createSO.mutateAsync(payload);
         const { supabase } = await import('@/integrations/supabase/client');
-        if (selectedTechnicians.length > 0) {
+        const validTechs = selectedTechnicians.filter(uid => uid && uid.trim() !== '');
+        if (validTechs.length > 0) {
           await supabase.from('service_order_technicians').insert(
-            selectedTechnicians.map((uid) => ({ service_order_id: result.id, user_id: uid }))
+            validTechs.map((uid) => ({ service_order_id: result.id, user_id: uid }))
           );
+        }
+        if (selectedTechnicians.length > 0) {
           for (const uid of selectedTechnicians) {
             if (!uid || uid.trim() === '') continue;
             supabase.functions.invoke('send-push-notification', {
