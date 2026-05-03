@@ -1052,6 +1052,16 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           await supabase.from('service_order_technicians').insert(
             selectedTechnicians.map((uid) => ({ service_order_id: result.id, user_id: uid }))
           );
+          for (const uid of selectedTechnicians) {
+            supabase.functions.invoke('send-push-notification', {
+              body: {
+                user_id: uid,
+                title: 'Nova OS atribuída',
+                body: `Você foi atribuído à OS ${result.service_order_number ?? ''}`,
+                url: `/service-orders/${result.id}`,
+              },
+            }).catch((e) => console.warn('push notify failed', e));
+          }
         }
         // Persist any draft parts entered before the OS existed
         for (const dp of draftParts) {
@@ -1089,11 +1099,27 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       } else {
         await updateSO.mutateAsync({ id: orderId!, ...payload });
         const { supabase } = await import('@/integrations/supabase/client');
+        const { data: existingTechs } = await supabase
+          .from('service_order_technicians')
+          .select('user_id')
+          .eq('service_order_id', orderId!);
+        const existingIds = new Set((existingTechs ?? []).map((t: any) => t.user_id));
         await supabase.from('service_order_technicians').delete().eq('service_order_id', orderId!);
         if (selectedTechnicians.length > 0) {
           await supabase.from('service_order_technicians').insert(
             selectedTechnicians.map((uid) => ({ service_order_id: orderId!, user_id: uid }))
           );
+          const newlyAssigned = selectedTechnicians.filter((uid) => !existingIds.has(uid));
+          for (const uid of newlyAssigned) {
+            supabase.functions.invoke('send-push-notification', {
+              body: {
+                user_id: uid,
+                title: 'Nova OS atribuída',
+                body: `Você foi atribuído à OS ${form.service_order_number ?? ''}`,
+                url: `/service-orders/${orderId}`,
+              },
+            }).catch((e) => console.warn('push notify failed', e));
+          }
         }
         toast.success('Ordem de serviço atualizada');
 
