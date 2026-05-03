@@ -2,7 +2,10 @@ import { useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 
-const VAPID_PUBLIC_KEY = (import.meta.env.VITE_VAPID_PUBLIC_KEY as string) || '';
+// Public VAPID key — safe to expose in client code by design.
+const VAPID_PUBLIC_KEY =
+  (import.meta.env.VITE_VAPID_PUBLIC_KEY as string) ||
+  'BOadl7mApPwKwTHQE4YUTbBZB_vo-6Y8pzgn8UDeoXbUAUr-mMqMsrs6PpA6dlNplUFVekIJXJKbejrW_10EHSk';
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
