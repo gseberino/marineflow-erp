@@ -2052,7 +2052,10 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         <div>
           <Label>{t.serviceOrders.technicians}</Label>
           <div className="flex flex-wrap gap-2 mt-1">
-            {appUsers?.map((u) => (
+            {(appUsers || []).filter((u: any) =>
+              u.id && u.id.trim() !== '' &&
+              ['admin', 'technician', 'seller'].includes(u.role)
+            ).map((u) => (
               <label key={u.id} className="flex items-center gap-1.5 text-sm border rounded-lg px-3 py-1.5 cursor-pointer hover:bg-muted transition-colors">
                 <input
                   type="checkbox"
