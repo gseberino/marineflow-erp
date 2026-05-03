@@ -1048,10 +1048,13 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       if (isNew) {
         const result = await createSO.mutateAsync(payload);
         const { supabase } = await import('@/integrations/supabase/client');
-        if (selectedTechnicians.length > 0) {
+        const validTechs = selectedTechnicians.filter(uid => uid && uid.trim() !== '');
+        if (validTechs.length > 0) {
           await supabase.from('service_order_technicians').insert(
-            selectedTechnicians.map((uid) => ({ service_order_id: result.id, user_id: uid }))
+            validTechs.map((uid) => ({ service_order_id: result.id, user_id: uid }))
           );
+        }
+        if (selectedTechnicians.length > 0) {
           for (const uid of selectedTechnicians) {
             if (!uid || uid.trim() === '') continue;
             supabase.functions.invoke('send-push-notification', {
@@ -1106,10 +1109,13 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           .eq('service_order_id', orderId!);
         const existingIds = new Set((existingTechs ?? []).map((t: any) => t.user_id));
         await supabase.from('service_order_technicians').delete().eq('service_order_id', orderId!);
-        if (selectedTechnicians.length > 0) {
+        const validTechs = selectedTechnicians.filter(uid => uid && uid.trim() !== '');
+        if (validTechs.length > 0) {
           await supabase.from('service_order_technicians').insert(
-            selectedTechnicians.map((uid) => ({ service_order_id: orderId!, user_id: uid }))
+            validTechs.map((uid) => ({ service_order_id: orderId!, user_id: uid }))
           );
+        }
+        if (selectedTechnicians.length > 0) {
           const newlyAssigned = selectedTechnicians.filter((uid) => !existingIds.has(uid));
           for (const uid of newlyAssigned) {
             if (!uid || uid.trim() === '') continue;
@@ -2052,7 +2058,10 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         <div>
           <Label>{t.serviceOrders.technicians}</Label>
           <div className="flex flex-wrap gap-2 mt-1">
-            {appUsers?.map((u) => (
+            {(appUsers || []).filter((u: any) =>
+              u.id && u.id.trim() !== '' &&
+              ['admin', 'technician', 'seller'].includes(u.role)
+            ).map((u) => (
               <label key={u.id} className="flex items-center gap-1.5 text-sm border rounded-lg px-3 py-1.5 cursor-pointer hover:bg-muted transition-colors">
                 <input
                   type="checkbox"
