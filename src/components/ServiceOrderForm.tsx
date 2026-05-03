@@ -1109,10 +1109,13 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           .eq('service_order_id', orderId!);
         const existingIds = new Set((existingTechs ?? []).map((t: any) => t.user_id));
         await supabase.from('service_order_technicians').delete().eq('service_order_id', orderId!);
-        if (selectedTechnicians.length > 0) {
+        const validTechs = selectedTechnicians.filter(uid => uid && uid.trim() !== '');
+        if (validTechs.length > 0) {
           await supabase.from('service_order_technicians').insert(
-            selectedTechnicians.map((uid) => ({ service_order_id: orderId!, user_id: uid }))
+            validTechs.map((uid) => ({ service_order_id: orderId!, user_id: uid }))
           );
+        }
+        if (selectedTechnicians.length > 0) {
           const newlyAssigned = selectedTechnicians.filter((uid) => !existingIds.has(uid));
           for (const uid of newlyAssigned) {
             if (!uid || uid.trim() === '') continue;
