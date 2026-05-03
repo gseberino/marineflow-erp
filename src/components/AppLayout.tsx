@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Users, Ship, Anchor, Package, ClipboardList,
   DollarSign, BarChart3, Settings, ChevronLeft, ChevronRight, Menu,
   Warehouse, Building2, Wrench, History, LogOut, CalendarDays, MessageCircle, CreditCard,
-  Database, ChevronDown, Rocket, ShoppingCart, FileDown, Target, CheckCircle2
+  Database, ChevronDown, Rocket, ShoppingCart, FileDown, Target, CheckCircle2, Bell
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -28,7 +28,8 @@ import { AIAgentWidget } from '@/components/ai/AIAgentWidget';
 import { OfflineIndicator } from '@/components/OfflineIndicator';
 import { DiagnosticExportButton } from '@/components/DiagnosticExportButton';
 import { Button } from '@/components/ui/button';
-import { usePushNotifications } from '@/hooks/use-push-notifications';
+import { usePushNotifications, requestPushPermission } from '@/hooks/use-push-notifications';
+import { toast } from 'sonner';
 
 type NavItem = {
   label: string;
@@ -62,6 +63,37 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const { t } = useI18n();
   const { user, signOut } = useAuth();
   usePushNotifications();
+
+  const [showPushBanner, setShowPushBanner] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    if (localStorage.getItem('push_banner_dismissed') === '1') return;
+    if (localStorage.getItem('push_registered') === '1') return;
+    if (!('PushManager' in window)) return;
+    const isMobile = window.innerWidth < 640;
+    if (!isMobile) return;
+    supabase
+      .from('push_subscriptions')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!data) setShowPushBanner(true);
+      });
+  }, [user?.id]);
+
+  const handleEnablePush = async () => {
+    if (!user) return;
+    const ok = await requestPushPermission(user.id);
+    if (ok) {
+      localStorage.setItem('push_registered', '1');
+      setShowPushBanner(false);
+      toast.success('Notificações ativadas!');
+    } else {
+      toast.error('Permissão negada. Ative nas configurações do iPhone em Safari → MarineFlow.');
+    }
+  };
 
   const { data: logoSetting } = useQuery({
     queryKey: ['company-logo'],
@@ -391,6 +423,35 @@ export function AppLayout({ children }: { children: ReactNode }) {
       </div>
       <PWAInstallPrompt />
       <AIAgentWidget />
+      {showPushBanner && (
+        <div className="fixed bottom-20 left-4 right-4 z-50 bg-primary text-primary-foreground rounded-xl p-3 flex items-center justify-between shadow-lg sm:hidden">
+          <div className="flex items-center gap-2 text-sm min-w-0">
+            <Bell className="h-4 w-4 flex-shrink-0" />
+            <span className="truncate">Ativar notificações de OS</span>
+          </div>
+          <div className="flex gap-2 ml-2 flex-shrink-0">
+            <Button
+              size="sm"
+              variant="secondary"
+              className="h-7 text-xs"
+              onClick={handleEnablePush}
+            >
+              Ativar
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0 text-primary-foreground/70"
+              onClick={() => {
+                setShowPushBanner(false);
+                localStorage.setItem('push_banner_dismissed', '1');
+              }}
+            >
+              ×
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
