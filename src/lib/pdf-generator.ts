@@ -456,13 +456,50 @@ function buildPaymentSection(so: PDFData['serviceOrder']): string {
 
   let installmentsHtml = '';
   if (hasInstallments) {
-    const rows = installments.map((inst, idx) => `
+    const servicesTotal = Number(so.labor_cost_total || 0);
+    const partsTotal = Number(so.parts_cost_total || 0);
+    const expensesTotal =
+      Number(so.travel_cost_total || 0) +
+      Number(so.operational_cost_total || 0) +
+      Number(so.subcontract_cost_total || 0);
+    const grandTotal = Number(so.grand_total || 0);
+
+    // Compute amount for each installment, supporting both formats:
+    //   1) preset percentages: { services_pct, parts_pct, expenses_pct }
+    //   2) flat percent: { percent }
+    //   3) explicit amount: { amount }
+    const computedAmounts: number[] = installments.map((inst: any) => {
+      if (typeof inst.amount === 'number' && !isNaN(inst.amount)) return inst.amount;
+      if (typeof inst.percent === 'number' && !isNaN(inst.percent)) {
+        return Math.round(grandTotal * (inst.percent / 100) * 100) / 100;
+      }
+      const sPct = Number(inst.services_pct || 0) / 100;
+      const pPct = Number(inst.parts_pct || 0) / 100;
+      const ePct = Number(inst.expenses_pct || 0) / 100;
+      const v = servicesTotal * sPct + partsTotal * pPct + expensesTotal * ePct;
+      return Math.round(v * 100) / 100;
+    });
+
+    // Sanity adjust: if rounding leaves a residue, push it onto the last installment
+    const sum = computedAmounts.reduce((a, b) => a + b, 0);
+    if (grandTotal > 0 && Math.abs(sum - grandTotal) < 1 && computedAmounts.length > 0) {
+      const diff = Math.round((grandTotal - sum) * 100) / 100;
+      computedAmounts[computedAmounts.length - 1] =
+        Math.round((computedAmounts[computedAmounts.length - 1] + diff) * 100) / 100;
+    }
+
+    const rows = installments.map((inst: any, idx: number) => {
+      const eventLabel = inst.due_date
+        ? fmtDate(inst.due_date)
+        : (inst.label || (inst.tipo === 'aprovacao' ? 'Na aprovação' : inst.tipo === 'entrega' ? 'Na entrega' : '—'));
+      return `
       <tr>
         <td style="font-weight:600;padding:6px 12px;">Parcela ${idx + 1}</td>
-        <td style="padding:6px 12px;">${inst.due_date ? fmtDate(inst.due_date) : (inst.label || '—')}</td>
-        <td style="text-align:right;font-weight:700;padding:6px 12px;">${fmtCurrency(inst.amount)}</td>
+        <td style="padding:6px 12px;">${esc(eventLabel)}</td>
+        <td style="text-align:right;font-weight:700;padding:6px 12px;">${fmtCurrency(computedAmounts[idx])}</td>
       </tr>
-    `).join('');
+    `;
+    }).join('');
 
     installmentsHtml = `
       <table style="margin-bottom:0; width:100%; border-collapse:collapse;">
