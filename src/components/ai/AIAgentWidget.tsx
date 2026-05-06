@@ -1,7 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Sparkles, Send, Loader2, RotateCcw, X, Mic, MicOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/hooks/use-auth';
 import { useAIContext } from '@/lib/ai-context';
@@ -63,6 +63,25 @@ function DraggableAIButton({ onOpen }: { onOpen: () => void }) {
   );
 }
 
+// Hook para acompanhar o visualViewport (teclado virtual no mobile)
+function useVisualViewportHeight() {
+  const [height, setHeight] = useState(() =>
+    typeof window !== 'undefined' ? (window.visualViewport?.height ?? window.innerHeight) : 600
+  );
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => setHeight(vv.height);
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+    };
+  }, []);
+  return height;
+}
+
 export function AIAgentWidget() {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
@@ -71,68 +90,55 @@ export function AIAgentWidget() {
   const { display, loading, loadingMsg, sendMessage, confirmProposal, cancelProposal, reset, activeProposal } =
     useAIAgent(context);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const vpHeight = useVisualViewportHeight();
 
-  // Voice Input State
+  // Altura do popup: 78% da viewport visível (respeita teclado virtual)
+  const popupHeight = Math.min(Math.round(vpHeight * 0.78), 640);
+
+  // Voice Input
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
-      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      recognitionRef.current = new SpeechRecognition();
+      const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      recognitionRef.current = new SR();
       recognitionRef.current.continuous = true;
       recognitionRef.current.interimResults = false;
       recognitionRef.current.lang = 'pt-BR';
-
       recognitionRef.current.onresult = (event: any) => {
-        let finalTranscript = '';
+        let t = '';
         for (let i = event.resultIndex; i < event.results.length; ++i) {
-          if (event.results[i].isFinal) {
-            finalTranscript += event.results[i][0].transcript;
-          }
+          if (event.results[i].isFinal) t += event.results[i][0].transcript;
         }
-        if (finalTranscript) {
-          setInput((prev) => {
-            const separator = prev && !prev.endsWith(' ') ? ' ' : '';
-            return prev + separator + finalTranscript;
-          });
-        }
+        if (t) setInput((prev) => prev + (prev && !prev.endsWith(' ') ? ' ' : '') + t);
       };
-
-      recognitionRef.current.onerror = (event: any) => {
-        console.error("Speech recognition error", event.error);
-        setIsListening(false);
-      };
-
-      recognitionRef.current.onend = () => {
-        setIsListening(false);
-      };
+      recognitionRef.current.onerror = () => setIsListening(false);
+      recognitionRef.current.onend = () => setIsListening(false);
     }
-    return () => {
-      if (recognitionRef.current) {
-         recognitionRef.current.stop();
-      }
-    };
+    return () => recognitionRef.current?.stop();
   }, []);
 
-  const toggleListening = () => {
+  const toggleListening = useCallback(() => {
     if (isListening) {
       recognitionRef.current?.stop();
       setIsListening(false);
     } else {
-      if (!recognitionRef.current) {
-        toast.error('Seu navegador não suporta reconhecimento de voz.');
-        return;
-      }
-      try {
-        recognitionRef.current.start();
-        setIsListening(true);
-      } catch (e) {
-        console.error(e);
-      }
+      if (!recognitionRef.current) { toast.error('Seu navegador não suporta reconhecimento de voz.'); return; }
+      try { recognitionRef.current.start(); setIsListening(true); } catch (e) { console.error(e); }
     }
-  };
+  }, [isListening]);
 
+  // Fecha ao pressionar Escape
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [open]);
+
+  // Scroll para o fim ao receber nova mensagem
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [display, loading]);
@@ -147,145 +153,161 @@ export function AIAgentWidget() {
   };
 
   const handleKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
   };
+
+  const entityLabel =
+    context.entityType === 'service_order' ? '📋 OS em contexto' :
+    context.entityType === 'client' ? '👤 Cliente em contexto' :
+    context.entityType === 'vessel' ? '⛵ Embarcação em contexto' :
+    context.entityType === 'agenda' ? '📅 Agenda em contexto' :
+    context.entityType === 'products' ? '📦 Produtos em contexto' :
+    context.entityType === 'financial' ? '💰 Financeiro em contexto' : null;
+
+  const suggestions =
+    context.entityType === 'service_order' ? [
+      'Adicione mão de obra nesta OS',
+      'Qual o valor total desta OS?',
+      'Agende para amanhã às 9h',
+      'Envie o link desta OS para o cliente',
+    ] : context.entityType === 'client' ? [
+      'Histórico de OSs deste cliente',
+      'Crie uma nova OS para este cliente',
+      'Cobranças pendentes deste cliente',
+    ] : context.entityType === 'vessel' ? [
+      'Histórico de serviços desta embarcação',
+      'Crie uma OS para esta embarcação',
+    ] : [
+      'Crie uma OS para o barco do João',
+      'Tarefas de hoje na agenda',
+      'OSs em andamento',
+      'Cadastre o cliente Carlos, tel 47 99999-0000',
+    ];
+
+  const popup = open ? (
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center px-3 pb-4 sm:pb-0">
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+        onClick={() => setOpen(false)}
+        aria-hidden
+      />
+
+      {/* Popup */}
+      <div
+        className="relative w-full max-w-md rounded-2xl bg-background shadow-2xl flex flex-col overflow-hidden border border-border"
+        style={{ height: popupHeight }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <Sparkles className="h-5 w-5 text-primary shrink-0" />
+            <span className="font-semibold text-sm">Assistente IA</span>
+            {entityLabel && context.entityType !== 'unknown' && (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium truncate">
+                {entityLabel}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={reset} title="Nova conversa">
+              <RotateCcw className="h-3.5 w-3.5" />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setOpen(false)} title="Fechar">
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+
+        {/* Messages */}
+        <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
+          {display.length === 0 && !loading && (
+            <div className="space-y-3">
+              <p className="text-sm font-medium text-foreground">Como posso ajudar?</p>
+              <div className="flex flex-col gap-1.5">
+                {suggestions.map((s, i) => (
+                  <button
+                    key={i}
+                    onClick={() => sendMessage(s)}
+                    className="text-left text-sm px-3 py-2 rounded-lg bg-muted hover:bg-muted/80 transition-colors text-muted-foreground hover:text-foreground"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {display.map((item, i) => {
+            if (item.kind === 'message')
+              return <AIChatMessage key={i} role={item.role} content={item.content} />;
+            if (item.kind === 'proposal')
+              return (
+                <AIConfirmCard
+                  key={i}
+                  proposal={item.proposal}
+                  status={item.status}
+                  onConfirm={confirmProposal}
+                  onCancel={cancelProposal}
+                  disabled={loading || !activeProposal}
+                />
+              );
+            return null;
+          })}
+
+          {loading && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              {loadingMsg || 'Processando…'}
+            </div>
+          )}
+        </div>
+
+        {/* Input */}
+        <div className="border-t px-3 py-2.5 shrink-0">
+          <div className="flex gap-2 items-end">
+            <Button
+              variant={isListening ? 'destructive' : 'outline'}
+              size="icon"
+              onClick={toggleListening}
+              disabled={loading}
+              className={`h-9 w-9 shrink-0 ${isListening ? 'animate-pulse' : ''}`}
+              title={isListening ? 'Parar de ouvir' : 'Falar'}
+            >
+              {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+            </Button>
+            <Textarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKey}
+              placeholder="Pergunte ou descreva uma ação…"
+              rows={1}
+              disabled={loading}
+              className="resize-none text-sm min-h-[36px] max-h-[80px] py-2"
+            />
+            <Button
+              onClick={handleSend}
+              disabled={loading || !input.trim()}
+              size="icon"
+              className="h-9 w-9 shrink-0"
+            >
+              <Send className="h-4 w-4" />
+            </Button>
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-1 text-center">
+            Enter envia · Shift+Enter quebra linha
+          </p>
+        </div>
+      </div>
+    </div>
+  ) : null;
 
   return (
     <>
-      {/* Floating button — draggable */}
       <DraggableAIButton onOpen={() => setOpen(true)} />
-
-      <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-md flex flex-col p-0 gap-0">
-          <SheetHeader className="px-4 py-3 border-b">
-            <div className="flex items-center justify-between">
-              <div className="min-w-0">
-                <SheetTitle className="flex items-center gap-2">
-                  <Sparkles className="h-5 w-5 text-primary" />
-                  Assistente IA
-                </SheetTitle>
-                {context.entityType && context.entityType !== 'unknown' && (
-                  <div className="flex items-center gap-1.5 mt-1 px-2 py-1 rounded-md bg-primary/10 w-fit">
-                    <span className="text-xs font-medium text-primary">
-                      {context.entityType === 'service_order' ? '📋 Ordem de Serviço em contexto' :
-                       context.entityType === 'client' ? '👤 Cliente em contexto' :
-                       context.entityType === 'vessel' ? '⛵ Embarcação em contexto' :
-                       context.entityType === 'agenda' ? '📅 Agenda em contexto' :
-                       context.entityType === 'products' ? '📦 Produtos em contexto' :
-                       context.entityType === 'financial' ? '💰 Financeiro em contexto' :
-                       `${context.entityType} em contexto`}
-                    </span>
-                  </div>
-                )}
-              </div>
-              <Button variant="ghost" size="sm" onClick={reset} title="Nova conversa">
-                <RotateCcw className="h-4 w-4" />
-              </Button>
-            </div>
-          </SheetHeader>
-
-          <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
-            {display.length === 0 && !loading && (() => {
-              const suggestions = context.entityType === 'service_order' ? [
-                "Adicione um serviço de mão de obra nesta OS",
-                "Qual o valor total desta OS?",
-                "Agende esta OS para amanhã às 9h",
-                "Otimize a descrição do problema desta OS",
-                "Envie o link desta OS para o cliente",
-              ] : context.entityType === 'client' ? [
-                "Mostre o histórico de OSs deste cliente",
-                "Crie uma nova OS para este cliente",
-                "Quais cobranças estão pendentes para este cliente?",
-                "Envie uma mensagem para este cliente",
-              ] : context.entityType === 'vessel' ? [
-                "Mostre o histórico de serviços desta embarcação",
-                "Crie uma OS para esta embarcação",
-              ] : [
-                "Crie uma OS para o barco do João",
-                "Quais tarefas tenho hoje na agenda?",
-                "Liste as OSs em andamento",
-                "Envie um lembrete de cobrança para a Maria",
-                "Cadastre o cliente Carlos, telefone 47 99999-0000",
-              ];
-              return (
-                <div className="space-y-3">
-                  <p className="text-sm font-medium text-foreground">Como posso ajudar?</p>
-                  <div className="flex flex-col gap-1.5">
-                    {suggestions.map((s, i) => (
-                      <button
-                        key={i}
-                        onClick={() => sendMessage(s)}
-                        className="text-left text-sm px-3 py-2 rounded-lg bg-muted hover:bg-muted/80 transition-colors text-muted-foreground hover:text-foreground"
-                      >
-                        {s}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              );
-            })()}
-
-            {display.map((item, i) => {
-              if (item.kind === 'message') {
-                return <AIChatMessage key={i} role={item.role} content={item.content} />;
-              }
-              if (item.kind === 'proposal') {
-                return (
-                  <AIConfirmCard
-                    key={i}
-                    proposal={item.proposal}
-                    status={item.status}
-                    onConfirm={confirmProposal}
-                    onCancel={cancelProposal}
-                    disabled={loading || !activeProposal}
-                  />
-                );
-              }
-              return null;
-            })}
-
-            {loading && (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                {loadingMsg || 'Processando…'}
-              </div>
-            )}
-          </div>
-
-          <div className="border-t p-3">
-            <div className="flex gap-2 items-end">
-              <Button
-                variant={isListening ? "destructive" : "outline"}
-                size="icon"
-                onClick={toggleListening}
-                disabled={loading}
-                title={isListening ? "Parar de ouvir" : "Falar (Ditado)"}
-                className={`shrink-0 ${isListening ? 'animate-pulse' : ''}`}
-              >
-                {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-              </Button>
-              <Textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKey}
-                placeholder="Pergunte ou descreva uma ação…"
-                rows={2}
-                disabled={loading}
-                className="resize-none text-sm"
-              />
-              <Button onClick={handleSend} disabled={loading || !input.trim()} size="icon">
-                <Send className="h-4 w-4" />
-              </Button>
-            </div>
-            <p className="text-[10px] text-muted-foreground mt-1">
-              Enter envia · Shift+Enter quebra linha
-            </p>
-          </div>
-        </SheetContent>
-      </Sheet>
+      {typeof document !== 'undefined' ? createPortal(popup, document.body) : popup}
     </>
   );
 }

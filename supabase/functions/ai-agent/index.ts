@@ -1129,14 +1129,15 @@ async function executeTool(
 }
 
 async function sendWhatsapp(phone: string, message: string, jwt: string) {
-  const r = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send-text`, {
+  // Usa whatsapp-send (não whatsapp-send-text) para respeitar test_mode e test_number do app_settings
+  const r = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${jwt}`,
       apikey: ANON,
     },
-    body: JSON.stringify({ phone, message }),
+    body: JSON.stringify({ phone, message, kind: "text" }),
   });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) return { error: (data as any).error || `HTTP ${r.status}` };
