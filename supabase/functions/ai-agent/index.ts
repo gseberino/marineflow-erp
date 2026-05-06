@@ -528,9 +528,9 @@ const TOOLS = [
 async function executeTool(
   name: string,
   args: any,
-  ctx: { sb: any; admin: any; userId: string; jwt: string; appOrigin: string }
+  ctx: { sb: any; admin: any; userId: string; jwt: string; appOrigin: string; settings: Record<string, string> }
 ): Promise<any> {
-  const { sb, admin, userId, jwt, appOrigin } = ctx;
+  const { sb, admin, userId, jwt, appOrigin, settings } = ctx;
 
   switch (name) {
     case "search_clients": {
@@ -955,7 +955,8 @@ async function executeTool(
         ? await sb.from("services").select("service_name, billing_unit, default_price").eq("id", args.service_id).maybeSingle()
         : { data: null };
       const qty = Number(args.quantity) || 1;
-      const price = Number(args.unit_price) || svc?.default_price || 0;
+      const defaultHourlyRate = Number(settings.default_hourly_rate) || 0;
+      const price = Number(args.unit_price) || svc?.default_price || defaultHourlyRate || 0;
       const { data, error } = await sb
         .from("service_order_services")
         .insert({
@@ -1169,6 +1170,11 @@ Deno.serve(async (req) => {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
+    // ---- Carrega TODAS as configuracoes do sistema uma unica vez ----
+    const { data: settingsRows } = await admin.from("app_settings").select("key, value");
+    const settings: Record<string, string> = {};
+    (settingsRows || []).forEach((r: any) => { if (r.key) settings[r.key] = String(r.value ?? ""); });
+
     const body = await req.json().catch(() => ({}));
     const incoming = Array.isArray(body.messages) ? body.messages : [];
     const context = body.context || {};
@@ -1281,6 +1287,15 @@ QUALIDADE DAS RESPOSTAS:
 - Status: draft=Rascunho, pending=Pendente, approved=Aprovado, scheduled=Agendado, in_progress=Em andamento, completed=Concluído, cancelled=Cancelado, invoiced=Faturado.
 - Use listas markdown para múltiplos itens.
 - Respostas concisas e objetivas.
+CONFIGURAÇÕES DA EMPRESA (use sempre que relevante para calcular preços, sugerir valores ou criar registros):
+- Empresa: ${settings.company_name || "HBR Marine"}
+- Valor hora padrão (mão de obra): R$ ${settings.default_hourly_rate || "0"}/h — use como referência ao adicionar serviços sem preço definido
+- Custo por km (deslocamento): R$ ${settings.cost_per_km || "0"}/km — use ao calcular deslocamento
+- Margem de lucro padrão: ${settings.default_profit_margin || "30"}% — alerte se OS estiver abaixo disso
+- Comissão padrão: ${settings.default_commission_rate || "0"}%
+- Chave PIX: ${settings.pix_key || "não configurada"}
+- Banco: ${settings.bank_name || ""} Ag: ${settings.bank_agency || ""} Cc: ${settings.bank_account || ""}
+
 CONTEXTO ATUAL:
 - Data/hora: ${today.toISOString()} (${today.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })})
 - Usuário logado: ${userName} (ID: ${userId})
@@ -1361,7 +1376,7 @@ Quando o usuário disser "este cliente", "esta OS", "este barco", use o ID em co
 
         let result: any;
         try {
-          result = await executeTool(fnName, fnArgs, { sb, admin, userId, jwt, appOrigin });
+          result = await executeTool(fnName, fnArgs, { sb, admin, userId, jwt, appOrigin, settings });
         } catch (e: any) {
           result = { error: e?.message || "Falha na execução da tool" };
         }
