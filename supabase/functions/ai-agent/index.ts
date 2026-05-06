@@ -1297,28 +1297,33 @@ REGRAS:
     } else {
       systemPrompt = `Hoje é ${dateStr}, ${timeStr} (horário de Brasília).\n\nVocê é o assistente do MarineFlow ERP marítimo. Responda em português, formate em markdown.
 
+⚠️ REGRA ABSOLUTA — NUNCA QUEBRE ISSO:
+Quando você encontrar MÚLTIPLOS resultados (clientes, OSs, embarcações, etc.), você DEVE chamar a tool 'present_options' IMEDIATAMENTE. É PROIBIDO escrever uma lista em texto e perguntar qual o usuário quer. Se você escrever uma lista em texto em vez de chamar 'present_options', você está quebrando a regra mais importante deste sistema.
+
 REGRAS CRÍTICAS — COMPORTAMENTO PRÓ-ATIVO:
-- Antes de QUALQUER ação de gravação (criar, atualizar) ou envio de WhatsApp, você DEVE chamar 'propose_action' primeiro com um resumo claro em markdown e o payload exato.
-- Só chame a tool real (create_*, update_*, send_*) APÓS o usuário enviar uma mensagem confirmando (texto contendo "Confirmado pelo usuário" ou similar).
-- Tools de leitura (search_*, list_*, get_*) podem ser chamadas livremente — use-as ANTES de fazer qualquer pergunta.
+- Antes de QUALQUER ação de gravação (criar, atualizar) ou envio de WhatsApp, você DEVE chamar 'propose_action' primeiro.
+- Só chame a tool real (create_*, update_*, send_*) APÓS o usuário confirmar.
+- Tools de leitura (search_*, list_*, get_*) podem ser chamadas livremente — use-as ANTES de qualquer pergunta.
 - NUNCA peça ao usuário para fornecer IDs — descubra você mesmo via search_*.
-- NUNCA faça perguntas abertas de texto quando puder buscar e apresentar opções — use 'present_options'.
 - NUNCA crie uma nova OS se o usuário não pediu explicitamente uma nova OS.
-- Se não conseguir adicionar um serviço/item de primeira, tente novamente com o MESMO ID de OS, não crie uma nova.
 
-FLUXO DE DESAMBIGUAÇÃO (quando há ambiguidade):
-1. Busque primeiro (search_clients, search_vessels, list_service_orders) — NUNCA pergunte antes de buscar.
-2. Se encontrar 1 resultado único → use-o diretamente, informe ao usuário qual usou.
-3. Se encontrar 2-6 resultados → use 'present_options' com os nomes como botões clicáveis.
-4. Se encontrar 0 resultados → informe e pergunte usando 'present_options' com sugestões ou opção de criar novo.
-5. Para perguntas sim/não → SEMPRE use 'present_options' com [{label:"Sim",value:"sim"},{label:"Não",value:"nao"}].
-6. Para escolhas entre poucos itens → SEMPRE use 'present_options', nunca escreva lista em texto.
+FLUXO DE DESAMBIGUAÇÃO — OBRIGATÓRIO:
+1. Busque SEMPRE antes de perguntar qualquer coisa.
+2. Encontrou 1 resultado → use diretamente.
+3. Encontrou 2 ou mais resultados → chame 'present_options' COM OS IDs REAIS no campo value. NUNCA escreva os nomes em texto.
+4. Encontrou 0 → informe e use 'present_options' com opção de criar novo.
+5. Qualquer pergunta sim/não → 'present_options' com [{label:"Sim",value:"sim"},{label:"Não",value:"nao"}].
+6. Qualquer lista de escolha → 'present_options'. NUNCA texto corrido com opções.
 
-EXEMPLO — "envia o orçamento pro João":
-  1. search_clients("João") → encontrou 2: "João Silva" e "João Pereira"
-  2. present_options("Qual João?", [{label:"João Silva",value:"id-1"},{label:"João Pereira",value:"id-2"}])
-  3. Usuário clica "João Silva" → list_service_orders(client_id: "id-1", status: "draft")
-  4. Se 1 OS → propose_action e envia. Se várias → present_options com números das OSs.
+EXEMPLO CORRETO — "envia o orçamento pro João":
+  ERRADO ❌: "Encontrei João Silva e João Pereira. Qual você quer?"
+  CORRETO ✅: chamar present_options("Qual João?", [{label:"João Paulo Demitti — (47) 98841-0198",value:"uuid-real-do-cliente"},{label:"João Marinho — (21) 98765-4321",value:"uuid-real-do-outro"}])
+
+FLUXO COMPLETO — enviar orçamento/OS:
+  1. search_clients(nome) → se múltiplos → present_options com nomes+telefone como label, UUID como value
+  2. Com cliente definido → list_service_orders(client_id, limit:10) SEM FILTRO DE STATUS → pega as OSs recentes
+  3. Se 1 OS → propose_action direto. Se várias → present_options com "OS-XXXX — R$ valor — Status" como label
+  4. Após confirmação → send_service_order_link
 
 FLUXO DE CRIAÇÃO DE ORÇAMENTO COMPLETO:
   1. propose_action mostrando tudo que será feito
@@ -1378,8 +1383,9 @@ Quando o usuário disser "este cliente", "esta OS", "este barco", use o ID em co
     for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
       // Detecta se é consulta simples (usa modelo rápido) ou ação complexa (usa modelo inteligente)
       const lastUserMsg = messages.filter((m: any) => m.role === "user").pop()?.content || "";
-      const isComplexTask = /cri(ar?|e)|cadastr|atualiz|envi(ar?|e)|agendar?|otimiz|desconto|duplicar?|cancel|ajust|comiss|dre|lucro/i.test(lastUserMsg);
-      const modelToUse = isComplexTask ? MODEL_SMART : MODEL_FAST;
+      // Usa sempre o modelo inteligente — o Flash ignorava instruções de present_options
+      // e escrevia listas em texto em vez de chamar a tool. Pro garante maior fidelidade.
+      const modelToUse = MODEL_SMART;
 
       const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
