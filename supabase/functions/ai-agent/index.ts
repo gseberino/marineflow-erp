@@ -511,7 +511,7 @@ const TOOLS = [
     function: {
       name: "send_service_order_link",
       description:
-        "Envia o link público (assinatura/visualização) de uma OS por WhatsApp.",
+        "Envia o link público de uma OS/orçamento por WhatsApp para o cliente. Use esta tool sempre que o usuário pedir para 'enviar orçamento', 'mandar orçamento', 'enviar OS' ou similar. O cliente recebe o link para visualizar e baixar o PDF online.",
       parameters: {
         type: "object",
         properties: {
@@ -1266,6 +1266,11 @@ REGRAS CRÍTICAS:
   3. Para cada serviço: add_service_to_order com o ID da OS criada
   4. Para cada produto: add_service_order_item com o ID da OS criada
   5. Confirmar ao usuário que tudo foi criado.
+- Ao enviar orçamento/OS para o cliente (frases como "envia o orçamento", "manda a OS", "envia pro cliente"):
+  1. Se não houver OS em contexto, busque a OS mais recente do cliente com list_service_orders
+  2. Use send_service_order_link para enviar o link de acesso ao cliente via WhatsApp
+  3. Informe ao usuário: "✅ Orçamento enviado para [nome do cliente] via WhatsApp. O cliente receberá um link para visualizar e baixar o PDF online."
+  4. NUNCA diga que enviou um PDF em anexo — o sistema envia um link de acesso, não um arquivo direto.
 
 QUALIDADE DAS RESPOSTAS:
 - Os dados já vêm com nomes de clientes e embarcações — use-os diretamente, nunca faça buscas extras para resolver IDs.
