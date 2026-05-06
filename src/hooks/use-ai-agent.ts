@@ -15,9 +15,17 @@ export type Proposal = {
   payload: any;
 };
 
+export type OptionItem = { label: string; value: string };
+
+export type OptionsData = {
+  question: string;
+  options: OptionItem[];
+};
+
 export type DisplayItem =
   | { kind: 'message'; role: 'user' | 'assistant'; content: string }
   | { kind: 'proposal'; proposal: Proposal; status: 'pending' | 'confirmed' | 'cancelled' }
+  | { kind: 'options'; data: OptionsData; status: 'pending' | 'selected'; selectedValue?: string }
   | { kind: 'tool_summary'; text: string };
 
 export function useAIAgent(context: AIContext) {
@@ -27,6 +35,7 @@ export function useAIAgent(context: AIContext) {
   const [loading, setLoading] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState<string>('');
   const [activeProposal, setActiveProposal] = useState<{ idx: number; proposal: Proposal } | null>(null);
+  const [activeOptions, setActiveOptions] = useState<{ idx: number; data: OptionsData } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const invalidateAll = useCallback(() => {
@@ -62,6 +71,15 @@ export function useAIAgent(context: AIContext) {
             const idx = next.length;
             next.push({ kind: 'proposal', proposal, status: 'pending' });
             setActiveProposal({ idx, proposal });
+            return next;
+          });
+        } else if ((data as any).options) {
+          const optionsData = (data as any).options as OptionsData;
+          setDisplay((d) => {
+            const next = [...d];
+            const idx = next.length;
+            next.push({ kind: 'options', data: optionsData, status: 'pending' });
+            setActiveOptions({ idx, data: optionsData });
             return next;
           });
         } else {
@@ -124,12 +142,31 @@ export function useAIAgent(context: AIContext) {
     await callAgent(next);
   }, [activeProposal, messages, callAgent]);
 
+  const selectOption = useCallback(async (value: string, label: string) => {
+    if (!activeOptions) return;
+    // Mark option as selected in display
+    setDisplay((d) =>
+      d.map((it, i) =>
+        i === activeOptions.idx && it.kind === 'options'
+          ? { ...it, status: 'selected' as const, selectedValue: value }
+          : it
+      )
+    );
+    setActiveOptions(null);
+    // Send the selected label as user message so agent can continue
+    const userMsg: ChatMessage = { role: 'user', content: label };
+    setDisplay((d) => [...d, { kind: 'message', role: 'user', content: label }]);
+    const next = [...messages, userMsg];
+    await callAgent(next);
+  }, [activeOptions, messages, callAgent]);
+
   const reset = useCallback(() => {
     setMessages([]);
     setDisplay([]);
     setActiveProposal(null);
+    setActiveOptions(null);
     setError(null);
   }, []);
 
-  return { display, loading, loadingMsg, error, activeProposal, sendMessage, confirmProposal, cancelProposal, reset };
+  return { display, loading, loadingMsg, error, activeProposal, activeOptions, sendMessage, confirmProposal, cancelProposal, selectOption, reset };
 }

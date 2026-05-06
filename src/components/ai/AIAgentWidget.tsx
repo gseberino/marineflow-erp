@@ -8,6 +8,7 @@ import { useAIContext } from '@/lib/ai-context';
 import { useAIAgent } from '@/hooks/use-ai-agent';
 import { AIChatMessage } from './AIChatMessage';
 import { AIConfirmCard } from './AIConfirmCard';
+import { AIOptionsCard } from './AIOptionsCard';
 import { toast } from 'sonner';
 
 function DraggableAIButton({ onOpen }: { onOpen: () => void }) {
@@ -87,7 +88,7 @@ export function AIAgentWidget() {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
   const context = useAIContext();
-  const { display, loading, loadingMsg, sendMessage, confirmProposal, cancelProposal, reset, activeProposal } =
+  const { display, loading, loadingMsg, sendMessage, confirmProposal, cancelProposal, selectOption, reset, activeProposal, activeOptions } =
     useAIAgent(context);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -251,6 +252,17 @@ export function AIAgentWidget() {
                   onConfirm={confirmProposal}
                   onCancel={cancelProposal}
                   disabled={loading || !activeProposal}
+                />
+              );
+            if (item.kind === 'options')
+              return (
+                <AIOptionsCard
+                  key={i}
+                  question={item.data.question}
+                  options={item.data.options}
+                  status={item.status}
+                  selectedValue={item.selectedValue}
+                  onSelect={selectOption}
                 />
               );
             return null;

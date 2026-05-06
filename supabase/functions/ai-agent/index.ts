@@ -245,6 +245,33 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "present_options",
+      description:
+        "Use quando precisar que o usuário escolha entre opções. Exemplos: múltiplos clientes encontrados, múltiplas OSs, confirmação sim/não, seleção de data. NUNCA faça perguntas abertas de texto — sempre use esta tool para enumerar opções clicáveis. Máximo 6 opções.",
+      parameters: {
+        type: "object",
+        properties: {
+          question: { type: "string", description: "Pergunta clara para o usuário (ex: 'Qual cliente você quer?')" },
+          options: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                label: { type: "string", description: "Texto visível no botão (curto, max 40 chars)" },
+                value: { type: "string", description: "Valor interno (id, nome, ou texto da resposta)" },
+              },
+              required: ["label", "value"],
+            },
+            description: "Lista de opções. Para sim/não: [{label:'Sim',value:'sim'},{label:'Não',value:'nao'}]",
+          },
+        },
+        required: ["question", "options"],
+      },
+    },
+  },
 
   // ====== WRITE ======
   {
@@ -836,6 +863,16 @@ async function executeTool(
       };
     }
 
+    case "present_options": {
+      // Read-only: sinaliza para o frontend renderizar botões clicáveis.
+      return {
+        options_ready: true,
+        question: args.question,
+        options: args.options,
+        instruction: "Aguardando seleção do usuário.",
+      };
+    }
+
     case "create_agenda_task": {
       const { data, error } = await sb
         .from("agenda_tasks")
@@ -1257,27 +1294,41 @@ REGRAS:
     } else {
       systemPrompt = `Hoje é ${dateStr}, ${timeStr} (horário de Brasília).\n\nVocê é o assistente do MarineFlow ERP marítimo. Responda em português, formate em markdown.
 
-REGRAS CRÍTICAS:
+REGRAS CRÍTICAS — COMPORTAMENTO PRÓ-ATIVO:
 - Antes de QUALQUER ação de gravação (criar, atualizar) ou envio de WhatsApp, você DEVE chamar 'propose_action' primeiro com um resumo claro em markdown e o payload exato.
 - Só chame a tool real (create_*, update_*, send_*) APÓS o usuário enviar uma mensagem confirmando (texto contendo "Confirmado pelo usuário" ou similar).
-- Tools de leitura (search_*, list_*, get_*) podem ser chamadas livremente.
-- Use as tools de busca para resolver nomes em IDs. Seja tolerante a erros de digitação.
+- Tools de leitura (search_*, list_*, get_*) podem ser chamadas livremente — use-as ANTES de fazer qualquer pergunta.
 - NUNCA peça ao usuário para fornecer IDs — descubra você mesmo via search_*.
+- NUNCA faça perguntas abertas de texto quando puder buscar e apresentar opções — use 'present_options'.
 - NUNCA crie uma nova OS se o usuário não pediu explicitamente uma nova OS.
-- Se o usuário pedir para adicionar serviços/itens a uma OS existente, use add_service_to_order ou add_service_order_item com o ID da OS existente.
-- Após criar uma OS com create_service_order, use o ID retornado para adicionar serviços com add_service_to_order — NUNCA crie outra OS.
 - Se não conseguir adicionar um serviço/item de primeira, tente novamente com o MESMO ID de OS, não crie uma nova.
-- Ao criar um orçamento completo, o fluxo CORRETO é:
+
+FLUXO DE DESAMBIGUAÇÃO (quando há ambiguidade):
+1. Busque primeiro (search_clients, search_vessels, list_service_orders) — NUNCA pergunte antes de buscar.
+2. Se encontrar 1 resultado único → use-o diretamente, informe ao usuário qual usou.
+3. Se encontrar 2-6 resultados → use 'present_options' com os nomes como botões clicáveis.
+4. Se encontrar 0 resultados → informe e pergunte usando 'present_options' com sugestões ou opção de criar novo.
+5. Para perguntas sim/não → SEMPRE use 'present_options' com [{label:"Sim",value:"sim"},{label:"Não",value:"nao"}].
+6. Para escolhas entre poucos itens → SEMPRE use 'present_options', nunca escreva lista em texto.
+
+EXEMPLO — "envia o orçamento pro João":
+  1. search_clients("João") → encontrou 2: "João Silva" e "João Pereira"
+  2. present_options("Qual João?", [{label:"João Silva",value:"id-1"},{label:"João Pereira",value:"id-2"}])
+  3. Usuário clica "João Silva" → list_service_orders(client_id: "id-1", status: "draft")
+  4. Se 1 OS → propose_action e envia. Se várias → present_options com números das OSs.
+
+FLUXO DE CRIAÇÃO DE ORÇAMENTO COMPLETO:
   1. propose_action mostrando tudo que será feito
   2. Após confirmação: create_service_order (salva o ID retornado)
   3. Para cada serviço: add_service_to_order com o ID da OS criada
   4. Para cada produto: add_service_order_item com o ID da OS criada
   5. Confirmar ao usuário que tudo foi criado.
-- Ao enviar orçamento/OS para o cliente (frases como "envia o orçamento", "manda a OS", "envia pro cliente"):
-  1. Se não houver OS em contexto, busque a OS mais recente do cliente com list_service_orders
-  2. Use send_service_order_link para enviar o link de acesso ao cliente via WhatsApp
-  3. Informe ao usuário: "✅ Orçamento enviado para [nome do cliente] via WhatsApp. O cliente receberá um link para visualizar e baixar o PDF online."
-  4. NUNCA diga que enviou um PDF em anexo — o sistema envia um link de acesso, não um arquivo direto.
+
+FLUXO DE ENVIO DE ORÇAMENTO/OS:
+  1. Se não houver OS em contexto, busque com list_service_orders
+  2. Use send_service_order_link para enviar via WhatsApp
+  3. Informe: "✅ Orçamento enviado para [nome do cliente] via WhatsApp. O cliente receberá um link para visualizar e baixar o PDF online."
+  4. NUNCA diga que enviou um PDF em anexo — o sistema envia um link de acesso.
 
 QUALIDADE DAS RESPOSTAS:
 - Os dados já vêm com nomes de clientes e embarcações — use-os diretamente, nunca faça buscas extras para resolver IDs.
@@ -1400,7 +1451,19 @@ Quando o usuário disser "este cliente", "esta OS", "este barco", use o ID em co
               payload: fnArgs.payload,
             },
             tool_events: toolEvents,
-            // Devolve mensagens atualizadas para o frontend continuar a conversa
+            updated_messages: messages.slice(1), // remove system
+          });
+        }
+
+        // Se foi present_options, retorna IMEDIATAMENTE para o frontend renderizar os botões
+        if (fnName === "present_options") {
+          return jr({
+            message: { role: "assistant", content: aiMsg.content || "" },
+            options: {
+              question: fnArgs.question,
+              options: fnArgs.options,
+            },
+            tool_events: toolEvents,
             updated_messages: messages.slice(1), // remove system
           });
         }
