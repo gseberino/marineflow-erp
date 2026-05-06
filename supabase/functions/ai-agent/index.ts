@@ -1140,21 +1140,24 @@ async function executeTool(
     }
 
     case "send_service_order_link": {
-      const { data: so, error } = await sb
+      // Usa admin (service role) para garantir acesso independente de RLS
+      const { data: so, error } = await admin
         .from("service_orders")
         .select("id, service_order_number, share_token, client_id")
         .eq("id", args.service_order_id)
         .maybeSingle();
-      if (error || !so) return { error: "OS não encontrada" };
-      if (!so.share_token) return { error: "OS sem share_token" };
-      const { data: c } = await sb
+      if (error || !so) return { error: `OS não encontrada (id: ${args.service_order_id})` };
+      if (!so.share_token) return { error: "Esta OS ainda não possui link público gerado. Abra a OS no sistema e gere o link antes de enviar." };
+      const { data: c } = await admin
         .from("clients")
         .select("whatsapp, phone, full_name_or_company_name")
         .eq("id", so.client_id)
         .maybeSingle();
       const phone = c?.whatsapp || c?.phone;
-      if (!phone) return { error: "Cliente sem WhatsApp/telefone." };
-      const link = `${appOrigin}/view/${so.share_token}`;
+      if (!phone) return { error: "Cliente sem WhatsApp/telefone cadastrado." };
+      // Garante origem correta: usa settings.app_public_url como fallback
+      const origin = appOrigin || settings.app_public_url || "https://hbrmarine.online";
+      const link = `${origin}/view/${so.share_token}`;
       const msg =
         args.custom_message ||
         `Olá${c?.full_name_or_company_name ? ` ${c.full_name_or_company_name}` : ""}, segue o link da OS ${so.service_order_number}: ${link}`;
