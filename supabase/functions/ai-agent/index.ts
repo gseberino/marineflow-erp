@@ -540,12 +540,12 @@ const TOOLS = [
     function: {
       name: "send_service_order_link",
       description:
-        "Envia o link público de uma OS/orçamento por WhatsApp para o cliente. Use esta tool sempre que o usuário pedir para 'enviar orçamento', 'mandar orçamento', 'enviar OS' ou similar. O cliente recebe o link para visualizar e baixar o PDF online.",
+        "Envia o link público de uma OS/orçamento por WhatsApp. Use sempre que o usuário pedir 'enviar orçamento', 'mandar OS', 'enviar para o cliente' etc. O campo service_order_id aceita TANTO o UUID (campo 'id' do list_service_orders) QUANTO o número da OS (campo 'numero', ex: 'OS-2026-152542'). Prefira sempre o UUID.",
       parameters: {
         type: "object",
         properties: {
-          service_order_id: { type: "string" },
-          custom_message: { type: "string" },
+          service_order_id: { type: "string", description: "UUID (campo id) ou número da OS (campo numero, ex: OS-2026-152542)" },
+          custom_message: { type: "string", description: "Mensagem personalizada. Se omitido, usa mensagem padrão com link." },
         },
         required: ["service_order_id"],
       },
@@ -1142,14 +1142,20 @@ async function executeTool(
     }
 
     case "send_service_order_link": {
-      // Usa admin (service role) para garantir acesso independente de RLS
-      const { data: so, error } = await admin
+      // Aceita UUID (campo id) OU número da OS (campo service_order_number)
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(args.service_order_id || ""));
+      let soQuery = admin
         .from("service_orders")
-        .select("id, service_order_number, share_token, client_id")
-        .eq("id", args.service_order_id)
-        .maybeSingle();
-      if (error || !so) return { error: `OS não encontrada (id: ${args.service_order_id})` };
-      if (!so.share_token) return { error: "Esta OS ainda não possui link público gerado. Abra a OS no sistema e gere o link antes de enviar." };
+        .select("id, service_order_number, share_token, client_id");
+      if (isUUID) {
+        soQuery = soQuery.eq("id", args.service_order_id);
+      } else {
+        // Aceita "OS-2026-XXXXX" ou "SO-2026-XXXXX"
+        soQuery = soQuery.eq("service_order_number", args.service_order_id);
+      }
+      const { data: so, error: soErr } = await soQuery.maybeSingle();
+      if (soErr || !so) return { error: `OS não encontrada. Verifique se o número ou ID está correto. Valor recebido: "${args.service_order_id}"` };
+      if (!so.share_token) return { error: `A OS ${so.service_order_number} não possui link público ainda. Abra a OS no app, clique em "Compartilhar" para gerar o link, e tente novamente.` };
       const { data: c } = await admin
         .from("clients")
         .select("whatsapp, phone, full_name_or_company_name")
@@ -1299,8 +1305,8 @@ REGRAS:
     } else {
       systemPrompt = `Hoje é ${dateStr}, ${timeStr} (horário de Brasília).\n\nVocê é o assistente do MarineFlow ERP marítimo. Responda em português, formate em markdown.
 
-⚠️ REGRA ABSOLUTA — NUNCA QUEBRE ISSO:
-Quando você encontrar MÚLTIPLOS resultados (clientes, OSs, embarcações, etc.), você DEVE chamar a tool 'present_options' IMEDIATAMENTE. É PROIBIDO escrever uma lista em texto e perguntar qual o usuário quer. Se você escrever uma lista em texto em vez de chamar 'present_options', você está quebrando a regra mais importante deste sistema.
+⚠️⚠️⚠️ REGRA ABSOLUTA NÚMERO 1 — INVIOLÁVEL:
+Após qualquer tool de busca (search_clients, search_vessels, list_service_orders, search_products) retornar MAIS DE UM resultado, você TEM PROIBIÇÃO TOTAL de escrever texto com os resultados. A ÚNICA ação permitida é chamar 'present_options' imediatamente, com os UUIDs reais no campo value. ZERO EXCEÇÕES. Se você escrever uma lista em texto, a função do sistema falhará e o usuário não conseguirá interagir. SEMPRE chame present_options. NUNCA escreva lista.
 
 REGRAS CRÍTICAS — COMPORTAMENTO PRÓ-ATIVO:
 - Antes de QUALQUER ação de gravação (criar, atualizar) ou envio de WhatsApp, você DEVE chamar 'propose_action' primeiro.

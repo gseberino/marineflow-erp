@@ -116,16 +116,24 @@ export function useAIAgent(context: AIContext) {
 
   const confirmProposal = useCallback(async () => {
     if (!activeProposal) return;
+    const proposalIdx = activeProposal.idx;
+    const proposalAction = activeProposal.proposal.action;
+    const proposalPayload = activeProposal.proposal.payload;
     setDisplay((d) =>
-      d.map((it, i) => (i === activeProposal.idx && it.kind === 'proposal' ? { ...it, status: 'confirmed' } : it))
+      d.map((it, i) => (i === proposalIdx && it.kind === 'proposal' ? { ...it, status: 'confirmed' } : it))
     );
+    // Envia payload explicitamente para o agente não precisar reconstruir da memória
     const userMsg: ChatMessage = {
       role: 'user',
-      content: `Confirmado pelo usuário. Execute a action "${activeProposal.proposal.action}" agora com o payload já apresentado.`,
+      content: `Confirmado pelo usuário. Execute a action "${proposalAction}" agora com este payload exato (use os IDs exatamente como estão): ${JSON.stringify(proposalPayload)}`,
     };
     const next = [...messages, userMsg];
     setActiveProposal(null);
     await callAgent(next);
+    // Marca como executado após retorno
+    setDisplay((d) =>
+      d.map((it, i) => (i === proposalIdx && it.kind === 'proposal' ? { ...it, status: 'executed' as any } : it))
+    );
   }, [activeProposal, messages, callAgent]);
 
   const cancelProposal = useCallback(async () => {
@@ -155,9 +163,13 @@ export function useAIAgent(context: AIContext) {
     setActiveOptions(null);
 
     // __refine__ = user wants to narrow search with more details
+    // For UUIDs: include both label and ID so agent uses correct UUID in next action
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
     const messageText = value === '__refine__'
       ? 'Quero refinar a busca — me peça mais detalhes para encontrar o registro correto.'
-      : label;
+      : isUUID
+        ? `${label} (id: ${value})`
+        : label;
 
     const userMsg: ChatMessage = { role: 'user', content: messageText };
     setDisplay((d) => [...d, { kind: 'message', role: 'user', content: messageText }]);

@@ -12,7 +12,7 @@ export function AIConfirmCard({
   disabled,
 }: {
   proposal: Proposal;
-  status: 'pending' | 'confirmed' | 'cancelled';
+  status: 'pending' | 'confirmed' | 'cancelled' | 'executed';
   onConfirm: () => void;
   onCancel: () => void;
   disabled?: boolean;
@@ -40,7 +40,12 @@ export function AIConfirmCard({
         </div>
       )}
       {status === 'confirmed' && (
-        <p className="text-xs text-muted-foreground italic">✓ Confirmado — executando…</p>
+        <p className="text-xs text-muted-foreground italic flex items-center gap-1">
+          <span className="animate-pulse">⏳</span> Executando ação…
+        </p>
+      )}
+      {status === 'executed' && (
+        <p className="text-xs text-green-600 dark:text-green-400 italic">✅ Ação executada com sucesso.</p>
       )}
       {status === 'cancelled' && (
         <p className="text-xs text-muted-foreground italic">✕ Cancelado pelo usuário.</p>
