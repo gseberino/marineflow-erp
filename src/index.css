@@ -4,6 +4,29 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Mobile layout lock ─────────────────────────────────────────────────────
+   Prevents the page from stretching when the user pinch-zooms.
+   The zoom itself still works visually (viewport scales), but the
+   layout never reflows or overflows horizontally.
+   ─────────────────────────────────────────────────────────────────────── */
+html {
+  overflow-x: hidden;
+  touch-action: pan-x pan-y;   /* allows scroll + pinch-zoom, blocks double-tap zoom */
+}
+
+body {
+  overflow-x: hidden;
+  min-height: 100dvh;
+  /* Prevent text size adjustment on orientation change */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+#root {
+  min-height: 100dvh;
+  overflow-x: hidden;
+}
+
 @layer base {
   :root {
     --background: 210 20% 98%;

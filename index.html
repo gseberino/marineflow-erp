@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <!-- TODO: Set the document title to the name of your application -->
     <title>HBR Marine - ERP Sistema</title>
     <meta name="description" content="MarineFlow ERP is a specialized SaaS application for nautical technical services.">
@@ -28,6 +28,40 @@
   <meta name="twitter:title" content="HBR Marine - ERP Sistema">
   <meta property="og:description" content="MarineFlow ERP is a specialized SaaS application for nautical technical services.">
   <meta name="twitter:description" content="MarineFlow ERP is a specialized SaaS application for nautical technical services.">
+  <script>
+    // Auto-reset zoom when fingers are released — keeps layout locked to device width
+    // Allows temporary pinch-zoom while fingers are on screen, resets on touchend
+    (function () {
+      var lastTouchEnd = 0;
+
+      // Reset zoom by briefly enforcing maximum-scale=1, then restoring
+      function resetZoom() {
+        var meta = document.querySelector('meta[name="viewport"]');
+        if (!meta) return;
+        var base = 'width=device-width, initial-scale=1.0, viewport-fit=cover';
+        meta.setAttribute('content', base + ', maximum-scale=1.0');
+        setTimeout(function () {
+          meta.setAttribute('content', base);
+        }, 300);
+      }
+
+      // Reset on touchend when all fingers are lifted
+      document.addEventListener('touchend', function (e) {
+        if (e.touches.length === 0) {
+          resetZoom();
+        }
+      }, { passive: true });
+
+      // Prevent double-tap zoom (but keep pinch-zoom)
+      document.addEventListener('touchend', function (e) {
+        var now = Date.now();
+        if (now - lastTouchEnd < 300 && e.touches.length === 0) {
+          e.preventDefault();
+        }
+        lastTouchEnd = now;
+      }, { passive: false });
+    })();
+  </script>
 </head>
 
   <body>
