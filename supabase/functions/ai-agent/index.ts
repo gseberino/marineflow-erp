@@ -1469,6 +1469,70 @@ Quando o usuário disser "este cliente", "esta OS", "este barco", use o ID em co
           content: JSON.stringify(result),
         });
 
+        // ── AUTO-DISAMBIGUATION ──────────────────────────────────────────────
+        // Se a busca retornou múltiplos resultados, o LOOP gera os botões
+        // diretamente — sem depender do modelo chamar present_options.
+        const autoDisambig: Record<string, {
+          question: (q: string, total: number) => string;
+          label: (item: any) => string;
+          value: (item: any) => string;
+        }> = {
+          search_clients: {
+            question: (q, n) => n > 5
+              ? `Encontrei ${n} clientes para "${q}". Escolha ou refine:`
+              : `Qual cliente chamado "${q}"?`,
+            label: (c) => [c.full_name_or_company_name, c.whatsapp || c.phone].filter(Boolean).join(" — "),
+            value: (c) => c.id,
+          },
+          search_vessels: {
+            question: (q, n) => n > 5
+              ? `Encontrei ${n} embarcações para "${q}". Escolha ou refine:`
+              : `Qual embarcação chamada "${q}"?`,
+            label: (v) => [v.boat_name, v.model, v.year].filter(Boolean).join(" · "),
+            value: (v) => v.id,
+          },
+          search_products: {
+            question: (q, n) => n > 5
+              ? `Encontrei ${n} produtos para "${q}". Escolha ou refine:`
+              : `Qual produto para "${q}"?`,
+            label: (p) => `${p.product_name}${p.sale_price ? ` — R$ ${Number(p.sale_price).toFixed(2)}` : ""}`,
+            value: (p) => p.id,
+          },
+          list_service_orders: {
+            question: (_q, n) => n > 5
+              ? `Encontrei ${n} ordens de serviço. Escolha ou refine:`
+              : "Qual ordem de serviço?",
+            label: (so) => `${so.numero} — R$ ${Number(so.valor_total || 0).toFixed(2)} — ${so.status}${so.embarcacao && so.embarcacao !== "—" ? ` · ${so.embarcacao}` : ""}`,
+            value: (so) => so.id,
+          },
+        };
+
+        if (autoDisambig[fnName]) {
+          const items: any[] = result?.results ?? [];
+          if (items.length > 1) {
+            const cfg = autoDisambig[fnName];
+            const searchQuery = fnArgs.query || fnArgs.client_id || "";
+            const top5 = items.slice(0, 5);
+            const options = top5.map((item: any) => ({
+              label: cfg.label(item).slice(0, 60),
+              value: cfg.value(item),
+            }));
+            if (items.length > 5) {
+              options.push({ label: "🔍 Refinar busca — digitar mais detalhes", value: "__refine__" });
+            }
+            return jr({
+              message: { role: "assistant", content: "" },
+              options: {
+                question: cfg.question(searchQuery, items.length),
+                options,
+              },
+              tool_events: toolEvents,
+              updated_messages: messages.slice(1),
+            });
+          }
+        }
+        // ── FIM AUTO-DISAMBIGUATION ──────────────────────────────────────────
+
         // Se foi propose_action, retorna IMEDIATAMENTE para o frontend renderizar o card
         if (fnName === "propose_action") {
           return jr({
