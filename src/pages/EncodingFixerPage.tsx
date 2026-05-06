@@ -87,7 +87,7 @@ function TableEditor({ table }: { table: TableKey }) {
       return;
     }
     setSaving(row.id);
-    const { error } = await supabase.from(table).update(patch).eq("id", row.id);
+    const { error } = await (supabase.from(table) as any).update(patch).eq("id", row.id);
     setSaving(null);
     if (error) {
       toast({ title: "Erro ao salvar", description: error.message, variant: "destructive" });
@@ -178,7 +178,7 @@ export default function EncodingFixerPage() {
 
   return (
     <div className="container mx-auto p-4 space-y-4">
-      <PageHeader title="Corrigir caracteres inválidos" subtitle="Revise e corrija manualmente registros que contêm ? ou \uFFFD." />
+      <PageHeader title="Corrigir caracteres inválidos" description="Revise e corrija manualmente registros que contêm ? ou \uFFFD." />
       <Tabs value={tab} onValueChange={(v) => setTab(v as TableKey)}>
         <TabsList className="flex-wrap h-auto">
           {tabs.map(([k, c]) => (
