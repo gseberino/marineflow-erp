@@ -250,23 +250,25 @@ const TOOLS = [
     function: {
       name: "present_options",
       description:
-        "Use quando precisar que o usuário escolha entre opções. Exemplos: múltiplos clientes encontrados, múltiplas OSs, confirmação sim/não, seleção de data. NUNCA faça perguntas abertas de texto — sempre use esta tool para enumerar opções clicáveis. Máximo 6 opções.",
+        "Use quando precisar que o usuário escolha entre opções. Exemplos: múltiplos clientes, múltiplas OSs, sim/não. NUNCA escreva lista em texto — sempre use esta tool. Máximo 6 opções visíveis. Se houver mais de 5 resultados, mostre os 5 mais relevantes + última opção sempre sendo {label:'🔍 Refinar busca — digitar mais detalhes',value:'__refine__'}. Se usuário escolher __refine__, peça mais informações específicas (sobrenome, telefone, CNPJ).",
       parameters: {
         type: "object",
         properties: {
           question: { type: "string", description: "Pergunta clara para o usuário (ex: 'Qual cliente você quer?')" },
           options: {
             type: "array",
+            maxItems: 6,
             items: {
               type: "object",
               properties: {
-                label: { type: "string", description: "Texto visível no botão (curto, max 40 chars)" },
-                value: { type: "string", description: "Valor interno (id, nome, ou texto da resposta)" },
+                label: { type: "string", description: "Texto visível no botão (curto, max 50 chars). Inclua info útil: nome + telefone ou nome + cidade." },
+                value: { type: "string", description: "Valor interno: UUID do registro, ou '__refine__' para pedir mais detalhes." },
               },
               required: ["label", "value"],
             },
-            description: "Lista de opções. Para sim/não: [{label:'Sim',value:'sim'},{label:'Não',value:'nao'}]",
+            description: "Lista de opções (máx 6). Se resultados > 5, inclua os 5 melhores + {label:'🔍 Refinar busca',value:'__refine__'}.",
           },
+          total_found: { type: "number", description: "Total de resultados encontrados (para informar o usuário quando > 5)" },
         },
         required: ["question", "options"],
       },
@@ -1309,15 +1311,27 @@ REGRAS CRÍTICAS — COMPORTAMENTO PRÓ-ATIVO:
 
 FLUXO DE DESAMBIGUAÇÃO — OBRIGATÓRIO:
 1. Busque SEMPRE antes de perguntar qualquer coisa.
-2. Encontrou 1 resultado → use diretamente.
-3. Encontrou 2 ou mais resultados → chame 'present_options' COM OS IDs REAIS no campo value. NUNCA escreva os nomes em texto.
-4. Encontrou 0 → informe e use 'present_options' com opção de criar novo.
-5. Qualquer pergunta sim/não → 'present_options' com [{label:"Sim",value:"sim"},{label:"Não",value:"nao"}].
-6. Qualquer lista de escolha → 'present_options'. NUNCA texto corrido com opções.
+2. Encontrou 1 resultado → use diretamente, informe o usuário qual usou.
+3. Encontrou 2 a 5 resultados → chame 'present_options' com todos + IDs REAIS no campo value.
+4. Encontrou 6 ou mais resultados → chame 'present_options' com os 5 PRIMEIROS (mais relevantes) + última opção obrigatória: {label:"🔍 Refinar busca — digitar mais detalhes",value:"__refine__"}. Informe o total encontrado na pergunta: "Encontrei 12 clientes chamados João. Escolha ou refine a busca:"
+5. Encontrou 0 → informe e use 'present_options' com opção de criar novo.
+6. Usuário escolheu __refine__ → peça mais detalhes específicos (sobrenome, telefone, CNPJ, cidade).
+7. Qualquer pergunta sim/não → 'present_options' com [{label:"Sim",value:"sim"},{label:"Não",value:"nao"}].
+8. Qualquer lista de escolha → 'present_options'. NUNCA texto corrido com opções.
 
-EXEMPLO CORRETO — "envia o orçamento pro João":
+EXEMPLO CORRETO — "envia o orçamento pro João" com 2 resultados:
   ERRADO ❌: "Encontrei João Silva e João Pereira. Qual você quer?"
-  CORRETO ✅: chamar present_options("Qual João?", [{label:"João Paulo Demitti — (47) 98841-0198",value:"uuid-real-do-cliente"},{label:"João Marinho — (21) 98765-4321",value:"uuid-real-do-outro"}])
+  CORRETO ✅: present_options("Qual João?", [{label:"João Paulo Demitti — (47) 98841-0198",value:"uuid-1"},{label:"João Marinho — (21) 98765-4321",value:"uuid-2"}])
+
+EXEMPLO CORRETO — "envia o orçamento pro João" com 12 resultados:
+  CORRETO ✅: present_options("Encontrei 12 clientes chamados João. Escolha ou refine:", [
+    {label:"João Paulo Demitti — (47) 98841-0198", value:"uuid-1"},
+    {label:"João Marinho — RJ", value:"uuid-2"},
+    {label:"João Carlos Silva — (48) 99999-0000", value:"uuid-3"},
+    {label:"João Roberto — Itajaí", value:"uuid-4"},
+    {label:"João Souza — (47) 98888-0000", value:"uuid-5"},
+    {label:"🔍 Refinar busca — digitar mais detalhes", value:"__refine__"}
+  ])
 
 FLUXO COMPLETO — enviar orçamento/OS:
   1. search_clients(nome) → se múltiplos → present_options com nomes+telefone como label, UUID como value

@@ -153,9 +153,14 @@ export function useAIAgent(context: AIContext) {
       )
     );
     setActiveOptions(null);
-    // Send the selected label as user message so agent can continue
-    const userMsg: ChatMessage = { role: 'user', content: label };
-    setDisplay((d) => [...d, { kind: 'message', role: 'user', content: label }]);
+
+    // __refine__ = user wants to narrow search with more details
+    const messageText = value === '__refine__'
+      ? 'Quero refinar a busca — me peça mais detalhes para encontrar o registro correto.'
+      : label;
+
+    const userMsg: ChatMessage = { role: 'user', content: messageText };
+    setDisplay((d) => [...d, { kind: 'message', role: 'user', content: messageText }]);
     const next = [...messages, userMsg];
     await callAgent(next);
   }, [activeOptions, messages, callAgent]);
