@@ -72,7 +72,12 @@ function useVisualViewportHeight() {
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
-    const update = () => setHeight(vv.height);
+    const update = () => {
+      // Ignora atualizações enquanto o usuário está com zoom ativo (scale > 1)
+      // Evita que o chat redimensione/distorça durante pinch-zoom
+      if (vv.scale && vv.scale > 1.05) return;
+      setHeight(vv.height);
+    };
     vv.addEventListener('resize', update);
     vv.addEventListener('scroll', update);
     return () => {
@@ -186,7 +191,10 @@ export function AIAgentWidget() {
     ];
 
   const popup = open ? (
-    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center px-3 pb-4 sm:pb-0">
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center sm:items-center px-3 pb-4 sm:pb-0"
+      style={{ touchAction: 'none' }}
+    >
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/50 backdrop-blur-sm"
@@ -194,10 +202,10 @@ export function AIAgentWidget() {
         aria-hidden
       />
 
-      {/* Popup */}
+      {/* Popup — touch-action: pan-y prevents zoom while interacting with the chat */}
       <div
         className="relative w-full max-w-md rounded-2xl bg-background shadow-2xl flex flex-col overflow-hidden border border-border"
-        style={{ height: popupHeight }}
+        style={{ height: popupHeight, touchAction: 'pan-y' }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
