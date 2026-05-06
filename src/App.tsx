@@ -41,6 +41,7 @@ import ImportFiscalXML from "./pages/ImportFiscalXML";
 import CommissionsPage from "./pages/CommissionsPage";
 import SmartPurchasePage from "./pages/SmartPurchasePage";
 import NotFound from "./pages/NotFound";
+import EncodingFixerPage from "./pages/EncodingFixerPage";
 import CRMKanbanPage from "./pages/CRMKanbanPage";
 import ExternalQuoteListPage from "./pages/ExternalQuoteListPage";
 import ExternalQuoteNewPage from "./pages/ExternalQuoteNewPage";
@@ -160,6 +161,11 @@ const App = () => (
                         <Route path="/settings" element={
                           <ProtectedRoute roles={['admin']} groupId="sistema">
                             <SettingsPage />
+                          </ProtectedRoute>
+                        } />
+                        <Route path="/tools/encoding-fixer" element={
+                          <ProtectedRoute roles={['admin']} groupId="sistema">
+                            <EncodingFixerPage />
                           </ProtectedRoute>
                         } />
                         <Route path="*" element={<NotFound />} />
