@@ -80,7 +80,7 @@ export default function PublicServiceOrderView() {
           return;
         }
 
-        const [clientRes, vesselRes, partsRes, servicesRes, settingsRes, sigRes] = await Promise.all([
+        const [clientRes, vesselRes, partsRes, servicesRes, settingsRes, sigRes, presetRes] = await Promise.all([
           supabase.from('clients').select('*').eq('id', order.client_id).maybeSingle(),
           order.vessel_id
             ? supabase.from('vessels').select('*').eq('id', order.vessel_id).maybeSingle()
@@ -102,6 +102,13 @@ export default function PublicServiceOrderView() {
             .order('signed_at', { ascending: false })
             .limit(1)
             .maybeSingle(),
+          (order as any).payment_condition_preset_id
+            ? supabase
+                .from('payment_condition_presets')
+                .select('label, installments')
+                .eq('id', (order as any).payment_condition_preset_id)
+                .maybeSingle()
+            : Promise.resolve({ data: null, error: null }),
         ]);
 
         const company: Record<string, string> = {};
@@ -229,6 +236,9 @@ export default function PublicServiceOrderView() {
         operational_cost_total: order.operational_cost_total || 0,
         extra_notes: order.extra_notes ?? undefined,
         payment_conditions: order.payment_conditions ?? undefined,
+        payment_condition_label: presetRes?.data?.label ?? null,
+        payment_condition_installments: presetRes?.data?.installments ?? null,
+        subcontract_cost_total: (order as any).subcontract_cost_total || 0,
       },
       client: {
         name: client?.full_name_or_company_name || '—',

@@ -522,7 +522,44 @@ function buildPaymentSection(so: PDFData['serviceOrder']): string {
         <span style="color:var(--text-muted);font-size:8px;">${esc(so.payment_condition_label || 'Condição Comercial')}</span>
       </div>
       ${installmentsHtml}
-      ${hasText ? `<div style="font-size:10px;color:var(--text-main);margin-top:8px;padding:8px;background:var(--bg-light);border-radius:4px;border:1px dashed var(--border);white-space:pre-wrap;">${esc(so.payment_conditions)}</div>` : ''}
+      ${hasText ? (() => {
+        // Tenta calcular parcelas a partir do texto livre
+        // Detecta padrões como "50% mão de obra + 100% materiais"
+        const servicesTotal = Number(so.labor_cost_total || 0);
+        const partsTotal = Number(so.parts_cost_total || 0);
+        const grandTotal = Number(so.grand_total || 0);
+
+        const svcMatch = (so.payment_conditions || '').match(/(\d+(?:[.,]\d+)?)\s*%\s*(?:m[aã]o[\s\-]de[\s\-]obra|servi[cç]os?|labor)/i);
+        const partsMatch = (so.payment_conditions || '').match(/(\d+(?:[.,]\d+)?)\s*%\s*(?:materiais?|pe[cç]as?|produtos?|parts?)/i);
+        const totalPctMatch = (so.payment_conditions || '').match(/^(\d+(?:[.,]\d+)?)\s*%\s*(?:entrada|antecipado|adiantamento)/i);
+
+        const hasCalc = (svcMatch || partsMatch || totalPctMatch) && grandTotal > 0;
+
+        let calcHtml = '';
+        if (hasCalc) {
+          const rows: string[] = [];
+          if (svcMatch) {
+            const pct = parseFloat(svcMatch[1].replace(',', '.'));
+            const val = servicesTotal * (pct / 100);
+            if (val > 0) rows.push(`<tr><td style="padding:4px 8px;">${pct}% Mão de obra</td><td style="text-align:right;font-weight:700;padding:4px 8px;">${fmtCurrency(val)}</td></tr>`);
+          }
+          if (partsMatch) {
+            const pct = parseFloat(partsMatch[1].replace(',', '.'));
+            const val = partsTotal * (pct / 100);
+            if (val > 0) rows.push(`<tr><td style="padding:4px 8px;">${pct}% Materiais</td><td style="text-align:right;font-weight:700;padding:4px 8px;">${fmtCurrency(val)}</td></tr>`);
+          }
+          if (totalPctMatch && rows.length === 0) {
+            const pct = parseFloat(totalPctMatch[1].replace(',', '.'));
+            const val = grandTotal * (pct / 100);
+            rows.push(`<tr><td style="padding:4px 8px;">Entrada (${pct}%)</td><td style="text-align:right;font-weight:700;padding:4px 8px;">${fmtCurrency(val)}</td></tr>`);
+          }
+          if (rows.length > 0) {
+            calcHtml = `<table style="width:100%;border-collapse:collapse;margin-top:6px;font-size:10px;">${rows.join('')}</table>`;
+          }
+        }
+
+        return `<div style="font-size:10px;color:var(--text-main);margin-top:8px;padding:8px;background:var(--bg-light);border-radius:4px;border:1px dashed var(--border);white-space:pre-wrap;">${esc(so.payment_conditions)}</div>${calcHtml}`;
+      })() : ''}
     </div>
   `;
 }
