@@ -31,6 +31,7 @@ import ServiceList from "./pages/ServiceList";
 import AuditLogPage from "./pages/AuditLogPage";
 import WhatsAppLeadsPage from "./pages/WhatsAppLeadsPage";
 import WhatsAppLogsPage from "./pages/WhatsAppLogsPage";
+import WhatsAppScheduledPage from "./pages/WhatsAppScheduledPage";
 import LoginPage from "./pages/LoginPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import PublicServiceOrderView from "./pages/PublicServiceOrderView";
@@ -146,6 +147,11 @@ const App = () => (
                         <Route path="/whatsapp/logs" element={
                           <ProtectedRoute roles={['admin']} groupId="whatsapp">
                             <WhatsAppLogsPage />
+                          </ProtectedRoute>
+                        } />
+                        <Route path="/whatsapp/scheduled" element={
+                          <ProtectedRoute roles={['admin', 'financial']} groupId="whatsapp">
+                            <WhatsAppScheduledPage />
                           </ProtectedRoute>
                         } />
                         <Route path="/audit-log" element={

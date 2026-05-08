@@ -551,6 +551,55 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "schedule_whatsapp_message",
+      description:
+        "Agenda uma mensagem WhatsApp para ser enviada em data/hora específica. Use para 'agendar envio', 'mandar amanhã', 'lembrete automático' etc. Para envios com link de OS, informe service_order_id.",
+      parameters: {
+        type: "object",
+        properties: {
+          phone: { type: "string", description: "Telefone do destinatário com DDI+DDD (ex: 5547999999999). Obrigatório se não informar client_id." },
+          client_id: { type: "string", description: "UUID do cliente — busca o WhatsApp/telefone automaticamente." },
+          message: { type: "string", description: "Texto da mensagem a ser enviada." },
+          scheduled_at: { type: "string", description: "Data e hora do envio em ISO 8601 (ex: 2026-05-10T09:00:00)." },
+          recurrence_type: { type: "string", enum: ["once", "daily", "weekly", "monthly"], description: "Recorrência do envio. Padrão: once." },
+          service_order_id: { type: "string", description: "UUID ou número da OS para envio de link (send_mode=link)." },
+          send_mode: { type: "string", enum: ["text", "link"], description: "Modo de envio. Padrão: text. Use 'link' para enviar o link público de uma OS." },
+        },
+        required: ["message", "scheduled_at"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_scheduled_whatsapp",
+      description: "Lista as mensagens WhatsApp agendadas. Pode filtrar por status.",
+      parameters: {
+        type: "object",
+        properties: {
+          status: { type: "string", enum: ["pending", "sent", "failed", "cancelled", "all"], description: "Filtro de status. Padrão: pending." },
+          limit: { type: "number", description: "Máximo de registros. Padrão: 10." },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "cancel_scheduled_whatsapp",
+      description: "Cancela um agendamento de WhatsApp pelo ID.",
+      parameters: {
+        type: "object",
+        properties: {
+          scheduled_id: { type: "string", description: "UUID do agendamento a cancelar." },
+        },
+        required: ["scheduled_id"],
+      },
+    },
+  },
 ];
 
 // ---------------- TOOL EXECUTORS ----------------
@@ -1172,6 +1221,98 @@ async function executeTool(
       return await sendWhatsapp(phone, msg, jwt);
     }
 
+    // ===== WhatsApp Scheduling =====
+    case "schedule_whatsapp_message": {
+      let phone = args.phone;
+      let clientId = args.client_id || null;
+
+      if (!phone && clientId) {
+        const { data: c } = await sb
+          .from("clients")
+          .select("whatsapp, phone")
+          .eq("id", clientId)
+          .maybeSingle();
+        phone = c?.whatsapp || c?.phone;
+      }
+      if (!phone) return { error: "Telefone não informado. Forneça phone ou client_id." };
+
+      // Resolve service_order_id se fornecido como número
+      let soId: string | null = null;
+      if (args.service_order_id) {
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(args.service_order_id));
+        if (isUUID) {
+          soId = args.service_order_id;
+        } else {
+          const { data: so } = await admin
+            .from("service_orders")
+            .select("id")
+            .eq("service_order_number", args.service_order_id)
+            .maybeSingle();
+          soId = so?.id || null;
+        }
+      }
+
+      const scheduledAt = new Date(args.scheduled_at).toISOString();
+      const sendMode = args.send_mode || (soId ? "link" : "text");
+      const recurrenceType = args.recurrence_type || "once";
+
+      const { data: created, error: insErr } = await admin
+        .from("whatsapp_scheduled_sends")
+        .insert({
+          phone: String(phone).replace(/\D/g, ""),
+          message: args.message,
+          scheduled_at: scheduledAt,
+          next_run_at: scheduledAt,
+          recurrence_type: recurrenceType,
+          send_mode: sendMode,
+          target_kind: soId ? "service_order" : "manual",
+          service_order_id: soId,
+          client_id: clientId,
+          status: "pending",
+          created_by: userId,
+          auto_retry: true,
+          max_attempts: 3,
+        })
+        .select()
+        .single();
+
+      if (insErr) return { error: insErr.message };
+      return {
+        ok: true,
+        scheduled_id: created.id,
+        phone: created.phone,
+        scheduled_at: created.scheduled_at,
+        recurrence_type: created.recurrence_type,
+        message_preview: created.message.slice(0, 100),
+      };
+    }
+
+    case "list_scheduled_whatsapp": {
+      const status = args.status || "pending";
+      const limit = Math.min(Number(args.limit) || 10, 30);
+
+      let q = admin
+        .from("whatsapp_scheduled_sends")
+        .select("id, phone, message, status, next_run_at, recurrence_type, send_mode, last_error, client_id")
+        .order("next_run_at", { ascending: true })
+        .limit(limit);
+
+      if (status !== "all") q = q.eq("status", status);
+
+      const { data, error } = await q;
+      if (error) return { error: error.message };
+      return { results: data, count: data?.length ?? 0 };
+    }
+
+    case "cancel_scheduled_whatsapp": {
+      const { error } = await admin
+        .from("whatsapp_scheduled_sends")
+        .update({ status: "cancelled" })
+        .eq("id", args.scheduled_id);
+      if (error) return { error: error.message };
+      return { ok: true, cancelled_id: args.scheduled_id };
+    }
+
     default:
       return { error: `Tool desconhecida: ${name}` };
   }
@@ -1357,6 +1498,14 @@ FLUXO DE ENVIO DE ORÇAMENTO/OS:
   2. Use send_service_order_link para enviar via WhatsApp
   3. Informe: "✅ Orçamento enviado para [nome do cliente] via WhatsApp. O cliente receberá um link para visualizar e baixar o PDF online."
   4. NUNCA diga que enviou um PDF em anexo — o sistema envia um link de acesso.
+
+FLUXO DE AGENDAMENTO DE WHATSAPP:
+  - "Agendar mensagem", "mandar amanhã de manhã", "lembrete no dia X": use schedule_whatsapp_message.
+  - Sempre use propose_action antes de agendar.
+  - Se o usuário não especificar hora, assuma 09:00 do dia solicitado.
+  - Após agendar, confirme: "✅ Mensagem agendada para [data/hora]. Você pode gerenciá-la em WhatsApp → Agendamentos."
+  - Para listar ou cancelar agendamentos: use list_scheduled_whatsapp / cancel_scheduled_whatsapp.
+  - Informe o status do modo de teste se ativo: "⚠️ Modo de teste ativo — a mensagem será redirecionada para o número de teste."
 
 QUALIDADE DAS RESPOSTAS:
 - Os dados já vêm com nomes de clientes e embarcações — use-os diretamente, nunca faça buscas extras para resolver IDs.

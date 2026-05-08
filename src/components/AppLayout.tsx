@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Users, Ship, Anchor, Package, ClipboardList,
   DollarSign, BarChart3, Settings, ChevronLeft, ChevronRight, Menu,
   Warehouse, Building2, Wrench, History, LogOut, CalendarDays, MessageCircle, CreditCard,
-  Database, ChevronDown, Rocket, ShoppingCart, FileDown, Target, CheckCircle2, Bell
+  Database, ChevronDown, Rocket, ShoppingCart, FileDown, Target, CheckCircle2, Bell, CalendarClock
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -171,6 +171,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
       roles: ['admin', 'financial', 'seller'],
       items: [
         { label: 'Leads / Inbox', icon: MessageCircle, path: '/whatsapp/leads' },
+        { label: 'Agendamentos', icon: CalendarClock, path: '/whatsapp/scheduled', roles: ['admin', 'financial'] },
         { label: 'Logs', icon: History, path: '/whatsapp/logs', roles: ['admin'] },
       ],
     },
