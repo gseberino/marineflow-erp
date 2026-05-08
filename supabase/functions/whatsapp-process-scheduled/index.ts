@@ -27,6 +27,20 @@ Deno.serve(async (req) => {
 
     // Pega lote de agendamentos pendentes
     const nowIso = new Date().toISOString();
+
+    // ── Zombie recovery ──────────────────────────────────────────────────────
+    // If a job got stuck in 'processing' for more than 10 minutes (e.g. due to
+    // a function timeout or Z-API hang), reset it back to 'pending' so it can
+    // be retried on the next cron tick. Without this, a timed-out job stays
+    // in 'processing' forever and is never retried.
+    const zombieThreshold = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    await admin
+      .from("whatsapp_scheduled_sends")
+      .update({ status: "pending", last_error: "Recovered from stuck processing state (timeout)" })
+      .eq("status", "processing")
+      .lt("updated_at", zombieThreshold);
+    // ─────────────────────────────────────────────────────────────────────────
+
     const { data: due, error: dueErr } = await admin
       .from("whatsapp_scheduled_sends")
       .select("*")

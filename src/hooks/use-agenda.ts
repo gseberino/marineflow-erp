@@ -90,6 +90,23 @@ export function useQuickSchedule() {
       scheduled_start_at: string;
       scheduled_end_at: string | null;
     }) => {
+      // Guard: check for technician scheduling conflicts before saving
+      if (input.scheduled_end_at) {
+        const { data: conflicts } = await supabase
+          .from('service_orders')
+          .select('id, service_order_number, scheduled_start_at, scheduled_end_at, service_order_technicians!inner(user_id)')
+          .eq('service_order_technicians.user_id', input.technician_user_id)
+          .neq('id', input.service_order_id)
+          .neq('status', 'cancelled')
+          .lt('scheduled_start_at', input.scheduled_end_at)
+          .gt('scheduled_end_at', input.scheduled_start_at);
+
+        if (conflicts && conflicts.length > 0) {
+          const conflictNums = conflicts.map((c: any) => c.service_order_number).join(', ');
+          throw new Error(`Conflito de agenda: o técnico já está alocado na(s) OS ${conflictNums} nesse horário.`);
+        }
+      }
+
       const { data: current, error: getErr } = await supabase
         .from('service_orders')
         .select('status')
@@ -153,6 +170,26 @@ export function useSaveAgendaTask() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: AgendaTaskInput) => {
+      // Guard: check for technician scheduling conflicts in agenda_tasks before saving
+      if (input.scheduled_end_at && input.technician_user_id) {
+        const conflictQuery = supabase
+          .from('agenda_tasks')
+          .select('id, title, scheduled_start_at')
+          .eq('technician_user_id', input.technician_user_id)
+          .neq('status', 'cancelled')
+          .lt('scheduled_start_at', input.scheduled_end_at)
+          .gt('scheduled_end_at', input.scheduled_start_at);
+
+        // Exclude the record being edited
+        if (input.id) conflictQuery.neq('id', input.id);
+
+        const { data: conflicts } = await conflictQuery;
+        if (conflicts && conflicts.length > 0) {
+          const conflictTitles = conflicts.map((c: any) => `"${c.title}"`).join(', ');
+          throw new Error(`Conflito de agenda: técnico já tem tarefa ${conflictTitles} nesse horário.`);
+        }
+      }
+
       if (input.id) {
         const { error } = await supabase
           .from('agenda_tasks')

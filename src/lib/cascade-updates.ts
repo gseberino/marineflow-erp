@@ -36,6 +36,31 @@ export async function updateReceivableFromSO(serviceOrderId: string, newTotal: n
 }
 
 export async function cancelServiceOrderCascade(serviceOrderId: string, reason: string) {
+  // ── Attempt atomic RPC first ─────────────────────────────────────────────
+  // The RPC runs inside a single PostgreSQL transaction (BEGIN/COMMIT).
+  // If ANY step fails, ALL changes roll back — no zombie/partial states.
+  const { data: rpcData, error: rpcErr } = await supabase.rpc('cancel_service_order_cascade', {
+    p_service_order_id: serviceOrderId,
+    p_reason: reason,
+  });
+
+  if (!rpcErr && rpcData?.success) {
+    await writeAuditLog({
+      table_name: 'service_orders',
+      record_id: serviceOrderId,
+      action: 'cancel',
+      new_value: { status: 'cancelled' },
+      reason,
+    });
+    return {
+      parts_restored: rpcData.parts_restored,
+      receivables_cancelled: rpcData.receivables_cancelled,
+      payments_cancelled: rpcData.payments_cancelled,
+    };
+  }
+
+  // ── Fallback: legacy sequential approach ─────────────────────────────────
+  console.warn('[cancelServiceOrderCascade] RPC unavailable, using fallback.', rpcErr);
   let partsRestored = 0;
   let receivablesCancelled = 0;
   let paymentsCancelled = 0;
@@ -89,7 +114,6 @@ export async function cancelServiceOrderCascade(serviceOrderId: string, reason: 
         cancellation_reason: reason,
       }).eq('id', payment.id);
 
-      // Undo bank reconciliation if linked
       await supabase.from('bank_transactions').update({
         reconciled: false,
         reconciled_payment_id: null,
@@ -143,6 +167,7 @@ export async function cancelServiceOrderCascade(serviceOrderId: string, reason: 
 
   return { parts_restored: partsRestored, receivables_cancelled: receivablesCancelled, payments_cancelled: paymentsCancelled };
 }
+
 
 export async function reopenServiceOrder(serviceOrderId: string, reason: string) {
   const { data: so } = await supabase
