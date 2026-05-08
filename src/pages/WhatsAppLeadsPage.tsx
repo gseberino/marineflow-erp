@@ -244,6 +244,7 @@ function InboxView() {
 // =============== LEADS (lista clássica) ===============
 function LeadsView() {
   const [tab, setTab] = useState('pending');
+  const [search, setSearch] = useState('');
   const { data: leads, isLoading } = useWhatsAppLeads(tab);
   const [selected, setSelected] = useState<any | null>(null);
   const [convertOpen, setConvertOpen] = useState(false);
@@ -257,6 +258,17 @@ function LeadsView() {
   const addBlocked = useAddBlockedNumber();
   const { formatDate } = useI18n();
   const { data: messages } = useWhatsAppLeadMessages(selected?.phone_normalized);
+
+  const filteredLeads = useMemo(() => {
+    const list = leads || [];
+    if (!search.trim()) return list;
+    const q = search.toLowerCase();
+    const digits = q.replace(/\D/g, '');
+    return list.filter((l: any) =>
+      (l.display_name || '').toLowerCase().includes(q) ||
+      (digits.length >= 4 && l.phone_normalized.includes(digits)),
+    );
+  }, [leads, search]);
 
   const statusBadge = (s: string) => {
     const map: Record<string, string> = {
@@ -273,6 +285,15 @@ function LeadsView() {
 
   return (
     <>
+      <div className="mb-4 relative max-w-xs">
+        <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          placeholder="Buscar por nome ou telefone…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="pl-9"
+        />
+      </div>
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="pending">Pendentes</TabsTrigger>
@@ -284,14 +305,14 @@ function LeadsView() {
         <TabsContent value={tab} className="mt-4">
           {isLoading ? (
             <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-20 w-full" />)}</div>
-          ) : !leads?.length ? (
+          ) : !filteredLeads?.length ? (
             <div className="rounded-xl border bg-card p-12 text-center space-y-2">
               <MessageCircle className="h-10 w-10 mx-auto text-muted-foreground" />
-              <p className="text-muted-foreground">Nenhum lead.</p>
+              <p className="text-muted-foreground">{search.trim() ? 'Nenhum lead encontrado para a busca.' : 'Nenhum lead.'}</p>
             </div>
           ) : (
             <div className="grid gap-3 md:grid-cols-2">
-              {leads.map((lead: any) => (
+              {filteredLeads.map((lead: any) => (
                 <div key={lead.id} className="rounded-xl border bg-card p-4 hover:shadow-md transition-shadow">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">

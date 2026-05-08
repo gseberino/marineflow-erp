@@ -31,6 +31,8 @@ import {
 import { toast } from 'sonner';
 import { PriceSuggestionAlert } from '@/components/PriceSuggestionAlert';
 import { BarcodeScannerModal } from '@/components/BarcodeScannerModal';
+import { useMultiFilter } from '@/hooks/use-multi-filter';
+import { MultiFilterBar } from '@/components/MultiFilterBar';
 
 // ── Movement labels & colors ──────────────────────────────
 const MOVEMENT_LABELS: Record<string, string> = {
@@ -73,6 +75,11 @@ export default function InventoryPage() {
   // ── Sort ──
   const [sortField, setSortField] = useState<string>('product_name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+  // ── Multi-filters (overview tab) ──
+  const { filters: invFilters, toggle: invToggle, setField: invSetField, clearAll: invClearAll, activeCount: invActiveCount } = useMultiFilter({ search: '', category: [] as string[] });
+  // ── Movement type multi-filter ──
+  const [movTypeFilter, setMovTypeFilter] = useState<string[]>([]);
   const toggleSort = (field: string) => {
     if (sortField === field) {
       setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -101,10 +108,15 @@ export default function InventoryPage() {
     return Array.from(set).sort();
   }, [allProducts]);
 
-  // ── Sorted products ──
+  // ── Sorted products (with client-side category filter) ──
   const sortedProducts = useMemo(() => {
-    if (!products) return [];
-    return [...products].sort((a, b) => {
+    let list = products || [];
+    const cats = invFilters.category as string[];
+    if (cats.length > 0) {
+      list = list.filter(p => cats.includes(p.category || ''));
+    }
+    if (!list.length) return [];
+    return [...list].sort((a, b) => {
       let aVal: any, bVal: any;
       if (sortField === 'status') {
         const getStatus = (p: any) => {
@@ -124,21 +136,30 @@ export default function InventoryPage() {
       }
       return sortDir === 'asc' ? aVal - bVal : bVal - aVal;
     });
-  }, [products, sortField, sortDir]);
+  }, [products, invFilters.category, sortField, sortDir]);
 
   // ── Filtered totals ──
   const filteredValue = useMemo(() =>
     (products || []).reduce((s, p) => s + (p.stock_quantity ?? 0) * (p.cost_price ?? 0), 0)
   , [products]);
 
+  // ── Filtered movements (client-side type filter) ──
+  const filteredMovements = useMemo(() => {
+    let list = movements || [];
+    if (movTypeFilter.length > 0) {
+      list = list.filter(m => movTypeFilter.includes(m.movement_type));
+    }
+    return list;
+  }, [movements, movTypeFilter]);
+
   // ── Movement totals ──
   const movTotals = useMemo(() => {
-    const m = movements || [];
+    const m = filteredMovements;
     return {
       entries: m.filter(x => x.quantity_delta > 0).reduce((s, x) => s + x.quantity_delta, 0),
       exits: m.filter(x => x.quantity_delta < 0).reduce((s, x) => s + x.quantity_delta, 0),
     };
-  }, [movements]);
+  }, [filteredMovements]);
 
   const formatDateTime = (iso: string) => {
     const d = new Date(iso);
@@ -240,27 +261,25 @@ export default function InventoryPage() {
 
         {/* ── Tab 1: Overview ── */}
         <TabsContent value="overview" className="space-y-4">
-          {/* Filters — search + category only */}
-          <div className="flex flex-wrap gap-3 items-center">
-            <Input
-              placeholder="Buscar produto, SKU..."
-              className="max-w-xs"
-              value={prodFilters.search || ''}
-              onChange={e => setProdFilters(p => ({ ...p, search: e.target.value }))}
-            />
-            {categories.length > 0 && (
-              <Select
-                value={prodFilters.category || '__all'}
-                onValueChange={v => setProdFilters(p => ({ ...p, category: v === '__all' ? undefined : v }))}
-              >
-                <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__all">Todas categorias</SelectItem>
-                  {categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            )}
-          </div>
+          {/* Filters — search + category multi-select */}
+          <MultiFilterBar
+            search={invFilters.search as string}
+            onSearchChange={v => { invSetField('search', v); setProdFilters(p => ({ ...p, search: v })); }}
+            searchPlaceholder="Buscar produto, SKU..."
+            filters={invFilters}
+            activeCount={invActiveCount}
+            onToggle={invToggle}
+            onSetField={invSetField}
+            onClearAll={() => { invClearAll(); setProdFilters(p => ({ ...p, search: '', category: undefined })); }}
+            groups={categories.length > 0 ? [
+              {
+                type: 'multi' as const,
+                field: 'category',
+                label: 'Categoria',
+                options: categories.map(c => ({ value: c, label: c })),
+              },
+            ] : []}
+          />
 
           {/* Products table with sortable headers */}
           <div className="rounded-xl border bg-card shadow-sm overflow-x-auto scrollbar-thin">
@@ -361,16 +380,27 @@ export default function InventoryPage() {
               </SelectContent>
             </Select>
 
-            <Select
-              value={movFilters.movement_type || '__all'}
-              onValueChange={v => setMovFilters(p => ({ ...p, movement_type: v === '__all' ? undefined : v }))}
-            >
-              <SelectTrigger className="w-[180px]"><SelectValue placeholder={t.inventory.allTypes} /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all">{t.inventory.allTypes}</SelectItem>
-                {Object.entries(MOVEMENT_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            {/* Tipo — chips multi-select */}
+            <div className="flex flex-wrap gap-1.5 items-center">
+              <span className="text-xs text-muted-foreground shrink-0">Tipo:</span>
+              <button
+                type="button"
+                onClick={() => setMovTypeFilter([])}
+                className={`px-2.5 py-0.5 rounded-full text-xs border transition-colors ${movTypeFilter.length === 0 ? 'bg-primary/10 text-primary border-primary/50 font-medium' : 'bg-background text-muted-foreground border-border hover:border-primary/50'}`}
+              >
+                Todos
+              </button>
+              {Object.entries(MOVEMENT_LABELS).map(([k, v]) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setMovTypeFilter(prev => prev.includes(k) ? prev.filter(x => x !== k) : [...prev, k])}
+                  className={`px-2.5 py-0.5 rounded-full text-xs border transition-colors ${movTypeFilter.includes(k) ? 'bg-primary/10 text-primary border-primary/50 font-medium' : 'bg-background text-muted-foreground border-border hover:border-primary/50'}`}
+                >
+                  {v}
+                </button>
+              ))}
+            </div>
 
             <div className="flex items-center gap-2">
               <Label className="text-xs">De</Label>
@@ -379,8 +409,8 @@ export default function InventoryPage() {
               <Input type="date" className="w-[150px]" value={movFilters.dateTo || ''} onChange={e => setMovFilters(p => ({ ...p, dateTo: e.target.value || undefined }))} />
             </div>
 
-            {(movFilters.product_id || movFilters.movement_type || movFilters.dateFrom || movFilters.dateTo) && (
-              <Button size="sm" variant="ghost" onClick={() => setMovFilters({})}>Limpar filtros</Button>
+            {(movFilters.product_id || movTypeFilter.length > 0 || movFilters.dateFrom || movFilters.dateTo) && (
+              <Button size="sm" variant="ghost" onClick={() => { setMovFilters({}); setMovTypeFilter([]); }}>Limpar filtros</Button>
             )}
           </div>
 
@@ -402,10 +432,10 @@ export default function InventoryPage() {
                   Array.from({ length: 5 }).map((_, i) => (
                     <tr key={i} className="border-b"><td colSpan={7} className="p-3"><Skeleton className="h-8 w-full" /></td></tr>
                   ))
-                ) : !movements?.length ? (
+                ) : !filteredMovements.length ? (
                   <tr><td colSpan={7} className="text-center py-10 text-muted-foreground">{t.common.noResults}</td></tr>
                 ) : (
-                  movements.map(m => {
+                  filteredMovements.map(m => {
                     const isPositive = m.quantity_delta > 0;
                     const typeLabel = MOVEMENT_LABELS[m.movement_type] || m.movement_type;
                     const badgeClass = POSITIVE_TYPES.has(m.movement_type)
@@ -438,7 +468,7 @@ export default function InventoryPage() {
                 )}
               </tbody>
             </table>
-            {movements && movements.length > 0 && (
+            {filteredMovements.length > 0 && (
               <div className="flex items-center justify-between px-4 py-3 border-t bg-muted/30 text-xs text-muted-foreground">
                 <span>{t.inventory.totalEntries}: <span className="text-success font-semibold">+{movTotals.entries}</span></span>
                 <span>{t.inventory.totalExits}: <span className="text-destructive font-semibold">{movTotals.exits}</span></span>

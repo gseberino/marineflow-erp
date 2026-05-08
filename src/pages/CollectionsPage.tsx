@@ -130,17 +130,28 @@ export default function CollectionsPage() {
           <Input placeholder="Cliente ou OS..." value={filters.search || ''}
             onChange={e => update({ search: e.target.value || undefined })} />
         </div>
-        <div className="space-y-1">
+        <div className="space-y-1 md:col-span-2 lg:col-span-4">
           <Label className="text-xs">Status</Label>
-          <Select value={filters.status || 'all'} onValueChange={v => update({ status: v })}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos</SelectItem>
-              {COLLECTION_STATUS_OPTIONS.map(o => (
-                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="flex flex-wrap gap-1.5">
+            {[{ value: 'all', label: 'Todos' }, ...COLLECTION_STATUS_OPTIONS].map(opt => {
+              const isActive = opt.value === 'all' ? !filters.status || filters.status === 'all' : filters.status === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => update({ status: opt.value === 'all' || isActive ? undefined : opt.value })}
+                  className={cn(
+                    'px-2.5 py-0.5 rounded-full text-xs border transition-colors',
+                    isActive
+                      ? 'bg-primary/10 text-primary border-primary/50 font-medium'
+                      : 'bg-background text-muted-foreground border-border hover:border-primary/50',
+                  )}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
         <div className="space-y-1">
           <Label className="text-xs">Cliente</Label>
