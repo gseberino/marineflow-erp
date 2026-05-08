@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, Ship, Anchor, Battery, Radio, Zap, Edit } from 'lucide-react';
 import { VesselFormDialog } from '@/components/VesselFormDialog';
+import { RecordHistory } from '@/components/RecordHistory';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 
@@ -76,6 +77,7 @@ export default function VesselDetail() {
           <TabsTrigger value="overview">{t.common.overview}</TabsTrigger>
           <TabsTrigger value="technical">{t.vessels.technicalProfile}</TabsTrigger>
           <TabsTrigger value="history">{t.vessels.serviceHistory}</TabsTrigger>
+          <TabsTrigger value="audit">Histórico de Edições</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -221,6 +223,11 @@ export default function VesselDetail() {
                 </div>
               </div>
             ))}
+          </div>
+        </TabsContent>
+        <TabsContent value="audit" className="mt-4">
+          <div className="rounded-xl border bg-card shadow-sm p-4">
+            <RecordHistory tableName="vessels" recordId={id} />
           </div>
         </TabsContent>
       </Tabs>

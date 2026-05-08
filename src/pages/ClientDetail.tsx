@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, Mail, Phone, MapPin, Ship, Edit } from 'lucide-react';
 import { ClientFormDialog } from '@/components/ClientFormDialog';
+import { RecordHistory } from '@/components/RecordHistory';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 
@@ -107,6 +108,7 @@ export default function ClientDetail() {
           <TabsTrigger value="vessels">{t.clients.vessels}</TabsTrigger>
           <TabsTrigger value="orders">{t.clients.serviceOrders}</TabsTrigger>
           <TabsTrigger value="financial">{t.clients.financial}</TabsTrigger>
+          <TabsTrigger value="history">Histórico</TabsTrigger>
         </TabsList>
         <TabsContent value="vessels" className="mt-4">
           {(!vessels || vessels.length === 0) ? (
@@ -183,6 +185,11 @@ export default function ClientDetail() {
                 {(!clientReceivables || clientReceivables.length === 0) && <tr><td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">{t.clients.noFinancialRecords}</td></tr>}
               </tbody>
             </table>
+          </div>
+        </TabsContent>
+        <TabsContent value="history" className="mt-4">
+          <div className="rounded-xl border bg-card shadow-sm p-4">
+            <RecordHistory tableName="clients" recordId={id} />
           </div>
         </TabsContent>
       </Tabs>
