@@ -683,7 +683,17 @@ async function executeTool(
         .select("id, service_order_number, status, grand_total, scheduled_start_at, created_at, clients(full_name_or_company_name), vessels(boat_name)")
         .order("created_at", { ascending: false })
         .limit(Math.min(Number(args.limit) || 20, 50));
-      if (args.status) query = query.eq("status", args.status);
+      if (args.status) {
+        const STATUS_PT_EN: Record<string, string> = {
+          "rascunho": "draft", "pendente": "pending", "aprovado": "approved",
+          "agendado": "scheduled", "em andamento": "in_progress", "em execução": "in_progress",
+          "concluído": "completed", "concluido": "completed",
+          "cancelado": "cancelled", "faturado": "invoiced",
+          "aguardando peças": "waiting_parts", "aguardando aprovação": "waiting_approval", "reaberto": "reopened",
+        };
+        const mappedStatus = STATUS_PT_EN[args.status.toLowerCase()] ?? args.status;
+        query = query.eq("status", mappedStatus);
+      }
       if (args.client_id) query = query.eq("client_id", args.client_id);
       if (args.vessel_id) query = query.eq("vessel_id", args.vessel_id);
       const { data, error } = await query;
@@ -1630,7 +1640,12 @@ Quando o usuário disser "este cliente", "esta OS", "este barco", use o ID em co
             question: (q, n) => n > 5
               ? `Encontrei ${n} clientes para "${q}". Escolha ou refine:`
               : `Qual cliente chamado "${q}"?`,
-            label: (c) => [c.full_name_or_company_name, c.whatsapp || c.phone].filter(Boolean).join(" — "),
+            label: (c) => {
+              const parts = [c.full_name_or_company_name];
+              const contact = c.whatsapp || c.phone || c.email || c.cpf_cnpj || c.city;
+              if (contact) parts.push(contact);
+              return parts.join(" — ");
+            },
             value: (c) => c.id,
           },
           search_vessels: {

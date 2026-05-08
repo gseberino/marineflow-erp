@@ -56,7 +56,14 @@ export function useAIAgent(context: AIContext) {
         const { data, error } = await supabase.functions.invoke('ai-agent', {
           body: { messages: limitedMsgs, context },
         });
-        if (error) throw error;
+        if (error) {
+          // Tenta extrair mensagem amigável do body da edge function (ex: créditos esgotados)
+          const rawBody = (error as any)?.context?.responseBody ?? '';
+          if (rawBody) {
+            try { throw new Error(JSON.parse(rawBody).error || rawBody); } catch (parseErr: any) { if (parseErr?.message !== rawBody) throw parseErr; throw new Error(rawBody); }
+          }
+          throw error;
+        }
         if ((data as any)?.error) throw new Error((data as any).error);
 
         // Atualiza histórico oficial — usa updated_messages se vier (caso de proposal)
