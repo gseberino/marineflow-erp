@@ -471,7 +471,7 @@ export default function WhatsAppScheduledPage() {
                                 <RefreshCw className="h-3.5 w-3.5" />
                               </Button>
                             )}
-                            {(job.status === 'sent' || job.status === 'cancelled') && (
+                            {(job.status === 'sent' || job.status === 'cancelled' || job.status === 'failed') && (
                               <Button
                                 variant="ghost"
                                 size="icon"

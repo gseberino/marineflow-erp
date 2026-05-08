@@ -9,8 +9,8 @@ export function useAgendaOrders(dateFrom: string, dateTo: string) {
         .from('service_orders')
         .select(`
           id, service_order_number, status, scheduled_start_at, scheduled_end_at,
-          clients!service_orders_client_id_fkey(full_name_or_company_name),
-          vessels!service_orders_vessel_id_fkey(boat_name),
+          clients(full_name_or_company_name),
+          vessels(boat_name),
           service_order_technicians(user_id, app_users(id, full_name))
         `)
         .gte('scheduled_start_at', dateFrom)
@@ -69,8 +69,8 @@ export function useSchedulableOrders() {
         .from('service_orders')
         .select(`
           id, service_order_number, status,
-          clients!service_orders_client_id_fkey(full_name_or_company_name),
-          vessels!service_orders_vessel_id_fkey(boat_name)
+          clients(full_name_or_company_name),
+          vessels(boat_name)
         `)
         .in('status', ['draft', 'approved', 'scheduled', 'open', 'in_progress'])
         .order('created_at', { ascending: false })

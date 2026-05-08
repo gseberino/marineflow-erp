@@ -73,10 +73,10 @@ async function loadProfile(
     return {
       id: authUser.id,
       email: authUser.email || '',
-      full_name: data.full_name || authUser.email || '',
-      role: (data.role as AuthUser['role']) || 'other',
-      department: data.department,
-      metadata: data.metadata,
+      full_name: data?.full_name || authUser.email || '',
+      role: (data?.role as AuthUser['role']) || 'other',
+      department: data?.department,
+      metadata: data?.metadata,
     };
   } catch (err) {
     console.error('[Auth] Profile load error:', err);
