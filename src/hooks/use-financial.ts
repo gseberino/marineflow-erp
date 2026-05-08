@@ -96,37 +96,60 @@ export function useRegisterPayment() {
       payment_method: string; installments?: number;
       card_fee_percent?: number; net_amount?: number; notes?: string;
     }) => {
-      const { data: payment, error: pErr } = await supabase
-        .from('payments').insert({ ...input, status: 'confirmed' }).select().single();
-      if (pErr) throw pErr;
+      // Try the secure atomic RPC first to avoid race conditions
+      const { data: rpcData, error: rpcErr } = await supabase.rpc('register_payment_and_update_balance', {
+        p_receivable_id: input.receivable_id || null,
+        p_payable_id: input.payable_id || null,
+        p_amount: input.amount,
+        p_payment_date: input.payment_date,
+        p_payment_method: input.payment_method,
+        p_installments: input.installments || 1,
+        p_card_fee_percent: input.card_fee_percent || 0,
+        p_net_amount: input.net_amount || input.amount,
+        p_notes: input.notes || null
+      });
 
-      // Recalc parent
-      const table = input.receivable_id ? 'receivables' : 'payables';
-      const parentId = input.receivable_id || input.payable_id!;
-      const fk = input.receivable_id ? 'receivable_id' : 'payable_id';
+      let paymentId;
 
-      const { data: payments } = await supabase
-        .from('payments').select('amount').eq(fk, parentId).eq('status', 'confirmed');
-      const totalPaid = (payments || []).reduce((s, p) => s + Number(p.amount), 0);
+      if (!rpcErr && rpcData?.payment_id) {
+        paymentId = rpcData.payment_id;
+      } else {
+        // Fallback to old behavior if RPC is not deployed yet
+        console.warn('RPC not found or failed, using fallback.', rpcErr);
+        const { data: payment, error: pErr } = await supabase
+          .from('payments').insert({ ...input, status: 'confirmed' }).select().single();
+        if (pErr) throw pErr;
+        
+        paymentId = payment.id;
 
-      const { data: parent } = await supabase
-        .from(table).select('amount').eq('id', parentId).single();
-      const originalAmount = Number(parent?.amount || 0);
-      const balance = Math.max(0, originalAmount - totalPaid);
-      const status = totalPaid >= originalAmount ? 'paid' : totalPaid > 0 ? 'partially_paid' : 'pending';
+        // Recalc parent
+        const table = input.receivable_id ? 'receivables' : 'payables';
+        const parentId = input.receivable_id || input.payable_id!;
+        const fk = input.receivable_id ? 'receivable_id' : 'payable_id';
 
-      await supabase.from(table).update({
-        paid_amount: totalPaid, balance_amount: balance, status,
-      }).eq('id', parentId);
+        const { data: payments } = await supabase
+          .from('payments').select('amount').eq(fk, parentId).eq('status', 'confirmed');
+        const totalPaid = (payments || []).reduce((s, p) => s + Number(p.amount), 0);
+
+        const { data: parent } = await supabase
+          .from(table).select('amount').eq('id', parentId).single();
+        const originalAmount = Number(parent?.amount || 0);
+        const balance = Math.max(0, originalAmount - totalPaid);
+        const status = totalPaid >= originalAmount ? 'paid' : totalPaid > 0 ? 'partially_paid' : 'pending';
+
+        await supabase.from(table).update({
+          paid_amount: totalPaid, balance_amount: balance, status,
+        }).eq('id', parentId);
+      }
 
       await writeAuditLog({
         table_name: 'payments',
-        record_id: payment.id,
+        record_id: paymentId,
         action: 'update',
         new_value: { amount: input.amount, payment_method: input.payment_method },
       });
 
-      return payment;
+      return { id: paymentId };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['receivables'] });

@@ -180,18 +180,23 @@ export function useImportRows() {
           if (error) throw error;
           inserted += data?.length || 0;
 
+          const movementInserts = [];
           for (const p of data || []) {
             if ((p.stock_quantity ?? 0) > 0) {
-              try {
-                await supabase.from('inventory_movements').insert({
-                  product_id: p.id,
-                  movement_type: 'purchase' as string,
-                  quantity_delta: p.stock_quantity ?? 0,
-                  reference_type: 'import' as string,
-                });
-              } catch {
-                // Non-critical: inventory movement logging failed
-              }
+              movementInserts.push({
+                product_id: p.id,
+                movement_type: 'purchase',
+                quantity_delta: p.stock_quantity ?? 0,
+                reference_type: 'import',
+              });
+            }
+          }
+          
+          if (movementInserts.length > 0) {
+            try {
+              await supabase.from('inventory_movements').insert(movementInserts);
+            } catch {
+              // Non-critical: inventory movement logging failed
             }
           }
         }
