@@ -31,7 +31,13 @@ export default function ProspectingPage() {
       if ((data as any)?.error) throw new Error((data as any).error);
       setOutput((data as any)?.message?.content || '');
     } catch (e: any) {
-      toast.error(e?.message || 'Erro ao gerar mensagem');
+      const rawBody = e?.context?.responseBody ?? '';
+      if (rawBody) {
+        try { toast.error(JSON.parse(rawBody).error || rawBody); }
+        catch { toast.error(rawBody); }
+      } else {
+        toast.error(e?.message || 'Erro ao gerar mensagem');
+      }
     } finally {
       setLoading(false);
     }
