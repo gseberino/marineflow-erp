@@ -3705,6 +3705,20 @@ export type Database = {
       is_admin: { Args: { _user_id: string }; Returns: boolean }
       is_admin_or_financial: { Args: { _user_id: string }; Returns: boolean }
       is_external_seller: { Args: { _user_id: string }; Returns: boolean }
+      register_payment_and_update_balance: {
+        Args: {
+          p_amount: number
+          p_card_fee_percent: number
+          p_installments: number
+          p_net_amount: number
+          p_notes: string
+          p_payable_id: string
+          p_payment_date: string
+          p_payment_method: string
+          p_receivable_id: string
+        }
+        Returns: Json
+      }
       wa_extract_body_text: { Args: { p: Json }; Returns: string }
       wa_extract_message_type: { Args: { p: Json }; Returns: string }
       wa_normalize_phone: { Args: { raw: string }; Returns: string }
