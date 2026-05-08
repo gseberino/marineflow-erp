@@ -4,7 +4,6 @@ import { toast } from 'sonner';
 import type { Database } from '@/integrations/supabase/types';
 
 export type ScheduledSend = Database['public']['Tables']['whatsapp_scheduled_sends']['Row'] & {
-  client?: { id: string; full_name_or_company_name: string } | null;
   service_order?: { id: string; order_number: string } | null;
 };
 
@@ -18,7 +17,6 @@ export function useWhatsAppScheduled(filters?: { status?: string }) {
         .from('whatsapp_scheduled_sends')
         .select(`
           *,
-          client:clients(id, full_name_or_company_name),
           service_order:service_orders(id, order_number)
         `)
         .order('next_run_at', { ascending: true });

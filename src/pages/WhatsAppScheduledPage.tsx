@@ -405,13 +405,8 @@ export default function WhatsAppScheduledPage() {
                           ) : '—'}
                         </TableCell>
                         <TableCell className="hidden md:table-cell">
-                          <div className="text-xs">
-                            <div className="font-medium truncate max-w-[120px]">
-                              {job.client?.full_name_or_company_name || '—'}
-                            </div>
-                            <div className="text-muted-foreground font-mono">
-                              {job.phone}
-                            </div>
+                          <div className="text-xs font-mono text-muted-foreground">
+                            {job.phone}
                           </div>
                         </TableCell>
                         <TableCell>
