@@ -628,6 +628,9 @@ function QuickScheduleDialog({
   const [date, setDate] = useState('');
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('11:00');
+  // Local submitting flag prevents double-submit during the brief async window
+  // before quickSchedule.isPending becomes true after mutateAsync is called
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -636,10 +639,12 @@ function QuickScheduleDialog({
       setDate(prefillDate || toLocalDateInput(new Date()));
       setStartTime('09:00');
       setEndTime('11:00');
+      setSubmitting(false);
     }
   }, [open, prefillTechnicianId, prefillDate]);
 
   const handleSave = async () => {
+    if (submitting || quickSchedule.isPending) return;
     if (!orderId || !technicianId || !date || !startTime) {
       toast.error('Preencha OS, técnico, data e hora de início');
       return;
@@ -647,6 +652,7 @@ function QuickScheduleDialog({
     const startISO = new Date(`${date}T${startTime}:00`).toISOString();
     const endISO = endTime ? new Date(`${date}T${endTime}:00`).toISOString() : null;
 
+    setSubmitting(true);
     try {
       await quickSchedule.mutateAsync({
         service_order_id: orderId,
@@ -654,15 +660,20 @@ function QuickScheduleDialog({
         scheduled_start_at: startISO,
         scheduled_end_at: endISO,
       });
+      // Success: only reached if mutateAsync resolves without throwing
       toast.success('OS agendada com sucesso');
       onOpenChange(false);
     } catch (err: any) {
+      // Error: only reached if mutateAsync throws (mutationFn threw)
       toast.error(err?.message || 'Erro ao agendar OS');
+      setSubmitting(false);
     }
   };
 
+  const isBusy = submitting || quickSchedule.isPending;
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(v) => { if (!isBusy) onOpenChange(v); }}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Agendar Ordem de Serviço</DialogTitle>
@@ -717,10 +728,12 @@ function QuickScheduleDialog({
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          <Button onClick={handleSave} disabled={quickSchedule.isPending}>
-            {quickSchedule.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-            Agendar
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isBusy}>
+            Cancelar
+          </Button>
+          <Button onClick={handleSave} disabled={isBusy}>
+            {isBusy && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+            {isBusy ? 'Agendando...' : 'Agendar'}
           </Button>
         </DialogFooter>
       </DialogContent>

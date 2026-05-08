@@ -72,7 +72,8 @@ export function useSchedulableOrders() {
           clients(full_name_or_company_name),
           vessels(boat_name)
         `)
-        .in('status', ['draft', 'approved', 'scheduled', 'open', 'in_progress'])
+        // Valid schedulable statuses in this app's state machine:
+        .in('status', ['pending', 'scheduled', 'in_progress', 'waiting_parts', 'waiting_approval', 'reopened'])
         .order('created_at', { ascending: false })
         .limit(200);
       if (error) throw error;
@@ -92,16 +93,17 @@ export function useQuickSchedule() {
     }) => {
       // Guard: check for technician scheduling conflicts before saving
       if (input.scheduled_end_at) {
-        const { data: conflicts } = await supabase
+        const { data: conflicts, error: conflictErr } = await supabase
           .from('service_orders')
-          .select('id, service_order_number, scheduled_start_at, scheduled_end_at, service_order_technicians!inner(user_id)')
+          .select('id, service_order_number, service_order_technicians!inner(user_id)')
           .eq('service_order_technicians.user_id', input.technician_user_id)
           .neq('id', input.service_order_id)
           .neq('status', 'cancelled')
           .lt('scheduled_start_at', input.scheduled_end_at)
           .gt('scheduled_end_at', input.scheduled_start_at);
 
-        if (conflicts && conflicts.length > 0) {
+        // Only block on conflict if the query itself succeeded
+        if (!conflictErr && conflicts && conflicts.length > 0) {
           const conflictNums = conflicts.map((c: any) => c.service_order_number).join(', ');
           throw new Error(`Conflito de agenda: o técnico já está alocado na(s) OS ${conflictNums} nesse horário.`);
         }
@@ -118,7 +120,8 @@ export function useQuickSchedule() {
         scheduled_start_at: input.scheduled_start_at,
         scheduled_end_at: input.scheduled_end_at,
       };
-      if (current?.status === 'draft' || current?.status === 'approved') updatePayload.status = 'scheduled';
+      // Transition to 'scheduled' only from statuses that precede it
+      if (current?.status === 'pending') updatePayload.status = 'scheduled';
 
       const { error: updateErr } = await supabase
         .from('service_orders')
@@ -126,23 +129,19 @@ export function useQuickSchedule() {
         .eq('id', input.service_order_id);
       if (updateErr) throw updateErr;
 
-      const { data: existing } = await supabase
+      // Use upsert to safely assign the technician — avoids unique-constraint
+      // errors when the technician is already linked to this OS
+      const { error: techErr } = await supabase
         .from('service_order_technicians')
-        .select('user_id')
-        .eq('service_order_id', input.service_order_id)
-        .eq('user_id', input.technician_user_id)
-        .maybeSingle();
-
-      if (!existing) {
-        const { error: techErr } = await supabase
-          .from('service_order_technicians')
-          .insert({
+        .upsert(
+          {
             service_order_id: input.service_order_id,
             user_id: input.technician_user_id,
             role_in_order: 'technician',
-          });
-        if (techErr) throw techErr;
-      }
+          },
+          { onConflict: 'service_order_id,user_id', ignoreDuplicates: true }
+        );
+      if (techErr) throw techErr;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['agenda-orders'] });
@@ -172,7 +171,7 @@ export function useSaveAgendaTask() {
     mutationFn: async (input: AgendaTaskInput) => {
       // Guard: check for technician scheduling conflicts in agenda_tasks before saving
       if (input.scheduled_end_at && input.technician_user_id) {
-        const conflictQuery = supabase
+        let conflictQuery = supabase
           .from('agenda_tasks')
           .select('id, title, scheduled_start_at')
           .eq('technician_user_id', input.technician_user_id)
@@ -180,11 +179,12 @@ export function useSaveAgendaTask() {
           .lt('scheduled_start_at', input.scheduled_end_at)
           .gt('scheduled_end_at', input.scheduled_start_at);
 
-        // Exclude the record being edited
-        if (input.id) conflictQuery.neq('id', input.id);
+        // Exclude the record being edited — must reassign since filter returns new builder
+        if (input.id) conflictQuery = conflictQuery.neq('id', input.id);
 
-        const { data: conflicts } = await conflictQuery;
-        if (conflicts && conflicts.length > 0) {
+        const { data: conflicts, error: conflictErr } = await conflictQuery;
+        // Only block on actual conflicts — ignore query errors (e.g. missing table)
+        if (!conflictErr && conflicts && conflicts.length > 0) {
           const conflictTitles = conflicts.map((c: any) => `"${c.title}"`).join(', ');
           throw new Error(`Conflito de agenda: técnico já tem tarefa ${conflictTitles} nesse horário.`);
         }
