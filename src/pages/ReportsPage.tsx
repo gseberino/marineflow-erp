@@ -18,8 +18,24 @@ import { StatusBadge } from '@/components/StatusBadge';
 import { Badge } from '@/components/ui/badge';
 import {
   BarChart3, Clock, Wrench, DollarSign, TrendingUp, FileCheck,
-  AlertTriangle, Percent, Users, Package, Loader2, RefreshCw,
+  AlertTriangle, Percent, Users, Package, Loader2, RefreshCw, Download,
 } from 'lucide-react';
+
+// ── CSV export utility ──────────────────────────────────────
+function exportCSV(filename: string, rows: Record<string, any>[]) {
+  if (!rows.length) return;
+  const headers = Object.keys(rows[0]);
+  const escape = (v: any) => {
+    const s = v == null ? '' : String(v);
+    return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const csv = [headers.join(','), ...rows.map(r => headers.map(h => escape(r[h])).join(','))].join('\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
 import { Button } from '@/components/ui/button';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -285,13 +301,23 @@ function TechniciansTab() {
       </ChartCard>
 
       <ChartCard title="Produtividade detalhada">
+        <div className="flex justify-end mb-3">
+          <Button size="sm" variant="outline" className="gap-2 h-7 text-xs"
+            onClick={() => exportCSV('tecnicos.csv', data.rows.map((r: any) => ({
+              Técnico: r.name, 'OS Concluídas': r.os_count, 'Horas': r.hours,
+              'Média h/OS': r.avg_per_os, 'Receita': r.revenue, 'Lucro Líquido': r.profit,
+            })))}
+          >
+            <Download className="h-3 w-3" /> Exportar CSV
+          </Button>
+        </div>
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Técnico</TableHead>
               <TableHead className="text-right">OS concluídas</TableHead>
-              <TableHead className="text-right">Horas</TableHead>
-              <TableHead className="text-right">Média h/OS</TableHead>
+              <TableHead className="text-right hidden sm:table-cell">Horas</TableHead>
+              <TableHead className="text-right hidden sm:table-cell">Média h/OS</TableHead>
               <TableHead className="text-right">Receita gerada</TableHead>
               <TableHead className="text-right text-emerald-600">Lucro Líquido</TableHead>
             </TableRow>
@@ -303,8 +329,8 @@ function TechniciansTab() {
               <TableRow key={r.name}>
                 <TableCell className="font-medium">{r.name}</TableCell>
                 <TableCell className="text-right font-mono">{r.os_count}</TableCell>
-                <TableCell className="text-right font-mono">{r.hours}h</TableCell>
-                <TableCell className="text-right font-mono">{r.avg_per_os}h</TableCell>
+                <TableCell className="text-right font-mono hidden sm:table-cell">{r.hours}h</TableCell>
+                <TableCell className="text-right font-mono hidden sm:table-cell">{r.avg_per_os}h</TableCell>
                 <TableCell className="text-right font-mono">{formatCurrency(r.revenue)}</TableCell>
                 <TableCell className="text-right font-mono font-bold text-emerald-600">{formatCurrency(r.profit)}</TableCell>
               </TableRow>
@@ -359,12 +385,22 @@ function ProfitabilityTab() {
           </ChartCard>
 
           <ChartCard title="Detalhamento de Lucratividade por OS">
+            <div className="flex justify-end mb-3">
+              <Button size="sm" variant="outline" className="gap-2 h-7 text-xs"
+                onClick={() => exportCSV('lucratividade.csv', data.rows.map((r: any) => ({
+                  OS: r.number, Cliente: r.client, Faturamento: r.revenue,
+                  'Custo Total': r.cost, 'Lucro Líquido': r.profit, 'Margem %': r.margin,
+                })))}
+              >
+                <Download className="h-3 w-3" /> Exportar CSV
+              </Button>
+            </div>
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>OS / Cliente</TableHead>
                   <TableHead className="text-right">Faturamento</TableHead>
-                  <TableHead className="text-right">Custo Total</TableHead>
+                  <TableHead className="text-right hidden sm:table-cell">Custo Total</TableHead>
                   <TableHead className="text-right">Lucro Líquido</TableHead>
                   <TableHead className="text-right">Margem</TableHead>
                 </TableRow>
@@ -379,7 +415,7 @@ function ProfitabilityTab() {
                       <span className="block text-[10px] text-muted-foreground truncate max-w-[200px]">{r.client}</span>
                     </TableCell>
                     <TableCell className="text-right font-mono">{formatCurrency(r.revenue)}</TableCell>
-                    <TableCell className="text-right font-mono text-destructive">{formatCurrency(r.cost)}</TableCell>
+                    <TableCell className="text-right font-mono text-destructive hidden sm:table-cell">{formatCurrency(r.cost)}</TableCell>
                     <TableCell className="text-right font-mono font-bold text-emerald-600">{formatCurrency(r.profit)}</TableCell>
                     <TableCell className="text-right font-mono">
                       <Badge variant="outline" className={r.margin > 30 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}>
