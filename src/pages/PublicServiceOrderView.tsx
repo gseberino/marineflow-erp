@@ -42,6 +42,7 @@ interface PublicData {
   services: any[];
   company: Record<string, string>;
   signature: Signature | null;
+  presetData: { label: string | null; installments: number | null } | null;
 }
 
 export default function PublicServiceOrderView() {
@@ -126,6 +127,7 @@ export default function PublicServiceOrderView() {
             services: servicesRes.data || [],
             company,
             signature: (sigRes.data as Signature) || null,
+            presetData: presetRes?.data || null,
           });
           setLoading(false);
         }
@@ -236,8 +238,8 @@ export default function PublicServiceOrderView() {
         operational_cost_total: order.operational_cost_total || 0,
         extra_notes: order.extra_notes ?? undefined,
         payment_conditions: order.payment_conditions ?? undefined,
-        payment_condition_label: presetRes?.data?.label ?? null,
-        payment_condition_installments: presetRes?.data?.installments ?? null,
+        payment_condition_label: data?.presetData?.label ?? null,
+        payment_condition_installments: data?.presetData?.installments ?? null,
         subcontract_cost_total: (order as any).subcontract_cost_total || 0,
       },
       client: {

@@ -75,7 +75,7 @@ export type PDFData = {
     extra_notes?: string;
     payment_conditions?: string;
     payment_condition_label?: string | null;
-    payment_condition_installments?: any[] | null;
+    payment_condition_installments?: any[] | number | null;
     subcontract_cost_total?: number;
   };
   client: {

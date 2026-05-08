@@ -111,8 +111,8 @@ export function useRegisterPayment() {
 
       let paymentId;
 
-      if (!rpcErr && rpcData?.payment_id) {
-        paymentId = rpcData.payment_id;
+      if (!rpcErr && (rpcData as any)?.payment_id) {
+        paymentId = (rpcData as any).payment_id;
       } else {
         // Fallback to old behavior if RPC is not deployed yet
         console.warn('RPC not found or failed, using fallback.', rpcErr);

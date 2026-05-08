@@ -44,7 +44,7 @@ export async function cancelServiceOrderCascade(serviceOrderId: string, reason: 
     p_reason: reason,
   });
 
-  if (!rpcErr && rpcData?.success) {
+  if (!rpcErr && (rpcData as any)?.success) {
     await writeAuditLog({
       table_name: 'service_orders',
       record_id: serviceOrderId,
@@ -53,9 +53,9 @@ export async function cancelServiceOrderCascade(serviceOrderId: string, reason: 
       reason,
     });
     return {
-      parts_restored: rpcData.parts_restored,
-      receivables_cancelled: rpcData.receivables_cancelled,
-      payments_cancelled: rpcData.payments_cancelled,
+      parts_restored: (rpcData as any).parts_restored,
+      receivables_cancelled: (rpcData as any).receivables_cancelled,
+      payments_cancelled: (rpcData as any).payments_cancelled,
     };
   }
 
