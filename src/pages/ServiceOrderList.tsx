@@ -27,6 +27,7 @@ import { toast } from 'sonner';
 import { recordWhatsAppEvent } from '@/lib/diagnostics';
 import { useQueryClient } from '@tanstack/react-query';
 import { FilterPresets } from '@/components/FilterPresets';
+import { useTechnicians } from '@/hooks/use-agenda';
 
 type SortDir = 'asc' | 'desc';
 const PAGE_SIZE = 20;
@@ -38,6 +39,7 @@ export default function ServiceOrderList() {
     search: '',
     status: [] as string[],
     priority: [] as string[],
+    technician: [] as string[],
     dateFrom: '',
     dateTo: '',
   });
@@ -45,6 +47,7 @@ export default function ServiceOrderList() {
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const { t, formatCurrency, formatDate } = useI18n();
   const { data: orders, isLoading, error } = useServiceOrders();
+  const { data: technicians = [] } = useTechnicians();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const duplicate = useDuplicateServiceOrder();
@@ -154,8 +157,8 @@ export default function ServiceOrderList() {
   };
 
   const filtered = useMemo(() => {
-    const { search, status, priority, dateFrom, dateTo } = filters as {
-      search: string; status: string[]; priority: string[]; dateFrom: string; dateTo: string;
+    const { search, status, priority, technician, dateFrom, dateTo } = filters as {
+      search: string; status: string[]; priority: string[]; technician: string[]; dateFrom: string; dateTo: string;
     };
     const list = (orders || []).filter((so: any) => {
       const clientName = so.clients?.full_name_or_company_name || '';
@@ -167,6 +170,10 @@ export default function ServiceOrderList() {
       )) return false;
       if (status.length && !status.includes(so.status)) return false;
       if (priority.length && !priority.includes(so.priority)) return false;
+      if (technician.length) {
+        const soTechs: string[] = (so.service_order_technicians || []).map((t: any) => t.user_id);
+        if (!technician.some(tid => soTechs.includes(tid))) return false;
+      }
       if (dateFrom || dateTo) {
         const soDate = so.created_at ? so.created_at.split('T')[0] : '';
         if (dateFrom && soDate < dateFrom) return false;
@@ -227,6 +234,12 @@ export default function ServiceOrderList() {
               { value: 'high', label: 'Alta' },
               { value: 'urgent', label: 'Urgente' },
             ],
+          },
+          {
+            type: 'multi',
+            field: 'technician',
+            label: 'Técnico',
+            options: technicians.map((t: any) => ({ value: t.id, label: t.full_name })),
           },
           { type: 'daterange', fromField: 'dateFrom', toField: 'dateTo', label: 'Período' },
         ]}
