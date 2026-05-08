@@ -7,7 +7,9 @@ import { useI18n } from '@/i18n';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useRecordHistory } from '@/hooks/use-audit-log';
 import { Badge } from '@/components/ui/badge';
-import { History } from 'lucide-react';
+import { History, Link2, Check } from 'lucide-react';
+import { useState } from 'react';
+import { toast } from 'sonner';
 
 function TimelineTab({ id }: { id: string }) {
   const { data: history } = useRecordHistory('service_orders', id);
@@ -61,9 +63,20 @@ export default function ServiceOrderDetail() {
     );
   }
 
+  const [copied, setCopied] = useState(false);
+  const handleCopyLink = () => {
+    if (!order?.share_token) return;
+    const url = `${window.location.origin}/view/${order.share_token}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      toast.success('Link público copiado!');
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
   return (
     <Tabs defaultValue="details" className="flex flex-col gap-0">
-      <div className="border-b bg-background px-4 lg:px-6 sticky top-0 z-10">
+      <div className="border-b bg-background px-4 lg:px-6 sticky top-0 z-10 flex items-center justify-between">
         <TabsList className="h-10 bg-transparent p-0 gap-4">
           <TabsTrigger
             value="details"
@@ -75,6 +88,16 @@ export default function ServiceOrderDetail() {
             <TimelineTab id={id} />
           )}
         </TabsList>
+        {order?.share_token && (
+          <button
+            onClick={handleCopyLink}
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors pb-1"
+            title="Copiar link público da OS"
+          >
+            {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Link2 className="h-3.5 w-3.5" />}
+            {copied ? 'Copiado!' : 'Link público'}
+          </button>
+        )}
       </div>
 
       <TabsContent value="details" className="mt-0">
