@@ -120,7 +120,7 @@ export default function Dashboard() {
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">{greeting}, MarineFlow</h1>
+          <h1 className="text-2xl font-bold tracking-tight">{greeting}{user?.full_name ? `, ${user.full_name.split(' ')[0]}` : ''}!</h1>
           <p className="text-sm text-muted-foreground mt-0.5">{dateStr}</p>
         </div>
         <Button variant="ghost" size="sm" onClick={() => refetch()} className="text-muted-foreground">
