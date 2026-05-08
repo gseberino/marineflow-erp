@@ -1197,7 +1197,6 @@ async function sendWhatsapp(phone: string, message: string, jwt: string) {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
-    console.log("[AI-AGENT] v2-autodisambig handler start");
     if (!LOVABLE_API_KEY) return jr({ error: "LOVABLE_API_KEY não configurada" }, 500);
 
     const authHeader = req.headers.get("Authorization") || "";
@@ -1510,7 +1509,6 @@ Quando o usuário disser "este cliente", "esta OS", "este barco", use o ID em co
 
         if (autoDisambig[fnName]) {
           const items: any[] = result?.results ?? [];
-          console.log(`[AUTO-DISAMBIG] tool=${fnName} items=${items.length}`);
           if (items.length > 1) {
             const cfg = autoDisambig[fnName];
             const searchQuery = fnArgs.query || fnArgs.client_id || "";
@@ -1523,7 +1521,6 @@ Quando o usuário disser "este cliente", "esta OS", "este barco", use o ID em co
               options.push({ label: "🔍 Refinar busca — digitar mais detalhes", value: "__refine__" });
             }
             const question = cfg.question(searchQuery, items.length);
-            console.log(`[AUTO-DISAMBIG] Returning options: ${question} | ${options.length} options`);
             return jr({
               message: { role: "assistant", content: `Encontrei ${items.length} resultado(s). Selecione:` },
               options: { question, options },

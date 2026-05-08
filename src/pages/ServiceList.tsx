@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useI18n } from '@/i18n';
 import { useServices } from '@/hooks/use-services';
 import { PageHeader } from '@/components/PageHeader';
@@ -10,7 +10,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatusBadge } from '@/components/StatusBadge';
-import { Plus, Search, Wrench, Pencil, Upload, Download, Table2 } from 'lucide-react';
+import { Plus, Search, Wrench, Pencil, Upload, Download, Table2, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+
+type SortDir = 'asc' | 'desc';
+const PAGE_SIZE = 20;
 
 export default function ServiceList() {
   const { t, formatCurrency } = useI18n();
@@ -20,11 +23,9 @@ export default function ServiceList() {
   const [editData, setEditData] = useState<any>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
-
-  const filtered = services?.filter((s) => {
-    const q = search.toLowerCase();
-    return s.service_name.toLowerCase().includes(q) || (s.category || '').toLowerCase().includes(q);
-  });
+  const [page, setPage] = useState(1);
+  const [sortKey, setSortKey] = useState('service_name');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
 
   const billingUnitLabel: Record<string, string> = {
     hour: t.services.unitHour,
@@ -32,6 +33,36 @@ export default function ServiceList() {
     day: t.services.unitDay,
     unit: t.services.unitUnit,
   };
+
+  const handleSort = (key: string) => {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(key); setSortDir('asc'); }
+    setPage(1);
+  };
+
+  function SortIcon({ col }: { col: string }) {
+    if (sortKey !== col) return <ArrowUpDown className="h-3 w-3 ml-1 opacity-40 shrink-0" />;
+    return sortDir === 'asc' ? <ArrowUp className="h-3 w-3 ml-1 shrink-0" /> : <ArrowDown className="h-3 w-3 ml-1 shrink-0" />;
+  }
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    const list = (services ?? []).filter((s) =>
+      s.service_name.toLowerCase().includes(q) || (s.category || '').toLowerCase().includes(q)
+    );
+    return [...list].sort((a, b) => {
+      let av: any = (a as any)[sortKey] ?? '';
+      let bv: any = (b as any)[sortKey] ?? '';
+      if (typeof av === 'string') av = av.toLowerCase();
+      if (typeof bv === 'string') bv = bv.toLowerCase();
+      if (av < bv) return sortDir === 'asc' ? -1 : 1;
+      if (av > bv) return sortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [services, search, sortKey, sortDir]);
+
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -56,7 +87,7 @@ export default function ServiceList() {
       <div className="relative max-w-sm">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input placeholder={t.services.searchPlaceholder} value={search}
-          onChange={(e) => setSearch(e.target.value)} className="pl-9" />
+          onChange={(e) => { setSearch(e.target.value); setPage(1); }} className="pl-9" />
       </div>
 
       {error ? (
@@ -76,41 +107,79 @@ export default function ServiceList() {
           )}
         </div>
       ) : (
-        <div className="rounded-xl border bg-card shadow-sm overflow-x-auto scrollbar-thin">
-          <table className="w-full text-sm min-w-[800px]">
-            <thead>
-              <tr className="border-b bg-muted/50">
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.services.serviceName}</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.services.category}</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.services.billingUnit}</th>
-                <th className="px-4 py-3 text-right font-medium text-muted-foreground">{t.services.defaultPrice}</th>
-                <th className="px-4 py-3 text-center font-medium text-muted-foreground">{t.common.status}</th>
-                <th className="px-4 py-3 w-10"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((s) => (
-                <tr key={s.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
-                  <td className="px-4 py-3 font-medium">{s.service_name}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{s.category || '—'}</td>
-                  <td className="px-4 py-3">{billingUnitLabel[s.billing_unit] || s.billing_unit}</td>
-                  <td className="px-4 py-3 text-right">{formatCurrency(s.default_price || 0)}</td>
-                  <td className="px-4 py-3 text-center">
-                    <StatusBadge className={s.active ? 'bg-success/15 text-success' : 'bg-muted text-muted-foreground'}>
-                      {s.active ? t.common.active : t.common.inactive}
-                    </StatusBadge>
-                  </td>
-                  <td className="px-4 py-3">
-                    <Button variant="ghost" size="icon" className="h-7 w-7"
-                      onClick={() => { setEditData(s); setDialogOpen(true); }}>
-                      <Pencil className="h-3.5 w-3.5" />
-                    </Button>
-                  </td>
+        <>
+          <div className="rounded-xl border bg-card shadow-sm overflow-x-auto scrollbar-thin">
+            <table className="w-full text-sm min-w-[800px]">
+              <thead>
+                <tr className="border-b bg-muted/50">
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                    <button onClick={() => handleSort('service_name')} className="flex items-center hover:text-foreground transition-colors">
+                      {t.services.serviceName}<SortIcon col="service_name" />
+                    </button>
+                  </th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                    <button onClick={() => handleSort('category')} className="flex items-center hover:text-foreground transition-colors">
+                      {t.services.category}<SortIcon col="category" />
+                    </button>
+                  </th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                    <button onClick={() => handleSort('billing_unit')} className="flex items-center hover:text-foreground transition-colors">
+                      {t.services.billingUnit}<SortIcon col="billing_unit" />
+                    </button>
+                  </th>
+                  <th className="px-4 py-3 text-right font-medium text-muted-foreground">
+                    <button onClick={() => handleSort('default_price')} className="flex items-center justify-end w-full hover:text-foreground transition-colors">
+                      {t.services.defaultPrice}<SortIcon col="default_price" />
+                    </button>
+                  </th>
+                  <th className="px-4 py-3 text-center font-medium text-muted-foreground">
+                    <button onClick={() => handleSort('active')} className="flex items-center justify-center w-full hover:text-foreground transition-colors">
+                      {t.common.status}<SortIcon col="active" />
+                    </button>
+                  </th>
+                  <th className="px-4 py-3 w-10"></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {paginated.map((s) => (
+                  <tr key={s.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                    <td className="px-4 py-3 font-medium">{s.service_name}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{s.category || '—'}</td>
+                    <td className="px-4 py-3">{billingUnitLabel[s.billing_unit] || s.billing_unit}</td>
+                    <td className="px-4 py-3 text-right">{formatCurrency(s.default_price || 0)}</td>
+                    <td className="px-4 py-3 text-center">
+                      <StatusBadge className={s.active ? 'bg-success/15 text-success' : 'bg-muted text-muted-foreground'}>
+                        {s.active ? t.common.active : t.common.inactive}
+                      </StatusBadge>
+                    </td>
+                    <td className="px-4 py-3">
+                      <Button variant="ghost" size="icon" className="h-7 w-7"
+                        onClick={() => { setEditData(s); setDialogOpen(true); }}>
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">
+                {filtered.length} serviços · Página {page} de {totalPages}
+              </span>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
+                  <ChevronLeft className="h-4 w-4" /> Anterior
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
+                  Próxima <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       <ServiceFormDialog open={dialogOpen} onOpenChange={setDialogOpen} editData={editData} />

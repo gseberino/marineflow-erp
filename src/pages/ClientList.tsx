@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PageHeader } from '@/components/PageHeader';
 import { useI18n } from '@/i18n';
 import { useClients } from '@/hooks/use-clients';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Plus, Search, Phone, Mail, Ship, Upload, Download, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, Search, Phone, Mail, Ship, Upload, Download, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ClientFormDialog } from '@/components/ClientFormDialog';
@@ -14,11 +14,15 @@ import { exportToCSV, CLIENTS_COLUMNS } from '@/lib/export-utils';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 
+type SortDir = 'asc' | 'desc';
+
 export default function ClientList() {
   const [search, setSearch] = useState('');
   const [formOpen, setFormOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [page, setPage] = useState(1);
+  const [sortKey, setSortKey] = useState('full_name_or_company_name');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
   const PAGE_SIZE = 20;
   const { t } = useI18n();
   const { data: clients, isLoading, error } = useClients();
@@ -34,11 +38,33 @@ export default function ClientList() {
     },
   });
 
-  const filtered = (clients ?? []).filter(c =>
-    !search || c.full_name_or_company_name.toLowerCase().includes(search.toLowerCase()) ||
-    (c.email ?? '').toLowerCase().includes(search.toLowerCase()) ||
-    (c.cpf_cnpj ?? '').includes(search)
-  );
+  const handleSort = (key: string) => {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(key); setSortDir('asc'); }
+    setPage(1);
+  };
+
+  function SortIcon({ col }: { col: string }) {
+    if (sortKey !== col) return <ArrowUpDown className="h-3 w-3 ml-1 opacity-40 shrink-0" />;
+    return sortDir === 'asc' ? <ArrowUp className="h-3 w-3 ml-1 shrink-0" /> : <ArrowDown className="h-3 w-3 ml-1 shrink-0" />;
+  }
+
+  const filtered = useMemo(() => {
+    const list = (clients ?? []).filter(c =>
+      !search || c.full_name_or_company_name.toLowerCase().includes(search.toLowerCase()) ||
+      (c.email ?? '').toLowerCase().includes(search.toLowerCase()) ||
+      (c.cpf_cnpj ?? '').includes(search)
+    );
+    return [...list].sort((a, b) => {
+      let av: any = (a as any)[sortKey] ?? '';
+      let bv: any = (b as any)[sortKey] ?? '';
+      if (typeof av === 'string') av = av.toLowerCase();
+      if (typeof bv === 'string') bv = bv.toLowerCase();
+      if (av < bv) return sortDir === 'asc' ? -1 : 1;
+      if (av > bv) return sortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [clients, search, sortKey, sortDir]);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -84,16 +110,22 @@ export default function ClientList() {
               <thead>
                 <tr className="border-b bg-muted/50">
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                    {(t.clients as any).name || 'Nome'}
+                    <button onClick={() => handleSort('full_name_or_company_name')} className="flex items-center hover:text-foreground transition-colors">
+                      {(t.clients as any).name || 'Nome'}<SortIcon col="full_name_or_company_name" />
+                    </button>
                   </th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">
-                    {(t.common as any).contact || 'Contato'}
+                    <button onClick={() => handleSort('email')} className="flex items-center hover:text-foreground transition-colors">
+                      {(t.common as any).contact || 'Contato'}<SortIcon col="email" />
+                    </button>
                   </th>
                   <th className="px-4 py-3 text-center font-medium text-muted-foreground hidden sm:table-cell w-20">
                     {t.clients.vessels || 'Embarcações'}
                   </th>
                   <th className="px-4 py-3 text-center font-medium text-muted-foreground w-20">
-                    {(t.common as any).status || 'Status'}
+                    <button onClick={() => handleSort('active')} className="flex items-center justify-center w-full hover:text-foreground transition-colors">
+                      {(t.common as any).status || 'Status'}<SortIcon col="active" />
+                    </button>
                   </th>
                 </tr>
               </thead>

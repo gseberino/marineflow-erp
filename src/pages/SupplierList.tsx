@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import { useI18n } from '@/i18n';
 import { useSuppliers, type Supplier } from '@/hooks/use-suppliers';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Plus, Search, Building2, Upload, Download } from 'lucide-react';
+import { Plus, Search, Building2, Upload, Download, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatusBadge } from '@/components/StatusBadge';
 import { SupplierFormDialog } from '@/components/SupplierFormDialog';
@@ -12,6 +12,9 @@ import { ImportWizard } from '@/components/ImportWizard';
 import { exportToCSV, SUPPLIERS_COLUMNS } from '@/lib/export-utils';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
+
+type SortDir = 'asc' | 'desc';
+const PAGE_SIZE = 20;
 
 function useSupplierProductCounts() {
   return useQuery({
@@ -35,16 +38,44 @@ export default function SupplierList() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Supplier | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const [sortKey, setSortKey] = useState('supplier_name');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
   const { t } = useI18n();
   const { data: suppliers, isLoading, error } = useSuppliers();
   const { data: productCounts } = useSupplierProductCounts();
 
-  const filtered = (suppliers ?? []).filter(s =>
-    !search ||
-    s.supplier_name.toLowerCase().includes(search.toLowerCase()) ||
-    (s.cnpj_cpf ?? '').toLowerCase().includes(search.toLowerCase()) ||
-    (s.trade_name ?? '').toLowerCase().includes(search.toLowerCase())
-  );
+  const handleSort = (key: string) => {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(key); setSortDir('asc'); }
+    setPage(1);
+  };
+
+  function SortIcon({ col }: { col: string }) {
+    if (sortKey !== col) return <ArrowUpDown className="h-3 w-3 ml-1 opacity-40 shrink-0" />;
+    return sortDir === 'asc' ? <ArrowUp className="h-3 w-3 ml-1 shrink-0" /> : <ArrowDown className="h-3 w-3 ml-1 shrink-0" />;
+  }
+
+  const filtered = useMemo(() => {
+    const list = (suppliers ?? []).filter(s =>
+      !search ||
+      s.supplier_name.toLowerCase().includes(search.toLowerCase()) ||
+      (s.cnpj_cpf ?? '').toLowerCase().includes(search.toLowerCase()) ||
+      (s.trade_name ?? '').toLowerCase().includes(search.toLowerCase())
+    );
+    return [...list].sort((a, b) => {
+      let av: any = (a as any)[sortKey] ?? '';
+      let bv: any = (b as any)[sortKey] ?? '';
+      if (typeof av === 'string') av = av.toLowerCase();
+      if (typeof bv === 'string') bv = bv.toLowerCase();
+      if (av < bv) return sortDir === 'asc' ? -1 : 1;
+      if (av > bv) return sortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [suppliers, search, sortKey, sortDir]);
+
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   if (error) return <div className="py-20 text-center text-destructive">{(error as Error).message}</div>;
 
@@ -65,7 +96,7 @@ export default function SupplierList() {
       </PageHeader>
       <div className="relative">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input placeholder={t.suppliers.searchPlaceholder} value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
+        <Input placeholder={t.suppliers.searchPlaceholder} value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} className="pl-9" />
       </div>
 
       {isLoading ? (
@@ -80,47 +111,89 @@ export default function SupplierList() {
           )}
         </div>
       ) : (
-        <div className="rounded-xl border bg-card shadow-sm overflow-x-auto scrollbar-thin">
-          <table className="w-full text-sm min-w-[700px]">
-            <thead><tr className="border-b bg-muted/50">
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.suppliers.supplierName}</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">{t.suppliers.tradeName}</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">{t.suppliers.cnpj}</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">{t.suppliers.contactName}</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">{t.address.city}/{t.address.state}</th>
-              <th className="px-4 py-3 text-center font-medium text-muted-foreground">{t.suppliers.linkedProducts}</th>
-              <th className="px-4 py-3 text-center font-medium text-muted-foreground">{t.common.status}</th>
-              <th className="px-4 py-3 text-center font-medium text-muted-foreground">{t.common.actions}</th>
-            </tr></thead>
-            <tbody>
-              {filtered.map(s => (
-                <tr key={s.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <Building2 className="h-4 w-4 text-accent shrink-0" />
-                      <span className="font-medium">{s.supplier_name}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 hidden md:table-cell text-muted-foreground">{s.trade_name ?? '—'}</td>
-                  <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">{s.cnpj_cpf ?? '—'}</td>
-                  <td className="px-4 py-3 hidden md:table-cell text-muted-foreground">{s.contact_name ?? '—'}</td>
-                  <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">
-                    {[s.city, s.state].filter(Boolean).join('/') || '—'}
-                  </td>
-                  <td className="px-4 py-3 text-center font-medium">{productCounts?.[s.id] ?? 0}</td>
-                  <td className="px-4 py-3 text-center">
-                    <StatusBadge className={s.active ? 'bg-emerald-100 text-emerald-700' : 'bg-muted text-muted-foreground'}>
-                      {s.active ? t.common.active : t.common.inactive}
-                    </StatusBadge>
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    <Button variant="ghost" size="sm" onClick={() => { setEditing(s); setFormOpen(true); }}>{t.common.edit}</Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <>
+          <div className="rounded-xl border bg-card shadow-sm overflow-x-auto scrollbar-thin">
+            <table className="w-full text-sm min-w-[700px]">
+              <thead><tr className="border-b bg-muted/50">
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                  <button onClick={() => handleSort('supplier_name')} className="flex items-center hover:text-foreground transition-colors">
+                    {t.suppliers.supplierName}<SortIcon col="supplier_name" />
+                  </button>
+                </th>
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">
+                  <button onClick={() => handleSort('trade_name')} className="flex items-center hover:text-foreground transition-colors">
+                    {t.suppliers.tradeName}<SortIcon col="trade_name" />
+                  </button>
+                </th>
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">
+                  <button onClick={() => handleSort('cnpj_cpf')} className="flex items-center hover:text-foreground transition-colors">
+                    {t.suppliers.cnpj}<SortIcon col="cnpj_cpf" />
+                  </button>
+                </th>
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">
+                  <button onClick={() => handleSort('contact_name')} className="flex items-center hover:text-foreground transition-colors">
+                    {t.suppliers.contactName}<SortIcon col="contact_name" />
+                  </button>
+                </th>
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">
+                  <button onClick={() => handleSort('city')} className="flex items-center hover:text-foreground transition-colors">
+                    {t.address.city}/{t.address.state}<SortIcon col="city" />
+                  </button>
+                </th>
+                <th className="px-4 py-3 text-center font-medium text-muted-foreground">{t.suppliers.linkedProducts}</th>
+                <th className="px-4 py-3 text-center font-medium text-muted-foreground">
+                  <button onClick={() => handleSort('active')} className="flex items-center justify-center w-full hover:text-foreground transition-colors">
+                    {t.common.status}<SortIcon col="active" />
+                  </button>
+                </th>
+                <th className="px-4 py-3 text-center font-medium text-muted-foreground">{t.common.actions}</th>
+              </tr></thead>
+              <tbody>
+                {paginated.map(s => (
+                  <tr key={s.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <Building2 className="h-4 w-4 text-accent shrink-0" />
+                        <span className="font-medium">{s.supplier_name}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 hidden md:table-cell text-muted-foreground">{s.trade_name ?? '—'}</td>
+                    <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">{s.cnpj_cpf ?? '—'}</td>
+                    <td className="px-4 py-3 hidden md:table-cell text-muted-foreground">{s.contact_name ?? '—'}</td>
+                    <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">
+                      {[s.city, s.state].filter(Boolean).join('/') || '—'}
+                    </td>
+                    <td className="px-4 py-3 text-center font-medium">{productCounts?.[s.id] ?? 0}</td>
+                    <td className="px-4 py-3 text-center">
+                      <StatusBadge className={s.active ? 'bg-emerald-100 text-emerald-700' : 'bg-muted text-muted-foreground'}>
+                        {s.active ? t.common.active : t.common.inactive}
+                      </StatusBadge>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <Button variant="ghost" size="sm" onClick={() => { setEditing(s); setFormOpen(true); }}>{t.common.edit}</Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">
+                {filtered.length} fornecedores · Página {page} de {totalPages}
+              </span>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
+                  <ChevronLeft className="h-4 w-4" /> Anterior
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
+                  Próxima <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       <SupplierFormDialog open={formOpen} onOpenChange={setFormOpen} supplier={editing} />

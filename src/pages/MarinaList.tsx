@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import { useI18n } from '@/i18n';
 import { useMarinas } from '@/hooks/use-marinas';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Plus, Search, MapPin, Phone, Mail, Ship, Edit, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, Search, MapPin, Phone, Mail, Ship, Edit, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { MarinaFormDialog } from '@/components/MarinaFormDialog';
@@ -12,11 +12,15 @@ import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import type { Marina } from '@/hooks/use-marinas';
 
+type SortDir = 'asc' | 'desc';
+
 export default function MarinaList() {
   const [search, setSearch] = useState('');
   const [formOpen, setFormOpen] = useState(false);
   const [editMarina, setEditMarina] = useState<Marina | null>(null);
   const [page, setPage] = useState(1);
+  const [sortKey, setSortKey] = useState('marina_name');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
   const PAGE_SIZE = 20;
   const { t } = useI18n();
   const { data: marinas, isLoading, error } = useMarinas();
@@ -32,9 +36,31 @@ export default function MarinaList() {
     },
   });
 
-  const filtered = (marinas ?? []).filter(m =>
-    !search || m.marina_name.toLowerCase().includes(search.toLowerCase()) || (m.city ?? '').toLowerCase().includes(search.toLowerCase())
-  );
+  const handleSort = (key: string) => {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(key); setSortDir('asc'); }
+    setPage(1);
+  };
+
+  function SortIcon({ col }: { col: string }) {
+    if (sortKey !== col) return <ArrowUpDown className="h-3 w-3 ml-1 opacity-40 shrink-0" />;
+    return sortDir === 'asc' ? <ArrowUp className="h-3 w-3 ml-1 shrink-0" /> : <ArrowDown className="h-3 w-3 ml-1 shrink-0" />;
+  }
+
+  const filtered = useMemo(() => {
+    const list = (marinas ?? []).filter(m =>
+      !search || m.marina_name.toLowerCase().includes(search.toLowerCase()) || (m.city ?? '').toLowerCase().includes(search.toLowerCase())
+    );
+    return [...list].sort((a, b) => {
+      let av: any = (a as any)[sortKey] ?? '';
+      let bv: any = (b as any)[sortKey] ?? '';
+      if (typeof av === 'string') av = av.toLowerCase();
+      if (typeof bv === 'string') bv = bv.toLowerCase();
+      if (av < bv) return sortDir === 'asc' ? -1 : 1;
+      if (av > bv) return sortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [marinas, search, sortKey, sortDir]);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -71,16 +97,22 @@ export default function MarinaList() {
               <thead>
                 <tr className="border-b bg-muted/50">
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                    {(t.marinas as any).name || 'Marina'}
+                    <button onClick={() => handleSort('marina_name')} className="flex items-center hover:text-foreground transition-colors">
+                      {(t.marinas as any).name || 'Marina'}<SortIcon col="marina_name" />
+                    </button>
                   </th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">
-                    {(t.common as any).contact || 'Contato'}
+                    <button onClick={() => handleSort('contact_name')} className="flex items-center hover:text-foreground transition-colors">
+                      {(t.common as any).contact || 'Contato'}<SortIcon col="contact_name" />
+                    </button>
                   </th>
                   <th className="px-4 py-3 text-center font-medium text-muted-foreground hidden sm:table-cell w-24">
                     {t.clients.vessels || 'Embarcações'}
                   </th>
                   <th className="px-4 py-3 text-center font-medium text-muted-foreground w-20">
-                    {(t.common as any).status || 'Status'}
+                    <button onClick={() => handleSort('active')} className="flex items-center justify-center w-full hover:text-foreground transition-colors">
+                      {(t.common as any).status || 'Status'}<SortIcon col="active" />
+                    </button>
                   </th>
                   <th className="px-4 py-3 w-10"></th>
                 </tr>

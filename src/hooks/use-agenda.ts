@@ -72,7 +72,7 @@ export function useSchedulableOrders() {
           clients!service_orders_client_id_fkey(full_name_or_company_name),
           vessels!service_orders_vessel_id_fkey(boat_name)
         `)
-        .in('status', ['draft', 'scheduled', 'open', 'in_progress'])
+        .in('status', ['draft', 'approved', 'scheduled', 'open', 'in_progress'])
         .order('created_at', { ascending: false })
         .limit(200);
       if (error) throw error;
@@ -101,7 +101,7 @@ export function useQuickSchedule() {
         scheduled_start_at: input.scheduled_start_at,
         scheduled_end_at: input.scheduled_end_at,
       };
-      if (current?.status === 'draft') updatePayload.status = 'scheduled';
+      if (current?.status === 'draft' || current?.status === 'approved') updatePayload.status = 'scheduled';
 
       const { error: updateErr } = await supabase
         .from('service_orders')

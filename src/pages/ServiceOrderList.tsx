@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { PageHeader } from '@/components/PageHeader';
 import { StatusBadge } from '@/components/StatusBadge';
@@ -8,7 +8,7 @@ import { statusConfig, priorityConfig } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Plus, Search, Filter, ClipboardList, MoreHorizontal, FileText, Printer, MessageCircle, Send, CheckCircle2, XCircle, History, Copy, Download } from 'lucide-react';
+import { Plus, Search, Filter, ClipboardList, MoreHorizontal, FileText, Printer, MessageCircle, Send, CheckCircle2, XCircle, History, Copy, Download, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { exportToCSV } from '@/lib/export';
 import { supabase } from '@/integrations/supabase/client';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -27,11 +27,18 @@ import { recordWhatsAppEvent } from '@/lib/diagnostics';
 import { useQueryClient } from '@tanstack/react-query';
 import { FilterPresets } from '@/components/FilterPresets';
 
+type SortDir = 'asc' | 'desc';
+const PAGE_SIZE = 20;
+const PRIORITY_WEIGHT: Record<string, number> = { urgent: 4, high: 3, normal: 2, low: 1 };
+
 export default function ServiceOrderList() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [periodFilter, setPeriodFilter] = useState<string>('all');
+  const [page, setPage] = useState(1);
+  const [sortKey, setSortKey] = useState('created_at');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
   const { t, formatCurrency, formatDate } = useI18n();
   const { data: orders, isLoading, error } = useServiceOrders();
   const queryClient = useQueryClient();
@@ -124,33 +131,65 @@ export default function ServiceOrderList() {
     });
   };
 
-  const filtered = (orders || []).filter((so: any) => {
-    const clientName = so.clients?.full_name_or_company_name || '';
-    const vesselName = so.vessels?.boat_name || '';
-    const matchesSearch = !search ||
-      so.service_order_number.toLowerCase().includes(search.toLowerCase()) ||
-      clientName.toLowerCase().includes(search.toLowerCase()) ||
-      vesselName.toLowerCase().includes(search.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || so.status === statusFilter;
-    const matchesPriority = priorityFilter === 'all' || so.priority === priorityFilter;
-    const now = new Date();
-    const soDate = new Date(so.created_at);
-    const matchesPeriod = (() => {
-      if (periodFilter === 'all') return true;
-      if (periodFilter === 'today') return soDate.toDateString() === now.toDateString();
-      if (periodFilter === 'week') {
-        const weekAgo = new Date(now); weekAgo.setDate(now.getDate() - 7);
-        return soDate >= weekAgo;
-      }
-      if (periodFilter === 'month') return soDate.getMonth() === now.getMonth() && soDate.getFullYear() === now.getFullYear();
-      if (periodFilter === 'last_month') {
-        const lm = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-        return soDate.getMonth() === lm.getMonth() && soDate.getFullYear() === lm.getFullYear();
-      }
-      return true;
-    })();
-    return matchesSearch && matchesStatus && matchesPriority && matchesPeriod;
-  });
+  const handleSort = (key: string) => {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(key); setSortDir('asc'); }
+    setPage(1);
+  };
+
+  function SortIcon({ col }: { col: string }) {
+    if (sortKey !== col) return <ArrowUpDown className="h-3 w-3 ml-1 opacity-40 shrink-0" />;
+    return sortDir === 'asc' ? <ArrowUp className="h-3 w-3 ml-1 shrink-0" /> : <ArrowDown className="h-3 w-3 ml-1 shrink-0" />;
+  }
+
+  const getSortValue = (so: any, key: string): any => {
+    if (key === 'client_name') return so.clients?.full_name_or_company_name ?? '';
+    if (key === 'vessel_name') return so.vessels?.boat_name ?? '';
+    if (key === 'priority') return PRIORITY_WEIGHT[so.priority] ?? 0;
+    return so[key] ?? '';
+  };
+
+  const filtered = useMemo(() => {
+    const list = (orders || []).filter((so: any) => {
+      const clientName = so.clients?.full_name_or_company_name || '';
+      const vesselName = so.vessels?.boat_name || '';
+      const matchesSearch = !search ||
+        so.service_order_number.toLowerCase().includes(search.toLowerCase()) ||
+        clientName.toLowerCase().includes(search.toLowerCase()) ||
+        vesselName.toLowerCase().includes(search.toLowerCase());
+      const matchesStatus = statusFilter === 'all' || so.status === statusFilter;
+      const matchesPriority = priorityFilter === 'all' || so.priority === priorityFilter;
+      const now = new Date();
+      const soDate = new Date(so.created_at);
+      const matchesPeriod = (() => {
+        if (periodFilter === 'all') return true;
+        if (periodFilter === 'today') return soDate.toDateString() === now.toDateString();
+        if (periodFilter === 'week') {
+          const weekAgo = new Date(now); weekAgo.setDate(now.getDate() - 7);
+          return soDate >= weekAgo;
+        }
+        if (periodFilter === 'month') return soDate.getMonth() === now.getMonth() && soDate.getFullYear() === now.getFullYear();
+        if (periodFilter === 'last_month') {
+          const lm = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+          return soDate.getMonth() === lm.getMonth() && soDate.getFullYear() === lm.getFullYear();
+        }
+        return true;
+      })();
+      return matchesSearch && matchesStatus && matchesPriority && matchesPeriod;
+    });
+    return [...list].sort((a, b) => {
+      let av = getSortValue(a, sortKey);
+      let bv = getSortValue(b, sortKey);
+      if (typeof av === 'string') av = av.toLowerCase();
+      if (typeof bv === 'string') bv = bv.toLowerCase();
+      if (av < bv) return sortDir === 'asc' ? -1 : 1;
+      if (av > bv) return sortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [orders, search, statusFilter, priorityFilter, periodFilter, sortKey, sortDir]);
+
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <div className="space-y-4 animate-fade-in">
@@ -165,9 +204,9 @@ export default function ServiceOrderList() {
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input placeholder={t.serviceOrders.searchPlaceholder} value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
+          <Input placeholder={t.serviceOrders.searchPlaceholder} value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} className="pl-9" />
         </div>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
+        <Select value={statusFilter} onValueChange={v => { setStatusFilter(v); setPage(1); }}>
           <SelectTrigger className="w-full sm:w-[180px]">
             <Filter className="h-4 w-4 mr-2" />
             <SelectValue placeholder={t.common.status} />
@@ -179,7 +218,7 @@ export default function ServiceOrderList() {
             ))}
           </SelectContent>
         </Select>
-        <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+        <Select value={priorityFilter} onValueChange={v => { setPriorityFilter(v); setPage(1); }}>
           <SelectTrigger className="w-full sm:w-[140px]">
             <SelectValue placeholder="Prioridade" />
           </SelectTrigger>
@@ -191,7 +230,7 @@ export default function ServiceOrderList() {
             <SelectItem value="urgent">Urgente</SelectItem>
           </SelectContent>
         </Select>
-        <Select value={periodFilter} onValueChange={setPeriodFilter}>
+        <Select value={periodFilter} onValueChange={v => { setPeriodFilter(v); setPage(1); }}>
           <SelectTrigger className="w-full sm:w-[160px]">
             <SelectValue placeholder="Período" />
           </SelectTrigger>
@@ -212,6 +251,7 @@ export default function ServiceOrderList() {
             setStatusFilter(c.statusFilter ?? 'all');
             setPriorityFilter(c.priorityFilter ?? 'all');
             setPeriodFilter(c.periodFilter ?? 'all');
+            setPage(1);
           }}
         />
         {(statusFilter !== 'all' || priorityFilter !== 'all' || periodFilter !== 'all' || search) && (
@@ -220,6 +260,7 @@ export default function ServiceOrderList() {
             setStatusFilter('all');
             setPriorityFilter('all');
             setPeriodFilter('all');
+            setPage(1);
           }}>
             Limpar filtros
           </Button>
@@ -264,24 +305,53 @@ export default function ServiceOrderList() {
           </Link>
         </div>
       ) : (
-        <div className="rounded-xl border bg-card shadow-sm overflow-x-auto scrollbar-thin">
-          <table className="w-full text-sm min-w-[1000px]">
+        <>
+          <div className="rounded-xl border bg-card shadow-sm overflow-x-auto scrollbar-thin">
+            <table className="w-full text-sm min-w-[1000px]">
               <thead>
                 <tr className="border-b bg-muted/50">
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.serviceOrders.orderNumber}</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.serviceOrders.client}</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">{t.serviceOrders.vessel}</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.common.status}</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">{t.serviceOrders.priority}</th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                    <button onClick={() => handleSort('service_order_number')} className="flex items-center hover:text-foreground transition-colors">
+                      {t.serviceOrders.orderNumber}<SortIcon col="service_order_number" />
+                    </button>
+                  </th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                    <button onClick={() => handleSort('client_name')} className="flex items-center hover:text-foreground transition-colors">
+                      {t.serviceOrders.client}<SortIcon col="client_name" />
+                    </button>
+                  </th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">
+                    <button onClick={() => handleSort('vessel_name')} className="flex items-center hover:text-foreground transition-colors">
+                      {t.serviceOrders.vessel}<SortIcon col="vessel_name" />
+                    </button>
+                  </th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                    <button onClick={() => handleSort('status')} className="flex items-center hover:text-foreground transition-colors">
+                      {t.common.status}<SortIcon col="status" />
+                    </button>
+                  </th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">
+                    <button onClick={() => handleSort('priority')} className="flex items-center hover:text-foreground transition-colors">
+                      {t.serviceOrders.priority}<SortIcon col="priority" />
+                    </button>
+                  </th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">{t.common.type}</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">{t.serviceOrders.scheduled}</th>
-                  <th className="px-4 py-3 text-right font-medium text-muted-foreground">{t.common.total}</th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">
+                    <button onClick={() => handleSort('scheduled_start_at')} className="flex items-center hover:text-foreground transition-colors">
+                      {t.serviceOrders.scheduled}<SortIcon col="scheduled_start_at" />
+                    </button>
+                  </th>
+                  <th className="px-4 py-3 text-right font-medium text-muted-foreground">
+                    <button onClick={() => handleSort('grand_total')} className="flex items-center justify-end w-full hover:text-foreground transition-colors">
+                      {t.common.total}<SortIcon col="grand_total" />
+                    </button>
+                  </th>
                   <th className="px-4 py-3 text-center font-medium text-muted-foreground hidden md:table-cell">WhatsApp</th>
                   <th className="px-4 py-3 w-10"></th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((so: any) => {
+                {paginated.map((so: any) => {
                   const sc = statusConfig[so.status as keyof typeof statusConfig];
                   const pc = priorityConfig[so.priority as keyof typeof priorityConfig];
                   return (
@@ -423,7 +493,24 @@ export default function ServiceOrderList() {
               </tbody>
             </table>
           </div>
-        )}
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">
+                {filtered.length} ordens · Página {page} de {totalPages}
+              </span>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
+                  <ChevronLeft className="h-4 w-4" /> Anterior
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
+                  Próxima <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
       <PDFOptionsDialog
         open={!!pdfTarget}
