@@ -127,6 +127,22 @@ export default function VesselDetail() {
         </TabsContent>
 
         <TabsContent value="history" className="mt-4">
+          {orders && orders.length > 0 && (
+            <div className="flex gap-4 mb-4 text-sm">
+              <div className="rounded-lg border bg-card px-4 py-2">
+                <span className="text-muted-foreground">OS: </span>
+                <strong>{orders.length}</strong>
+              </div>
+              <div className="rounded-lg border bg-card px-4 py-2">
+                <span className="text-muted-foreground">Total gasto: </span>
+                <strong>{formatCurrency(orders.reduce((s, o: any) => s + (o.grand_total ?? 0), 0))}</strong>
+              </div>
+              <div className="rounded-lg border bg-card px-4 py-2">
+                <span className="text-muted-foreground">Concluídas: </span>
+                <strong>{orders.filter((o: any) => o.status === 'completed').length}</strong>
+              </div>
+            </div>
+          )}
           <div className="space-y-8 pl-4 border-l-2 border-border/50 relative py-4">
             {(!orders || orders.length === 0) && (
               <div className="text-center py-12 text-muted-foreground bg-card rounded-xl border border-dashed">
