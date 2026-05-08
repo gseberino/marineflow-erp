@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useCreateSupplier, type Supplier } from '@/hooks/use-suppliers';
+import { maskPhone } from '@/lib/masks';
 import { toast } from 'sonner';
 
 interface Props {
@@ -60,7 +61,7 @@ export function QuickSupplierDialog({ open, onOpenChange, initialName = '', onCr
           </div>
           <div>
             <Label>Telefone</Label>
-            <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
+            <Input value={phone} onChange={(e) => setPhone(maskPhone(e.target.value))} placeholder="(47) 99999-9999" maxLength={15} />
           </div>
           <div>
             <Label>E-mail</Label>
