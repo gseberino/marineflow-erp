@@ -216,12 +216,12 @@ export default function CollectionsPage() {
           <TableHeader>
             <TableRow>
               <TableHead>Cliente</TableHead>
-              <TableHead>OS / Ref</TableHead>
+              <TableHead className="hidden sm:table-cell">OS / Ref</TableHead>
               <TableHead className="text-right">Valor</TableHead>
               <TableHead>Vencimento</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead>Contato</TableHead>
-              <TableHead>Último contato</TableHead>
+              <TableHead className="hidden md:table-cell">Contato</TableHead>
+              <TableHead className="hidden lg:table-cell">Último contato</TableHead>
               <TableHead className="w-12"></TableHead>
             </TableRow>
           </TableHeader>
@@ -235,7 +235,7 @@ export default function CollectionsPage() {
               return (
                 <TableRow key={c.id} className="cursor-pointer" onClick={() => setDetailId(c.id)}>
                   <TableCell className="font-medium">{c.client?.full_name_or_company_name || '—'}</TableCell>
-                  <TableCell className="text-sm">
+                  <TableCell className="text-sm hidden sm:table-cell">
                     {c.service_order?.service_order_number || <span className="text-muted-foreground">Avulso</span>}
                   </TableCell>
                   <TableCell className="text-right font-mono">{fmtBRL(Number(c.amount))}</TableCell>
@@ -243,10 +243,10 @@ export default function CollectionsPage() {
                     {new Date(c.due_date).toLocaleDateString('pt-BR')}
                   </TableCell>
                   <TableCell><CollectionStatusBadge status={c.status} /></TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
+                  <TableCell className="text-xs text-muted-foreground hidden md:table-cell">
                     {phone ? <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3" />{phone}</span> : '—'}
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
+                  <TableCell className="text-xs text-muted-foreground hidden lg:table-cell">
                     {c.last_contact_at ? new Date(c.last_contact_at).toLocaleDateString('pt-BR') : '—'}
                   </TableCell>
                   <TableCell onClick={e => e.stopPropagation()}>

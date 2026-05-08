@@ -382,10 +382,10 @@ export default function PurchaseOrdersPage() {
               <TableRow>
                 <TableHead>Número</TableHead>
                 <TableHead>Fornecedor</TableHead>
-                <TableHead>OS vinculada</TableHead>
+                <TableHead className="hidden md:table-cell">OS vinculada</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Previsão</TableHead>
-                <TableHead className="text-right">Total</TableHead>
+                <TableHead className="hidden sm:table-cell">Previsão</TableHead>
+                <TableHead className="text-right hidden sm:table-cell">Total</TableHead>
                 <TableHead className="w-24" />
               </TableRow>
             </TableHeader>
@@ -394,7 +394,7 @@ export default function PurchaseOrdersPage() {
                 <TableRow key={po.id} className="cursor-pointer hover:bg-muted/30">
                   <TableCell className="font-medium">{po.po_number}</TableCell>
                   <TableCell>{po.suppliers?.company_name ?? '—'}</TableCell>
-                  <TableCell className="text-muted-foreground text-sm">
+                  <TableCell className="text-muted-foreground text-sm hidden md:table-cell">
                     {po.service_orders?.service_order_number ?? '—'}
                   </TableCell>
                   <TableCell>
@@ -402,12 +402,12 @@ export default function PurchaseOrdersPage() {
                       {PO_STATUS_LABELS[po.status]}
                     </span>
                   </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
+                  <TableCell className="text-sm text-muted-foreground hidden sm:table-cell">
                     {po.expected_date
                       ? format(new Date(po.expected_date), 'dd/MM/yyyy', { locale: ptBR })
                       : '—'}
                   </TableCell>
-                  <TableCell className="text-right font-medium">
+                  <TableCell className="text-right font-medium hidden sm:table-cell">
                     {formatCurrency(po.total_amount ?? 0)}
                   </TableCell>
                   <TableCell>
