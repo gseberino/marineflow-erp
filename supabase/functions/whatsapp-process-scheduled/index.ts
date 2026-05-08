@@ -83,7 +83,10 @@ Deno.serve(async (req) => {
         if (job.service_order_id) payload.service_order_id = job.service_order_id;
         if (job.receivable_id) payload.receivable_id = job.receivable_id;
 
-        if (job.send_mode === "link") {
+        if (job.send_mode === "text") {
+          // Envio de texto puro — a mensagem já está em payload.message
+          payload.kind = "text";
+        } else if (job.send_mode === "link") {
           // precisa do share_token
           let shareToken: string | null = null;
           if (job.service_order_id) {
