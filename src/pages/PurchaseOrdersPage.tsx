@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { PageHeader } from '@/components/PageHeader';
 import {
   usePurchaseOrders,
@@ -423,8 +424,12 @@ export default function PurchaseOrdersPage() {
                 <TableRow key={po.id} className="cursor-pointer hover:bg-muted/30">
                   <TableCell className="font-medium">{po.po_number}</TableCell>
                   <TableCell>{po.suppliers?.company_name ?? '—'}</TableCell>
-                  <TableCell className="text-muted-foreground text-sm hidden md:table-cell">
-                    {po.service_orders?.service_order_number ?? '—'}
+                  <TableCell className="text-sm hidden md:table-cell">
+                    {po.service_order_id && po.service_orders?.service_order_number
+                      ? <Link to={`/service-orders/${po.service_order_id}`} className="text-primary hover:underline" onClick={e => e.stopPropagation()}>
+                          {po.service_orders.service_order_number}
+                        </Link>
+                      : <span className="text-muted-foreground">—</span>}
                   </TableCell>
                   <TableCell>
                     <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium', PO_STATUS_COLORS[po.status])}>
