@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useMemo, useState, useEffect } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { PageHeader } from '@/components/PageHeader';
 import { StatusBadge } from '@/components/StatusBadge';
 import { useI18n } from '@/i18n';
@@ -48,6 +48,17 @@ export default function ServiceOrderList() {
   const { t, formatCurrency, formatDate } = useI18n();
   const { data: orders, isLoading, error } = useServiceOrders();
   const { data: technicians = [] } = useTechnicians();
+  const [searchParams] = useSearchParams();
+
+  // Apply ?status= from Dashboard navigation links
+  useEffect(() => {
+    const statusParam = searchParams.get('status');
+    if (statusParam) {
+      setField('status', [statusParam]);
+      setPage(1);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const duplicate = useDuplicateServiceOrder();
