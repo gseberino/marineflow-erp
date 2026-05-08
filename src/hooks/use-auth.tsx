@@ -24,6 +24,7 @@ type AuthContextType = {
   session: Session | null;
   loading: boolean;
   authReady: boolean;
+  profileReady: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -87,6 +88,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  const [profileReady, setProfileReady] = useState(false);
   const mountedRef = useRef(true);
   const profileRequestRef = useRef(0);
   const lastUserIdRef = useRef<string | null>(null);
@@ -97,16 +99,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Only set minimal user if we don't already have a user for this id
     setUser((prev) => (prev?.id === authUser.id ? prev : buildMinimalUser(authUser)));
+    // Reset profileReady while a new profile is being fetched
+    setProfileReady(false);
 
     loadProfile(authUser)
       .then((profile) => {
         if (!mountedRef.current || profileRequestRef.current !== requestId) return;
         setUser(profile);
+        setProfileReady(true);
         console.log('[Auth] Profile ready:', profile.role);
       })
       .catch((error) => {
         if (!mountedRef.current || profileRequestRef.current !== requestId) return;
         console.warn('[Auth] Profile load failed:', error);
+        // Mark ready even on failure so ProtectedRoute can evaluate (role='other' → unauthorized)
+        setProfileReady(true);
       });
   }
 
@@ -117,6 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       profileRequestRef.current += 1;
       lastUserIdRef.current = null;
       setUser(null);
+      setProfileReady(false);
       return;
     }
 
@@ -215,7 +223,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, session, loading: !authReady, authReady, signIn, signOut, refreshProfile }}
+      value={{ user, session, loading: !authReady, authReady, profileReady, signIn, signOut, refreshProfile }}
     >
       {children}
     </AuthContext.Provider>

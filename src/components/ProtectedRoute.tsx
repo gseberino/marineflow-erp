@@ -10,7 +10,7 @@ interface Props {
 }
 
 export function ProtectedRoute({ children, roles, groupId }: Props) {
-  const { user, session, authReady } = useAuth();
+  const { user, session, authReady, profileReady } = useAuth();
 
   if (!authReady) {
     return (
@@ -22,6 +22,18 @@ export function ProtectedRoute({ children, roles, groupId }: Props) {
 
   if (!session) {
     return <Navigate to="/login" replace />;
+  }
+
+  // Wait for profile (role) to load before evaluating role-based access.
+  // Without this, the ProtectedRoute evaluates role='other' during the async
+  // window between authReady=true and loadProfile() resolving, causing a flash
+  // of "Acesso não autorizado" for authenticated users with restricted routes.
+  if (roles && !profileReady) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center">
+        <Loader2 className="h-16 w-16 animate-spin text-primary" />
+      </div>
+    );
   }
 
   if (roles && user) {
