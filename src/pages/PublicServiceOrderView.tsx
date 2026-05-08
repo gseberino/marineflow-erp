@@ -127,6 +127,7 @@ export default function PublicServiceOrderView() {
             services: servicesRes.data || [],
             company,
             signature: (sigRes.data as Signature) || null,
+            presetData: presetRes?.data || null,
           });
           setLoading(false);
         }
