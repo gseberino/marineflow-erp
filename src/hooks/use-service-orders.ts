@@ -341,7 +341,7 @@ export function useAddServiceOrderPart() {
 
       await supabase.from('inventory_movements').insert({
         product_id: values.product_id,
-        movement_type: 'manual_adjustment',
+        movement_type: 'service_order_usage',
         quantity_delta: -values.quantity,
         reference_type: 'service_order',
         reference_id: values.service_order_id,
@@ -646,25 +646,42 @@ export function useDuplicateServiceOrder() {
         }));
         await supabase.from('service_order_parts').insert(parts);
 
-        // Deduct stock for each copied part
+        // We already inserted parts, now handle stock deductions in batch
+        const productUpdates = [];
+        const movementInserts = [];
+
         for (const p of source.service_order_parts) {
           const { data: prod } = await supabase
             .from('products')
             .select('stock_quantity')
             .eq('id', p.product_id)
             .single();
-          await supabase
-            .from('products')
-            .update({ stock_quantity: (prod?.stock_quantity || 0) - p.quantity })
-            .eq('id', p.product_id);
-          await supabase.from('inventory_movements').insert({
-            product_id: p.product_id,
-            movement_type: 'manual_adjustment',
-            quantity_delta: -p.quantity,
-            reference_type: 'service_order',
-            reference_id: newId,
-            unit_cost_snapshot: p.unit_cost_snapshot,
-          });
+
+          if (prod) {
+            productUpdates.push({
+              id: p.product_id,
+              stock_quantity: (prod.stock_quantity || 0) - p.quantity
+            });
+            
+            movementInserts.push({
+              product_id: p.product_id,
+              movement_type: 'service_order_usage',
+              quantity_delta: -p.quantity,
+              reference_type: 'service_order',
+              reference_id: newId,
+              unit_cost_snapshot: p.unit_cost_snapshot,
+            });
+          }
+        }
+
+        // Apply updates one by one (since bulk update on varied IDs is tricky without upsert)
+        for (const update of productUpdates) {
+          await supabase.from('products').update({ stock_quantity: update.stock_quantity }).eq('id', update.id);
+        }
+        
+        // Insert movements in a single batch
+        if (movementInserts.length > 0) {
+          await supabase.from('inventory_movements').insert(movementInserts);
         }
       }
 
