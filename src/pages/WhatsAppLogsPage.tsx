@@ -15,7 +15,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { RefreshCw, Eye, MessageCircle, Wand2 } from 'lucide-react';
+import { RefreshCw, Eye, MessageCircle, Wand2, Download } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 
@@ -186,9 +186,28 @@ export default function WhatsAppLogsPage() {
           },
         ]}
         extra={
-          <Button variant="outline" size="icon" onClick={() => refetch()} disabled={isFetching} title="Atualizar">
-            <RefreshCw className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
-          </Button>
+          <>
+            <Button variant="outline" size="sm" className="gap-1" onClick={() => {
+              const list = data || [];
+              if (!list.length) return;
+              const rows = list.map(m => ({
+                'Data/Hora': m.occurred_at ? format(new Date(m.occurred_at), 'dd/MM/yyyy HH:mm') : '',
+                'Direção': m.direction === 'inbound' ? 'Recebida' : 'Enviada',
+                'Telefone': m.phone_normalized || '',
+                'Tipo': m.message_type || '',
+                'Status Entrega': m.delivery_status || '',
+                'Broadcast': m.is_broadcast ? 'Sim' : 'Não',
+                'Mensagem': (m.body || '').substring(0, 200),
+              }));
+              const csv = [Object.keys(rows[0]).join(','), ...rows.map(r => Object.values(r).map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','))].join('\n');
+              const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })); a.download = 'whatsapp_logs.csv'; a.click();
+            }}>
+              <Download className="h-3.5 w-3.5" /> CSV
+            </Button>
+            <Button variant="outline" size="icon" onClick={() => refetch()} disabled={isFetching} title="Atualizar">
+              <RefreshCw className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
+            </Button>
+          </>
         }
       />
 
