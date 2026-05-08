@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -142,12 +142,17 @@ function NewScheduleDialog({ onClose }: { onClose: () => void }) {
   const [message, setMessage] = useState('');
   const [scheduledAt, setScheduledAt] = useState('');
   const [recurrence, setRecurrence] = useState('once');
+  // Ref para ler o valor DOM diretamente — funciona mesmo quando onChange
+  // não dispara (ex: preenchimento programático via ferramenta de automação)
+  const dateRef = useRef<HTMLInputElement>(null);
 
   const handleCreate = async () => {
-    if (!phone.trim() || !message.trim() || !scheduledAt) {
+    // Lê do ref como fallback caso o estado React não tenha sido atualizado
+    const dateValue = dateRef.current?.value || scheduledAt;
+    if (!phone.trim() || !message.trim() || !dateValue) {
       return;
     }
-    const iso = new Date(scheduledAt).toISOString();
+    const iso = new Date(dateValue).toISOString();
     await create.mutateAsync({
       phone: phone.replace(/\D/g, ''),
       message,
@@ -161,6 +166,9 @@ function NewScheduleDialog({ onClose }: { onClose: () => void }) {
     });
     onClose();
   };
+
+  // Verifica se já tem data preenchida (estado OU DOM) para habilitar o botão
+  const hasDate = !!scheduledAt || !!(dateRef.current?.value);
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -191,9 +199,11 @@ function NewScheduleDialog({ onClose }: { onClose: () => void }) {
           </div>
           <div>
             <Label>Data e hora de envio</Label>
-            <Input
+            {/* Input nativo com ref para garantir leitura correta do valor DOM */}
+            <input
+              ref={dateRef}
               type="datetime-local"
-              value={scheduledAt}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               onChange={(e) => setScheduledAt(e.target.value)}
             />
           </div>
@@ -214,7 +224,7 @@ function NewScheduleDialog({ onClose }: { onClose: () => void }) {
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancelar</Button>
-          <Button onClick={handleCreate} disabled={create.isPending || !phone || !message || !scheduledAt}>
+          <Button onClick={handleCreate} disabled={create.isPending || !phone || !message}>
             {create.isPending ? 'Agendando…' : 'Agendar'}
           </Button>
         </DialogFooter>
