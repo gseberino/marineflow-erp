@@ -3,7 +3,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { KPICard } from '@/components/KPICard';
 import { StatusBadge } from '@/components/StatusBadge';
 import { useI18n } from '@/i18n';
-import { DollarSign, TrendingUp, TrendingDown, AlertTriangle, ArrowUpCircle, ArrowDownCircle, Plus, Info, Receipt as ReceiptIcon, Paperclip, Download } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, AlertTriangle, ArrowUpCircle, ArrowDownCircle, Plus, Info, Receipt as ReceiptIcon, Paperclip, Download, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { exportToCSV } from '@/lib/export';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -157,8 +157,27 @@ export default function FinancialPage() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const filteredReceivables = applyFilters(receivables || [], recFilters, 'receivable');
-  const filteredPayables = applyFilters(payables || [], payFilters, 'payable');
+  const [recSort, setRecSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'due_date', dir: 'asc' });
+  const [paySort, setPaySort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'due_date', dir: 'asc' });
+
+  const sortList = (list: any[], sort: { key: string; dir: 'asc' | 'desc' }) =>
+    [...list].sort((a, b) => {
+      let av = a[sort.key], bv = b[sort.key];
+      if (av == null) av = '';
+      if (bv == null) bv = '';
+      if (sort.key === 'amount' || sort.key === 'balance_amount' || sort.key === 'paid_amount') { av = Number(av); bv = Number(bv); }
+      if (av < bv) return sort.dir === 'asc' ? -1 : 1;
+      if (av > bv) return sort.dir === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+  const toggleSort = (current: { key: string; dir: 'asc' | 'desc' }, key: string, setter: (v: any) => void) => {
+    if (current.key === key) setter({ key, dir: current.dir === 'asc' ? 'desc' : 'asc' });
+    else setter({ key, dir: key === 'due_date' ? 'asc' : 'desc' });
+  };
+
+  const filteredReceivables = sortList(applyFilters(receivables || [], recFilters, 'receivable'), recSort);
+  const filteredPayables = sortList(applyFilters(payables || [], payFilters, 'payable'), paySort);
 
   const today = new Date();
   const in30 = new Date(today.getTime() + 30 * 86400000);
@@ -322,19 +341,28 @@ export default function FinancialPage() {
     );
   };
 
+  const SortTh = ({ col, sort, onSort, children, className = '' }: { col: string; sort: { key: string; dir: 'asc'|'desc' }; onSort: (k: string) => void; children: React.ReactNode; className?: string }) => (
+    <th className={`px-4 py-3 font-medium text-muted-foreground cursor-pointer select-none hover:text-foreground ${className}`} onClick={() => onSort(col)}>
+      <span className="inline-flex items-center gap-1">
+        {children}
+        {sort.key === col ? (sort.dir === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 opacity-40" />}
+      </span>
+    </th>
+  );
+
   const payableTableHead = (
     <thead><tr className="border-b bg-muted/50">
-      <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.financial.dueDate}</th>
+      <SortTh col="due_date" sort={paySort} onSort={k => toggleSort(paySort, k, setPaySort)} className="text-left">{t.financial.dueDate}</SortTh>
       <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">{t.suppliers.title}</th>
       <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">{t.products.category}</th>
       <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.common.description}</th>
       <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">OS</th>
       <th className="px-4 py-3 text-center font-medium text-muted-foreground hidden lg:table-cell">Comprovante</th>
       <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden xl:table-cell">Origem</th>
-      <th className="px-4 py-3 text-right font-medium text-muted-foreground">{t.common.total}</th>
+      <SortTh col="amount" sort={paySort} onSort={k => toggleSort(paySort, k, setPaySort)} className="text-right">{t.common.total}</SortTh>
       <th className="px-4 py-3 text-right font-medium text-muted-foreground hidden md:table-cell">Pago</th>
-      <th className="px-4 py-3 text-right font-medium text-muted-foreground hidden md:table-cell">{t.common.balance}</th>
-      <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.common.status}</th>
+      <SortTh col="balance_amount" sort={paySort} onSort={k => toggleSort(paySort, k, setPaySort)} className="text-right hidden md:table-cell">{t.common.balance}</SortTh>
+      <SortTh col="status" sort={paySort} onSort={k => toggleSort(paySort, k, setPaySort)} className="text-left">{t.common.status}</SortTh>
       <th className="px-4 py-3 text-right font-medium text-muted-foreground">{t.common.actions}</th>
     </tr></thead>
   );
@@ -516,13 +544,13 @@ export default function FinancialPage() {
             <div className="rounded-xl border bg-card shadow-sm overflow-x-auto scrollbar-thin">
               <table className="w-full text-sm min-w-[900px]">
                 <thead><tr className="border-b bg-muted/50">
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.financial.dueDate}</th>
+                  <SortTh col="due_date" sort={recSort} onSort={k => toggleSort(recSort, k, setRecSort)} className="text-left">{t.financial.dueDate}</SortTh>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">{t.serviceOrders.client}</th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.common.description}</th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">OS</th>
-                  <th className="px-4 py-3 text-right font-medium text-muted-foreground">{t.common.amount}</th>
-                  <th className="px-4 py-3 text-right font-medium text-muted-foreground hidden md:table-cell">{t.common.balance}</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.common.status}</th>
+                  <SortTh col="amount" sort={recSort} onSort={k => toggleSort(recSort, k, setRecSort)} className="text-right">{t.common.amount}</SortTh>
+                  <SortTh col="balance_amount" sort={recSort} onSort={k => toggleSort(recSort, k, setRecSort)} className="text-right hidden md:table-cell">{t.common.balance}</SortTh>
+                  <SortTh col="status" sort={recSort} onSort={k => toggleSort(recSort, k, setRecSort)} className="text-left">{t.common.status}</SortTh>
                   <th className="px-4 py-3 text-right font-medium text-muted-foreground">{t.common.actions}</th>
                 </tr></thead>
                 <tbody>

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import { KPICard } from '@/components/KPICard';
 import { useI18n } from '@/i18n';
@@ -13,6 +13,9 @@ import {
   TrendingUp,
   CreditCard,
   Download,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
@@ -27,6 +30,18 @@ export default function CommissionsPage() {
   const { t, formatCurrency, formatDate } = useI18n();
   const qc = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [sortKey, setSortKey] = useState<string>('created_at');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
+  const handleSort = (key: string) => {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(key); setSortDir('desc'); }
+  };
+  const SortIcon = ({ col }: { col: string }) => {
+    if (sortKey !== col) return <ArrowUpDown className="h-3 w-3 ml-1 opacity-40" />;
+    return sortDir === 'asc' ? <ArrowUp className="h-3 w-3 ml-1" /> : <ArrowDown className="h-3 w-3 ml-1" />;
+  };
 
   // 1. Buscar Comissões
   const { data: commissions, isLoading } = useQuery({
@@ -77,10 +92,24 @@ export default function CommissionsPage() {
     }
   });
 
-  const filtered = commissions?.filter(c => 
-    c.app_users?.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.service_orders?.service_order_number.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filtered = useMemo(() => {
+    let list = commissions || [];
+    if (statusFilter) list = list.filter(c => c.status === statusFilter);
+    if (searchTerm) list = list.filter(c =>
+      c.app_users?.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      c.service_orders?.service_order_number?.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+    return [...list].sort((a, b) => {
+      let av: any, bv: any;
+      if (sortKey === 'amount') { av = Number(a.amount); bv = Number(b.amount); }
+      else if (sortKey === 'name') { av = a.app_users?.full_name || ''; bv = b.app_users?.full_name || ''; }
+      else if (sortKey === 'os_total') { av = Number(a.service_orders?.grand_total || 0); bv = Number(b.service_orders?.grand_total || 0); }
+      else { av = a.created_at; bv = b.created_at; }
+      if (av < bv) return sortDir === 'asc' ? -1 : 1;
+      if (av > bv) return sortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [commissions, searchTerm, statusFilter, sortKey, sortDir]);
 
   const stats = {
     pending: commissions?.filter(c => c.status === 'pending').reduce((s, c) => s + Number(c.amount), 0) || 0,
@@ -114,7 +143,12 @@ export default function CommissionsPage() {
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
-            <Button variant="outline" size="icon"><Filter className="h-4 w-4" /></Button>
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+              <option value="">Todos os status</option>
+              <option value="pending">Pendente</option>
+              <option value="approved">Aprovado</option>
+              <option value="paid">Pago</option>
+            </select>
             <Button variant="outline" size="sm" className="gap-1" onClick={() => {
               const rows = (filtered || []).map((c: any) => ({
                 'Técnico/Vendedor': c.app_users?.full_name || '—',
@@ -137,10 +171,10 @@ export default function CommissionsPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Técnico / Vendedor</TableHead>
-                <TableHead>OS Ref.</TableHead>
-                <TableHead className="text-right hidden sm:table-cell">Valor OS</TableHead>
-                <TableHead className="text-right">Comissão</TableHead>
+                <TableHead className="cursor-pointer select-none" onClick={() => handleSort('name')}><span className="flex items-center">Técnico / Vendedor <SortIcon col="name" /></span></TableHead>
+                <TableHead className="cursor-pointer select-none" onClick={() => handleSort('created_at')}><span className="flex items-center">OS Ref. <SortIcon col="created_at" /></span></TableHead>
+                <TableHead className="text-right hidden sm:table-cell cursor-pointer select-none" onClick={() => handleSort('os_total')}><span className="flex items-center justify-end">Valor OS <SortIcon col="os_total" /></span></TableHead>
+                <TableHead className="text-right cursor-pointer select-none" onClick={() => handleSort('amount')}><span className="flex items-center justify-end">Comissão <SortIcon col="amount" /></span></TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Ações</TableHead>
               </TableRow>
