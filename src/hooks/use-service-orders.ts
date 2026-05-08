@@ -341,7 +341,7 @@ export function useAddServiceOrderPart() {
 
       await supabase.from('inventory_movements').insert({
         product_id: values.product_id,
-        movement_type: 'service_usage',
+        movement_type: 'manual_adjustment',
         quantity_delta: -values.quantity,
         reference_type: 'service_order',
         reference_id: values.service_order_id,
@@ -659,7 +659,7 @@ export function useDuplicateServiceOrder() {
             .eq('id', p.product_id);
           await supabase.from('inventory_movements').insert({
             product_id: p.product_id,
-            movement_type: 'service_usage',
+            movement_type: 'manual_adjustment',
             quantity_delta: -p.quantity,
             reference_type: 'service_order',
             reference_id: newId,

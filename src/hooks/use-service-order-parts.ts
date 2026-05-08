@@ -57,7 +57,7 @@ export function useUpdateServiceOrderPart() {
 
         await supabase.from('inventory_movements').insert({
           product_id: values.product_id,
-          movement_type: 'adjustment',
+          movement_type: 'manual_adjustment',
           quantity_delta: -delta,
           reference_type: 'service_order',
           reference_id: values.service_order_id,
