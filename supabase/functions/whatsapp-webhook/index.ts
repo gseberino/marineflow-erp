@@ -59,6 +59,73 @@ Deno.serve(async (req) => {
 
   // --- MODO FAXINA E BLINDAGEM (GET) ---
   if (req.method === "GET") {
+    const url = new URL(req.url);
+
+    // Healthcheck — retorna JSON com métricas para o painel de configuração
+    if (url.searchParams.get("healthcheck") === "1") {
+      try {
+        const webhookUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/whatsapp-webhook`;
+        const now = new Date();
+
+        const { count: totalInbound } = await admin
+          .from("whatsapp_messages")
+          .select("*", { count: "exact", head: true })
+          .eq("direction", "inbound");
+
+        const since24h = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+        const { count: last24h } = await admin
+          .from("whatsapp_messages")
+          .select("*", { count: "exact", head: true })
+          .eq("direction", "inbound")
+          .gte("created_at", since24h);
+
+        const { data: lastMsg } = await admin
+          .from("whatsapp_messages")
+          .select("created_at, phone_normalized, body")
+          .eq("direction", "inbound")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        const { data: recentMsgs } = await admin
+          .from("whatsapp_messages")
+          .select("created_at, phone_normalized, message_type, body")
+          .eq("direction", "inbound")
+          .order("created_at", { ascending: false })
+          .limit(5);
+
+        const minutesSinceLast = lastMsg
+          ? Math.floor((now.getTime() - new Date(lastMsg.created_at).getTime()) / 60000)
+          : null;
+
+        const healthStatus =
+          !lastMsg ? "never" :
+          minutesSinceLast !== null && minutesSinceLast > 60 ? "stale" : "ok";
+
+        return jr({
+          webhook_url: webhookUrl,
+          health_status: healthStatus,
+          total_inbound: totalInbound ?? 0,
+          last_24h: last24h ?? 0,
+          last_message_at: lastMsg?.created_at ?? null,
+          minutes_since_last: minutesSinceLast,
+          last_message_preview: lastMsg
+            ? { phone: lastMsg.phone_normalized, body: lastMsg.body, is_broadcast: false }
+            : null,
+          recent_messages: (recentMsgs || []).map((m) => ({
+            at: m.created_at,
+            phone: m.phone_normalized,
+            type: m.message_type,
+            body: m.body,
+            is_broadcast: false,
+          })),
+          checked_at: now.toISOString(),
+        });
+      } catch (e: any) {
+        return jr({ error: e.message }, 500);
+      }
+    }
+
     try {
       console.log("[Cleanup] Iniciando limpeza de leads fantasmas...");
       const { data: leads } = await admin.from("whatsapp_leads").select("id, phone_normalized");
