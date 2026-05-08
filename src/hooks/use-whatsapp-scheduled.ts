@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import type { Database } from '@/integrations/supabase/types';
 
 export type ScheduledSend = Database['public']['Tables']['whatsapp_scheduled_sends']['Row'] & {
-  service_order?: { id: string; order_number: string } | null;
+  service_order?: { id: string; order_number: string } | null; // joined only when FK exists
 };
 
 export type ScheduledSendStatus = 'pending' | 'processing' | 'sent' | 'failed' | 'cancelled';
@@ -15,10 +15,7 @@ export function useWhatsAppScheduled(filters?: { status?: string }) {
     queryFn: async () => {
       let q = supabase
         .from('whatsapp_scheduled_sends')
-        .select(`
-          *,
-          service_order:service_orders(id, order_number)
-        `)
+        .select('*')
         .order('next_run_at', { ascending: true });
 
       if (filters?.status && filters.status !== 'all') {

@@ -417,11 +417,6 @@ export default function WhatsAppScheduledPage() {
                                 ⚠ {job.last_error}
                               </p>
                             )}
-                            {job.service_order && (
-                              <span className="text-muted-foreground">
-                                OS: {job.service_order.order_number}
-                              </span>
-                            )}
                           </div>
                         </TableCell>
                         <TableCell className="hidden sm:table-cell text-xs text-muted-foreground">
