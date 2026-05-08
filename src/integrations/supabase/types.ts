@@ -3685,6 +3685,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      cancel_service_order_cascade: {
+        Args: { p_reason: string; p_service_order_id: string }
+        Returns: Json
+      }
       compute_next_run: {
         Args: {
           _day_of_month: number
