@@ -34,6 +34,7 @@ export function useAuditLog(filters?: {
   action?: string;
   dateFrom?: string;
   dateTo?: string;
+  record_id?: string;
 }) {
   return useQuery({
     queryKey: ['audit-log', filters],
@@ -47,6 +48,7 @@ export function useAuditLog(filters?: {
       if (filters?.action) q = q.eq('action', filters.action);
       if (filters?.dateFrom) q = q.gte('changed_at', filters.dateFrom);
       if (filters?.dateTo) q = q.lte('changed_at', filters.dateTo);
+      if (filters?.record_id) q = q.eq('record_id', filters.record_id);
       const { data, error } = await q;
       if (error) throw error;
       return data;

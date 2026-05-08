@@ -139,7 +139,7 @@ export default function CommissionsPage() {
               <TableRow>
                 <TableHead>Técnico / Vendedor</TableHead>
                 <TableHead>OS Ref.</TableHead>
-                <TableHead className="text-right">Valor OS</TableHead>
+                <TableHead className="text-right hidden sm:table-cell">Valor OS</TableHead>
                 <TableHead className="text-right">Comissão</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Ações</TableHead>
@@ -158,7 +158,7 @@ export default function CommissionsPage() {
                       <div className="text-sm font-semibold">{c.service_orders?.service_order_number}</div>
                       <div className="text-[10px] text-muted-foreground">{formatDate(c.created_at)}</div>
                     </TableCell>
-                    <TableCell className="text-right">{formatCurrency(c.service_orders?.grand_total || 0)}</TableCell>
+                    <TableCell className="text-right hidden sm:table-cell">{formatCurrency(c.service_orders?.grand_total || 0)}</TableCell>
                     <TableCell className="text-right font-bold text-emerald-600">
                       {formatCurrency(c.amount)}
                       <span className="block text-[10px] font-normal text-muted-foreground">{c.percentage}% do lucro</span>

@@ -29,6 +29,7 @@ export default function AuditLogPage() {
   const [actionFilter, setActionFilter] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [recordSearch, setRecordSearch] = useState('');
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
 
   const auditT = t.auditLog as any;
@@ -54,9 +55,10 @@ export default function AuditLogPage() {
     setActionFilter('');
     setDateFrom('');
     setDateTo('');
+    setRecordSearch('');
   };
 
-  const hasFilters = tableFilter || actionFilter || dateFrom || dateTo;
+  const hasFilters = tableFilter || actionFilter || dateFrom || dateTo || recordSearch;
 
   const FIELD_MAP: Record<string, string> = {
     status: 'Status', grand_total: 'Valor Total', service_order_number: 'Nº OS',
@@ -165,6 +167,7 @@ export default function AuditLogPage() {
         </div>
         <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="w-40" placeholder={t.financial.dateFrom} />
         <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="w-40" placeholder={t.financial.dateTo} />
+        <Input value={recordSearch} onChange={e => setRecordSearch(e.target.value)} className="w-48" placeholder="Buscar por nº OS ou ID..." />
         {hasFilters && (
           <Button variant="ghost" size="sm" onClick={clearFilters}>
             <X className="h-4 w-4 mr-1" /> {t.financial.clearFilters}
@@ -175,7 +178,16 @@ export default function AuditLogPage() {
       {/* Table */}
       {isLoading ? (
         <div className="space-y-2">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
-      ) : !logs || logs.length === 0 ? (
+      ) : (() => {
+        const visibleLogs = recordSearch.trim()
+          ? (logs || []).filter((l: any) => {
+              const q = recordSearch.toLowerCase();
+              return l.record_id?.toLowerCase().includes(q) ||
+                JSON.stringify(l.new_value)?.toLowerCase().includes(q) ||
+                JSON.stringify(l.previous_value)?.toLowerCase().includes(q);
+            })
+          : (logs || []);
+        return !visibleLogs.length ? (
         <div className="text-center py-12 text-muted-foreground">{auditT.noChanges}</div>
       ) : (
         <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
@@ -191,7 +203,7 @@ export default function AuditLogPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {logs.map((log: any) => (
+              {visibleLogs.map((log: any) => (
                 <Collapsible key={log.id} open={expandedRow === log.id} onOpenChange={(open) => setExpandedRow(open ? log.id : null)} asChild>
                   <>
                     <CollapsibleTrigger asChild>
@@ -239,7 +251,8 @@ export default function AuditLogPage() {
             </TableBody>
           </Table>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
