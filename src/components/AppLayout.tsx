@@ -31,6 +31,18 @@ import { Button } from '@/components/ui/button';
 import { usePushNotifications, requestPushPermission } from '@/hooks/use-push-notifications';
 import { toast } from 'sonner';
 
+// ── HBR Systems brand mark (inline SVG) ──────────────────────────────────────
+function HbrMark({ size = 32 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect width="32" height="32" rx="7" fill="#C8A063" fillOpacity="0.15" />
+      <text x="5" y="22" fontSize="17" fontWeight="900" fill="#C8A063" fontFamily="system-ui, sans-serif" letterSpacing="-0.5">H</text>
+      <path d="M3 26 C8 21 13 27 19 24 C23 22 27 23 30 21" stroke="#C8A063" strokeWidth="1.8" fill="none" strokeLinecap="round"/>
+      <path d="M3 28 C9 23 15 29 21 26 C25 24 28 25 31 24" stroke="#7FA0B8" strokeWidth="1.2" fill="none" strokeLinecap="round" opacity="0.65"/>
+    </svg>
+  );
+}
+
 type NavItem = {
   label: string;
   icon: typeof LayoutDashboard;
@@ -260,22 +272,25 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
   const sidebarContent = (
     <div className="flex h-full flex-col">
-      <div className="flex h-14 items-center gap-2 px-4 border-b border-sidebar-border">
-        <Link to="/" className="flex h-8 w-8 items-center justify-center rounded-lg bg-sidebar-primary shrink-0">
-          <Anchor className="h-4 w-4 text-sidebar-primary-foreground" />
-        </Link>
-        {!collapsed && (
-          <Link to="/" className="flex flex-col">
-            {logoSetting ? (
-              <img src={logoSetting} alt="Logo" className="h-10 w-auto max-w-[140px] object-contain" />
+      {/* ── Brand Header ── */}
+      <div className="flex h-16 items-center gap-3 px-3 border-b border-sidebar-border">
+        <Link to="/" className="flex items-center gap-2.5 min-w-0">
+          <HbrMark size={collapsed ? 36 : 32} />
+          {!collapsed && (
+            logoSetting ? (
+              <img src={logoSetting} alt="HBR Systems" className="h-9 w-auto max-w-[120px] object-contain" />
             ) : (
-              <>
-                <span className="text-sm font-bold text-sidebar-accent-foreground">MarineFlow</span>
-                <span className="text-[10px] text-sidebar-foreground">Marine ERP</span>
-              </>
-            )}
-          </Link>
-        )}
+              <div className="flex flex-col leading-none select-none">
+                <span className="text-[17px] font-black tracking-[0.18em] text-sidebar-primary">HBR</span>
+                <div className="flex items-center gap-1 mt-[3px]">
+                  <div className="h-px w-3.5 bg-sidebar-primary/60" />
+                  <span className="text-[7.5px] font-bold tracking-[0.38em] text-sidebar-foreground/75 uppercase">Systems</span>
+                  <div className="h-px w-3.5 bg-[#7FA0B8]/50" />
+                </div>
+              </div>
+            )
+          )}
+        </Link>
       </div>
 
       <nav className="flex-1 space-y-1 p-2 overflow-y-auto scrollbar-thin">
@@ -368,13 +383,18 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
       <div className="flex flex-1 flex-col overflow-hidden">
         <OfflineIndicator />
-        <header className="flex h-14 items-center gap-4 border-b px-4 lg:px-6 shrink-0">
+        <header className="flex h-14 items-center gap-4 border-b border-border/60 bg-background px-4 lg:px-6 shrink-0">
           <button
             onClick={() => setMobileOpen(true)}
             className="lg:hidden rounded-lg p-1.5 hover:bg-muted transition-colors"
           >
             <Menu className="h-5 w-5" />
           </button>
+          {/* Mobile brand mark */}
+          <Link to="/" className="lg:hidden flex items-center gap-2">
+            <HbrMark size={28} />
+            <span className="text-sm font-black tracking-widest text-primary">HBR</span>
+          </Link>
           <div className="flex-1" />
           <div className="flex items-center gap-3">
             <DiagnosticExportButton />

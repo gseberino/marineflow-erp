@@ -29,88 +29,96 @@ body {
 }
 
 @layer base {
+  /* ── HBR Systems Brand Colors ─────────────────────────────────────────────
+     #0D1B2A  →  hsl(211 53% 11%)   Deep Navy
+     #274A6D  →  hsl(210 47% 29%)   Navy Blue
+     #7FA0B8  →  hsl(205 29% 61%)   Steel Blue
+     #C8A063  →  hsl(36  48% 59%)   Gold / Bronze
+     #D9DDE1  →  hsl(210 11% 86%)   Light Silver
+  ── ─────────────────────────────────────────────────────────────────────── */
   :root {
     --background: 210 20% 98%;
-    --foreground: 215 25% 15%;
+    --foreground: 211 53% 11%;       /* #0D1B2A */
 
     --card: 0 0% 100%;
-    --card-foreground: 215 25% 15%;
+    --card-foreground: 211 53% 11%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 215 25% 15%;
+    --popover-foreground: 211 53% 11%;
 
-    --primary: 210 60% 25%;
-    --primary-foreground: 210 20% 98%;
+    --primary: 36 48% 59%;           /* #C8A063 Gold */
+    --primary-foreground: 211 53% 11%;
 
-    --secondary: 210 15% 93%;
-    --secondary-foreground: 215 25% 15%;
+    --secondary: 210 11% 93%;
+    --secondary-foreground: 211 53% 11%;
 
-    --muted: 210 15% 95%;
-    --muted-foreground: 215 12% 50%;
+    --muted: 210 11% 96%;
+    --muted-foreground: 210 47% 40%;
 
-    --accent: 174 60% 35%;
+    --accent: 205 29% 61%;           /* #7FA0B8 Steel Blue */
     --accent-foreground: 0 0% 100%;
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 214 20% 90%;
-    --input: 214 20% 90%;
-    --ring: 210 60% 25%;
+    --border: 210 15% 88%;
+    --input: 210 15% 88%;
+    --ring: 36 48% 59%;              /* Gold focus ring */
 
     --radius: 0.5rem;
 
-    --sidebar-background: 215 30% 12%;
-    --sidebar-foreground: 210 15% 80%;
-    --sidebar-primary: 174 60% 50%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 215 25% 18%;
-    --sidebar-accent-foreground: 210 15% 90%;
-    --sidebar-border: 215 25% 20%;
-    --sidebar-ring: 174 60% 50%;
+    /* ── Sidebar: Deep Navy HBR brand ── */
+    --sidebar-background: 211 53% 11%;   /* #0D1B2A */
+    --sidebar-foreground: 205 25% 68%;
+    --sidebar-primary: 36 48% 59%;       /* Gold active items */
+    --sidebar-primary-foreground: 211 53% 11%;
+    --sidebar-accent: 210 47% 17%;       /* Hover: slightly lighter navy */
+    --sidebar-accent-foreground: 205 29% 85%;
+    --sidebar-border: 210 47% 16%;
+    --sidebar-ring: 36 48% 59%;
 
     --success: 152 60% 40%;
     --success-foreground: 0 0% 100%;
     --warning: 38 92% 50%;
     --warning-foreground: 0 0% 100%;
-    --info: 210 60% 50%;
+    --info: 210 47% 45%;
     --info-foreground: 0 0% 100%;
 
-    --chart-1: 210 60% 25%;
-    --chart-2: 174 60% 35%;
-    --chart-3: 38 92% 50%;
-    --chart-4: 152 60% 40%;
-    --chart-5: 0 72% 51%;
+    --chart-1: 36 48% 59%;    /* Gold */
+    --chart-2: 210 47% 29%;   /* Navy */
+    --chart-3: 205 29% 61%;   /* Steel Blue */
+    --chart-4: 152 60% 40%;   /* Success */
+    --chart-5: 0 72% 51%;     /* Destructive */
   }
 
   .dark {
-    --background: 215 30% 8%;
+    --background: 211 53% 8%;
     --foreground: 210 15% 90%;
-    --card: 215 30% 12%;
+    --card: 211 53% 11%;
     --card-foreground: 210 15% 90%;
-    --popover: 215 30% 12%;
+    --popover: 211 53% 11%;
     --popover-foreground: 210 15% 90%;
-    --primary: 174 60% 50%;
-    --primary-foreground: 215 30% 8%;
-    --secondary: 215 25% 18%;
+    --primary: 36 48% 59%;
+    --primary-foreground: 211 53% 11%;
+    --secondary: 210 47% 18%;
     --secondary-foreground: 210 15% 90%;
-    --muted: 215 25% 18%;
-    --muted-foreground: 215 12% 55%;
-    --accent: 174 60% 35%;
+    --muted: 210 47% 15%;
+    --muted-foreground: 205 29% 55%;
+    --accent: 205 29% 50%;
     --accent-foreground: 0 0% 100%;
     --destructive: 0 62% 30%;
     --destructive-foreground: 0 0% 100%;
-    --border: 215 25% 20%;
-    --input: 215 25% 20%;
-    --ring: 174 60% 50%;
-    --sidebar-background: 215 35% 6%;
-    --sidebar-foreground: 210 15% 75%;
-    --sidebar-primary: 174 60% 50%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 215 30% 12%;
-    --sidebar-accent-foreground: 210 15% 90%;
-    --sidebar-border: 215 30% 14%;
-    --sidebar-ring: 174 60% 50%;
+    --border: 210 47% 18%;
+    --input: 210 47% 18%;
+    --ring: 36 48% 59%;
+    --sidebar-background: 211 53% 7%;
+    --sidebar-foreground: 205 25% 62%;
+    --sidebar-primary: 36 48% 59%;
+    --sidebar-primary-foreground: 211 53% 11%;
+    --sidebar-accent: 210 47% 13%;
+    --sidebar-accent-foreground: 205 29% 80%;
+    --sidebar-border: 210 47% 13%;
+    --sidebar-ring: 36 48% 59%;
   }
 }
 
