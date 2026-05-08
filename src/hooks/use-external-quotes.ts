@@ -34,7 +34,6 @@ export function useExternalQuotes(filters?: { status?: string; created_by?: stri
         .from('external_quotes')
         .select(`
           *,
-          seller:app_users!created_by(id, full_name),
           client:clients(id, full_name_or_company_name, phone),
           lead:external_quote_leads(id, full_name_or_company_name, phone),
           vessel:vessels(id, boat_name)
@@ -60,7 +59,6 @@ export function useExternalQuote(id: string) {
         .from('external_quotes')
         .select(`
           *,
-          seller:app_users!created_by(id, full_name),
           client:clients(*),
           lead:external_quote_leads(*),
           vessel:vessels(*),
