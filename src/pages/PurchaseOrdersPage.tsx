@@ -37,7 +37,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
-import { Plus, Search, Truck, Trash2, Pencil, PackageCheck, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Plus, Search, Truck, Trash2, Pencil, PackageCheck, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown, Download } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { toast } from 'sonner';
@@ -323,6 +323,21 @@ export default function PurchaseOrdersPage() {
         description="Gerencie pedidos de compra para fornecedores"
         icon={<Truck className="h-5 w-5" />}
         actions={
+          <Button variant="outline" size="sm" className="gap-1" onClick={() => {
+            if (!filtered.length) return;
+            const rows = filtered.map(po => ({
+              'Número': po.po_number,
+              'Fornecedor': po.suppliers?.company_name || '',
+              'OS Vinculada': po.service_orders?.service_order_number || '',
+              'Status': PO_STATUS_LABELS[po.status] || po.status,
+              'Previsão Entrega': po.expected_date ? format(new Date(po.expected_date), 'dd/MM/yyyy', { locale: ptBR }) : '',
+              'Total': (po.items || []).reduce((s: number, it: any) => s + Number(it.total_price || 0), 0).toFixed(2),
+            }));
+            const csv = [Object.keys(rows[0]).join(','), ...rows.map(r => Object.values(r).map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','))].join('\n');
+            const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })); a.download = 'ordens_compra.csv'; a.click();
+          }}>
+            <Download className="h-3.5 w-3.5" /> CSV
+          </Button>
           <Button onClick={handleNew}>
             <Plus className="h-4 w-4 mr-2" /> Nova PO
           </Button>
