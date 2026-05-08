@@ -47,15 +47,23 @@ Deno.serve(async (req) => {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    // Auth first (needed before reading DB)
+    // Auth — aceita token de usuário (chamadas do frontend) ou service role (chamadas internas)
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) return jr({ error: "Unauthorized" }, 401);
     const supabaseAdmin = createClient(SUPABASE_URL, SERVICE_ROLE);
-    const supabaseAuth = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_ANON_KEY")!, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: userData, error: userErr } = await supabaseAuth.auth.getUser();
-    if (userErr || !userData.user) return jr({ error: "Invalid session" }, 401);
+
+    const token = authHeader.replace(/^Bearer\s+/i, "");
+    const isServiceRoleCall = token === SERVICE_ROLE;
+    let callerIdentity = "system";
+
+    if (!isServiceRoleCall) {
+      const supabaseAuth = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_ANON_KEY")!, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const { data: userData, error: userErr } = await supabaseAuth.auth.getUser();
+      if (userErr || !userData.user) return jr({ error: "Invalid session" }, 401);
+      callerIdentity = userData.user.email || userData.user.id;
+    }
 
     // Load credentials from app_settings (DB) with env fallback
     const { data: settings } = await supabaseAdmin.from("app_settings").select("key, value");
@@ -146,7 +154,7 @@ Deno.serve(async (req) => {
       table_name: auditTable,
       record_id: auditId,
       action: "whatsapp_send_api",
-      changed_by: userData.user.email || userData.user.id,
+      changed_by: callerIdentity,
       new_value: {
         provider: "z-api",
         kind: body.kind,
