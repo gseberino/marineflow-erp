@@ -157,6 +157,14 @@ export default function ClientDetail() {
                 ))}
                 {(!orders || orders.length === 0) && <tr><td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">{t.common.noResults}</td></tr>}
               </tbody>
+              {orders && orders.length > 0 && (
+                <tfoot>
+                  <tr className="border-t bg-muted/30 font-medium text-sm">
+                    <td className="px-4 py-2" colSpan={3}>Total ({orders.length} OS)</td>
+                    <td className="px-4 py-2 text-right">{formatCurrency(orders.reduce((s, o) => s + (o.grand_total ?? 0), 0))}</td>
+                  </tr>
+                </tfoot>
+              )}
             </table>
           </div>
         </TabsContent>
@@ -184,6 +192,27 @@ export default function ClientDetail() {
                 ))}
                 {(!clientReceivables || clientReceivables.length === 0) && <tr><td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">{t.clients.noFinancialRecords}</td></tr>}
               </tbody>
+              {clientReceivables && clientReceivables.length > 0 && (() => {
+                const total = clientReceivables.reduce((s, r) => s + Number(r.amount), 0);
+                const paid = clientReceivables.filter(r => r.status === 'paid').reduce((s, r) => s + Number(r.amount), 0);
+                const pending = total - paid;
+                return (
+                  <tfoot>
+                    <tr className="border-t bg-muted/30 font-medium text-sm">
+                      <td className="px-4 py-2" colSpan={3}>Total ({clientReceivables.length} lançamentos)</td>
+                      <td className="px-4 py-2 text-right">{formatCurrency(total)}</td>
+                    </tr>
+                    <tr className="bg-muted/10 text-xs text-muted-foreground">
+                      <td className="px-4 py-1 text-success" colSpan={3}>Pago</td>
+                      <td className="px-4 py-1 text-right text-success">{formatCurrency(paid)}</td>
+                    </tr>
+                    <tr className="bg-muted/10 text-xs text-muted-foreground">
+                      <td className="px-4 py-1 text-warning" colSpan={3}>Em aberto</td>
+                      <td className="px-4 py-1 text-right text-warning">{formatCurrency(pending)}</td>
+                    </tr>
+                  </tfoot>
+                );
+              })()}
             </table>
           </div>
         </TabsContent>
