@@ -1,5 +1,5 @@
 // Edge Function: ai-agent
-// Agente de IA com function calling — Lovable AI Gateway (Gemini).
+// Agente de IA com function calling — Google Gemini API (OpenAI-compatible endpoint).
 // Recebe { messages, context } e roda loop de tool-calling até resposta final.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
@@ -18,9 +18,10 @@ const jr = (b: unknown, s = 200) =>
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON = Deno.env.get("SUPABASE_ANON_KEY")!;
-const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
-const MODEL_FAST = "google/gemini-2.5-flash";
-const MODEL_SMART = "google/gemini-2.5-pro";
+const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY")!;
+const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai";
+const MODEL_FAST = "gemini-2.5-flash-preview-04-17";
+const MODEL_SMART = "gemini-2.5-pro-preview-05-06";
 const MAX_ITERATIONS = 8;
 
 // ---------------- TOOL DEFINITIONS ----------------
@@ -1101,10 +1102,10 @@ async function executeTool(
         observation: "observação técnica",
       };
       const label = contextLabels[args.context] || args.context;
-      const optimizeRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      const optimizeRes = await fetch(`${GEMINI_BASE_URL}/chat/completions`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          Authorization: `Bearer ${GEMINI_API_KEY}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -1348,7 +1349,7 @@ async function sendWhatsapp(phone: string, message: string, jwt: string) {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
-    if (!LOVABLE_API_KEY) return jr({ error: "LOVABLE_API_KEY não configurada" }, 500);
+    if (!GEMINI_API_KEY) return jr({ error: "GEMINI_API_KEY não configurada no Supabase" }, 500);
 
     const authHeader = req.headers.get("Authorization") || "";
     const jwt = authHeader.replace(/^Bearer\s+/i, "");
@@ -1405,10 +1406,10 @@ Responda APENAS com o texto da mensagem pronta para envio, sem explicações ou 
 
       const salesMessages: any[] = [{ role: "system", content: salesPrompt }, ...incoming];
 
-      const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      const aiRes = await fetch(`${GEMINI_BASE_URL}/chat/completions`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          Authorization: `Bearer ${GEMINI_API_KEY}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -1566,10 +1567,10 @@ Quando o usuário disser "este cliente", "esta OS", "este barco", use o ID em co
       // e escrevia listas em texto em vez de chamar a tool. Pro garante maior fidelidade.
       const modelToUse = MODEL_SMART;
 
-      const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      const aiRes = await fetch(`${GEMINI_BASE_URL}/chat/completions`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          Authorization: `Bearer ${GEMINI_API_KEY}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
