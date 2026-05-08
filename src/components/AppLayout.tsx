@@ -354,7 +354,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
       {/* Version footer */}
       {!collapsed && (
         <div className="px-3 pb-1 pt-0">
-          <p className="text-[10px] text-sidebar-foreground/30 text-center select-none">v1.1.0</p>
+          <p className="text-[10px] text-sidebar-foreground/30 text-center select-none">v1.2.0</p>
         </div>
       )}
       <div className="hidden lg:flex border-t border-sidebar-border p-2">
