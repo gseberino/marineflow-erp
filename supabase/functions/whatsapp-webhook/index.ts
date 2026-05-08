@@ -154,9 +154,14 @@ Deno.serve(async (req) => {
 
     const pAny = payload as any;
     const type = String(pAny.type || pAny.event || "");
-    const phoneRaw = pAny.phone || pAny.chatId || pAny.senderLid || "";
-    const phone = normalizePhone(phoneRaw);
     const fromMe = !!pAny.fromMe;
+
+    // Para mensagens enviadas por nós (fromMe=true), o destinatário está em pAny.to ou pAny.chatId.
+    // Para mensagens recebidas, o remetente está em pAny.phone.
+    const phoneRaw = fromMe
+      ? (pAny.to || pAny.chatId || pAny.phone || "")
+      : (pAny.phone || pAny.chatId || pAny.senderLid || "");
+    const phone = normalizePhone(phoneRaw);
 
     const ignoredTypes = ["PresenceChatCallback", "ChatStateCallback", "PresenceCallback", "ChatPresence", "Presence", "typing", "recording"];
     if (ignoredTypes.includes(type)) return jr({ ok: true, ignored: "system" });
@@ -174,6 +179,12 @@ Deno.serve(async (req) => {
     }
 
     const { body, messageType, mediaUrl } = extractBodyAndType(pAny);
+
+    // Ignorar eventos outbound sem conteúdo (ex: notificações de sistema do Z-API)
+    if (fromMe && (!body || body === "[conteúdo vazio]")) {
+      return jr({ ok: true, ignored: "outbound_no_body" });
+    }
+
     const zapiId = pAny.messageId || pAny.id || null;
     if (zapiId) {
       const { data: dup } = await admin.from("whatsapp_messages").select("id").eq("zapi_message_id", String(zapiId)).maybeSingle();

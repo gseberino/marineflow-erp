@@ -4,10 +4,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { PageHeader } from '@/components/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
+import { MultiFilterBar } from '@/components/MultiFilterBar';
+import { useMultiFilter } from '@/hooks/use-multi-filter';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -17,7 +15,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { RefreshCw, Search, Eye, MessageCircle, Wand2 } from 'lucide-react';
+import { RefreshCw, Eye, MessageCircle, Wand2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 
@@ -66,17 +64,21 @@ function typeVariant(type: string): 'default' | 'secondary' | 'destructive' | 'o
 }
 
 export default function WhatsAppLogsPage() {
-  const [direction, setDirection] = useState<string>('all');
-  const [messageType, setMessageType] = useState<string>('all');
-  const [deliveryStatus, setDeliveryStatus] = useState<string>('all');
-  const [phoneFilter, setPhoneFilter] = useState('');
-  const [searchBody, setSearchBody] = useState('');
-  const [showOnlyUnknown, setShowOnlyUnknown] = useState(false);
+  const { filters, toggle, setField, clearAll, activeCount } = useMultiFilter({
+    search: '',
+    direction: [] as string[],
+    messageType: [] as string[],
+    deliveryStatus: [] as string[],
+  });
   const [selected, setSelected] = useState<WaMessage | null>(null);
   const [reprocessing, setReprocessing] = useState(false);
 
+  const { search, direction, messageType, deliveryStatus } = filters as {
+    search: string; direction: string[]; messageType: string[]; deliveryStatus: string[];
+  };
+
   const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ['wa-logs', direction, messageType, deliveryStatus, phoneFilter, searchBody, showOnlyUnknown],
+    queryKey: ['wa-logs', direction, messageType, deliveryStatus, search],
     queryFn: async () => {
       let q = supabase
         .from('whatsapp_messages')
@@ -84,17 +86,16 @@ export default function WhatsAppLogsPage() {
         .order('occurred_at', { ascending: false })
         .limit(500);
 
-      if (direction !== 'all') q = q.eq('direction', direction);
-      if (messageType !== 'all') q = q.eq('message_type', messageType);
-      if (deliveryStatus !== 'all') q = q.eq('delivery_status', deliveryStatus);
-      if (phoneFilter.trim()) {
-        q = q.ilike('phone_normalized', `%${phoneFilter.replace(/\D/g, '')}%`);
-      }
-      if (searchBody.trim()) {
-        q = q.ilike('body', `%${searchBody.trim()}%`);
-      }
-      if (showOnlyUnknown) {
-        q = q.eq('message_type', 'other');
+      if (direction.length) q = (q as any).in('direction', direction);
+      if (messageType.length) q = (q as any).in('message_type', messageType);
+      if (deliveryStatus.length) q = (q as any).in('delivery_status', deliveryStatus);
+      if (search.trim()) {
+        const digits = search.replace(/\D/g, '');
+        if (digits.length >= 6) {
+          q = q.ilike('phone_normalized', `%${digits}%`);
+        } else {
+          q = q.ilike('body', `%${search.trim()}%`);
+        }
       }
 
       const { data, error } = await q;
@@ -152,63 +153,44 @@ export default function WhatsAppLogsPage() {
         <Card><CardContent className="pt-4"><div className="text-xs text-muted-foreground">Falhas</div><div className="text-2xl font-semibold text-destructive">{stats.failed}</div></CardContent></Card>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Filtros</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3">
-            <div>
-              <Label className="text-xs">Direção</Label>
-              <Select value={direction} onValueChange={setDirection}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {DIRECTIONS.map((d) => <SelectItem key={d} value={d}>{d === 'all' ? 'Todas' : d}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label className="text-xs">Tipo de mensagem</Label>
-              <Select value={messageType} onValueChange={setMessageType}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {MESSAGE_TYPES.map((t) => <SelectItem key={t} value={t}>{t === 'all' ? 'Todos' : t}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label className="text-xs">Status de entrega</Label>
-              <Select value={deliveryStatus} onValueChange={setDeliveryStatus}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {DELIVERY_STATUSES.map((s) => <SelectItem key={s} value={s}>{s === 'all' ? 'Todos' : s}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label className="text-xs">Telefone</Label>
-              <Input placeholder="ex: 5547..." value={phoneFilter} onChange={(e) => setPhoneFilter(e.target.value)} />
-            </div>
-            <div>
-              <Label className="text-xs">Buscar no corpo</Label>
-              <Input placeholder="texto..." value={searchBody} onChange={(e) => setSearchBody(e.target.value)} />
-            </div>
-            <div className="flex items-end gap-2">
-              <Button
-                variant={showOnlyUnknown ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setShowOnlyUnknown((v) => !v)}
-                className="flex-1"
-              >
-                <Search className="h-4 w-4 mr-1" /> Só não reconhecidas
-              </Button>
-              <Button variant="outline" size="icon" onClick={() => refetch()} disabled={isFetching}>
-                <RefreshCw className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <MultiFilterBar
+        search={search}
+        onSearchChange={v => setField('search', v)}
+        searchPlaceholder="Buscar por telefone (dígitos) ou texto da mensagem…"
+        filters={filters}
+        activeCount={activeCount}
+        onToggle={toggle}
+        onSetField={setField}
+        onClearAll={clearAll}
+        groups={[
+          {
+            type: 'multi',
+            field: 'direction',
+            label: 'Direção',
+            options: [
+              { value: 'inbound', label: 'Recebida' },
+              { value: 'outbound', label: 'Enviada' },
+            ],
+          },
+          {
+            type: 'multi',
+            field: 'messageType',
+            label: 'Tipo',
+            options: MESSAGE_TYPES.filter(t => t !== 'all').map(t => ({ value: t, label: t })),
+          },
+          {
+            type: 'multi',
+            field: 'deliveryStatus',
+            label: 'Status de entrega',
+            options: DELIVERY_STATUSES.filter(s => s !== 'all').map(s => ({ value: s, label: s })),
+          },
+        ]}
+        extra={
+          <Button variant="outline" size="icon" onClick={() => refetch()} disabled={isFetching} title="Atualizar">
+            <RefreshCw className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
+          </Button>
+        }
+      />
 
       <Card>
         <CardHeader className="flex-row items-center justify-between">

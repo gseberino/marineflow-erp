@@ -8,11 +8,12 @@ import { statusConfig, priorityConfig } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Plus, Search, Filter, ClipboardList, MoreHorizontal, FileText, Printer, MessageCircle, Send, CheckCircle2, XCircle, History, Copy, Download, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Plus, ClipboardList, MoreHorizontal, FileText, Printer, MessageCircle, Send, CheckCircle2, XCircle, History, Copy, Download, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { exportToCSV } from '@/lib/export';
 import { supabase } from '@/integrations/supabase/client';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { MultiFilterBar } from '@/components/MultiFilterBar';
+import { useMultiFilter } from '@/hooks/use-multi-filter';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { PDFOptionsDialog } from '@/components/PDFOptionsDialog';
 import { WhatsAppSendHistoryDialog } from '@/components/WhatsAppSendHistoryDialog';
@@ -32,11 +33,14 @@ const PAGE_SIZE = 20;
 const PRIORITY_WEIGHT: Record<string, number> = { urgent: 4, high: 3, normal: 2, low: 1 };
 
 export default function ServiceOrderList() {
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [priorityFilter, setPriorityFilter] = useState<string>('all');
-  const [periodFilter, setPeriodFilter] = useState<string>('all');
   const [page, setPage] = useState(1);
+  const { filters, toggle, setField, clearAll, activeCount } = useMultiFilter({
+    search: '',
+    status: [] as string[],
+    priority: [] as string[],
+    dateFrom: '',
+    dateTo: '',
+  });
   const [sortKey, setSortKey] = useState('created_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const { t, formatCurrency, formatDate } = useI18n();
@@ -150,32 +154,25 @@ export default function ServiceOrderList() {
   };
 
   const filtered = useMemo(() => {
+    const { search, status, priority, dateFrom, dateTo } = filters as {
+      search: string; status: string[]; priority: string[]; dateFrom: string; dateTo: string;
+    };
     const list = (orders || []).filter((so: any) => {
       const clientName = so.clients?.full_name_or_company_name || '';
       const vesselName = so.vessels?.boat_name || '';
-      const matchesSearch = !search ||
+      if (search && !(
         so.service_order_number.toLowerCase().includes(search.toLowerCase()) ||
         clientName.toLowerCase().includes(search.toLowerCase()) ||
-        vesselName.toLowerCase().includes(search.toLowerCase());
-      const matchesStatus = statusFilter === 'all' || so.status === statusFilter;
-      const matchesPriority = priorityFilter === 'all' || so.priority === priorityFilter;
-      const now = new Date();
-      const soDate = new Date(so.created_at);
-      const matchesPeriod = (() => {
-        if (periodFilter === 'all') return true;
-        if (periodFilter === 'today') return soDate.toDateString() === now.toDateString();
-        if (periodFilter === 'week') {
-          const weekAgo = new Date(now); weekAgo.setDate(now.getDate() - 7);
-          return soDate >= weekAgo;
-        }
-        if (periodFilter === 'month') return soDate.getMonth() === now.getMonth() && soDate.getFullYear() === now.getFullYear();
-        if (periodFilter === 'last_month') {
-          const lm = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-          return soDate.getMonth() === lm.getMonth() && soDate.getFullYear() === lm.getFullYear();
-        }
-        return true;
-      })();
-      return matchesSearch && matchesStatus && matchesPriority && matchesPeriod;
+        vesselName.toLowerCase().includes(search.toLowerCase())
+      )) return false;
+      if (status.length && !status.includes(so.status)) return false;
+      if (priority.length && !priority.includes(so.priority)) return false;
+      if (dateFrom || dateTo) {
+        const soDate = so.created_at ? so.created_at.split('T')[0] : '';
+        if (dateFrom && soDate < dateFrom) return false;
+        if (dateTo && soDate > dateTo) return false;
+      }
+      return true;
     });
     return [...list].sort((a, b) => {
       let av = getSortValue(a, sortKey);
@@ -186,7 +183,7 @@ export default function ServiceOrderList() {
       if (av > bv) return sortDir === 'asc' ? 1 : -1;
       return 0;
     });
-  }, [orders, search, statusFilter, priorityFilter, periodFilter, sortKey, sortDir]);
+  }, [orders, filters, sortKey, sortDir]);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -201,90 +198,60 @@ export default function ServiceOrderList() {
         </Link>
       </PageHeader>
 
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input placeholder={t.serviceOrders.searchPlaceholder} value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} className="pl-9" />
-        </div>
-        <Select value={statusFilter} onValueChange={v => { setStatusFilter(v); setPage(1); }}>
-          <SelectTrigger className="w-full sm:w-[180px]">
-            <Filter className="h-4 w-4 mr-2" />
-            <SelectValue placeholder={t.common.status} />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">{t.serviceOrders.allStatuses}</SelectItem>
-            {Object.keys(statusConfig).map(key => (
-              <SelectItem key={key} value={key}>{(t.status as Record<string, string>)[key]}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={priorityFilter} onValueChange={v => { setPriorityFilter(v); setPage(1); }}>
-          <SelectTrigger className="w-full sm:w-[140px]">
-            <SelectValue placeholder="Prioridade" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todas</SelectItem>
-            <SelectItem value="low">Baixa</SelectItem>
-            <SelectItem value="normal">Normal</SelectItem>
-            <SelectItem value="high">Alta</SelectItem>
-            <SelectItem value="urgent">Urgente</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={periodFilter} onValueChange={v => { setPeriodFilter(v); setPage(1); }}>
-          <SelectTrigger className="w-full sm:w-[160px]">
-            <SelectValue placeholder="Período" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos os períodos</SelectItem>
-            <SelectItem value="today">Hoje</SelectItem>
-            <SelectItem value="week">Esta semana</SelectItem>
-            <SelectItem value="month">Este mês</SelectItem>
-            <SelectItem value="last_month">Mês passado</SelectItem>
-          </SelectContent>
-        </Select>
-        <FilterPresets
-          filterType="service_orders"
-          currentConfig={{ search, statusFilter, priorityFilter, periodFilter }}
-          hasActiveFilters={statusFilter !== 'all' || priorityFilter !== 'all' || periodFilter !== 'all' || !!search}
-          onApply={(c: any) => {
-            setSearch(c.search ?? '');
-            setStatusFilter(c.statusFilter ?? 'all');
-            setPriorityFilter(c.priorityFilter ?? 'all');
-            setPeriodFilter(c.periodFilter ?? 'all');
-            setPage(1);
-          }}
-        />
-        {(statusFilter !== 'all' || priorityFilter !== 'all' || periodFilter !== 'all' || search) && (
-          <Button variant="ghost" size="sm" onClick={() => {
-            setSearch('');
-            setStatusFilter('all');
-            setPriorityFilter('all');
-            setPeriodFilter('all');
-            setPage(1);
-          }}>
-            Limpar filtros
+      <MultiFilterBar
+        search={filters.search as string}
+        onSearchChange={v => { setField('search', v); setPage(1); }}
+        searchPlaceholder={t.serviceOrders.searchPlaceholder}
+        filters={filters}
+        activeCount={activeCount}
+        onToggle={(f, v) => { toggle(f, v); setPage(1); }}
+        onSetField={(f, v) => { setField(f, v); setPage(1); }}
+        onClearAll={() => { clearAll(); setPage(1); }}
+        groups={[
+          {
+            type: 'multi',
+            field: 'status',
+            label: 'Status',
+            options: Object.keys(statusConfig).map(key => ({
+              value: key,
+              label: (t.status as Record<string, string>)[key] ?? key,
+            })),
+          },
+          {
+            type: 'multi',
+            field: 'priority',
+            label: 'Prioridade',
+            options: [
+              { value: 'low', label: 'Baixa' },
+              { value: 'normal', label: 'Normal' },
+              { value: 'high', label: 'Alta' },
+              { value: 'urgent', label: 'Urgente' },
+            ],
+          },
+          { type: 'daterange', fromField: 'dateFrom', toField: 'dateTo', label: 'Período' },
+        ]}
+        extra={
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              exportToCSV(filtered, 'ordens_servico', [
+                { key: 'service_order_number', label: 'Número' },
+                { key: 'status', label: 'Status' },
+                { key: 'clients', label: 'Cliente', format: (v) => v?.full_name_or_company_name || '' },
+                { key: 'vessels', label: 'Embarcação', format: (v) => v?.boat_name || '' },
+                { key: 'grand_total', label: 'Valor Total', format: (v) => Number(v || 0).toFixed(2).replace('.', ',') },
+                { key: 'created_at', label: 'Data Criação', format: (v) => v ? new Date(v).toLocaleDateString('pt-BR') : '' },
+                { key: 'scheduled_start_at', label: 'Agendado Para', format: (v) => v ? new Date(v).toLocaleDateString('pt-BR') : '' },
+              ])
+            }
+            className="gap-1"
+          >
+            <Download className="h-4 w-4" />
+            Exportar CSV
           </Button>
-        )}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() =>
-            exportToCSV(filtered, 'ordens_servico', [
-              { key: 'service_order_number', label: 'Número' },
-              { key: 'status', label: 'Status' },
-              { key: 'clients', label: 'Cliente', format: (v) => v?.full_name_or_company_name || '' },
-              { key: 'vessels', label: 'Embarcação', format: (v) => v?.boat_name || '' },
-              { key: 'grand_total', label: 'Valor Total', format: (v) => Number(v || 0).toFixed(2).replace('.', ',') },
-              { key: 'created_at', label: 'Data Criação', format: (v) => v ? new Date(v).toLocaleDateString('pt-BR') : '' },
-              { key: 'scheduled_start_at', label: 'Agendado Para', format: (v) => v ? new Date(v).toLocaleDateString('pt-BR') : '' },
-            ])
-          }
-          className="gap-1"
-        >
-          <Download className="h-4 w-4" />
-          Exportar CSV
-        </Button>
-      </div>
+        }
+      />
 
       {isLoading ? (
         <div className="space-y-2">
@@ -294,7 +261,7 @@ export default function ServiceOrderList() {
         <div className="rounded-xl border bg-card p-8 text-center">
           <p className="text-destructive">Erro ao carregar ordens de serviço</p>
         </div>
-      ) : filtered.length === 0 && !search && statusFilter === 'all' ? (
+      ) : filtered.length === 0 && activeCount === 0 ? (
         <div className="rounded-xl border bg-card p-12 text-center space-y-3">
           <ClipboardList className="h-12 w-12 mx-auto text-muted-foreground" />
           <p className="text-muted-foreground">Nenhuma ordem de serviço cadastrada ainda.</p>

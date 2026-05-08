@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -6,9 +6,8 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
+import { MultiFilterBar } from '@/components/MultiFilterBar';
+import { useMultiFilter } from '@/hooks/use-multi-filter';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
@@ -22,7 +21,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Clock, CheckCircle2, XCircle, AlertCircle, Send, Pencil, Trash2,
-  RefreshCw, CalendarClock, Filter, MessageSquare, Plus, Zap,
+  RefreshCw, CalendarClock, MessageSquare, Plus, Zap,
 } from 'lucide-react';
 import { format, formatDistanceToNow, isPast } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -236,25 +235,35 @@ function NewScheduleDialog({ onClose }: { onClose: () => void }) {
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
 export default function WhatsAppScheduledPage() {
-  const [statusFilter, setStatusFilter] = useState('all');
+  const { filters, toggle, setField, clearAll, activeCount } = useMultiFilter({
+    status: [] as string[],
+    search: '',
+  });
   const [editingJob, setEditingJob] = useState<ScheduledSend | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
 
-  const { data: jobs, isLoading, refetch, isFetching } = useWhatsAppScheduled({
-    status: statusFilter,
-  });
+  const { data: allJobs, isLoading, refetch, isFetching } = useWhatsAppScheduled();
+
+  const jobs = useMemo(() => {
+    const { status, search } = filters as { status: string[]; search: string };
+    return (allJobs ?? []).filter(j => {
+      if (status.length && !status.includes(j.status)) return false;
+      if (search && !j.phone.includes(search) && !(j.message ?? '').toLowerCase().includes(search.toLowerCase())) return false;
+      return true;
+    });
+  }, [allJobs, filters]);
 
   const cancelMut = useCancelScheduledSend();
   const deleteMut = useDeleteScheduledSend();
   const sendNow = useSendNow();
 
   const stats = {
-    pending: jobs?.filter((j) => j.status === 'pending').length ?? 0,
-    sent: jobs?.filter((j) => j.status === 'sent').length ?? 0,
-    failed: jobs?.filter((j) => j.status === 'failed').length ?? 0,
-    total: jobs?.length ?? 0,
+    pending: allJobs?.filter((j) => j.status === 'pending').length ?? 0,
+    sent: allJobs?.filter((j) => j.status === 'sent').length ?? 0,
+    failed: allJobs?.filter((j) => j.status === 'failed').length ?? 0,
+    total: allJobs?.length ?? 0,
   };
 
   return (
@@ -323,24 +332,30 @@ export default function WhatsAppScheduledPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-3 bg-muted/30 p-2 rounded-lg">
-        <div className="flex items-center gap-1 text-sm text-muted-foreground">
-          <Filter className="h-4 w-4" /> Filtrar:
-        </div>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[180px] h-8 bg-white text-sm">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos os status</SelectItem>
-            <SelectItem value="pending">Pendentes</SelectItem>
-            <SelectItem value="processing">Processando</SelectItem>
-            <SelectItem value="sent">Enviados</SelectItem>
-            <SelectItem value="failed">Falhas</SelectItem>
-            <SelectItem value="cancelled">Cancelados</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+      <MultiFilterBar
+        search={filters.search as string}
+        onSearchChange={v => setField('search', v)}
+        searchPlaceholder="Buscar por telefone ou mensagem…"
+        filters={filters}
+        activeCount={activeCount}
+        onToggle={toggle}
+        onSetField={setField}
+        onClearAll={clearAll}
+        groups={[
+          {
+            type: 'multi',
+            field: 'status',
+            label: 'Status',
+            options: [
+              { value: 'pending', label: 'Pendente' },
+              { value: 'processing', label: 'Processando' },
+              { value: 'sent', label: 'Enviado' },
+              { value: 'failed', label: 'Falha' },
+              { value: 'cancelled', label: 'Cancelado' },
+            ],
+          },
+        ]}
+      />
 
       {/* Table */}
       <Card>

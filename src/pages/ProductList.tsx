@@ -4,8 +4,9 @@ import { useI18n } from '@/i18n';
 import { useProducts, type Product } from '@/hooks/use-products';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Plus, Search, AlertTriangle, Edit, Upload, Download, Table2, Package, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Plus, AlertTriangle, Edit, Upload, Download, Table2, Package, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { MultiFilterBar } from '@/components/MultiFilterBar';
+import { useMultiFilter } from '@/hooks/use-multi-filter';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ProductFormDialog } from '@/components/ProductFormDialog';
@@ -19,15 +20,17 @@ type SortDir = 'asc' | 'desc';
 const PAGE_SIZE = 20;
 
 export default function ProductList() {
-  const [search, setSearch] = useState('');
   const [formOpen, setFormOpen] = useState(false);
   const [editProduct, setEditProduct] = useState<Product | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
-  const [activeFilter, setActiveFilter] = useState<'all'|'active'|'inactive'>('all');
-  const [categoryFilter, setCategoryFilter] = useState('all');
   const [incompleteFilter, setIncompleteFilter] = useState(false);
   const [page, setPage] = useState(1);
+  const { filters, toggle, setField, clearAll, activeCount } = useMultiFilter({
+    search: '',
+    active: [] as string[],   // 'active' | 'inactive'
+    category: [] as string[],
+  });
   const [sortKey, setSortKey] = useState('product_name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const { t, formatCurrency } = useI18n();
@@ -49,16 +52,21 @@ export default function ProductList() {
   }
 
   const filtered = useMemo(() => {
+    const { search, active, category } = filters as { search: string; active: string[]; category: string[] };
     const list = (products ?? []).filter(p => {
-      const matchesSearch = !search ||
+      if (search && !(
         p.product_name.toLowerCase().includes(search.toLowerCase()) ||
         (p.sku ?? '').toLowerCase().includes(search.toLowerCase()) ||
-        (p.category ?? '').toLowerCase().includes(search.toLowerCase());
-      const matchesActive = activeFilter === 'all' ||
-        (activeFilter === 'active' ? (p as any).active : !(p as any).active);
-      const matchesCategory = categoryFilter === 'all' || p.category === categoryFilter;
-      const matchesIncomplete = !incompleteFilter || (p as any).fiscal_complete === false;
-      return matchesSearch && matchesActive && matchesCategory && matchesIncomplete;
+        (p.category ?? '').toLowerCase().includes(search.toLowerCase())
+      )) return false;
+      if (active.length) {
+        const isActive = (p as any).active;
+        if (active.includes('active') && !active.includes('inactive') && !isActive) return false;
+        if (active.includes('inactive') && !active.includes('active') && isActive) return false;
+      }
+      if (category.length && !category.includes(p.category ?? '')) return false;
+      if (incompleteFilter && (p as any).fiscal_complete !== false) return false;
+      return true;
     });
     return [...list].sort((a, b) => {
       let av: any = (a as any)[sortKey] ?? '';
@@ -69,7 +77,7 @@ export default function ProductList() {
       if (av > bv) return sortDir === 'asc' ? 1 : -1;
       return 0;
     });
-  }, [products, search, activeFilter, categoryFilter, incompleteFilter, sortKey, sortDir]);
+  }, [products, filters, incompleteFilter, sortKey, sortDir]);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -97,54 +105,44 @@ export default function ProductList() {
 
       <PriceSuggestionAlert />
 
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input placeholder={t.products.searchPlaceholder} value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} className="pl-9" />
-        </div>
-        <Select value={activeFilter} onValueChange={(v) => { setActiveFilter(v as any); setPage(1); }}>
-          <SelectTrigger className="w-full sm:w-[130px]">
-            <SelectValue placeholder="Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos</SelectItem>
-            <SelectItem value="active">Ativos</SelectItem>
-            <SelectItem value="inactive">Inativos</SelectItem>
-          </SelectContent>
-        </Select>
-        {categories.length > 0 && (
-          <Select value={categoryFilter} onValueChange={v => { setCategoryFilter(v); setPage(1); }}>
-            <SelectTrigger className="w-full sm:w-[170px]">
-              <SelectValue placeholder="Categoria" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todas categorias</SelectItem>
-              {categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        )}
-        <Button
-          variant={incompleteFilter ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => { setIncompleteFilter(v => !v); setPage(1); }}
-          className="gap-1"
-        >
-          <AlertTriangle className="h-3 w-3" />
-          Incompletos
-        </Button>
-        <FilterPresets
-          filterType="products"
-          currentConfig={{ search, activeFilter, categoryFilter, incompleteFilter }}
-          hasActiveFilters={!!search || activeFilter !== 'all' || categoryFilter !== 'all' || incompleteFilter}
-          onApply={(c: any) => {
-            setSearch(c.search ?? '');
-            setActiveFilter(c.activeFilter ?? 'all');
-            setCategoryFilter(c.categoryFilter ?? 'all');
-            setIncompleteFilter(!!c.incompleteFilter);
-            setPage(1);
-          }}
-        />
-      </div>
+      <MultiFilterBar
+        search={filters.search as string}
+        onSearchChange={v => { setField('search', v); setPage(1); }}
+        searchPlaceholder={t.products.searchPlaceholder}
+        filters={filters}
+        activeCount={activeCount + (incompleteFilter ? 1 : 0)}
+        onToggle={(f, v) => { toggle(f, v); setPage(1); }}
+        onSetField={(f, v) => { setField(f, v); setPage(1); }}
+        onClearAll={() => { clearAll(); setIncompleteFilter(false); setPage(1); }}
+        groups={[
+          {
+            type: 'multi',
+            field: 'active',
+            label: 'Status',
+            options: [
+              { value: 'active', label: 'Ativos' },
+              { value: 'inactive', label: 'Inativos' },
+            ],
+          },
+          ...(categories.length > 0 ? [{
+            type: 'multi' as const,
+            field: 'category',
+            label: 'Categoria',
+            options: categories.map(c => ({ value: c, label: c })),
+          }] : []),
+        ]}
+        extra={
+          <Button
+            variant={incompleteFilter ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => { setIncompleteFilter(v => !v); setPage(1); }}
+            className="gap-1"
+          >
+            <AlertTriangle className="h-3 w-3" />
+            Incompletos
+          </Button>
+        }
+      />
 
       {isLoading ? (
         <div className="space-y-2">{[1,2,3,4].map(i => <Skeleton key={i} className="h-14 rounded-lg" />)}</div>
