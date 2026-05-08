@@ -3,15 +3,16 @@ import { PageHeader } from '@/components/PageHeader';
 import { KPICard } from '@/components/KPICard';
 import { useI18n } from '@/i18n';
 import { 
-  ShoppingCart, 
-  Package, 
-  AlertTriangle, 
-  TrendingUp, 
+  ShoppingCart,
+  Package,
+  AlertTriangle,
+  TrendingUp,
   ArrowRight,
   Truck,
   History,
   CheckCircle2,
-  ChevronRight
+  ChevronRight,
+  Download
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
@@ -82,9 +83,26 @@ export default function SmartPurchasePage() {
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         <div className="lg:col-span-3 space-y-4">
           <Card>
-            <CardHeader>
-              <CardTitle>Sugestões de Reposição</CardTitle>
-              <CardDescription>Produtos abaixo do nível de segurança em estoque.</CardDescription>
+            <CardHeader className="flex flex-row items-start justify-between space-y-0">
+              <div>
+                <CardTitle>Sugestões de Reposição</CardTitle>
+                <CardDescription>Produtos abaixo do nível de segurança em estoque.</CardDescription>
+              </div>
+              <Button variant="outline" size="sm" className="gap-1 shrink-0" onClick={() => {
+                const rows = (suggestions || []).map((s: any) => ({
+                  'Produto': s.product_name,
+                  'SKU': s.sku || '',
+                  'Fornecedor': s.suppliers?.supplier_name || '',
+                  'Estoque Atual': s.stock_quantity ?? 0,
+                  'Mínimo': s.minimum_stock ?? 0,
+                  'Sugestão': Math.max(0, (s.minimum_stock ?? 0) * 2 - (s.stock_quantity ?? 0)),
+                }));
+                if (!rows.length) return;
+                const csv = [Object.keys(rows[0]).join(','), ...rows.map(r => Object.values(r).map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','))].join('\n');
+                const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })); a.download = 'sugestoes_compra.csv'; a.click();
+              }}>
+                <Download className="h-3.5 w-3.5" /> Exportar
+              </Button>
             </CardHeader>
             <CardContent>
               <Table>
