@@ -20,7 +20,7 @@ import {
 import {
   MoreHorizontal, MessageCircle, RefreshCw, CheckCircle, ClipboardList,
   History, FileText, Pencil, X, Plus, SlidersHorizontal, ArrowUpDown,
-  AlertCircle, TrendingUp, Wallet, Clock, Phone, Download,
+  AlertCircle, TrendingUp, Wallet, Clock, Phone, Download, ArrowUp, ArrowDown,
 } from 'lucide-react';
 import {
   useCollections, useMarkOverdueCollections, useCancelCollection, useSendCollectionWhatsApp,
@@ -55,6 +55,18 @@ export default function CollectionsPage() {
   const [detailId, setDetailId] = useState<string | null>(null);
 
   const { data: collections = [], isLoading } = useCollections(filters);
+
+  const handleSort = (col: CollectionFilters['sort_by']) => {
+    setFilters(f => ({
+      ...f,
+      sort_by: col,
+      sort_dir: f.sort_by === col && f.sort_dir !== 'desc' ? 'desc' : 'asc',
+    }));
+  };
+  const SortIcon = ({ col }: { col: CollectionFilters['sort_by'] }) => {
+    if (filters.sort_by !== col) return <ArrowUpDown className="h-3 w-3 ml-1 opacity-40" />;
+    return filters.sort_dir === 'desc' ? <ArrowDown className="h-3 w-3 ml-1" /> : <ArrowUp className="h-3 w-3 ml-1" />;
+  };
   const { data: clients } = useClients();
   const cancel = useCancelCollection();
   const send = useSendCollectionWhatsApp();
@@ -230,11 +242,19 @@ export default function CollectionsPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Cliente</TableHead>
+              <TableHead className="cursor-pointer select-none" onClick={() => handleSort('client')}>
+                <span className="inline-flex items-center">Cliente <SortIcon col="client" /></span>
+              </TableHead>
               <TableHead className="hidden sm:table-cell">OS / Ref</TableHead>
-              <TableHead className="text-right">Valor</TableHead>
-              <TableHead>Vencimento</TableHead>
-              <TableHead>Status</TableHead>
+              <TableHead className="text-right cursor-pointer select-none" onClick={() => handleSort('amount')}>
+                <span className="inline-flex items-center justify-end w-full">Valor <SortIcon col="amount" /></span>
+              </TableHead>
+              <TableHead className="cursor-pointer select-none" onClick={() => handleSort('due_date')}>
+                <span className="inline-flex items-center">Vencimento <SortIcon col="due_date" /></span>
+              </TableHead>
+              <TableHead className="cursor-pointer select-none" onClick={() => handleSort('status')}>
+                <span className="inline-flex items-center">Status <SortIcon col="status" /></span>
+              </TableHead>
               <TableHead className="hidden md:table-cell">Contato</TableHead>
               <TableHead className="hidden lg:table-cell">Último contato</TableHead>
               <TableHead className="w-12"></TableHead>

@@ -36,7 +36,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
-import { Plus, Search, Truck, Trash2, Pencil, PackageCheck, ChevronDown } from 'lucide-react';
+import { Plus, Search, Truck, Trash2, Pencil, PackageCheck, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { toast } from 'sonner';
@@ -267,6 +267,17 @@ export default function PurchaseOrdersPage() {
   const deletePO = useDeletePurchaseOrder();
   const updatePO = useUpdatePurchaseOrder();
 
+  const [sortKey, setSortKey] = useState<'po_number' | 'supplier' | 'status' | 'expected_date' | 'total_amount'>('po_number');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const handleSort = (key: typeof sortKey) => {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(key); setSortDir('asc'); }
+  };
+  const SortIcon = ({ col }: { col: typeof sortKey }) => {
+    if (sortKey !== col) return <ArrowUpDown className="h-3 w-3 ml-1 opacity-40" />;
+    return sortDir === 'desc' ? <ArrowDown className="h-3 w-3 ml-1" /> : <ArrowUp className="h-3 w-3 ml-1" />;
+  };
+
   const filtered = useMemo(() => {
     let list = orders ?? [];
     if (statusFilter !== 'all') list = list.filter(o => o.status === statusFilter);
@@ -278,8 +289,16 @@ export default function PurchaseOrdersPage() {
         (o.service_orders?.service_order_number ?? '').toLowerCase().includes(q)
       );
     }
-    return list;
-  }, [orders, statusFilter, search]);
+    return [...list].sort((a, b) => {
+      let av: any, bv: any;
+      if (sortKey === 'supplier') { av = a.suppliers?.company_name ?? ''; bv = b.suppliers?.company_name ?? ''; }
+      else if (sortKey === 'total_amount') { av = a.total_amount ?? 0; bv = b.total_amount ?? 0; }
+      else if (sortKey === 'expected_date') { av = a.expected_date ?? ''; bv = b.expected_date ?? ''; }
+      else { av = (a as any)[sortKey] ?? ''; bv = (b as any)[sortKey] ?? ''; }
+      if (typeof av === 'string') return sortDir === 'asc' ? av.localeCompare(bv, 'pt-BR') : bv.localeCompare(av, 'pt-BR');
+      return sortDir === 'asc' ? av - bv : bv - av;
+    });
+  }, [orders, statusFilter, search, sortKey, sortDir]);
 
   const handleEdit = (po: PurchaseOrder) => { setEditing(po); setFormOpen(true); };
   const handleNew = () => { setEditing(null); setFormOpen(true); };
@@ -380,12 +399,22 @@ export default function PurchaseOrdersPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Número</TableHead>
-                <TableHead>Fornecedor</TableHead>
+                <TableHead className="cursor-pointer select-none" onClick={() => handleSort('po_number')}>
+                  <span className="inline-flex items-center">Número <SortIcon col="po_number" /></span>
+                </TableHead>
+                <TableHead className="cursor-pointer select-none" onClick={() => handleSort('supplier')}>
+                  <span className="inline-flex items-center">Fornecedor <SortIcon col="supplier" /></span>
+                </TableHead>
                 <TableHead className="hidden md:table-cell">OS vinculada</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="hidden sm:table-cell">Previsão</TableHead>
-                <TableHead className="text-right hidden sm:table-cell">Total</TableHead>
+                <TableHead className="cursor-pointer select-none" onClick={() => handleSort('status')}>
+                  <span className="inline-flex items-center">Status <SortIcon col="status" /></span>
+                </TableHead>
+                <TableHead className="hidden sm:table-cell cursor-pointer select-none" onClick={() => handleSort('expected_date')}>
+                  <span className="inline-flex items-center">Previsão <SortIcon col="expected_date" /></span>
+                </TableHead>
+                <TableHead className="text-right hidden sm:table-cell cursor-pointer select-none" onClick={() => handleSort('total_amount')}>
+                  <span className="inline-flex items-center justify-end w-full">Total <SortIcon col="total_amount" /></span>
+                </TableHead>
                 <TableHead className="w-24" />
               </TableRow>
             </TableHeader>
