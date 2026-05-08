@@ -460,6 +460,21 @@ export default function InventoryPage() {
             {(movFilters.product_id || movTypeFilter.length > 0 || movFilters.dateFrom || movFilters.dateTo) && (
               <Button size="sm" variant="ghost" onClick={() => { setMovFilters({}); setMovTypeFilter([]); }}>Limpar filtros</Button>
             )}
+            <Button variant="outline" size="sm" className="gap-1 ml-auto" onClick={() => {
+              if (!filteredMovements.length) return;
+              const rows = filteredMovements.map(m => ({
+                'Data/Hora': formatDateTime(m.created_at),
+                'Produto': (m.products as any)?.product_name || '',
+                'Tipo': MOVEMENT_LABELS[m.movement_type] || m.movement_type,
+                'Quantidade': m.quantity_delta,
+                'Custo Unit.': m.unit_cost_snapshot ?? '',
+                'Notas': m.notes || '',
+              }));
+              const csv = [Object.keys(rows[0]).join(','), ...rows.map(r => Object.values(r).map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','))].join('\n');
+              const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })); a.download = 'movimentos_estoque.csv'; a.click();
+            }}>
+              <Download className="h-3.5 w-3.5" /> Exportar
+            </Button>
           </div>
 
           <div className="rounded-xl border bg-card shadow-sm overflow-x-auto scrollbar-thin">
