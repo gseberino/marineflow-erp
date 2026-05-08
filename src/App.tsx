@@ -50,6 +50,7 @@ import ExternalQuoteApprovalPage from "./pages/ExternalQuoteApprovalPage";
 import ExternalQuoteDetailPage from "./pages/ExternalQuoteDetailPage";
 import ExternalSellerLeadsPage from "./pages/ExternalSellerLeadsPage";
 import ExternalProductCatalogPage from "./pages/ExternalProductCatalogPage";
+import PurchaseOrdersPage from "./pages/PurchaseOrdersPage";
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -78,6 +79,7 @@ const App = () => (
                         } />
                         <Route path="/crm" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><CRMKanbanPage /></ProtectedRoute>} />
                         <Route path="/service-orders" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><ServiceOrderList /></ProtectedRoute>} />
+                        <Route path="/purchase-orders" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><PurchaseOrdersPage /></ProtectedRoute>} />
                         <Route path="/service-orders/new" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><ServiceOrderDetail /></ProtectedRoute>} />
                         <Route path="/service-orders/:id" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><ServiceOrderDetail /></ProtectedRoute>} />
                         <Route path="/clients" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><ClientList /></ProtectedRoute>} />

@@ -52,7 +52,6 @@ import { calculateDisplacement, calculateTravelCost } from '@/lib/displacement';
 import { statusConfig, priorityConfig } from '@/lib/constants';
 import { StatusBadge } from '@/components/StatusBadge';
 import { ServiceFormDialog } from '@/components/ServiceFormDialog';
-import { RecordHistory } from '@/components/RecordHistory';
 import { ServiceOrderSignatures } from '@/components/ServiceOrderSignatures';
 import { ServiceOrderPhotos } from '@/components/ServiceOrderPhotos';
 import { WhatsAppSendHistoryDialog } from '@/components/WhatsAppSendHistoryDialog';
@@ -3465,13 +3464,6 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             </h2>
           </div>
           <ServiceOrderSignatures serviceOrderId={orderId} />
-        </section>
-      )}
-
-      {/* Record History */}
-      {!isNew && (
-        <section className="rounded-xl border bg-card p-5 shadow-sm">
-          <RecordHistory tableName="service_orders" recordId={orderId} />
         </section>
       )}
 

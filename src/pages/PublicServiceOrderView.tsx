@@ -4,7 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Loader2, Ship, User, MapPin, FileText, Wrench, Package, Download, CheckCircle2, AlertTriangle, PenLine, Image as ImageIcon } from 'lucide-react';
+import { Loader2, Ship, User, MapPin, FileText, Wrench, Package, Download, CheckCircle2, AlertTriangle, PenLine, Image as ImageIcon, CreditCard, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -680,6 +680,29 @@ export default function PublicServiceOrderView() {
               <p className="text-sm whitespace-pre-wrap text-muted-foreground">
                 {company.payment_instructions}
               </p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Botão de pagamento online */}
+        {company.payment_link_url && (
+          <Card className="border-primary/30 bg-primary/5">
+            <CardContent className="pt-6 pb-6 flex flex-col items-center gap-3 text-center">
+              <CreditCard className="h-8 w-8 text-primary" />
+              <div>
+                <p className="font-semibold text-base">Pague online com segurança</p>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  Clique no botão abaixo para realizar o pagamento desta OS.
+                </p>
+              </div>
+              <a
+                href={company.payment_link_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 text-sm font-bold text-primary-foreground shadow-md hover:opacity-90 transition-opacity"
+              >
+                Pagar agora <ExternalLink className="h-4 w-4" />
+              </a>
             </CardContent>
           </Card>
         )}

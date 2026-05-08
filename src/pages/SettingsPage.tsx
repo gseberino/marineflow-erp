@@ -331,6 +331,7 @@ function CompanyTab() {
     bank_agency: '',
     bank_account: '',
     pix_key: '',
+    payment_link_url: '',
     app_public_url: 'https://hbrmarine.online',
   });
 
@@ -364,6 +365,7 @@ function CompanyTab() {
           bank_agency: map.bank_agency || '',
           bank_account: map.bank_account || '',
           pix_key: map.pix_key || '',
+          payment_link_url: map.payment_link_url || '',
           app_public_url: map.app_public_url || 'https://hbrmarine.online',
         }));
         setLogoUrl(map.company_logo_url || '');
@@ -660,6 +662,19 @@ function CompanyTab() {
             <label className="text-xs font-medium text-muted-foreground">Chave PIX</label>
             <Input value={form.pix_key} onChange={e => set('pix_key', e.target.value)}
               placeholder="CNPJ, e-mail, telefone ou chave aleatória" className="mt-1" />
+          </div>
+          <div className="md:col-span-2">
+            <label className="text-xs font-medium text-muted-foreground">Link de Pagamento Online (Portal do Cliente)</label>
+            <Input
+              type="url"
+              value={form.payment_link_url}
+              onChange={e => set('payment_link_url', e.target.value)}
+              placeholder="https://link.mercadopago.com.br/... ou link do Stripe"
+              className="mt-1"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Se preenchido, um botão "Pagar agora" aparecerá no portal público da OS. Deixe em branco para ocultar.
+            </p>
           </div>
         </div>
       </div>

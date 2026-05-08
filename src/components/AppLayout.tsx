@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Users, Ship, Anchor, Package, ClipboardList,
   DollarSign, BarChart3, Settings, ChevronLeft, ChevronRight, Menu,
   Warehouse, Building2, Wrench, History, LogOut, CalendarDays, MessageCircle, CreditCard,
-  Database, ChevronDown, Rocket, ShoppingCart, FileDown, Target, CheckCircle2, Bell, CalendarClock
+  Database, ChevronDown, Rocket, ShoppingCart, FileDown, Target, CheckCircle2, Bell, CalendarClock, Truck
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -134,6 +134,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
       items: [
         { label: 'CRM & Funil', icon: Target, path: '/crm' },
         { label: 'Ordens de Serviço', icon: ClipboardList, path: '/service-orders' },
+        { label: 'Ordens de Compra', icon: Truck, path: '/purchase-orders', roles: ['admin', 'financial'] },
         { label: 'Agenda', icon: CalendarDays, path: '/agenda' },
         { label: 'Motor de Vendas', icon: Rocket, path: '/prospecting', roles: ['admin'] },
         { label: 'Cobranças', icon: CreditCard, path: '/collections', roles: ['admin', 'financial'] },
@@ -350,6 +351,12 @@ export function AppLayout({ children }: { children: ReactNode }) {
         })}
       </nav>
 
+      {/* Version footer */}
+      {!collapsed && (
+        <div className="px-3 pb-1 pt-0">
+          <p className="text-[10px] text-sidebar-foreground/30 text-center select-none">v1.1.0</p>
+        </div>
+      )}
       <div className="hidden lg:flex border-t border-sidebar-border p-2">
         <button
           onClick={() => setCollapsed(!collapsed)}
