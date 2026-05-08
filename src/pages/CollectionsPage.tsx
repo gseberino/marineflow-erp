@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -23,7 +23,7 @@ import {
   AlertCircle, TrendingUp, Wallet, Clock, Phone,
 } from 'lucide-react';
 import {
-  useCollections, useCancelCollection, useSendCollectionWhatsApp,
+  useCollections, useMarkOverdueCollections, useCancelCollection, useSendCollectionWhatsApp,
   type CollectionFilters, type Collection, type CollectionStatus,
 } from '@/hooks/use-collections';
 import { useClients } from '@/hooks/use-clients';
@@ -58,6 +58,10 @@ export default function CollectionsPage() {
   const { data: clients } = useClients();
   const cancel = useCancelCollection();
   const send = useSendCollectionWhatsApp();
+  const markOverdue = useMarkOverdueCollections();
+
+  // Run once on mount to mark any past-due collections as overdue
+  useEffect(() => { markOverdue.mutate(); }, []);
 
   const kpis = useMemo(() => {
     const open = collections.filter(c => ['pending', 'sent', 'viewed'].includes(c.status));

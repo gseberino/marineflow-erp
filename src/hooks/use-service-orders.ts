@@ -160,25 +160,34 @@ export function useUpdateServiceOrderStatus() {
           .eq('id', id)
           .single();
         if (!current?.check_out_at) updates.check_out_at = new Date().toISOString();
-        // Auto-generate receivable
+        // Auto-generate receivable (only if none exists yet for this SO)
         if (current) {
-          const { data: vessel } = await supabase
-            .from('vessels')
-            .select('boat_name')
-            .eq('id', current.vessel_id)
-            .single();
-          const today = new Date().toISOString().slice(0, 10);
-          const due = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
-          await supabase.from('receivables').insert({
-            client_id: current.client_id,
-            service_order_id: id,
-            description: `OS ${current.service_order_number} - ${vessel?.boat_name || ''}`,
-            issue_date: today,
-            due_date: due,
-            amount: current.grand_total || 0,
-            balance_amount: current.grand_total || 0,
-            status: 'pending',
-          });
+          const { data: existingRec } = await supabase
+            .from('receivables')
+            .select('id')
+            .eq('service_order_id', id)
+            .neq('status', 'cancelled')
+            .maybeSingle();
+
+          if (!existingRec) {
+            const { data: vessel } = await supabase
+              .from('vessels')
+              .select('boat_name')
+              .eq('id', current.vessel_id)
+              .single();
+            const today = new Date().toISOString().slice(0, 10);
+            const due = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+            await supabase.from('receivables').insert({
+              client_id: current.client_id,
+              service_order_id: id,
+              description: `OS ${current.service_order_number} - ${vessel?.boat_name || ''}`,
+              issue_date: today,
+              due_date: due,
+              amount: current.grand_total || 0,
+              balance_amount: current.grand_total || 0,
+              status: 'pending',
+            });
+          }
         }
       }
       const { data, error } = await supabase
@@ -340,12 +349,16 @@ export function useAddServiceOrderPart() {
       });
 
       await recalcTotals(values.service_order_id);
+      const { data: updatedSO } = await supabase
+        .from('service_orders').select('grand_total').eq('id', values.service_order_id).single();
+      await updateReceivableFromSO(values.service_order_id, updatedSO?.grand_total || 0);
     },
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ['so-parts', vars.service_order_id] });
       qc.invalidateQueries({ queryKey: ['service-orders', vars.service_order_id] });
       qc.invalidateQueries({ queryKey: ['products'] });
       qc.invalidateQueries({ queryKey: ['pdf-data'] });
+      qc.invalidateQueries({ queryKey: ['receivables'] });
     },
   });
 }
@@ -396,10 +409,14 @@ export function useRemoveServiceOrderPart() {
       });
 
       await recalcTotals(part.service_order_id);
+      const { data: updatedSO } = await supabase
+        .from('service_orders').select('grand_total').eq('id', part.service_order_id).single();
+      await updateReceivableFromSO(part.service_order_id, updatedSO?.grand_total || 0);
     },
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ['so-parts', vars.service_order_id] });
       qc.invalidateQueries({ queryKey: ['service-orders', vars.service_order_id] });
+      qc.invalidateQueries({ queryKey: ['receivables'] });
       qc.invalidateQueries({ queryKey: ['products'] });
       qc.invalidateQueries({ queryKey: ['pdf-data'] });
     },
@@ -628,6 +645,27 @@ export function useDuplicateServiceOrder() {
           notes: p.notes,
         }));
         await supabase.from('service_order_parts').insert(parts);
+
+        // Deduct stock for each copied part
+        for (const p of source.service_order_parts) {
+          const { data: prod } = await supabase
+            .from('products')
+            .select('stock_quantity')
+            .eq('id', p.product_id)
+            .single();
+          await supabase
+            .from('products')
+            .update({ stock_quantity: (prod?.stock_quantity || 0) - p.quantity })
+            .eq('id', p.product_id);
+          await supabase.from('inventory_movements').insert({
+            product_id: p.product_id,
+            movement_type: 'service_usage',
+            quantity_delta: -p.quantity,
+            reference_type: 'service_order',
+            reference_id: newId,
+            unit_cost_snapshot: p.unit_cost_snapshot,
+          });
+        }
       }
 
       // 5. Copy expenses (without receipts and without linked payable)

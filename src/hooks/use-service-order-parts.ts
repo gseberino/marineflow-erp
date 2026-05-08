@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { recalcTotals } from '@/hooks/use-service-orders';
+import { updateReceivableFromSO } from '@/lib/cascade-updates';
 
 /**
  * Update an existing service_order_parts row. Adjusts stock & inventory_movements
@@ -45,9 +46,13 @@ export function useUpdateServiceOrderPart() {
           .select('stock_quantity')
           .eq('id', values.product_id)
           .single();
+        const currentStock = prod?.stock_quantity || 0;
+        if (delta > 0 && currentStock < delta) {
+          throw new Error(`Estoque insuficiente. Disponível: ${currentStock}, solicitado adicional: ${delta}`);
+        }
         await supabase
           .from('products')
-          .update({ stock_quantity: (prod?.stock_quantity || 0) - delta })
+          .update({ stock_quantity: currentStock - delta })
           .eq('id', values.product_id);
 
         await supabase.from('inventory_movements').insert({
@@ -62,12 +67,16 @@ export function useUpdateServiceOrderPart() {
       }
 
       await recalcTotals(values.service_order_id);
+      const { data: updatedSO } = await supabase
+        .from('service_orders').select('grand_total').eq('id', values.service_order_id).single();
+      await updateReceivableFromSO(values.service_order_id, updatedSO?.grand_total || 0);
     },
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ['so-parts', vars.service_order_id] });
       qc.invalidateQueries({ queryKey: ['service-orders', vars.service_order_id] });
       qc.invalidateQueries({ queryKey: ['products'] });
       qc.invalidateQueries({ queryKey: ['pdf-data'] });
+      qc.invalidateQueries({ queryKey: ['receivables'] });
     },
   });
 }

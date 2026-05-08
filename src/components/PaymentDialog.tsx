@@ -83,6 +83,8 @@ export function PaymentDialog({ open, onOpenChange, receivable, payable }: Payme
   };
 
   const handleDetailedPay = async () => {
+    if (amount <= 0) { toast.error('Valor deve ser maior que zero'); return; }
+    if (amount > balance + 0.005) { toast.error('Valor não pode exceder o saldo em aberto'); return; }
     try {
       await registerPayment.mutateAsync({
         receivable_id: isReceivable ? parentId : undefined,

@@ -306,6 +306,13 @@ export async function cancelPaymentCascade(paymentId: string, reason: string) {
     reconciled_payment_id: null,
   }).eq('reconciled_payment_id', paymentId);
 
+  // Undo technician expense reimbursement if this payment was the proof
+  await supabase.from('service_order_expenses').update({
+    reimbursed: false,
+    reimbursed_at: null,
+    reimbursed_payment_id: null,
+  }).eq('reimbursed_payment_id', paymentId);
+
   await writeAuditLog({
     table_name: 'payments',
     record_id: paymentId,

@@ -274,6 +274,17 @@ export function useReconcile() {
       bankTransactionId: string; receivableId?: string; payableId?: string;
       amount: number; paymentMethod?: string;
     }) => {
+      // Validate amount against the open balance before registering
+      if (input.receivableId || input.payableId) {
+        const table = input.receivableId ? 'receivables' : 'payables';
+        const parentId = (input.receivableId || input.payableId)!;
+        const { data: parent } = await supabase.from(table).select('balance_amount').eq('id', parentId).single();
+        const openBalance = Number(parent?.balance_amount || 0);
+        if (input.amount > openBalance + 0.005) {
+          throw new Error(`Valor R$ ${input.amount.toFixed(2)} excede o saldo em aberto de R$ ${openBalance.toFixed(2)}`);
+        }
+      }
+
       const payment = await registerPayment.mutateAsync({
         receivable_id: input.receivableId,
         payable_id: input.payableId,

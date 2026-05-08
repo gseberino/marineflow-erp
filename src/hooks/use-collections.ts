@@ -78,12 +78,10 @@ export interface CollectionFilters {
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
-export function useCollections(filters: CollectionFilters = {}) {
+export function useMarkOverdueCollections() {
   const qc = useQueryClient();
-  return useQuery({
-    queryKey: ['collections', filters],
-    queryFn: async () => {
-      // Auto-mark overdue first
+  return useMutation({
+    mutationFn: async () => {
       const today = todayISO();
       const { data: stale } = await supabase
         .from('collections')
@@ -96,7 +94,18 @@ export function useCollections(filters: CollectionFilters = {}) {
           .update({ status: 'overdue' })
           .in('id', stale.map(s => s.id));
       }
+      return stale?.length ?? 0;
+    },
+    onSuccess: (count) => {
+      if (count > 0) qc.invalidateQueries({ queryKey: ['collections'] });
+    },
+  });
+}
 
+export function useCollections(filters: CollectionFilters = {}) {
+  return useQuery({
+    queryKey: ['collections', filters],
+    queryFn: async () => {
       let q = supabase
         .from('collections')
         .select(`
@@ -151,11 +160,6 @@ export function useCollections(filters: CollectionFilters = {}) {
           if (!lastByColl[row.collection_id]) lastByColl[row.collection_id] = row.created_at;
         }
         list = list.map(c => ({ ...c, last_contact_at: lastByColl[c.id] || null }));
-      }
-
-      // Invalidate related cache if we updated overdues
-      if (stale && stale.length > 0) {
-        qc.invalidateQueries({ queryKey: ['collection'] });
       }
 
       return list;
