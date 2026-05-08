@@ -72,8 +72,9 @@ export function useSchedulableOrders() {
           clients(full_name_or_company_name),
           vessels(boat_name)
         `)
-        // Valid schedulable statuses in this app's state machine:
-        .in('status', ['pending', 'scheduled', 'in_progress', 'waiting_parts', 'waiting_approval', 'reopened'])
+        // Valid schedulable statuses — includes draft/approved so newly created/approved
+        // orders appear in the Agenda scheduling dialog before being assigned a technician
+        .in('status', ['draft', 'pending', 'approved', 'scheduled', 'in_progress', 'waiting_parts', 'waiting_approval', 'reopened'])
         .order('created_at', { ascending: false })
         .limit(200);
       if (error) throw error;
