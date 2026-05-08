@@ -5,7 +5,8 @@ import { useUpdateServiceOrderStatus } from '@/hooks/use-service-orders';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { MessageCircle, Calendar, Edit, ArrowRight } from 'lucide-react';
+import { MessageCircle, Calendar, Edit, ArrowRight, Search } from 'lucide-react';
+import { Input } from '@/components/ui/input';
 import { useNavigate } from 'react-router-dom';
 import { useI18n } from '@/i18n';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -25,10 +26,20 @@ export default function CRMKanbanPage() {
   const updateStatus = useUpdateServiceOrderStatus();
 
   const [zapiTarget, setZapiTarget] = useState<any>(null);
+  const [search, setSearch] = useState('');
 
   if (isLoading) return <div className="p-6 space-y-4"><Skeleton className="h-10 w-64" /><Skeleton className="h-[600px] w-full" /></div>;
 
-  const activeOrders = (orders || []).filter(o => COLUMNS.map(c => c.id).includes(o.status || ''));
+  const activeOrders = (orders || []).filter(o => {
+    if (!COLUMNS.map(c => c.id).includes(o.status || '')) return false;
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return (
+      (o.service_order_number || '').toLowerCase().includes(q) ||
+      ((o as any).clients?.full_name_or_company_name || '').toLowerCase().includes(q) ||
+      ((o as any).vessels?.boat_name || '').toLowerCase().includes(q)
+    );
+  });
 
   const moveOrder = async (orderId: string, newStatus: string) => {
     await updateStatus.mutateAsync({ id: orderId, status: newStatus as any });
@@ -41,7 +52,13 @@ export default function CRMKanbanPage() {
           title="CRM & Funil de Vendas" 
           description="Acompanhe oportunidades, orçamentos e serviços em andamento."
         />
-        <Button onClick={() => navigate('/service-orders/new')}>Novo Negócio / OS</Button>
+        <div className="flex gap-2 items-center">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input placeholder="Buscar OS, cliente, barco..." className="pl-8 w-56 h-9" value={search} onChange={e => setSearch(e.target.value)} />
+          </div>
+          <Button onClick={() => navigate('/service-orders/new')}>Novo Negócio / OS</Button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-x-auto pb-4">
