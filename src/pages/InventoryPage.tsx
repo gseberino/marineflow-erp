@@ -26,7 +26,7 @@ import {
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import {
-  Package, TrendingDown, AlertTriangle, Plus, DollarSign, ChevronUp, ChevronDown, ScanBarcode, ChevronLeft, ChevronRight
+  Package, TrendingDown, AlertTriangle, Plus, DollarSign, ChevronUp, ChevronDown, ScanBarcode, ChevronLeft, ChevronRight, Download
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { PriceSuggestionAlert } from '@/components/PriceSuggestionAlert';
@@ -297,6 +297,25 @@ export default function InventoryPage() {
               },
             ] : []}
           />
+
+          <div className="flex justify-end">
+            <Button variant="outline" size="sm" className="gap-1" onClick={() => {
+              const rows = sortedProducts.map(p => ({
+                'Produto': p.product_name,
+                'SKU': p.sku || '',
+                'Categoria': p.category || '',
+                'Local': p.location_bin || '',
+                'Custo': Number(p.cost_price ?? 0).toFixed(2),
+                'Estoque': p.stock_quantity ?? 0,
+                'Mínimo': p.minimum_stock ?? 0,
+              }));
+              if (!rows.length) return;
+              const csv = [Object.keys(rows[0]).join(','), ...rows.map(r => Object.values(r).map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','))].join('\n');
+              const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })); a.download = 'estoque.csv'; a.click();
+            }}>
+              <Download className="h-3.5 w-3.5" /> Exportar CSV
+            </Button>
+          </div>
 
           {/* Products table with sortable headers */}
           <div className="rounded-xl border bg-card shadow-sm overflow-x-auto scrollbar-thin">
