@@ -84,6 +84,8 @@ export default function InventoryPage() {
   const { filters: invFilters, toggle: invToggle, setField: invSetField, clearAll: invClearAll, activeCount: invActiveCount } = useMultiFilter({ search: '', category: [] as string[] });
   // ── Movement type multi-filter ──
   const [movTypeFilter, setMovTypeFilter] = useState<string[]>([]);
+  const MOV_PAGE_SIZE = 30;
+  const [movPage, setMovPage] = useState(1);
   const toggleSort = (field: string) => {
     if (sortField === field) {
       setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -163,6 +165,9 @@ export default function InventoryPage() {
     }
     return list;
   }, [movements, movTypeFilter]);
+
+  const movTotalPages = Math.ceil(filteredMovements.length / MOV_PAGE_SIZE);
+  const pagedMovements = filteredMovements.slice((movPage - 1) * MOV_PAGE_SIZE, movPage * MOV_PAGE_SIZE);
 
   // ── Movement totals ──
   const movTotals = useMemo(() => {
@@ -459,7 +464,7 @@ export default function InventoryPage() {
                 ) : !filteredMovements.length ? (
                   <tr><td colSpan={7} className="text-center py-10 text-muted-foreground">{t.common.noResults}</td></tr>
                 ) : (
-                  filteredMovements.map(m => {
+                  pagedMovements.map(m => {
                     const isPositive = m.quantity_delta > 0;
                     const typeLabel = MOVEMENT_LABELS[m.movement_type] || m.movement_type;
                     const badgeClass = POSITIVE_TYPES.has(m.movement_type)
@@ -494,8 +499,22 @@ export default function InventoryPage() {
             </table>
             {filteredMovements.length > 0 && (
               <div className="flex items-center justify-between px-4 py-3 border-t bg-muted/30 text-xs text-muted-foreground">
-                <span>{t.inventory.totalEntries}: <span className="text-success font-semibold">+{movTotals.entries}</span></span>
-                <span>{t.inventory.totalExits}: <span className="text-destructive font-semibold">{movTotals.exits}</span></span>
+                <span>
+                  {t.inventory.totalEntries}: <span className="text-success font-semibold">+{movTotals.entries}</span>
+                  {' · '}
+                  {t.inventory.totalExits}: <span className="text-destructive font-semibold">{movTotals.exits}</span>
+                  {movTotalPages > 1 && ` · Página ${movPage} de ${movTotalPages}`}
+                </span>
+                {movTotalPages > 1 && (
+                  <div className="flex gap-1">
+                    <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setMovPage(p => Math.max(1, p - 1))} disabled={movPage === 1}>
+                      <ChevronLeft className="h-3 w-3" />
+                    </Button>
+                    <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setMovPage(p => Math.min(movTotalPages, p + 1))} disabled={movPage === movTotalPages}>
+                      <ChevronRight className="h-3 w-3" />
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
           </div>
