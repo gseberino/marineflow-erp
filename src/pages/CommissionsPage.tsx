@@ -2,16 +2,17 @@ import { useState } from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import { KPICard } from '@/components/KPICard';
 import { useI18n } from '@/i18n';
-import { 
-  DollarSign, 
-  Users, 
-  CheckCircle2, 
-  Clock, 
-  Search, 
+import {
+  DollarSign,
+  Users,
+  CheckCircle2,
+  Clock,
+  Search,
   Filter,
   ArrowRight,
   TrendingUp,
-  CreditCard
+  CreditCard,
+  Download,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
@@ -114,6 +115,22 @@ export default function CommissionsPage() {
               />
             </div>
             <Button variant="outline" size="icon"><Filter className="h-4 w-4" /></Button>
+            <Button variant="outline" size="sm" className="gap-1" onClick={() => {
+              const rows = (filtered || []).map((c: any) => ({
+                'Técnico/Vendedor': c.app_users?.full_name || '—',
+                'OS': c.service_orders?.service_order_number || '—',
+                'Valor OS': Number(c.os_grand_total || 0).toFixed(2),
+                'Comissão %': c.commission_rate,
+                'Valor Comissão': Number(c.commission_amount || 0).toFixed(2),
+                'Status': c.status,
+                'Data': c.created_at ? new Date(c.created_at).toLocaleDateString('pt-BR') : '',
+              }));
+              if (!rows.length) return;
+              const csv = [Object.keys(rows[0]).join(','), ...rows.map((r: any) => Object.values(r).map((v: any) => `"${String(v ?? '').replace(/"/g,'""')}"`).join(','))].join('\n');
+              const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿'+csv], {type:'text/csv;charset=utf-8;'})); a.download = 'comissoes.csv'; a.click();
+            }}>
+              <Download className="h-3.5 w-3.5" /> Exportar
+            </Button>
           </div>
         </CardHeader>
         <CardContent>
