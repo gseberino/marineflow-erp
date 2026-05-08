@@ -20,7 +20,7 @@ import {
 import {
   MoreHorizontal, MessageCircle, RefreshCw, CheckCircle, ClipboardList,
   History, FileText, Pencil, X, Plus, SlidersHorizontal, ArrowUpDown,
-  AlertCircle, TrendingUp, Wallet, Clock, Phone,
+  AlertCircle, TrendingUp, Wallet, Clock, Phone, Download,
 } from 'lucide-react';
 import {
   useCollections, useMarkOverdueCollections, useCancelCollection, useSendCollectionWhatsApp,
@@ -97,6 +97,21 @@ export default function CollectionsPage() {
   return (
     <div>
       <PageHeader title="Cobranças" description="Gerencie cobranças e régua automática">
+        <Button variant="outline" size="sm" className="gap-1" onClick={() => {
+          const rows = collections.map((c: any) => ({
+            Cliente: c.client?.full_name_or_company_name || '—',
+            'OS / Ref': c.service_order?.service_order_number || 'Avulso',
+            'Valor': Number(c.amount).toFixed(2),
+            'Vencimento': new Date(c.due_date).toLocaleDateString('pt-BR'),
+            'Status': c.status,
+            'Telefone': c.contact_phone || c.client?.phone || '',
+            'Último Contato': c.last_contact_at ? new Date(c.last_contact_at).toLocaleDateString('pt-BR') : '',
+          }));
+          const csv = [Object.keys(rows[0] || {}).join(','), ...rows.map((r: any) => Object.values(r).map((v: any) => `"${String(v ?? '').replace(/"/g,'""')}"`).join(','))].join('\n');
+          const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿'+csv], {type:'text/csv;charset=utf-8;'})); a.download = 'cobranças.csv'; a.click();
+        }}>
+          <Download className="h-3.5 w-3.5" /> Exportar CSV
+        </Button>
         <Button variant="outline" onClick={() => setRuleOpen(true)}>
           <SlidersHorizontal className="h-4 w-4 mr-2" /> Configurar Régua
         </Button>
