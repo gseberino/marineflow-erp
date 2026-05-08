@@ -4,10 +4,11 @@ import { useI18n } from '@/i18n';
 import { useMarinas } from '@/hooks/use-marinas';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Plus, Search, MapPin, Phone, Mail, Ship, Edit, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Plus, Search, MapPin, Phone, Mail, Ship, Edit, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Download } from 'lucide-react';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { MarinaFormDialog } from '@/components/MarinaFormDialog';
+import { exportToCSV, MARINAS_COLUMNS } from '@/lib/export-utils';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import type { Marina } from '@/hooks/use-marinas';
@@ -70,6 +71,9 @@ export default function MarinaList() {
   return (
     <div className="space-y-4 animate-fade-in">
       <PageHeader title={t.marinas.title} description={`${t.marinas.description} (${marinas?.length ?? 0})`}>
+        <Button variant="outline" size="sm" className="gap-1" onClick={() => exportToCSV(filtered, 'marinas.csv', MARINAS_COLUMNS)}>
+          <Download className="h-3.5 w-3.5" /> CSV
+        </Button>
         <Button className="gap-2 bg-accent text-accent-foreground hover:bg-accent/90" onClick={() => { setEditMarina(null); setFormOpen(true); }}>
           <Plus className="h-4 w-4" /> {t.marinas.newMarina}
         </Button>
