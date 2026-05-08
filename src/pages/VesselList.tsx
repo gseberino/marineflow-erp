@@ -5,7 +5,8 @@ import { useI18n } from '@/i18n';
 import { useVessels } from '@/hooks/use-vessels';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Plus, Search, Anchor, Ship, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Plus, Search, Anchor, Ship, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Download } from 'lucide-react';
+import { exportToCSV, VESSELS_COLUMNS } from '@/lib/export-utils';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { VesselFormDialog } from '@/components/VesselFormDialog';
@@ -74,6 +75,9 @@ export default function VesselList() {
   return (
     <div className="space-y-4 animate-fade-in">
       <PageHeader title={t.vessels.title} description={`${t.vessels.description} (${vessels?.length ?? 0})`}>
+        <Button variant="outline" size="sm" className="gap-1" onClick={() => vessels && exportToCSV(vessels, 'embarcacoes.csv', VESSELS_COLUMNS)}>
+          <Download className="h-3.5 w-3.5" /> Exportar CSV
+        </Button>
         <Button className="gap-2 bg-accent text-accent-foreground hover:bg-accent/90" onClick={() => setFormOpen(true)}>
           <Plus className="h-4 w-4" /> Nova Unidade
         </Button>

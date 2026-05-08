@@ -71,6 +71,20 @@ export const CLIENTS_COLUMNS: ExportColumn[] = [
   { header: 'Situação', key: 'active', transform: v => v ? 'Ativo' : 'Inativo' },
 ];
 
+export const VESSELS_COLUMNS: ExportColumn[] = [
+  { header: 'Nome', key: 'boat_name' },
+  { header: 'Modelo', key: 'model' },
+  { header: 'Fabricante', key: 'manufacturer' },
+  { header: 'Ano', key: 'year' },
+  { header: 'Tipo', key: 'boat_type' },
+  { header: 'Material', key: 'hull_material' },
+  { header: 'Comprimento (m)', key: 'length_meters' },
+  { header: 'Motorização', key: 'engine_type' },
+  { header: 'Registro', key: 'registration_number' },
+  { header: 'Marina', key: 'marina_name' },
+  { header: 'Situação', key: 'active', transform: (v: any) => v ? 'Ativo' : 'Inativo' },
+];
+
 export const SUPPLIERS_COLUMNS: ExportColumn[] = [
   { header: 'Razão Social', key: 'supplier_name' },
   { header: 'Nome Fantasia', key: 'trade_name' },
