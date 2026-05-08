@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useI18n } from '@/i18n';
 import { useAuditLog } from '@/hooks/use-audit-log';
+import { useAppUsers } from '@/hooks/use-app-users';
 import { PageHeader } from '@/components/PageHeader';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
@@ -33,6 +34,13 @@ export default function AuditLogPage() {
   const auditT = t.auditLog as any;
   const tablesMap = auditT.tables as Record<string, string>;
   const actionsMap = auditT.actions as Record<string, string>;
+
+  const { data: usersData } = useAppUsers();
+  const userMap = useMemo(() => {
+    const m: Record<string, string> = {};
+    (usersData || []).forEach((u: any) => { m[u.id] = u.full_name || u.email || u.id; });
+    return m;
+  }, [usersData]);
 
   const { data: logs, isLoading } = useAuditLog({
     table_name: tableFilter || undefined,
@@ -75,6 +83,21 @@ export default function AuditLogPage() {
       return new Date(val).toLocaleString('pt-BR');
     }
     return JSON.stringify(val);
+  };
+
+  // Gera frase resumo legível da alteração — ex: "Status: Pendente → Em Andamento"
+  const humanSummary = (prev: any, next: any): string => {
+    if (!prev && !next) return '';
+    const IGNORE = new Set(['updated_at', 'created_at', 'id', 'client_id', 'vessel_id']);
+    const allKeys = [...new Set([...Object.keys(prev || {}), ...Object.keys(next || {})])];
+    const changed = allKeys.filter(k => !IGNORE.has(k) && JSON.stringify(prev?.[k]) !== JSON.stringify(next?.[k]));
+    if (!changed.length) return '';
+    return changed.slice(0, 3).map(k => {
+      const label = FIELD_MAP[k] || k;
+      const from = formatValue(k, prev?.[k]);
+      const to = formatValue(k, next?.[k]);
+      return `${label}: ${from} → ${to}`;
+    }).join(' · ') + (changed.length > 3 ? ` (+${changed.length - 3})` : '');
   };
 
   const renderDiff = (prev: any, next: any) => {
@@ -186,8 +209,10 @@ export default function AuditLogPage() {
                             {actionsMap[log.action] || log.action}
                           </span>
                         </TableCell>
-                        <TableCell className="text-sm">{log.changed_by}</TableCell>
-                        <TableCell className="text-sm text-muted-foreground max-w-[200px] truncate">{log.reason || '—'}</TableCell>
+                        <TableCell className="text-sm">{userMap[log.changed_by] || log.changed_by?.slice(0, 8) || '—'}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground max-w-xs">
+                          <span className="block truncate">{humanSummary(log.previous_value, log.new_value) || log.reason || '—'}</span>
+                        </TableCell>
                         <TableCell>
                           <ChevronDown className={`h-4 w-4 transition-transform ${expandedRow === log.id ? 'rotate-180' : ''}`} />
                         </TableCell>

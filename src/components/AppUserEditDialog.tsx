@@ -60,18 +60,15 @@ export function AppUserEditDialog({ user, open, onOpenChange, isCurrentUserAdmin
       return;
     }
     try {
-      console.log('[AppUserEditDialog] Saving form state:', form);
       
       await updateUser.mutateAsync({
         ...form,
         id: user.id
       });
       
-      console.log('[AppUserEditDialog] Save successful');
       
       // If we updated our own profile, refresh it
       if (currentUser?.id === user.id) {
-        console.log('[AppUserEditDialog] Refreshing current user profile...');
         await refreshProfile();
       }
 
@@ -350,7 +347,6 @@ export function AppUserEditDialog({ user, open, onOpenChange, isCurrentUserAdmin
                                   : currentAreas.filter((p: string) => p !== area.id);
                                 
                                 newAreas = [...new Set(newAreas.filter((p: any) => p))];
-                                console.log(`[AppUserEditDialog] Toggling area ${area.id}:`, checked, 'New areas:', newAreas);
                                 set('metadata', { ...metadata, visible_areas: newAreas });
                               }} 
                             />

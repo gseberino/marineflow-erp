@@ -26,7 +26,7 @@ import {
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import {
-  Package, TrendingDown, AlertTriangle, Plus, DollarSign, ChevronUp, ChevronDown, ScanBarcode
+  Package, TrendingDown, AlertTriangle, Plus, DollarSign, ChevronUp, ChevronDown, ScanBarcode, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { PriceSuggestionAlert } from '@/components/PriceSuggestionAlert';
@@ -75,6 +75,10 @@ export default function InventoryPage() {
   // ── Sort ──
   const [sortField, setSortField] = useState<string>('product_name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+  // ── Pagination ──
+  const PAGE_SIZE = 20;
+  const [page, setPage] = useState(1);
 
   // ── Multi-filters (overview tab) ──
   const { filters: invFilters, toggle: invToggle, setField: invSetField, clearAll: invClearAll, activeCount: invActiveCount } = useMultiFilter({ search: '', category: [] as string[] });
@@ -137,6 +141,14 @@ export default function InventoryPage() {
       return sortDir === 'asc' ? aVal - bVal : bVal - aVal;
     });
   }, [products, invFilters.category, sortField, sortDir]);
+
+  // Reset to page 1 when filters or sort change
+  const sortedKey = `${sortField}-${sortDir}-${(invFilters.category as string[]).join(',')}`;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useMemo(() => setPage(1), [sortedKey]);
+
+  const totalPages = Math.ceil(sortedProducts.length / PAGE_SIZE);
+  const pagedProducts = sortedProducts.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // ── Filtered totals ──
   const filteredValue = useMemo(() =>
@@ -318,7 +330,7 @@ export default function InventoryPage() {
                 ) : !sortedProducts.length ? (
                   <tr><td colSpan={9} className="text-center py-10 text-muted-foreground">{t.common.noResults}</td></tr>
                 ) : (
-                  sortedProducts.map(p => {
+                  pagedProducts.map(p => {
                     const qty = p.stock_quantity ?? 0;
                     const min = p.minimum_stock ?? 0;
                     const isOut = qty === 0;
@@ -359,8 +371,20 @@ export default function InventoryPage() {
             </table>
             {sortedProducts.length > 0 && (
               <div className="flex items-center justify-between px-4 py-3 border-t bg-muted/30 text-xs text-muted-foreground">
-                <span>{sortedProducts.length} produtos</span>
-                <span>{t.inventory.filteredValue}: {formatCurrency(filteredValue)}</span>
+                <span>{sortedProducts.length} produtos · Página {page} de {totalPages}</span>
+                <div className="flex items-center gap-3">
+                  <span>{t.inventory.filteredValue}: {formatCurrency(filteredValue)}</span>
+                  {totalPages > 1 && (
+                    <div className="flex gap-1">
+                      <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
+                        <ChevronLeft className="h-3 w-3" />
+                      </Button>
+                      <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
+                        <ChevronRight className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>

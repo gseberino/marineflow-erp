@@ -83,7 +83,6 @@ export function WhatsAppWebhookValidator() {
         });
         setTimeout(check, 2000);
       }
-      console.log('zapi-configure-webhook details:', result);
     } catch (e: any) {
       toast({ title: 'Erro ao configurar', description: e.message, variant: 'destructive' });
     } finally {

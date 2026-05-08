@@ -67,7 +67,6 @@ async function loadProfile(
     }
 
     if (data) {
-      console.log('[Auth] Profile loaded successfully:', { role: data.role, hasMetadata: !!data.metadata, metadata: data.metadata });
     }
 
     return {
@@ -107,11 +106,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!mountedRef.current || profileRequestRef.current !== requestId) return;
         setUser(profile);
         setProfileReady(true);
-        console.log('[Auth] Profile ready:', profile.role);
       })
       .catch((error) => {
         if (!mountedRef.current || profileRequestRef.current !== requestId) return;
-        console.warn('[Auth] Profile load failed:', error);
         // Mark ready even on failure so ProtectedRoute can evaluate (role='other' → unauthorized)
         setProfileReady(true);
       });
@@ -145,7 +142,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const safetyTimer = setTimeout(() => {
       if (!mountedRef.current) return;
       if (!authReady) {
-        console.warn('[Auth] Safety timeout — forcing authReady');
         setAuthReady(true);
       }
     }, 5000);
@@ -187,7 +183,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
       .catch((error) => {
         if (!mountedRef.current) return;
-        console.warn('[Auth] Session restore failed:', error);
         applySession(null);
         setAuthReady(true);
         clearTimeout(safetyTimer);
