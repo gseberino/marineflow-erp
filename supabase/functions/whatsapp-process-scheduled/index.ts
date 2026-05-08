@@ -73,6 +73,7 @@ Deno.serve(async (req) => {
       }
 
       try {
+        console.log('[whatsapp-process-scheduled] iniciando processamento', new Date().toISOString());
         // Chama whatsapp-send via fetch interno
         const sendUrl = `${SUPABASE_URL}/functions/v1/whatsapp-send`;
         const payload: Record<string, unknown> = {
