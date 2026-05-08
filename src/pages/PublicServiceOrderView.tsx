@@ -42,6 +42,7 @@ interface PublicData {
   services: any[];
   company: Record<string, string>;
   signature: Signature | null;
+  presetData: { label: string | null; installments: number | null } | null;
 }
 
 export default function PublicServiceOrderView() {
