@@ -468,6 +468,10 @@ function buildPaymentSection(so: PDFData['serviceOrder']): string {
     //   1) preset percentages: { services_pct, parts_pct, expenses_pct }
     //   2) flat percent: { percent }
     //   3) explicit amount: { amount }
+    // Discount ratio ensures the installment amounts sum to grandTotal (not the gross subtotal)
+    const subtotal = servicesTotal + partsTotal + expensesTotal;
+    const discountRatio = subtotal > 0 ? grandTotal / subtotal : 1;
+
     const computedAmounts: number[] = installments.map((inst: any) => {
       if (typeof inst.amount === 'number' && !isNaN(inst.amount)) return inst.amount;
       if (typeof inst.percent === 'number' && !isNaN(inst.percent)) {
@@ -476,8 +480,9 @@ function buildPaymentSection(so: PDFData['serviceOrder']): string {
       const sPct = Number(inst.services_pct || 0) / 100;
       const pPct = Number(inst.parts_pct || 0) / 100;
       const ePct = Number(inst.expenses_pct || 0) / 100;
-      const v = servicesTotal * sPct + partsTotal * pPct + expensesTotal * ePct;
-      return Math.round(v * 100) / 100;
+      // Apply discount ratio so amounts reflect the final discounted total
+      const gross = servicesTotal * sPct + partsTotal * pPct + expensesTotal * ePct;
+      return Math.round(gross * discountRatio * 100) / 100;
     });
 
     // Sanity adjust: if rounding leaves a residue, push it onto the last installment
