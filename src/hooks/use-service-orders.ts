@@ -110,9 +110,23 @@ export function useUpdateServiceOrder() {
         .single();
       if (error) throw error;
 
+      // Always recompute grand_total from the DB after saving.
+      // This ensures discount, tax, travel and all line items are reflected
+      // correctly in the stored value — used by PDFs, receivables, and reports.
+      await recalcTotals(id);
+
+      // Re-read the freshly computed grand_total for cascade logic
+      const { data: refreshed } = await supabase
+        .from('service_orders')
+        .select('grand_total')
+        .eq('id', id)
+        .single();
+
+      const newGrandTotal = Number(refreshed?.grand_total ?? data.grand_total);
+
       // Cascade update receivable if grand_total changed
-      if (prev && data && prev.grand_total !== data.grand_total) {
-        await updateReceivableFromSO(id, Number(data.grand_total));
+      if (prev && newGrandTotal !== Number(prev.grand_total)) {
+        await updateReceivableFromSO(id, newGrandTotal);
       }
 
       await writeAuditLog({
@@ -128,6 +142,7 @@ export function useUpdateServiceOrder() {
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ['service-orders'] });
       qc.invalidateQueries({ queryKey: ['service-orders', vars.id] });
+      qc.invalidateQueries({ queryKey: ['pdf-data', vars.id] });
       qc.invalidateQueries({ queryKey: ['receivables'] });
       if (vars?.status === 'completed') {
         qc.invalidateQueries({ queryKey: ['products'] });
