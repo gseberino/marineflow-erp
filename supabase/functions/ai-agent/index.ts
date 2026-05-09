@@ -22,8 +22,8 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON = Deno.env.get("SUPABASE_ANON_KEY")!;
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY")!;
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai";
-const MODEL_FAST = "gemini-2.0-flash";
-const MODEL_SMART = "gemini-2.0-flash";
+const MODEL_FAST = "gemini-3-flash";
+const MODEL_SMART = "gemini-3-flash";
 const MAX_ITERATIONS = 8;
 
 // ---------------- TOOL DEFINITIONS ----------------
