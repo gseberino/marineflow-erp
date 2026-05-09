@@ -1,8 +1,9 @@
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Migration: fiscal_notes table + confirm_nfe_import RPC
+-- 100% idempotent: safe to run even if any part was already applied
 -- ─────────────────────────────────────────────────────────────────────────────
 
--- 1. Tabela principal de notas fiscais importadas
+-- 1. Create table if it doesn't exist yet
 CREATE TABLE IF NOT EXISTS fiscal_notes (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   nfe_key       text UNIQUE,
@@ -15,46 +16,67 @@ CREATE TABLE IF NOT EXISTS fiscal_notes (
   tax_ipi       numeric(14,2) DEFAULT 0,
   tax_pis       numeric(14,2) DEFAULT 0,
   tax_cofins    numeric(14,2) DEFAULT 0,
-  items         jsonb NOT NULL DEFAULT '[]',
-  xml_content   text,                          -- XML original armazenado
-  status        text NOT NULL DEFAULT 'pending'
-                CHECK (status IN ('pending','confirmed','cancelled','error')),
+  items         jsonb DEFAULT '[]',
+  xml_content   text,
+  status        text NOT NULL DEFAULT 'pending',
   confirmed_at  timestamptz,
   created_at    timestamptz DEFAULT now(),
   updated_at    timestamptz DEFAULT now()
 );
 
--- Índices para queries frequentes
+-- 2. Add missing columns (safe if they already exist)
+ALTER TABLE fiscal_notes ADD COLUMN IF NOT EXISTS issued_at    timestamptz;
+ALTER TABLE fiscal_notes ADD COLUMN IF NOT EXISTS total_amount numeric(14,2) DEFAULT 0;
+ALTER TABLE fiscal_notes ADD COLUMN IF NOT EXISTS tax_icms     numeric(14,2) DEFAULT 0;
+ALTER TABLE fiscal_notes ADD COLUMN IF NOT EXISTS tax_ipi      numeric(14,2) DEFAULT 0;
+ALTER TABLE fiscal_notes ADD COLUMN IF NOT EXISTS tax_pis      numeric(14,2) DEFAULT 0;
+ALTER TABLE fiscal_notes ADD COLUMN IF NOT EXISTS tax_cofins   numeric(14,2) DEFAULT 0;
+ALTER TABLE fiscal_notes ADD COLUMN IF NOT EXISTS items        jsonb DEFAULT '[]';
+ALTER TABLE fiscal_notes ADD COLUMN IF NOT EXISTS xml_content  text;
+ALTER TABLE fiscal_notes ADD COLUMN IF NOT EXISTS confirmed_at timestamptz;
+
+-- 3. Status constraint (drop old variations, add canonical one)
+ALTER TABLE fiscal_notes DROP CONSTRAINT IF EXISTS fiscal_notes_status_check;
+ALTER TABLE fiscal_notes DROP CONSTRAINT IF EXISTS chk_fiscal_notes_status;
+ALTER TABLE fiscal_notes ADD CONSTRAINT fiscal_notes_status_check
+  CHECK (status IN ('pending','confirmed','cancelled','error'));
+
+-- 4. Indexes
 CREATE INDEX IF NOT EXISTS idx_fiscal_notes_status    ON fiscal_notes (status);
 CREATE INDEX IF NOT EXISTS idx_fiscal_notes_nfe_key   ON fiscal_notes (nfe_key);
 CREATE INDEX IF NOT EXISTS idx_fiscal_notes_issued_at ON fiscal_notes (issued_at DESC);
 
--- RLS
+-- 5. RLS
 ALTER TABLE fiscal_notes ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "fiscal_notes_select" ON fiscal_notes;
-DROP POLICY IF EXISTS "fiscal_notes_insert" ON fiscal_notes;
-DROP POLICY IF EXISTS "fiscal_notes_update" ON fiscal_notes;
+
+-- Drop ALL known policy names (handles both old and new naming conventions)
+DROP POLICY IF EXISTS "fiscal_notes_select"           ON fiscal_notes;
+DROP POLICY IF EXISTS "fiscal_notes_insert"           ON fiscal_notes;
+DROP POLICY IF EXISTS "fiscal_notes_update"           ON fiscal_notes;
+DROP POLICY IF EXISTS "authenticated_all_fiscal_notes" ON fiscal_notes;
+
 CREATE POLICY "fiscal_notes_select" ON fiscal_notes FOR SELECT TO authenticated USING (true);
 CREATE POLICY "fiscal_notes_insert" ON fiscal_notes FOR INSERT TO authenticated WITH CHECK (true);
 CREATE POLICY "fiscal_notes_update" ON fiscal_notes FOR UPDATE TO authenticated USING (true);
 
--- 2. Extend payables.origin to include 'fiscal_note' and 'commission'
+-- 6. Extend payables.origin constraint
 ALTER TABLE public.payables DROP CONSTRAINT IF EXISTS chk_payables_origin;
 ALTER TABLE public.payables ADD CONSTRAINT chk_payables_origin
   CHECK (origin IN ('manual','service_order_expense','bank_reconciliation','fiscal_note','commission'));
 
--- 3. Extend inventory_movements.movement_type constraint
+-- 7. Extend inventory_movements.movement_type constraint
 ALTER TABLE public.inventory_movements
   DROP CONSTRAINT IF EXISTS inventory_movements_movement_type_check;
 ALTER TABLE public.inventory_movements
   ADD CONSTRAINT inventory_movements_movement_type_check
   CHECK (movement_type IN (
     'purchase','manual_adjustment','service_usage','return','transfer',
-    'manual_add','manual_remove','import','fiscal_note_entry'
+    'manual_add','manual_remove','import','fiscal_note_entry',
+    'service_order_usage','manual_add_stock','manual_remove_stock'
   ));
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- 4. RPC: confirm_nfe_import (atomic: stock + movements + payable + audit)
+-- 8. RPC: confirm_nfe_import (atomic: stock + movements + payable + audit)
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION confirm_nfe_import(
   p_note_id      uuid,
@@ -82,13 +104,11 @@ BEGIN
     RAISE EXCEPTION 'fiscal_note already has status %, cannot confirm again', v_note.status;
   END IF;
 
-  -- Resolve supplier name for the payable snapshot
   IF p_supplier_id IS NOT NULL THEN
     SELECT supplier_name INTO v_supplier_name FROM suppliers WHERE id = p_supplier_id;
   END IF;
 
-  -- Process each item
-  FOR v_item IN SELECT * FROM jsonb_array_elements(v_note.items) LOOP
+  FOR v_item IN SELECT * FROM jsonb_array_elements(COALESCE(v_note.items, '[]')) LOOP
     v_qty  := COALESCE((v_item->>'quantity')::numeric, 0);
     v_cost := COALESCE((v_item->>'unit_price')::numeric, 0);
 
@@ -136,7 +156,6 @@ BEGIN
     v_movements := v_movements + 1;
   END LOOP;
 
-  -- Create payable (optional)
   IF p_supplier_id IS NOT NULL THEN
     INSERT INTO payables (
       supplier_id, supplier_name, description,
@@ -157,12 +176,10 @@ BEGIN
     );
   END IF;
 
-  -- Mark as confirmed
   UPDATE fiscal_notes
      SET status = 'confirmed', confirmed_at = now(), updated_at = now()
    WHERE id = p_note_id;
 
-  -- Audit
   INSERT INTO audit_logs (table_name, record_id, action, new_value, reason)
   VALUES (
     'fiscal_notes',
