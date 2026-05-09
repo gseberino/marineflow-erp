@@ -20,8 +20,8 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON = Deno.env.get("SUPABASE_ANON_KEY")!;
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY")!;
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai";
-const MODEL_FAST = "gemini-2.5-flash-preview-04-17";
-const MODEL_SMART = "gemini-2.5-pro-preview-05-06";
+const MODEL_FAST = "gemini-1.5-flash";
+const MODEL_SMART = "gemini-1.5-pro";
 const MAX_ITERATIONS = 8;
 
 // ---------------- TOOL DEFINITIONS ----------------
@@ -1634,7 +1634,12 @@ Quando o usuário disser "este cliente", "esta OS", "este barco", use o ID em co
       if (!aiRes.ok) {
         const t = await aiRes.text();
         console.error("AI gateway error:", aiRes.status, t);
-        return jr({ error: "Erro no gateway de IA" }, 500);
+        try {
+          const errJson = JSON.parse(t);
+          return jr({ error: `IA Erro (${aiRes.status}): ${errJson.error?.message || t}` }, 500);
+        } catch {
+          return jr({ error: `Erro no gateway de IA (${aiRes.status})` }, 500);
+        }
       }
 
       const aiJson = await aiRes.json();
