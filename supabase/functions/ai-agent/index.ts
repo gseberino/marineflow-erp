@@ -601,6 +601,36 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "create_purchase_order",
+      description: "Cria uma nova ordem de compra para um fornecedor.",
+      parameters: {
+        type: "object",
+        properties: {
+          supplier_id: { type: "string" },
+          service_order_id: { type: "string" },
+          expected_date: { type: "string", description: "Data esperada (ISO date)" },
+          notes: { type: "string" },
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                product_id: { type: "string" },
+                description: { type: "string" },
+                quantity: { type: "number" },
+                unit_cost: { type: "number" },
+              },
+              required: ["description", "quantity", "unit_cost"],
+            },
+          },
+        },
+        required: ["supplier_id"],
+      },
+    },
+  },
 ];
 
 // ---------------- TOOL EXECUTORS ----------------
@@ -657,7 +687,7 @@ async function executeTool(
     case "list_agenda": {
       let query = sb
         .from("agenda_tasks")
-        .select("id, title, scheduled_start_at, scheduled_end_at, status, priority, location, clients(full_name_or_company_name), app_users!agenda_tasks_technician_user_id_fkey(full_name)")
+        .select("id, title, scheduled_start_at, scheduled_end_at, status, priority, location, clients(full_name_or_company_name), app_users(full_name)")
         .gte("scheduled_start_at", args.date_from)
         .lte("scheduled_start_at", args.date_to)
         .order("scheduled_start_at", { ascending: true });
@@ -906,7 +936,7 @@ async function executeTool(
       await admin.from("inventory_movements").insert({
         product_id,
         quantity_delta: delta,
-        movement_type: "adjustment",
+        movement_type: "manual_adjustment",
         notes: reason
       });
 
@@ -1153,6 +1183,24 @@ async function executeTool(
       const { data, error } = await sb.from("products").insert(args).select().single();
       if (error) throw error;
       return { ok: true, product: data };
+    }
+
+    case "create_purchase_order": {
+      const { supplier_id, service_order_id, items, ...rest } = args;
+      const { data: po, error } = await sb.from("purchase_orders").insert({
+        ...rest,
+        supplier_id,
+        service_order_id,
+        status: rest.status || "draft",
+        created_by: userId
+      }).select().single();
+      if (error) throw error;
+      if (Array.isArray(items) && items.length > 0) {
+        await sb.from("purchase_order_items").insert(
+          items.map((it: any) => ({ ...it, purchase_order_id: po.id }))
+        );
+      }
+      return { ok: true, purchase_order: po };
     }
 
     // ===== WhatsApp =====

@@ -251,12 +251,14 @@ export function useTechnicianProductivityReport() {
 }
 
 // ============ TAB 5: PROFITABILITY ============
-export function useProfitabilityReport() {
+export function useProfitabilityReport(periodDays: number = 30) {
   return useQuery({
-    queryKey: ['reports', 'profitability'],
+    queryKey: ['reports', 'profitability', periodDays],
     queryFn: async () => {
+      const since = daysAgo(periodDays);
       const { data, error } = await (supabase.from as any)('vw_os_profitability')
         .select('*')
+        .gte('created_at', since)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -270,41 +272,26 @@ export function useProfitabilityReport() {
         ? completed.reduce((s: number, o: any) => s + Number(o.net_margin_percent || 0), 0) / completed.length 
         : 0;
 
-      // Top 10 most profitable OS
-      const topOS = [...completed]
-        .sort((a: any, b: any) => b.net_profit - a.net_profit)
-        .slice(0, 10);
+      // Map rows for the table
+      const rows = all.map((o: any) => ({
+        id: o.os_id,
+        number: o.service_order_number,
+        client: o.client_name,
+        revenue: Number(o.revenue || 0),
+        cost: Number(o.parts_cost || 0) + Number(o.travel_cost || 0) + Number(o.operational_cost || 0) + Number(o.commission_cost || 0),
+        profit: Number(o.net_profit || 0),
+        margin: Number(o.net_margin_percent || 0),
+        status: o.status,
+        created_at: o.created_at
+      }));
 
-      // Monthly profit trend (last 6 months)
-      const monthMap = new Map<string, { revenue: number; profit: number }>();
-      for (let i = 5; i >= 0; i--) {
-        const d = new Date();
-        d.setMonth(d.getMonth() - i);
-        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-        monthMap.set(key, { revenue: 0, profit: 0 });
-      }
-
-      completed.forEach((o: any) => {
-        const key = String(o.created_at).slice(0, 7);
-        if (monthMap.has(key)) {
-          const cur = monthMap.get(key)!;
-          cur.revenue += Number(o.revenue || 0);
-          cur.profit += Number(o.net_profit || 0);
-          monthMap.set(key, cur);
-        }
-      });
-
-      const trend = Array.from(monthMap.entries()).map(([month, val]) => {
-        const [, m] = month.split('-');
-        const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
-        return { 
-          name: monthNames[Number(m) - 1], 
-          revenue: val.revenue, 
-          profit: val.profit 
-        };
-      });
-
-      return { totalRevenue, totalNetProfit, avgMargin, topOS, trend };
+      return { 
+        totalRevenue, 
+        totalProfit: totalNetProfit, 
+        avgMargin, 
+        rows,
+        topOS: [...rows].filter(r => r.status === 'completed' || r.status === 'invoiced').sort((a, b) => b.profit - a.profit).slice(0, 10)
+      };
     },
   });
 }

@@ -362,17 +362,17 @@ function ProfitabilityTab() {
         </Select>
       </div>
 
-      {isLoading ? <LoadingBlock /> : error ? <ErrorBlock onRetry={() => refetch()} /> : !data ? <LoadingBlock /> : (
+      {isLoading ? <LoadingBlock /> : error ? <ErrorBlock onRetry={() => refetch()} /> : !data || !data.rows ? <LoadingBlock /> : (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <KPICard title="Faturamento Total" value={formatCurrency(data.totalRevenue)} icon={DollarSign} />
             <KPICard title="Lucro Bruto Real" value={formatCurrency(data.totalProfit)} icon={TrendingUp} className="border-emerald-200 bg-emerald-50/20" />
-            <KPICard title="Margem Média" value={`${data.avgMargin.toFixed(1)}%`} icon={Percent} />
+            <KPICard title="Margem Média" value={`${(data.avgMargin || 0).toFixed(1)}%`} icon={Percent} />
           </div>
 
           <ChartCard title="Lucro vs Custo por OS (Top 10)">
             <ResponsiveContainer width="100%" height={320}>
-              <BarChart data={data.rows.slice(0, 10)} layout="vertical" margin={{ left: 30 }}>
+              <BarChart data={(data.topOS || []).slice(0, 10)} layout="vertical" margin={{ left: 30 }}>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                 <XAxis type="number" className="text-xs" tickFormatter={v => formatCurrency(v).replace(/[^\d.,]/g, '')} />
                 <YAxis type="category" dataKey="number" className="text-xs" width={100} />
@@ -436,6 +436,8 @@ function ProfitabilityTab() {
 // =============== MAIN PAGE ===============
 export default function ReportsPage() {
   const { t } = useI18n();
+  const { data: dataProfitability } = useProfitabilityReport(30);
+  const { data: dataPerformance } = useOsPerformanceReport();
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -443,8 +445,8 @@ export default function ReportsPage() {
 
       <AIConsultantDashboard 
         data={{
-          profitability: (useProfitabilityReport as any)(30).data,
-          performance: useOsPerformanceReport().data
+          profitability: dataProfitability?.rows || [],
+          performance: dataPerformance || {}
         }} 
       />
 

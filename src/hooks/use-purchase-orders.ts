@@ -37,13 +37,13 @@ export interface PurchaseOrder {
 const PO_LIST_SELECT = `
   *,
   suppliers(company_name, contact_name),
-  service_orders!purchase_orders_service_order_id_fkey(service_order_number, title)
+  service_orders(service_order_number, title)
 `;
 
 const PO_DETAIL_SELECT = `
   *,
   suppliers(company_name, contact_name, email, phone),
-  service_orders!purchase_orders_service_order_id_fkey(service_order_number, title),
+  service_orders(service_order_number, title),
   purchase_order_items(*, products(name, sku))
 `;
 
