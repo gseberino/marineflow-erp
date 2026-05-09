@@ -44,7 +44,7 @@ SELECT
         ELSE 0 
     END as net_margin_percent,
     so.created_at,
-    so.finished_at,
+    COALESCE(so.finished_at, so.check_out_at) as finished_at,
     c.full_name_or_company_name as client_name
 FROM 
     public.service_orders so
