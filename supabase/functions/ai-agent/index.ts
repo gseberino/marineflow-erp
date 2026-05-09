@@ -1468,7 +1468,15 @@ Responda APENAS com o texto da mensagem pronta para envio, sem explicações ou 
         }),
       });
 
-      if (aiRes.status === 429) return jr({ error: "Limite de requisições atingido. Tente novamente em alguns segundos." }, 429);
+      if (aiRes.status === 429) {
+        const t = await aiRes.text();
+        let msg = "Limite de requisições atingido.";
+        try {
+          const j = JSON.parse(t);
+          msg = j.error?.message || t;
+        } catch { msg = t; }
+        return jr({ error: `IA Limite (429): ${msg}` }, 429);
+      }
       if (aiRes.status === 402) return jr({ error: "Créditos da IA esgotados." }, 402);
       if (!aiRes.ok) {
         const t = await aiRes.text();
@@ -1631,7 +1639,15 @@ Quando o usuário disser "este cliente", "esta OS", "este barco", use o ID em co
         }),
       });
 
-      if (aiRes.status === 429) return jr({ error: "Limite de requisições atingido. Tente novamente em alguns segundos." }, 429);
+      if (aiRes.status === 429) {
+        const t = await aiRes.text();
+        let msg = "Limite de requisições atingido.";
+        try {
+          const j = JSON.parse(t);
+          msg = j.error?.message || t;
+        } catch { msg = t; }
+        return jr({ error: `IA Limite (429): ${msg}` }, 429);
+      }
       if (aiRes.status === 402) return jr({ error: "Créditos da IA esgotados. Adicione créditos em Settings > Workspace > Usage." }, 402);
       if (!aiRes.ok) {
         const t = await aiRes.text();
