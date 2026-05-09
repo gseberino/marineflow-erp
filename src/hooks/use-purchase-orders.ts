@@ -13,7 +13,7 @@ export interface PurchaseOrderItem {
   unit_cost: number;
   received_qty: number;
   created_at: string;
-  products?: { name: string; sku?: string } | null;
+  products?: { product_name: string; sku?: string | null } | null;
 }
 
 export interface PurchaseOrder {
@@ -29,22 +29,22 @@ export interface PurchaseOrder {
   created_by: string;
   created_at: string;
   updated_at: string;
-  suppliers?: { company_name: string; contact_name?: string | null } | null;
-  service_orders?: { service_order_number: string; title?: string | null } | null;
+  suppliers?: { supplier_name: string; contact_name?: string | null } | null;
+  service_orders?: { service_order_number: string } | null;
   purchase_order_items?: PurchaseOrderItem[];
 }
 
 const PO_LIST_SELECT = `
   *,
-  suppliers(company_name, contact_name),
-  service_orders(service_order_number, title)
+  suppliers(supplier_name, contact_name),
+  service_orders(service_order_number)
 `;
 
 const PO_DETAIL_SELECT = `
   *,
-  suppliers(company_name, contact_name, email, phone),
-  service_orders(service_order_number, title),
-  purchase_order_items(*, products(name, sku))
+  suppliers(supplier_name, contact_name, contact_email, contact_phone),
+  service_orders(service_order_number),
+  purchase_order_items(*, products(product_name, sku))
 `;
 
 async function generatePONumber(): Promise<string> {
@@ -77,7 +77,7 @@ export function usePurchaseOrders(filters?: { status?: string; search?: string }
       }
       const { data, error } = await q;
       if (error) throw error;
-      return (data ?? []) as PurchaseOrder[];
+      return (data ?? []) as unknown as PurchaseOrder[];
     },
     staleTime: 30 * 1000,
   });
@@ -94,7 +94,7 @@ export function usePurchaseOrder(id: string | undefined) {
         .eq('id', id)
         .maybeSingle();
       if (error) throw error;
-      return data as PurchaseOrder | null;
+      return data as unknown as PurchaseOrder | null;
     },
     enabled: !!id,
   });
@@ -173,7 +173,7 @@ export function useAddPOItem() {
     mutationFn: async (item: Omit<PurchaseOrderItem, 'id' | 'created_at'>) => {
       const { data, error } = await supabase
         .from('purchase_order_items')
-        .insert(item)
+        .insert(item as any)
         .select()
         .single();
       if (error) throw error;

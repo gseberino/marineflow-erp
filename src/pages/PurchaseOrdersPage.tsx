@@ -141,7 +141,7 @@ function POFormDialog({
                 </SelectTrigger>
                 <SelectContent>
                   {(suppliers ?? []).map((s: any) => (
-                    <SelectItem key={s.id} value={s.id}>{s.company_name}</SelectItem>
+                    <SelectItem key={s.id} value={s.id}>{s.supplier_name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -286,13 +286,13 @@ export default function PurchaseOrdersPage() {
       const q = search.toLowerCase();
       list = list.filter(o =>
         o.po_number.toLowerCase().includes(q) ||
-        (o.suppliers?.company_name ?? '').toLowerCase().includes(q) ||
+        (o.suppliers?.supplier_name ?? '').toLowerCase().includes(q) ||
         (o.service_orders?.service_order_number ?? '').toLowerCase().includes(q)
       );
     }
     return [...list].sort((a, b) => {
       let av: any, bv: any;
-      if (sortKey === 'supplier') { av = a.suppliers?.company_name ?? ''; bv = b.suppliers?.company_name ?? ''; }
+      if (sortKey === 'supplier') { av = a.suppliers?.supplier_name ?? ''; bv = b.suppliers?.supplier_name ?? ''; }
       else if (sortKey === 'total_amount') { av = a.total_amount ?? 0; bv = b.total_amount ?? 0; }
       else if (sortKey === 'expected_date') { av = a.expected_date ?? ''; bv = b.expected_date ?? ''; }
       else { av = (a as any)[sortKey] ?? ''; bv = (b as any)[sortKey] ?? ''; }
@@ -321,30 +321,26 @@ export default function PurchaseOrdersPage() {
       <PageHeader
         title="Ordens de Compra"
         description="Gerencie pedidos de compra para fornecedores"
-        icon={<Truck className="h-5 w-5" />}
-        actions={
-          <>
-          <Button variant="outline" size="sm" className="gap-1" onClick={() => {
-            if (!filtered.length) return;
-            const rows = filtered.map(po => ({
-              'Número': po.po_number,
-              'Fornecedor': po.suppliers?.company_name || '',
-              'OS Vinculada': po.service_orders?.service_order_number || '',
-              'Status': PO_STATUS_LABELS[po.status] || po.status,
-              'Previsão Entrega': po.expected_date ? format(new Date(po.expected_date), 'dd/MM/yyyy', { locale: ptBR }) : '',
-              'Total': (po.items || []).reduce((s: number, it: any) => s + Number(it.total_price || 0), 0).toFixed(2),
-            }));
-            const csv = [Object.keys(rows[0]).join(','), ...rows.map(r => Object.values(r).map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','))].join('\n');
-            const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })); a.download = 'ordens_compra.csv'; a.click();
-          }}>
-            <Download className="h-3.5 w-3.5" /> CSV
-          </Button>
-          <Button onClick={handleNew}>
-            <Plus className="h-4 w-4 mr-2" /> Nova PO
-          </Button>
-          </>
-        }
-      />
+      >
+        <Button variant="outline" size="sm" className="gap-1" onClick={() => {
+          if (!filtered.length) return;
+          const rows = filtered.map(po => ({
+            'Número': po.po_number,
+            'Fornecedor': po.suppliers?.supplier_name || '',
+            'OS Vinculada': po.service_orders?.service_order_number || '',
+            'Status': PO_STATUS_LABELS[po.status] || po.status,
+            'Previsão Entrega': po.expected_date ? format(new Date(po.expected_date), 'dd/MM/yyyy', { locale: ptBR }) : '',
+            'Total': Number(po.total_amount || 0).toFixed(2),
+          }));
+          const csv = [Object.keys(rows[0]).join(','), ...rows.map(r => Object.values(r).map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','))].join('\n');
+          const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })); a.download = 'ordens_compra.csv'; a.click();
+        }}>
+          <Download className="h-3.5 w-3.5" /> CSV
+        </Button>
+        <Button onClick={handleNew}>
+          <Plus className="h-4 w-4 mr-2" /> Nova PO
+        </Button>
+      </PageHeader>
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3 items-center">
@@ -440,7 +436,7 @@ export default function PurchaseOrdersPage() {
               {filtered.map(po => (
                 <TableRow key={po.id} className="cursor-pointer hover:bg-muted/30">
                   <TableCell className="font-medium">{po.po_number}</TableCell>
-                  <TableCell>{po.suppliers?.company_name ?? '—'}</TableCell>
+                  <TableCell>{po.suppliers?.supplier_name ?? '—'}</TableCell>
                   <TableCell className="text-sm hidden md:table-cell">
                     {po.service_order_id && po.service_orders?.service_order_number
                       ? <Link to={`/service-orders/${po.service_order_id}`} className="text-primary hover:underline" onClick={e => e.stopPropagation()}>
