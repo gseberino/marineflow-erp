@@ -365,8 +365,8 @@ function ProfitabilityTab() {
       {isLoading ? <LoadingBlock /> : error ? <ErrorBlock onRetry={() => refetch()} /> : !data || !data.rows ? <LoadingBlock /> : (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            <KPICard title="Faturamento Total" value={formatCurrency(data.totalRevenue)} icon={DollarSign} />
-            <KPICard title="Lucro Bruto Real" value={formatCurrency(data.totalProfit)} icon={TrendingUp} className="border-emerald-200 bg-emerald-50/20" />
+            <KPICard title="Faturamento Total" value={formatCurrency(data.totalRevenue || 0)} icon={DollarSign} />
+            <KPICard title="Lucro Bruto Real" value={formatCurrency(data.totalProfit || 0)} icon={TrendingUp} className="border-emerald-200 bg-emerald-50/20" />
             <KPICard title="Margem Média" value={`${(data.avgMargin || 0).toFixed(1)}%`} icon={Percent} />
           </div>
 
@@ -418,8 +418,8 @@ function ProfitabilityTab() {
                     <TableCell className="text-right font-mono text-destructive hidden sm:table-cell">{formatCurrency(r.cost)}</TableCell>
                     <TableCell className="text-right font-mono font-bold text-emerald-600">{formatCurrency(r.profit)}</TableCell>
                     <TableCell className="text-right font-mono">
-                      <Badge variant="outline" className={r.margin > 30 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}>
-                        {r.margin.toFixed(1)}%
+                      <Badge variant="outline" className={(r.margin || 0) > 30 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}>
+                        {(r.margin || 0).toFixed(1)}%
                       </Badge>
                     </TableCell>
                   </TableRow>
