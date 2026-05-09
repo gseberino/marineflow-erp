@@ -10,7 +10,7 @@ export function useReceivables() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('receivables')
-        .select('*, clients!receivables_client_id_fkey(id,full_name_or_company_name,whatsapp,phone), service_orders!receivables_service_order_id_fkey(id,service_order_number,share_token)')
+        .select('*, clients!receivables_client_id_fkey(id,name,whatsapp,phone), service_orders!receivables_service_order_id_fkey(id,service_order_number,share_token)')
         .order('due_date', { ascending: true });
       if (error) throw error;
       return data;
@@ -24,7 +24,7 @@ export function usePayables() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('payables')
-        .select('*, suppliers!payables_supplier_id_fkey(supplier_name), service_orders!payables_linked_service_order_id_fkey(service_order_number), service_order_expenses!service_order_expenses_linked_payable_id_fkey(receipt_url)')
+        .select('*, suppliers!payables_supplier_id_fkey(name), service_orders!payables_linked_service_order_id_fkey(service_order_number), service_order_expenses!service_order_expenses_linked_payable_id_fkey(receipt_url)')
         .order('due_date', { ascending: true });
       if (error) throw error;
       return data;
@@ -57,7 +57,7 @@ export function useCreatePayable() {
     mutationFn: async (p: {
       description: string; issue_date: string; due_date: string;
       amount: number; currency?: string; expense_category?: string;
-      supplier_id?: string; supplier_name?: string;
+      supplier_id?: string; name?: string;
       linked_service_order_id?: string; notes?: string;
       origin?: string; bank_transaction_id?: string;
       cost_center_id?: string; sub_category?: string;

@@ -49,7 +49,7 @@ export function PayableFormDialog({ open, onOpenChange }: Props) {
         expense_category: category || undefined,
         cost_center_id: costCenterId || undefined,
         supplier_id: supplierId || undefined,
-        supplier_name: selectedSupplier?.supplier_name || supplierName || undefined,
+        name: selectedSupplier?.name || supplierName || undefined,
         linked_service_order_id: soId || undefined,
         notes: notes || undefined,
       });
@@ -70,9 +70,9 @@ export function PayableFormDialog({ open, onOpenChange }: Props) {
               placeholder="—"
               options={(suppliers || []).map(s => ({
                 value: s.id,
-                label: s.supplier_name,
+                label: s.name,
                 description: s.cnpj_cpf || undefined,
-                searchTerms: [s.cnpj_cpf || '', s.contact_email || ''],
+                searchTerms: [s.cnpj_cpf || '', s.email || ''],
               }))}
               onCreate={(typed) => {
                 setQuickSupplierName(typed);

@@ -115,7 +115,7 @@ export function BulkBillingReminderDialog({
         const phoneRaw = client?.whatsapp || client?.phone || '';
         return {
           ...r,
-          client_name: client?.full_name_or_company_name || 'Cliente',
+          client_name: client?.name || 'Cliente',
           phone_normalized: normalizePhoneE164(phoneRaw),
           has_phone: !!normalizePhoneE164(phoneRaw),
         };

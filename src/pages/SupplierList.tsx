@@ -39,7 +39,7 @@ export default function SupplierList() {
   const [editing, setEditing] = useState<Supplier | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [page, setPage] = useState(1);
-  const [sortKey, setSortKey] = useState('supplier_name');
+  const [sortKey, setSortKey] = useState('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const { t } = useI18n();
   const { data: suppliers, isLoading, error } = useSuppliers();
@@ -59,7 +59,7 @@ export default function SupplierList() {
   const filtered = useMemo(() => {
     const list = (suppliers ?? []).filter(s =>
       !search ||
-      s.supplier_name.toLowerCase().includes(search.toLowerCase()) ||
+      s.name.toLowerCase().includes(search.toLowerCase()) ||
       (s.cnpj_cpf ?? '').toLowerCase().includes(search.toLowerCase()) ||
       (s.trade_name ?? '').toLowerCase().includes(search.toLowerCase())
     );
@@ -116,8 +116,8 @@ export default function SupplierList() {
             <table className="w-full text-sm min-w-[700px]">
               <thead><tr className="border-b bg-muted/50">
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                  <button onClick={() => handleSort('supplier_name')} className="flex items-center hover:text-foreground transition-colors">
-                    {t.suppliers.supplierName}<SortIcon col="supplier_name" />
+                  <button onClick={() => handleSort('name')} className="flex items-center hover:text-foreground transition-colors">
+                    {t.suppliers.supplierName}<SortIcon col="name" />
                   </button>
                 </th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">
@@ -154,7 +154,7 @@ export default function SupplierList() {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <Building2 className="h-4 w-4 text-accent shrink-0" />
-                        <span className="font-medium">{s.supplier_name}</span>
+                        <span className="font-medium">{s.name}</span>
                       </div>
                     </td>
                     <td className="px-4 py-3 hidden md:table-cell text-muted-foreground">{s.trade_name ?? '—'}</td>

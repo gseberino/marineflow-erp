@@ -88,7 +88,7 @@ export default function PublicServiceOrderView() {
             : Promise.resolve({ data: null, error: null }),
           supabase
             .from('service_order_parts')
-            .select('*, products(product_name, sku)')
+            .select('*, products(name, sku)')
             .eq('service_order_id', order.id),
           supabase
             .from('service_order_services')
@@ -243,21 +243,21 @@ export default function PublicServiceOrderView() {
         subcontract_cost_total: (order as any).subcontract_cost_total || 0,
       },
       client: {
-        name: client?.full_name_or_company_name || '—',
+        name: client?.name || '—',
         cpf_cnpj: client?.cpf_cnpj ?? undefined,
         phone: client?.phone ?? undefined,
         email: client?.email ?? undefined,
         address: [client?.address_line_1, client?.city, client?.state].filter(Boolean).join(', ') || undefined,
       },
       vessel: vessel ? {
-        name: vessel.boat_name,
+        name: vessel.name,
         manufacturer: vessel.manufacturer ?? undefined,
         model: vessel.model ?? undefined,
         year: vessel.year ?? undefined,
         registration: vessel.hull_id_or_registration ?? undefined,
       } : undefined,
       services: services.map((s: any) => ({
-        service_name: s.service_name_snapshot || '—',
+        name: s.name_snapshot || '—',
         description: s.description_snapshot ?? undefined,
         billing_unit: s.billing_unit_snapshot || 'unit',
         quantity: s.quantity || 1,
@@ -265,7 +265,7 @@ export default function PublicServiceOrderView() {
         line_total: s.line_total || 0,
       })),
       parts: parts.map((p: any) => ({
-        product_name: p.products?.product_name || '—',
+        name: p.products?.name || '—',
         sku: p.products?.sku ?? undefined,
         quantity: p.quantity || 1,
         unit_price: p.unit_sale_snapshot || 0,
@@ -298,13 +298,13 @@ export default function PublicServiceOrderView() {
       const hash = await computeDocumentHash(
         order,
         services.map((s: any) => ({
-          name: s.service_name_snapshot,
+          name: s.name_snapshot,
           qty: s.quantity,
           unit_price: s.unit_price_snapshot,
           line_total: s.line_total,
         })),
         parts.map((p: any) => ({
-          name: p.products?.product_name || '',
+          name: p.products?.name || '',
           qty: p.quantity,
           unit_price: p.unit_sale_snapshot,
           line_total: p.line_total_sale,
@@ -481,7 +481,7 @@ export default function PublicServiceOrderView() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="text-sm space-y-1">
-                <p className="font-medium">{client.full_name_or_company_name}</p>
+                <p className="font-medium">{client.name}</p>
                 {client.cpf_cnpj && <p className="text-muted-foreground">{client.cpf_cnpj}</p>}
                 {client.phone && <p className="text-muted-foreground">{client.phone}</p>}
                 {client.email && <p className="text-muted-foreground">{client.email}</p>}
@@ -497,7 +497,7 @@ export default function PublicServiceOrderView() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="text-sm space-y-1">
-                <p className="font-medium">{vessel.boat_name}</p>
+                <p className="font-medium">{vessel.name}</p>
                 {(vessel.manufacturer || vessel.model) && (
                   <p className="text-muted-foreground">
                     {[vessel.manufacturer, vessel.model].filter(Boolean).join(' ')}
@@ -528,7 +528,7 @@ export default function PublicServiceOrderView() {
                 {services.map((s) => (
                   <div key={s.id} className="flex justify-between gap-4 text-sm py-2 border-b last:border-0">
                     <div className="flex-1">
-                      <p className="font-medium">{s.service_name_snapshot}</p>
+                      <p className="font-medium">{s.name_snapshot}</p>
                       {s.description_snapshot && (
                         <p className="text-xs text-muted-foreground">{s.description_snapshot}</p>
                       )}
@@ -562,7 +562,7 @@ export default function PublicServiceOrderView() {
                 {parts.map((p) => (
                   <div key={p.id} className="flex justify-between gap-4 text-sm py-2 border-b last:border-0">
                     <div className="flex-1">
-                      <p className="font-medium">{p.products?.product_name || '—'}</p>
+                      <p className="font-medium">{p.products?.name || '—'}</p>
                       {p.products?.sku && (
                         <p className="text-xs text-muted-foreground">SKU: {p.products.sku}</p>
                       )}

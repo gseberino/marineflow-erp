@@ -24,7 +24,7 @@ export function ServiceFormDialog({ open, onOpenChange, editData, onCreated }: P
   const update = useUpdateService();
 
   const [form, setForm] = useState({
-    service_name: '',
+    name: '',
     description: '',
     category: '',
     billing_unit: 'hour',
@@ -37,7 +37,7 @@ export function ServiceFormDialog({ open, onOpenChange, editData, onCreated }: P
   useEffect(() => {
     if (editData) {
       setForm({
-        service_name: editData.service_name || '',
+        name: editData.name || '',
         description: editData.description || '',
         category: editData.category || '',
         billing_unit: editData.billing_unit || 'hour',
@@ -47,14 +47,14 @@ export function ServiceFormDialog({ open, onOpenChange, editData, onCreated }: P
         default_warranty_days: editData.default_warranty_days ?? 0,
       });
     } else {
-      setForm({ service_name: '', description: '', category: '', billing_unit: 'hour', default_price: 0, currency: 'BRL', active: true, default_warranty_days: 0 });
+      setForm({ name: '', description: '', category: '', billing_unit: 'hour', default_price: 0, currency: 'BRL', active: true, default_warranty_days: 0 });
     }
   }, [editData, open]);
 
   const set = (field: string, value: any) => setForm((p) => ({ ...p, [field]: value }));
 
   const handleSave = async () => {
-    if (!form.service_name.trim()) return;
+    if (!form.name.trim()) return;
     try {
       if (editData?.id) {
         await update.mutateAsync({ id: editData.id, ...form });
@@ -86,7 +86,7 @@ export function ServiceFormDialog({ open, onOpenChange, editData, onCreated }: P
         <div className="space-y-4">
           <div>
             <Label>{t.services.serviceName} *</Label>
-            <Input value={form.service_name} onChange={(e) => set('service_name', e.target.value)} className="mt-1" />
+            <Input value={form.name} onChange={(e) => set('name', e.target.value)} className="mt-1" />
           </div>
           <div>
             <Label>{t.common.description}</Label>

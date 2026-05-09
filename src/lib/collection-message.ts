@@ -32,7 +32,7 @@ export function buildCollectionMessage(args: BuildArgs): string {
 
   const baseCtx = {
     nome:
-      c.contact_name || c.client?.full_name_or_company_name || 'Cliente',
+      c.contact_name || c.client?.name || 'Cliente',
     numero_os: c.service_order?.service_order_number || 'Avulso',
     valor: Number(c.amount),
     vencimento: c.due_date,

@@ -28,12 +28,12 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   client?: Client | null;
   initialName?: string;
-  onCreated?: (client: { id: string; full_name_or_company_name: string }) => void;
+  onCreated?: (client: { id: string; name: string }) => void;
 }
 
 const empty = {
   type: 'individual' as string,
-  full_name_or_company_name: '',
+  name: '',
   cpf_cnpj: '',
   phone: '',
   whatsapp: '',
@@ -63,7 +63,7 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
     if (client) {
       setForm({
         type: client.type,
-        full_name_or_company_name: client.full_name_or_company_name,
+        name: client.name,
         cpf_cnpj: client.cpf_cnpj ?? '',
         phone: client.phone ?? '',
         whatsapp: client.whatsapp ?? '',
@@ -81,7 +81,7 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
         active: client.active,
       });
     } else {
-      setForm({ ...empty, full_name_or_company_name: initialName || '' });
+      setForm({ ...empty, name: initialName || '' });
     }
   }, [client, open, initialName]);
 
@@ -93,7 +93,7 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
       const fullAddress = [form.address_line_1, form.address_number, form.address_complement].filter(Boolean).join(', ');
       const payload: TablesInsert<'clients'> = {
         type: form.type,
-        full_name_or_company_name: form.full_name_or_company_name,
+        name: form.name,
         cpf_cnpj: form.cpf_cnpj || null,
         phone: form.phone || null,
         whatsapp: form.whatsapp || null,
@@ -115,7 +115,7 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
         const result = await create.mutateAsync(payload);
         toast.success(t.clients.createSuccess);
         if (onCreated && result) {
-          onCreated({ id: result.id, full_name_or_company_name: result.full_name_or_company_name });
+          onCreated({ id: result.id, name: result.name });
         }
       }
       onOpenChange(false);
@@ -133,7 +133,7 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
     if (data) {
       setForm(prev => ({
         ...prev,
-        full_name_or_company_name: data.nome_fantasia || data.razao_social || prev.full_name_or_company_name,
+        name: data.nome_fantasia || data.razao_social || prev.name,
         postal_code: data.cep || prev.postal_code,
         address_line_1: data.logradouro || prev.address_line_1,
         address_number: data.numero || prev.address_number,
@@ -179,7 +179,7 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
             </div>
             <div className="col-span-2">
               <Label>{t.clients.fullName} *</Label>
-              <Input required value={form.full_name_or_company_name} onChange={e => set('full_name_or_company_name', e.target.value)} />
+              <Input required value={form.name} onChange={e => set('name', e.target.value)} />
             </div>
             <div className="col-span-2">
               <Label>{form.type === 'company' ? t.clients.cnpj : t.clients.cpf}</Label>

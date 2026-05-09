@@ -20,10 +20,10 @@ interface Props {
 }
 
 const empty = {
-  marina_name: '',
+  name: '',
   contact_name: '',
-  contact_phone: '',
-  contact_email: '',
+  phone: '',
+  email: '',
   postal_code: '',
   address_line_1: '',
   address_number: '',
@@ -49,10 +49,10 @@ export function MarinaFormDialog({ open, onOpenChange, marina, onSaved }: Props)
   useEffect(() => {
     if (marina) {
       setForm({
-        marina_name: marina.marina_name,
+        name: marina.name,
         contact_name: marina.contact_name ?? '',
-        contact_phone: marina.contact_phone ?? '',
-        contact_email: marina.contact_email ?? '',
+        phone: marina.phone ?? '',
+        email: marina.email ?? '',
         postal_code: marina.postal_code ?? '',
         address_line_1: marina.address_line_1 ?? '',
         address_number: '',
@@ -79,10 +79,10 @@ export function MarinaFormDialog({ open, onOpenChange, marina, onSaved }: Props)
     try {
       const fullAddress = [form.address_line_1, form.address_number, form.address_complement].filter(Boolean).join(', ');
       const payload: TablesInsert<'marinas'> = {
-        marina_name: form.marina_name,
+        name: form.name,
         contact_name: form.contact_name || null,
-        contact_phone: form.contact_phone || null,
-        contact_email: form.contact_email || null,
+        phone: form.phone || null,
+        email: form.email || null,
         address_line_1: fullAddress || null,
         city: form.city || null,
         state: form.state || null,
@@ -125,7 +125,7 @@ export function MarinaFormDialog({ open, onOpenChange, marina, onSaved }: Props)
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="col-span-2">
               <Label>{t.marinas.marinaName} *</Label>
-              <Input required value={form.marina_name} onChange={e => set('marina_name', e.target.value)} />
+              <Input required value={form.name} onChange={e => set('name', e.target.value)} />
             </div>
             <div>
               <Label>{t.marinas.contactName}</Label>
@@ -133,11 +133,11 @@ export function MarinaFormDialog({ open, onOpenChange, marina, onSaved }: Props)
             </div>
             <div>
               <Label>{t.marinas.contactPhone}</Label>
-              <Input value={form.contact_phone} onChange={e => set('contact_phone', maskPhone(e.target.value))} placeholder="(47) 99999-9999" maxLength={15} />
+              <Input value={form.phone} onChange={e => set('phone', maskPhone(e.target.value))} placeholder="(47) 99999-9999" maxLength={15} />
             </div>
             <div className="col-span-2">
               <Label>{t.marinas.contactEmail}</Label>
-              <Input type="email" value={form.contact_email} onChange={e => set('contact_email', e.target.value)} />
+              <Input type="email" value={form.email} onChange={e => set('email', e.target.value)} />
             </div>
           </div>
 

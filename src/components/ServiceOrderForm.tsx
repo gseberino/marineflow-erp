@@ -104,7 +104,7 @@ const BILLING_UNIT_LABELS: Record<string, string> = {
 // ===== Types & components for inline service/part cards (module-level to preserve input focus) =====
 type SvcCardState = {
   service_id: string;
-  service_name_snapshot: string;
+  name_snapshot: string;
   description_snapshot: string;
   billing_unit_snapshot: string;
   quantity: number;
@@ -117,7 +117,7 @@ type SvcCardState = {
 
 type PartCardState = {
   product_id: string;
-  product_name: string;
+  name: string;
   unit: string;
   quantity: number;
   unit_cost: number;
@@ -156,14 +156,14 @@ function ServiceCardFormComponent({
   const technicians = (appUsers || []).filter(
     (u: any) => u.role === 'technician' || u.role === 'admin'
   );
-  const nameQuery = draft.service_name_snapshot.toLowerCase();
+  const nameQuery = draft.name_snapshot.toLowerCase();
   const suggestions = (services || [])
     .filter((s: any) => s.active)
     .filter((s: any) => {
       if (!nameQuery) return false;
       if (s.id === draft.service_id) return false;
       return (
-        (s.service_name || '').toLowerCase().includes(nameQuery) ||
+        (s.name || '').toLowerCase().includes(nameQuery) ||
         (s.description || '').toLowerCase().includes(nameQuery)
       );
     })
@@ -175,9 +175,9 @@ function ServiceCardFormComponent({
         <div className="md:col-span-6 relative">
           <Label>Descrição</Label>
           <Input
-            value={draft.service_name_snapshot}
+            value={draft.name_snapshot}
             onChange={(e) =>
-              onUpdate({ service_name_snapshot: e.target.value, service_id: '' })
+              onUpdate({ name_snapshot: e.target.value, service_id: '' })
             }
             onFocus={() => setShowSuggestions(true)}
             onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
@@ -194,7 +194,7 @@ function ServiceCardFormComponent({
                   onClick={() => {
                     onUpdate({
                       service_id: s.id,
-                      service_name_snapshot: s.service_name,
+                      name_snapshot: s.name,
                       description_snapshot: s.description || '',
                       billing_unit_snapshot: s.billing_unit || 'hour',
                       unit_price: Number(s.default_price) || 0,
@@ -203,7 +203,7 @@ function ServiceCardFormComponent({
                     setShowSuggestions(false);
                   }}
                 >
-                  <div className="font-medium">{s.service_name}</div>
+                  <div className="font-medium">{s.name}</div>
                   <div className="text-xs text-muted-foreground">
                     {BILLING_UNIT_LABELS[s.billing_unit] || s.billing_unit} —{' '}
                     {formatCurrency(s.default_price || 0)}
@@ -354,14 +354,14 @@ function PartCardFormComponent({
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   if (!draft) return null;
-  const nameQuery = draft.product_name.toLowerCase();
+  const nameQuery = draft.name.toLowerCase();
   const suggestions = (products || [])
     .filter((p: any) => p.active)
     .filter((p: any) => {
       if (!nameQuery) return false;
       if (p.id === draft.product_id) return false;
       return (
-        (p.product_name || '').toLowerCase().includes(nameQuery) ||
+        (p.name || '').toLowerCase().includes(nameQuery) ||
         (p.sku || '').toLowerCase().includes(nameQuery) ||
         (p.brand || '').toLowerCase().includes(nameQuery)
       );
@@ -432,8 +432,8 @@ function PartCardFormComponent({
         <div className="md:col-span-6 relative">
           <Label>Nome / Descrição</Label>
           <Input
-            value={draft.product_name}
-            onChange={(e) => onUpdate({ product_name: e.target.value, product_id: '' })}
+            value={draft.name}
+            onChange={(e) => onUpdate({ name: e.target.value, product_id: '' })}
             onFocus={() => setShowSuggestions(true)}
             onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
             placeholder="Digite ou selecione um produto"
@@ -449,7 +449,7 @@ function PartCardFormComponent({
                   onClick={() => {
                     onUpdate({
                       product_id: p.id,
-                      product_name: p.product_name,
+                      name: p.name,
                       unit: p.unit || 'un',
                       unit_cost: Number(p.cost_price) || 0,
                       unit_sale: Number(p.sale_price) || 0,
@@ -459,7 +459,7 @@ function PartCardFormComponent({
                     setShowSuggestions(false);
                   }}
                 >
-                  <div className="font-medium">{p.product_name}</div>
+                  <div className="font-medium">{p.name}</div>
                   <div className="text-xs text-muted-foreground">
                     {formatCurrency(p.sale_price || 0)}
                     {p.sku ? ` · SKU ${p.sku}` : ''}
@@ -725,7 +725,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   // Part inline-card state (matches the services pattern)
   type PartCardDraft = {
     product_id: string;
-    product_name: string;
+    name: string;
     unit: string;
     quantity: number;
     unit_cost: number;
@@ -735,7 +735,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   };
   const emptyPartCard = (): PartCardDraft => ({
     product_id: '',
-    product_name: '',
+    name: '',
     unit: 'un',
     quantity: 1,
     unit_cost: 0,
@@ -758,7 +758,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   // Service line cards (inline expanding cards)
   type SvcCardDraft = {
     service_id: string;
-    service_name_snapshot: string;
+    name_snapshot: string;
     description_snapshot: string;
     billing_unit_snapshot: string;
     quantity: number;
@@ -769,7 +769,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   };
   const emptySvcCard = (): SvcCardDraft => ({
     service_id: '',
-    service_name_snapshot: '',
+    name_snapshot: '',
     description_snapshot: '',
     billing_unit_snapshot: 'hour',
     quantity: 1,
@@ -788,7 +788,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   type DraftPart = {
     tempId: string;
     product_id: string;
-    product_name: string;
+    name: string;
     quantity: number;
     unit_cost: number;
     unit_sale: number;
@@ -798,7 +798,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   type DraftService = {
     tempId: string;
     service_id?: string;
-    service_name_snapshot: string;
+    name_snapshot: string;
     description_snapshot?: string;
     billing_unit_snapshot: string;
     quantity: number;
@@ -1098,7 +1098,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             await addService.mutateAsync({
               service_order_id: result.id,
               service_id: ds.service_id || undefined,
-              service_name_snapshot: ds.service_name_snapshot,
+              name_snapshot: ds.name_snapshot,
               description_snapshot: ds.description_snapshot || undefined,
               billing_unit_snapshot: ds.billing_unit_snapshot,
               quantity: ds.quantity,
@@ -1192,7 +1192,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     const { data, error } = await supabase
       .from('products')
       .insert({
-        product_name: draft.product_name,
+        name: draft.name,
         cost_price: draft.unit_cost,
         sale_price: draft.unit_sale,
         unit: draft.unit || 'un',
@@ -1232,7 +1232,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       ...prev,
       [row.id]: {
         product_id: row.product_id || '',
-        product_name: row.products?.product_name || '',
+        name: row.products?.name || '',
         unit: row.products?.unit || 'un',
         quantity: Number(row.quantity) || 1,
         unit_cost: Number(row.unit_cost_snapshot) || 0,
@@ -1245,7 +1245,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const handleConfirmNewPartCard = async (cardKey: string) => {
     const draft = editingPart[cardKey];
     if (!draft) return;
-    if (!draft.product_name.trim() || draft.quantity <= 0) {
+    if (!draft.name.trim() || draft.quantity <= 0) {
       toast.error('Preencha nome e quantidade');
       return;
     }
@@ -1257,7 +1257,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           {
             tempId: crypto.randomUUID(),
             product_id: productId,
-            product_name: draft.product_name,
+            name: draft.name,
             quantity: draft.quantity,
             unit_cost: draft.unit_cost,
             unit_sale: draft.unit_sale,
@@ -1290,7 +1290,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const handleConfirmEditPart = async (rowId: string, originalRow: any) => {
     const draft = editingPart[rowId];
     if (!draft || !orderId) return;
-    if (!draft.product_name.trim() || draft.quantity <= 0) {
+    if (!draft.name.trim() || draft.quantity <= 0) {
       toast.error('Preencha nome e quantidade');
       return;
     }
@@ -1325,7 +1325,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     const { data, error } = await supabase
       .from('services')
       .insert({
-        service_name: draft.service_name_snapshot,
+        name: draft.name_snapshot,
         default_price: draft.unit_price,
         billing_unit: draft.billing_unit_snapshot,
         active: true,
@@ -1341,7 +1341,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const handleConfirmNewSvcCard = async (cardKey: string) => {
     const draft = editingSvc[cardKey];
     if (!draft) return;
-    if (!draft.service_name_snapshot.trim() || draft.quantity <= 0) {
+    if (!draft.name_snapshot.trim() || draft.quantity <= 0) {
       toast.error('Preencha descrição e quantidade');
       return;
     }
@@ -1358,7 +1358,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           {
             tempId: crypto.randomUUID(),
             service_id: serviceId || undefined,
-            service_name_snapshot: draft.service_name_snapshot,
+            name_snapshot: draft.name_snapshot,
             description_snapshot: draft.description_snapshot || undefined,
             billing_unit_snapshot: draft.billing_unit_snapshot,
             quantity: draft.quantity,
@@ -1375,7 +1375,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         await addService.mutateAsync({
           service_order_id: orderId,
           service_id: serviceId || undefined,
-          service_name_snapshot: draft.service_name_snapshot,
+          name_snapshot: draft.name_snapshot,
           description_snapshot: draft.description_snapshot || undefined,
           billing_unit_snapshot: draft.billing_unit_snapshot,
           quantity: draft.quantity,
@@ -1402,7 +1402,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const handleConfirmEditSvc = async (rowId: string) => {
     const draft = editingSvc[rowId];
     if (!draft || !orderId) return;
-    if (!draft.service_name_snapshot.trim() || draft.quantity <= 0) {
+    if (!draft.name_snapshot.trim() || draft.quantity <= 0) {
       toast.error('Preencha descrição e quantidade');
       return;
     }
@@ -1413,7 +1413,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         id: rowId,
         service_order_id: orderId,
         service_id: serviceId || null,
-        service_name_snapshot: draft.service_name_snapshot,
+        name_snapshot: draft.name_snapshot,
         description_snapshot: draft.description_snapshot || null,
         billing_unit_snapshot: draft.billing_unit_snapshot,
         quantity: draft.quantity,
@@ -1454,7 +1454,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       ...prev,
       [row.id]: {
         service_id: row.service_id || '',
-        service_name_snapshot: row.service_name_snapshot || '',
+        name_snapshot: row.name_snapshot || '',
         description_snapshot: row.description_snapshot || '',
         billing_unit_snapshot: row.billing_unit_snapshot || 'hour',
         quantity: Number(row.quantity) || 1,
@@ -1737,7 +1737,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                     const url = `${window.location.origin}/view/${orderData.share_token}`;
                     const phoneRaw = (orderData?.clients as any)?.whatsapp || (orderData?.clients as any)?.phone || '';
                     const phone = normalizePhoneE164(phoneRaw);
-                    const clientName = (orderData?.clients as any)?.full_name_or_company_name || '';
+                    const clientName = (orderData?.clients as any)?.name || '';
                     const msg = `Olá${clientName ? ' ' + clientName : ''}, segue o link da Ordem de Serviço ${orderData.service_order_number}: ${url}`;
                     setWaEditPhone(phone);
                     setWaEditMessage(msg);
@@ -1791,7 +1791,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                         serviceOrderNumber: orderData.service_order_number,
                         shareToken: orderData.share_token,
                         clientId: (orderData?.clients as any)?.id || (orderData as any)?.client_id || null,
-                        clientName: (orderData?.clients as any)?.full_name_or_company_name || null,
+                        clientName: (orderData?.clients as any)?.name || null,
                         clientPhone: (orderData?.clients as any)?.whatsapp || (orderData?.clients as any)?.phone || null,
                         documentType: 'service_order',
                       })}
@@ -1805,7 +1805,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                         serviceOrderNumber: orderData.service_order_number,
                         shareToken: orderData.share_token,
                         clientId: (orderData?.clients as any)?.id || (orderData as any)?.client_id || null,
-                        clientName: (orderData?.clients as any)?.full_name_or_company_name || null,
+                        clientName: (orderData?.clients as any)?.name || null,
                         clientPhone: (orderData?.clients as any)?.whatsapp || (orderData?.clients as any)?.phone || null,
                         documentType: 'quote',
                       })}
@@ -1991,7 +1991,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               onChange={(v) => set('marina_id', v)}
               options={(marinas || []).filter((m) => m.active).map((m) => ({
                 value: m.id,
-                label: m.marina_name,
+                label: m.name,
                 description: m.city || undefined,
               }))}
               placeholder="—"
@@ -2354,7 +2354,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 }
                 return renderCollapsedRow({
                   keyId: s.id,
-                  name: s.service_name_snapshot,
+                  name: s.name_snapshot,
                   description: s.description_snapshot,
                   unit: s.billing_unit_snapshot,
                   quantity: s.quantity,
@@ -2382,7 +2382,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               {drafts.map((d) =>
                 renderCollapsedRow({
                   keyId: d.tempId,
-                  name: d.service_name_snapshot,
+                  name: d.name_snapshot,
                   description: d.description_snapshot,
                   unit: d.billing_unit_snapshot,
                   quantity: d.quantity,
@@ -2396,7 +2396,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                       ...prev,
                       [key]: {
                         service_id: d.service_id || '',
-                        service_name_snapshot: d.service_name_snapshot,
+                        name_snapshot: d.name_snapshot,
                         description_snapshot: d.description_snapshot || '',
                         billing_unit_snapshot: d.billing_unit_snapshot,
                         quantity: d.quantity,
@@ -2774,7 +2774,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 }
                 return renderCollapsedPartRow({
                   keyId: p.id,
-                  name: p.products?.product_name || 'Produto',
+                  name: p.products?.name || 'Produto',
                   unit: p.products?.unit,
                   quantity: p.quantity,
                   unitPrice: p.unit_sale_snapshot,
@@ -2797,7 +2797,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               {drafts.map((d) =>
                 renderCollapsedPartRow({
                   keyId: d.tempId,
-                  name: d.product_name,
+                  name: d.name,
                   quantity: d.quantity,
                   unitPrice: d.unit_sale,
                   total: d.unit_sale * d.quantity,
@@ -2810,7 +2810,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                       ...prev,
                       [key]: {
                         product_id: d.product_id,
-                        product_name: d.product_name,
+                        name: d.name,
                         unit: prod?.unit || 'un',
                         quantity: d.quantity,
                         unit_cost: d.unit_cost,
@@ -2994,7 +2994,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   onChange={(v) => setExpForm({ ...expForm, supplier_id: v })}
                   options={(suppliers || []).filter((s) => s.active).map((s) => ({
                     value: s.id,
-                    label: s.supplier_name,
+                    label: s.name,
                     description: s.cnpj_cpf || undefined,
                   }))}
                   placeholder="—"
@@ -3046,7 +3046,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                     <td className="px-4 py-3"><StatusBadge className="bg-secondary text-secondary-foreground">{exp.category}</StatusBadge></td>
                     <td className="px-4 py-3 font-medium">{exp.description}</td>
                      <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">
-                       {exp.suppliers?.supplier_name || '—'}
+                       {exp.suppliers?.name || '—'}
                      </td>
                      <td className="px-4 py-3 hidden sm:table-cell">
                        {exp.paid_by === 'technician' ? (

@@ -26,7 +26,7 @@ export interface Collection {
   due_date: string;
   status: CollectionStatus;
   contact_name: string | null;
-  contact_phone: string | null;
+  phone: string | null;
   contact_whatsapp: string | null;
   send_method: CollectionSendMethod;
   message_template: string | null;
@@ -40,7 +40,7 @@ export interface Collection {
   last_auto_sent_at: string | null;
   created_by: string | null;
   notes: string | null;
-  client?: { id: string; full_name_or_company_name: string; whatsapp: string | null; phone: string | null } | null;
+  client?: { id: string; name: string; whatsapp: string | null; phone: string | null } | null;
   service_order?: { id: string; service_order_number: string } | null;
   last_contact_at?: string | null;
 }
@@ -110,7 +110,7 @@ export function useCollections(filters: CollectionFilters = {}) {
         .from('collections')
         .select(`
           *,
-          client:clients ( id, full_name_or_company_name, whatsapp, phone ),
+          client:clients ( id, name, whatsapp, phone ),
           service_order:service_orders ( id, service_order_number )
         `);
 
@@ -134,7 +134,7 @@ export function useCollections(filters: CollectionFilters = {}) {
       if (filters.search) {
         const s = filters.search.toLowerCase();
         list = list.filter(c =>
-          (c.client?.full_name_or_company_name || '').toLowerCase().includes(s) ||
+          (c.client?.name || '').toLowerCase().includes(s) ||
           (c.service_order?.service_order_number || '').toLowerCase().includes(s) ||
           (c.description || '').toLowerCase().includes(s)
         );
@@ -143,8 +143,8 @@ export function useCollections(filters: CollectionFilters = {}) {
       if (filters.sort_by === 'client') {
         const dir = filters.sort_dir === 'desc' ? -1 : 1;
         list = [...list].sort((a, b) =>
-          dir * (a.client?.full_name_or_company_name || '')
-            .localeCompare(b.client?.full_name_or_company_name || ''));
+          dir * (a.client?.name || '')
+            .localeCompare(b.client?.name || ''));
       }
 
       // Fetch last_contact for each (single grouped query)
@@ -412,7 +412,7 @@ export function useSendCollectionWhatsApp() {
       cardInstallments?: number;
     }) => {
       const c = input.collection;
-      const phoneRaw = c.contact_whatsapp || c.contact_phone || c.client?.whatsapp || c.client?.phone || '';
+      const phoneRaw = c.contact_whatsapp || c.phone || c.client?.whatsapp || c.client?.phone || '';
       const phone = normalizePhoneE164(phoneRaw, '55');
       if (!phone || phone.length < 10) throw new Error('Telefone inválido');
 

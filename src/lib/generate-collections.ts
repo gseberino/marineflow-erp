@@ -21,7 +21,7 @@ export async function generateCollectionsFromOS(
     .select(`
       id, grand_total, payment_conditions, client_id, signed_at,
       payment_condition_preset_id,
-      clients(id, full_name_or_company_name, phone, whatsapp)
+      clients(id, name, phone, whatsapp)
     `)
     .eq('id', input.serviceOrderId)
     .single();
@@ -94,8 +94,8 @@ export async function generateCollectionsFromOS(
         due_date: dueDateISO,
         status: 'pending',
         description: inst.label,
-        contact_name: client?.full_name_or_company_name || null,
-        contact_phone: client?.phone || null,
+        contact_name: client?.name || null,
+        phone: client?.phone || null,
         contact_whatsapp: client?.whatsapp || null,
         auto_rule_enabled: autoRuleEnabled,
       } as never)
@@ -120,7 +120,7 @@ async function autoSendCollectionWhatsApp(collectionIds: string[]) {
         .from('collections')
         .select(`
           *,
-          client:clients(full_name_or_company_name, phone, whatsapp),
+          client:clients(name, phone, whatsapp),
           service_order:service_orders(service_order_number, payment_method, card_installments)
         `)
         .eq('id', id)
@@ -131,7 +131,7 @@ async function autoSendCollectionWhatsApp(collectionIds: string[]) {
 
       const phone =
         c.contact_whatsapp ||
-        c.contact_phone ||
+        c.phone ||
         c.client?.whatsapp ||
         c.client?.phone ||
         '';

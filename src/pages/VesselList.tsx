@@ -20,7 +20,7 @@ export default function VesselList() {
   const [formOpen, setFormOpen] = useState(false);
   const [typeFilter, setTypeFilter] = useState('all');
   const [page, setPage] = useState(1);
-  const [sortKey, setSortKey] = useState('boat_name');
+  const [sortKey, setSortKey] = useState('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const { t } = useI18n();
   const { data: vessels, isLoading, error } = useVessels();
@@ -43,18 +43,18 @@ export default function VesselList() {
   const filtered = useMemo(() => {
     const list = (vessels ?? []).filter((v: any) =>
       (!search ||
-        v.boat_name.toLowerCase().includes(search.toLowerCase()) ||
+        v.name.toLowerCase().includes(search.toLowerCase()) ||
         (v.manufacturer ?? '').toLowerCase().includes(search.toLowerCase()) ||
         (v.model ?? '').toLowerCase().includes(search.toLowerCase()) ||
-        (v.clients?.full_name_or_company_name ?? '').toLowerCase().includes(search.toLowerCase())
+        (v.clients?.name ?? '').toLowerCase().includes(search.toLowerCase())
       ) && (typeFilter === 'all' || v.asset_type === typeFilter)
     );
     return [...list].sort((a: any, b: any) => {
       let av: any;
       let bv: any;
       if (sortKey === 'owner') {
-        av = a.clients?.full_name_or_company_name ?? '';
-        bv = b.clients?.full_name_or_company_name ?? '';
+        av = a.clients?.name ?? '';
+        bv = b.clients?.name ?? '';
       } else {
         av = a[sortKey] ?? '';
         bv = b[sortKey] ?? '';
@@ -127,8 +127,8 @@ export default function VesselList() {
             <table className="w-full text-sm min-w-[800px]">
               <thead><tr className="border-b bg-muted/50">
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                  <button onClick={() => handleSort('boat_name')} className="flex items-center hover:text-foreground transition-colors">
-                    Unidade / Tipo<SortIcon col="boat_name" />
+                  <button onClick={() => handleSort('name')} className="flex items-center hover:text-foreground transition-colors">
+                    Unidade / Tipo<SortIcon col="name" />
                   </button>
                 </th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">
@@ -156,19 +156,19 @@ export default function VesselList() {
                       <Link to={`/vessels/${v.id}`} className="flex items-center gap-2">
                         <Ship className="h-4 w-4 text-accent shrink-0" />
                         <div>
-                          <p className="font-medium text-accent hover:underline">{v.boat_name}</p>
+                          <p className="font-medium text-accent hover:underline">{v.name}</p>
                           <p className="text-xs text-muted-foreground">{v.asset_type || 'Lancha'} • {v.manufacturer} {v.model}</p>
                         </div>
                       </Link>
                     </td>
                     <td className="px-4 py-3 hidden md:table-cell">
                       <Link to={`/clients/${v.client_id}`} className="text-muted-foreground hover:text-foreground">
-                        {v.clients?.full_name_or_company_name ?? '—'}
+                        {v.clients?.name ?? '—'}
                       </Link>
                     </td>
                     <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">
-                      {v.marinas?.marina_name ? (
-                        <span className="flex items-center gap-1"><Anchor className="h-3 w-3" />{v.marinas.marina_name}</span>
+                      {v.marinas?.name ? (
+                        <span className="flex items-center gap-1"><Anchor className="h-3 w-3" />{v.marinas.name}</span>
                       ) : '—'}
                     </td>
                     <td className="px-4 py-3 hidden md:table-cell text-muted-foreground">

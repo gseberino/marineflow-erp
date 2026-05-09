@@ -32,7 +32,7 @@ export function BarcodeScannerModal({ open, onOpenChange, onProductScanned }: Pr
     
     const product = products?.find(p => p.barcode === barcode || p.sku === barcode);
     if (product) {
-      toast.success(`Produto localizado: ${product.product_name}`);
+      toast.success(`Produto localizado: ${product.name}`);
       onProductScanned(product);
       setBarcode('');
       // Mantém o foco para o próximo bip

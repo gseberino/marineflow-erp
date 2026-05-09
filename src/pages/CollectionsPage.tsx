@@ -111,12 +111,12 @@ export default function CollectionsPage() {
       <PageHeader title="Cobranças" description="Gerencie cobranças e régua automática">
         <Button variant="outline" size="sm" className="gap-1" onClick={() => {
           const rows = collections.map((c: any) => ({
-            Cliente: c.client?.full_name_or_company_name || '—',
+            Cliente: c.client?.name || '—',
             'OS / Ref': c.service_order?.service_order_number || 'Avulso',
             'Valor': Number(c.amount).toFixed(2),
             'Vencimento': new Date(c.due_date).toLocaleDateString('pt-BR'),
             'Status': c.status,
-            'Telefone': c.contact_phone || c.client?.phone || '',
+            'Telefone': c.phone || c.client?.phone || '',
             'Último Contato': c.last_contact_at ? new Date(c.last_contact_at).toLocaleDateString('pt-BR') : '',
           }));
           const csv = [Object.keys(rows[0] || {}).join(','), ...rows.map((r: any) => Object.values(r).map((v: any) => `"${String(v ?? '').replace(/"/g,'""')}"`).join(','))].join('\n');
@@ -188,7 +188,7 @@ export default function CollectionsPage() {
             <SelectContent>
               <SelectItem value="all">Todos</SelectItem>
               {(clients || []).map(c => (
-                <SelectItem key={c.id} value={c.id}>{c.full_name_or_company_name}</SelectItem>
+                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -266,10 +266,10 @@ export default function CollectionsPage() {
             ) : collections.length === 0 ? (
               <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">Nenhuma cobrança encontrada.</TableCell></TableRow>
             ) : collections.map(c => {
-              const phone = c.contact_whatsapp || c.contact_phone || c.client?.whatsapp || c.client?.phone || '';
+              const phone = c.contact_whatsapp || c.phone || c.client?.whatsapp || c.client?.phone || '';
               return (
                 <TableRow key={c.id} className="cursor-pointer" onClick={() => setDetailId(c.id)}>
-                  <TableCell className="font-medium">{c.client?.full_name_or_company_name || '—'}</TableCell>
+                  <TableCell className="font-medium">{c.client?.name || '—'}</TableCell>
                   <TableCell className="text-sm hidden sm:table-cell">
                     {c.service_order?.service_order_number || <span className="text-muted-foreground">Avulso</span>}
                   </TableCell>
@@ -349,7 +349,7 @@ export default function CollectionsPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Cancelar cobrança?</AlertDialogTitle>
             <AlertDialogDescription>
-              A cobrança de {cancelTarget?.client?.full_name_or_company_name} no valor de
+              A cobrança de {cancelTarget?.client?.name} no valor de
               {' '}{cancelTarget && fmtBRL(Number(cancelTarget.amount))} será marcada como cancelada.
             </AlertDialogDescription>
           </AlertDialogHeader>

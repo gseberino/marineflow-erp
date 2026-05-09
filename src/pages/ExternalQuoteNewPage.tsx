@@ -48,9 +48,9 @@ export default function ExternalQuoteNewPage() {
     if (leadId !== 'new' && myLeads) {
       const l = myLeads.find(x => x.id === leadId);
       if (l) {
-        setLeadName(l.full_name_or_company_name);
+        setLeadName(l.name);
         setLeadPhone(l.phone || '');
-        setVesselName(l.boat_name || '');
+        setVesselName(l.name || '');
       }
     } else {
       setLeadName('');
@@ -60,7 +60,7 @@ export default function ExternalQuoteNewPage() {
   }, [leadId, myLeads]);
 
   const addItem = () => {
-    setItems([...items, { product_id: '', quantity: 1, unit_price: 0, product_name: '' }]);
+    setItems([...items, { product_id: '', quantity: 1, unit_price: 0, name: '' }]);
   };
 
   const removeItem = (index: number) => {
@@ -75,7 +75,7 @@ export default function ExternalQuoteNewPage() {
       const p = products?.find(x => x.id === value);
       if (p) {
         newItems[index].unit_price = p.sale_price || 0;
-        newItems[index].product_name = p.product_name;
+        newItems[index].name = p.name;
       }
     }
     
@@ -105,7 +105,7 @@ export default function ExternalQuoteNewPage() {
           .insert([{
             created_by: user.id,
             type: 'person',
-            full_name_or_company_name: leadName,
+            name: leadName,
             phone: leadPhone,
             boat_name: vesselName
           } as any])
@@ -126,7 +126,7 @@ export default function ExternalQuoteNewPage() {
         grand_total: total,
         parts: items.map(it => ({
           product_id: it.product_id || null,
-          product_name_snapshot: it.product_name || 'Item manual',
+          name_snapshot: it.name || 'Item manual',
           quantity: it.quantity,
           unit_sale_snapshot: it.unit_price,
           unit_cost_snapshot: 0,
@@ -157,25 +157,25 @@ export default function ExternalQuoteNewPage() {
         // Check in Clients
         const { data: existingClients } = await supabase
           .from('clients')
-          .select('full_name_or_company_name, phone')
-          .or(`full_name_or_company_name.ilike.%${leadName}%,phone.eq.${leadPhone}`)
+          .select('name, phone')
+          .or(`name.ilike.%${leadName}%,phone.eq.${leadPhone}`)
           .limit(1);
 
         if (existingClients && existingClients.length > 0) {
-          setDuplicateWarning(`Atenção: Já existe um CLIENTE cadastrado com nome ou telefone similar: "${existingClients[0].full_name_or_company_name}"`);
+          setDuplicateWarning(`Atenção: Já existe um CLIENTE cadastrado com nome ou telefone similar: "${existingClients[0].name}"`);
           return;
         }
 
         // Check in other Leads
         const { data: existingLeads } = await supabase
           .from('external_quote_leads')
-          .select('full_name_or_company_name, phone')
-          .or(`full_name_or_company_name.ilike.%${leadName}%,phone.eq.${leadPhone}`)
+          .select('name, phone')
+          .or(`name.ilike.%${leadName}%,phone.eq.${leadPhone}`)
           .neq('id', leadId === 'new' ? '00000000-0000-0000-0000-000000000000' : leadId)
           .limit(1);
 
         if (existingLeads && existingLeads.length > 0) {
-          setDuplicateWarning(`Atenção: Já existe um PROSPECTO com dados similares: "${existingLeads[0].full_name_or_company_name}"`);
+          setDuplicateWarning(`Atenção: Já existe um PROSPECTO com dados similares: "${existingLeads[0].name}"`);
         } else {
           setDuplicateWarning(null);
         }
@@ -222,7 +222,7 @@ export default function ExternalQuoteNewPage() {
                 <SelectContent>
                   <SelectItem value="new">+ Criar Novo Prospecto</SelectItem>
                   {myLeads.map(l => (
-                    <SelectItem key={l.id} value={l.id}>{l.full_name_or_company_name}</SelectItem>
+                    <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -304,7 +304,7 @@ export default function ExternalQuoteNewPage() {
                         <SelectContent>
                           <SelectItem value="manual">-- Produto Manual --</SelectItem>
                           {products?.filter(p => p.active).map(p => (
-                            <SelectItem key={p.id} value={p.id}>{p.product_name}</SelectItem>
+                            <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -323,8 +323,8 @@ export default function ExternalQuoteNewPage() {
                     <div className="space-y-2">
                       <Label className="text-xs">Descrição do Produto *</Label>
                       <Input 
-                        value={item.product_name} 
-                        onChange={e => updateItem(index, 'product_name', e.target.value)}
+                        value={item.name} 
+                        onChange={e => updateItem(index, 'name', e.target.value)}
                         placeholder="Descreva o produto/peça"
                       />
                     </div>

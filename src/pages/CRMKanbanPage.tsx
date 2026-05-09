@@ -36,8 +36,8 @@ export default function CRMKanbanPage() {
     const q = search.toLowerCase();
     return (
       (o.service_order_number || '').toLowerCase().includes(q) ||
-      ((o as any).clients?.full_name_or_company_name || '').toLowerCase().includes(q) ||
-      ((o as any).vessels?.boat_name || '').toLowerCase().includes(q)
+      ((o as any).clients?.name || '').toLowerCase().includes(q) ||
+      ((o as any).vessels?.name || '').toLowerCase().includes(q)
     );
   });
 
@@ -85,8 +85,8 @@ export default function CRMKanbanPage() {
                           <span className="text-xs font-medium text-muted-foreground">OS #{order.service_order_number}</span>
                           <span className="text-xs font-semibold">{formatCurrency(order.grand_total || 0)}</span>
                         </div>
-                        <h4 className="font-bold text-sm leading-tight mb-1">{(order as any).clients?.full_name_or_company_name}</h4>
-                        <p className="text-xs text-muted-foreground truncate mb-3">{(order as any).vessels?.boat_name || 'Sem unidade'}</p>
+                        <h4 className="font-bold text-sm leading-tight mb-1">{(order as any).clients?.name}</h4>
+                        <p className="text-xs text-muted-foreground truncate mb-3">{(order as any).vessels?.name || 'Sem unidade'}</p>
                         
                         <div className="flex items-center gap-2 mb-3">
                           <Button size="icon" variant="ghost" className="h-7 w-7 text-green-600 hover:text-green-700 hover:bg-green-50" onClick={() => setZapiTarget({
@@ -94,7 +94,7 @@ export default function CRMKanbanPage() {
                             serviceOrderId: order.id,
                             serviceOrderNumber: order.service_order_number,
                             clientPhone: (order as any).clients?.whatsapp || (order as any).clients?.phone,
-                            clientName: (order as any).clients?.full_name_or_company_name,
+                            clientName: (order as any).clients?.name,
                             clientId: (order as any).clients?.id,
                             documentType: order.status === 'draft' ? 'quote' : 'service_order',
                             shareToken: order.share_token

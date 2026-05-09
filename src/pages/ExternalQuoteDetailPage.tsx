@@ -85,7 +85,7 @@ export default function ExternalQuoteDetailPage() {
                   {quote.parts?.map((item, index) => (
                     <div key={item.id} className="flex justify-between items-start py-3 border-b last:border-0">
                       <div>
-                        <p className="font-medium">{item.product_name_snapshot || 'Peça sem nome'}</p>
+                        <p className="font-medium">{item.name_snapshot || 'Peça sem nome'}</p>
                         <p className="text-xs text-muted-foreground">Qtd: {item.quantity}</p>
                       </div>
                       <div className="text-right">
@@ -101,7 +101,7 @@ export default function ExternalQuoteDetailPage() {
                   {quote.services?.map((item, index) => (
                     <div key={item.id} className="flex justify-between items-start py-3 border-b last:border-0">
                       <div>
-                        <p className="font-medium">{item.service_name_snapshot || 'Serviço sem nome'}</p>
+                        <p className="font-medium">{item.name_snapshot || 'Serviço sem nome'}</p>
                         <p className="text-xs text-muted-foreground">Qtd: {item.quantity}</p>
                       </div>
                       <div className="text-right">
@@ -170,18 +170,18 @@ export default function ExternalQuoteDetailPage() {
                   <User className="h-4 w-4 text-primary" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium">{quote.client?.full_name_or_company_name || quote.lead?.full_name_or_company_name || '—'}</p>
+                  <p className="text-sm font-medium">{quote.client?.name || quote.lead?.name || '—'}</p>
                   <p className="text-xs text-muted-foreground">{quote.client?.phone || quote.lead?.phone || '—'}</p>
                 </div>
               </div>
-              {quote.vessel?.boat_name && (
+              {quote.vessel?.name && (
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-blue-100 rounded-full">
                     <Anchor className="h-4 w-4 text-blue-600" />
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Embarcação/Unidade</p>
-                    <p className="text-sm font-medium">{quote.vessel.boat_name}</p>
+                    <p className="text-sm font-medium">{quote.vessel.name}</p>
                   </div>
                 </div>
               )}

@@ -41,7 +41,7 @@ export function CollectionDetailSheet({ collectionId, onClose }: Props) {
   const preview = useMemo(() => {
     if (!collection || !selectedTpl) return '';
     return renderTemplate(selectedTpl.body, {
-      nome: collection.contact_name || collection.client?.full_name_or_company_name || 'Cliente',
+      nome: collection.contact_name || collection.client?.name || 'Cliente',
       numero_os: collection.service_order?.service_order_number || 'Avulso',
       valor: Number(collection.amount),
       vencimento: collection.due_date,
@@ -63,7 +63,7 @@ export function CollectionDetailSheet({ collectionId, onClose }: Props) {
       <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
         <SheetContent className="sm:max-w-xl w-full overflow-y-auto">
           <SheetHeader>
-            <SheetTitle>{collection.client?.full_name_or_company_name || 'Cliente'}</SheetTitle>
+            <SheetTitle>{collection.client?.name || 'Cliente'}</SheetTitle>
             <SheetDescription>
               {collection.service_order?.service_order_number || 'Avulso'} •
               {' '}R$ {Number(collection.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -96,9 +96,9 @@ export function CollectionDetailSheet({ collectionId, onClose }: Props) {
                   <Pencil className="h-3.5 w-3.5 mr-1" /> Editar
                 </Button>
               </div>
-              <p className="text-sm">{collection.contact_name || collection.client?.full_name_or_company_name}</p>
+              <p className="text-sm">{collection.contact_name || collection.client?.name}</p>
               <p className="text-xs text-muted-foreground">
-                Tel: {collection.contact_phone || collection.client?.phone || '—'} •
+                Tel: {collection.phone || collection.client?.phone || '—'} •
                 {' '}WhatsApp: {collection.contact_whatsapp || collection.client?.whatsapp || '—'}
               </p>
             </div>

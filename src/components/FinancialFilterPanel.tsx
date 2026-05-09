@@ -196,9 +196,9 @@ export function FinancialFilterPanel({ type, filters, onChange }: Props) {
               <Label className="text-xs text-muted-foreground mb-1 block">{ft.allSuppliers}</Label>
               <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
                 {(suppliersList || []).map(s => (
-                  <Button key={s.id} size="sm" variant={filters.suppliers.includes(s.supplier_name) ? 'default' : 'outline'}
-                    onClick={() => onChange({ ...filters, suppliers: toggleArray(filters.suppliers, s.supplier_name) })}>
-                    {s.supplier_name}
+                  <Button key={s.id} size="sm" variant={filters.suppliers.includes(s.name) ? 'default' : 'outline'}
+                    onClick={() => onChange({ ...filters, suppliers: toggleArray(filters.suppliers, s.name) })}>
+                    {s.name}
                   </Button>
                 ))}
               </div>
@@ -208,9 +208,9 @@ export function FinancialFilterPanel({ type, filters, onChange }: Props) {
               <Label className="text-xs text-muted-foreground mb-1 block">{ft.allClients}</Label>
               <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
                 {(clientsList || []).map(c => (
-                  <Button key={c.id} size="sm" variant={filters.clients.includes(c.full_name_or_company_name) ? 'default' : 'outline'}
-                    onClick={() => onChange({ ...filters, clients: toggleArray(filters.clients, c.full_name_or_company_name) })}>
-                    {c.full_name_or_company_name}
+                  <Button key={c.id} size="sm" variant={filters.clients.includes(c.name) ? 'default' : 'outline'}
+                    onClick={() => onChange({ ...filters, clients: toggleArray(filters.clients, c.name) })}>
+                    {c.name}
                   </Button>
                 ))}
               </div>
@@ -294,8 +294,8 @@ export function applyFilters(items: any[], filters: FinancialFilters, type: 'pay
       const s = filters.search.toLowerCase();
       const desc = (item.description || '').toLowerCase();
       const name = type === 'payable'
-        ? ((item as any).suppliers?.supplier_name || item.supplier_name || '').toLowerCase()
-        : ((item as any).clients?.full_name_or_company_name || '').toLowerCase();
+        ? ((item as any).suppliers?.name || item.name || '').toLowerCase()
+        : ((item as any).clients?.name || '').toLowerCase();
       if (!desc.includes(s) && !name.includes(s)) return false;
     }
     if (filters.status.length > 0) {
@@ -310,11 +310,11 @@ export function applyFilters(items: any[], filters: FinancialFilters, type: 'pay
       if (!filters.categories.includes(cat)) return false;
     }
     if (type === 'payable' && filters.suppliers.length > 0) {
-      const sup = (item as any).suppliers?.supplier_name || item.supplier_name;
+      const sup = (item as any).suppliers?.name || item.name;
       if (!filters.suppliers.includes(sup)) return false;
     }
     if (type === 'receivable' && filters.clients.length > 0) {
-      const client = (item as any).clients?.full_name_or_company_name;
+      const client = (item as any).clients?.name;
       if (!filters.clients.includes(client)) return false;
     }
     if (filters.amountMin !== null && Number(item.amount) < filters.amountMin) return false;

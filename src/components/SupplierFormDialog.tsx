@@ -21,12 +21,12 @@ interface Props {
 }
 
 const empty = {
-  supplier_name: '',
+  name: '',
   trade_name: '',
   cnpj_cpf: '',
   contact_name: '',
-  contact_phone: '',
-  contact_email: '',
+  phone: '',
+  email: '',
   website: '',
   postal_code: '',
   address_line_1: '',
@@ -52,12 +52,12 @@ export function SupplierFormDialog({ open, onOpenChange, supplier }: Props) {
   useEffect(() => {
     if (supplier) {
       setForm({
-        supplier_name: supplier.supplier_name,
+        name: supplier.name,
         trade_name: supplier.trade_name ?? '',
         cnpj_cpf: supplier.cnpj_cpf ?? '',
         contact_name: supplier.contact_name ?? '',
-        contact_phone: supplier.contact_phone ?? '',
-        contact_email: supplier.contact_email ?? '',
+        phone: supplier.phone ?? '',
+        email: supplier.email ?? '',
         website: supplier.website ?? '',
         postal_code: supplier.postal_code ?? '',
         address_line_1: supplier.address_line_1 ?? '',
@@ -83,12 +83,12 @@ export function SupplierFormDialog({ open, onOpenChange, supplier }: Props) {
     try {
       const fullAddress = [form.address_line_1, form.address_number, form.address_complement].filter(Boolean).join(', ');
       const payload: TablesInsert<'suppliers'> = {
-        supplier_name: form.supplier_name,
+        name: form.name,
         trade_name: form.trade_name || null,
         cnpj_cpf: form.cnpj_cpf || null,
         contact_name: form.contact_name || null,
-        contact_phone: form.contact_phone || null,
-        contact_email: form.contact_email || null,
+        phone: form.phone || null,
+        email: form.email || null,
         website: form.website || null,
         postal_code: form.postal_code || null,
         address_line_1: fullAddress || null,
@@ -125,7 +125,7 @@ export function SupplierFormDialog({ open, onOpenChange, supplier }: Props) {
     if (data) {
       setForm(prev => ({
         ...prev,
-        supplier_name: data.nome_fantasia || data.razao_social || prev.supplier_name,
+        name: data.nome_fantasia || data.razao_social || prev.name,
         trade_name: data.nome_fantasia || prev.trade_name,
         postal_code: data.cep || prev.postal_code,
         address_line_1: data.logradouro || prev.address_line_1,
@@ -134,8 +134,8 @@ export function SupplierFormDialog({ open, onOpenChange, supplier }: Props) {
         neighborhood: data.bairro || prev.neighborhood,
         city: data.municipio || prev.city,
         state: data.uf || prev.state,
-        contact_phone: data.ddd_telefone_1 || prev.contact_phone,
-        contact_email: data.email || prev.contact_email,
+        phone: data.ddd_telefone_1 || prev.phone,
+        email: data.email || prev.email,
       }));
       toast.success('Dados preenchidos via Receita Federal');
     }
@@ -152,7 +152,7 @@ export function SupplierFormDialog({ open, onOpenChange, supplier }: Props) {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <Label>{t.suppliers.supplierName} *</Label>
-            <Input required value={form.supplier_name} onChange={e => set('supplier_name', e.target.value)} />
+            <Input required value={form.name} onChange={e => set('name', e.target.value)} />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -174,11 +174,11 @@ export function SupplierFormDialog({ open, onOpenChange, supplier }: Props) {
             </div>
             <div>
               <Label>{t.clients.phone}</Label>
-              <Input value={form.contact_phone} onChange={e => set('contact_phone', maskPhone(e.target.value))} placeholder="(47) 99999-9999" maxLength={15} />
+              <Input value={form.phone} onChange={e => set('phone', maskPhone(e.target.value))} placeholder="(47) 99999-9999" maxLength={15} />
             </div>
             <div>
               <Label>{t.clients.email}</Label>
-              <Input type="email" value={form.contact_email} onChange={e => set('contact_email', e.target.value)} />
+              <Input type="email" value={form.email} onChange={e => set('email', e.target.value)} />
             </div>
             <div>
               <Label>Website</Label>

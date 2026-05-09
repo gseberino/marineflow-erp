@@ -13,18 +13,18 @@ type TableKey = "clients" | "vessels" | "whatsapp_leads" | "service_orders";
 const TABLES: Record<TableKey, { label: string; fields: string[]; labelField: string }> = {
   clients: {
     label: "Clientes",
-    labelField: "full_name_or_company_name",
-    fields: ["full_name_or_company_name", "address_line_1", "address_line_2", "city", "state", "notes"],
+    labelField: "name",
+    fields: ["name", "address_line_1", "address_line_2", "city", "state", "notes"],
   },
   vessels: {
     label: "Embarcações",
-    labelField: "boat_name",
-    fields: ["boat_name", "manufacturer", "model", "current_marina_name_snapshot"],
+    labelField: "name",
+    fields: ["name", "manufacturer", "model", "current_marina_name_snapshot"],
   },
   whatsapp_leads: {
     label: "Leads WhatsApp",
-    labelField: "display_name",
-    fields: ["display_name"],
+    labelField: "name",
+    fields: ["name"],
   },
   service_orders: {
     label: "Ordens de Serviço",

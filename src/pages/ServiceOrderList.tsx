@@ -95,7 +95,7 @@ export default function ServiceOrderList() {
     const url = `${window.location.origin}/view/${so.share_token}`;
     const phoneRaw = so.clients?.whatsapp || so.clients?.phone || '';
     const phone = normalizePhoneE164(phoneRaw);
-    const clientName = so.clients?.full_name_or_company_name || '';
+    const clientName = so.clients?.name || '';
     const msg = `Olá${clientName ? ' ' + clientName : ''}, segue o link da Ordem de Serviço ${so.service_order_number}: ${url}`;
     const waUrl = phone
       ? `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`
@@ -143,7 +143,7 @@ export default function ServiceOrderList() {
       serviceOrderNumber: so.service_order_number,
       shareToken: so.share_token,
       clientId: so.client_id || so.clients?.id || null,
-      clientName: so.clients?.full_name_or_company_name || null,
+      clientName: so.clients?.name || null,
       clientPhone: so.clients?.whatsapp || so.clients?.phone || null,
       documentType,
     });
@@ -161,8 +161,8 @@ export default function ServiceOrderList() {
   }
 
   const getSortValue = (so: any, key: string): any => {
-    if (key === 'client_name') return so.clients?.full_name_or_company_name ?? '';
-    if (key === 'vessel_name') return so.vessels?.boat_name ?? '';
+    if (key === 'client_name') return so.clients?.name ?? '';
+    if (key === 'vessel_name') return so.vessels?.name ?? '';
     if (key === 'priority') return PRIORITY_WEIGHT[so.priority] ?? 0;
     return so[key] ?? '';
   };
@@ -172,8 +172,8 @@ export default function ServiceOrderList() {
       search: string; status: string[]; priority: string[]; technician: string[]; dateFrom: string; dateTo: string;
     };
     const list = (orders || []).filter((so: any) => {
-      const clientName = so.clients?.full_name_or_company_name || '';
-      const vesselName = so.vessels?.boat_name || '';
+      const clientName = so.clients?.name || '';
+      const vesselName = so.vessels?.name || '';
       if (search && !(
         so.service_order_number.toLowerCase().includes(search.toLowerCase()) ||
         clientName.toLowerCase().includes(search.toLowerCase()) ||
@@ -262,8 +262,8 @@ export default function ServiceOrderList() {
               exportToCSV(filtered, 'ordens_servico', [
                 { key: 'service_order_number', label: 'Número' },
                 { key: 'status', label: 'Status' },
-                { key: 'clients', label: 'Cliente', format: (v) => v?.full_name_or_company_name || '' },
-                { key: 'vessels', label: 'Embarcação', format: (v) => v?.boat_name || '' },
+                { key: 'clients', label: 'Cliente', format: (v) => v?.name || '' },
+                { key: 'vessels', label: 'Embarcação', format: (v) => v?.name || '' },
                 { key: 'grand_total', label: 'Valor Total', format: (v) => Number(v || 0).toFixed(2).replace('.', ',') },
                 { key: 'created_at', label: 'Data Criação', format: (v) => v ? new Date(v).toLocaleDateString('pt-BR') : '' },
                 { key: 'scheduled_start_at', label: 'Agendado Para', format: (v) => v ? new Date(v).toLocaleDateString('pt-BR') : '' },
@@ -351,9 +351,9 @@ export default function ServiceOrderList() {
                         <Link to={`/service-orders/${so.id}`} className="font-medium text-accent hover:underline">{so.service_order_number}</Link>
                       </td>
                       <td className="px-4 py-3 font-medium max-w-[150px]">
-                        <span className="block truncate">{so.clients?.full_name_or_company_name || '—'}</span>
+                        <span className="block truncate">{so.clients?.name || '—'}</span>
                       </td>
-                      <td className="px-4 py-3 hidden md:table-cell text-muted-foreground">{so.vessels?.boat_name || '—'}</td>
+                      <td className="px-4 py-3 hidden md:table-cell text-muted-foreground">{so.vessels?.name || '—'}</td>
                       <td className="px-4 py-3">
                         {sc && <StatusBadge className={sc.className}>{(t.status as Record<string, string>)[so.status]}</StatusBadge>}
                       </td>

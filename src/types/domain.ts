@@ -5,7 +5,8 @@ export type ClientType = 'individual' | 'company';
 export interface Client {
   id: string;
   type: ClientType;
-  full_name_or_company_name: string;
+  name: string; // Temporarily keeping for compatibility while migrating others
+  name: string;
   cpf_cnpj: string;
   phone: string;
   whatsapp: string;
@@ -26,7 +27,7 @@ export interface Vessel {
   id: string;
   client_id: string;
   marina_id?: string;
-  boat_name: string;
+  name: string;
   manufacturer: string;
   model: string;
   year: number;
@@ -53,10 +54,10 @@ export interface Vessel {
 
 export interface Marina {
   id: string;
-  marina_name: string;
+  name: string;
   contact_name: string;
-  contact_phone: string;
-  contact_email: string;
+  phone: string;
+  email: string;
   address_line_1: string;
   city: string;
   state: string;
@@ -74,7 +75,7 @@ export interface Marina {
 export interface Product {
   id: string;
   sku: string;
-  product_name: string;
+  name: string;
   category: string;
   brand: string;
   supplier_id?: string;

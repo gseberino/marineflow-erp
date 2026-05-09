@@ -25,7 +25,7 @@ export default function VesselDetail() {
       if (!id) return [];
       const { data, error } = await supabase
         .from('service_orders')
-        .select('*, service_order_parts(id, products(product_name), quantity, warranty_days), service_order_services(id, service_name_snapshot, quantity, warranty_days)')
+        .select('*, service_order_parts(id, products(name), quantity, warranty_days), service_order_services(id, name_snapshot, quantity, warranty_days)')
         .eq('vessel_id', id)
         .order('created_at', { ascending: false });
       if (error) throw error;
@@ -47,8 +47,8 @@ export default function VesselDetail() {
     </div>
   );
 
-  const clientName = (vessel as any).clients?.full_name_or_company_name ?? '—';
-  const marinaName = (vessel as any).marinas?.marina_name;
+  const clientName = (vessel as any).clients?.name ?? '—';
+  const marinaName = (vessel as any).marinas?.name;
 
   const InfoRow = ({ label, value }: { label: string; value?: string | number | null }) => (
     <div className="flex justify-between py-2 border-b border-border/50 last:border-0">
@@ -62,7 +62,7 @@ export default function VesselDetail() {
       <div className="flex items-center gap-3">
         <Link to="/vessels" className="rounded-lg p-1.5 hover:bg-muted transition-colors"><ArrowLeft className="h-5 w-5" /></Link>
         <div className="flex-1">
-          <h1 className="text-2xl font-bold flex items-center gap-2"><Ship className="h-6 w-6 text-accent" />{vessel.boat_name}</h1>
+          <h1 className="text-2xl font-bold flex items-center gap-2"><Ship className="h-6 w-6 text-accent" />{vessel.name}</h1>
           <p className="text-sm text-muted-foreground">
             {vessel.manufacturer} {vessel.model} {vessel.year ? `(${vessel.year})` : ''} • {vessel.length_feet ? `${vessel.length_feet} ft` : ''} • {t.vessels.owner}: {clientName}
           </p>
@@ -194,7 +194,7 @@ export default function VesselDetail() {
                           {o.service_order_services.map((s: any) => (
                             <li key={s.id} className="text-xs text-muted-foreground flex justify-between items-start">
                               <div className="min-w-0 pr-2">
-                                <span className="block truncate">• {s.service_name_snapshot}</span>
+                                <span className="block truncate">• {s.name_snapshot}</span>
                                 {s.warranty_days > 0 && (
                                   <span className="text-[9px] text-accent font-semibold flex items-center gap-0.5">
                                     <Zap className="h-2 w-2" /> Garantia: {s.warranty_days} dias
@@ -218,7 +218,7 @@ export default function VesselDetail() {
                           {o.service_order_parts.map((p: any) => (
                             <li key={p.id} className="text-xs text-muted-foreground flex justify-between items-start">
                               <div className="min-w-0 pr-2">
-                                <span className="block truncate">• {p.products?.product_name || 'Produto sem nome'}</span>
+                                <span className="block truncate">• {p.products?.name || 'Produto sem nome'}</span>
                                 {p.warranty_days > 0 && (
                                   <span className="text-[9px] text-accent font-semibold flex items-center gap-0.5">
                                     <Anchor className="h-2 w-2" /> Garantia: {p.warranty_days} dias

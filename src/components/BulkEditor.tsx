@@ -58,7 +58,7 @@ export function BulkEditor({ entityType, open, onOpenChange }: BulkEditorProps) 
   }, []);
 
   const filtered = data.filter(item => {
-    const name = entityType === 'products' ? getVal(item, 'product_name') : getVal(item, 'service_name');
+    const name = entityType === 'products' ? getVal(item, 'name') : getVal(item, 'name');
     if (search && !String(name).toLowerCase().includes(search.toLowerCase())) return false;
     const active = getVal(item, 'active');
     if (filterActive === 'active' && !active) return false;
@@ -252,7 +252,7 @@ export function BulkEditor({ entityType, open, onOpenChange }: BulkEditorProps) 
                     {entityType === 'products' ? (
                       <>
                         <td className="px-2 py-1"><EditCell id={item.id} field="sku" item={item} /></td>
-                        <td className="px-2 py-1"><EditCell id={item.id} field="product_name" item={item} /></td>
+                        <td className="px-2 py-1"><EditCell id={item.id} field="name" item={item} /></td>
                         <td className="px-2 py-1"><EditCell id={item.id} field="category" item={item} /></td>
                         <td className="px-2 py-1"><EditCell id={item.id} field="brand" item={item} /></td>
                         <td className="px-2 py-1"><EditCell id={item.id} field="cost_price" type="number" item={item} /></td>
@@ -265,7 +265,7 @@ export function BulkEditor({ entityType, open, onOpenChange }: BulkEditorProps) 
                       </>
                     ) : (
                       <>
-                        <td className="px-2 py-1"><EditCell id={item.id} field="service_name" item={item} /></td>
+                        <td className="px-2 py-1"><EditCell id={item.id} field="name" item={item} /></td>
                         <td className="px-2 py-1"><EditCell id={item.id} field="category" item={item} /></td>
                         <td className="px-2 py-1"><EditCell id={item.id} field="billing_unit" item={item} /></td>
                         <td className="px-2 py-1"><EditCell id={item.id} field="default_price" type="number" item={item} /></td>

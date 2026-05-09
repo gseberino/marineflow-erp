@@ -37,16 +37,16 @@ export function useInventoryProducts(filters: InventoryProductFilters = {}) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('products')
-        .select('id, product_name, sku, category, brand, unit, stock_quantity, minimum_stock, cost_price, sale_price, location_bin, active, product_category_id, product_categories(name)')
+        .select('id, name, sku, category, brand, unit, stock_quantity, minimum_stock, cost_price, sale_price, location_bin, active, product_category_id, product_categories(name)')
         .eq('active', true)
-        .order('product_name', { ascending: true });
+        .order('name', { ascending: true });
       if (error) throw error;
       let list = data || [];
 
       if (filters.search) {
         const q = filters.search.toLowerCase();
         list = list.filter(p =>
-          (p.product_name || '').toLowerCase().includes(q) ||
+          (p.name || '').toLowerCase().includes(q) ||
           (p.sku || '').toLowerCase().includes(q) ||
           (p.category || '').toLowerCase().includes(q)
         );
@@ -83,7 +83,7 @@ export function useInventoryMovements(filters: MovementFilters = {}) {
     queryFn: async () => {
       let q = supabase
         .from('inventory_movements')
-        .select('*, products(product_name, sku, unit)')
+        .select('*, products(name, sku, unit)')
         .order('created_at', { ascending: false })
         .limit(filters.limit || 200);
 

@@ -27,7 +27,7 @@ export function ClientCombobox({ value, onChange, clients, disabled }: Props) {
     if (trimmed.length < 3) return active.slice(0, 200);
     return active.filter(c => {
       const haystack = [
-        c.full_name_or_company_name,
+        c.name,
         c.cpf_cnpj || '',
         c.email || '',
         c.phone || '',
@@ -51,7 +51,7 @@ export function ClientCombobox({ value, onChange, clients, disabled }: Props) {
             disabled={disabled}
           >
             {selectedClient
-              ? selectedClient.full_name_or_company_name
+              ? selectedClient.name
               : 'Selecionar cliente...'}
             <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
           </Button>
@@ -83,14 +83,14 @@ export function ClientCombobox({ value, onChange, clients, disabled }: Props) {
                     key={client.id}
                     value={client.id}
                     onSelect={() => {
-                      onChange(client.id, client.full_name_or_company_name);
+                      onChange(client.id, client.name);
                       setOpen(false);
                       setSearch('');
                     }}
                   >
                     <Check className={cn('mr-2 h-4 w-4', value === client.id ? 'opacity-100' : 'opacity-0')} />
                     <div className="flex flex-col">
-                      <span className="text-sm">{client.full_name_or_company_name}</span>
+                      <span className="text-sm">{client.name}</span>
                       {client.cpf_cnpj && (
                         <span className="text-xs text-muted-foreground">{client.cpf_cnpj}</span>
                       )}
@@ -118,7 +118,7 @@ export function ClientCombobox({ value, onChange, clients, disabled }: Props) {
         onOpenChange={setShowCreate}
         initialName={search}
         onCreated={(newClient) => {
-          onChange(newClient.id, newClient.full_name_or_company_name);
+          onChange(newClient.id, newClient.name);
           setSearch('');
         }}
       />

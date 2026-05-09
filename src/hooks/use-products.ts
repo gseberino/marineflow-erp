@@ -11,7 +11,7 @@ export function useProducts() {
       const { data, error } = await supabase
         .from('products')
         .select('*')
-        .order('product_name', { ascending: true });
+        .order('name', { ascending: true });
       if (error) throw error;
       return data as Product[];
     },
@@ -49,7 +49,7 @@ export function usePriceSuggestions() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('price_update_suggestions')
-        .select('*, products(product_name, sku, cost_price)')
+        .select('*, products(name, sku, cost_price)')
         .eq('status', 'pending')
         .order('created_at', { ascending: false });
       if (error) throw error;

@@ -72,7 +72,7 @@ export function CreateCollectionDialog({ open, onOpenChange }: Props) {
   const selectedClient = clients?.find(c => c.id === clientId);
   useEffect(() => {
     if (overrideContact || !selectedClient) return;
-    setContactName(selectedClient.full_name_or_company_name);
+    setContactName(selectedClient.name);
     setContactPhone(selectedClient.phone || '');
     setContactWhatsapp(selectedClient.whatsapp || selectedClient.phone || '');
   }, [selectedClient, overrideContact]);
@@ -108,7 +108,7 @@ export function CreateCollectionDialog({ open, onOpenChange }: Props) {
       amount: Number(amount),
       due_date: dueDate,
       contact_name: contactName || null,
-      contact_phone: contactPhone || null,
+      phone: contactPhone || null,
       contact_whatsapp: contactWhatsapp || null,
       send_method: sendMethod,
       message_template: tmpl?.body || null,
@@ -140,7 +140,7 @@ export function CreateCollectionDialog({ open, onOpenChange }: Props) {
                 <SelectContent>
                   {eligibleSO.map(so => (
                     <SelectItem key={so.id} value={so.id}>
-                      {so.service_order_number} — {(so as any).client?.full_name_or_company_name || 'Cliente'}
+                      {so.service_order_number} — {(so as any).client?.name || 'Cliente'}
                     </SelectItem>
                   ))}
                 </SelectContent>

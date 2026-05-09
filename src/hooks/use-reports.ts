@@ -22,7 +22,7 @@ export function useRevenueReport(periodDays: number) {
           .gte('payment_date', since.slice(0, 10)),
         supabase
           .from('service_orders')
-          .select('id, grand_total, parts_cost_total, status, payment_status, client_id, created_at, clients(full_name_or_company_name)')
+          .select('id, grand_total, parts_cost_total, status, payment_status, client_id, created_at, clients(name)')
           .gte('created_at', since),
         supabase
           .from('service_order_parts')
@@ -81,7 +81,7 @@ export function useRevenueReport(periodDays: number) {
       // Top 10 clients
       const clientMap = new Map<string, { name: string; revenue: number }>();
       orders.forEach(o => {
-        const name = (o.clients as any)?.full_name_or_company_name ?? '—';
+        const name = (o.clients as any)?.name ?? '—';
         const cur = clientMap.get(o.client_id) ?? { name, revenue: 0 };
         cur.revenue += Number(o.grand_total || 0);
         clientMap.set(o.client_id, cur);
@@ -102,7 +102,7 @@ export function useOsPerformanceReport() {
     queryFn: async () => {
       const { data: orders, error } = await supabase
         .from('service_orders')
-        .select('id, service_order_number, status, scheduled_start_at, scheduled_end_at, check_out_at, created_at, updated_at, clients(full_name_or_company_name)');
+        .select('id, service_order_number, status, scheduled_start_at, scheduled_end_at, check_out_at, created_at, updated_at, clients(name)');
       if (error) throw error;
 
       const all = orders ?? [];
@@ -142,7 +142,7 @@ export function useOsPerformanceReport() {
         .map(o => ({
           id: o.id,
           number: o.service_order_number,
-          client: (o.clients as any)?.full_name_or_company_name ?? '—',
+          client: (o.clients as any)?.name ?? '—',
           status: o.status,
           last_update: o.updated_at,
           days_since: Math.floor((Date.now() - new Date(o.updated_at).getTime()) / (1000 * 60 * 60 * 24)),
@@ -171,13 +171,13 @@ export function usePartsUsageReport(periodDays: number) {
 
       const { data, error } = await supabase
         .from('service_order_parts')
-        .select('product_id, quantity, line_total_sale, unit_sale_snapshot, created_at, products(product_name)')
+        .select('product_id, quantity, line_total_sale, unit_sale_snapshot, created_at, products(name)')
         .gte('created_at', since);
       if (error) throw error;
 
       const map = new Map<string, { name: string; qty: number; revenue: number; prices: number[] }>();
       (data ?? []).forEach(p => {
-        const name = (p.products as any)?.product_name ?? '—';
+        const name = (p.products as any)?.name ?? '—';
         const cur = map.get(p.product_id) ?? { name, qty: 0, revenue: 0, prices: [] };
         cur.qty += Number(p.quantity || 0);
         cur.revenue += Number(p.line_total_sale || 0);

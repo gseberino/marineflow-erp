@@ -9,7 +9,7 @@ export type ViaCepResult = {
 };
 
 export type NominatimResult = {
-  display_name: string;
+  name: string;
   lat: string;
   lon: string;
 };

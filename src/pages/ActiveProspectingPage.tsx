@@ -31,7 +31,7 @@ export default function ActiveProspectingPage() {
 
       const { data: quotes } = await supabase
         .from('service_orders')
-        .select('*, clients(full_name_or_company_name, phone, whatsapp)')
+        .select('*, clients(name, phone, whatsapp)')
         .eq('status', 'draft')
         .lte('created_at', twoDaysAgo.toISOString())
         .order('created_at', { ascending: false })
@@ -46,7 +46,7 @@ export default function ActiveProspectingPage() {
       // Usando uma query simples para pegar OS antigas e agrupar (simplificado para demonstração)
       const { data: oldOs } = await supabase
         .from('service_orders')
-        .select('*, clients(full_name_or_company_name, phone, whatsapp), vessels(boat_name, engine_type)')
+        .select('*, clients(name, phone, whatsapp), vessels(name, engine_type)')
         .eq('status', 'completed')
         .lte('created_at', sixMonthsAgo.toISOString())
         .order('created_at', { ascending: false })
@@ -75,14 +75,14 @@ export default function ActiveProspectingPage() {
 
   const generateSalesCopy = async (type: 'quote' | 'maintenance', target: any) => {
     setIsGenerating(true);
-    const clientName = target.clients?.full_name_or_company_name?.split(' ')[0] || 'Cliente';
+    const clientName = target.clients?.name?.split(' ')[0] || 'Cliente';
     const total = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(target.grand_total || 0);
     
     let prompt = '';
     if (type === 'quote') {
       prompt = `Crie uma mensagem curta de WhatsApp muito persuasiva e educada para ${clientName}. Ele tem um orçamento (OS #${target.service_order_number}) de ${total} parado no status rascunho. O objetivo é fechar a venda agora. Ofereça de forma sutil uma facilidade (tipo parcelamento ou prioridade na agenda). Use gatilhos mentais. Não pareça desesperado.`;
     } else {
-      const boat = target.vessels?.boat_name || 'sua embarcação';
+      const boat = target.vessels?.name || 'sua embarcação';
       prompt = `Crie uma mensagem curta de WhatsApp para ${clientName}. Já faz mais de 6 meses que fizemos a última revisão no ${boat}. Sugira uma manutenção preventiva para evitar dores de cabeça e garantir a diversão no fim de semana. Seja muito amigável e focado em segurança e tranquilidade.`;
     }
 
@@ -105,7 +105,7 @@ export default function ActiveProspectingPage() {
       if (type === 'quote') {
         setDraftMsg(`Olá ${clientName}, tudo bem? Estou revisando aqui o orçamento da sua OS #${target.service_order_number}. Queria ver com você se ficou alguma dúvida e se podemos aprovar para eu já garantir o seu horário na nossa agenda da semana. Conseguimos facilitar o pagamento se precisar! Me avise.`);
       } else {
-        setDraftMsg(`Olá ${clientName}, tudo joia? Notei no nosso sistema que já faz um tempinho desde a última revisão do ${target.vessels?.boat_name}. Para garantir sua tranquilidade e segurança nos próximos passeios, que tal agendarmos uma manutenção preventiva? Assim evitamos imprevistos. Um abraço!`);
+        setDraftMsg(`Olá ${clientName}, tudo joia? Notei no nosso sistema que já faz um tempinho desde a última revisão do ${target.vessels?.name}. Para garantir sua tranquilidade e segurança nos próximos passeios, que tal agendarmos uma manutenção preventiva? Assim evitamos imprevistos. Um abraço!`);
       }
     } finally {
       setIsGenerating(false);
@@ -198,7 +198,7 @@ export default function ActiveProspectingPage() {
                       <Badge variant="outline" className="bg-amber-100 text-amber-800">Rascunho</Badge>
                       <span className="text-xs text-muted-foreground">Há {Math.floor((Date.now() - new Date(quote.created_at).getTime()) / (1000 * 60 * 60 * 24))} dias</span>
                     </div>
-                    <CardTitle className="text-lg mt-2">{quote.clients?.full_name_or_company_name}</CardTitle>
+                    <CardTitle className="text-lg mt-2">{quote.clients?.name}</CardTitle>
                     <CardDescription>OS #{quote.service_order_number}</CardDescription>
                   </CardHeader>
                   <CardContent>
@@ -229,8 +229,8 @@ export default function ActiveProspectingPage() {
                 <Card key={target.id} className="hover:border-primary/50 transition-colors">
                   <CardHeader className="pb-3">
                     <Badge variant="outline" className="bg-blue-100 text-blue-800 w-fit">Prevenção</Badge>
-                    <CardTitle className="text-lg mt-2">{target.vessels?.boat_name}</CardTitle>
-                    <CardDescription>Cliente: {target.clients?.full_name_or_company_name}</CardDescription>
+                    <CardTitle className="text-lg mt-2">{target.vessels?.name}</CardTitle>
+                    <CardDescription>Cliente: {target.clients?.name}</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <p className="text-sm text-muted-foreground mb-4">

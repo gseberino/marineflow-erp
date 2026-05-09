@@ -35,7 +35,7 @@ export default function SmartPurchasePage() {
         .from('products')
         .select(`
           *,
-          suppliers!products_supplier_id_fkey(supplier_name, contact_name, contact_phone)
+          suppliers!products_supplier_id_fkey(name, contact_name, phone)
         `)
         .filter('stock_quantity', 'lte', 'minimum_stock')
         .order('stock_quantity', { ascending: true });
@@ -90,9 +90,9 @@ export default function SmartPurchasePage() {
               </div>
               <Button variant="outline" size="sm" className="gap-1 shrink-0" onClick={() => {
                 const rows = (suggestions || []).map((s: any) => ({
-                  'Produto': s.product_name,
+                  'Produto': s.name,
                   'SKU': s.sku || '',
-                  'Fornecedor': s.suppliers?.supplier_name || '',
+                  'Fornecedor': s.suppliers?.name || '',
                   'Estoque Atual': s.stock_quantity ?? 0,
                   'Mínimo': s.minimum_stock ?? 0,
                   'Sugestão': Math.max(0, (s.minimum_stock ?? 0) * 2 - (s.stock_quantity ?? 0)),
@@ -133,13 +133,13 @@ export default function SmartPurchasePage() {
                           />
                         </TableCell>
                         <TableCell>
-                          <div className="font-medium">{p.product_name}</div>
+                          <div className="font-medium">{p.name}</div>
                           <div className="text-[10px] text-muted-foreground">SKU: {p.sku || '—'}</div>
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1.5">
                             <Truck className="h-3 w-3 text-muted-foreground" />
-                            <span className="text-sm">{(p as any).suppliers?.supplier_name || 'Não vinculado'}</span>
+                            <span className="text-sm">{(p as any).suppliers?.name || 'Não vinculado'}</span>
                           </div>
                         </TableCell>
                         <TableCell className="text-right">

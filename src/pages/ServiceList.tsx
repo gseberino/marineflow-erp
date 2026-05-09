@@ -24,7 +24,7 @@ export default function ServiceList() {
   const [importOpen, setImportOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [page, setPage] = useState(1);
-  const [sortKey, setSortKey] = useState('service_name');
+  const [sortKey, setSortKey] = useState('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
 
   const billingUnitLabel: Record<string, string> = {
@@ -48,7 +48,7 @@ export default function ServiceList() {
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     const list = (services ?? []).filter((s) =>
-      s.service_name.toLowerCase().includes(q) || (s.category || '').toLowerCase().includes(q)
+      s.name.toLowerCase().includes(q) || (s.category || '').toLowerCase().includes(q)
     );
     return [...list].sort((a, b) => {
       let av: any = (a as any)[sortKey] ?? '';
@@ -113,8 +113,8 @@ export default function ServiceList() {
               <thead>
                 <tr className="border-b bg-muted/50">
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                    <button onClick={() => handleSort('service_name')} className="flex items-center hover:text-foreground transition-colors">
-                      {t.services.serviceName}<SortIcon col="service_name" />
+                    <button onClick={() => handleSort('name')} className="flex items-center hover:text-foreground transition-colors">
+                      {t.services.serviceName}<SortIcon col="name" />
                     </button>
                   </th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">
@@ -143,7 +143,7 @@ export default function ServiceList() {
               <tbody>
                 {paginated.map((s) => (
                   <tr key={s.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
-                    <td className="px-4 py-3 font-medium">{s.service_name}</td>
+                    <td className="px-4 py-3 font-medium">{s.name}</td>
                     <td className="px-4 py-3 text-muted-foreground">{s.category || '—'}</td>
                     <td className="px-4 py-3">{billingUnitLabel[s.billing_unit] || s.billing_unit}</td>
                     <td className="px-4 py-3 text-right">{formatCurrency(s.default_price || 0)}</td>

@@ -290,7 +290,7 @@ export default function ImportFiscalXML() {
                   <SelectContent>
                     <SelectItem value="__none">Não vincular</SelectItem>
                     {(suppliers || []).map((s: any) => (
-                      <SelectItem key={s.id} value={s.id}>{s.supplier_name}</SelectItem>
+                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -317,7 +317,7 @@ export default function ImportFiscalXML() {
                         const sku = item.sku_supplier || '';
                         const manualId = manualMappings[sku];
                         const match = (products || []).find(
-                          (p) => (manualId ? p.id === manualId : (p.sku === sku || p.product_name?.toLowerCase() === item.description?.toLowerCase()))
+                          (p) => (manualId ? p.id === manualId : (p.sku === sku || p.name?.toLowerCase() === item.description?.toLowerCase()))
                         );
                         
                         return (
@@ -354,7 +354,7 @@ export default function ImportFiscalXML() {
                                   <div className="border-t my-1" />
                                   {(products || []).filter(p => p.active).map(p => (
                                     <SelectItem key={p.id} value={p.id} className="text-xs">
-                                      {p.product_name} {p.sku ? `(${p.sku})` : ''}
+                                      {p.name} {p.sku ? `(${p.sku})` : ''}
                                     </SelectItem>
                                   ))}
                                 </SelectContent>

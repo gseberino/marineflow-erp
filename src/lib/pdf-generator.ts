@@ -98,7 +98,7 @@ export type PDFData = {
     city?: string;
   };
   services: Array<{
-    service_name: string;
+    name: string;
     description?: string;
     billing_unit: string;
     quantity: number;
@@ -106,7 +106,7 @@ export type PDFData = {
     line_total: number;
   }>;
   parts: Array<{
-    product_name: string;
+    name: string;
     sku?: string;
     quantity: number;
     unit_price: number;
@@ -595,7 +595,7 @@ function buildOrderHTML(data: PDFData, options: PDFOptions): string {
 
   const serviceRows = data.services.map(s => `
     <tr>
-      <td style="font-weight:600;">${esc(s.service_name)}${s.description ? `<div style="font-weight:400;color:var(--text-muted);font-size:9px;margin-top:2px;">${esc(s.description)}</div>` : ''}</td>
+      <td style="font-weight:600;">${esc(s.name)}${s.description ? `<div style="font-weight:400;color:var(--text-muted);font-size:9px;margin-top:2px;">${esc(s.description)}</div>` : ''}</td>
       <td style="text-align:center;">${s.quantity} ${esc(billingUnitLabel[s.billing_unit] || s.billing_unit)}</td>
       ${options.showServicePrices ? `<td style="text-align:right;">${fmtCurrency(s.unit_price)}</td>` : ''}
       <td style="text-align:right;font-weight:600;">${fmtCurrency(s.line_total)}</td>
@@ -608,11 +608,11 @@ function buildOrderHTML(data: PDFData, options: PDFOptions): string {
       ? `<div style="display:flex;align-items:center;gap:10px;">
            <img src="${esc(p.image_url!)}" style="width:40px;height:40px;object-fit:cover;border-radius:4px;border:1px solid var(--border);" crossorigin="anonymous" />
            <div>
-             <div style="font-weight:600;">${esc(p.product_name)}</div>
+             <div style="font-weight:600;">${esc(p.name)}</div>
              ${p.sku ? `<div style="font-size:9px;color:var(--text-muted);">#${esc(p.sku)}</div>` : ''}
            </div>
          </div>`
-      : `<div style="font-weight:600;">${esc(p.product_name)}</div>
+      : `<div style="font-weight:600;">${esc(p.name)}</div>
          ${p.sku ? `<div style="font-size:9px;color:var(--text-muted);">#${esc(p.sku)}</div>` : ''}`;
 
     return `
@@ -803,7 +803,7 @@ function buildInvoiceHTML(data: PDFData, options: PDFOptions): string {
 
   const serviceRows = data.services.map(s => `
     <tr>
-      <td style="font-weight:600;">${esc(s.service_name)}${s.description ? `<div style="font-weight:400;color:var(--text-muted);font-size:9px;">${esc(s.description)}</div>` : ''}</td>
+      <td style="font-weight:600;">${esc(s.name)}${s.description ? `<div style="font-weight:400;color:var(--text-muted);font-size:9px;">${esc(s.description)}</div>` : ''}</td>
       <td style="text-align:center;">${s.quantity} ${esc(billingUnitLabel[s.billing_unit] || s.billing_unit)}</td>
       <td style="text-align:right;font-weight:600;">${fmtCurrency(s.line_total)}</td>
     </tr>
@@ -811,7 +811,7 @@ function buildInvoiceHTML(data: PDFData, options: PDFOptions): string {
 
   const partsRows = data.parts.map(p => `
     <tr>
-      <td style="font-weight:600;">${esc(p.product_name)}</td>
+      <td style="font-weight:600;">${esc(p.name)}</td>
       <td style="text-align:center;">${p.quantity}</td>
       <td style="text-align:right;font-weight:600;">${fmtCurrency(p.line_total)}</td>
     </tr>

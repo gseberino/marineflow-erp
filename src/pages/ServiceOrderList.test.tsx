@@ -16,8 +16,8 @@ const mockOrders = [
     grand_total: 1500,
     share_token: 'token-abc-123',
     scheduled_start_at: null,
-    clients: { full_name_or_company_name: 'Cliente Alpha', phone: '11999998888', whatsapp: '' },
-    vessels: { boat_name: 'Barco Alpha' },
+    clients: { name: 'Cliente Alpha', phone: '11999998888', whatsapp: '' },
+    vessels: { name: 'Barco Alpha' },
   },
   {
     id: 'so-2',
@@ -28,8 +28,8 @@ const mockOrders = [
     grand_total: 3200,
     share_token: 'token-def-456',
     scheduled_start_at: null,
-    clients: { full_name_or_company_name: 'Cliente Beta', phone: '', whatsapp: '11977776666' },
-    vessels: { boat_name: 'Barco Beta' },
+    clients: { name: 'Cliente Beta', phone: '', whatsapp: '11977776666' },
+    vessels: { name: 'Barco Beta' },
   },
   {
     id: 'so-3',
@@ -40,8 +40,8 @@ const mockOrders = [
     grand_total: 500,
     share_token: null, // sem token => itens Z-API + wa.me desabilitados
     scheduled_start_at: null,
-    clients: { full_name_or_company_name: 'Cliente Gama', phone: '11955554444', whatsapp: '' },
-    vessels: { boat_name: 'Barco Gama' },
+    clients: { name: 'Cliente Gama', phone: '11955554444', whatsapp: '' },
+    vessels: { name: 'Barco Gama' },
   },
 ];
 

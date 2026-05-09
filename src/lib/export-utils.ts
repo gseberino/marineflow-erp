@@ -31,7 +31,7 @@ export function exportToCSV(
 
 export const PRODUCTS_COLUMNS: ExportColumn[] = [
   { header: 'SKU', key: 'sku' },
-  { header: 'Nome do Produto', key: 'product_name' },
+  { header: 'Nome do Produto', key: 'name' },
   { header: 'Categoria', key: 'category' },
   { header: 'Marca', key: 'brand' },
   { header: 'Unidade', key: 'unit' },
@@ -47,7 +47,7 @@ export const PRODUCTS_COLUMNS: ExportColumn[] = [
 ];
 
 export const SERVICES_COLUMNS: ExportColumn[] = [
-  { header: 'Nome do Serviço', key: 'service_name' },
+  { header: 'Nome do Serviço', key: 'name' },
   { header: 'Categoria', key: 'category' },
   { header: 'Unidade de Cobrança', key: 'billing_unit' },
   { header: 'Preço Padrão', key: 'default_price' },
@@ -58,7 +58,7 @@ export const SERVICES_COLUMNS: ExportColumn[] = [
 
 export const CLIENTS_COLUMNS: ExportColumn[] = [
   { header: 'Tipo', key: 'type', transform: v => v === 'company' ? 'PJ' : 'PF' },
-  { header: 'Nome/Razão Social', key: 'full_name_or_company_name' },
+  { header: 'Nome/Razão Social', key: 'name' },
   { header: 'CPF/CNPJ', key: 'cpf_cnpj' },
   { header: 'Email', key: 'email' },
   { header: 'Telefone', key: 'phone' },
@@ -72,7 +72,7 @@ export const CLIENTS_COLUMNS: ExportColumn[] = [
 ];
 
 export const VESSELS_COLUMNS: ExportColumn[] = [
-  { header: 'Nome', key: 'boat_name' },
+  { header: 'Nome', key: 'name' },
   { header: 'Modelo', key: 'model' },
   { header: 'Fabricante', key: 'manufacturer' },
   { header: 'Ano', key: 'year' },
@@ -81,12 +81,12 @@ export const VESSELS_COLUMNS: ExportColumn[] = [
   { header: 'Comprimento (m)', key: 'length_meters' },
   { header: 'Motorização', key: 'engine_type' },
   { header: 'Registro', key: 'registration_number' },
-  { header: 'Marina', key: 'marina_name' },
+  { header: 'Marina', key: 'name' },
   { header: 'Situação', key: 'active', transform: (v: any) => v ? 'Ativo' : 'Inativo' },
 ];
 
 export const MARINAS_COLUMNS: ExportColumn[] = [
-  { header: 'Marina', key: 'marina_name' },
+  { header: 'Marina', key: 'name' },
   { header: 'Cidade', key: 'city' },
   { header: 'Estado', key: 'state' },
   { header: 'Telefone', key: 'phone' },
@@ -98,12 +98,12 @@ export const MARINAS_COLUMNS: ExportColumn[] = [
 ];
 
 export const SUPPLIERS_COLUMNS: ExportColumn[] = [
-  { header: 'Razão Social', key: 'supplier_name' },
+  { header: 'Razão Social', key: 'name' },
   { header: 'Nome Fantasia', key: 'trade_name' },
   { header: 'CNPJ/CPF', key: 'cnpj_cpf' },
   { header: 'Contato', key: 'contact_name' },
-  { header: 'Telefone', key: 'contact_phone' },
-  { header: 'Email', key: 'contact_email' },
+  { header: 'Telefone', key: 'phone' },
+  { header: 'Email', key: 'email' },
   { header: 'Cidade', key: 'city' },
   { header: 'Estado', key: 'state' },
   { header: 'Notas', key: 'notes' },

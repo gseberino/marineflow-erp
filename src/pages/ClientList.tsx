@@ -21,7 +21,7 @@ export default function ClientList() {
   const [formOpen, setFormOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [page, setPage] = useState(1);
-  const [sortKey, setSortKey] = useState('full_name_or_company_name');
+  const [sortKey, setSortKey] = useState('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const PAGE_SIZE = 20;
   const { t } = useI18n();
@@ -51,7 +51,7 @@ export default function ClientList() {
 
   const filtered = useMemo(() => {
     const list = (clients ?? []).filter(c =>
-      !search || c.full_name_or_company_name.toLowerCase().includes(search.toLowerCase()) ||
+      !search || c.name.toLowerCase().includes(search.toLowerCase()) ||
       (c.email ?? '').toLowerCase().includes(search.toLowerCase()) ||
       (c.cpf_cnpj ?? '').includes(search)
     );
@@ -110,8 +110,8 @@ export default function ClientList() {
               <thead>
                 <tr className="border-b bg-muted/50">
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                    <button onClick={() => handleSort('full_name_or_company_name')} className="flex items-center hover:text-foreground transition-colors">
-                      {(t.clients as any).name || 'Nome'}<SortIcon col="full_name_or_company_name" />
+                    <button onClick={() => handleSort('name')} className="flex items-center hover:text-foreground transition-colors">
+                      {(t.clients as any).name || 'Nome'}<SortIcon col="name" />
                     </button>
                   </th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">
@@ -136,7 +136,7 @@ export default function ClientList() {
                     <tr key={client.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
                       <td className="px-4 py-3">
                         <Link to={`/clients/${client.id}`} className="font-medium text-accent hover:underline block truncate max-w-[160px]">
-                          {client.full_name_or_company_name}
+                          {client.name}
                         </Link>
                         <span className="text-xs text-muted-foreground">
                           {client.type === 'company' ? t.common.company : t.common.individual}

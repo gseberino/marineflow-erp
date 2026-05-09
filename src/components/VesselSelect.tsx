@@ -4,7 +4,7 @@ import { EntityCombobox } from '@/components/EntityCombobox';
 
 interface VesselOption {
   id: string;
-  boat_name: string;
+  name: string;
   manufacturer?: string | null;
   model?: string | null;
   hull_id_or_registration?: string | null;
@@ -18,7 +18,7 @@ interface Props {
   vessels: VesselOption[];
   clientId: string;
   disabled?: boolean;
-  onVesselCreated?: (vessel: { id: string; boat_name: string; marina_id?: string | null }) => void;
+  onVesselCreated?: (vessel: { id: string; name: string; marina_id?: string | null }) => void;
 }
 
 export function VesselSelect({ value, onChange, vessels, clientId, disabled, onVesselCreated }: Props) {
@@ -28,7 +28,7 @@ export function VesselSelect({ value, onChange, vessels, clientId, disabled, onV
     .filter(v => v.active)
     .map(v => ({
       value: v.id,
-      label: v.boat_name,
+      label: v.name,
       description: [v.manufacturer, v.model].filter(Boolean).join(' ') || undefined,
       searchTerms: [
         v.manufacturer || '',

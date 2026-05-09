@@ -45,7 +45,7 @@ export function PriceSuggestionAlert() {
             <CardContent className="p-4">
               <div className="flex justify-between items-start mb-2">
                 <div className="min-w-0">
-                  <p className="font-semibold text-sm truncate">{(s.products as any)?.product_name}</p>
+                  <p className="font-semibold text-sm truncate">{(s.products as any)?.name}</p>
                   <p className="text-[10px] text-muted-foreground truncate">SKU: {(s.products as any)?.sku || '—'}</p>
                 </div>
                 <TrendingUp className="h-4 w-4 text-amber-500 shrink-0" />

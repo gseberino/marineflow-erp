@@ -145,7 +145,7 @@ export default function ExternalQuoteListPage() {
                     {getStatusIcon(quote.status as ExternalQuoteStatus)}
                   </div>
                   <div>
-                    <CardTitle className="text-sm font-medium">{quote.client?.full_name_or_company_name || quote.lead?.full_name_or_company_name || '—'}</CardTitle>
+                    <CardTitle className="text-sm font-medium">{quote.client?.name || quote.lead?.name || '—'}</CardTitle>
                     <p className="text-xs text-muted-foreground">
                       {format(new Date(quote.created_at), "dd 'de' MMMM", { locale: ptBR })}
                     </p>

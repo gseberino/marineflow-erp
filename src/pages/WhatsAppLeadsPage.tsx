@@ -57,7 +57,7 @@ function InboxView() {
     if (!search.trim()) return list;
     const q = search.toLowerCase();
     return list.filter((c: any) =>
-      (c.display_name || '').toLowerCase().includes(q) ||
+      (c.name || '').toLowerCase().includes(q) ||
       c.phone.includes(q.replace(/\D/g, '')),
     );
   }, [conversations, search]);
@@ -125,7 +125,7 @@ function InboxView() {
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-medium text-sm truncate">
-                    {c.display_name || formatPhone(c.phone)}
+                    {c.name || formatPhone(c.phone)}
                   </span>
                   {c.unread_count > 0 && (
                     <Badge className="bg-primary text-primary-foreground h-5 min-w-5 px-1.5 text-[10px]">
@@ -165,7 +165,7 @@ function InboxView() {
                   <ArrowLeft className="h-4 w-4" />
                 </Button>
                 <div className="min-w-0">
-                  <p className="font-semibold truncate">{active.display_name || formatPhone(active.phone)}</p>
+                  <p className="font-semibold truncate">{active.name || formatPhone(active.phone)}</p>
                   <p className="text-xs text-muted-foreground">{formatPhone(active.phone)}</p>
                 </div>
               </div>
@@ -265,7 +265,7 @@ function LeadsView() {
     const q = search.toLowerCase();
     const digits = q.replace(/\D/g, '');
     return list.filter((l: any) =>
-      (l.display_name || '').toLowerCase().includes(q) ||
+      (l.name || '').toLowerCase().includes(q) ||
       (digits.length >= 4 && l.phone_normalized.includes(digits)),
     );
   }, [leads, search]);
@@ -317,7 +317,7 @@ function LeadsView() {
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="font-semibold truncate">{lead.display_name || 'Contato sem nome'}</h3>
+                        <h3 className="font-semibold truncate">{lead.name || 'Contato sem nome'}</h3>
                         {statusBadge(lead.status)}
                         {lead.is_broadcast && <Badge variant="outline" className="text-[10px]">Broadcast</Badge>}
                       </div>
@@ -334,13 +334,13 @@ function LeadsView() {
                     <p className="mt-3 text-sm text-muted-foreground line-clamp-2 italic">"{lead.first_message}"</p>
                   )}
                   {lead.linked_client && (
-                    <p className="mt-2 text-xs text-blue-700">→ {lead.linked_client.full_name_or_company_name}</p>
+                    <p className="mt-2 text-xs text-blue-700">→ {lead.linked_client.name}</p>
                   )}
                   <div className="mt-3 flex flex-wrap gap-2">
                     <Button size="sm" variant="outline" onClick={() => setSelected(lead)}>Ver mensagens</Button>
                     {lead.status === 'pending' && (
                       <>
-                        <Button size="sm" onClick={() => { setSelected(lead); setConvertName(lead.display_name || ''); setConvertOpen(true); }}><UserPlus className="h-3.5 w-3.5 mr-1" />Converter</Button>
+                        <Button size="sm" onClick={() => { setSelected(lead); setConvertName(lead.name || ''); setConvertOpen(true); }}><UserPlus className="h-3.5 w-3.5 mr-1" />Converter</Button>
                         <Button size="sm" variant="secondary" onClick={() => { setSelected(lead); setLinkClientId(null); setLinkOpen(true); }}><Link2 className="h-3.5 w-3.5 mr-1" />Vincular</Button>
                         <Button size="sm" variant="ghost" onClick={() => discardMut.mutate(lead.id)} className="text-destructive"><Trash2 className="h-3.5 w-3.5 mr-1" />Descartar</Button>
                         <Button size="sm" variant="ghost" onClick={() => addBlocked.mutate({ phone: lead.phone_normalized, reason: 'Bloqueado da lista de leads' })} className="text-destructive"><Ban className="h-3.5 w-3.5 mr-1" />Bloquear</Button>
@@ -357,7 +357,7 @@ function LeadsView() {
       <Dialog open={!!selected && !convertOpen && !linkOpen} onOpenChange={(v) => !v && setSelected(null)}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{selected?.display_name || 'Contato'} — {formatPhone(selected?.phone_normalized || '')}</DialogTitle>
+            <DialogTitle>{selected?.name || 'Contato'} — {formatPhone(selected?.phone_normalized || '')}</DialogTitle>
           </DialogHeader>
           <div className="max-h-[60vh] overflow-y-auto space-y-2 p-1">
             {messages?.length === 0 && <p className="text-sm text-muted-foreground text-center py-8">Sem mensagens.</p>}
@@ -392,7 +392,7 @@ function LeadsView() {
           <DialogHeader><DialogTitle>Vincular a cliente existente</DialogTitle></DialogHeader>
           <Select value={linkClientId || ''} onValueChange={setLinkClientId}>
             <SelectTrigger><SelectValue placeholder="Selecione um cliente..." /></SelectTrigger>
-            <SelectContent>{(clients || []).map((c: any) => <SelectItem key={c.id} value={c.id}>{c.full_name_or_company_name}</SelectItem>)}</SelectContent>
+            <SelectContent>{(clients || []).map((c: any) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
           </Select>
           <DialogFooter>
             <Button variant="outline" onClick={() => setLinkOpen(false)}>Cancelar</Button>

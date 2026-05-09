@@ -104,7 +104,7 @@ export function BankReconciliation() {
       .filter(r => {
         if (searchMatch) {
           const desc = (r.description || '').toLowerCase();
-          const name = isCredit ? ((r as any).clients?.full_name_or_company_name || '').toLowerCase() : '';
+          const name = isCredit ? ((r as any).clients?.name || '').toLowerCase() : '';
           return desc.includes(searchMatch.toLowerCase()) || name.includes(searchMatch.toLowerCase());
         }
         const amtRatio = Math.abs(Number(r.balance_amount) - tx.amount) / tx.amount;
@@ -143,8 +143,8 @@ export function BankReconciliation() {
       const s = soSearch.toLowerCase();
       return list.filter(so =>
         so.service_order_number.toLowerCase().includes(s) ||
-        (so as any).clients?.full_name_or_company_name?.toLowerCase().includes(s) ||
-        (so as any).vessels?.boat_name?.toLowerCase().includes(s)
+        (so as any).clients?.name?.toLowerCase().includes(s) ||
+        (so as any).vessels?.name?.toLowerCase().includes(s)
       );
     }
     return list.slice(0, 10);
@@ -416,7 +416,7 @@ export function BankReconciliation() {
                               <div key={r.id} className={`flex items-center justify-between p-2 rounded border text-sm ${isAutoMatch ? 'border-warning bg-warning/5' : ''}`}>
                                 <div>
                                   <span className="font-medium">{r.description}</span>
-                                  {isRec && (r as any).clients && <span className="text-muted-foreground ml-2">— {(r as any).clients.full_name_or_company_name}</span>}
+                                  {isRec && (r as any).clients && <span className="text-muted-foreground ml-2">— {(r as any).clients.name}</span>}
                                   {isAutoMatch && <StatusBadge className="bg-warning/15 text-warning ml-2">{t.financial.autoSuggestion}</StatusBadge>}
                                 </div>
                                 <div className="flex items-center gap-2">
@@ -443,8 +443,8 @@ export function BankReconciliation() {
                             <div key={so.id} className="flex items-center justify-between p-2 rounded border text-sm hover:bg-muted/50">
                               <div>
                                 <span className="font-bold">{so.service_order_number}</span>
-                                <span className="text-muted-foreground ml-2">{(so as any).clients?.full_name_or_company_name}</span>
-                                <span className="text-muted-foreground ml-2">— {(so as any).vessels?.boat_name}</span>
+                                <span className="text-muted-foreground ml-2">{(so as any).clients?.name}</span>
+                                <span className="text-muted-foreground ml-2">— {(so as any).vessels?.name}</span>
                               </div>
                               <div className="flex items-center gap-2">
                                 <span className="font-medium">{formatCurrency(Number(so.grand_total || 0))}</span>
@@ -477,7 +477,7 @@ export function BankReconciliation() {
                                 <SelectTrigger><SelectValue placeholder="Selecionar cliente" /></SelectTrigger>
                                 <SelectContent>
                                   {clients?.map(c => (
-                                    <SelectItem key={c.id} value={c.id}>{c.full_name_or_company_name}</SelectItem>
+                                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                                   ))}
                                 </SelectContent>
                               </Select>
@@ -504,7 +504,7 @@ export function BankReconciliation() {
                                 <SelectTrigger><SelectValue placeholder={t.financial.supplierOptional} /></SelectTrigger>
                                 <SelectContent>
                                   {suppliers?.map(s => (
-                                    <SelectItem key={s.id} value={s.id}>{s.supplier_name}</SelectItem>
+                                    <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
                                   ))}
                                 </SelectContent>
                               </Select>

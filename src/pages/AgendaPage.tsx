@@ -385,11 +385,11 @@ function WeekView({
                           )}
                         </div>
                         <div className="font-medium truncate">
-                          {o.clients?.full_name_or_company_name || '—'}
+                          {o.clients?.name || '—'}
                         </div>
-                        {o.vessels?.boat_name && (
+                        {o.vessels?.name && (
                           <div className="truncate opacity-75 text-[10px]">
-                            {o.vessels.boat_name}
+                            {o.vessels.name}
                           </div>
                         )}
                       </div>
@@ -566,10 +566,10 @@ function MonthView({
               )}
             </div>
             <div className="font-medium mt-0.5">
-              {o.clients?.full_name_or_company_name || '—'}
+              {o.clients?.name || '—'}
             </div>
-            {o.vessels?.boat_name && (
-              <div className="opacity-75 text-[11px]">{o.vessels.boat_name}</div>
+            {o.vessels?.name && (
+              <div className="opacity-75 text-[11px]">{o.vessels.name}</div>
             )}
             <StatusBadge className={cn('mt-1', statusConfig[o.status as keyof typeof statusConfig]?.className || 'bg-muted text-muted-foreground')}>
               {statusLabels[o.status] || o.status}
@@ -687,12 +687,12 @@ function QuickScheduleDialog({
               placeholder="Selecione uma OS"
               options={schedulable.map((o: any) => ({
                 value: o.id,
-                label: `${o.service_order_number} — ${o.clients?.full_name_or_company_name || '—'}`,
-                description: o.vessels?.boat_name || undefined,
+                label: `${o.service_order_number} — ${o.clients?.name || '—'}`,
+                description: o.vessels?.name || undefined,
                 searchTerms: [
                   o.service_order_number,
-                  o.clients?.full_name_or_company_name || '',
-                  o.vessels?.boat_name || '',
+                  o.clients?.name || '',
+                  o.vessels?.name || '',
                 ],
               }))}
             />

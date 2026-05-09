@@ -42,16 +42,16 @@ export function useCheckConflicts() {
 
       if (entityType === 'products') {
         const skus = rows.map(r => r.sku).filter(Boolean) as string[];
-        const names = rows.map(r => r.product_name).filter(Boolean) as string[];
+        const names = rows.map(r => r.name).filter(Boolean) as string[];
         const [bySku, byName] = await Promise.all([
-          batchIn<any>('products', 'sku', skus, 'id,sku,product_name'),
-          batchIn<any>('products', 'product_name', names, 'id,sku,product_name'),
+          batchIn<any>('products', 'sku', skus, 'id,sku,name'),
+          batchIn<any>('products', 'name', names, 'id,sku,name'),
         ]);
         const skuMap = new Map(bySku.map(p => [p.sku, p]));
-        const nameMap = new Map(byName.map(p => [p.product_name, p]));
+        const nameMap = new Map(byName.map(p => [p.name, p]));
         for (const row of rows) {
           const existing = (row.sku && skuMap.get(row.sku))
-            || (row.product_name && nameMap.get(row.product_name))
+            || (row.name && nameMap.get(row.name))
             || null;
           if (existing) {
             conflicts.push({ incoming: row, existing, resolution: 'keep' });
@@ -60,11 +60,11 @@ export function useCheckConflicts() {
           }
         }
       } else if (entityType === 'services') {
-        const names = rows.map(r => r.service_name).filter(Boolean) as string[];
-        const existing = await batchIn<any>('services', 'service_name', names, 'id,service_name');
-        const nameMap = new Map(existing.map(s => [s.service_name, s]));
+        const names = rows.map(r => r.name).filter(Boolean) as string[];
+        const existing = await batchIn<any>('services', 'name', names, 'id,name');
+        const nameMap = new Map(existing.map(s => [s.name, s]));
         for (const row of rows) {
-          const found = row.service_name ? nameMap.get(row.service_name) : null;
+          const found = row.name ? nameMap.get(row.name) : null;
           if (found) {
             conflicts.push({ incoming: row, existing: found, resolution: 'keep' });
           } else {
@@ -73,7 +73,7 @@ export function useCheckConflicts() {
         }
       } else if (entityType === 'clients') {
         const cnpjs = rows.map(r => r.cnpj_cpf).filter(Boolean) as string[];
-        const existing = await batchIn<any>('clients', 'cpf_cnpj', cnpjs, 'id,cpf_cnpj,full_name_or_company_name');
+        const existing = await batchIn<any>('clients', 'cpf_cnpj', cnpjs, 'id,cpf_cnpj,name');
         const cnpjMap = new Map(existing.map(c => [c.cpf_cnpj, c]));
         for (const row of rows) {
           const found = row.cnpj_cpf ? cnpjMap.get(row.cnpj_cpf) : null;
@@ -85,7 +85,7 @@ export function useCheckConflicts() {
         }
       } else if (entityType === 'suppliers') {
         const cnpjs = rows.map(r => r.cnpj_cpf).filter(Boolean) as string[];
-        const existing = await batchIn<any>('suppliers', 'cnpj_cpf', cnpjs, 'id,cnpj_cpf,supplier_name');
+        const existing = await batchIn<any>('suppliers', 'cnpj_cpf', cnpjs, 'id,cnpj_cpf,name');
         const cnpjMap = new Map(existing.map(s => [s.cnpj_cpf, s]));
         for (const row of rows) {
           const found = row.cnpj_cpf ? cnpjMap.get(row.cnpj_cpf) : null;
@@ -155,10 +155,10 @@ export function useImportRows() {
       let updated = 0;
 
       if (entityType === 'products') {
-        const validProductRows = newRows.filter(r => r.product_name);
+        const validProductRows = newRows.filter(r => r.name);
         for (const chunk of chunks(validProductRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            product_name: r.product_name as string,
+            name: r.name as string,
             sku: (r.sku || null) as string | null,
             sale_price: (r.sale_price || 0) as number,
             cost_price: (r.cost_price || 0) as number,
@@ -208,10 +208,10 @@ export function useImportRows() {
       }
 
       if (entityType === 'services') {
-        const validServiceRows = newRows.filter(r => r.service_name);
+        const validServiceRows = newRows.filter(r => r.name);
         for (const chunk of chunks(validServiceRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            service_name: r.service_name as string,
+            name: r.name as string,
             default_price: (r.default_price || 0) as number,
             billing_unit: 'visit' as string,
             currency: 'BRL' as string,
@@ -229,14 +229,14 @@ export function useImportRows() {
       }
 
       if (entityType === 'clients') {
-        const validClientRows = newRows.filter(r => r.full_name_or_company_name);
+        const validClientRows = newRows.filter(r => r.name);
         for (const chunk of chunks(validClientRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            full_name_or_company_name: r.full_name_or_company_name,
+            name: r.name,
             type: r._type || 'company',
             cpf_cnpj: r.cnpj_cpf || null,
             email: r.email || null,
-            phone: r.phone || r.contact_phone || null,
+            phone: r.phone || r.phone || null,
             address_line_1: r.address_line_1 || null,
             address_line_2: [r.address_number, r.neighborhood, r.address_complement].filter(Boolean).join(', ') || null,
             postal_code: r.postal_code || null,
@@ -252,14 +252,14 @@ export function useImportRows() {
       }
 
       if (entityType === 'suppliers') {
-        const validSupplierRows = newRows.filter(r => r.full_name_or_company_name || r.supplier_name);
+        const validSupplierRows = newRows.filter(r => r.name || r.name);
         for (const chunk of chunks(validSupplierRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            supplier_name: r.full_name_or_company_name || r.supplier_name,
+            name: r.name || r.name,
             trade_name: r.trade_name || null,
             cnpj_cpf: r.cnpj_cpf || null,
-            contact_email: r.email || null,
-            contact_phone: r.phone || r.contact_phone || null,
+            email: r.email || null,
+            phone: r.phone || r.phone || null,
             address_line_1: r.address_line_1 || null,
             postal_code: r.postal_code || null,
             city: r.city || null,
@@ -276,18 +276,18 @@ export function useImportRows() {
       if (entityType === 'mixed') {
         const clientRows = newRows.filter(r =>
           (r._entity_type === 'Cliente' || r._entity_type === 'Ambos') &&
-          r.full_name_or_company_name);
+          r.name);
         const supplierRows = newRows.filter(r =>
           (r._entity_type === 'Fornecedor' || r._entity_type === 'Ambos') &&
-          r.full_name_or_company_name);
+          r.name);
 
         for (const chunk of chunks(clientRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            full_name_or_company_name: r.full_name_or_company_name,
+            name: r.name,
             type: r._type || 'company',
             cpf_cnpj: r.cnpj_cpf || null,
             email: r.email || null,
-            phone: r.phone || r.contact_phone || null,
+            phone: r.phone || r.phone || null,
             address_line_1: r.address_line_1 || null,
             address_line_2: [r.address_number, r.neighborhood, r.address_complement].filter(Boolean).join(', ') || null,
             postal_code: r.postal_code || null,
@@ -302,11 +302,11 @@ export function useImportRows() {
 
         for (const chunk of chunks(supplierRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            supplier_name: r.full_name_or_company_name,
+            name: r.name,
             trade_name: r.trade_name || null,
             cnpj_cpf: r.cnpj_cpf || null,
-            contact_email: r.email || null,
-            contact_phone: r.phone || r.contact_phone || null,
+            email: r.email || null,
+            phone: r.phone || r.phone || null,
             address_line_1: r.address_line_1 || null,
             postal_code: r.postal_code || null,
             city: r.city || null,

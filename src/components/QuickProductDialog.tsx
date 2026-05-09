@@ -33,7 +33,7 @@ export function QuickProductDialog({ open, onOpenChange, initialName = '', onCre
     }
     try {
       const created = await create.mutateAsync({
-        product_name: name.trim(),
+        name: name.trim(),
         sale_price: salePrice,
         cost_price: 0,
         unit: 'pcs',

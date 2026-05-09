@@ -17,7 +17,7 @@ export function EditContactDialog({ open, onOpenChange, collection }: Props) {
   useEffect(() => {
     if (collection) {
       setName(collection.contact_name || '');
-      setPhone(collection.contact_phone || '');
+      setPhone(collection.phone || '');
       setWhatsapp(collection.contact_whatsapp || '');
     }
   }, [collection]);
@@ -27,7 +27,7 @@ export function EditContactDialog({ open, onOpenChange, collection }: Props) {
   const handleSave = async () => {
     await update.mutateAsync({
       id: collection.id,
-      patch: { contact_name: name, contact_phone: phone, contact_whatsapp: whatsapp },
+      patch: { contact_name: name, phone: phone, contact_whatsapp: whatsapp },
     });
     onOpenChange(false);
   };

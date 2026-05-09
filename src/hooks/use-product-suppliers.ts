@@ -9,7 +9,7 @@ export function useProductSuppliers(productId: string | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('product_suppliers')
-        .select('*, suppliers(supplier_name)')
+        .select('*, suppliers(name)')
         .eq('product_id', productId!)
         .order('is_preferred', { ascending: false })
         .order('created_at');

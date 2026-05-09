@@ -34,9 +34,9 @@ export function useExternalQuotes(filters?: { status?: string; created_by?: stri
         .from('external_quotes')
         .select(`
           *,
-          client:clients(id, full_name_or_company_name, phone),
-          lead:external_quote_leads(id, full_name_or_company_name, phone),
-          vessel:vessels(id, boat_name)
+          client:clients(id, name, phone),
+          lead:external_quote_leads(id, name, phone),
+          vessel:vessels(id, name)
         `)
         .order('created_at', { ascending: false });
 

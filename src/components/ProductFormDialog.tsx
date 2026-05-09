@@ -31,7 +31,7 @@ interface Props {
 }
 
 const empty: TablesInsert<'products'> = {
-  product_name: '',
+  name: '',
   sku: '',
   category: '',
   brand: '',
@@ -103,7 +103,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
     if (product) {
       const p = product as any;
       setForm({
-        product_name: p.product_name,
+        name: p.name,
         sku: p.sku ?? '',
         category: p.category ?? '',
         brand: p.brand ?? '',
@@ -329,7 +329,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2">
               <Label>{t.products.productName} *</Label>
-              <Input required value={form.product_name} onChange={e => set('product_name', e.target.value)} />
+              <Input required value={form.name} onChange={e => set('name', e.target.value)} />
             </div>
 
             {/* Foto do produto */}
@@ -340,7 +340,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
                   <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-md border bg-muted">
                     <img
                       src={(form as any).image_url}
-                      alt={form.product_name || 'Produto'}
+                      alt={form.name || 'Produto'}
                       className="h-full w-full object-cover"
                     />
                     <button
@@ -694,7 +694,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
                       <div key={ps.id} className="flex items-center justify-between p-3 rounded-lg border bg-muted/30 text-sm">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
-                            <span className="font-medium">{ps.suppliers?.supplier_name}</span>
+                            <span className="font-medium">{ps.suppliers?.name}</span>
                             {ps.is_preferred && <Star className="h-3 w-3 text-amber-500 fill-amber-500" />}
                           </div>
                           <div className="text-xs text-muted-foreground flex flex-wrap gap-x-3 mt-0.5">
@@ -726,7 +726,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
                         <SelectTrigger><SelectValue placeholder={t.suppliers.selectSupplier} /></SelectTrigger>
                         <SelectContent>
                           {(allSuppliers ?? []).filter(s => s.active).map(s => (
-                            <SelectItem key={s.id} value={s.id}>{s.supplier_name}</SelectItem>
+                            <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>

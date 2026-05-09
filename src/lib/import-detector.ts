@@ -84,7 +84,7 @@ export function detectFormat(parsed: ParsedFile): DetectionResult {
         confidence: 95,
         recordCount: rows.length,
         suggestedMapping: {
-          'Nome do Produto (120)': 'service_name',
+          'Nome do Produto (120)': 'name',
           'Valor Venda (Tabela Padrão)': 'default_price',
           'Observações': 'notes',
           'Situação (Ativo/Inativo)': 'active',
@@ -100,7 +100,7 @@ export function detectFormat(parsed: ParsedFile): DetectionResult {
       recordCount: allProducts ? rows.length : rows.filter(r => r['Tipo (Produto/Servico)'] === 'Produto').length,
       suggestedMapping: {
         'Código do Produto (60)': 'sku',
-        'Nome do Produto (120)': 'product_name',
+        'Nome do Produto (120)': 'name',
         'Valor Venda (Tabela Padrão)': 'sale_price',
         'Valor Custo': 'cost_price',
         'Estoque Atual': 'stock_quantity',
@@ -127,7 +127,7 @@ export function detectFormat(parsed: ParsedFile): DetectionResult {
       confidence: 95,
       recordCount: rows.length,
       suggestedMapping: {
-        'Razao Social/Nome': 'full_name_or_company_name',
+        'Razao Social/Nome': 'name',
         'Fantasia': 'trade_name',
         'CNPJ/CPF': 'cnpj_cpf',
         'Tipo Pessoa (PJ/PF)': '_type',
@@ -140,7 +140,7 @@ export function detectFormat(parsed: ParsedFile): DetectionResult {
         'Cidade': 'city',
         'UF': 'state',
         'Celular': 'phone',
-        'Telefone': 'contact_phone',
+        'Telefone': 'phone',
         'E-mail': 'email',
         'Observacoes': 'notes',
         'Situacao (Ativo/Inativo)': 'active',

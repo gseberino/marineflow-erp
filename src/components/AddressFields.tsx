@@ -137,13 +137,13 @@ export function AddressFields({ value, onChange, showCoordinates = true, coordin
                 className="px-3 py-2 text-sm cursor-pointer hover:bg-muted truncate"
                 onMouseDown={e => e.preventDefault()}
                 onClick={() => {
-                  onChange('address_line_1', s.display_name.slice(0, 80));
+                  onChange('address_line_1', s.name.slice(0, 80));
                   onChange('latitude', parseFloat(s.lat));
                   onChange('longitude', parseFloat(s.lon));
                   clearAddressSuggestions();
                 }}
               >
-                {s.display_name.slice(0, 80)}
+                {s.name.slice(0, 80)}
               </div>
             ))}
           </div>

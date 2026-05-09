@@ -10,8 +10,8 @@ export function useVessels() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('vessels')
-        .select('*, clients(full_name_or_company_name), marinas(marina_name)')
-        .order('boat_name', { ascending: true });
+        .select('*, clients(name), marinas(name)')
+        .order('name', { ascending: true });
       if (error) throw error;
       return data;
     },
@@ -26,7 +26,7 @@ export function useVessel(id: string | undefined) {
       if (!id) throw new Error('No id');
       const { data, error } = await supabase
         .from('vessels')
-        .select('*, clients(full_name_or_company_name), marinas(marina_name)')
+        .select('*, clients(name), marinas(name)')
         .eq('id', id)
         .maybeSingle();
       if (error) throw error;
@@ -44,9 +44,9 @@ export function useVesselsForClient(clientId: string | undefined) {
       if (!clientId) return [];
       const { data, error } = await supabase
         .from('vessels')
-        .select('*, marinas(marina_name)')
+        .select('*, marinas(name)')
         .eq('client_id', clientId)
-        .order('boat_name');
+        .order('name');
       if (error) throw error;
       return data;
     },

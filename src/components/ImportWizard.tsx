@@ -20,19 +20,19 @@ interface ImportWizardProps {
 }
 
 const PRODUCT_FIELDS: Record<string, string> = {
-  product_name: 'Nome*', sku: 'SKU', sale_price: 'Preço venda', cost_price: 'Preço custo',
+  name: 'Nome*', sku: 'SKU', sale_price: 'Preço venda', cost_price: 'Preço custo',
   stock_quantity: 'Estoque atual', minimum_stock: 'Estoque mínimo', unit: 'Unidade',
   brand: 'Marca', location_bin: 'Localização', notes: 'Notas', active: 'Ativo',
 };
 const SERVICE_FIELDS: Record<string, string> = {
-  service_name: 'Nome*', default_price: 'Preço padrão', billing_unit: 'Unidade', notes: 'Notas', active: 'Ativo',
+  name: 'Nome*', default_price: 'Preço padrão', billing_unit: 'Unidade', notes: 'Notas', active: 'Ativo',
 };
 const CLIENT_FIELDS: Record<string, string> = {
-  full_name_or_company_name: 'Nome*', cnpj_cpf: 'CPF/CNPJ', email: 'Email', phone: 'Telefone',
+  name: 'Nome*', cnpj_cpf: 'CPF/CNPJ', email: 'Email', phone: 'Telefone',
   address_line_1: 'Endereço', postal_code: 'CEP', city: 'Cidade', state: 'Estado', notes: 'Notas',
 };
 const SUPPLIER_FIELDS: Record<string, string> = {
-  supplier_name: 'Razão Social*', cnpj_cpf: 'CNPJ', contact_email: 'Email', contact_phone: 'Telefone',
+  name: 'Razão Social*', cnpj_cpf: 'CNPJ', email: 'Email', phone: 'Telefone',
   address_line_1: 'Endereço', postal_code: 'CEP', city: 'Cidade', state: 'Estado', notes: 'Notas',
 };
 
@@ -340,8 +340,8 @@ export function ImportWizard({ entityType, open, onOpenChange, onComplete }: Imp
                 </div>
                 <div className="max-h-48 overflow-y-auto space-y-1">
                   {conflicts.slice(0, 20).map((c, i) => {
-                    const name = c.existing.product_name || c.existing.service_name ||
-                      c.existing.full_name_or_company_name || c.existing.supplier_name || '—';
+                    const name = c.existing.name || c.existing.name ||
+                      c.existing.name || c.existing.name || '—';
                     return (
                       <div key={i} className="flex items-center justify-between rounded border px-3 py-2 text-sm">
                         <span className="truncate flex-1">{name}</span>

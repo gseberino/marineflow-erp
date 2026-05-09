@@ -13,7 +13,7 @@ export interface PurchaseOrderItem {
   unit_cost: number;
   received_qty: number;
   created_at: string;
-  products?: { product_name: string; sku?: string | null } | null;
+  products?: { name: string; sku?: string | null } | null;
 }
 
 export interface PurchaseOrder {
@@ -29,22 +29,22 @@ export interface PurchaseOrder {
   created_by: string;
   created_at: string;
   updated_at: string;
-  suppliers?: { supplier_name: string; contact_name?: string | null } | null;
+  suppliers?: { name: string; contact_name?: string | null } | null;
   service_orders?: { service_order_number: string } | null;
   purchase_order_items?: PurchaseOrderItem[];
 }
 
 const PO_LIST_SELECT = `
   *,
-  suppliers(supplier_name, contact_name),
+  suppliers(name, contact_name),
   service_orders(service_order_number)
 `;
 
 const PO_DETAIL_SELECT = `
   *,
-  suppliers(supplier_name, contact_name, contact_email, contact_phone),
+  suppliers(name, contact_name, email, phone),
   service_orders(service_order_number),
-  purchase_order_items(*, products(product_name, sku))
+  purchase_order_items(*, products(name, sku))
 `;
 
 async function generatePONumber(): Promise<string> {

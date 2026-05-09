@@ -20,7 +20,7 @@ export default function MarinaList() {
   const [formOpen, setFormOpen] = useState(false);
   const [editMarina, setEditMarina] = useState<Marina | null>(null);
   const [page, setPage] = useState(1);
-  const [sortKey, setSortKey] = useState('marina_name');
+  const [sortKey, setSortKey] = useState('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const PAGE_SIZE = 20;
   const { t } = useI18n();
@@ -50,7 +50,7 @@ export default function MarinaList() {
 
   const filtered = useMemo(() => {
     const list = (marinas ?? []).filter(m =>
-      !search || m.marina_name.toLowerCase().includes(search.toLowerCase()) || (m.city ?? '').toLowerCase().includes(search.toLowerCase())
+      !search || m.name.toLowerCase().includes(search.toLowerCase()) || (m.city ?? '').toLowerCase().includes(search.toLowerCase())
     );
     return [...list].sort((a, b) => {
       let av: any = (a as any)[sortKey] ?? '';
@@ -101,8 +101,8 @@ export default function MarinaList() {
               <thead>
                 <tr className="border-b bg-muted/50">
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                    <button onClick={() => handleSort('marina_name')} className="flex items-center hover:text-foreground transition-colors">
-                      {(t.marinas as any).name || 'Marina'}<SortIcon col="marina_name" />
+                    <button onClick={() => handleSort('name')} className="flex items-center hover:text-foreground transition-colors">
+                      {(t.marinas as any).name || 'Marina'}<SortIcon col="name" />
                     </button>
                   </th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">
@@ -127,7 +127,7 @@ export default function MarinaList() {
                   return (
                     <tr key={m.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
                       <td className="px-4 py-3">
-                        <p className="font-medium">{m.marina_name}</p>
+                        <p className="font-medium">{m.name}</p>
                         {m.address_line_1 && (
                           <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
                             <MapPin className="h-3 w-3 shrink-0" />
@@ -139,13 +139,13 @@ export default function MarinaList() {
                         {m.contact_name && (
                           <div className="flex items-center gap-1.5">
                             <Phone className="h-3 w-3 shrink-0" />
-                            {m.contact_name}{m.contact_phone ? ` · ${m.contact_phone}` : ''}
+                            {m.contact_name}{m.phone ? ` · ${m.phone}` : ''}
                           </div>
                         )}
-                        {m.contact_email && (
+                        {m.email && (
                           <div className="flex items-center gap-1.5 text-xs mt-0.5">
                             <Mail className="h-3 w-3 shrink-0" />
-                            {m.contact_email}
+                            {m.email}
                           </div>
                         )}
                       </td>

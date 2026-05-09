@@ -11,7 +11,7 @@ export function useMarinas() {
       const { data, error } = await supabase
         .from('marinas')
         .select('*')
-        .order('marina_name', { ascending: true });
+        .order('name', { ascending: true });
       if (error) throw error;
       return data as Marina[];
     },

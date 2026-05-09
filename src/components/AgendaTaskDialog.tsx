@@ -200,7 +200,7 @@ export function AgendaTaskDialog({
                   { value: '', label: 'Sem cliente' },
                   ...clients.map((c: any) => ({
                     value: c.id,
-                    label: c.full_name_or_company_name,
+                    label: c.name,
                   })),
                 ]}
               />

@@ -92,7 +92,7 @@ function groupPayables(payables: any[], groupBy: string) {
   return payables.reduce((acc: Record<string, any[]>, p: any) => {
     let key = '';
     if (groupBy === 'category') key = p.expense_category || 'Sem categoria';
-    if (groupBy === 'supplier') key = (p as any).suppliers?.supplier_name || p.supplier_name || 'Sem fornecedor';
+    if (groupBy === 'supplier') key = (p as any).suppliers?.name || p.name || 'Sem fornecedor';
     if (!acc[key]) acc[key] = [];
     acc[key].push(p);
     return acc;
@@ -259,7 +259,7 @@ export default function FinancialPage() {
           travel_cost_total: 0, discount_amount: 0, tax_amount: 0,
         },
         client: {
-          name: (r as any).clients?.full_name_or_company_name || '—',
+          name: (r as any).clients?.name || '—',
           cpf_cnpj: (r as any).clients?.cpf_cnpj ?? undefined,
           phone: (r as any).clients?.phone ?? undefined,
           email: (r as any).clients?.email ?? undefined,
@@ -289,7 +289,7 @@ export default function FinancialPage() {
           <div className="text-muted-foreground">{formatDate(p.due_date)}</div>
           {alert && <StatusBadge className={`${alert.className} text-xs mt-1`}>{alert.label}</StatusBadge>}
         </td>
-        <td className="px-4 py-3 hidden md:table-cell">{(p as any).suppliers?.supplier_name || p.supplier_name || '—'}</td>
+        <td className="px-4 py-3 hidden md:table-cell">{(p as any).suppliers?.name || p.name || '—'}</td>
         <td className="px-4 py-3 hidden lg:table-cell">
           {p.expense_category ? <StatusBadge className="bg-secondary text-secondary-foreground">{p.expense_category}</StatusBadge> : '—'}
         </td>
@@ -477,7 +477,7 @@ export default function FinancialPage() {
                   {upcomingRec.map(r => (
                     <div key={r.id} className="flex items-center justify-between text-sm border-b pb-2">
                       <div>
-                        <p className="font-medium">{(r as any).clients?.full_name_or_company_name}</p>
+                        <p className="font-medium">{(r as any).clients?.name}</p>
                         <p className="text-xs text-muted-foreground">{formatDate(r.due_date)}</p>
                       </div>
                       <div className="flex items-center gap-2">
@@ -535,7 +535,7 @@ export default function FinancialPage() {
                     { key: 'amount', label: 'Valor', format: (v) => Number(v || 0).toFixed(2).replace('.', ',') },
                     { key: 'due_date', label: 'Vencimento', format: (v) => v ? new Date(v).toLocaleDateString('pt-BR') : '' },
                     { key: 'status', label: 'Status' },
-                    { key: 'clients', label: 'Cliente', format: (v) => v?.full_name_or_company_name || '' },
+                    { key: 'clients', label: 'Cliente', format: (v) => v?.name || '' },
                   ])
                 }
               >
@@ -567,7 +567,7 @@ export default function FinancialPage() {
                     return (
                       <tr key={r.id} className={`border-b last:border-0 hover:bg-muted/30 ${isOverdue ? 'bg-destructive/5' : ''}`}>
                         <td className="px-4 py-3 text-muted-foreground">{formatDate(r.due_date)}</td>
-                        <td className="px-4 py-3 hidden md:table-cell">{(r as any).clients?.full_name_or_company_name}</td>
+                        <td className="px-4 py-3 hidden md:table-cell">{(r as any).clients?.name}</td>
                         <td className="px-4 py-3 font-medium max-w-[180px] truncate">{r.description}</td>
                         <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">{(r as any).service_orders?.service_order_number || '—'}</td>
                         <td className="px-4 py-3 text-right font-medium">{formatCurrency(Number(r.amount))}</td>
@@ -594,7 +594,7 @@ export default function FinancialPage() {
                                   serviceOrderId: so?.id || null,
                                   shareToken: so?.share_token || null,
                                   clientId: client?.id || (r as any).client_id || null,
-                                  clientName: client?.full_name_or_company_name || null,
+                                  clientName: client?.name || null,
                                   clientPhone: client?.whatsapp || client?.phone || null,
                                   amount: Number(r.balance_amount ?? r.amount) || null,
                                   dueDate: r.due_date || null,
@@ -660,7 +660,7 @@ export default function FinancialPage() {
                     { key: 'amount', label: 'Valor', format: (v) => Number(v || 0).toFixed(2).replace('.', ',') },
                     { key: 'due_date', label: 'Vencimento', format: (v) => v ? new Date(v).toLocaleDateString('pt-BR') : '' },
                     { key: 'status', label: 'Status' },
-                    { key: 'supplier_name', label: 'Fornecedor' },
+                    { key: 'name', label: 'Fornecedor' },
                   ])
                 }
               >

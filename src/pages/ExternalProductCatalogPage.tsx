@@ -14,7 +14,7 @@ export default function ExternalProductCatalogPage() {
 
   const filteredProducts = products?.filter(p => 
     p.active && (
-      p.product_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.category?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.sku?.toLowerCase().includes(searchTerm.toLowerCase())
     )
@@ -63,7 +63,7 @@ export default function ExternalProductCatalogPage() {
                           {product.category || 'Geral'}
                         </Badge>
                         <h3 className="font-bold text-base leading-tight group-hover:text-primary transition-colors truncate">
-                          {product.product_name}
+                          {product.name}
                         </h3>
                       </div>
                     </div>

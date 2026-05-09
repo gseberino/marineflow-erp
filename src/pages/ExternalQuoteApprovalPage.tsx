@@ -83,7 +83,7 @@ export default function ExternalQuoteApprovalPage() {
                       </div>
                       <h3 className="text-xl font-bold flex items-center gap-2">
                         <User className="h-5 w-5 text-muted-foreground" />
-                        {quote.client?.full_name_or_company_name || quote.lead?.full_name_or_company_name || '—'}
+                        {quote.client?.name || quote.lead?.name || '—'}
                       </h3>
                     </div>
                     <div className="text-right">
@@ -99,10 +99,10 @@ export default function ExternalQuoteApprovalPage() {
                       <Phone className="h-4 w-4 text-muted-foreground" />
                       {quote.client?.phone || quote.lead?.phone || '—'}
                     </div>
-                    {quote.vessel?.boat_name && (
+                    {quote.vessel?.name && (
                       <div className="flex items-center gap-2">
                         <Anchor className="h-4 w-4 text-muted-foreground" />
-                        {quote.vessel.boat_name}
+                        {quote.vessel.name}
                       </div>
                     )}
                     <div className="flex items-center gap-2">
@@ -116,13 +116,13 @@ export default function ExternalQuoteApprovalPage() {
                     <div className="space-y-1">
                       {quote.parts?.map((item: any) => (
                         <div key={item.id} className="flex justify-between text-sm py-1 border-b border-dashed last:border-0">
-                          <span>{item.quantity}x {item.product_name_snapshot || 'Item s/ nome'} (Peça)</span>
+                          <span>{item.quantity}x {item.name_snapshot || 'Item s/ nome'} (Peça)</span>
                           <span className="font-medium">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.line_total_sale)}</span>
                         </div>
                       ))}
                       {quote.services?.map((item: any) => (
                         <div key={item.id} className="flex justify-between text-sm py-1 border-b border-dashed last:border-0">
-                          <span>{item.quantity}x {item.service_name_snapshot || 'Item s/ nome'} (Serviço)</span>
+                          <span>{item.quantity}x {item.name_snapshot || 'Item s/ nome'} (Serviço)</span>
                           <span className="font-medium">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.line_total)}</span>
                         </div>
                       ))}

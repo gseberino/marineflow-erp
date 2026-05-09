@@ -56,7 +56,7 @@ async function generateNotifications(userId: string, role: string): Promise<AppN
   if (isExternal || isAdmin) {
     const { data: quotes } = await supabase
       .from('external_quotes')
-      .select('id, quote_number, status, updated_at, lead:external_quote_leads(full_name_or_company_name)')
+      .select('id, quote_number, status, updated_at, lead:external_quote_leads(name)')
       .eq('created_by', userId)
       .in('status', ['approved', 'cancelled'])
       .order('updated_at', { ascending: false })
@@ -68,7 +68,7 @@ async function generateNotifications(userId: string, role: string): Promise<AppN
         id: `quote:${q.id}:${q.status}`,
         type: isApproved ? 'QUOTE_APPROVED' : 'QUOTE_REJECTED',
         title: isApproved ? 'Orçamento Aprovado' : 'Orçamento Reprovado',
-        description: `${q.quote_number} — ${q.lead?.full_name_or_company_name ?? 'Cliente'}`,
+        description: `${q.quote_number} — ${q.lead?.name ?? 'Cliente'}`,
         created_at: q.updated_at,
         navigate_to: `/external-quotes/${q.id}`,
       });
@@ -79,7 +79,7 @@ async function generateNotifications(userId: string, role: string): Promise<AppN
   if (isAdmin || isFinancial) {
     const { data: overdue } = await supabase
       .from('receivables')
-      .select('id, balance_amount, due_date, clients(full_name_or_company_name)')
+      .select('id, balance_amount, due_date, clients(name)')
       .not('status', 'in', '("paid","cancelled")')
       .lt('due_date', threeDaysAgo)
       .limit(5);
@@ -89,7 +89,7 @@ async function generateNotifications(userId: string, role: string): Promise<AppN
         id: `overdue:${r.id}`,
         type: 'OVERDUE_RECEIVABLE',
         title: 'Recebível em atraso',
-        description: `${fmtCurrency(Number(r.balance_amount || 0))} — ${r.clients?.full_name_or_company_name ?? 'Cliente'}`,
+        description: `${fmtCurrency(Number(r.balance_amount || 0))} — ${r.clients?.name ?? 'Cliente'}`,
         created_at: r.due_date,
         navigate_to: '/financial?tab=receivables',
       });
@@ -100,7 +100,7 @@ async function generateNotifications(userId: string, role: string): Promise<AppN
   if (isAdmin || isFinancial) {
     const { data: products } = await supabase
       .from('products')
-      .select('id, product_name, stock_quantity, minimum_stock')
+      .select('id, name, stock_quantity, minimum_stock')
       .eq('active', true)
       .gt('minimum_stock', 0)
       .limit(20);
@@ -112,7 +112,7 @@ async function generateNotifications(userId: string, role: string): Promise<AppN
           id: `lowstock:${p.id}`,
           type: 'LOW_STOCK',
           title: 'Estoque baixo',
-          description: `${p.product_name} (${p.stock_quantity || 0}/${p.minimum_stock})`,
+          description: `${p.name} (${p.stock_quantity || 0}/${p.minimum_stock})`,
           created_at: new Date().toISOString(),
           navigate_to: '/inventory',
         });
@@ -123,7 +123,7 @@ async function generateNotifications(userId: string, role: string): Promise<AppN
   if (isStaff && !isExternal) {
     const { data: upcoming } = await supabase
       .from('service_orders')
-      .select('id, service_order_number, scheduled_start_at, clients(full_name_or_company_name)')
+      .select('id, service_order_number, scheduled_start_at, clients(name)')
       .in('status', ['scheduled', 'open'])
       .gte('scheduled_start_at', today)
       .lte('scheduled_start_at', tomorrow + 'T23:59:59')
@@ -138,7 +138,7 @@ async function generateNotifications(userId: string, role: string): Promise<AppN
         id: `upcoming:${o.id}`,
         type: 'OS_UPCOMING',
         title: 'OS agendada',
-        description: `${o.service_order_number} — ${o.clients?.full_name_or_company_name ?? ''} às ${timeStr}`,
+        description: `${o.service_order_number} — ${o.clients?.name ?? ''} às ${timeStr}`,
         created_at: o.scheduled_start_at || new Date().toISOString(),
         navigate_to: `/service-orders/${o.id}`,
       });

@@ -9,7 +9,7 @@ export function useUpdateServiceOrderService() {
       id: string;
       service_order_id: string;
       service_id?: string | null;
-      service_name_snapshot?: string;
+      name_snapshot?: string;
       description_snapshot?: string | null;
       billing_unit_snapshot?: string;
       quantity?: number;

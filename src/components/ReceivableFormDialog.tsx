@@ -61,7 +61,7 @@ export function ReceivableFormDialog({ open, onOpenChange }: Props) {
               placeholder={t.serviceOrders.client}
               options={(clients || []).map(c => ({
                 value: c.id,
-                label: c.full_name_or_company_name,
+                label: c.name,
                 description: c.cpf_cnpj || undefined,
                 searchTerms: [c.cpf_cnpj || '', c.email || ''],
               }))}

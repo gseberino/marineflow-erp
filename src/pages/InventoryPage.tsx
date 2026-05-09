@@ -73,7 +73,7 @@ export default function InventoryPage() {
   const [movFilters, setMovFilters] = useState<MovementFilters>({});
 
   // ── Sort ──
-  const [sortField, setSortField] = useState<string>('product_name');
+  const [sortField, setSortField] = useState<string>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
   // ── Pagination ──
@@ -301,7 +301,7 @@ export default function InventoryPage() {
           <div className="flex justify-end">
             <Button variant="outline" size="sm" className="gap-1" onClick={() => {
               const rows = sortedProducts.map(p => ({
-                'Produto': p.product_name,
+                'Produto': p.name,
                 'SKU': p.sku || '',
                 'Categoria': p.category || '',
                 'Local': p.location_bin || '',
@@ -323,7 +323,7 @@ export default function InventoryPage() {
               <thead>
                 <tr className="border-b bg-muted/50">
                   {([
-                    { label: 'Produto', field: 'product_name', align: 'text-left', hide: '' },
+                    { label: 'Produto', field: 'name', align: 'text-left', hide: '' },
                     { label: 'SKU', field: 'sku', align: 'text-left', hide: 'hidden md:table-cell' },
                     { label: 'Categoria', field: 'category', align: 'text-left', hide: 'hidden lg:table-cell' },
                     { label: 'Local', field: 'location_bin', align: 'text-left', hide: 'hidden lg:table-cell' },
@@ -361,7 +361,7 @@ export default function InventoryPage() {
                     const isLow = !isOut && min > 0 && qty < min;
                     return (
                       <tr key={p.id} className="border-b last:border-0 hover:bg-muted/30">
-                        <td className="px-4 py-3 font-medium">{p.product_name}</td>
+                        <td className="px-4 py-3 font-medium">{p.name}</td>
                         <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{p.sku || '—'}</td>
                         <td className="px-4 py-3 hidden lg:table-cell">{p.category || '—'}</td>
                         <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">{p.location_bin || '—'}</td>
@@ -424,7 +424,7 @@ export default function InventoryPage() {
               <SelectTrigger className="w-[220px]"><SelectValue placeholder={t.inventory.allProducts} /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="__all">{t.inventory.allProducts}</SelectItem>
-                {(allProducts || []).map(p => <SelectItem key={p.id} value={p.id}>{p.product_name}</SelectItem>)}
+                {(allProducts || []).map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
               </SelectContent>
             </Select>
 
@@ -464,7 +464,7 @@ export default function InventoryPage() {
               if (!filteredMovements.length) return;
               const rows = filteredMovements.map(m => ({
                 'Data/Hora': formatDateTime(m.created_at),
-                'Produto': (m.products as any)?.product_name || '',
+                'Produto': (m.products as any)?.name || '',
                 'Tipo': MOVEMENT_LABELS[m.movement_type] || m.movement_type,
                 'Quantidade': m.quantity_delta,
                 'Custo Unit.': m.unit_cost_snapshot ?? '',
@@ -511,7 +511,7 @@ export default function InventoryPage() {
                     return (
                       <tr key={m.id} className="border-b last:border-0 hover:bg-muted/30">
                         <td className="px-4 py-3 text-muted-foreground text-xs">{formatDateTime(m.created_at)}</td>
-                        <td className="px-4 py-3 font-medium">{prod?.product_name || '—'}</td>
+                        <td className="px-4 py-3 font-medium">{prod?.name || '—'}</td>
                         <td className="px-4 py-3">
                           <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${badgeClass}`}>{typeLabel}</span>
                         </td>
@@ -638,7 +638,7 @@ function AdjustStockDialog({ product, onClose, formatCurrency }: {
         </DialogHeader>
         <div className="space-y-4">
           <div>
-            <p className="font-semibold">{product?.product_name}</p>
+            <p className="font-semibold">{product?.name}</p>
             <p className="text-sm text-muted-foreground">Estoque atual: {current} {product?.unit || 'un'}</p>
           </div>
           <div className="space-y-2">
@@ -723,7 +723,7 @@ function AddEntryDialog({ open, onClose, product, allProducts, formatCurrency }:
         <div className="space-y-4">
           {product ? (
             <div>
-              <p className="font-semibold">{product.product_name}</p>
+              <p className="font-semibold">{product.name}</p>
               <p className="text-xs text-muted-foreground">Estoque atual: {product.stock_quantity ?? 0}</p>
             </div>
           ) : (
@@ -733,7 +733,7 @@ function AddEntryDialog({ open, onClose, product, allProducts, formatCurrency }:
                 <SelectTrigger><SelectValue placeholder="Selecione o produto" /></SelectTrigger>
                 <SelectContent>
                   {allProducts.filter(p => p.active).map(p => (
-                    <SelectItem key={p.id} value={p.id}>{p.product_name}</SelectItem>
+                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>

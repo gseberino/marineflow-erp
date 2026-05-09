@@ -35,7 +35,7 @@ export default function ClientPortal() {
 
       setClientData(data.client);
       setOrders(data.orders || []);
-      toast.success(`Bem-vindo, ${data.client.full_name_or_company_name}`);
+      toast.success(`Bem-vindo, ${data.client.name}`);
     } catch (err: any) {
       console.error(err);
       toast.error(err.message || 'Dados não encontrados. Verifique o número e tente novamente.');
@@ -97,7 +97,7 @@ export default function ClientPortal() {
           </div>
           <div className="flex items-center gap-4">
             <span className="text-sm font-medium hidden sm:inline-block">
-              {clientData.full_name_or_company_name}
+              {clientData.name}
             </span>
             <Button variant="ghost" size="sm" onClick={handleLogout} className="text-muted-foreground hover:text-foreground">
               <LogOut className="h-4 w-4 mr-1.5" /> Sair
@@ -136,7 +136,7 @@ export default function ClientPortal() {
                     {o.vessels && (
                       <div className="flex items-center text-sm text-muted-foreground">
                         <Ship className="h-4 w-4 mr-2" />
-                        {o.vessels.boat_name}
+                        {o.vessels.name}
                       </div>
                     )}
                     <div className="text-sm">
