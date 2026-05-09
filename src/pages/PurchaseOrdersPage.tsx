@@ -286,13 +286,13 @@ export default function PurchaseOrdersPage() {
       const q = search.toLowerCase();
       list = list.filter(o =>
         o.po_number.toLowerCase().includes(q) ||
-        (o.suppliers?.company_name ?? '').toLowerCase().includes(q) ||
+        (o.suppliers?.supplier_name ?? '').toLowerCase().includes(q) ||
         (o.service_orders?.service_order_number ?? '').toLowerCase().includes(q)
       );
     }
     return [...list].sort((a, b) => {
       let av: any, bv: any;
-      if (sortKey === 'supplier') { av = a.suppliers?.company_name ?? ''; bv = b.suppliers?.company_name ?? ''; }
+      if (sortKey === 'supplier') { av = a.suppliers?.supplier_name ?? ''; bv = b.suppliers?.supplier_name ?? ''; }
       else if (sortKey === 'total_amount') { av = a.total_amount ?? 0; bv = b.total_amount ?? 0; }
       else if (sortKey === 'expected_date') { av = a.expected_date ?? ''; bv = b.expected_date ?? ''; }
       else { av = (a as any)[sortKey] ?? ''; bv = (b as any)[sortKey] ?? ''; }
@@ -328,7 +328,7 @@ export default function PurchaseOrdersPage() {
             if (!filtered.length) return;
             const rows = filtered.map(po => ({
               'Número': po.po_number,
-              'Fornecedor': po.suppliers?.company_name || '',
+              'Fornecedor': po.suppliers?.supplier_name || '',
               'OS Vinculada': po.service_orders?.service_order_number || '',
               'Status': PO_STATUS_LABELS[po.status] || po.status,
               'Previsão Entrega': po.expected_date ? format(new Date(po.expected_date), 'dd/MM/yyyy', { locale: ptBR }) : '',
@@ -440,7 +440,7 @@ export default function PurchaseOrdersPage() {
               {filtered.map(po => (
                 <TableRow key={po.id} className="cursor-pointer hover:bg-muted/30">
                   <TableCell className="font-medium">{po.po_number}</TableCell>
-                  <TableCell>{po.suppliers?.company_name ?? '—'}</TableCell>
+                  <TableCell>{po.suppliers?.supplier_name ?? '—'}</TableCell>
                   <TableCell className="text-sm hidden md:table-cell">
                     {po.service_order_id && po.service_orders?.service_order_number
                       ? <Link to={`/service-orders/${po.service_order_id}`} className="text-primary hover:underline" onClick={e => e.stopPropagation()}>
