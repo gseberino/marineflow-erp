@@ -1052,6 +1052,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         marina_id: uuidOrNull(form.marina_id),
         payment_conditions: form.payment_conditions || null,
         payment_condition_preset_id: uuidOrNull(form.payment_condition_preset_id),
+        // Always persist the computed grand_total so the PDF and receivables
+        // always reflect the current discount/tax/travel values.
+        grand_total: Math.round(grandTotal * 100) / 100,
       };
 
       if (isNew) {
