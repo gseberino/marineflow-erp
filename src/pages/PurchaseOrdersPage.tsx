@@ -323,6 +323,7 @@ export default function PurchaseOrdersPage() {
         description="Gerencie pedidos de compra para fornecedores"
         icon={<Truck className="h-5 w-5" />}
         actions={
+          <>
           <Button variant="outline" size="sm" className="gap-1" onClick={() => {
             if (!filtered.length) return;
             const rows = filtered.map(po => ({
@@ -341,6 +342,7 @@ export default function PurchaseOrdersPage() {
           <Button onClick={handleNew}>
             <Plus className="h-4 w-4 mr-2" /> Nova PO
           </Button>
+          </>
         }
       />
 
