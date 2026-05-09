@@ -20,6 +20,9 @@ import {
 } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
+import {
   Clock, CheckCircle2, XCircle, AlertCircle, Send, Pencil, Trash2,
   RefreshCw, CalendarClock, MessageSquare, Plus, Zap,
 } from 'lucide-react';

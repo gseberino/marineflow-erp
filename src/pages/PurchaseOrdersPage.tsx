@@ -141,7 +141,7 @@ function POFormDialog({
                 </SelectTrigger>
                 <SelectContent>
                   {(suppliers ?? []).map((s: any) => (
-                    <SelectItem key={s.id} value={s.id}>{s.company_name}</SelectItem>
+                    <SelectItem key={s.id} value={s.id}>{s.supplier_name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -321,30 +321,26 @@ export default function PurchaseOrdersPage() {
       <PageHeader
         title="Ordens de Compra"
         description="Gerencie pedidos de compra para fornecedores"
-        icon={<Truck className="h-5 w-5" />}
-        actions={
-          <>
-          <Button variant="outline" size="sm" className="gap-1" onClick={() => {
-            if (!filtered.length) return;
-            const rows = filtered.map(po => ({
-              'Número': po.po_number,
-              'Fornecedor': po.suppliers?.supplier_name || '',
-              'OS Vinculada': po.service_orders?.service_order_number || '',
-              'Status': PO_STATUS_LABELS[po.status] || po.status,
-              'Previsão Entrega': po.expected_date ? format(new Date(po.expected_date), 'dd/MM/yyyy', { locale: ptBR }) : '',
-              'Total': (po.items || []).reduce((s: number, it: any) => s + Number(it.total_price || 0), 0).toFixed(2),
-            }));
-            const csv = [Object.keys(rows[0]).join(','), ...rows.map(r => Object.values(r).map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','))].join('\n');
-            const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })); a.download = 'ordens_compra.csv'; a.click();
-          }}>
-            <Download className="h-3.5 w-3.5" /> CSV
-          </Button>
-          <Button onClick={handleNew}>
-            <Plus className="h-4 w-4 mr-2" /> Nova PO
-          </Button>
-          </>
-        }
-      />
+      >
+        <Button variant="outline" size="sm" className="gap-1" onClick={() => {
+          if (!filtered.length) return;
+          const rows = filtered.map(po => ({
+            'Número': po.po_number,
+            'Fornecedor': po.suppliers?.supplier_name || '',
+            'OS Vinculada': po.service_orders?.service_order_number || '',
+            'Status': PO_STATUS_LABELS[po.status] || po.status,
+            'Previsão Entrega': po.expected_date ? format(new Date(po.expected_date), 'dd/MM/yyyy', { locale: ptBR }) : '',
+            'Total': Number(po.total_amount || 0).toFixed(2),
+          }));
+          const csv = [Object.keys(rows[0]).join(','), ...rows.map(r => Object.values(r).map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','))].join('\n');
+          const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })); a.download = 'ordens_compra.csv'; a.click();
+        }}>
+          <Download className="h-3.5 w-3.5" /> CSV
+        </Button>
+        <Button onClick={handleNew}>
+          <Plus className="h-4 w-4 mr-2" /> Nova PO
+        </Button>
+      </PageHeader>
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3 items-center">
