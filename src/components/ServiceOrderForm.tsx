@@ -1014,12 +1014,17 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         tipo: r.tipo as 'aprovacao' | 'entrega' | 'prazo' | undefined,
       }))
     : [];
-  const calcInstallmentAmount = (row: typeof installmentRows[0]) =>
-    (laborCost * row.services_pct / 100)
-    + (partsCost * row.parts_pct / 100)
-    + (expensesTotal * row.expenses_pct / 100);
-  const subtotal = laborCost + partsCost + operationalCost + form.travel_cost_total + form.subcontract_cost_total;
-  const grandTotal = subtotal - form.discount_amount + form.tax_amount;
+  const subtotal = laborCost + partsCost + operationalCost + (form.travel_cost_total || 0) + (form.subcontract_cost_total || 0);
+  const grandTotal = subtotal - (form.discount_amount || 0) + (form.tax_amount || 0);
+  // Apply the discount ratio proportionally to each installment row
+  const discountRatio = subtotal > 0 ? grandTotal / subtotal : 1;
+  const calcInstallmentAmount = (row: typeof installmentRows[0]) => {
+    const gross =
+      (laborCost * row.services_pct / 100)
+      + (partsCost * row.parts_pct / 100)
+      + (expensesTotal * row.expenses_pct / 100);
+    return Math.round(gross * discountRatio * 100) / 100;
+  };
 
   // Card fee calculation
   const selectedFee = cardFees?.find((f) => f.installments === selectedInstallments);
@@ -1035,15 +1040,20 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     }
     try {
       const { signed_at: _signedAt, ...formForSave } = form;
+      // Helper: convert empty string to null for UUID fields
+      const uuidOrNull = (v: string | null | undefined) => (v && v.trim() !== '' ? v : null);
+
       const payload = {
         ...formForSave,
         scheduled_start_at: form.scheduled_start_at || null,
         scheduled_end_at: form.scheduled_end_at || null,
-        commissioned_user_id: form.commissioned_user_id || null,
-        requested_by_contact_id: form.requested_by_contact_id || null,
+        commissioned_user_id: uuidOrNull(form.commissioned_user_id),
+        requested_by_contact_id: uuidOrNull(form.requested_by_contact_id),
+        marina_id: uuidOrNull(form.marina_id),
         payment_conditions: form.payment_conditions || null,
-        payment_condition_preset_id: form.payment_condition_preset_id || null,
+        payment_condition_preset_id: uuidOrNull(form.payment_condition_preset_id),
       };
+
       if (isNew) {
         const result = await createSO.mutateAsync(payload);
         const { supabase } = await import('@/integrations/supabase/client');
