@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { AppLayout } from '@/components/AppLayout';
+
 import { PageHeader } from '@/components/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -144,7 +144,7 @@ export default function WhatsAppStatusPage() {
   };
 
   return (
-    <AppLayout>
+    <>
       <div className="flex flex-col gap-6">
         <PageHeader 
           title="Agendador de Status" 
@@ -422,6 +422,6 @@ export default function WhatsAppStatusPage() {
           </div>
         </div>
       </div>
-    </AppLayout>
+    </>
   );
 }
