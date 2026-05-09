@@ -22,7 +22,7 @@ CREATE POLICY "Enable all for authenticated users" ON public.supplier_product_ma
 COMMENT ON TABLE public.supplier_product_mappings IS 'Armazena o vínculo entre SKUs de fornecedores (XML) e produtos internos do catálogo.';
 
 -- Atualizar a função confirm_nfe_import para usar mapeamentos
-OR REPLACE FUNCTION confirm_nfe_import(
+CREATE OR REPLACE FUNCTION confirm_nfe_import(
     p_note_id UUID,
     p_supplier_id UUID DEFAULT NULL,
     p_manual_mappings JSONB DEFAULT '[]'::jsonb
