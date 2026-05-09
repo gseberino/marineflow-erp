@@ -10,11 +10,13 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const jr = (b: unknown, s = 200) =>
-  new Response(JSON.stringify(b), {
-    status: s,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+const jr = (b: unknown, s = 200) => {
+  console.log(`[AI-AGENT] Returning status ${s}:`, JSON.stringify(b).slice(0, 200));
+  return new Response(JSON.stringify(b), {
+    status: 200, // Always return 200 to avoid Supabase generic non-2xx error handling
+    headers: { ...corsHeaders, "Content-Type": "application/json", "X-Actual-Status": s.toString() },
   });
+};
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -1634,12 +1636,14 @@ Quando o usuário disser "este cliente", "esta OS", "este barco", use o ID em co
       if (!aiRes.ok) {
         const t = await aiRes.text();
         console.error("AI gateway error:", aiRes.status, t);
+        let errorMsg = `Erro no gateway de IA (${aiRes.status})`;
         try {
           const errJson = JSON.parse(t);
-          return jr({ error: `IA Erro (${aiRes.status}): ${errJson.error?.message || t}` }, 500);
+          errorMsg = errJson.error?.message || t;
         } catch {
-          return jr({ error: `Erro no gateway de IA (${aiRes.status})` }, 500);
+          errorMsg = t;
         }
+        return jr({ error: `IA Falhou: ${errorMsg}` }, aiRes.status);
       }
 
       const aiJson = await aiRes.json();
