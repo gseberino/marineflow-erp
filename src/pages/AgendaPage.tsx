@@ -227,7 +227,7 @@ export default function AgendaPage() {
             tasks={filteredTasks}
             technicians={technicians}
             onCardClick={(id) => navigate(`/service-orders/${id}`)}
-            onCellClick={openQuickSchedule}
+            onCellClick={openTaskDialog}
             onTaskClick={(t) => openTaskDialog(undefined, undefined, t)}
           />
         ) : (
