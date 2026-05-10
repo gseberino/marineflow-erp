@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useI18n } from '@/i18n';
 
 // The complete list of tables to export
+// The complete list of verified tables to export
 const EXPORT_TABLES = [
   'app_settings', 'app_users', 'clients', 'suppliers', 'marinas', 'vessels',
   'product_categories', 'financial_categories', 'payment_condition_presets',
@@ -15,11 +16,10 @@ const EXPORT_TABLES = [
   'product_price_history', 'price_update_suggestions', 'inventory_movements',
   'service_orders', 'service_order_parts', 'service_order_services',
   'service_order_technicians', 'agenda_tasks',
-  'external_quotes', 'external_quote_items',
+  'external_quote_leads', 'external_quotes', 'external_quote_parts', 'external_quote_services',
   'purchase_orders', 'purchase_order_items',
-  'smart_purchases', 'smart_purchase_items',
   'fiscal_notes', 'fiscal_note_items',
-  'collections', 'payables', 'whatsapp_message_logs'
+  'collections', 'payables', 'audit_log'
 ];
 
 export function MasterDataPanel() {
@@ -36,26 +36,38 @@ export function MasterDataPanel() {
       const backup: Record<string, any[]> = {};
       
       for (const table of EXPORT_TABLES) {
-        let allRows: any[] = [];
-        let page = 0;
-        const limit = 1000;
-        while (true) {
-          const { data, error } = await supabase
-            .from(table as any)
-            .select('*')
-            .range(page * limit, (page + 1) * limit - 1);
+        try {
+          let allRows: any[] = [];
+          let page = 0;
+          const limit = 1000;
+          while (true) {
+            const { data, error } = await supabase
+              .from(table as any)
+              .select('*')
+              .range(page * limit, (page + 1) * limit - 1);
+              
+            if (error) {
+              if (error.code === 'PGRST116' || error.message.includes('schema cache')) {
+                console.warn(`Table ${table} not found in schema cache, skipping.`);
+                break;
+              }
+              throw error;
+            }
+            if (!data || data.length === 0) break;
             
-          if (error) throw error;
-          if (!data || data.length === 0) break;
-          
-          allRows = allRows.concat(data);
-          if (data.length < limit) break;
-          page++;
+            allRows = allRows.concat(data);
+            if (data.length < limit) break;
+            page++;
+          }
+          if (allRows.length > 0) {
+            backup[table] = allRows;
+          }
+        } catch (tableErr) {
+          console.warn(`Failed to export table ${table}:`, tableErr);
         }
-        backup[table] = allRows;
       }
       
-      backup['_meta'] = [{ version: '1.0', date: new Date().toISOString() }];
+      backup['_meta'] = [{ version: '1.1', date: new Date().toISOString() }];
 
       const jsonStr = JSON.stringify(backup, null, 2);
       const blob = new Blob([jsonStr], { type: 'application/json' });
@@ -107,26 +119,27 @@ export function MasterDataPanel() {
         'app_settings', 'app_users', 'clients', 'suppliers', 'marinas', 'vessels',
         'product_categories', 'financial_categories', 'payment_condition_presets',
         'products', 'services', 'supplier_product_mappings',
-        'inventory_movements', 'service_orders', 'service_order_parts', 
-        'service_order_services', 'service_order_technicians', 'agenda_tasks',
-        'external_quotes', 'external_quote_items',
+        'inventory_movements', 
+        'external_quote_leads', 'external_quotes', 'external_quote_parts', 'external_quote_services',
+        'service_orders', 'service_order_parts', 'service_order_services', 'service_order_technicians', 'agenda_tasks',
         'collections', 'payables', 'fiscal_notes', 'fiscal_note_items',
         'price_update_suggestions', 'product_price_history',
         'purchase_orders', 'purchase_order_items',
-        'smart_purchases', 'smart_purchase_items',
-        'whatsapp_message_logs'
+        'audit_log'
       ];
       
-      // Import any other tables that might be in the file but not in our explicit order
       const fileTables = Object.keys(importData).filter(k => k !== '_meta');
-      const allTablesToImport = [...new Set([...importOrder, ...fileTables])];
+      // Ensure we respect the order but also include any extra tables in the file
+      const allTablesToImport = [
+        ...importOrder.filter(t => fileTables.includes(t)),
+        ...fileTables.filter(t => !importOrder.includes(t))
+      ];
 
       for (const table of allTablesToImport) {
         const rows = importData[table] || [];
         if (rows.length === 0) continue;
         
-        // Chunk inserts
-        const chunk = 100;
+        const chunk = 50; // Smaller chunks for better stability
         for (let i = 0; i < rows.length; i += chunk) {
           const slice = rows.slice(i, i + chunk);
           const { error } = await supabase.from(table as any).upsert(slice);
@@ -146,6 +159,9 @@ export function MasterDataPanel() {
       setImporting(false);
     }
   };
+
+  const tablesInFile = importData ? Object.keys(importData).filter(k => k !== '_meta') : [];
+  const firstTable = tablesInFile.length > 0 ? tablesInFile[0] : '';
 
   return (
     <div className="rounded-xl border bg-card p-6 shadow-sm max-w-2xl">
@@ -182,20 +198,21 @@ export function MasterDataPanel() {
             <DialogTitle>Revisão de Importação Global</DialogTitle>
           </DialogHeader>
           
-          {importData && (
+          {!importData ? (
+            <div className="p-8 flex justify-center"><Loader2 className="h-8 w-8 animate-spin" /></div>
+          ) : (
             <div className="flex-1 overflow-hidden flex flex-col">
               <div className="mb-4 text-sm text-muted-foreground bg-warning/10 border border-warning/30 p-3 rounded flex items-start gap-2">
                 <AlertTriangle className="h-5 w-5 text-warning shrink-0" />
                 <p>
-                  Atenção: A importação irá <strong>sobrescrever</strong> registros existentes que possuam o mesmo ID 
-                  e adicionar os novos. Certifique-se de que este é o backup correto.
+                  A importação irá <strong>sobrescrever</strong> registros com o mesmo ID. Verifique os dados abaixo antes de confirmar.
                 </p>
               </div>
 
-              <Tabs defaultValue={Object.keys(importData).filter(k => k !== '_meta')[0]} className="flex-1 flex flex-col min-h-0">
+              <Tabs defaultValue={firstTable} className="flex-1 flex flex-col min-h-0">
                 <div className="overflow-x-auto scrollbar-thin pb-2 mb-2">
                   <TabsList className="h-auto whitespace-nowrap px-1">
-                    {Object.keys(importData).filter(k => k !== '_meta').map(table => {
+                    {tablesInFile.map(table => {
                       const count = (importData[table] || []).length;
                       if (count === 0) return null;
                       return (
@@ -208,7 +225,7 @@ export function MasterDataPanel() {
                 </div>
                 
                 <div className="flex-1 overflow-y-auto border rounded-md p-2 bg-muted/20">
-                  {Object.keys(importData).filter(k => k !== '_meta').map(table => {
+                  {tablesInFile.map(table => {
                     const rows = importData[table] || [];
                     if (rows.length === 0) return null;
                     const keys = Object.keys(rows[0] || {}).slice(0, 8);
