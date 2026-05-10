@@ -114,26 +114,21 @@ export function MasterDataPanel() {
     if (!importData) return;
     setImporting(true);
     try {
-      // 1. Intelligent Field Mapping (Old Names -> New Names)
-      const FIELD_MAP: Record<string, string> = {
-        'name': 'full_name_or_company_name', // for clients
-        'supplier_name_legacy': 'supplier_name', 
-        'boat_name_legacy': 'boat_name',
-        'product_name_legacy': 'product_name',
-        'service_name_legacy': 'service_name',
-        'contact_email_legacy': 'contact_email',
-        'contact_phone_legacy': 'contact_phone'
-      };
-
-      // Table-specific renames
+      // 1. Intelligent Field Mapping (Backup/Legacy -> Current Simplified DB)
       const TABLE_FIELD_MAP: Record<string, Record<string, string>> = {
-        'clients': { 'name': 'full_name_or_company_name', 'cnpj_cpf': 'cpf_cnpj' },
-        'suppliers': { 'name': 'supplier_name', 'cpf_cnpj': 'cnpj_cpf' },
-        'marinas': { 'name': 'marina_name' },
-        'vessels': { 'name': 'boat_name' },
-        'products': { 'name': 'product_name' },
-        'services': { 'name': 'service_name' },
-        'external_quote_leads': { 'name': 'full_name_or_company_name' }
+        'clients': { 'full_name_or_company_name': 'name' },
+        'suppliers': { 
+          'supplier_name': 'name', 
+          'contact_phone': 'phone', 
+          'contact_email': 'email',
+          'cnpj_cpf': 'cnpj_cpf' 
+        },
+        'marinas': { 'marina_name': 'name' },
+        'vessels': { 'boat_name': 'name' },
+        'products': { 'product_name': 'name' },
+        'services': { 'service_name': 'name' },
+        'external_quote_leads': { 'full_name_or_company_name': 'name' },
+        'collections': { 'contact_phone': 'phone' }
       };
 
       // 2. Resolve User ID mappings
@@ -156,12 +151,16 @@ export function MasterDataPanel() {
         processedData[table] = processedData[table].map((row: any) => {
           let newRow = { ...row };
           
-          // Apply Table-Specific Mappings
+          // Apply Table-Specific Mappings (Legacy -> Simple)
           if (TABLE_FIELD_MAP[table]) {
             Object.keys(TABLE_FIELD_MAP[table]).forEach(oldKey => {
-              if (newRow[oldKey] !== undefined && newRow[TABLE_FIELD_MAP[table][oldKey]] === undefined) {
-                newRow[TABLE_FIELD_MAP[table][oldKey]] = newRow[oldKey];
-                delete newRow[oldKey];
+              if (newRow[oldKey] !== undefined) {
+                const newKey = TABLE_FIELD_MAP[table][oldKey];
+                newRow[newKey] = newRow[oldKey];
+                // Only delete if the keys are actually different
+                if (oldKey !== newKey) {
+                  delete newRow[oldKey];
+                }
               }
             });
           }
