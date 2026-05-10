@@ -7,12 +7,19 @@ import { supabase } from '@/integrations/supabase/client';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useI18n } from '@/i18n';
 
-// The tables to export/import
+// The complete list of tables to export
 const EXPORT_TABLES = [
-  'clients', 'suppliers', 'marinas', 'vessels',
-  'products', 'services', 'product_categories', 'financial_categories',
+  'app_settings', 'app_users', 'clients', 'suppliers', 'marinas', 'vessels',
+  'product_categories', 'financial_categories', 'payment_condition_presets',
+  'products', 'services', 'supplier_product_mappings',
+  'product_price_history', 'price_update_suggestions', 'inventory_movements',
   'service_orders', 'service_order_parts', 'service_order_services',
-  'collections', 'payables', 'whatsapp_message_logs', 'app_users'
+  'service_order_technicians', 'agenda_tasks',
+  'external_quotes', 'external_quote_items',
+  'purchase_orders', 'purchase_order_items',
+  'smart_purchases', 'smart_purchase_items',
+  'fiscal_notes', 'fiscal_note_items',
+  'collections', 'payables', 'whatsapp_message_logs'
 ];
 
 export function MasterDataPanel() {
@@ -95,17 +102,26 @@ export function MasterDataPanel() {
     if (!importData) return;
     setImporting(true);
     try {
-      // Very basic import logic (UPSERT)
-      // Tables must be imported in order of dependencies, roughly
+      // Dependecy-safe import order
       const importOrder = [
-        'app_users', 'clients', 'suppliers', 'marinas', 'vessels',
-        'product_categories', 'financial_categories',
-        'products', 'services', 
-        'service_orders', 'service_order_parts', 'service_order_services',
-        'collections', 'payables', 'whatsapp_message_logs'
+        'app_settings', 'app_users', 'clients', 'suppliers', 'marinas', 'vessels',
+        'product_categories', 'financial_categories', 'payment_condition_presets',
+        'products', 'services', 'supplier_product_mappings',
+        'inventory_movements', 'service_orders', 'service_order_parts', 
+        'service_order_services', 'service_order_technicians', 'agenda_tasks',
+        'external_quotes', 'external_quote_items',
+        'collections', 'payables', 'fiscal_notes', 'fiscal_note_items',
+        'price_update_suggestions', 'product_price_history',
+        'purchase_orders', 'purchase_order_items',
+        'smart_purchases', 'smart_purchase_items',
+        'whatsapp_message_logs'
       ];
       
-      for (const table of importOrder) {
+      // Import any other tables that might be in the file but not in our explicit order
+      const fileTables = Object.keys(importData).filter(k => k !== '_meta');
+      const allTablesToImport = [...new Set([...importOrder, ...fileTables])];
+
+      for (const table of allTablesToImport) {
         const rows = importData[table] || [];
         if (rows.length === 0) continue;
         
@@ -176,10 +192,10 @@ export function MasterDataPanel() {
                 </p>
               </div>
 
-              <Tabs defaultValue={EXPORT_TABLES[0]} className="flex-1 flex flex-col min-h-0">
+              <Tabs defaultValue={Object.keys(importData).filter(k => k !== '_meta')[0]} className="flex-1 flex flex-col min-h-0">
                 <div className="overflow-x-auto scrollbar-thin pb-2 mb-2">
                   <TabsList className="h-auto whitespace-nowrap px-1">
-                    {EXPORT_TABLES.map(table => {
+                    {Object.keys(importData).filter(k => k !== '_meta').map(table => {
                       const count = (importData[table] || []).length;
                       if (count === 0) return null;
                       return (
@@ -192,7 +208,7 @@ export function MasterDataPanel() {
                 </div>
                 
                 <div className="flex-1 overflow-y-auto border rounded-md p-2 bg-muted/20">
-                  {EXPORT_TABLES.map(table => {
+                  {Object.keys(importData).filter(k => k !== '_meta').map(table => {
                     const rows = importData[table] || [];
                     if (rows.length === 0) return null;
                     const keys = Object.keys(rows[0] || {}).slice(0, 8);
