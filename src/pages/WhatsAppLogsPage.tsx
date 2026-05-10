@@ -162,6 +162,7 @@ export default function WhatsAppLogsPage() {
         onToggle={toggle}
         onSetField={setField}
         onClearAll={clearAll}
+        presetType="whatsapp_logs"
         groups={[
           {
             type: 'multi',

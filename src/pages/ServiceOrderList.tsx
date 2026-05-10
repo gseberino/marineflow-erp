@@ -225,6 +225,7 @@ export default function ServiceOrderList() {
         onToggle={(f, v) => { toggle(f, v); setPage(1); }}
         onSetField={(f, v) => { setField(f, v); setPage(1); }}
         onClearAll={() => { clearAll(); setPage(1); }}
+        presetType="service_orders"
         groups={[
           {
             type: 'multi',

@@ -7,7 +7,20 @@ export type SavedFilterType =
   | 'service_orders'
   | 'products'
   | 'vessels'
-  | 'agenda';
+  | 'agenda'
+  | 'clients'
+  | 'suppliers'
+  | 'marinas'
+  | 'services'
+  | 'inventory'
+  | 'purchase_orders'
+  | 'collections'
+  | 'crm'
+  | 'external_quotes'
+  | 'whatsapp_leads'
+  | 'whatsapp_scheduled'
+  | 'whatsapp_logs'
+  | string;
 
 export function useSavedFilters(filterType: SavedFilterType) {
   return useQuery({

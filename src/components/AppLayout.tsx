@@ -120,10 +120,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
     staleTime: 5 * 60 * 1000,
   });
 
-  const isActive = (path: string) => {
-    if (path === '/') return location.pathname === '/';
-    return location.pathname.startsWith(path);
-  };
+
 
   const groups: NavGroup[] = [
     {
@@ -201,6 +198,23 @@ export function AppLayout({ children }: { children: ReactNode }) {
     },
   ];
 
+  const isActive = (path: string) => {
+    if (path === '/') return location.pathname === '/';
+    if (location.pathname === path) return true;
+    
+    // Check if another menu item is a better (longer) match
+    const allPaths = groups.flatMap(g => g.items.map(i => i.path));
+    const matchingPaths = allPaths.filter(p => location.pathname.startsWith(p) && (location.pathname.length === p.length || location.pathname.charAt(p.length) === '/'));
+    const longestMatch = matchingPaths.reduce((a, b) => a.length > b.length ? a : b, '');
+    
+    if (longestMatch) {
+      return path === longestMatch;
+    }
+    
+    // Fallback for paths that don't match any menu exactly (like /clients/new)
+    return location.pathname.startsWith(path + '/');
+  };
+
   // Filter items based on roles and dynamic permissions (metadata.visible_areas)
   const visibleAreas = (user?.metadata as any)?.visible_areas as string[] | undefined;
   // Support legacy department field too just in case
@@ -226,15 +240,13 @@ export function AppLayout({ children }: { children: ReactNode }) {
     .filter((g) => g.items.length > 0);
 
   // Track open/closed state per group. Default: only "operacional" open.
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => ({
-    operacional: true,
-  }));
+  const [openGroup, setOpenGroup] = useState<string | null>('operacional');
 
   // Auto-expand the group that contains the active route
   useEffect(() => {
     const activeGroup = visibleGroups.find((g) => g.items.some((i) => isActive(i.path)));
     if (activeGroup) {
-      setOpenGroups((prev) => (prev[activeGroup.id] ? prev : { ...prev, [activeGroup.id]: true }));
+      setOpenGroup(activeGroup.id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
@@ -251,7 +263,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
     navigate('/login');
   };
 
-  const toggleGroup = (id: string) => setOpenGroups((p) => ({ ...p, [id]: !p[id] }));
+  const toggleGroup = (id: string) => setOpenGroup((prev) => (prev === id ? null : id));
 
   const renderNavItem = (item: NavItem, indent = true) => (
     <Link
@@ -314,7 +326,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
         {visibleGroups.map((group) => {
           const groupHasActive = group.items.some((i) => isActive(i.path));
-          const isOpen = openGroups[group.id] ?? false;
+          const isOpen = openGroup === group.id;
 
           if (collapsed) {
             // In collapsed mode, render items flat (icon-only) so navigation still works

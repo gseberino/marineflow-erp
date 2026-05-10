@@ -114,6 +114,7 @@ export default function ProductList() {
         onToggle={(f, v) => { toggle(f, v); setPage(1); }}
         onSetField={(f, v) => { setField(f, v); setPage(1); }}
         onClearAll={() => { clearAll(); setIncompleteFilter(false); setPage(1); }}
+        presetType="products"
         groups={[
           {
             type: 'multi',

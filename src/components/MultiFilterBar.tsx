@@ -24,6 +24,7 @@ import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Filter, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { FilterPresets } from '@/components/FilterPresets';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -66,6 +67,7 @@ interface MultiFilterBarProps {
   search?: string;
   onSearchChange?: (v: string) => void;
   searchPlaceholder?: string;
+  presetType?: string;
 }
 
 // ─── Date presets ───────────────────────────────────────────────────────────
@@ -119,6 +121,7 @@ export function MultiFilterBar({
   search,
   onSearchChange,
   searchPlaceholder = 'Buscar…',
+  presetType,
 }: MultiFilterBarProps) {
   const [open, setOpen] = useState(false);
 
@@ -329,6 +332,26 @@ export function MultiFilterBar({
           <X className="h-3 w-3" />
           Limpar
         </button>
+      )}
+
+      {/* Filter presets */}
+      {presetType && (
+        <FilterPresets
+          filterType={presetType}
+          currentConfig={{ ...filters, search: search ?? '' }}
+          hasActiveFilters={activeCount > 0 || !!search}
+          onApply={(config: any) => {
+            if (config.search !== undefined && onSearchChange) {
+              onSearchChange(config.search);
+            }
+            // Apply other filters by calling onSetField
+            Object.keys(config).forEach(key => {
+              if (key !== 'search') {
+                onSetField(key, config[key]);
+              }
+            });
+          }}
+        />
       )}
 
       {/* Extra buttons (e.g. Export CSV) */}

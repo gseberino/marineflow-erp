@@ -288,6 +288,7 @@ export default function InventoryPage() {
             onToggle={invToggle}
             onSetField={invSetField}
             onClearAll={() => { invClearAll(); setProdFilters(p => ({ ...p, search: '', category: undefined })); }}
+            presetType="inventory"
             groups={categories.length > 0 ? [
               {
                 type: 'multi' as const,

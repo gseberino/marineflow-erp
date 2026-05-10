@@ -344,6 +344,7 @@ export default function WhatsAppScheduledPage() {
         onToggle={toggle}
         onSetField={setField}
         onClearAll={clearAll}
+        presetType="whatsapp_scheduled"
         groups={[
           {
             type: 'multi',

@@ -1,0 +1,322 @@
+﻿
+> supabase\migrations\20260428010000_fiscal_notes.sql:7:CREATE TABLE IF NOT EXISTS fiscal_notes (
+  supabase\migrations\20260428010000_fiscal_notes.sql:8:  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  supabase\migrations\20260428010000_fiscal_notes.sql:9:  nfe_key       text UNIQUE,
+  supabase\migrations\20260428010000_fiscal_notes.sql:10:  nfe_number    text,
+  supabase\migrations\20260428010000_fiscal_notes.sql:11:  issuer_name   text,
+  supabase\migrations\20260428010000_fiscal_notes.sql:12:  issuer_cnpj   text,
+  supabase\migrations\20260428010000_fiscal_notes.sql:13:  issued_at     timestamptz,
+  supabase\migrations\20260428010000_fiscal_notes.sql:14:  total_amount  numeric(14,2) DEFAULT 0,
+  supabase\migrations\20260428010000_fiscal_notes.sql:15:  tax_icms      numeric(14,2) DEFAULT 0,
+  supabase\migrations\20260428010000_fiscal_notes.sql:16:  tax_ipi       numeric(14,2) DEFAULT 0,
+  supabase\migrations\20260428010000_fiscal_notes.sql:17:  tax_pis       numeric(14,2) DEFAULT 0,
+  supabase\migrations\20260428010000_fiscal_notes.sql:18:  tax_cofins    numeric(14,2) DEFAULT 0,
+  supabase\migrations\20260428010000_fiscal_notes.sql:19:  items         jsonb DEFAULT '[]',
+  supabase\migrations\20260428010000_fiscal_notes.sql:20:  xml_content   text,
+  supabase\migrations\20260428010000_fiscal_notes.sql:21:  status        text NOT NULL DEFAULT 'pending',
+  supabase\migrations\20260428010000_fiscal_notes.sql:22:  confirmed_at  timestamptz,
+  supabase\migrations\20260428010000_fiscal_notes.sql:23:  created_at    timestamptz DEFAULT now(),
+  supabase\migrations\20260428010000_fiscal_notes.sql:24:  updated_at    timestamptz DEFAULT now()
+  supabase\migrations\20260428010000_fiscal_notes.sql:25:);
+  supabase\migrations\20260428010000_fiscal_notes.sql:26:
+  supabase\migrations\20260428010000_fiscal_notes.sql:27:-- 2. Add missing columns (safe if they already exist)
+  supabase\migrations\20260428010000_fiscal_notes.sql:28:ALTER TABLE fiscal_notes ADD COLUMN IF NOT EXISTS issued_at   
+ timestamptz;
+  supabase\migrations\20260428010000_fiscal_notes.sql:29:ALTER TABLE fiscal_notes ADD COLUMN IF NOT EXISTS 
+total_amount numeric(14,2) DEFAULT 0;
+  supabase\migrations\20260428010000_fiscal_notes.sql:30:ALTER TABLE fiscal_notes ADD COLUMN IF NOT EXISTS tax_icms    
+ numeric(14,2) DEFAULT 0;
+  supabase\migrations\20260428010000_fiscal_notes.sql:31:ALTER TABLE fiscal_notes ADD COLUMN IF NOT EXISTS tax_ipi     
+ numeric(14,2) DEFAULT 0;
+  supabase\migrations\20260428010000_fiscal_notes.sql:32:ALTER TABLE fiscal_notes ADD COLUMN IF NOT EXISTS tax_pis     
+ numeric(14,2) DEFAULT 0;
+  supabase\migrations\20260428010000_fiscal_notes.sql:33:ALTER TABLE fiscal_notes ADD COLUMN IF NOT EXISTS tax_cofins  
+ numeric(14,2) DEFAULT 0;
+  supabase\migrations\20260428010000_fiscal_notes.sql:34:ALTER TABLE fiscal_notes ADD COLUMN IF NOT EXISTS items       
+ jsonb DEFAULT '[]';
+  supabase\migrations\20260428010000_fiscal_notes.sql:35:ALTER TABLE fiscal_notes ADD COLUMN IF NOT EXISTS xml_content 
+ text;
+  supabase\migrations\20260428010000_fiscal_notes.sql:36:ALTER TABLE fiscal_notes ADD COLUMN IF NOT EXISTS 
+confirmed_at timestamptz;
+  supabase\migrations\20260428010000_fiscal_notes.sql:37:
+  supabase\migrations\20260428010000_fiscal_notes.sql:38:-- 3. Status constraint (drop old variations, add canonical 
+one)
+  supabase\migrations\20260428010000_fiscal_notes.sql:39:ALTER TABLE fiscal_notes DROP CONSTRAINT IF EXISTS 
+fiscal_notes_status_check;
+  supabase\migrations\20260428010000_fiscal_notes.sql:40:ALTER TABLE fiscal_notes DROP CONSTRAINT IF EXISTS 
+chk_fiscal_notes_status;
+  supabase\migrations\20260428010000_fiscal_notes.sql:41:ALTER TABLE fiscal_notes ADD CONSTRAINT 
+fiscal_notes_status_check
+  supabase\migrations\20260428010000_fiscal_notes.sql:42:  CHECK (status IN 
+('pending','confirmed','cancelled','error'));
+  supabase\migrations\20260428010000_fiscal_notes.sql:43:
+  supabase\migrations\20260428010000_fiscal_notes.sql:44:-- 4. Indexes
+  supabase\migrations\20260428010000_fiscal_notes.sql:45:CREATE INDEX IF NOT EXISTS idx_fiscal_notes_status    ON 
+fiscal_notes (status);
+  supabase\migrations\20260428010000_fiscal_notes.sql:46:CREATE INDEX IF NOT EXISTS idx_fiscal_notes_nfe_key   ON 
+fiscal_notes (nfe_key);
+  supabase\migrations\20260428010000_fiscal_notes.sql:47:CREATE INDEX IF NOT EXISTS idx_fiscal_notes_issued_at ON 
+fiscal_notes (issued_at DESC);
+> supabase\migrations\20260428020000_supplier_product_mappings.sql:4:CREATE TABLE IF NOT EXISTS 
+public.supplier_product_mappings (
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:5:    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:6:    supplier_id UUID REFERENCES 
+public.suppliers(id) ON DELETE CASCADE,
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:7:    supplier_sku TEXT NOT NULL,
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:8:    supplier_description TEXT,
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:9:    internal_product_id UUID REFERENCES 
+public.products(id) ON DELETE CASCADE,
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:10:    created_at TIMESTAMPTZ DEFAULT now(),
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:11:    updated_at TIMESTAMPTZ DEFAULT now(),
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:12:    UNIQUE(supplier_id, supplier_sku)
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:13:);
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:14:
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:15:-- Habilitar RLS
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:16:ALTER TABLE public.supplier_product_mappings 
+ENABLE ROW LEVEL SECURITY;
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:17:
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:18:CREATE POLICY "Enable all for authenticated 
+users" ON public.supplier_product_mappings
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:19:    FOR ALL TO authenticated USING (true) WITH 
+CHECK (true);
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:20:
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:21:-- Comentários para documentação
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:22:COMMENT ON TABLE 
+public.supplier_product_mappings IS 'Armazena o vínculo entre SKUs de fornecedores (XML) e produtos internos do 
+catálogo.';
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:23:
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:24:-- Atualizar a função confirm_nfe_import para 
+usar mapeamentos
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:25:CREATE OR REPLACE FUNCTION confirm_nfe_import(
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:26:    p_note_id UUID,
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:27:    p_supplier_id UUID DEFAULT NULL,
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:28:    p_manual_mappings JSONB DEFAULT '[]'::jsonb
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:29:)
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:30:RETURNS JSONB
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:31:LANGUAGE plpgsql
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:32:SECURITY DEFINER
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:33:AS $$
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:34:DECLARE
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:35:    v_note_status TEXT;
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:36:    v_items JSONB;
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:37:    v_item RECORD;
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:38:    v_product_id UUID;
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:39:    v_movement_id UUID;
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:40:    v_products_created INT := 0;
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:41:    v_movements_created INT := 0;
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:42:    v_payable_id UUID;
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:43:    v_total_amount DECIMAL;
+  supabase\migrations\20260428020000_supplier_product_mappings.sql:44:    v_nfe_number TEXT;
+> supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:10:CREATE TABLE IF NOT EXISTS 
+public.fiscal_notes (
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:11:  id uuid PRIMARY KEY DEFAULT 
+gen_random_uuid(),
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:12:  nfe_key text UNIQUE NOT NULL,
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:13:  nfe_number text,
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:14:  issuer_name text,
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:15:  issuer_cnpj text,
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:16:  issue_date date,
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:17:  total_value numeric DEFAULT 0,
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:18:  status text NOT NULL DEFAULT 
+'imported',
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:19:  xml_url text,
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:20:  raw_xml text,
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:21:  payable_id uuid,
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:22:  supplier_id uuid,
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:23:  notes text,
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:24:  created_by uuid,
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:25:  created_at timestamptz NOT NULL 
+DEFAULT now(),
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:26:  updated_at timestamptz NOT NULL 
+DEFAULT now()
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:27:);
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:28:
+> supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:29:CREATE TABLE IF NOT EXISTS 
+public.fiscal_note_items (
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:30:  id uuid PRIMARY KEY DEFAULT 
+gen_random_uuid(),
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:31:  fiscal_note_id uuid NOT NULL 
+REFERENCES public.fiscal_notes(id) ON DELETE CASCADE,
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:32:  c_prod text,
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:33:  x_prod text,
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:34:  ncm text,
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:35:  unit text,
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:36:  q_com numeric DEFAULT 0,
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:37:  v_un_com numeric DEFAULT 0,
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:38:  v_prod numeric DEFAULT 0,
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:39:  matched_product_id uuid,
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:40:  inventory_movement_id uuid,
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:41:  created_at timestamptz NOT NULL 
+DEFAULT now()
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:42:);
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:43:
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:44:ALTER TABLE public.fiscal_notes 
+ENABLE ROW LEVEL SECURITY;
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:45:ALTER TABLE public.fiscal_note_items 
+ENABLE ROW LEVEL SECURITY;
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:46:
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:47:CREATE POLICY 
+"authenticated_all_fiscal_notes" ON public.fiscal_notes
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:48:  FOR ALL TO authenticated USING 
+(auth.uid() IS NOT NULL) WITH CHECK (auth.uid() IS NOT NULL);
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:49:
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:50:CREATE POLICY 
+"authenticated_all_fiscal_note_items" ON public.fiscal_note_items
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:51:  FOR ALL TO authenticated USING 
+(auth.uid() IS NOT NULL) WITH CHECK (auth.uid() IS NOT NULL);
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:52:
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:53:CREATE TRIGGER 
+update_fiscal_notes_updated_at
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:54:  BEFORE UPDATE ON public.fiscal_notes
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:55:  FOR EACH ROW EXECUTE FUNCTION 
+public.update_updated_at_column();
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:56:
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:57:CREATE INDEX IF NOT EXISTS 
+idx_fiscal_note_items_note ON public.fiscal_note_items(fiscal_note_id);
+  supabase\migrations\20260428022454_39950c6e-57c4-405e-acc9-bf458cd2f3c2.sql:58:CREATE INDEX IF NOT EXISTS 
+idx_fiscal_note_items_matched_product ON public.fiscal_note_items(matched_product_id);
+> supabase\migrations\20260428030000_price_intelligence.sql:2:CREATE TABLE IF NOT EXISTS public.product_price_history (
+  supabase\migrations\20260428030000_price_intelligence.sql:3:    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  supabase\migrations\20260428030000_price_intelligence.sql:4:    product_id UUID REFERENCES public.products(id) ON 
+DELETE CASCADE,
+  supabase\migrations\20260428030000_price_intelligence.sql:5:    old_cost DECIMAL,
+  supabase\migrations\20260428030000_price_intelligence.sql:6:    new_cost DECIMAL,
+  supabase\migrations\20260428030000_price_intelligence.sql:7:    fiscal_note_id UUID REFERENCES 
+public.fiscal_notes(id) ON DELETE SET NULL,
+  supabase\migrations\20260428030000_price_intelligence.sql:8:    created_at TIMESTAMPTZ DEFAULT now()
+  supabase\migrations\20260428030000_price_intelligence.sql:9:);
+  supabase\migrations\20260428030000_price_intelligence.sql:10:
+> supabase\migrations\20260428030000_price_intelligence.sql:11:CREATE TABLE IF NOT EXISTS 
+public.price_update_suggestions (
+  supabase\migrations\20260428030000_price_intelligence.sql:12:    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  supabase\migrations\20260428030000_price_intelligence.sql:13:    product_id UUID REFERENCES public.products(id) ON 
+DELETE CASCADE,
+  supabase\migrations\20260428030000_price_intelligence.sql:14:    fiscal_note_id UUID REFERENCES 
+public.fiscal_notes(id) ON DELETE CASCADE,
+  supabase\migrations\20260428030000_price_intelligence.sql:15:    current_sale_price DECIMAL,
+  supabase\migrations\20260428030000_price_intelligence.sql:16:    suggested_sale_price DECIMAL,
+  supabase\migrations\20260428030000_price_intelligence.sql:17:    margin_percent DECIMAL,
+  supabase\migrations\20260428030000_price_intelligence.sql:18:    status TEXT DEFAULT 'pending',
+  supabase\migrations\20260428030000_price_intelligence.sql:19:    created_at TIMESTAMPTZ DEFAULT now()
+  supabase\migrations\20260428030000_price_intelligence.sql:20:);
+  supabase\migrations\20260428030000_price_intelligence.sql:21:
+  supabase\migrations\20260428030000_price_intelligence.sql:22:ALTER TABLE public.product_price_history    ENABLE ROW 
+LEVEL SECURITY;
+  supabase\migrations\20260428030000_price_intelligence.sql:23:ALTER TABLE public.price_update_suggestions ENABLE ROW 
+LEVEL SECURITY;
+  supabase\migrations\20260428030000_price_intelligence.sql:24:
+  supabase\migrations\20260428030000_price_intelligence.sql:25:DROP POLICY IF EXISTS "Enable all for authenticated 
+users" ON public.product_price_history;
+  supabase\migrations\20260428030000_price_intelligence.sql:26:DROP POLICY IF EXISTS "Enable all for authenticated 
+users" ON public.price_update_suggestions;
+  supabase\migrations\20260428030000_price_intelligence.sql:27:CREATE POLICY "Enable all for authenticated users" ON 
+public.product_price_history    FOR ALL TO authenticated USING (true);
+  supabase\migrations\20260428030000_price_intelligence.sql:28:CREATE POLICY "Enable all for authenticated users" ON 
+public.price_update_suggestions FOR ALL TO authenticated USING (true);
+  supabase\migrations\20260428030000_price_intelligence.sql:29:
+  supabase\migrations\20260428030000_price_intelligence.sql:30:DROP TRIGGER IF EXISTS tr_log_product_cost_change ON 
+public.products;
+  supabase\migrations\20260428030000_price_intelligence.sql:31:
+  supabase\migrations\20260428030000_price_intelligence.sql:32:CREATE OR REPLACE FUNCTION log_product_cost_change()
+  supabase\migrations\20260428030000_price_intelligence.sql:33:RETURNS TRIGGER AS $$
+  supabase\migrations\20260428030000_price_intelligence.sql:34:BEGIN
+  supabase\migrations\20260428030000_price_intelligence.sql:35:    IF (OLD.cost_price IS DISTINCT FROM NEW.cost_price) 
+THEN
+  supabase\migrations\20260428030000_price_intelligence.sql:36:        INSERT INTO product_price_history (product_id, 
+old_cost, new_cost)
+  supabase\migrations\20260428030000_price_intelligence.sql:37:        VALUES (NEW.id, OLD.cost_price, NEW.cost_price);
+  supabase\migrations\20260428030000_price_intelligence.sql:38:    END IF;
+  supabase\migrations\20260428030000_price_intelligence.sql:39:    RETURN NEW;
+  supabase\migrations\20260428030000_price_intelligence.sql:40:END;
+  supabase\migrations\20260428030000_price_intelligence.sql:41:$$ LANGUAGE plpgsql;
+  supabase\migrations\20260428030000_price_intelligence.sql:42:
+  supabase\migrations\20260428030000_price_intelligence.sql:43:CREATE TRIGGER tr_log_product_cost_change
+  supabase\migrations\20260428030000_price_intelligence.sql:44:    AFTER UPDATE OF cost_price ON public.products
+  supabase\migrations\20260428030000_price_intelligence.sql:45:    FOR EACH ROW EXECUTE FUNCTION 
+log_product_cost_change();
+> supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:74:CREATE TABLE IF NOT EXISTS 
+public.supplier_product_mappings (
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:75:  id UUID PRIMARY KEY DEFAULT 
+gen_random_uuid(),
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:76:  supplier_id UUID REFERENCES 
+public.suppliers(id) ON DELETE CASCADE,
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:77:  supplier_sku TEXT NOT NULL,
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:78:  supplier_description TEXT,
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:79:  internal_product_id UUID REFERENCES 
+public.products(id) ON DELETE CASCADE,
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:80:  created_at TIMESTAMPTZ DEFAULT 
+now(),
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:81:  updated_at TIMESTAMPTZ DEFAULT 
+now(),
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:82:  UNIQUE(supplier_id, supplier_sku)
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:83:);
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:84:ALTER TABLE 
+public.supplier_product_mappings ENABLE ROW LEVEL SECURITY;
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:85:DO $$ BEGIN
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:86:  IF NOT EXISTS (SELECT 1 FROM 
+pg_policies WHERE tablename='supplier_product_mappings' AND policyname='spm_all_authenticated') THEN
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:87:    CREATE POLICY 
+"spm_all_authenticated" ON public.supplier_product_mappings
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:88:      FOR ALL TO authenticated USING 
+(true) WITH CHECK (true);
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:89:  END IF;
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:90:END $$;
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:91:
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:92:-- 6. Inteligência de preços
+> supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:93:CREATE TABLE IF NOT EXISTS 
+public.product_price_history (
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:94:  id UUID PRIMARY KEY DEFAULT 
+gen_random_uuid(),
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:95:  product_id UUID REFERENCES 
+public.products(id) ON DELETE CASCADE,
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:96:  old_cost NUMERIC,
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:97:  new_cost NUMERIC,
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:98:  fiscal_note_id UUID REFERENCES 
+public.fiscal_notes(id) ON DELETE SET NULL,
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:99:  created_at TIMESTAMPTZ DEFAULT now()
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:100:);
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:101:ALTER TABLE 
+public.product_price_history ENABLE ROW LEVEL SECURITY;
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:102:DO $$ BEGIN
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:103:  IF NOT EXISTS (SELECT 1 FROM 
+pg_policies WHERE tablename='product_price_history' AND policyname='pph_all_authenticated') THEN
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:104:    CREATE POLICY 
+"pph_all_authenticated" ON public.product_price_history
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:105:      FOR ALL TO authenticated USING 
+(true) WITH CHECK (true);
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:106:  END IF;
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:107:END $$;
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:108:
+> supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:109:CREATE TABLE IF NOT EXISTS 
+public.price_update_suggestions (
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:110:  id UUID PRIMARY KEY DEFAULT 
+gen_random_uuid(),
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:111:  product_id UUID REFERENCES 
+public.products(id) ON DELETE CASCADE,
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:112:  fiscal_note_id UUID REFERENCES 
+public.fiscal_notes(id) ON DELETE CASCADE,
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:113:  current_sale_price NUMERIC,
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:114:  suggested_sale_price NUMERIC,
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:115:  margin_percent NUMERIC,
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:116:  status TEXT DEFAULT 'pending',
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:117:  created_at TIMESTAMPTZ DEFAULT 
+now()
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:118:);
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:119:ALTER TABLE 
+public.price_update_suggestions ENABLE ROW LEVEL SECURITY;
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:120:DO $$ BEGIN
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:121:  IF NOT EXISTS (SELECT 1 FROM 
+pg_policies WHERE tablename='price_update_suggestions' AND policyname='pus_all_authenticated') THEN
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:122:    CREATE POLICY 
+"pus_all_authenticated" ON public.price_update_suggestions
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:123:      FOR ALL TO authenticated USING 
+(true) WITH CHECK (true);
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:124:  END IF;
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:125:END $$;
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:126:
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:127:-- 7. Produtos: última entrada de 
+estoque
+  supabase\migrations\20260428121826_7c58b9e4-8e9f-455c-8031-b567ff94ce2c.sql:128:ALTER TABLE public.products ADD 
+COLUMN IF NOT EXISTS last_stock_entry_at TIMESTAMPTZ;
+
+
