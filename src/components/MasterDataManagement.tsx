@@ -114,7 +114,41 @@ export function MasterDataPanel() {
     if (!importData) return;
     setImporting(true);
     try {
-      // Dependecy-safe import order
+      // 1. Resolve User ID mappings (crucial for Auth users across environments)
+      const { data: currentDbUsers } = await supabase.from('app_users').select('id, email');
+      const userMap: Record<string, string> = {};
+      const backupUsers = importData['app_users'] || [];
+      
+      backupUsers.forEach(bu => {
+        const dbMatch = currentDbUsers?.find(du => du.email === bu.email);
+        if (dbMatch && dbMatch.id !== bu.id) {
+          userMap[bu.id] = dbMatch.id;
+        }
+      });
+
+      // Clone data to avoid mutating original state if we need to retry
+      const processedData = JSON.parse(JSON.stringify(importData));
+      
+      // 2. Global ID replacement in the backup data
+      const oldIds = Object.keys(userMap);
+      if (oldIds.length > 0) {
+        Object.keys(processedData).forEach(table => {
+          if (table === '_meta') return;
+          processedData[table] = processedData[table].map((row: any) => {
+            const newRow = { ...row };
+            Object.keys(newRow).forEach(key => {
+              const val = newRow[key];
+              if (typeof val === 'string' && userMap[val]) {
+                newRow[key] = userMap[val];
+              }
+            });
+            return newRow;
+          });
+        });
+        console.log(`Mapped ${oldIds.length} users and updated references.`);
+      }
+
+      // 3. Dependency-safe import order
       const importOrder = [
         'app_settings', 'app_users', 'clients', 'suppliers', 'marinas', 'vessels',
         'product_categories', 'financial_categories', 'payment_condition_presets',
@@ -128,21 +162,30 @@ export function MasterDataPanel() {
         'audit_log'
       ];
       
-      const fileTables = Object.keys(importData).filter(k => k !== '_meta');
-      // Ensure we respect the order but also include any extra tables in the file
+      const fileTables = Object.keys(processedData).filter(k => k !== '_meta');
       const allTablesToImport = [
         ...importOrder.filter(t => fileTables.includes(t)),
         ...fileTables.filter(t => !importOrder.includes(t))
       ];
 
       for (const table of allTablesToImport) {
-        const rows = importData[table] || [];
+        const rows = processedData[table] || [];
         if (rows.length === 0) continue;
         
-        const chunk = 50; // Smaller chunks for better stability
+        const chunk = 50;
         for (let i = 0; i < rows.length; i += chunk) {
           const slice = rows.slice(i, i + chunk);
-          const { error } = await supabase.from(table as any).upsert(slice);
+          // Use onConflict if needed, but upsert usually handles ID by default
+          // For app_users, we specifically skip if the ID was already mapped (already exists)
+          let finalSlice = slice;
+          if (table === 'app_users') {
+             // Avoid clashing with existing emails if we already mapped them
+             finalSlice = slice.filter((u: any) => !Object.values(userMap).includes(u.id));
+          }
+          
+          if (finalSlice.length === 0) continue;
+
+          const { error } = await supabase.from(table as any).upsert(finalSlice);
           if (error) {
             console.error(`Error importing ${table}:`, error);
             throw new Error(`Erro na tabela ${table}: ${error.message}`);
