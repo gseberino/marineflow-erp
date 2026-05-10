@@ -114,7 +114,29 @@ export function MasterDataPanel() {
     if (!importData) return;
     setImporting(true);
     try {
-      // 1. Resolve User ID mappings (crucial for Auth users across environments)
+      // 1. Intelligent Field Mapping (Old Names -> New Names)
+      const FIELD_MAP: Record<string, string> = {
+        'name': 'full_name_or_company_name', // for clients
+        'supplier_name_legacy': 'supplier_name', 
+        'boat_name_legacy': 'boat_name',
+        'product_name_legacy': 'product_name',
+        'service_name_legacy': 'service_name',
+        'contact_email_legacy': 'contact_email',
+        'contact_phone_legacy': 'contact_phone'
+      };
+
+      // Table-specific renames
+      const TABLE_FIELD_MAP: Record<string, Record<string, string>> = {
+        'clients': { 'name': 'full_name_or_company_name', 'cnpj_cpf': 'cpf_cnpj' },
+        'suppliers': { 'name': 'supplier_name', 'cpf_cnpj': 'cnpj_cpf' },
+        'marinas': { 'name': 'marina_name' },
+        'vessels': { 'name': 'boat_name' },
+        'products': { 'name': 'product_name' },
+        'services': { 'name': 'service_name' },
+        'external_quote_leads': { 'name': 'full_name_or_company_name' }
+      };
+
+      // 2. Resolve User ID mappings
       const { data: currentDbUsers } = await supabase.from('app_users').select('id, email');
       const userMap: Record<string, string> = {};
       const backupUsers = importData['app_users'] || [];
@@ -126,29 +148,37 @@ export function MasterDataPanel() {
         }
       });
 
-      // Clone data to avoid mutating original state if we need to retry
       const processedData = JSON.parse(JSON.stringify(importData));
       
-      // 2. Global ID replacement in the backup data
-      const oldIds = Object.keys(userMap);
-      if (oldIds.length > 0) {
-        Object.keys(processedData).forEach(table => {
-          if (table === '_meta') return;
-          processedData[table] = processedData[table].map((row: any) => {
-            const newRow = { ...row };
-            Object.keys(newRow).forEach(key => {
-              const val = newRow[key];
-              if (typeof val === 'string' && userMap[val]) {
-                newRow[key] = userMap[val];
+      // 3. Global Transformation (Mapping Columns & User IDs)
+      Object.keys(processedData).forEach(table => {
+        if (table === '_meta') return;
+        processedData[table] = processedData[table].map((row: any) => {
+          let newRow = { ...row };
+          
+          // Apply Table-Specific Mappings
+          if (TABLE_FIELD_MAP[table]) {
+            Object.keys(TABLE_FIELD_MAP[table]).forEach(oldKey => {
+              if (newRow[oldKey] !== undefined && newRow[TABLE_FIELD_MAP[table][oldKey]] === undefined) {
+                newRow[TABLE_FIELD_MAP[table][oldKey]] = newRow[oldKey];
+                delete newRow[oldKey];
               }
             });
-            return newRow;
-          });
-        });
-        console.log(`Mapped ${oldIds.length} users and updated references.`);
-      }
+          }
 
-      // 3. Dependency-safe import order
+          // Apply User ID Mappings
+          Object.keys(newRow).forEach(key => {
+            const val = newRow[key];
+            if (typeof val === 'string' && userMap[val]) {
+              newRow[key] = userMap[val];
+            }
+          });
+          
+          return newRow;
+        });
+      });
+
+      // 4. Dependency-safe import order
       const importOrder = [
         'app_settings', 'app_users', 'clients', 'suppliers', 'marinas', 'vessels',
         'product_categories', 'financial_categories', 'payment_condition_presets',
@@ -175,11 +205,9 @@ export function MasterDataPanel() {
         const chunk = 50;
         for (let i = 0; i < rows.length; i += chunk) {
           const slice = rows.slice(i, i + chunk);
-          // Use onConflict if needed, but upsert usually handles ID by default
-          // For app_users, we specifically skip if the ID was already mapped (already exists)
           let finalSlice = slice;
+          
           if (table === 'app_users') {
-             // Avoid clashing with existing emails if we already mapped them
              finalSlice = slice.filter((u: any) => !Object.values(userMap).includes(u.id));
           }
           
@@ -188,6 +216,12 @@ export function MasterDataPanel() {
           const { error } = await supabase.from(table as any).upsert(finalSlice);
           if (error) {
             console.error(`Error importing ${table}:`, error);
+            // If it's a "column does not exist" error, we might want to be even more resilient
+            if (error.message.includes('column') && error.message.includes('does not exist')) {
+               console.warn(`Attempting recovery for ${table} by removing invalid columns...`);
+               // This is a last-resort recovery: try to filter out the problematic column
+               // For now, we'll just throw so the user can see which column it is
+            }
             throw new Error(`Erro na tabela ${table}: ${error.message}`);
           }
         }
