@@ -14,6 +14,7 @@ import { WhatsAppQueuePanel } from '@/components/WhatsAppQueuePanel';
 import { WhatsAppWebhookValidator } from '@/components/WhatsAppWebhookValidator';
 import { WhatsAppZApiSettings } from '@/components/WhatsAppZApiSettings';
 import { AppUserEditDialog } from '@/components/AppUserEditDialog';
+import { MasterDataPanel } from '@/components/MasterDataManagement';
 import { useAuth } from '@/hooks/use-auth';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useCardFees, useUpdateCardFee } from '@/hooks/use-card-fees';
@@ -298,6 +299,7 @@ export default function SettingsPage() {
 
         <TabsContent value="system" className="mt-4 space-y-4">
           {languageContent}
+          <MasterDataPanel />
         </TabsContent>
       </Tabs>
     </div>
