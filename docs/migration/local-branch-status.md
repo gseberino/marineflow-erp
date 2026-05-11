@@ -1,10 +1,10 @@
-# Local Branch Status
+﻿# Local Branch Status
 
 ## Current Branch
 
 - Branch: `codex/migration-audit`
 - Base: `origin/main`
-- Current tip: `4389f8a`
+- Current tip: `9cc245e`
 
 ## Local Commits
 
@@ -13,6 +13,7 @@
 3. `ffaf48f` - `docs: add Supabase staging migration checklist`
 4. `dd9611d` - `docs: add manual Supabase staging creation steps`
 5. `4389f8a` - `chore: add staging env support for migration tools`
+6. `9cc245e` - `chore: prepare staging readiness workflow`
 
 ## What Is Already Ready
 
@@ -23,8 +24,9 @@
 - Schema / migrations inventory is documented.
 - Staging schema application plan is documented.
 - Staging readiness check support exists locally.
+- Final Gustavo handoff and local ready summary are documented.
 - Local preservation package exists outside the repo and includes patches plus a bundle.
-- Build, tests, and backup analysis are passing locally.
+- Build, tests, backup analysis, inventory, and readiness checks are passing locally.
 
 ## What Still Needs To Happen
 
@@ -33,7 +35,6 @@
 - Run `migration:check-staging` against the staging env.
 - Apply schema migrations only after staging is confirmed.
 - Re-run readiness and validation checks after schema application.
-- Review the schema / migrations inventory before the first staging migration.
 - Run dry-run against staging before any import discussion.
 - Import remains blocked until `CONFIRM_IMPORT=true` and other gates pass.
 
