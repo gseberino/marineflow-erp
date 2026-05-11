@@ -5,6 +5,7 @@
 - Branch: `codex/migration-audit`
 - Base remota: `origin/main`
 - Estado atual: pronto para aguardar a criacao manual do Supabase staging
+- HEAD real: `76e6fe5` (`docs: reconcile final local migration status`)
 
 ## 2. Commit locais
 
@@ -14,6 +15,8 @@
 - `dd9611d` `docs: add manual Supabase staging creation steps`
 - `4389f8a` `chore: add staging env support for migration tools`
 - `9cc245e` `chore: prepare staging readiness workflow`
+- `babc98b` `docs: add final local migration handoff`
+- `76e6fe5` `docs: reconcile final local migration status`
 
 ## 3. Ferramentas criadas
 
@@ -42,6 +45,7 @@
 - migration:analyze: passou
 - migration:check-staging sem `.env.staging.local`: `not_configured`
 - inventory read-only: passou
+- branch tip reconciled with final local docs
 
 ## 6. Decisao tecnica atual
 

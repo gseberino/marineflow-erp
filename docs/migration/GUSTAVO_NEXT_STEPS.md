@@ -12,6 +12,7 @@ Commits locais existentes:
 - `4389f8a` `chore: add staging env support for migration tools`
 - `9cc245e` `chore: prepare staging readiness workflow`
 - `babc98b` `docs: add final local migration handoff`
+- `76e6fe5` `docs: reconcile final local migration status`
 
 O que já está pronto:
 - build passou;
@@ -21,6 +22,7 @@ O que já está pronto:
 - `migration:check-staging` existe e responde de forma segura;
 - documentação de staging foi criada;
 - o fechamento local foi reconciliado com o HEAD real da branch;
+- o ajuste final do HEAD real foi registrado;
 - pacote local de preservação existe;
 - nada foi enviado ao GitHub;
 - produção não foi alterada;
