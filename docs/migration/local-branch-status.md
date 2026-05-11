@@ -4,7 +4,7 @@
 
 - Branch: `codex/migration-audit`
 - Base: `origin/main`
-- Current tip: `9cc245e`
+- Current tip: `babc98b`
 
 ## Local Commits
 
@@ -14,6 +14,7 @@
 4. `dd9611d` - `docs: add manual Supabase staging creation steps`
 5. `4389f8a` - `chore: add staging env support for migration tools`
 6. `9cc245e` - `chore: prepare staging readiness workflow`
+7. `babc98b` - `docs: add final local migration handoff`
 
 ## What Is Already Ready
 
