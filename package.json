@@ -8,6 +8,10 @@
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
+    "migration:analyze": "node scripts/migration/cli.mjs analyze",
+    "migration:dry-run": "node scripts/migration/cli.mjs dry-run",
+    "migration:validate": "node scripts/migration/cli.mjs validate",
+    "migration:import": "node scripts/migration/cli.mjs import",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest"

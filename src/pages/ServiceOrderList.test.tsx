@@ -47,6 +47,7 @@ const mockOrders = [
 
 vi.mock('@/hooks/use-service-orders', () => ({
   useServiceOrders: () => ({ data: mockOrders, isLoading: false, error: null }),
+  useDuplicateServiceOrder: () => ({ mutateAsync: vi.fn() }),
 }));
 
 vi.mock('@/hooks/use-pdf', () => ({
