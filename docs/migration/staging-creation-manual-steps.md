@@ -1,14 +1,14 @@
-# Manual de criacao do Supabase staging
+# Manual de criação do Supabase staging
 
 ## 1. Aviso inicial
 
-Este guia e manual. Nao executar importacao ainda.
+Este guia é manual. Não executar importação ainda.
 
-Nao conectar Vercel production.
-Nao usar secrets do Lovable.
-Nao colar `service key` em frontend.
-Nao alterar o projeto Supabase atual `vmareepfbgocyleknrgg`.
-Nao alterar `zssewfqhmrlagqbfqsmb` sem confirmar antes o que ele representa.
+Não conectar Vercel production.
+Não usar secrets do Lovable.
+Não colar `service key` em frontend.
+Não alterar o projeto Supabase atual `vmareepfbgocyleknrgg`.
+Não alterar `zssewfqhmrlagqbfqsmb` sem confirmar antes o que ele representa.
 Staging deve ser novo, limpo e isolado.
 
 ## 2. Criar novo projeto Supabase
@@ -29,14 +29,14 @@ STAGING_SUPABASE_SERVICE_ROLE_KEY=
 
 Regras:
 
-- esses valores nao devem ser enviados no chat;
-- nao devem ser commitados;
+- esses valores não devem ser enviados no chat;
+- não devem ser commitados;
 - devem ficar apenas em `.env.staging.local`;
-- `SERVICE_ROLE` so sera usado em scripts locais ou server-side aprovados no futuro.
+- `SERVICE_ROLE` só será usado em scripts locais ou server-side aprovados no futuro.
 
 ## 3. Arquivo `.env.staging.local`
 
-Criar um arquivo local nao versionado com este formato base:
+Criar um arquivo local não versionado com este formato base:
 
 ```env
 VITE_SUPABASE_URL=
@@ -52,47 +52,48 @@ APP_PUBLIC_URL=http://localhost:5173
 Regras:
 
 - o arquivo deve ficar local;
-- nao deve ser versionado;
-- `.gitignore` ja deve bloquear `.env.*.local`;
-- nao usar valores de producao por engano.
+- não deve ser versionado;
+- `.gitignore` já deve bloquear `.env.*.local`;
+- não usar valores de produção por engano.
 
-## 4. Separacao de ambientes
+## 4. Separação de ambientes
 
-| Ambiente | Projeto Supabase | Uso | Pode receber importacao? | Pode ser usado no Vercel production? |
+| Ambiente | Projeto Supabase | Uso | Pode receber importação? | Pode ser usado no Vercel production? |
 |---|---|---|---|---|
-| Lovable original | origem do backup | referencia historica | nao | nao |
-| Supabase atual/controlado `vmareepfbgocyleknrgg` | destino atual | leitura e auditoria local | nao nesta fase | nao |
-| Supabase staging novo | ambiente limpo | validacao e importacao futura | sim, quando estiver pronto | nao |
-| Vercel production | producao | usuarios finais | nao | sim, somente com o banco correto |
-| App local | maquina local | desenvolvimento e validacao | sim, contra staging futuro | nao |
+| Lovable original | origem do backup | referência histórica | não | não |
+| Supabase atual/controlado `vmareepfbgocyleknrgg` | destino atual | leitura e auditoria local | não nesta fase | não |
+| Supabase staging novo | ambiente limpo | validação e importação futura | sim, quando estiver pronto | não |
+| Vercel production | produção | usuários finais | não | sim, somente com o banco correto |
+| App local | máquina local | desenvolvimento e validação | sim, contra staging futuro | não |
 
 ## 5. Depois de criar o staging
 
-Proximos passos tecnicos futuros, sem executar agora:
+Próximos passos técnicos futuros, sem executar agora:
 
 1. configurar `.env.staging.local`;
-2. verificar conexao read-only;
+2. verificar conexão read-only;
 3. aplicar migrations;
 4. verificar schema;
 5. gerar types;
-6. rodar `migration:dry-run`;
-7. so depois discutir `migration:import`.
+6. rodar `migration:check-staging`;
+7. rodar `migration:dry-run:staging`;
+8. só depois discutir `migration:import`.
 
-## 6. Criterios de bloqueio manual
+## 6. Critérios de bloqueio manual
 
 Parar se ocorrer qualquer um destes casos:
 
-- o usuario nao tiver certeza se esta no projeto certo;
+- o usuário não tiver certeza se está no projeto certo;
 - o painel mostrar `vmareepfbgocyleknrgg`;
 - o painel mostrar o projeto Lovable/origem;
-- houver duvida sobre a regiao;
-- houver duvida sobre a senha do banco;
+- houver dúvida sobre a região;
+- houver dúvida sobre a senha do banco;
 - qualquer chave for copiada para o lugar errado;
 - qualquer valor secreto aparecer no terminal, no chat ou em arquivo versionado.
 
 ## 7. Bloco para preenchimento depois
 
-Preencher apenas depois, sem colar valores sensiveis:
+Preencher apenas depois, sem colar valores sensíveis:
 
 ```text
 Staging criado: sim/nao
@@ -104,12 +105,13 @@ Service role configurada localmente: sim/nao
 .env.staging.local criado: sim/nao
 ```
 
-Nao colar chaves reais aqui.
+Não colar chaves reais aqui.
 
 ## 8. Como usar o `.env.staging.local` depois de criado
 
 1. Copiar `.env.staging.example` para `.env.staging.local`.
 2. Preencher os valores localmente, sem enviar para o chat.
-3. Rodar `npm.cmd run migration:dry-run:staging -- "D:\Dowloads SSD\EXPORTAÇÃO MARINEFLOW\marineflow_backup_2026-05-10.json"`.
-4. Conferir `migration:validate:staging` somente quando o staging estiver pronto.
-5. Nao rodar `migration:import` ainda.
+3. Rodar `npm.cmd run migration:check-staging`.
+4. Rodar `npm.cmd run migration:dry-run:staging -- "D:\Dowloads SSD\EXPORTAÇÃO MARINEFLOW\marineflow_backup_2026-05-10.json"`.
+5. Rodar `npm.cmd run migration:validate:staging` somente quando o staging estiver pronto.
+6. Não rodar `migration:import` ainda.

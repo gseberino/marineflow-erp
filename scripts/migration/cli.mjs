@@ -1,7 +1,12 @@
 import { createClient } from '@supabase/supabase-js';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+const blockedProjectRefs = [
+  'vmareepfbgocyleknrgg',
+  'zssewfqhmrlagqbfqsmb',
+];
 
 const expectedTables = [
   'app_settings', 'app_users', 'clients', 'suppliers', 'marinas', 'vessels',
@@ -45,6 +50,14 @@ const ignoredCompareFields = new Set([
   'createdAt',
   'updatedAt',
 ]);
+
+const stagingProbeTables = [
+  'clients',
+  'suppliers',
+  'service_orders',
+  'products',
+  'services',
+];
 
 export function resolveDryRunSupabaseConfig(env = process.env) {
   const url =
@@ -361,21 +374,44 @@ function parseEnvFile(content) {
 async function main() {
   const { command, backupPath, envPath } = parseMigrationArgs(process.argv.slice(2));
 
-  if (!command || !['analyze', 'dry-run', 'validate', 'import'].includes(command)) {
-    fail('Usage: npm run migration:<analyze|dry-run|validate|import> -- <backup.json>');
+  if (!command || !['analyze', 'dry-run', 'validate', 'import', 'inventory', 'check-staging', 'validate-staging-schema'].includes(command)) {
+    fail('Usage: npm run migration:<analyze|dry-run|validate|import|inventory|check-staging|validate-staging-schema> -- <backup.json>');
   }
 
   if (command === 'import') {
     fail('Import is intentionally blocked. Do not write data without explicit remote-write approval.');
   }
 
-  if (!backupPath) {
-    fail('Backup path is required.');
-  }
-
   const runtimeEnv = resolveMigrationEnv(process.env, envPath);
   if (runtimeEnv.envStatus === 'missing') {
     console.error(`Env file not found: ${runtimeEnv.envPath}`);
+  }
+
+  if (command === 'inventory') {
+    const result = await runSchemaInventory(backupPath ?? null);
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (command === 'check-staging' || command === 'validate-staging-schema') {
+    const result = command === 'check-staging'
+      ? await runStagingReadiness({
+          env: runtimeEnv.env,
+          backupPath: backupPath ?? null,
+          mode: command,
+        })
+      : await runValidateStagingSchema({
+          env: runtimeEnv.env,
+          backupPath: backupPath ?? null,
+          envStatus: runtimeEnv.envStatus,
+          envPath: runtimeEnv.envPath,
+        });
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (!backupPath) {
+    fail('Backup path is required.');
   }
 
   if (command === 'dry-run') {
@@ -407,6 +443,27 @@ async function main() {
     missingExpectedTables: analysis.missingExpectedTables,
     reports: reportPaths,
   }, null, 2));
+}
+
+export async function runValidateStagingSchema({ env, envStatus, envPath, backupPath = null }) {
+  const readiness = await runStagingReadiness({
+    env,
+    envStatus,
+    envPath,
+    backupPath,
+    mode: 'validate-staging-schema',
+  });
+
+  return {
+    ...readiness,
+    mode: 'validate-staging-schema',
+    validationScope: 'read-only placeholder',
+    limitations: [
+      'Does not inspect schema columns directly without administrative access.',
+      'Uses public read checks and readiness signals only.',
+      'Use Supabase CLI or admin access for full schema validation before import.',
+    ],
+  };
 }
 
 function readBackup(path) {
@@ -522,6 +579,505 @@ function writeDryRunReports({ backupPath, analysis, comparison, source }) {
   writeFileSync(mdPath, renderDryRunMarkdown(report));
 
   return { json: jsonPath, markdown: mdPath };
+}
+
+export async function runSchemaInventory(backupPath = null) {
+  const generatedAt = new Date().toISOString();
+  const migrationDir = resolve('supabase/migrations');
+  const functionsDir = resolve('supabase/functions');
+  const typesPath = resolve('src/integrations/supabase/types.ts');
+  const configPath = resolve('supabase/config.toml');
+
+  const migrationFiles = listMigrationFiles(migrationDir);
+  const edgeFunctions = listEdgeFunctions(functionsDir);
+  const migrationSummaries = migrationFiles.map((filePath) => summarizeMigrationFile(filePath));
+  const typesSummary = summarizeTypesFile(typesPath);
+  const configSummary = summarizeConfigFile(configPath);
+  const backupSummary = backupPath && existsSync(backupPath) ? analyzeBackup(readBackup(backupPath), backupPath) : null;
+
+  const tablesInMigrations = collectUniqueNames(
+    migrationSummaries.flatMap((entry) => [...entry.createdTables, ...entry.alteredTables]),
+  );
+  const tablesInTypes = collectUniqueNames(typesSummary.tables);
+  const backupTables = backupSummary ? backupSummary.tablesFound : [];
+  const backupTableSet = new Set(backupTables);
+  const repoOnlyTables = tablesInTypes.filter((table) => !backupTableSet.has(table));
+  const backupCoveredTables = backupTables.filter(
+    (table) => tablesInMigrations.includes(table) || tablesInTypes.includes(table),
+  );
+  const backupUncoveredTables = backupTables.filter(
+    (table) => !tablesInMigrations.includes(table) && !tablesInTypes.includes(table),
+  );
+
+  const report = {
+    mode: 'inventory',
+    generatedAt,
+    migrationCount: migrationFiles.length,
+    migrationFiles: migrationFiles.map((filePath) => basename(filePath)),
+    groupedMigrations: buildMigrationGroups(migrationFiles),
+    migrations: migrationSummaries,
+    edgeFunctionCount: edgeFunctions.length,
+    edgeFunctions,
+    configSummary,
+    typesSummary,
+    backupSummary: backupSummary
+      ? {
+          sourceFile: backupSummary.sourceFile,
+          tablesFound: backupSummary.tablesFound,
+          tableCounts: backupSummary.tableCounts,
+          duplicateSummary: backupSummary.duplicateSummary,
+          missingReferences: backupSummary.missingReferences,
+          missingExpectedTables: backupSummary.missingExpectedTables,
+        }
+      : null,
+    coverage: {
+      backupTables,
+      backupCoveredTables,
+      backupUncoveredTables,
+      repoOnlyTables,
+      tablesInMigrations,
+      tablesInTypes,
+    },
+    risks: buildInventoryRisks({
+      configSummary,
+      edgeFunctions,
+      backupSummary,
+      repoOnlyTables,
+    }),
+  };
+
+  const reports = writeSchemaInventoryReports(report);
+  return { ...report, reports };
+}
+
+function writeSchemaInventoryReports(report) {
+  const reportsDir = 'reports';
+  mkdirSync(reportsDir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const jsonPath = join(reportsDir, `schema-inventory-${stamp}.json`);
+  const mdPath = join(reportsDir, `schema-inventory-${stamp}.md`);
+
+  writeFileSync(jsonPath, `${JSON.stringify(report, null, 2)}\n`);
+  writeFileSync(mdPath, renderSchemaInventoryMarkdown(report));
+
+  return { json: jsonPath, markdown: mdPath };
+}
+
+function renderSchemaInventoryMarkdown(report) {
+  return [
+    '# Schema / Migrations Inventory',
+    '',
+    `Generated: ${report.generatedAt}`,
+    `Migrations found: ${report.migrationCount}`,
+    `Edge Functions found: ${report.edgeFunctionCount}`,
+    `Tables in types.ts: ${report.typesSummary.tables.length}`,
+    `Views in types.ts: ${report.typesSummary.views.length}`,
+    `Functions in types.ts: ${report.typesSummary.functions.length}`,
+    report.backupSummary ? `Backup Lovable tables: ${report.backupSummary.tablesFound.length}` : null,
+    '',
+    '## Coverage',
+    `- backup covered tables: ${report.coverage.backupCoveredTables.length}`,
+    `- backup uncovered tables: ${report.coverage.backupUncoveredTables.length}`,
+    `- repo-only tables: ${report.coverage.repoOnlyTables.length}`,
+    '',
+    '## Risks',
+    ...(report.risks.length ? report.risks.map((item) => `- ${item}`) : ['- none']),
+    '',
+  ].filter(Boolean).join('\n');
+}
+
+function listMigrationFiles(migrationDir) {
+  if (!existsSync(migrationDir)) {
+    return [];
+  }
+
+  return readdirSync(migrationDir)
+    .filter((entry) => entry.endsWith('.sql'))
+    .map((entry) => resolve(migrationDir, entry))
+    .sort((left, right) => basename(left).localeCompare(basename(right)));
+}
+
+function listEdgeFunctions(functionsDir) {
+  if (!existsSync(functionsDir)) {
+    return [];
+  }
+
+  return readdirSync(functionsDir)
+    .map((entry) => resolve(functionsDir, entry))
+    .filter((entryPath) => statSync(entryPath).isDirectory())
+    .map((entryPath) => basename(entryPath))
+    .sort((left, right) => left.localeCompare(right));
+}
+
+function summarizeMigrationFile(filePath) {
+  const content = readFileSync(filePath, 'utf8');
+  return {
+    file: basename(filePath),
+    tags: classifyMigrationTags(basename(filePath), content),
+    createdTables: extractSqlNames(content, /create\s+table\s+(?:if\s+not\s+exists\s+)?(?:public\.)?"?([a-z0-9_]+)"?/gi),
+    alteredTables: extractSqlNames(content, /alter\s+table\s+(?:if\s+exists\s+)?(?:public\.)?"?([a-z0-9_]+)"?/gi),
+    functions: extractSqlNames(content, /create\s+(?:or\s+replace\s+)?function\s+(?:public\.)?([a-z0-9_."() ,]+)/gi),
+    views: extractSqlNames(content, /create\s+(?:or\s+replace\s+)?view\s+(?:public\.)?"?([a-z0-9_]+)"?/gi),
+    triggers: extractSqlNames(content, /create\s+trigger\s+"?([a-z0-9_]+)"?/gi),
+    policies: extractSqlNames(content, /create\s+policy\s+"?([a-z0-9_ ]+)"?/gi),
+  };
+}
+
+function summarizeTypesFile(typesPath) {
+  if (!existsSync(typesPath)) {
+    return { tables: [], views: [], functions: [] };
+  }
+
+  const content = readFileSync(typesPath, 'utf8');
+  return {
+    tables: extractTypesSectionNames(content, 'Tables', 'Views'),
+    views: extractTypesSectionNames(content, 'Views', 'Functions'),
+    functions: extractTypesSectionNames(content, 'Functions', 'Enums'),
+  };
+}
+
+function summarizeConfigFile(configPath) {
+  if (!existsSync(configPath)) {
+    return { projectId: null, jwtDisabledFunctions: [] };
+  }
+
+  const content = readFileSync(configPath, 'utf8');
+  const projectIdMatch = content.match(/project_id\s*=\s*"([^"]+)"/i);
+  const jwtDisabledFunctions = [];
+  const lines = content.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!/jwt_enabled\s*=\s*false/i.test(lines[index])) {
+      continue;
+    }
+
+    let functionName = null;
+    for (let lookback = index; lookback >= 0; lookback -= 1) {
+      const match = lines[lookback].match(/name\s*=\s*"([^"]+)"/i);
+      if (match) {
+        functionName = match[1];
+        break;
+      }
+    }
+
+    if (functionName) {
+      jwtDisabledFunctions.push(functionName);
+    }
+  }
+
+  return {
+    projectId: projectIdMatch?.[1] ?? null,
+    jwtDisabledFunctions,
+  };
+}
+
+function buildMigrationGroups(migrationFiles) {
+  const groups = new Map([
+    ['Foundational / early schema', []],
+    ['Core business modules', []],
+    ['Advanced business modules', []],
+    ['Integrations / automation / late additions', []],
+  ]);
+
+  for (const filePath of migrationFiles) {
+    const name = basename(filePath);
+    const targetGroup =
+      name.startsWith('20260407') || name.startsWith('20260408') || name.startsWith('20260409')
+        ? 'Foundational / early schema'
+        : name.startsWith('20260410') || name.startsWith('20260411') || name.startsWith('20260412') || name.startsWith('20260413') || name.startsWith('20260414') || name.startsWith('20260415') || name.startsWith('20260416') || name.startsWith('20260417') || name.startsWith('20260418') || name.startsWith('20260419') || name.startsWith('20260420')
+          ? 'Core business modules'
+          : name.startsWith('20260421') || name.startsWith('20260422') || name.startsWith('20260423') || name.startsWith('20260424') || name.startsWith('20260425') || name.startsWith('20260427') || name.startsWith('20260428')
+            ? 'Advanced business modules'
+            : 'Integrations / automation / late additions';
+    groups.get(targetGroup).push(name);
+  }
+
+  return Object.fromEntries([...groups.entries()].map(([group, files]) => [group, files]));
+}
+
+function buildInventoryRisks({ configSummary, edgeFunctions, backupSummary, repoOnlyTables }) {
+  const risks = [];
+
+  if (configSummary.projectId && isBlockedSupabaseProjectRef(configSummary.projectId)) {
+    risks.push(`Config project_id is blocked for import flows: ${configSummary.projectId}`);
+  }
+
+  if (configSummary.jwtDisabledFunctions.length) {
+    risks.push(`JWT disabled Edge Functions require manual security review: ${configSummary.jwtDisabledFunctions.join(', ')}`);
+  }
+
+  if (edgeFunctions.some((name) => ['whatsapp-webhook', 'submit-signature', 'whatsapp-process-scheduled'].includes(name))) {
+    risks.push('Functions with JWT disabled exist and should remain read-only / manually reviewed before staging.');
+  }
+
+  if (backupSummary && backupSummary.missingExpectedTables.length) {
+    risks.push(`Backup is missing expected tables: ${backupSummary.missingExpectedTables.join(', ')}`);
+  }
+
+  if (repoOnlyTables.length) {
+    risks.push(`Repo has schema tables not present in the backup: ${repoOnlyTables.slice(0, 10).join(', ')}${repoOnlyTables.length > 10 ? '...' : ''}`);
+  }
+
+  return risks;
+}
+
+function extractTypesSectionNames(content, startLabel, endLabel) {
+  const startIndex = content.indexOf(`${startLabel}: {`);
+  if (startIndex === -1) {
+    return [];
+  }
+
+  const endIndex = content.indexOf(`${endLabel}: {`, startIndex + 1);
+  const section = endIndex === -1 ? content.slice(startIndex) : content.slice(startIndex, endIndex);
+  const names = new Set();
+  for (const match of section.matchAll(/^\s{4,}([a-z0-9_]+): \{/gmi)) {
+    if (!isInventoryNoiseName(match[1])) {
+      names.add(match[1]);
+    }
+  }
+
+  return [...names].sort((left, right) => left.localeCompare(right));
+}
+
+function extractSqlNames(content, pattern) {
+  const names = new Set();
+  for (const match of content.matchAll(pattern)) {
+    if (match[1]) {
+      const name = match[1].replace(/"/g, '').trim();
+      if (!isInventoryNoiseName(name)) {
+        names.add(name);
+      }
+    }
+  }
+
+  return [...names].filter(Boolean).sort((left, right) => left.localeCompare(right));
+}
+
+function classifyMigrationTags(fileName, content) {
+  const lower = `${fileName}\n${content}`.toLowerCase();
+  const tags = [];
+  if (/(whatsapp|zapi)/.test(lower)) tags.push('WhatsApp');
+  if (/(invoice|payment|receiv|payable|financial|commission|cost_center|dre)/.test(lower)) tags.push('Financeiro');
+  if (/(purchase|supplier_product|supplier)/.test(lower)) tags.push('Compras');
+  if (/(fiscal|nfe|api_references)/.test(lower)) tags.push('Fiscal');
+  if (/(import|import_session)/.test(lower)) tags.push('Importação');
+  if (/(view|profitability)/.test(lower)) tags.push('Views');
+  if (/(rpc|register_payment|cancel_so|recalc_po|convert_external_quote_to_so)/.test(lower)) tags.push('RPCs / Functions');
+  if (/(agenda|service_order|client|vessel|product|service|marina|app_setting|inventory|collection|audit_log|external_quote)/.test(lower)) tags.push('Cadastros / OS');
+  if (!tags.length) tags.push('General');
+  return [...new Set(tags)];
+}
+
+function collectUniqueNames(values) {
+  return [...new Set(values.filter((value) => value && !isInventoryNoiseName(value)))]
+    .sort((left, right) => left.localeCompare(right));
+}
+
+function extractSupabaseProjectRef(input) {
+  if (!input) {
+    return null;
+  }
+
+  const value = String(input).trim();
+  if (!value) {
+    return null;
+  }
+
+  for (const blockedRef of blockedProjectRefs) {
+    if (value.includes(blockedRef)) {
+      return blockedRef;
+    }
+  }
+
+  try {
+    const parsed = new URL(value);
+    const hostnameParts = parsed.hostname.split('.');
+    if (hostnameParts.length >= 3 && hostnameParts.at(-2) === 'supabase' && hostnameParts.at(-1) === 'co') {
+      return hostnameParts[0] ?? null;
+    }
+  } catch {
+    // Not a URL.
+  }
+
+  const refMatch = value.match(/[a-z0-9]{20,}/i);
+  return refMatch?.[0] ?? null;
+}
+
+function isBlockedSupabaseProjectRef(input) {
+  const ref = extractSupabaseProjectRef(input);
+  return Boolean(ref && blockedProjectRefs.includes(ref));
+}
+
+function isInventoryNoiseName(value) {
+  const normalized = String(value).trim().toLowerCase();
+  return ['args', 'if', 'insert', 'public', 'row', 'update'].includes(normalized);
+}
+
+export async function runStagingReadiness({ env, envStatus, envPath, mode = 'check-staging' }) {
+  const config = resolveDryRunSupabaseConfig(env);
+  const generatedAt = new Date().toISOString();
+
+  if (!config) {
+    const missingEnvVars = listMissingDryRunEnvVars(env);
+    const status = envStatus === 'missing' ? 'offline_only' : 'not_configured';
+    const report = {
+      mode,
+      generatedAt,
+      status,
+      envFileStatus: envStatus,
+      envFilePath: envPath,
+      missingEnvVars,
+      sameProjectGuess: guessSameProjectRef(env.VITE_SUPABASE_URL, env.SUPABASE_URL),
+      tableChecks: stagingProbeTables.map((table) => ({ table, status: 'not_checked' })),
+      recommendation:
+        status === 'offline_only'
+          ? 'The staging env file is missing. Create .env.staging.local and retry with the staging project.'
+          : 'The staging env is not configured yet. Fill .env.staging.local before retrying.',
+    };
+    const reports = writeStagingReadinessReports(report);
+    return { ...report, reports };
+  }
+
+  const client = createClient(config.url, config.key, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+
+  const tableChecks = [];
+  let readableCount = 0;
+  let blockedCount = 0;
+  let nonEmptyCount = 0;
+
+  for (const table of stagingProbeTables) {
+    const { count, error } = await client.from(table).select('*', { head: true, count: 'exact' });
+    if (error) {
+      const classification = classifyReadOnlyError(error.message ?? String(error));
+      if (classification === 'blocked') {
+        blockedCount += 1;
+      }
+      tableChecks.push({
+        table,
+        status: classification === 'blocked' ? 'blocked/read not available' : 'schema_error',
+        error: error.message ?? 'Unknown read-only error',
+      });
+      continue;
+    }
+
+    readableCount += 1;
+    const rowCount = typeof count === 'number' ? count : null;
+    if ((rowCount ?? 0) > 0) {
+      nonEmptyCount += 1;
+    }
+
+    tableChecks.push({
+      table,
+      status: 'readable',
+      count: rowCount,
+    });
+  }
+
+  let status = 'reachable_read_only';
+  if (blockedCount > 0 && readableCount === 0) {
+    status = 'blocked_by_rls_or_permissions';
+  } else if (nonEmptyCount > 0) {
+    status = 'possibly_not_empty';
+  } else if (blockedCount > 0 && readableCount > 0) {
+    status = 'reachable_read_only';
+  } else if (readableCount > 0) {
+    status = 'ready_for_schema_validation';
+  }
+
+  const report = {
+    mode,
+    generatedAt,
+    status,
+    envFileStatus: envStatus,
+    envFilePath: envPath,
+    source: config.source,
+    sameProjectGuess: guessSameProjectRef(env.VITE_SUPABASE_URL, env.SUPABASE_URL),
+    tableChecks,
+    recommendation:
+      status === 'possibly_not_empty'
+        ? 'The staging destination appears populated; validate schema in a clean staging project before any import.'
+        : status === 'ready_for_schema_validation'
+          ? 'The staging destination is readable and appears empty enough for schema validation.'
+          : status === 'blocked_by_rls_or_permissions'
+            ? 'RLS or permissions blocked all probe tables; verify staging access or use a controlled server-side validation path.'
+            : 'Continue with schema application only after the manual staging project is confirmed.',
+  };
+
+  const reports = writeStagingReadinessReports(report);
+  return { ...report, reports };
+}
+
+function writeStagingReadinessReports(report) {
+  const reportsDir = 'reports';
+  mkdirSync(reportsDir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const jsonPath = join(reportsDir, `staging-readiness-${stamp}.json`);
+  const mdPath = join(reportsDir, `staging-readiness-${stamp}.md`);
+
+  writeFileSync(jsonPath, `${JSON.stringify(report, null, 2)}\n`);
+  writeFileSync(mdPath, renderStagingReadinessMarkdown(report));
+
+  return { json: jsonPath, markdown: mdPath };
+}
+
+function renderStagingReadinessMarkdown(report) {
+  return [
+    '# Staging Readiness',
+    '',
+    `Generated: ${report.generatedAt}`,
+    `Status: ${report.status}`,
+    report.envFileStatus ? `Env file status: ${report.envFileStatus}` : null,
+    report.envFilePath ? `Env file path: ${report.envFilePath}` : null,
+    report.source ? `Source env: ${report.source}` : null,
+    report.sameProjectGuess ? `Same project guess: ${report.sameProjectGuess}` : null,
+    '',
+    '## Table Checks',
+    ...(report.tableChecks.length
+      ? report.tableChecks.map((entry) =>
+          entry.error
+            ? `- ${entry.table}: ${entry.status} (${entry.error})`
+            : `- ${entry.table}: ${entry.status}${entry.count !== null && entry.count !== undefined ? ` (${entry.count})` : ''}`,
+        )
+      : ['- none']),
+    '',
+    '## Recommendation',
+    `- ${report.recommendation}`,
+    '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+function guessSameProjectRef(left, right) {
+  const leftRef = extractProjectRefFromUrl(left);
+  const rightRef = extractProjectRefFromUrl(right);
+  if (!leftRef || !rightRef) {
+    return 'unknown';
+  }
+  return leftRef === rightRef ? 'same' : 'different';
+}
+
+function extractProjectRefFromUrl(value) {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(value.trim());
+    const hostParts = parsed.hostname.split('.');
+    if (hostParts.length >= 3 && hostParts.at(-2) === 'supabase' && hostParts.at(-1) === 'co') {
+      return hostParts[0] ?? null;
+    }
+  } catch {
+    // ignore
+  }
+
+  const match = value.trim().match(/[a-z0-9]{20,}/i);
+  return match?.[0] ?? null;
 }
 
 function renderAnalyzeMarkdown(report) {
