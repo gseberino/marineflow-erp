@@ -45,6 +45,7 @@ Depois, manualmente, sera preciso:
 - anotar service/secret key apenas para uso server-side local seguro;
 - nunca colocar service key em `VITE_*`;
 - criar um arquivo local `.env.staging.local` nao versionado;
+- partir de `.env.staging.example` como template;
 - configurar Vercel Preview futuramente, nao production.
 
 ## 4. Variaveis de ambiente
@@ -72,6 +73,13 @@ Regras:
 - ZAPI/Gemini/VAPID private apenas server-side;
 - nenhum segredo versionado;
 - `.env.staging.local` deve estar no `.gitignore`.
+
+Como usar depois:
+
+1. copiar `.env.staging.example` para `.env.staging.local`;
+2. preencher localmente;
+3. usar `npm.cmd run migration:dry-run:staging` quando o staging existir;
+4. nao rodar `migration:import` ainda.
 
 ## 5. Schema e migrations
 
@@ -193,4 +201,3 @@ Importante: `migration:import` nao deve ser executado agora.
 - Supabase destino atual nao deve receber nova importacao;
 - secrets ainda nao foram rotacionados;
 - push e deploy continuam proibidos.
-

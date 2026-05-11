@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -72,6 +72,32 @@ export function resolveDryRunSupabaseConfig(env = process.env) {
   ].join(' / ');
 
   return { url, key, source };
+}
+
+export function resolveMigrationEnv(env = process.env, envPath = null) {
+  if (!envPath) {
+    return {
+      env,
+      envPath: null,
+      envStatus: 'not-provided',
+    };
+  }
+
+  const resolvedPath = resolve(envPath);
+  if (!existsSync(resolvedPath)) {
+    return {
+      env,
+      envPath: resolvedPath,
+      envStatus: 'missing',
+    };
+  }
+
+  const fileEnv = parseEnvFile(readFileSync(resolvedPath, 'utf8'));
+  return {
+    env: { ...fileEnv, ...env },
+    envPath: resolvedPath,
+    envStatus: 'loaded',
+  };
 }
 
 export function compareDryRunComparison({ backup, liveByTable, blockedTables, analysis }) {
@@ -256,8 +282,84 @@ function isMainModule() {
   return process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 }
 
+function parseMigrationArgs(argv) {
+  let command = null;
+  let backupPath = null;
+  let envPath = null;
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
+
+    if (!command) {
+      command = token;
+      continue;
+    }
+
+    if (token === '--env') {
+      const next = argv[index + 1];
+      if (!next || next.startsWith('-')) {
+        fail('Missing value for --env.');
+      }
+      envPath = next;
+      index += 1;
+      continue;
+    }
+
+    if (token.startsWith('--env=')) {
+      envPath = token.slice('--env='.length);
+      if (!envPath) {
+        fail('Missing value for --env.');
+      }
+      continue;
+    }
+
+    if (token.startsWith('-')) {
+      fail(`Unknown option: ${token}`);
+    }
+
+    if (!backupPath) {
+      backupPath = token;
+      continue;
+    }
+
+    fail(`Unexpected argument: ${token}`);
+  }
+
+  return { command, backupPath, envPath };
+}
+
+function parseEnvFile(content) {
+  const values = {};
+
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) {
+      continue;
+    }
+
+    const equalsIndex = line.indexOf('=');
+    if (equalsIndex === -1) {
+      continue;
+    }
+
+    const key = line.slice(0, equalsIndex).trim();
+    if (!key) {
+      continue;
+    }
+
+    let value = line.slice(equalsIndex + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+
+    values[key] = value;
+  }
+
+  return values;
+}
+
 async function main() {
-  const [command, backupPath] = process.argv.slice(2);
+  const { command, backupPath, envPath } = parseMigrationArgs(process.argv.slice(2));
 
   if (!command || !['analyze', 'dry-run', 'validate', 'import'].includes(command)) {
     fail('Usage: npm run migration:<analyze|dry-run|validate|import> -- <backup.json>');
@@ -271,8 +373,13 @@ async function main() {
     fail('Backup path is required.');
   }
 
+  const runtimeEnv = resolveMigrationEnv(process.env, envPath);
+  if (runtimeEnv.envStatus === 'missing') {
+    console.error(`Env file not found: ${runtimeEnv.envPath}`);
+  }
+
   if (command === 'dry-run') {
-    const result = await runDryRun(backupPath, process.env);
+    const result = await runDryRun(backupPath, runtimeEnv.env);
     console.log(JSON.stringify(result, null, 2));
     return;
   }

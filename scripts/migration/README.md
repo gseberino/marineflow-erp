@@ -7,6 +7,7 @@ Rules:
 - Always run `analyze-backup` and `dry-run-import` before any import attempt.
 - Keep reports in a local ignored directory such as `reports/`.
 - Do not re-enable browser-driven import flows from the production UI.
+- For staging work, copy `.env.staging.example` to `.env.staging.local` and use the `--env .env.staging.local` flag or the `migration:dry-run:staging` / `migration:validate:staging` scripts.
 
 Suggested order:
 1. `analyze-backup.ts`

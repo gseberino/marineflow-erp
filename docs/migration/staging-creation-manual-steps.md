@@ -106,3 +106,10 @@ Service role configurada localmente: sim/nao
 
 Nao colar chaves reais aqui.
 
+## 8. Como usar o `.env.staging.local` depois de criado
+
+1. Copiar `.env.staging.example` para `.env.staging.local`.
+2. Preencher os valores localmente, sem enviar para o chat.
+3. Rodar `npm.cmd run migration:dry-run:staging -- "D:\Dowloads SSD\EXPORTAÇÃO MARINEFLOW\marineflow_backup_2026-05-10.json"`.
+4. Conferir `migration:validate:staging` somente quando o staging estiver pronto.
+5. Nao rodar `migration:import` ainda.

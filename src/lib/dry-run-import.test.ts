@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import {
   compareDryRunComparison,
+  resolveMigrationEnv,
   resolveDryRunSupabaseConfig,
 } from '../../scripts/migration/cli.mjs';
 
@@ -18,6 +22,86 @@ describe('resolveDryRunSupabaseConfig', () => {
       key: 'vite-public-key',
       source: 'VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY',
     });
+  });
+});
+
+describe('resolveMigrationEnv', () => {
+  test('loads env values from a staging env file when present', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'marineflow-staging-env-'));
+    const envPath = join(dir, '.env.staging.local');
+
+    writeFileSync(
+      envPath,
+      [
+        'VITE_SUPABASE_URL=https://file.example.supabase.co',
+        'VITE_SUPABASE_PUBLISHABLE_KEY=file-public-key',
+        'SUPABASE_URL=https://file.example.supabase.co',
+        'SUPABASE_ANON_KEY=file-anon-key',
+        'APP_PUBLIC_URL=http://localhost:5173',
+      ].join('\n'),
+    );
+
+    const resolved = resolveMigrationEnv({}, envPath);
+
+    expect(resolved.envStatus).toBe('loaded');
+    expect(resolveDryRunSupabaseConfig(resolved.env)).toEqual({
+      url: 'https://file.example.supabase.co',
+      key: 'file-public-key',
+      source: 'VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY',
+    });
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('keeps process env values ahead of the local staging env file', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'marineflow-staging-env-'));
+    const envPath = join(dir, '.env.staging.local');
+
+    writeFileSync(
+      envPath,
+      [
+        'VITE_SUPABASE_URL=https://file.example.supabase.co',
+        'VITE_SUPABASE_PUBLISHABLE_KEY=file-public-key',
+      ].join('\n'),
+    );
+
+    const resolved = resolveMigrationEnv(
+      {
+        VITE_SUPABASE_URL: 'https://process.example.supabase.co',
+        VITE_SUPABASE_PUBLISHABLE_KEY: 'process-public-key',
+      },
+      envPath,
+    );
+
+    expect(resolveDryRunSupabaseConfig(resolved.env)).toEqual({
+      url: 'https://process.example.supabase.co',
+      key: 'process-public-key',
+      source: 'VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY',
+    });
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('reports missing when the staging env file does not exist', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'marineflow-staging-env-'));
+    const envPath = join(dir, '.env.staging.local');
+
+    const resolved = resolveMigrationEnv(
+      {
+        VITE_SUPABASE_URL: 'https://process.example.supabase.co',
+        VITE_SUPABASE_PUBLISHABLE_KEY: 'process-public-key',
+      },
+      envPath,
+    );
+
+    expect(resolved.envStatus).toBe('missing');
+    expect(resolveDryRunSupabaseConfig(resolved.env)).toEqual({
+      url: 'https://process.example.supabase.co',
+      key: 'process-public-key',
+      source: 'VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY',
+    });
+
+    rmSync(dir, { recursive: true, force: true });
   });
 });
 

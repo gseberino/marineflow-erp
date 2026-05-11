@@ -11,9 +11,11 @@ node_modules
 dist
 dist-ssr
 *.local
+.env.staging.local
 .env
 .env.*
 !.env.example
+!.env.staging.example
 scratch/
 scripts/quarantine/
 reports/
