@@ -70,7 +70,9 @@ USING (
 -- 4) Storage bucket para imagens de assinatura
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('signatures', 'signatures', true)
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET
+  name = EXCLUDED.name,
+  public = EXCLUDED.public;
 
 -- Policies do bucket: leitura pública, escrita só via service_role
 DROP POLICY IF EXISTS "signatures_public_read" ON storage.objects;

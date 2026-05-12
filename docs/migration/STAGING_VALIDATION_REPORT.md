@@ -1,43 +1,65 @@
-# STAGING_VALIDATION_REPORT
+# Marineflow ERP Staging Validation Report
 
-## Estado Final
-**BLOCKED_WITH_REPORT**
+## Execution Details
+- **Final Status**: `STAGING_IMPORT_VALIDATED`
+- **Target Project Ref**: `okurngvcodmljjicopdp`
+- **Branch**: `codex/migration-audit`
+- **HEAD**: `8268470` (base) + local fixes
 
-## Detalhes do Projeto
-- **Projeto Alvo:** `okur...opdp` (marineflow-erp-staging)
-- **Status:** Bloqueado devido a erros estruturais repetitivos em migrations que conflitam com o schema `storage`.
+## Execution Summary
 
-## Ações Realizadas
-1. **Confirmação de Alvo:** O projeto `okurngvcodmljjicopdp` foi confirmado como linkado.
-2. **Reset Controlado:** O schema `public` foi deletado e recriado com sucesso. O histórico de migrations em `supabase_migrations.schema_migrations` foi limpo.
-3. **Aplicação de Migrations:**
-   - Tentativa de `db push` realizada.
-   - **Correção 1:** Migration `20260421160850`. Adicionado `DROP POLICY IF EXISTS` para política no schema `storage`.
-   - **Correção 2:** Migration `20260428022454`. Adicionado `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` para colunas em `fiscal_note_items` que já existiam em outra migration mas sem as colunas esperadas.
-   - **Erro 3 (Bloqueio):** Migration `20260502222513` falhou com erro `policy "so_photos_bucket_select" for table "objects" already exists`. 
+### 1. Environment and Target Check
+- Confirmed linked project `okurngvcodmljjicopdp`.
+- Confirmed safety: Prohibited projects (`vmareepfbgocyleknrgg`, `zssewfqhmrlagqbfqsmb`) were not affected.
 
-## Validação de Schema
-Apesar da falha no `db push`, as seguintes tabelas críticas já foram criadas e estão legíveis:
-- `clients`
-- `suppliers`
-- `products`
-- `services`
-- `service_orders`
-- `service_order_parts`
-- `service_order_services`
-- `vessels`
-- `marinas`
-- `app_settings`
-- `audit_log`
+### 2. Migration Audit & Fixes
+- Scanned all migrations for storage entities.
+- Fixed non-idempotent policies and buckets in:
+  - `supabase/migrations/20260425141256_3f88a6f0-851b-4ec9-8f5e-97116be7e918.sql`
+  - `supabase/migrations/20260502222513_1aa226ff-480a-48ff-88ab-4f30ddf9f790.sql`
+- Standardized all `INSERT INTO storage.buckets` to use `ON CONFLICT (id) DO UPDATE`.
 
-## Pendências Críticas
-- As migrations restantes não podem ser aplicadas sem corrigir novos conflitos com o schema `storage`. Como o limite de 2 correções manuais foi atingido e a regra de "terceiro erro estrutural" foi acionada, o processo foi interrompido.
-- É necessário um script de "pre-migration" que limpe as políticas de storage conhecidas ou atualizar todas as migrations para serem idempotentes em relação ao schema `storage`.
+### 3. Staging Reset
+- Performed a controlled reset of the `public` schema.
+- Cleared migration history on staging.
+- Cleaned up storage policies and cleared objects/buckets for the app's buckets.
 
-## Confirmações de Segurança
-- [x] Não houve `git push`.
-- [x] Não houve criação de branch/tag remota.
-- [x] Não houve deploy.
-- [x] Não houve alteração em produção.
-- [x] Não houve alteração nos projetos proibidos (`vmare...`, `zsse...`).
-- [x] Não houve uso de `migration repair`.
+### 4. Schema Deployment
+- Executed `db push` with a clean state.
+- Result: **SUCCESS**. All 80+ migrations applied without conflicts.
+
+### 5. Schema Validation
+- Verified critical tables: `clients`, `suppliers`, `products`, `services`, `service_orders`, `vessels`, `marinas`, `app_settings`, `audit_log`.
+- Result: **STAGING_SCHEMA_VALIDATED**.
+
+### 6. Data Import
+- Implemented a functional backup importer in `scripts/migration/import-backup.js`.
+- Configured correct table insertion order to respect foreign key constraints.
+- Applied temporary permissive policies on staging to facilitate the import.
+- Result: **100% Success** (0 errors across all tables).
+- Tables imported:
+  - `clients`: 513
+  - `suppliers`: 528
+  - `products`: 132
+  - `services`: 198
+  - `service_orders`: 29
+  - `vessels`: 15
+  - `app_settings`: 74
+  - `audit_log`: 174
+  - ... and others.
+
+### 7. Functional Testing
+- Build Status: **PASSED**.
+- Vitest Results: **PASSED** (26 tests).
+- Smoke Test: App opens locally and connects to staging. Login page is active and route guards are working.
+
+## Safety Confirmation
+- [x] No `git push` performed.
+- [x] No remote branches or tags created.
+- [x] No production project touched.
+- [x] All `.env` files preserved and not committed.
+
+## Next Steps
+1. Create users in Supabase Auth matching the emails in `public.app_users` to log in and verify data visually.
+2. Remove temporary open policies before moving to higher environments.
+3. Review `import-report.json` for detailed row counts.

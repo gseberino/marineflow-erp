@@ -6,7 +6,9 @@ ALTER TABLE public.service_order_expenses
 
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('expense-receipts', 'expense-receipts', true)
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET
+  name = EXCLUDED.name,
+  public = EXCLUDED.public;
 
 DROP POLICY IF EXISTS "expense_receipts_public_read" ON storage.objects;
 CREATE POLICY "expense_receipts_public_read"

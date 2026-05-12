@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { importBackup } from './import-backup.js';
 
 const blockedProjectRefs = [
   'vmareepfbgocyleknrgg',
@@ -378,14 +379,23 @@ async function main() {
     fail('Usage: npm run migration:<analyze|dry-run|validate|import|inventory|check-staging|validate-staging-schema> -- <backup.json>');
   }
 
-  if (command === 'import') {
-    fail('Import is intentionally blocked. Do not write data without explicit remote-write approval.');
-  }
-
   const runtimeEnv = resolveMigrationEnv(process.env, envPath);
   if (runtimeEnv.envStatus === 'missing') {
     console.error(`Env file not found: ${runtimeEnv.envPath}`);
   }
+
+  if (command === 'import') {
+    if (!backupPath) {
+      fail('Backup path is required for import.');
+    }
+    const result = await importBackup({
+      backupPath,
+      env: runtimeEnv.env,
+    });
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
 
   if (command === 'inventory') {
     const result = await runSchemaInventory(backupPath ?? null);

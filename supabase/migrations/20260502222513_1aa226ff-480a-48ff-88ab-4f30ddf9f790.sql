@@ -22,20 +22,26 @@ CREATE POLICY "so_photos_auth" ON public.service_order_photos
 
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('service-order-photos', 'service-order-photos', true)
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET
+  name = EXCLUDED.name,
+  public = EXCLUDED.public;
 
+DROP POLICY IF EXISTS "so_photos_bucket_select" ON storage.objects;
 CREATE POLICY "so_photos_bucket_select" ON storage.objects
   FOR SELECT TO public
   USING (bucket_id = 'service-order-photos');
 
+DROP POLICY IF EXISTS "so_photos_bucket_insert" ON storage.objects;
 CREATE POLICY "so_photos_bucket_insert" ON storage.objects
   FOR INSERT TO authenticated
   WITH CHECK (bucket_id = 'service-order-photos');
 
+DROP POLICY IF EXISTS "so_photos_bucket_update" ON storage.objects;
 CREATE POLICY "so_photos_bucket_update" ON storage.objects
   FOR UPDATE TO authenticated
   USING (bucket_id = 'service-order-photos');
 
+DROP POLICY IF EXISTS "so_photos_bucket_delete" ON storage.objects;
 CREATE POLICY "so_photos_bucket_delete" ON storage.objects
   FOR DELETE TO authenticated
-  USING (bucket_id = 'service-order-photos');
+  USING (bucket_id = 'service-order-photos');
