@@ -10,8 +10,8 @@ export function useClients() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('clients')
-        .select('*')
-        .order('name', { ascending: true });
+        .select('*, name:full_name_or_company_name')
+        .order('full_name_or_company_name', { ascending: true });
       if (error) throw error;
       return data as Client[];
     },

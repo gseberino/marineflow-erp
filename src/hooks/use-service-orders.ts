@@ -6,17 +6,17 @@ import { cancelServiceOrderCascade, reopenServiceOrder, updateReceivableFromSO }
 
 const SO_SELECT = `
   *,
-  clients(name, phone, whatsapp),
-  vessels(name, manufacturer, model),
-  marinas(name, latitude, longitude),
+  clients(full_name_or_company_name, phone, whatsapp),
+  vessels(boat_name, manufacturer, model),
+  marinas(marina_name, latitude, longitude),
   service_order_technicians(user_id)
 `;
 
 const SO_DETAIL_SELECT = `
   *,
-  clients(name, phone, whatsapp, email),
-  vessels(name, manufacturer, model, current_dock_position),
-  marinas(name, latitude, longitude),
+  clients(full_name_or_company_name, phone, whatsapp, email),
+  vessels(boat_name, manufacturer, model, current_dock_position),
+  marinas(marina_name, latitude, longitude),
   service_order_parts(*, products(*)),
   service_order_technicians(*, app_users(*)),
   time_entries(*, app_users(*)),

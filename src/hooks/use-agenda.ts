@@ -9,8 +9,8 @@ export function useAgendaOrders(dateFrom: string, dateTo: string) {
         .from('service_orders')
         .select(`
           id, service_order_number, status, scheduled_start_at, scheduled_end_at,
-          clients(name),
-          vessels(name),
+          clients(full_name_or_company_name),
+          vessels(boat_name),
           service_order_technicians(user_id, app_users(id, full_name))
         `)
         .gte('scheduled_start_at', dateFrom)
@@ -33,7 +33,7 @@ export function useAgendaTasks(dateFrom: string, dateTo: string) {
           id, title, description, technician_user_id, scheduled_start_at, scheduled_end_at,
           priority, status, location, client_id, notes,
           app_users:technician_user_id(id, full_name),
-          clients:client_id(id, name)
+          clients:client_id(id, full_name_or_company_name)
         `)
         .gte('scheduled_start_at', dateFrom)
         .lte('scheduled_start_at', dateTo)
@@ -69,8 +69,8 @@ export function useSchedulableOrders() {
         .from('service_orders')
         .select(`
           id, service_order_number, status,
-          clients(name),
-          vessels(name)
+          clients(full_name_or_company_name),
+          vessels(boat_name)
         `)
         // Valid schedulable statuses — includes draft/approved so newly created/approved
         // orders appear in the Agenda scheduling dialog before being assigned a technician

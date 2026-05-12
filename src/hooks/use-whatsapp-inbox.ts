@@ -153,7 +153,7 @@ export function useWhatsAppConversations() {
 
       // Enriquecer com clients e leads
       const [{ data: clients }, { data: leads }] = await Promise.all([
-        supabase.from('clients').select('id, name, phone, whatsapp').eq('active', true),
+        supabase.from('clients').select('id, full_name_or_company_name, phone, whatsapp').eq('active', true),
         supabase.from('whatsapp_leads').select('phone_normalized, name, status, unread_count, assigned_to').in('phone_normalized', phones),
       ]);
 

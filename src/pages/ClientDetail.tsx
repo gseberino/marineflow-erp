@@ -73,7 +73,7 @@ export default function ClientDetail() {
       <div className="flex items-center gap-3">
         <Link to="/clients" className="rounded-lg p-1.5 hover:bg-muted transition-colors"><ArrowLeft className="h-5 w-5" /></Link>
         <div className="flex-1">
-          <h1 className="text-2xl font-bold">{client.name}</h1>
+          <h1 className="text-2xl font-bold">{client.full_name_or_company_name}</h1>
           <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
             <StatusBadge className={client.type === 'company' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}>
               {client.type === 'company' ? t.common.company : t.common.individual}
@@ -119,7 +119,7 @@ export default function ClientDetail() {
                 <Link key={v.id} to={`/vessels/${v.id}`} className="rounded-xl border bg-card p-5 shadow-sm hover:shadow-md transition-all">
                   <div className="flex items-start justify-between mb-2">
                     <div>
-                      <h3 className="font-semibold flex items-center gap-2"><Ship className="h-4 w-4 text-accent" />{v.name}</h3>
+                      <h3 className="font-semibold flex items-center gap-2"><Ship className="h-4 w-4 text-accent" />{v.boat_name}</h3>
                       <p className="text-sm text-muted-foreground">{v.manufacturer} {v.model} {v.year ? `(${v.year})` : ''}</p>
                     </div>
                     {v.length_feet && <span className="text-sm font-medium">{v.length_feet} ft</span>}

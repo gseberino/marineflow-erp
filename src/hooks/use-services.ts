@@ -9,7 +9,7 @@ export function useServices() {
       const { data, error } = await supabase
         .from('services')
         .select('*')
-        .order('name', { ascending: true });
+        .order('service_name', { ascending: true });
       if (error) throw error;
       return data;
     },

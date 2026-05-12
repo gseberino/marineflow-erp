@@ -26,7 +26,7 @@ export default function Dashboard() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('products')
-        .select('id, name, stock_quantity, minimum_stock, unit')
+        .select('id, product_name, stock_quantity, minimum_stock, unit')
         .eq('active', true)
         .gt('minimum_stock', 0)
         .filter('stock_quantity', 'lte', 'minimum_stock')
@@ -139,7 +139,7 @@ export default function Dashboard() {
           <div className="space-y-1">
             {lowStockProducts.map(p => (
               <div key={p.id} className="flex justify-between text-xs text-red-700">
-                <span className="truncate max-w-[180px]">{p.name}</span>
+                <span className="truncate max-w-[180px]">{(p as any).product_name}</span>
                 <span className="font-medium flex-shrink-0">
                   {p.stock_quantity} / {p.minimum_stock} {p.unit}
                 </span>
@@ -259,7 +259,7 @@ export default function Dashboard() {
                     </span>
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {so.clients?.name} · {so.vessels?.name}
+                    {so.clients?.full_name_or_company_name} · {so.vessels?.boat_name}
                   </p>
                   {so.scheduled_start_at && (
                     <p className="text-xs text-muted-foreground">
@@ -304,8 +304,8 @@ export default function Dashboard() {
                       className="border-b hover:bg-muted/30 transition-colors cursor-pointer"
                     >
                       <td className="px-4 py-2.5 font-medium text-accent">{so.service_order_number}</td>
-                      <td className="px-4 py-2.5 text-muted-foreground">{so.clients?.name || '—'}</td>
-                      <td className="px-4 py-2.5 text-muted-foreground hidden md:table-cell">{so.vessels?.name || '—'}</td>
+                      <td className="px-4 py-2.5 text-muted-foreground">{so.clients?.full_name_or_company_name || '—'}</td>
+                      <td className="px-4 py-2.5 text-muted-foreground hidden md:table-cell">{so.vessels?.boat_name || '—'}</td>
                       <td className="px-4 py-2.5">
                         <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${statusConfig[so.status as keyof typeof statusConfig]?.className || 'bg-muted text-muted-foreground'}`}>
                           {statusLabels[so.status] || so.status}
@@ -333,8 +333,8 @@ export default function Dashboard() {
                 {lowStock.map((p: any) => (
                   <div key={p.id} className="flex items-center justify-between rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2">
                     <div>
-                      <p className="text-xs font-medium">{p.name}</p>
-                      <p className="text-xs text-muted-foreground">{p.category || 'Sem categoria'}</p>
+                      <p className="text-xs font-medium">{(p as any).product_name}</p>
+                      <p className="text-xs text-muted-foreground">{(p as any).product_categories?.name || 'Sem categoria'}</p>
                     </div>
                     <div className="text-right">
                       <p className="text-xs font-medium text-destructive">{p.stock_quantity ?? 0} / {p.minimum_stock}</p>

@@ -11,7 +11,7 @@ export function useSuppliers() {
       const { data, error } = await supabase
         .from('suppliers')
         .select('*')
-        .order('name');
+        .order('supplier_name');
       if (error) throw error;
       return data as Supplier[];
     },
