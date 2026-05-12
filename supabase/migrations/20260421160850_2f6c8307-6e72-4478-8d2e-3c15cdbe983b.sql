@@ -73,6 +73,7 @@ VALUES ('signatures', 'signatures', true)
 ON CONFLICT (id) DO NOTHING;
 
 -- Policies do bucket: leitura pública, escrita só via service_role
+DROP POLICY IF EXISTS "signatures_public_read" ON storage.objects;
 CREATE POLICY "signatures_public_read"
 ON storage.objects FOR SELECT
 USING (bucket_id = 'signatures');

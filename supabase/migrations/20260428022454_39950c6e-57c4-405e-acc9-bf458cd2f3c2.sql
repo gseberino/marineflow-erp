@@ -41,6 +41,17 @@ CREATE TABLE IF NOT EXISTS public.fiscal_note_items (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- Ensure columns exist if table was created by another migration
+ALTER TABLE public.fiscal_note_items 
+  ADD COLUMN IF NOT EXISTS c_prod text,
+  ADD COLUMN IF NOT EXISTS x_prod text,
+  ADD COLUMN IF NOT EXISTS unit text,
+  ADD COLUMN IF NOT EXISTS q_com numeric DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS v_un_com numeric DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS v_prod numeric DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS matched_product_id uuid,
+  ADD COLUMN IF NOT EXISTS inventory_movement_id uuid;
+
 ALTER TABLE public.fiscal_notes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.fiscal_note_items ENABLE ROW LEVEL SECURITY;
 
