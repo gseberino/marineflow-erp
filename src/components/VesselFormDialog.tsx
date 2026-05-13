@@ -67,7 +67,7 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
     if (vessel) {
       setForm({
         client_id: vessel.client_id,
-        name: vessel.name,
+        boat_name: (vessel as any).boat_name ?? (vessel as any).name ?? '',
         manufacturer: vessel.manufacturer ?? '',
         model: vessel.model ?? '',
         year: vessel.year ?? undefined,
