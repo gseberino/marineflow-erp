@@ -211,7 +211,7 @@ export function useImportRows() {
         const validServiceRows = newRows.filter(r => r.name);
         for (const chunk of chunks(validServiceRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            name: r.name as string,
+            service_name: r.name as string,
             default_price: (r.default_price || 0) as number,
             billing_unit: 'visit' as string,
             currency: 'BRL' as string,
