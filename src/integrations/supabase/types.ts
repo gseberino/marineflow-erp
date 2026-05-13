@@ -410,6 +410,7 @@ export type Database = {
           email: string | null
           full_name_or_company_name: string
           id: string
+          name: string | null
           notes: string | null
           phone: string | null
           postal_code: string | null
@@ -429,6 +430,7 @@ export type Database = {
           email?: string | null
           full_name_or_company_name: string
           id?: string
+          name?: string | null
           notes?: string | null
           phone?: string | null
           postal_code?: string | null
@@ -448,6 +450,7 @@ export type Database = {
           email?: string | null
           full_name_or_company_name?: string
           id?: string
+          name?: string | null
           notes?: string | null
           phone?: string | null
           postal_code?: string | null
@@ -1518,6 +1521,7 @@ export type Database = {
           latitude: number | null
           longitude: number | null
           marina_name: string
+          name: string | null
           postal_code: string | null
           state: string | null
           updated_at: string
@@ -1537,6 +1541,7 @@ export type Database = {
           latitude?: number | null
           longitude?: number | null
           marina_name: string
+          name?: string | null
           postal_code?: string | null
           state?: string | null
           updated_at?: string
@@ -1556,6 +1561,7 @@ export type Database = {
           latitude?: number | null
           longitude?: number | null
           marina_name?: string
+          name?: string | null
           postal_code?: string | null
           state?: string | null
           updated_at?: string
@@ -2002,6 +2008,7 @@ export type Database = {
           last_stock_entry_at: string | null
           location_bin: string | null
           minimum_stock: number | null
+          name: string | null
           ncm: string | null
           notes: string | null
           pis_rate: number | null
@@ -2039,6 +2046,7 @@ export type Database = {
           last_stock_entry_at?: string | null
           location_bin?: string | null
           minimum_stock?: number | null
+          name?: string | null
           ncm?: string | null
           notes?: string | null
           pis_rate?: number | null
@@ -2076,6 +2084,7 @@ export type Database = {
           last_stock_entry_at?: string | null
           location_bin?: string | null
           minimum_stock?: number | null
+          name?: string | null
           ncm?: string | null
           notes?: string | null
           pis_rate?: number | null
@@ -3120,6 +3129,7 @@ export type Database = {
           default_warranty_days: number | null
           description: string | null
           id: string
+          name: string | null
           service_name: string
           updated_at: string | null
         }
@@ -3133,6 +3143,7 @@ export type Database = {
           default_warranty_days?: number | null
           description?: string | null
           id?: string
+          name?: string | null
           service_name: string
           updated_at?: string | null
         }
@@ -3146,6 +3157,7 @@ export type Database = {
           default_warranty_days?: number | null
           description?: string | null
           id?: string
+          name?: string | null
           service_name?: string
           updated_at?: string | null
         }
@@ -3210,6 +3222,7 @@ export type Database = {
           country: string | null
           created_at: string | null
           id: string
+          name: string | null
           neighborhood: string | null
           notes: string | null
           payment_terms: string | null
@@ -3233,6 +3246,7 @@ export type Database = {
           country?: string | null
           created_at?: string | null
           id?: string
+          name?: string | null
           neighborhood?: string | null
           notes?: string | null
           payment_terms?: string | null
@@ -3256,6 +3270,7 @@ export type Database = {
           country?: string | null
           created_at?: string | null
           id?: string
+          name?: string | null
           neighborhood?: string | null
           notes?: string | null
           payment_terms?: string | null
@@ -3397,6 +3412,7 @@ export type Database = {
           manufacturer: string | null
           marina_id: string | null
           model: string | null
+          name: string | null
           navigation_electronics_summary: string | null
           propulsion_type: string | null
           shore_power_type: string | null
@@ -3426,6 +3442,7 @@ export type Database = {
           manufacturer?: string | null
           marina_id?: string | null
           model?: string | null
+          name?: string | null
           navigation_electronics_summary?: string | null
           propulsion_type?: string | null
           shore_power_type?: string | null
@@ -3455,6 +3472,7 @@ export type Database = {
           manufacturer?: string | null
           marina_id?: string | null
           model?: string | null
+          name?: string | null
           navigation_electronics_summary?: string | null
           propulsion_type?: string | null
           shore_power_type?: string | null
