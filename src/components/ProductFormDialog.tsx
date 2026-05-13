@@ -31,7 +31,7 @@ interface Props {
 }
 
 const empty: TablesInsert<'products'> = {
-  name: '',
+  product_name: '',
   sku: '',
   category: '',
   brand: '',
