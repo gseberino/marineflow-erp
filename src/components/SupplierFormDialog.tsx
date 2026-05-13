@@ -52,12 +52,12 @@ export function SupplierFormDialog({ open, onOpenChange, supplier }: Props) {
   useEffect(() => {
     if (supplier) {
       setForm({
-        name: supplier.name,
+        name: (supplier as any).name ?? supplier.supplier_name ?? '',
         trade_name: supplier.trade_name ?? '',
         cnpj_cpf: supplier.cnpj_cpf ?? '',
         contact_name: supplier.contact_name ?? '',
-        phone: supplier.phone ?? '',
-        email: supplier.email ?? '',
+        phone: supplier.contact_phone ?? '',
+        email: supplier.contact_email ?? '',
         website: supplier.website ?? '',
         postal_code: supplier.postal_code ?? '',
         address_line_1: supplier.address_line_1 ?? '',
