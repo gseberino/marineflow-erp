@@ -199,10 +199,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = async (email: string, password: string) => {
     // Staging Auth Bypass Logic
     const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const isVercel = window.location.hostname.endsWith('.vercel.app');
     const isStagingProject = import.meta.env.VITE_SUPABASE_URL?.includes('okurngvcodmljjicopdp');
     const bypassEnabled = import.meta.env.VITE_ENABLE_STAGING_AUTH_BYPASS === 'true';
 
-    if (bypassEnabled && isLocalhost && isStagingProject) {
+    if (bypassEnabled && (isLocalhost || isVercel) && isStagingProject) {
       console.log('[Auth] Using staging auth bypass...');
       const mockUser = {
         id: '00000000-0000-0000-0000-000000000000',
