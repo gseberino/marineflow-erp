@@ -8,7 +8,7 @@ export function useServices() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('services')
-        .select('*')
+        .select('*, name:service_name, price:default_price')
         .order('service_name', { ascending: true });
       if (error) throw error;
       return data;
@@ -21,9 +21,14 @@ export function useCreateService() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (values: Record<string, any>) => {
+      const { name, ...rest } = values;
+      const payload = {
+        ...rest,
+        service_name: name || values.service_name,
+      };
       const { data, error } = await supabase
         .from('services')
-        .insert(values as any)
+        .insert(payload as any)
         .select()
         .single();
       if (error) throw error;
@@ -39,9 +44,14 @@ export function useUpdateService() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, ...values }: { id: string } & Record<string, any>) => {
+      const { name, ...rest } = values;
+      const payload = {
+        ...rest,
+        service_name: name || values.service_name,
+      };
       const { data, error } = await supabase
         .from('services')
-        .update(values as any)
+        .update(payload as any)
         .eq('id', id)
         .select()
         .single();

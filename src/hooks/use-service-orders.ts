@@ -17,7 +17,8 @@ const SO_DETAIL_SELECT = `
   clients(full_name_or_company_name, phone, whatsapp, email),
   vessels(boat_name, manufacturer, model, current_dock_position),
   marinas(marina_name, latitude, longitude),
-  service_order_parts(*, products(*)),
+  service_order_parts(*, products(*, name:product_name)),
+  service_order_services(*, services(name:service_name)),
   service_order_technicians(*, app_users(*)),
   time_entries(*, app_users(*)),
   payment_condition_presets(*)
@@ -270,7 +271,7 @@ export function useServiceOrderParts(serviceOrderId: string | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('service_order_parts')
-        .select('*, products(*)')
+        .select('*, products(*, name:product_name)')
         .eq('service_order_id', serviceOrderId!)
         .order('created_at', { ascending: true });
       if (error) throw error;
@@ -516,7 +517,7 @@ export function useServiceOrderServices(serviceOrderId: string | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('service_order_services')
-        .select('*, services(name)')
+        .select('*, services(name:service_name)')
         .eq('service_order_id', serviceOrderId!)
         .order('created_at', { ascending: true });
       if (error) throw error;

@@ -163,7 +163,7 @@ function ServiceCardFormComponent({
       if (!nameQuery) return false;
       if (s.id === draft.service_id) return false;
       return (
-        (s.name || '').toLowerCase().includes(nameQuery) ||
+        (s.name || s.service_name || '').toLowerCase().includes(nameQuery) ||
         (s.description || '').toLowerCase().includes(nameQuery)
       );
     })
@@ -194,7 +194,7 @@ function ServiceCardFormComponent({
                   onClick={() => {
                     onUpdate({
                       service_id: s.id,
-                      name_snapshot: s.name,
+                      name_snapshot: s.name || s.service_name,
                       description_snapshot: s.description || '',
                       billing_unit_snapshot: s.billing_unit || 'hour',
                       unit_price: Number(s.default_price) || 0,
@@ -203,7 +203,7 @@ function ServiceCardFormComponent({
                     setShowSuggestions(false);
                   }}
                 >
-                  <div className="font-medium">{s.name}</div>
+                  <div className="font-medium">{s.name || s.service_name}</div>
                   <div className="text-xs text-muted-foreground">
                     {BILLING_UNIT_LABELS[s.billing_unit] || s.billing_unit} —{' '}
                     {formatCurrency(s.default_price || 0)}
@@ -1325,7 +1325,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     const { data, error } = await supabase
       .from('services')
       .insert({
-        name: draft.name_snapshot,
+        service_name: draft.name_snapshot,
         default_price: draft.unit_price,
         billing_unit: draft.billing_unit_snapshot,
         active: true,
