@@ -30,7 +30,7 @@ interface Props {
 
 const empty: TablesInsert<'vessels'> = {
   client_id: '',
-  name: '',
+  boat_name: '',
   manufacturer: '',
   model: '',
   year: undefined,
