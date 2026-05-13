@@ -31,7 +31,7 @@ interface Props {
 }
 
 const empty: TablesInsert<'products'> = {
-  name: '',
+  product_name: '',
   sku: '',
   category: '',
   brand: '',
@@ -103,7 +103,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
     if (product) {
       const p = product as any;
       setForm({
-        name: p.name,
+        product_name: p.product_name ?? p.name ?? '',
         sku: p.sku ?? '',
         category: p.category ?? '',
         brand: p.brand ?? '',

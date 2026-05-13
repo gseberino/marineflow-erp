@@ -49,10 +49,10 @@ export function MarinaFormDialog({ open, onOpenChange, marina, onSaved }: Props)
   useEffect(() => {
     if (marina) {
       setForm({
-        name: marina.name,
+        name: marina.name ?? marina.marina_name ?? '',
         contact_name: marina.contact_name ?? '',
-        phone: marina.phone ?? '',
-        email: marina.email ?? '',
+        phone: marina.contact_phone ?? '',
+        email: marina.contact_email ?? '',
         postal_code: marina.postal_code ?? '',
         address_line_1: marina.address_line_1 ?? '',
         address_number: '',
@@ -79,10 +79,10 @@ export function MarinaFormDialog({ open, onOpenChange, marina, onSaved }: Props)
     try {
       const fullAddress = [form.address_line_1, form.address_number, form.address_complement].filter(Boolean).join(', ');
       const payload: TablesInsert<'marinas'> = {
-        name: form.name,
+        marina_name: form.name,
         contact_name: form.contact_name || null,
-        phone: form.phone || null,
-        email: form.email || null,
+        contact_phone: form.phone || null,
+        contact_email: form.email || null,
         address_line_1: fullAddress || null,
         city: form.city || null,
         state: form.state || null,

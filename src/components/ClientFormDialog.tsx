@@ -93,7 +93,7 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
       const fullAddress = [form.address_line_1, form.address_number, form.address_complement].filter(Boolean).join(', ');
       const payload: TablesInsert<'clients'> = {
         type: form.type,
-        name: form.name,
+        full_name_or_company_name: form.name,
         cpf_cnpj: form.cpf_cnpj || null,
         phone: form.phone || null,
         whatsapp: form.whatsapp || null,

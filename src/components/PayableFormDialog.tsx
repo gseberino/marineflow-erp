@@ -72,7 +72,7 @@ export function PayableFormDialog({ open, onOpenChange }: Props) {
                 value: s.id,
                 label: s.name,
                 description: s.cnpj_cpf || undefined,
-                searchTerms: [s.cnpj_cpf || '', s.email || ''],
+                searchTerms: [s.cnpj_cpf || '', s.contact_email || ''],
               }))}
               onCreate={(typed) => {
                 setQuickSupplierName(typed);
