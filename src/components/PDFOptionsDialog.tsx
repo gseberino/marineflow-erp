@@ -15,15 +15,27 @@ export type ValidityConfig = {
   date?: string;
 };
 
+export type PDFAction = 'print' | 'download';
+
 interface Props {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   documentType: PDFDocumentType;
-  onGenerate: (options: PDFOptions, validity?: ValidityConfig, dueDate?: string) => void;
+  onGenerate: (options: PDFOptions, validity?: ValidityConfig, dueDate?: string, action?: PDFAction) => void;
   hasProductImages?: boolean;
+  isGenerating?: boolean;
+  isDataLoading?: boolean;
 }
 
-export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate, hasProductImages }: Props) {
+export function PDFOptionsDialog({ 
+  open, 
+  onOpenChange, 
+  documentType, 
+  onGenerate, 
+  hasProductImages,
+  isGenerating,
+  isDataLoading 
+}: Props) {
   const { t } = useI18n();
   const [options, setOptions] = useState<PDFOptions>({ ...DEFAULT_PDF_OPTIONS });
   const [validityMode, setValidityMode] = useState<'days' | 'date'>('days');
@@ -87,6 +99,19 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
     return items;
   })();
 
+  const handleAction = (action: PDFAction) => {
+    onGenerate(
+      options,
+      documentType === 'quote'
+        ? { mode: validityMode, days: validityDays, date: validityDate }
+        : undefined,
+      documentType === 'invoice' ? dueDate : undefined,
+      action
+    );
+  };
+
+  const isLoading = isGenerating || isDataLoading;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
@@ -106,8 +131,9 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
                   onCheckedChange={(checked) =>
                     setOptions(p => ({ ...p, [key]: !!checked }))
                   }
+                  disabled={isLoading}
                 />
-                <Label htmlFor={key} className="cursor-pointer text-sm">
+                <Label htmlFor={key} className={`cursor-pointer text-sm ${isLoading ? 'opacity-50' : ''}`}>
                   {label}
                 </Label>
               </div>
@@ -120,21 +146,23 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
           <div className="space-y-3 rounded-lg border border-border p-3">
             <p className="text-sm font-medium">Validade do Orçamento</p>
             <div className="flex gap-3">
-              <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+              <label className={`flex items-center gap-1.5 text-sm cursor-pointer ${isLoading ? 'opacity-50' : ''}`}>
                 <input
                   type="radio"
                   name="validityMode"
                   checked={validityMode === 'days'}
                   onChange={() => setValidityMode('days')}
+                  disabled={isLoading}
                 />
                 Em dias
               </label>
-              <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+              <label className={`flex items-center gap-1.5 text-sm cursor-pointer ${isLoading ? 'opacity-50' : ''}`}>
                 <input
                   type="radio"
                   name="validityMode"
                   checked={validityMode === 'date'}
                   onChange={() => setValidityMode('date')}
+                  disabled={isLoading}
                 />
                 Data específica
               </label>
@@ -147,6 +175,7 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
                   value={validityDays}
                   onChange={(e) => setValidityDays(Number(e.target.value) || 15)}
                   className="w-24"
+                  disabled={isLoading}
                 />
                 <span className="text-sm text-muted-foreground">dias a partir da emissão</span>
               </div>
@@ -156,6 +185,7 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
                 value={validityDate}
                 onChange={(e) => setValidityDate(e.target.value)}
                 min={new Date().toISOString().split('T')[0]}
+                disabled={isLoading}
               />
             )}
           </div>
@@ -171,33 +201,42 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
               value={dueDate}
               onChange={(e) => setDueDate(e.target.value)}
               min={new Date().toISOString().split('T')[0]}
+              disabled={isLoading}
             />
           </div>
         )}
 
         <div className="flex items-start gap-2 rounded-lg border border-border bg-muted p-3">
           <AlertTriangle className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
-          <p className="text-xs text-muted-foreground">{t.pdf.pdfHint}</p>
+          <p className="text-xs text-muted-foreground">
+            {isGenerating ? 'O sistema está gerando o arquivo PDF. Por favor, aguarde...' : t.pdf.pdfHint}
+          </p>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+        <DialogFooter className="flex-col sm:flex-row gap-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isLoading}>
             {t.common.cancel}
           </Button>
-          <Button
-            onClick={() => onGenerate(
-              options,
-              documentType === 'quote'
-                ? { mode: validityMode, days: validityDays, date: validityDate }
-                : undefined,
-              documentType === 'invoice' ? dueDate : undefined,
-            )}
-            className="bg-accent text-accent-foreground hover:bg-accent/90"
-          >
-            {t.pdf.generate}
-          </Button>
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            <Button
+              variant="secondary"
+              onClick={() => handleAction('download')}
+              disabled={isLoading}
+              className="gap-2"
+            >
+              {isGenerating ? 'Gerando...' : 'Baixar PDF'}
+            </Button>
+            <Button
+              onClick={() => handleAction('print')}
+              disabled={isLoading}
+              className="bg-accent text-accent-foreground hover:bg-accent/90 gap-2"
+            >
+              {isGenerating ? 'Gerando...' : 'Imprimir / Abrir'}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
+

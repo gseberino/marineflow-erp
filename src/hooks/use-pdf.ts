@@ -15,7 +15,7 @@ export function usePDFData(serviceOrderId: string | undefined) {
             clients(*),
             vessels(*),
             marinas(*),
-            service_order_services(*, services(name:service_name)),
+            service_order_services(*, name_snapshot:service_name_snapshot, services(name:service_name)),
             service_order_parts(*, products(name, sku, image_url)),
             service_order_expenses(category, description, amount, paid_by),
             payment_condition_presets(label, installments)

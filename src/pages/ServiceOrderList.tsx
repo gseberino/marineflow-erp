@@ -74,17 +74,71 @@ export default function ServiceOrderList() {
   };
 
   const [pdfTarget, setPdfTarget] = useState<{ id: string; type: 'quote' | 'service_order' } | null>(null);
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   const [historyTarget, setHistoryTarget] = useState<{ id: string; number: string } | null>(null);
   const [zapiTarget, setZapiTarget] = useState<SendViaZAPITarget | null>(null);
-  const { data: pdfData } = usePDFData(pdfTarget?.id);
+  const { data: pdfData, isLoading: isPDFDataLoading } = usePDFData(pdfTarget?.id);
 
   const orderIds = (orders || []).map((o: any) => o.id);
   const { data: sendStatusMap } = useWhatsAppSendStatusMap(orderIds);
 
-  const handleGeneratePDF = (options: PDFOptions, validity?: any) => {
-    if (!pdfData || !pdfTarget) return;
-    generatePDF({ ...pdfData, documentType: pdfTarget.type }, { ...options, validity });
-    setPdfTarget(null);
+  const handleGeneratePDF = async (options: PDFOptions, validity?: any, dueDate?: string, action: 'print' | 'download' = 'print') => {
+    if (!pdfData || !pdfTarget) {
+      toast.error('Dados do documento não carregados. Tente novamente.');
+      return;
+    }
+
+    try {
+      setIsGeneratingPDF(true);
+      
+      const blob = await generatePDFBlob(
+        { ...pdfData, documentType: pdfTarget.type }, 
+        { ...options, validity, dueDate }
+      );
+
+      if (blob.size < 2000) {
+        throw new Error('O PDF gerado parece estar vazio. Tente recarregar a página.');
+      }
+
+      const filename = `${pdfTarget.type === 'quote' ? 'orcamento' : 'ordem-servico'}-${pdfData.serviceOrder.service_order_number}.pdf`;
+      const url = URL.createObjectURL(blob);
+
+      if (action === 'download') {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        toast.success('PDF baixado com sucesso!');
+      } else {
+        const win = window.open(url, '_blank');
+        if (!win) {
+          toast.error('O navegador bloqueou a abertura da nova aba. O arquivo será baixado automaticamente.');
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          // Revoke with delay for the fallback download as well
+          setTimeout(() => URL.revokeObjectURL(url), 100);
+        } else {
+          win.focus();
+          // Give the browser time to load the Blob into the new tab before revoking
+          setTimeout(() => URL.revokeObjectURL(url), 10000);
+          toast.success('PDF aberto em nova aba!');
+        }
+      }
+
+      setPdfTarget(null);
+    } catch (e: any) {
+      console.error('Erro ao gerar PDF:', e);
+      toast.error(`Falha ao gerar PDF: ${e.message || 'Erro desconhecido'}`);
+    } finally {
+      setIsGeneratingPDF(false);
+    }
   };
 
   const handleSendWhatsApp = (so: any) => {
@@ -510,6 +564,8 @@ export default function ServiceOrderList() {
         documentType={pdfTarget?.type || 'quote'}
         hasProductImages={pdfData?.parts?.some((p: any) => !!p.image_url) ?? false}
         onGenerate={handleGeneratePDF}
+        isGenerating={isGeneratingPDF}
+        isDataLoading={isPDFDataLoading}
       />
 
       <WhatsAppSendHistoryDialog

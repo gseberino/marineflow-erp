@@ -189,7 +189,7 @@ export function useUpdateServiceOrderStatus() {
           if (!existingRec) {
             const { data: vessel } = await supabase
               .from('vessels')
-              .select('name')
+              .select('boat_name')
               .eq('id', current.vessel_id)
               .single();
             const today = new Date().toISOString().slice(0, 10);
@@ -197,7 +197,7 @@ export function useUpdateServiceOrderStatus() {
             await supabase.from('receivables').insert({
               client_id: current.client_id,
               service_order_id: id,
-              description: `OS ${current.service_order_number} - ${vessel?.name || ''}`,
+              description: `OS ${current.service_order_number} - ${vessel?.boat_name || ''}`,
               issue_date: today,
               due_date: due,
               amount: current.grand_total || 0,
@@ -639,7 +639,7 @@ export function useDuplicateServiceOrder() {
         const svcs = source.service_order_services.map((s: any) => ({
           service_order_id: newId,
           service_id: s.service_id,
-          name_snapshot: s.name_snapshot,
+          service_name_snapshot: s.service_name_snapshot,
           description_snapshot: s.description_snapshot,
           billing_unit_snapshot: s.billing_unit_snapshot,
           quantity: s.quantity,
