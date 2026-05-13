@@ -18,7 +18,7 @@ const SO_DETAIL_SELECT = `
   vessels(boat_name, manufacturer, model, current_dock_position),
   marinas(marina_name, latitude, longitude),
   service_order_parts(*, products(*, name:product_name)),
-  service_order_services(*, services(name:service_name)),
+  service_order_services(*, name_snapshot:service_name_snapshot, services(name:service_name)),
   service_order_technicians(*, app_users(*)),
   time_entries(*, app_users(*)),
   payment_condition_presets(*)
@@ -517,7 +517,7 @@ export function useServiceOrderServices(serviceOrderId: string | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('service_order_services')
-        .select('*, services(name:service_name)')
+        .select('*, name_snapshot:service_name_snapshot, services(name:service_name)')
         .eq('service_order_id', serviceOrderId!)
         .order('created_at', { ascending: true });
       if (error) throw error;
@@ -542,8 +542,10 @@ export function useAddServiceOrderService() {
       technician_user_id?: string | null;
     }) => {
       const line_total = Math.round(values.quantity * values.unit_price_snapshot * 100) / 100;
+      const { name_snapshot, ...rest } = values;
       const { data, error } = await supabase.from('service_order_services').insert({
-        ...values,
+        ...rest,
+        service_name_snapshot: name_snapshot,
         line_total,
       } as any).select('id').single();
       if (error) throw error;

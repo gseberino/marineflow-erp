@@ -17,8 +17,11 @@ export function useUpdateServiceOrderService() {
       notes?: string | null;
       technician_user_id?: string | null;
     }) => {
-      const { id, service_order_id, ...rest } = values;
-      const patch: Record<string, any> = { ...rest };
+      const { id, service_order_id, name_snapshot, ...rest } = values;
+      const patch: Record<string, any> = { 
+        ...rest,
+        service_name_snapshot: name_snapshot || (rest as any).service_name_snapshot
+      };
       if (typeof rest.quantity === 'number' && typeof rest.unit_price_snapshot === 'number') {
         patch.line_total = Math.round(rest.quantity * rest.unit_price_snapshot * 100) / 100;
       }
