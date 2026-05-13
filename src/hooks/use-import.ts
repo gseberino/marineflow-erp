@@ -158,7 +158,7 @@ export function useImportRows() {
         const validProductRows = newRows.filter(r => r.name);
         for (const chunk of chunks(validProductRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            name: r.name as string,
+            product_name: r.name as string,
             sku: (r.sku || null) as string | null,
             sale_price: (r.sale_price || 0) as number,
             cost_price: (r.cost_price || 0) as number,
