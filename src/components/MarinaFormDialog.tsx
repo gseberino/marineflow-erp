@@ -79,10 +79,10 @@ export function MarinaFormDialog({ open, onOpenChange, marina, onSaved }: Props)
     try {
       const fullAddress = [form.address_line_1, form.address_number, form.address_complement].filter(Boolean).join(', ');
       const payload: TablesInsert<'marinas'> = {
-        name: form.name,
+        marina_name: form.name,
         contact_name: form.contact_name || null,
-        phone: form.phone || null,
-        email: form.email || null,
+        contact_phone: form.phone || null,
+        contact_email: form.email || null,
         address_line_1: fullAddress || null,
         city: form.city || null,
         state: form.state || null,
