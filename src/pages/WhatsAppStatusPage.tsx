@@ -50,7 +50,7 @@ export default function WhatsAppStatusPage() {
   const { data: scheduledStatuses, isLoading } = useQuery({
     queryKey: ['whatsapp-status-scheduled'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from('whatsapp_status_scheduled')
         .select('*')
         .order('scheduled_at', { ascending: true });
@@ -61,7 +61,7 @@ export default function WhatsAppStatusPage() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from('whatsapp_status_scheduled').delete().eq('id', id);
+      const { error } = await (supabase as any).from('whatsapp_status_scheduled').delete().eq('id', id);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -116,7 +116,7 @@ export default function WhatsAppStatusPage() {
         mediaUrl = urlData.publicUrl;
       }
 
-      const { error: insertError } = await supabase
+      const { error: insertError } = await (supabase as any)
         .from('whatsapp_status_scheduled')
         .insert({
           content_type: contentType,

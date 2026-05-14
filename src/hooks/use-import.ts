@@ -232,11 +232,11 @@ export function useImportRows() {
         const validClientRows = newRows.filter(r => r.name);
         for (const chunk of chunks(validClientRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            name: r.name,
+            full_name_or_company_name: r.name,
             type: r._type || 'company',
             cpf_cnpj: r.cnpj_cpf || null,
             email: r.email || null,
-            phone: r.phone || r.phone || null,
+            phone: r.phone || null,
             address_line_1: r.address_line_1 || null,
             address_line_2: [r.address_number, r.neighborhood, r.address_complement].filter(Boolean).join(', ') || null,
             postal_code: r.postal_code || null,
@@ -245,21 +245,21 @@ export function useImportRows() {
             notes: r.notes || null,
             active: r.active !== false,
           }));
-          const { error } = await supabase.from('clients').insert(rows);
+          const { error } = await supabase.from('clients').insert(rows as any);
           if (error) throw error;
           inserted += chunk.length;
         }
       }
 
       if (entityType === 'suppliers') {
-        const validSupplierRows = newRows.filter(r => r.name || r.name);
+        const validSupplierRows = newRows.filter(r => r.name);
         for (const chunk of chunks(validSupplierRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            name: r.name || r.name,
+            supplier_name: r.name,
             trade_name: r.trade_name || null,
             cnpj_cpf: r.cnpj_cpf || null,
-            email: r.email || null,
-            phone: r.phone || r.phone || null,
+            contact_email: r.email || null,
+            contact_phone: r.phone || null,
             address_line_1: r.address_line_1 || null,
             postal_code: r.postal_code || null,
             city: r.city || null,
@@ -267,7 +267,7 @@ export function useImportRows() {
             notes: r.notes || null,
             active: r.active !== false,
           }));
-          const { error } = await supabase.from('suppliers').insert(rows);
+          const { error } = await supabase.from('suppliers').insert(rows as any);
           if (error) throw error;
           inserted += chunk.length;
         }
@@ -283,11 +283,11 @@ export function useImportRows() {
 
         for (const chunk of chunks(clientRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            name: r.name,
+            full_name_or_company_name: r.name,
             type: r._type || 'company',
             cpf_cnpj: r.cnpj_cpf || null,
             email: r.email || null,
-            phone: r.phone || r.phone || null,
+            phone: r.phone || null,
             address_line_1: r.address_line_1 || null,
             address_line_2: [r.address_number, r.neighborhood, r.address_complement].filter(Boolean).join(', ') || null,
             postal_code: r.postal_code || null,
@@ -296,17 +296,17 @@ export function useImportRows() {
             notes: r.notes || null,
             active: r.active !== false,
           }));
-          await supabase.from('clients').insert(rows);
+          await supabase.from('clients').insert(rows as any);
           inserted += chunk.length;
         }
 
         for (const chunk of chunks(supplierRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            name: r.name,
+            supplier_name: r.name,
             trade_name: r.trade_name || null,
             cnpj_cpf: r.cnpj_cpf || null,
-            email: r.email || null,
-            phone: r.phone || r.phone || null,
+            contact_email: r.email || null,
+            contact_phone: r.phone || null,
             address_line_1: r.address_line_1 || null,
             postal_code: r.postal_code || null,
             city: r.city || null,
@@ -314,7 +314,7 @@ export function useImportRows() {
             notes: r.notes || null,
             active: r.active !== false,
           }));
-          await supabase.from('suppliers').insert(rows);
+          await supabase.from('suppliers').insert(rows as any);
           inserted += chunk.length;
         }
       }
