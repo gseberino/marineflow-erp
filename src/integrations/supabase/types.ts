@@ -895,9 +895,9 @@ export type Database = {
           id: string
           line_total_cost: number
           line_total_sale: number
+          name_snapshot: string
           notes: string | null
           product_id: string | null
-          product_name_snapshot: string
           quantity: number
           unit_cost_snapshot: number
           unit_sale_snapshot: number
@@ -911,9 +911,9 @@ export type Database = {
           id?: string
           line_total_cost?: number
           line_total_sale?: number
+          name_snapshot: string
           notes?: string | null
           product_id?: string | null
-          product_name_snapshot: string
           quantity?: number
           unit_cost_snapshot?: number
           unit_sale_snapshot?: number
@@ -927,9 +927,9 @@ export type Database = {
           id?: string
           line_total_cost?: number
           line_total_sale?: number
+          name_snapshot?: string
           notes?: string | null
           product_id?: string | null
-          product_name_snapshot?: string
           quantity?: number
           unit_cost_snapshot?: number
           unit_sale_snapshot?: number
@@ -961,10 +961,10 @@ export type Database = {
           external_quote_id: string
           id: string
           line_total: number
+          name_snapshot: string
           notes: string | null
           quantity: number
           service_id: string | null
-          service_name_snapshot: string
           unit_price_snapshot: number
           updated_at: string
           warranty_days: number | null
@@ -976,10 +976,10 @@ export type Database = {
           external_quote_id: string
           id?: string
           line_total?: number
+          name_snapshot: string
           notes?: string | null
           quantity?: number
           service_id?: string | null
-          service_name_snapshot: string
           unit_price_snapshot?: number
           updated_at?: string
           warranty_days?: number | null
@@ -991,10 +991,10 @@ export type Database = {
           external_quote_id?: string
           id?: string
           line_total?: number
+          name_snapshot?: string
           notes?: string | null
           quantity?: number
           service_id?: string | null
-          service_name_snapshot?: string
           unit_price_snapshot?: number
           updated_at?: string
           warranty_days?: number | null
@@ -2661,10 +2661,10 @@ export type Database = {
           finished_at: string | null
           id: string
           line_total: number
+          name_snapshot: string
           notes: string | null
           quantity: number
           service_id: string | null
-          service_name_snapshot: string
           service_order_id: string
           started_at: string | null
           technician_user_id: string | null
@@ -2682,10 +2682,10 @@ export type Database = {
           finished_at?: string | null
           id?: string
           line_total?: number
+          name_snapshot: string
           notes?: string | null
           quantity?: number
           service_id?: string | null
-          service_name_snapshot: string
           service_order_id: string
           started_at?: string | null
           technician_user_id?: string | null
@@ -2703,10 +2703,10 @@ export type Database = {
           finished_at?: string | null
           id?: string
           line_total?: number
+          name_snapshot?: string
           notes?: string | null
           quantity?: number
           service_id?: string | null
-          service_name_snapshot?: string
           service_order_id?: string
           started_at?: string | null
           technician_user_id?: string | null
