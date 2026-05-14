@@ -15,13 +15,11 @@ export type ValidityConfig = {
   date?: string;
 };
 
-export type PDFAction = 'print' | 'download';
-
 interface Props {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   documentType: PDFDocumentType;
-  onGenerate: (options: PDFOptions, validity?: ValidityConfig, dueDate?: string, action?: PDFAction) => void;
+  onGenerate: (options: PDFOptions, validity?: ValidityConfig, dueDate?: string) => void;
   hasProductImages?: boolean;
   isGenerating?: boolean;
   isDataLoading?: boolean;
@@ -101,14 +99,13 @@ export function PDFOptionsDialog({
     return items;
   })();
 
-  const handleAction = (action: PDFAction) => {
+  const handleGenerate = () => {
     onGenerate(
       options,
       documentType === 'quote'
         ? { mode: validityMode, days: validityDays, date: validityDate }
         : undefined,
-      documentType === 'invoice' ? dueDate : undefined,
-      action
+      documentType === 'invoice' ? dueDate : undefined
     );
   };
 
@@ -226,23 +223,13 @@ export function PDFOptionsDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isLoading}>
             {t.common.cancel}
           </Button>
-          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-            <Button
-              variant="secondary"
-              onClick={() => handleAction('download')}
-              disabled={!canGenerate}
-              className="gap-2"
-            >
-              {isGenerating ? 'Gerando...' : 'Baixar PDF'}
-            </Button>
-            <Button
-              onClick={() => handleAction('print')}
-              disabled={!canGenerate}
-              className="bg-accent text-accent-foreground hover:bg-accent/90 gap-2"
-            >
-              {isGenerating ? 'Gerando...' : 'Imprimir / Abrir'}
-            </Button>
-          </div>
+          <Button
+            onClick={handleGenerate}
+            disabled={!canGenerate}
+            className="bg-accent text-accent-foreground hover:bg-accent/90 gap-2"
+          >
+            {isLoading ? 'Carregando...' : 'Imprimir / Salvar como PDF'}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

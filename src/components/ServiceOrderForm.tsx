@@ -44,8 +44,7 @@ import { useUpdateServiceOrderPart } from '@/hooks/use-service-order-parts';
 import { PriceCalculatorDialog } from '@/components/PriceCalculatorDialog';
 import { supabase } from '@/integrations/supabase/client';
 import { usePDFData } from '@/hooks/use-pdf';
-import { type PDFOptions, DEFAULT_PDF_OPTIONS } from '@/lib/pdf-generator';
-import { generateAndHandlePDF } from '@/lib/pdf-actions';
+import { type PDFOptions, DEFAULT_PDF_OPTIONS, generatePDF } from '@/lib/pdf-generator';
 import { PDFOptionsDialog } from '@/components/PDFOptionsDialog';
 import { OPERATIONAL_EXPENSE_CATEGORIES } from '@/lib/expense-categories';
 import { calculateDisplacement, calculateTravelCost } from '@/lib/displacement';
@@ -839,7 +838,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const { data: zapiHistory } = useWhatsAppSendHistory(orderId || null);
   const lastZapiSend = zapiHistory?.[0];
   const [pdfDialogType, setPdfDialogType] = useState<'quote' | 'service_order' | 'invoice' | null>(null);
-  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  const [isGeneratingPDF] = useState(false); // generatePDF is synchronous — no loading state needed
   const { data: pdfData, isLoading: isPDFDataLoading, error: pdfDataError } = usePDFData(isNew ? undefined : orderId);
   const [waPreview, setWaPreview] = useState<{ phone: string; message: string; url: string; clientName: string } | null>(null);
   const [waEditMessage, setWaEditMessage] = useState('');
@@ -3515,24 +3514,16 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         onOpenChange={v => { if (!v) setPdfDialogType(null); }}
         documentType={pdfDialogType || 'quote'}
         hasProductImages={pdfData?.parts?.some((p: any) => !!p.image_url) ?? false}
-        onGenerate={async (options, validity, dueDate, action = 'print') => {
+        onGenerate={(options, validity, dueDate) => {
           if (!pdfData || !pdfDialogType) {
             toast.error('Dados do documento não carregados. Aguarde um momento e tente novamente.');
             return;
           }
-          try {
-            setIsGeneratingPDF(true);
-            await generateAndHandlePDF(
-              { ...pdfData, documentType: pdfDialogType },
-              { ...options, validity, dueDate },
-              action
-            );
-            setPdfDialogType(null);
-          } catch (e) {
-            // Toast handled in helper
-          } finally {
-            setIsGeneratingPDF(false);
-          }
+          generatePDF(
+            { ...pdfData, documentType: pdfDialogType },
+            { ...options, validity, dueDate }
+          );
+          setPdfDialogType(null);
         }}
         isGenerating={isGeneratingPDF}
         isDataLoading={isPDFDataLoading}

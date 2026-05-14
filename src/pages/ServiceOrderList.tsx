@@ -20,8 +20,7 @@ import { WhatsAppSendHistoryDialog } from '@/components/WhatsAppSendHistoryDialo
 import { SendViaZAPIDialog, type SendViaZAPITarget } from '@/components/SendViaZAPIDialog';
 import { useWhatsAppSendStatusMap } from '@/hooks/use-whatsapp-send-log';
 import { usePDFData } from '@/hooks/use-pdf';
-import { type PDFOptions } from '@/lib/pdf-generator';
-import { generateAndHandlePDF } from '@/lib/pdf-actions';
+import { type PDFOptions, generatePDF } from '@/lib/pdf-generator';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { toast } from 'sonner';
@@ -75,7 +74,7 @@ export default function ServiceOrderList() {
   };
 
   const [pdfTarget, setPdfTarget] = useState<{ id: string; type: 'quote' | 'service_order' } | null>(null);
-  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  const [isGeneratingPDF] = useState(false); // generatePDF is synchronous — no loading state needed
   const [historyTarget, setHistoryTarget] = useState<{ id: string; number: string } | null>(null);
   const [zapiTarget, setZapiTarget] = useState<SendViaZAPITarget | null>(null);
   const { data: pdfData, isLoading: isPDFDataLoading, error: pdfDataError } = usePDFData(pdfTarget?.id);
@@ -83,25 +82,18 @@ export default function ServiceOrderList() {
   const orderIds = (orders || []).map((o: any) => o.id);
   const { data: sendStatusMap } = useWhatsAppSendStatusMap(orderIds);
 
-  const handleGeneratePDF = async (options: PDFOptions, validity?: any, dueDate?: string, action: 'print' | 'download' = 'print') => {
+  const handleGeneratePDF = (options: PDFOptions, validity?: any, dueDate?: string) => {
     if (!pdfData || !pdfTarget) {
       toast.error('Dados do documento não carregados. Aguarde um momento e tente novamente.');
       return;
     }
 
-    try {
-      setIsGeneratingPDF(true);
-      await generateAndHandlePDF(
-        { ...pdfData, documentType: pdfTarget.type },
-        { ...options, validity, dueDate },
-        action
-      );
-      setPdfTarget(null);
-    } catch (e: any) {
-      // Error handled inside helper toast
-    } finally {
-      setIsGeneratingPDF(false);
-    }
+    generatePDF(
+      { ...pdfData, documentType: pdfTarget.type },
+      { ...options, validity, dueDate }
+    );
+
+    setPdfTarget(null);
   };
 
   const handleSendWhatsApp = (so: any) => {

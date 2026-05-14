@@ -209,6 +209,9 @@ function extractContentFromHTML(fullHtml: string): string {
 /**
  * Gera o PDF como Blob (sem abrir janela de impressão).
  * Usa html2pdf.js (jsPDF + html2canvas) renderizando o HTML montado por buildHTMLDocument.
+ *
+ * Não usar para OS/Orçamento. O fluxo aprovado é generatePDF() com impressão nativa.
+ * Usar apenas para: PublicServiceOrderView (download/assinatura) e use-zapi-send (envio WhatsApp).
  */
 export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promise<Blob> {
   const html = buildHTMLDocument(data, options);
