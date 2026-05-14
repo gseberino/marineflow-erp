@@ -474,9 +474,9 @@ function pageWrapper(title: string, body: string): string {
   .card {
     border: 1px solid var(--border);
     border-radius: 8px;
-    padding: 14px 16px;
-    margin-bottom: 16px;
-    background: #fff;
+    padding: 16px;
+    margin-bottom: 20px;
+    background: var(--bg-light);
     page-break-inside: avoid;
     break-inside: avoid;
   }
@@ -486,41 +486,41 @@ function pageWrapper(title: string, body: string): string {
     font-weight: 700;
     color: var(--primary-light);
     text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
     border-bottom: 1px solid var(--border);
-    padding-bottom: 6px;
+    padding-bottom: 4px;
     display: flex;
     justify-content: space-between;
   }
 
-  table { width: 100%; border-collapse: collapse; margin-bottom: 16px; table-layout: fixed; }
-  thead { display: table-header-group; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
   th {
-    background: transparent;
-    color: var(--text-muted);
+    background: var(--primary);
+    color: #fff;
     text-align: left;
-    padding: 8px 10px;
+    padding: 8px 12px;
     font-size: 9px;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
     font-weight: 600;
-    border-bottom: 2px solid var(--border);
   }
-  td { padding: 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
-  tr { page-break-inside: avoid; break-inside: avoid; }
+  td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
   tr:last-child td { border-bottom: none; }
 
-  .summary-table td { padding: 4px 10px; border: none; }
-  .total-row td { padding: 10px 10px 4px; border-top: 2px solid var(--border); }
-  .total-row .label { font-weight: 700; color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
-  .total-row .value { font-weight: 800; font-size: 15px; color: var(--primary); text-align: right; }
+  .summary-table td { padding: 4px 12px; border: none; }
+  .total-row { background: var(--primary); color: #fff; font-weight: 800; font-size: 14px; }
+  .total-row td { padding: 12px; }
 
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; page-break-inside: avoid; break-inside: avoid; }
+  .badge {
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .badge-primary { background: var(--primary); color: #fff; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
   .totals-box { page-break-inside: avoid; break-inside: avoid; }
-  .signature-section { page-break-inside: avoid; break-inside: avoid; margin-top: 40px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
-  .signature-box { text-align: center; }
-  .signature-line { border-top: 1px solid var(--primary); padding-top: 8px; margin-top: 60px; }
 </style>
 </head>
 <body>
@@ -604,7 +604,7 @@ function buildPaymentSection(so: PDFData['serviceOrder']): string {
   }
 
   return `
-    <div class="card" style="margin-top:16px;">
+    <div class="card" style="margin-top:20px;border-left:4px solid var(--secondary); background:#fff;">
       <div class="section-title">
         <span>Programação de Pagamento</span>
         <span style="color:var(--text-muted);font-size:8px;">${esc(so.payment_condition_label || 'Condição Comercial')}</span>
@@ -810,30 +810,30 @@ ${!isQuote && data.serviceOrder.technical_notes ? `
       <tbody>
         ${summaryRows}
         <tr class="total-row">
-          <td class="label">Valor Total</td>
-          <td class="value">${fmtCurrency(data.serviceOrder.grand_total)}</td>
+          <td>VALOR TOTAL</td>
+          <td style="text-align:right;">${fmtCurrency(data.serviceOrder.grand_total)}</td>
         </tr>
       </tbody>
     </table>
-    ${isQuote ? `<div style="text-align:right;font-size:10px;font-weight:700;color:var(--secondary);margin-top:6px;padding-right:10px;">${getValidityText()}</div>` : ''}
+    ${isQuote ? `<div style="text-align:right;font-size:10px;font-weight:700;color:var(--secondary);margin-top:-10px;padding-right:12px;">${getValidityText()}</div>` : ''}
   </div>
 </div>
 
 ${buildPaymentSection(data.serviceOrder)}
 
 ${options.showBankDetails !== false && data.bank && (data.bank.bank_name || data.bank.pix_key) ? `
-<div class="card" style="margin-top:16px;">
+<div class="card" style="margin-top:20px; background:rgba(212, 175, 55, 0.03); border:1px solid rgba(212, 175, 55, 0.2);">
   <div class="section-title">Informações para Pagamento / Transferência</div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;font-size:10px;line-height:1.7;">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;font-size:10px;">
     <div>
-      <strong style="display:block;margin-bottom:6px;font-size:9px;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-muted);">Dados Bancários</strong>
+      <strong style="color:var(--primary);display:block;margin-bottom:4px;">DADOS BANCÁRIOS</strong>
       ${data.bank.bank_name ? `Banco: ${esc(data.bank.bank_name)}<br/>` : ''}
-      ${data.bank.bank_agency ? `Agência: ${esc(data.bank.bank_agency)} · ` : ''}${data.bank.bank_account ? `Conta: ${esc(data.bank.bank_account)}<br/>` : ''}
+      ${data.bank.bank_agency ? `Agência: ${esc(data.bank.bank_agency)} · ` : ''}${data.bank.bank_account ? `Conta: ${esc(data.bank.bank_account)}` : ''}<br/>
       Favorecido: ${esc(data.company.name)}<br/>
       CNPJ: ${esc(data.company.cnpj || '—')}
     </div>
-    <div style="border-left:1px solid var(--border);padding-left:20px;">
-      <strong style="display:block;margin-bottom:6px;font-size:9px;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-muted);">Pagamento via PIX</strong>
+    <div style="border-left:1px solid rgba(212, 175, 55, 0.2);padding-left:20px;">
+      <strong style="color:var(--primary);display:block;margin-bottom:4px;">PAGAMENTO VIA PIX</strong>
       Chave: <span style="font-size:12px;font-weight:800;color:var(--secondary);">${esc(data.bank.pix_key || '—')}</span><br/>
       <span style="font-size:9px;color:var(--text-muted);display:block;margin-top:6px;">Por favor, envie o comprovante para <strong>${esc(data.company.email)}</strong> para agilizar a baixa.</span>
     </div>
@@ -841,15 +841,17 @@ ${options.showBankDetails !== false && data.bank && (data.bank.bank_name || data
 </div>
 ` : ''}
 
-<div class="signature-section">
-  <div class="signature-box">
-    <div class="signature-line">
+<div class="grid" style="margin-top:40px;">
+  <div style="text-align:center;">
+    <div style="height:60px;"></div>
+    <div style="border-top:1px solid var(--primary);padding-top:8px;">
       <div style="font-weight:700;text-transform:uppercase;color:var(--primary);">${esc(data.company.name)}</div>
       <div style="font-size:9px;color:var(--text-muted);">Responsável Técnico</div>
     </div>
   </div>
-  <div class="signature-box">
-    <div class="signature-line">
+  <div style="text-align:center;">
+    <div style="height:60px;"></div>
+    <div style="border-top:1px solid var(--primary);padding-top:8px;">
       <div style="font-weight:700;text-transform:uppercase;color:var(--primary);">${esc(data.client.name)}</div>
       <div style="font-size:9px;color:var(--text-muted);">${isQuote ? 'Aprovação do Orçamento' : 'Aceite do Serviço Realizado'}</div>
     </div>
@@ -958,8 +960,8 @@ ${companyHeaderHTML(data.company, 'Fatura de Serviço', docNumber)}
       <tbody>
         ${summaryRows}
         <tr class="total-row">
-          <td class="label">Valor Total</td>
-          <td class="value">${fmtCurrency(data.serviceOrder.grand_total)}</td>
+          <td>VALOR TOTAL</td>
+          <td style="text-align:right;">${fmtCurrency(data.serviceOrder.grand_total)}</td>
         </tr>
       </tbody>
     </table>
