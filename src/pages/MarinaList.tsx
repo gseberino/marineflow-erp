@@ -139,13 +139,13 @@ export default function MarinaList() {
                         {m.contact_name && (
                           <div className="flex items-center gap-1.5">
                             <Phone className="h-3 w-3 shrink-0" />
-                            {m.contact_name}{m.phone ? ` · ${m.phone}` : ''}
+                            {m.contact_name}{m.contact_phone ? ` · ${m.contact_phone}` : ''}
                           </div>
                         )}
-                        {m.email && (
+                        {m.contact_email && (
                           <div className="flex items-center gap-1.5 text-xs mt-0.5">
                             <Mail className="h-3 w-3 shrink-0" />
-                            {m.email}
+                            {m.contact_email}
                           </div>
                         )}
                       </td>
