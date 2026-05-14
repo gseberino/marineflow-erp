@@ -407,7 +407,7 @@ function companyHeaderHTML(company: PDFData['company'], docTypeLabel: string, do
     ? `<img src="${esc(company.logo_url)}" alt="${esc(company.name)}"
         style="max-height:80px;max-width:220px;object-fit:contain;"
         crossorigin="anonymous" />`
-    : `<div style="font-size:28px;font-weight:900;color:var(--primary);letter-spacing:-1px;line-height:1;">
+    : `<div style="font-size:28px;font-weight:900;color:#002B5B;letter-spacing:-1px;line-height:1;">
         ${esc(company.name).toUpperCase()}
        </div>`;
 
@@ -415,7 +415,7 @@ function companyHeaderHTML(company: PDFData['company'], docTypeLabel: string, do
     <header style="display:flex;justify-content:space-between;margin-bottom:30px;align-items:flex-start;">
       <div style="flex:1;">
         ${logoHtml}
-        <div style="margin-top:12px;font-size:10px;color:var(--text-muted);max-width:300px;line-height:1.4;">
+        <div style="margin-top:12px;font-size:10px;color:#64748B;max-width:300px;line-height:1.4;">
           <strong>${esc(company.name)}</strong><br/>
           ${esc(company.address)}${company.city ? `, ${esc(company.city)}` : ''}${company.state ? ` - ${esc(company.state)}` : ''}<br/>
           ${company.cnpj ? `CNPJ: ${esc(company.cnpj)}` : ''}${company.phone ? ` · Tel: ${esc(company.phone)}` : ''}<br/>
@@ -423,9 +423,9 @@ function companyHeaderHTML(company: PDFData['company'], docTypeLabel: string, do
         </div>
       </div>
       <div style="text-align:right;">
-        <h1 style="font-size:24px;margin-bottom:4px;color:var(--primary);">${docTypeLabel}</h1>
-        <div style="font-size:16px;font-weight:700;color:var(--secondary);">${esc(docNumber)}</div>
-        <div style="margin-top:8px;font-size:10px;color:var(--text-muted);">
+        <h1 style="font-size:24px;margin-bottom:4px;color:#002B5B;">${docTypeLabel}</h1>
+        <div style="font-size:16px;font-weight:700;color:#D4AF37;">${esc(docNumber)}</div>
+        <div style="margin-top:8px;font-size:10px;color:#64748B;">
           Emissão: ${new Date().toLocaleDateString('pt-BR')}<br/>
           Página 01 / 01
         </div>
@@ -443,6 +443,10 @@ function pageWrapper(title: string, body: string): string {
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
   
+  /* NOTA: html2canvas (motor do html2pdf.js) não resolve var(--xxx) em backgrounds dentro
+     de iframe. Por isso usamos literais hex em TODAS as regras CSS. Os :root abaixo são
+     documentação. Inline color:var(--xxx) continua sendo usado em alguns lugares pois
+     html2canvas resolve CSS variables na propriedade color. */
   :root {
     --primary: #002B5B;
     --primary-light: #1A4D8B;
@@ -454,29 +458,29 @@ function pageWrapper(title: string, body: string): string {
   }
 
   * { margin:0; padding:0; box-sizing:border-box; }
-  body { 
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
-    font-size: 11px; 
-    color: var(--text-main); 
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 11px;
+    color: #1E293B;
     line-height: 1.5;
     background: #fff;
   }
 
   .container { padding: 40px; width: 100%; max-width: 800px; margin: 0 auto; }
-  
+
   @media print {
     .container { padding: 0; }
     @page { margin: 12mm; size: A4; }
   }
 
-  h1, h2, h3 { color: var(--primary); font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
-  
+  h1, h2, h3 { color: #002B5B; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
+
   .card {
-    border: 1px solid var(--border);
+    border: 1px solid #E2E8F0;
     border-radius: 8px;
     padding: 16px;
     margin-bottom: 20px;
-    background: var(--bg-light);
+    background-color: #F8FAFC;
     page-break-inside: avoid;
     break-inside: avoid;
   }
@@ -484,10 +488,10 @@ function pageWrapper(title: string, body: string): string {
   .section-title {
     font-size: 10px;
     font-weight: 700;
-    color: var(--primary-light);
+    color: #1A4D8B;
     text-transform: uppercase;
     margin-bottom: 8px;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid #E2E8F0;
     padding-bottom: 4px;
     display: flex;
     justify-content: space-between;
@@ -495,20 +499,20 @@ function pageWrapper(title: string, body: string): string {
 
   table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
   th {
-    background: var(--primary);
-    color: #fff;
+    background-color: #002B5B;
+    color: #ffffff;
     text-align: left;
     padding: 8px 12px;
     font-size: 9px;
     text-transform: uppercase;
     font-weight: 600;
   }
-  td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  td { padding: 8px 12px; border-bottom: 1px solid #E2E8F0; vertical-align: top; color: #1E293B; }
   tr:last-child td { border-bottom: none; }
 
   .summary-table td { padding: 4px 12px; border: none; }
-  .total-row { background: var(--primary); color: #fff; font-weight: 800; font-size: 14px; }
-  .total-row td { padding: 12px; }
+  .total-row { background-color: #002B5B; color: #ffffff; font-weight: 800; font-size: 14px; }
+  .total-row td { padding: 12px; background-color: #002B5B; color: #ffffff; }
 
   .badge {
     padding: 2px 6px;
@@ -517,7 +521,7 @@ function pageWrapper(title: string, body: string): string {
     font-weight: 700;
     text-transform: uppercase;
   }
-  .badge-primary { background: var(--primary); color: #fff; }
+  .badge-primary { background-color: #002B5B; color: #ffffff; }
 
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
   .totals-box { page-break-inside: avoid; break-inside: avoid; }
@@ -592,10 +596,10 @@ function buildPaymentSection(so: PDFData['serviceOrder']): string {
     installmentsHtml = `
       <table style="margin-bottom:0; width:100%; border-collapse:collapse;">
         <thead>
-          <tr style="background:rgba(212, 175, 55, 0.05);color:var(--primary);">
-            <th style="background:transparent;color:var(--primary);width:30%;">Vencimento</th>
-            <th style="background:transparent;color:var(--primary);width:40%;">Data/Evento</th>
-            <th style="background:transparent;color:var(--primary);text-align:right;">Valor</th>
+          <tr style="background:rgba(212, 175, 55, 0.05);color:#002B5B;">
+            <th style="background:transparent;color:#002B5B;width:30%;">Vencimento</th>
+            <th style="background:transparent;color:#002B5B;width:40%;">Data/Evento</th>
+            <th style="background:transparent;color:#002B5B;text-align:right;">Valor</th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -604,10 +608,10 @@ function buildPaymentSection(so: PDFData['serviceOrder']): string {
   }
 
   return `
-    <div class="card" style="margin-top:20px;border-left:4px solid var(--secondary); background:#fff;">
+    <div class="card" style="margin-top:20px;border-left:4px solid #D4AF37; background:#fff;">
       <div class="section-title">
         <span>Programação de Pagamento</span>
-        <span style="color:var(--text-muted);font-size:8px;">${esc(so.payment_condition_label || 'Condição Comercial')}</span>
+        <span style="color:#64748B;font-size:8px;">${esc(so.payment_condition_label || 'Condição Comercial')}</span>
       </div>
       ${installmentsHtml}
       ${hasText ? (() => {
@@ -646,7 +650,7 @@ function buildPaymentSection(so: PDFData['serviceOrder']): string {
           }
         }
 
-        return `<div style="font-size:10px;color:var(--text-main);margin-top:8px;padding:8px;background:var(--bg-light);border-radius:4px;border:1px dashed var(--border);white-space:pre-wrap;">${esc(so.payment_conditions)}</div>${calcHtml}`;
+        return `<div style="font-size:10px;color:#1E293B;margin-top:8px;padding:8px;background:#F8FAFC;border-radius:4px;border:1px dashed #E2E8F0;white-space:pre-wrap;">${esc(so.payment_conditions)}</div>${calcHtml}`;
       })() : ''}
     </div>
   `;
@@ -678,7 +682,7 @@ function buildOrderHTML(data: PDFData, options: PDFOptions): string {
 
   const serviceRows = data.services.map(s => `
     <tr>
-      <td style="font-weight:600;">${esc(s.name)}${s.description ? `<div style="font-weight:400;color:var(--text-muted);font-size:9px;margin-top:2px;">${esc(s.description)}</div>` : ''}</td>
+      <td style="font-weight:600;">${esc(s.name)}${s.description ? `<div style="font-weight:400;color:#64748B;font-size:9px;margin-top:2px;">${esc(s.description)}</div>` : ''}</td>
       <td style="text-align:center;">${s.quantity} ${esc(billingUnitLabel[s.billing_unit] || s.billing_unit)}</td>
       ${options.showServicePrices ? `<td style="text-align:right;">${fmtCurrency(s.unit_price)}</td>` : ''}
       <td style="text-align:right;font-weight:600;">${fmtCurrency(s.line_total)}</td>
@@ -689,14 +693,14 @@ function buildOrderHTML(data: PDFData, options: PDFOptions): string {
     const showImg = !!options.showProductImages && !!p.image_url;
     const itemCell = showImg 
       ? `<div style="display:flex;align-items:center;gap:10px;">
-           <img src="${esc(p.image_url!)}" style="width:40px;height:40px;object-fit:cover;border-radius:4px;border:1px solid var(--border);" crossorigin="anonymous" />
+           <img src="${esc(p.image_url!)}" style="width:40px;height:40px;object-fit:cover;border-radius:4px;border:1px solid #E2E8F0;" crossorigin="anonymous" />
            <div>
              <div style="font-weight:600;">${esc(p.name)}</div>
-             ${p.sku ? `<div style="font-size:9px;color:var(--text-muted);">#${esc(p.sku)}</div>` : ''}
+             ${p.sku ? `<div style="font-size:9px;color:#64748B;">#${esc(p.sku)}</div>` : ''}
            </div>
          </div>`
       : `<div style="font-weight:600;">${esc(p.name)}</div>
-         ${p.sku ? `<div style="font-size:9px;color:var(--text-muted);">#${esc(p.sku)}</div>` : ''}`;
+         ${p.sku ? `<div style="font-size:9px;color:#64748B;">#${esc(p.sku)}</div>` : ''}`;
 
     return `
     <tr>
@@ -712,12 +716,12 @@ function buildOrderHTML(data: PDFData, options: PDFOptions): string {
       <div class="section-title">Galeria Técnica / Evidências do Serviço</div>
       <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-top: 10px;">
         ${data.photos.map(url => `
-          <div style="border:1px solid var(--border); border-radius:8px; overflow:hidden; background:var(--bg-light);">
+          <div style="border:1px solid #E2E8F0; border-radius:8px; overflow:hidden; background:#F8FAFC;">
             <img src="${esc(url)}" style="width:100%; height:200px; object-fit:cover;" crossorigin="anonymous" />
           </div>
         `).join('')}
       </div>
-      <div style="font-size:9px; color:var(--text-muted); margin-top:8px; text-align:center;">
+      <div style="font-size:9px; color:#64748B; margin-top:8px; text-align:center;">
         As imagens acima servem como registro técnico das etapas e componentes analisados/substituídos.
       </div>
     </div>
@@ -737,15 +741,15 @@ ${companyHeaderHTML(data.company, docTypeLabel, docNumber)}
 <div class="grid">
   <div class="card">
     <div class="section-title">Informações do Cliente</div>
-    <div style="font-size:12px;font-weight:700;color:var(--primary);">${esc(data.client.name)}</div>
+    <div style="font-size:12px;font-weight:700;color:#002B5B;">${esc(data.client.name)}</div>
     ${data.client.cpf_cnpj ? `<div style="font-size:10px;">CPF/CNPJ: ${esc(data.client.cpf_cnpj)}</div>` : ''}
     ${data.client.phone ? `<div style="font-size:10px;">Fone: ${esc(data.client.phone)}</div>` : ''}
     ${data.client.email ? `<div style="font-size:10px;">Email: ${esc(data.client.email)}</div>` : ''}
-    ${data.client.address ? `<div style="font-size:10px;margin-top:4px;color:var(--text-muted);">${esc(data.client.address)}</div>` : ''}
+    ${data.client.address ? `<div style="font-size:10px;margin-top:4px;color:#64748B;">${esc(data.client.address)}</div>` : ''}
   </div>
   <div class="card">
     <div class="section-title">Dados do Ativo / Localização</div>
-    ${data.vessel ? `<div style="font-size:12px;font-weight:700;color:var(--primary);">${esc(data.vessel.name)}</div>` : ''}
+    ${data.vessel ? `<div style="font-size:12px;font-weight:700;color:#002B5B;">${esc(data.vessel.name)}</div>` : ''}
     <div style="font-size:10px;">
       ${data.vessel?.manufacturer ? `${esc(data.vessel.manufacturer)} ${esc(data.vessel.model || '')} (${data.vessel.year || '—'})<br/>` : ''}
       ${data.vessel?.registration ? `Registro: ${data.vessel.registration}<br/>` : ''}
@@ -798,7 +802,7 @@ ${data.parts.length > 0 ? `
 ` : ''}
 
 ${!isQuote && data.serviceOrder.technical_notes ? `
-<div class="card" style="background:#F0F4F8;border-left:4px solid var(--primary);">
+<div class="card" style="background:#F0F4F8;border-left:4px solid #002B5B;">
   <div class="section-title">Conclusão Técnica / Recomendações</div>
   <div style="white-space:pre-wrap;font-size:11px;font-style:italic;">${esc(data.serviceOrder.technical_notes)}</div>
 </div>
@@ -815,7 +819,7 @@ ${!isQuote && data.serviceOrder.technical_notes ? `
         </tr>
       </tbody>
     </table>
-    ${isQuote ? `<div style="text-align:right;font-size:10px;font-weight:700;color:var(--secondary);margin-top:-10px;padding-right:12px;">${getValidityText()}</div>` : ''}
+    ${isQuote ? `<div style="text-align:right;font-size:10px;font-weight:700;color:#D4AF37;margin-top:-10px;padding-right:12px;">${getValidityText()}</div>` : ''}
   </div>
 </div>
 
@@ -826,16 +830,16 @@ ${options.showBankDetails !== false && data.bank && (data.bank.bank_name || data
   <div class="section-title">Informações para Pagamento / Transferência</div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;font-size:10px;">
     <div>
-      <strong style="color:var(--primary);display:block;margin-bottom:4px;">DADOS BANCÁRIOS</strong>
+      <strong style="color:#002B5B;display:block;margin-bottom:4px;">DADOS BANCÁRIOS</strong>
       ${data.bank.bank_name ? `Banco: ${esc(data.bank.bank_name)}<br/>` : ''}
       ${data.bank.bank_agency ? `Agência: ${esc(data.bank.bank_agency)} · ` : ''}${data.bank.bank_account ? `Conta: ${esc(data.bank.bank_account)}` : ''}<br/>
       Favorecido: ${esc(data.company.name)}<br/>
       CNPJ: ${esc(data.company.cnpj || '—')}
     </div>
     <div style="border-left:1px solid rgba(212, 175, 55, 0.2);padding-left:20px;">
-      <strong style="color:var(--primary);display:block;margin-bottom:4px;">PAGAMENTO VIA PIX</strong>
-      Chave: <span style="font-size:12px;font-weight:800;color:var(--secondary);">${esc(data.bank.pix_key || '—')}</span><br/>
-      <span style="font-size:9px;color:var(--text-muted);display:block;margin-top:6px;">Por favor, envie o comprovante para <strong>${esc(data.company.email)}</strong> para agilizar a baixa.</span>
+      <strong style="color:#002B5B;display:block;margin-bottom:4px;">PAGAMENTO VIA PIX</strong>
+      Chave: <span style="font-size:12px;font-weight:800;color:#D4AF37;">${esc(data.bank.pix_key || '—')}</span><br/>
+      <span style="font-size:9px;color:#64748B;display:block;margin-top:6px;">Por favor, envie o comprovante para <strong>${esc(data.company.email)}</strong> para agilizar a baixa.</span>
     </div>
   </div>
 </div>
@@ -844,16 +848,16 @@ ${options.showBankDetails !== false && data.bank && (data.bank.bank_name || data
 <div class="grid" style="margin-top:40px;">
   <div style="text-align:center;">
     <div style="height:60px;"></div>
-    <div style="border-top:1px solid var(--primary);padding-top:8px;">
-      <div style="font-weight:700;text-transform:uppercase;color:var(--primary);">${esc(data.company.name)}</div>
-      <div style="font-size:9px;color:var(--text-muted);">Responsável Técnico</div>
+    <div style="border-top:1px solid #002B5B;padding-top:8px;">
+      <div style="font-weight:700;text-transform:uppercase;color:#002B5B;">${esc(data.company.name)}</div>
+      <div style="font-size:9px;color:#64748B;">Responsável Técnico</div>
     </div>
   </div>
   <div style="text-align:center;">
     <div style="height:60px;"></div>
-    <div style="border-top:1px solid var(--primary);padding-top:8px;">
-      <div style="font-weight:700;text-transform:uppercase;color:var(--primary);">${esc(data.client.name)}</div>
-      <div style="font-size:9px;color:var(--text-muted);">${isQuote ? 'Aprovação do Orçamento' : 'Aceite do Serviço Realizado'}</div>
+    <div style="border-top:1px solid #002B5B;padding-top:8px;">
+      <div style="font-weight:700;text-transform:uppercase;color:#002B5B;">${esc(data.client.name)}</div>
+      <div style="font-size:9px;color:#64748B;">${isQuote ? 'Aprovação do Orçamento' : 'Aceite do Serviço Realizado'}</div>
     </div>
   </div>
 </div>
@@ -861,13 +865,13 @@ ${options.showBankDetails !== false && data.bank && (data.bank.bank_name || data
 ${photoGallery}
 
 ${options.showTerms && data.terms ? `
-<div style="margin-top:30px;padding-top:10px;border-top:1px dashed var(--border);">
-  <div style="font-size:9px;font-weight:700;color:var(--primary-light);text-transform:uppercase;margin-bottom:4px;">Condições Gerais e Garantia</div>
-  <div style="font-size:8.5px;color:var(--text-muted);white-space:pre-wrap;text-align:justify;">${esc(data.terms)}</div>
+<div style="margin-top:30px;padding-top:10px;border-top:1px dashed #E2E8F0;">
+  <div style="font-size:9px;font-weight:700;color:#1A4D8B;text-transform:uppercase;margin-bottom:4px;">Condições Gerais e Garantia</div>
+  <div style="font-size:8.5px;color:#64748B;white-space:pre-wrap;text-align:justify;">${esc(data.terms)}</div>
 </div>
 ` : ''}
 
-<footer style="margin-top:30px;text-align:center;font-size:9px;color:var(--text-muted);border-top:1px solid var(--border);padding-top:10px; display:flex; justify-content:space-between; align-items:center;">
+<footer style="margin-top:30px;text-align:center;font-size:9px;color:#64748B;border-top:1px solid #E2E8F0;padding-top:10px; display:flex; justify-content:space-between; align-items:center;">
   <span>MarineFlow ERP · Documento Digital Autenticado</span>
   <span>Página 01 / 01</span>
   <span>Emitido em ${new Date().toLocaleString('pt-BR')}</span>
@@ -894,7 +898,7 @@ function buildInvoiceHTML(data: PDFData, options: PDFOptions): string {
 
   const serviceRows = data.services.map(s => `
     <tr>
-      <td style="font-weight:600;">${esc(s.name)}${s.description ? `<div style="font-weight:400;color:var(--text-muted);font-size:9px;">${esc(s.description)}</div>` : ''}</td>
+      <td style="font-weight:600;">${esc(s.name)}${s.description ? `<div style="font-weight:400;color:#64748B;font-size:9px;">${esc(s.description)}</div>` : ''}</td>
       <td style="text-align:center;">${s.quantity} ${esc(billingUnitLabel[s.billing_unit] || s.billing_unit)}</td>
       <td style="text-align:right;font-weight:600;">${fmtCurrency(s.line_total)}</td>
     </tr>
@@ -922,17 +926,17 @@ function buildInvoiceHTML(data: PDFData, options: PDFOptions): string {
 ${companyHeaderHTML(data.company, 'Fatura de Serviço', docNumber)}
 
 <div class="grid">
-  <div class="card" style="border-left:4px solid var(--secondary);">
+  <div class="card" style="border-left:4px solid #D4AF37;">
     <div class="section-title">Resumo Financeiro</div>
-    <div style="font-size:10px;color:var(--text-muted);">Vencimento:</div>
+    <div style="font-size:10px;color:#64748B;">Vencimento:</div>
     <div style="font-size:16px;font-weight:800;color:#dc2626;margin-bottom:8px;">${dueDate}</div>
-    <div style="font-size:10px;color:var(--text-muted);">Total a Pagar:</div>
-    <div style="font-size:18px;font-weight:800;color:var(--primary);">${fmtCurrency(data.serviceOrder.grand_total)}</div>
+    <div style="font-size:10px;color:#64748B;">Total a Pagar:</div>
+    <div style="font-size:18px;font-weight:800;color:#002B5B;">${fmtCurrency(data.serviceOrder.grand_total)}</div>
   </div>
   <div class="card">
     <div class="section-title">Informações do Pagador</div>
-    <div style="font-size:12px;font-weight:700;color:var(--primary);">${esc(data.client.name)}</div>
-    <div style="font-size:10px;color:var(--text-muted);">
+    <div style="font-size:12px;font-weight:700;color:#002B5B;">${esc(data.client.name)}</div>
+    <div style="font-size:10px;color:#64748B;">
       ${data.client.cpf_cnpj ? `CPF/CNPJ: ${esc(data.client.cpf_cnpj)}<br/>` : ''}
       ${data.client.email || ''}
     </div>
@@ -979,16 +983,16 @@ ${options.showBankDetails !== false && hasBank ? `
       Favorecido: ${esc(data.company.name)}<br/>
       ${data.company.cnpj ? `CNPJ: ${esc(data.company.cnpj)}` : ''}
     </div>
-    <div style="border-left:1px solid var(--border);padding-left:12px;">
+    <div style="border-left:1px solid #E2E8F0;padding-left:12px;">
       <strong>Pague via PIX:</strong><br/>
-      Chave: <span style="font-size:11px;font-weight:700;color:var(--primary);">${esc(bank.pix_key || 'N/A')}</span><br/>
-      <span style="font-size:9px;color:var(--text-muted);margin-top:4px;display:block;">Após o pagamento, envie o comprovante para ${data.company.email || 'nosso contato'}.</span>
+      Chave: <span style="font-size:11px;font-weight:700;color:#002B5B;">${esc(bank.pix_key || 'N/A')}</span><br/>
+      <span style="font-size:9px;color:#64748B;margin-top:4px;display:block;">Após o pagamento, envie o comprovante para ${data.company.email || 'nosso contato'}.</span>
     </div>
   </div>
 </div>
 ` : ''}
 
-<footer style="margin-top:50px;text-align:center;font-size:9px;color:var(--text-muted);">
+<footer style="margin-top:50px;text-align:center;font-size:9px;color:#64748B;">
   Referente à Ordem de Serviço ${esc(data.serviceOrder.service_order_number)} · Gerado em ${new Date().toLocaleString('pt-BR')}
 </footer>
 `;
@@ -1013,22 +1017,22 @@ function buildReceiptHTML(data: PDFData, options: PDFOptions): string {
 ${companyHeaderHTML(data.company, 'Recibo de Quitação', docNumber)}
 
 <div class="card" style="margin:30px 0;padding:30px;background:white;position:relative;overflow:hidden;">
-  <div style="position:absolute;top:0;left:0;width:4px;height:100%;background:var(--secondary);"></div>
+  <div style="position:absolute;top:0;left:0;width:4px;height:100%;background:#D4AF37;"></div>
   <div style="text-align:right;margin-bottom:20px;">
-    <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;">Valor Recebido</div>
-    <div style="font-size:24px;font-weight:800;color:var(--primary);">${fmtCurrency(r.amount)}</div>
+    <div style="font-size:10px;color:#64748B;text-transform:uppercase;">Valor Recebido</div>
+    <div style="font-size:24px;font-weight:800;color:#002B5B;">${fmtCurrency(r.amount)}</div>
   </div>
   
-  <div style="font-size:14px;line-height:2;text-align:justify;color:var(--text-main);">
+  <div style="font-size:14px;line-height:2;text-align:justify;color:#1E293B;">
     Recebemos de <strong>${esc(data.client.name).toUpperCase()}</strong>, 
     ${data.client.cpf_cnpj ? `inscrito(a) no CPF/CNPJ sob o nº <strong>${esc(data.client.cpf_cnpj)}</strong>, ` : ''}
     a importância líquida e certa de <strong>${fmtCurrency(r.amount)}</strong> 
-    <span style="font-size:11px;color:var(--text-muted);">(${esc(amountWords)})</span>, 
+    <span style="font-size:11px;color:#64748B;">(${esc(amountWords)})</span>, 
     referente ao pagamento de <strong>${esc(r.reference || data.serviceOrder.service_order_number)}</strong>
     ${data.vessel ? ` (Ativo: ${esc(data.vessel.name)})` : ''}.
   </div>
   
-  <div style="margin-top:20px;font-size:12px;color:var(--text-muted);">
+  <div style="margin-top:20px;font-size:12px;color:#64748B;">
     Forma de Pagamento: <strong>${esc(methodLabel)}</strong><br/>
     Data da Transação: <strong>${fmtDate(r.payment_date)}</strong>
   </div>
@@ -1045,14 +1049,14 @@ ${companyHeaderHTML(data.company, 'Recibo de Quitação', docNumber)}
   </div>
   <div style="text-align:center;padding-top:20px;">
     <div style="height:50px;"></div>
-    <div style="border-top:1px solid var(--primary);padding-top:8px;">
+    <div style="border-top:1px solid #002B5B;padding-top:8px;">
       <div style="font-weight:700;font-size:11px;">${esc(data.company.name).toUpperCase()}</div>
-      <div style="font-size:9px;color:var(--text-muted);">Assinatura Autorizada</div>
+      <div style="font-size:9px;color:#64748B;">Assinatura Autorizada</div>
     </div>
   </div>
 </div>
 
-<footer style="margin-top:50px;text-align:center;font-size:9px;color:var(--text-muted);">
+<footer style="margin-top:50px;text-align:center;font-size:9px;color:#64748B;">
   Este recibo confirma a quitação do valor acima descrito para os fins de direito.
 </footer>
 `;
