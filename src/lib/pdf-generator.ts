@@ -172,30 +172,100 @@ export function generatePDF(data: PDFData, options: PDFOptions): void {
 }
 
 /**
+ * Exporta o HTML do documento para uso externo (ex: fallback de impressão).
+ */
+export function buildPDFHTML(data: PDFData, options: PDFOptions): string {
+  return buildHTMLDocument(data, options);
+}
+
+async function waitForImages(root: HTMLElement): Promise<void> {
+  const images = Array.from(root.querySelectorAll('img'));
+  await Promise.all(
+    images.map((img) => {
+      if (img.complete) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        img.onload = () => resolve();
+        img.onerror = () => resolve();
+      });
+    })
+  );
+}
+
+function extractContentFromHTML(fullHtml: string): string {
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(fullHtml, 'text/html');
+    const styles = Array.from(doc.querySelectorAll('style, link'))
+      .map((el) => el.outerHTML)
+      .join('\n');
+    const bodyContent = doc.body.innerHTML;
+    return `${styles}\n${bodyContent}`;
+  } catch (e) {
+    console.error('[PDF] Failed to parse HTML document, using raw content', e);
+    return fullHtml;
+  }
+}
+
+/**
  * Gera o PDF como Blob (sem abrir janela de impressão).
  * Usa html2pdf.js (jsPDF + html2canvas) renderizando o HTML montado por buildHTMLDocument.
  */
 export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promise<Blob> {
   const html = buildHTMLDocument(data, options);
+  const sanitizedContent = extractContentFromHTML(html);
 
-  // Container off-screen com largura A4 para captura fiel.
-  // IMPORTANTE: usar `position:absolute` (NÃO `fixed`) e mantê-lo no fluxo de layout.
-  // Com `position:fixed;left:-99999px` o html2canvas calcula altura zero em Chromium
-  // recente, gerando PDF totalmente em branco.
+  // Container visível para o html2canvas, mas sem interferir na interação do usuário.
+  // Usamos z-index máximo e posição absoluta. O flash visual é aceitável para garantir captura.
   const container = document.createElement('div');
-  container.style.cssText =
-    'position:absolute;left:-10000px;top:0;width:794px;background:#ffffff;' +
-    'z-index:-1;visibility:visible;';
-  container.innerHTML = html;
+  container.className = 'pdf-render-container';
+  container.style.cssText = [
+    'position:absolute',
+    'left:0',
+    `top:${window.scrollY}px`,
+    'width:794px',
+    'background:#ffffff',
+    'z-index:2147483647',
+    'pointer-events:none',
+    'box-sizing:border-box',
+    'visibility:visible',
+    'opacity:1',
+    'overflow:visible',
+  ].join(';');
+  
+  container.innerHTML = sanitizedContent;
   document.body.appendChild(container);
 
-  // Aguarda o browser calcular layout + carregar fontes antes da captura
-  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-  if ((document as any).fonts?.ready) {
-    try { await (document as any).fonts.ready; } catch { /* ignore */ }
-  }
-
   try {
+    // Diagnóstico inicial
+    console.info('[PDF] Starting render diagnostics...', {
+      htmlLength: html.length,
+      documentType: data.documentType,
+      os: data.serviceOrder.service_order_number
+    });
+
+    // Aguarda múltiplos ciclos de renderização e carregamento de fontes/imagens
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    
+    if ((document as any).fonts?.ready) {
+      try { await (document as any).fonts.ready; } catch (e) { console.warn('[PDF] Font load error', e); }
+    }
+
+    await waitForImages(container);
+
+    const scrollHeight = container.scrollHeight;
+    const scrollWidth = container.scrollWidth;
+
+    console.info('[PDF] Render dimensions', { 
+      scrollHeight, 
+      scrollWidth,
+      containerHeight: container.clientHeight 
+    });
+
+    if (scrollHeight < 100) {
+      throw new Error('O conteúdo do PDF não renderizou corretamente (altura insuficiente).');
+    }
+
     // Import dinâmico para não pesar o bundle inicial
     const html2pdfModule: any = await import('html2pdf.js');
     const html2pdf = html2pdfModule.default || html2pdfModule;
@@ -204,16 +274,18 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
       .from(container)
       .set({
         margin: [10, 10, 10, 10],
-        filename: 'documento.pdf',
-        image: { type: 'jpeg', quality: 0.92 },
+        filename: `${data.documentType}-${data.serviceOrder.service_order_number}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
         html2canvas: {
           scale: 2,
           useCORS: true,
+          allowTaint: false,
           backgroundColor: '#ffffff',
-          // Força altura/largura reais — evita captura zerada em containers off-screen
-          windowWidth: 794,
-          width: 794,
-          height: container.scrollHeight,
+          logging: true, // Habilitar logs do html2canvas para debug em staging
+          windowWidth: Math.max(scrollWidth, 794),
+          windowHeight: Math.max(scrollHeight, 1123),
+          width: Math.max(scrollWidth, 794),
+          height: scrollHeight,
           scrollX: 0,
           scrollY: 0,
         },
@@ -223,8 +295,8 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
       .outputPdf('blob');
 
     // Sanity check — blob suspeito (<2KB) costuma significar página em branco
-    if (blob.size < 2000) {
-      console.warn('[generatePDFBlob] PDF suspeito de estar vazio:', {
+    if (blob.size < 5000) { // Aumentei o limite para 5KB, um PDF com texto real dificilmente é menor que isso
+      console.warn('[generatePDFBlob] PDF suspeito de estar vazio ou muito simples:', {
         size: blob.size,
         scrollHeight: container.scrollHeight,
       });

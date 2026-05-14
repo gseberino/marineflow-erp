@@ -1,7 +1,38 @@
 import { toast } from 'sonner';
-import { generatePDFBlob, type PDFData, type PDFOptions } from './pdf-generator';
+import { generatePDFBlob, buildPDFHTML, type PDFData, type PDFOptions } from './pdf-generator';
 
 export type PDFAction = 'print' | 'download';
+
+/**
+ * Fallback: abre uma nova aba com o HTML puro para impressão caso o PDF falhe.
+ */
+function openPrintableHTMLFallback(data: PDFData, options: PDFOptions) {
+  const html = buildPDFHTML(data, options);
+  const win = window.open('', '_blank');
+  
+  if (!win) {
+    toast.error('O navegador bloqueou a abertura da nova aba. Por favor, habilite popups para imprimir.');
+    return;
+  }
+
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
+  
+  toast.info('Utilizando modo de compatibilidade (HTML imprimível).');
+  
+  // Aguarda renderização básica antes de sugerir Ctrl+P
+  setTimeout(() => {
+    try {
+      win.focus();
+      // Em alguns navegadores o .print() pode ser bloqueado se não houver interação,
+      // mas como foi aberto por clique do usuário no ERP, costuma funcionar.
+      win.print();
+    } catch (e) {
+      console.warn('[PDF] Auto-print failed', e);
+    }
+  }, 800);
+}
 
 export async function generateAndHandlePDF(
   data: PDFData,
@@ -13,8 +44,12 @@ export async function generateAndHandlePDF(
   try {
     const blob = await generatePDFBlob(data, options);
 
-    if (blob.size < 2000) {
-      throw new Error('O PDF gerado parece estar vazio. Tente novamente.');
+    // Sanity check para PDF em branco
+    // Um PDF com conteúdo real dificilmente tem menos de 5KB (especialmente com escalas e imagens)
+    if (blob.size < 5000) {
+      console.warn('[PDF] Blob gerado é muito pequeno, possível página em branco. Acionando fallback.', { size: blob.size });
+      openPrintableHTMLFallback(data, options);
+      return;
     }
 
     const url = URL.createObjectURL(blob);
@@ -26,7 +61,6 @@ export async function generateAndHandlePDF(
       document.body.appendChild(a);
       a.click();
       a.remove();
-      // Revoke after a short delay to ensure the browser has started the download
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       toast.success('PDF baixado com sucesso!');
     } else {
@@ -42,15 +76,14 @@ export async function generateAndHandlePDF(
         setTimeout(() => URL.revokeObjectURL(url), 1000);
       } else {
         win.focus();
-        // Give the browser plenty of time to load the Blob into the new tab before revoking.
-        // 10 seconds is usually enough even for slow systems.
+        // Mantém a URL ativa por 10s para garantir o carregamento na nova aba
         setTimeout(() => URL.revokeObjectURL(url), 10000);
-        toast.success('PDF aberto em nova aba!');
+        toast.success('PDF gerado com sucesso!');
       }
     }
   } catch (error: any) {
-    console.error('Error generating PDF:', error);
-    toast.error(`Erro ao gerar PDF: ${error.message || 'Erro desconhecido'}`);
-    throw error;
+    console.error('[PDF] Erro crítico na geração do Blob:', error);
+    toast.error('Houve um erro ao gerar o arquivo PDF. Tentando modo de compatibilidade...');
+    openPrintableHTMLFallback(data, options);
   }
 }
