@@ -5,7 +5,6 @@ export type ClientType = 'individual' | 'company';
 export interface Client {
   id: string;
   type: ClientType;
-  name: string; // Temporarily keeping for compatibility while migrating others
   name: string;
   cpf_cnpj: string;
   phone: string;
