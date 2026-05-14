@@ -517,7 +517,18 @@ function pageWrapper(title: string, body: string): string {
   }
   .badge-primary { background: var(--primary); color: #fff; }
 
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; page-break-inside: avoid; break-inside: avoid; }
+
+  .card { page-break-inside: avoid; break-inside: avoid; }
+
+  table { table-layout: fixed; }
+  thead { display: table-header-group; }
+  tr { page-break-inside: avoid; break-inside: avoid; }
+
+  .totals-box { page-break-inside: avoid; break-inside: avoid; }
+  .signature-section { page-break-inside: avoid; break-inside: avoid; margin-top: 40px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
+  .signature-box { text-align: center; }
+  .signature-line { border-top: 1px solid var(--primary); padding-top: 8px; margin-top: 60px; }
 </style>
 </head>
 <body>
@@ -761,10 +772,14 @@ ${data.services.length > 0 ? `
 <table>
   <thead>
     <tr>
-      <th style="width:55%;">Descrição Técnica</th>
-      <th style="width:15%;text-align:center;">Qtd/Unid</th>
-      ${options.showServicePrices ? '<th style="width:15%;text-align:right;">Unitário</th>' : ''}
-      <th style="width:15%;text-align:right;">Subtotal</th>
+      ${options.showServicePrices
+        ? `<th style="width:55%;">Descrição Técnica</th>
+           <th style="width:15%;text-align:center;">Qtd/Unid</th>
+           <th style="width:15%;text-align:right;">Unitário</th>
+           <th style="width:15%;text-align:right;">Subtotal</th>`
+        : `<th style="width:65%;">Descrição Técnica</th>
+           <th style="width:20%;text-align:center;">Qtd/Unid</th>
+           <th style="width:15%;text-align:right;">Subtotal</th>`}
     </tr>
   </thead>
   <tbody>${serviceRows}</tbody>
@@ -776,10 +791,14 @@ ${data.parts.length > 0 ? `
 <table>
   <thead>
     <tr>
-      <th style="width:55%;">Item / Especificação</th>
-      <th style="width:15%;text-align:center;">Qtd</th>
-      ${options.showPartsPrices ? '<th style="width:15%;text-align:right;">Unitário</th>' : ''}
-      <th style="width:15%;text-align:right;">Subtotal</th>
+      ${options.showPartsPrices
+        ? `<th style="width:55%;">Item / Especificação</th>
+           <th style="width:15%;text-align:center;">Qtd</th>
+           <th style="width:15%;text-align:right;">Unitário</th>
+           <th style="width:15%;text-align:right;">Subtotal</th>`
+        : `<th style="width:65%;">Item / Especificação</th>
+           <th style="width:20%;text-align:center;">Qtd</th>
+           <th style="width:15%;text-align:right;">Subtotal</th>`}
     </tr>
   </thead>
   <tbody>${partsRows}</tbody>
@@ -793,7 +812,7 @@ ${!isQuote && data.serviceOrder.technical_notes ? `
 </div>
 ` : ''}
 
-<div style="display:flex;justify-content:flex-end;">
+<div class="totals-box" style="display:flex;justify-content:flex-end;">
   <div style="width:300px;">
     <table class="summary-table">
       <tbody>
@@ -804,7 +823,7 @@ ${!isQuote && data.serviceOrder.technical_notes ? `
         </tr>
       </tbody>
     </table>
-    ${isQuote ? `<div style="text-align:right;font-size:10px;font-weight:700;color:var(--secondary);margin-top:-10px;padding-right:12px;">${getValidityText()}</div>` : ''}
+    ${isQuote ? `<div style="text-align:right;font-size:10px;font-weight:600;color:var(--secondary);margin-top:6px;padding-right:12px;">${getValidityText()}</div>` : ''}
   </div>
 </div>
 
@@ -830,17 +849,15 @@ ${options.showBankDetails !== false && data.bank && (data.bank.bank_name || data
 </div>
 ` : ''}
 
-<div class="grid" style="margin-top:40px;">
-  <div style="text-align:center;">
-    <div style="height:60px;"></div>
-    <div style="border-top:1px solid var(--primary);padding-top:8px;">
+<div class="signature-section">
+  <div class="signature-box">
+    <div class="signature-line">
       <div style="font-weight:700;text-transform:uppercase;color:var(--primary);">${esc(data.company.name)}</div>
       <div style="font-size:9px;color:var(--text-muted);">Responsável Técnico</div>
     </div>
   </div>
-  <div style="text-align:center;">
-    <div style="height:60px;"></div>
-    <div style="border-top:1px solid var(--primary);padding-top:8px;">
+  <div class="signature-box">
+    <div class="signature-line">
       <div style="font-weight:700;text-transform:uppercase;color:var(--primary);">${esc(data.client.name)}</div>
       <div style="font-size:9px;color:var(--text-muted);">${isQuote ? 'Aprovação do Orçamento' : 'Aceite do Serviço Realizado'}</div>
     </div>

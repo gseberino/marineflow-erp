@@ -3,6 +3,12 @@ import { generatePDFBlob, buildPDFHTML, type PDFData, type PDFOptions } from './
 
 export type PDFAction = 'print' | 'download';
 
+function isLikelyMobileOrPWA(): boolean {
+  return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+    || window.matchMedia('(display-mode: standalone)').matches
+    || (navigator as any).standalone === true;
+}
+
 /**
  * Fallback: abre uma nova aba com o HTML puro para impressão caso o PDF falhe.
  */
@@ -40,7 +46,16 @@ export async function generateAndHandlePDF(
   action: PDFAction = 'print'
 ): Promise<void> {
   const filename = `${data.documentType === 'quote' ? 'orcamento' : 'ordem-servico'}-${data.serviceOrder.service_order_number}.pdf`;
-  
+  const mobile = isLikelyMobileOrPWA();
+
+  // Em mobile/PWA a ação 'print' (abrir em nova aba) é pouco confiável.
+  // Preferimos o fallback HTML imprimível que o usuário pode salvar/compartilhar.
+  if (mobile && action === 'print') {
+    toast.info('Seu navegador pode limitar a abertura de PDFs. Abrindo versão imprimível do documento.');
+    openPrintableHTMLFallback(data, options);
+    return;
+  }
+
   try {
     const blob = await generatePDFBlob(data, options);
 
@@ -66,6 +81,7 @@ export async function generateAndHandlePDF(
     } else {
       const win = window.open(url, '_blank');
       if (!win) {
+        // Popup bloqueado — fallback automático para download
         toast.error('O navegador bloqueou a abertura da nova aba. O arquivo será baixado automaticamente.');
         const a = document.createElement('a');
         a.href = url;
@@ -83,7 +99,12 @@ export async function generateAndHandlePDF(
     }
   } catch (error: any) {
     console.error('[PDF] Erro crítico na geração do Blob:', error);
-    toast.error('Houve um erro ao gerar o arquivo PDF. Tentando modo de compatibilidade...');
+    // Em mobile, o fallback HTML é mais confiável que tentar novamente
+    if (mobile) {
+      toast.info('Abrindo versão imprimível do documento (compatível com seu dispositivo).');
+    } else {
+      toast.error('Houve um erro ao gerar o arquivo PDF. Tentando modo de compatibilidade...');
+    }
     openPrintableHTMLFallback(data, options);
   }
 }
