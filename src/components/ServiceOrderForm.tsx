@@ -44,8 +44,8 @@ import { useUpdateServiceOrderPart } from '@/hooks/use-service-order-parts';
 import { PriceCalculatorDialog } from '@/components/PriceCalculatorDialog';
 import { supabase } from '@/integrations/supabase/client';
 import { usePDFData } from '@/hooks/use-pdf';
-import { generatePDF, DEFAULT_PDF_OPTIONS } from '@/lib/pdf-generator';
-import type { PDFOptions } from '@/lib/pdf-generator';
+import { type PDFOptions, DEFAULT_PDF_OPTIONS } from '@/lib/pdf-generator';
+import { generateAndHandlePDF } from '@/lib/pdf-actions';
 import { PDFOptionsDialog } from '@/components/PDFOptionsDialog';
 import { OPERATIONAL_EXPENSE_CATEGORIES } from '@/lib/expense-categories';
 import { calculateDisplacement, calculateTravelCost } from '@/lib/displacement';
@@ -641,7 +641,6 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const { data: services } = useServices();
   const { data: cardFees } = useCardFees();
   const { data: paymentPresets } = usePaymentConditionPresets();
-  const { data: pdfData } = usePDFData(isNew ? undefined : orderId);
   const queryClient = useQueryClient();
   const openPdfDialog = (type: 'quote' | 'service_order' | 'invoice') => {
     if (orderId) {
@@ -840,6 +839,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const { data: zapiHistory } = useWhatsAppSendHistory(orderId || null);
   const lastZapiSend = zapiHistory?.[0];
   const [pdfDialogType, setPdfDialogType] = useState<'quote' | 'service_order' | 'invoice' | null>(null);
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  const { data: pdfData, isLoading: isPDFDataLoading, error: pdfDataError } = usePDFData(isNew ? undefined : orderId);
   const [waPreview, setWaPreview] = useState<{ phone: string; message: string; url: string; clientName: string } | null>(null);
   const [waEditMessage, setWaEditMessage] = useState('');
   const [waEditPhone, setWaEditPhone] = useState('');
@@ -3510,15 +3511,32 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
 
       {/* PDF Options Dialog */}
       <PDFOptionsDialog
-        open={!!pdfDialogType && !!pdfData}
+        open={!!pdfDialogType}
         onOpenChange={v => { if (!v) setPdfDialogType(null); }}
         documentType={pdfDialogType || 'quote'}
         hasProductImages={pdfData?.parts?.some((p: any) => !!p.image_url) ?? false}
-        onGenerate={(options, validity, dueDate) => {
-          if (!pdfData || !pdfDialogType) return;
-          generatePDF({ ...pdfData, documentType: pdfDialogType }, { ...options, validity, dueDate });
-          setPdfDialogType(null);
+        onGenerate={async (options, validity, dueDate, action = 'print') => {
+          if (!pdfData || !pdfDialogType) {
+            toast.error('Dados do documento não carregados. Aguarde um momento e tente novamente.');
+            return;
+          }
+          try {
+            setIsGeneratingPDF(true);
+            await generateAndHandlePDF(
+              { ...pdfData, documentType: pdfDialogType },
+              { ...options, validity, dueDate },
+              action
+            );
+            setPdfDialogType(null);
+          } catch (e) {
+            // Toast handled in helper
+          } finally {
+            setIsGeneratingPDF(false);
+          }
         }}
+        isGenerating={isGeneratingPDF}
+        isDataLoading={isPDFDataLoading}
+        dataError={pdfDataError}
       />
 
       {/* WhatsApp Preview Dialog */}

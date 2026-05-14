@@ -24,7 +24,8 @@ import { ResponsiveContainer, ComposedChart, BarChart, Bar, Line, XAxis, YAxis, 
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
-import { generatePDF, DEFAULT_PDF_OPTIONS, type PDFData } from '@/lib/pdf-generator';
+import { type PDFData, DEFAULT_PDF_OPTIONS } from '@/lib/pdf-generator';
+import { generateAndHandlePDF } from '@/lib/pdf-actions';
 import { toast } from 'sonner';
 import { BulkBillingReminderDialog } from '@/components/BulkBillingReminderDialog';
 import { SendViaZAPIDialog, type SendViaZAPITarget } from '@/components/SendViaZAPIDialog';
@@ -273,7 +274,7 @@ export default function FinancialPage() {
           notes: lastPay?.notes || undefined,
         },
       };
-      generatePDF(pdfData, { ...DEFAULT_PDF_OPTIONS });
+      await generateAndHandlePDF(pdfData, { ...DEFAULT_PDF_OPTIONS }, 'print');
     } catch (e: any) {
       toast.error(e.message || 'Erro ao gerar recibo');
     }

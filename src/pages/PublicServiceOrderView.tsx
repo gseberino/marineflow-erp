@@ -9,7 +9,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { generatePDF, generatePDFBlob, DEFAULT_PDF_OPTIONS, type PDFData } from '@/lib/pdf-generator';
+import { generatePDFBlob, DEFAULT_PDF_OPTIONS, type PDFData } from '@/lib/pdf-generator';
+import { generateAndHandlePDF } from '@/lib/pdf-actions';
 import { SignaturePad } from '@/components/SignaturePad';
 import { computeDocumentHash } from '@/lib/document-hash';
 import { toast } from 'sonner';
@@ -275,8 +276,12 @@ export default function PublicServiceOrderView() {
     };
   };
 
-  const handleDownloadPDF = () => {
-    generatePDF(buildPdfData(), DEFAULT_PDF_OPTIONS);
+  const handleDownloadPDF = async () => {
+    try {
+      await generateAndHandlePDF(buildPdfData(), DEFAULT_PDF_OPTIONS, 'download');
+    } catch (e) {
+      // Toast handled in helper
+    }
   };
 
   const handleSubmitSignature = async () => {

@@ -25,6 +25,7 @@ interface Props {
   hasProductImages?: boolean;
   isGenerating?: boolean;
   isDataLoading?: boolean;
+  dataError?: any;
 }
 
 export function PDFOptionsDialog({ 
@@ -34,7 +35,8 @@ export function PDFOptionsDialog({
   onGenerate, 
   hasProductImages,
   isGenerating,
-  isDataLoading 
+  isDataLoading,
+  dataError
 }: Props) {
   const { t } = useI18n();
   const [options, setOptions] = useState<PDFOptions>({ ...DEFAULT_PDF_OPTIONS });
@@ -111,6 +113,9 @@ export function PDFOptionsDialog({
   };
 
   const isLoading = isGenerating || isDataLoading;
+  const isDataMissing = !isLoading && !hasProductImages && documentType !== 'receipt' && documentType !== 'invoice'; 
+  // Note: hasProductImages is just one proxy, better to pass a 'hasData' prop or just rely on onGenerate check.
+  // Let's use isDataLoading and a new prop or check.
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -206,10 +211,16 @@ export function PDFOptionsDialog({
           </div>
         )}
 
-        <div className="flex items-start gap-2 rounded-lg border border-border bg-muted p-3">
-          <AlertTriangle className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
-          <p className="text-xs text-muted-foreground">
-            {isGenerating ? 'O sistema está gerando o arquivo PDF. Por favor, aguarde...' : t.pdf.pdfHint}
+        <div className={`flex items-start gap-2 rounded-lg border p-3 ${dataError ? 'bg-destructive/10 border-destructive/20' : 'bg-muted border-border'}`}>
+          <AlertTriangle className={`h-4 w-4 shrink-0 mt-0.5 ${dataError ? 'text-destructive' : 'text-muted-foreground'}`} />
+          <p className={`text-xs ${dataError ? 'text-destructive font-medium' : 'text-muted-foreground'}`}>
+            {dataError 
+              ? `Erro ao carregar dados: ${dataError.message || 'Erro desconhecido'}. Tente fechar e abrir novamente.`
+              : isDataLoading 
+                ? 'Carregando dados do documento...' 
+                : isGenerating 
+                  ? 'O sistema está gerando o arquivo PDF. Por favor, aguarde...' 
+                  : t.pdf.pdfHint}
           </p>
         </div>
 
