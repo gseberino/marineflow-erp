@@ -212,58 +212,73 @@ function extractContentFromHTML(fullHtml: string): string {
  */
 export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promise<Blob> {
   const html = buildHTMLDocument(data, options);
-  const sanitizedContent = extractContentFromHTML(html);
 
-  // Container visível para o html2canvas, mas sem interferir na interação do usuário.
-  // Usamos z-index máximo e posição absoluta. O flash visual é aceitável para garantir captura.
-  const container = document.createElement('div');
-  container.className = 'pdf-render-container';
-  container.style.cssText = [
+  // Criamos um iframe temporário para isolar o CSS do documento PDF do CSS da aplicação principal.
+  // Isso evita que estilos globais da página (especialmente em formulários complexos)
+  // interfiram na renderização do PDF, causando páginas em branco.
+  const iframe = document.createElement('iframe');
+  
+  // O iframe deve estar no DOM e não pode ser 'display:none', senão scrollHeight será 0.
+  // 'visibility:hidden' e 'pointer-events:none' garantem que ele não atrapalhe o usuário.
+  iframe.style.cssText = [
     'position:absolute',
     'left:0',
-    `top:${window.scrollY}px`,
-    'width:794px',
-    'background:#ffffff',
-    'z-index:2147483647',
+    'top:0',
+    'width:800px', // Aproximado para A4 (794px)
+    'height:1000px',
+    'visibility:hidden',
     'pointer-events:none',
-    'box-sizing:border-box',
-    'visibility:visible',
-    'opacity:1',
-    'overflow:visible',
+    'border:none',
+    'z-index:-1000',
   ].join(';');
   
-  container.innerHTML = sanitizedContent;
-  document.body.appendChild(container);
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentDocument || iframe.contentWindow?.document;
+  if (!doc) {
+    document.body.removeChild(iframe);
+    throw new Error('Falha ao criar contexto de renderização do PDF (iframe).');
+  }
+
+  // Escreve o HTML completo (com head, styles e body) no iframe
+  doc.open();
+  doc.write(html);
+  doc.close();
 
   try {
     // Diagnóstico inicial
-    console.info('[PDF] Starting render diagnostics...', {
-      htmlLength: html.length,
+    console.info('[PDF] Initializing isolated rendering...', {
       documentType: data.documentType,
       os: data.serviceOrder.service_order_number
     });
 
-    // Aguarda múltiplos ciclos de renderização e carregamento de fontes/imagens
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    
-    if ((document as any).fonts?.ready) {
-      try { await (document as any).fonts.ready; } catch (e) { console.warn('[PDF] Font load error', e); }
+    // Aguarda o carregamento completo do documento no iframe
+    await new Promise((resolve) => {
+      if (doc.readyState === 'complete') resolve(null);
+      else iframe.onload = () => resolve(null);
+    });
+
+    // Aguarda fontes e imagens dentro do contexto do iframe
+    const win = iframe.contentWindow as any;
+    if (win.document.fonts?.ready) {
+      try { await win.document.fonts.ready; } catch (e) { console.warn('[PDF] Font load warning (iframe)', e); }
     }
 
-    await waitForImages(container);
+    // Elemento principal para captura
+    const element = doc.querySelector('.container') as HTMLElement || doc.body;
+    await waitForImages(element);
 
-    const scrollHeight = container.scrollHeight;
-    const scrollWidth = container.scrollWidth;
+    // Ajusta a altura do iframe para caber todo o conteúdo (evita cortes)
+    const scrollHeight = element.scrollHeight;
+    iframe.style.height = `${scrollHeight + 100}px`;
 
-    console.info('[PDF] Render dimensions', { 
-      scrollHeight, 
-      scrollWidth,
-      containerHeight: container.clientHeight 
+    console.info('[PDF] Isolated render dimensions', { 
+      scrollHeight,
+      clientWidth: element.clientWidth
     });
 
     if (scrollHeight < 100) {
-      throw new Error('O conteúdo do PDF não renderizou corretamente (altura insuficiente).');
+      throw new Error('O conteúdo do PDF não renderizou corretamente no container isolado.');
     }
 
     // Import dinâmico para não pesar o bundle inicial
@@ -271,7 +286,7 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
     const html2pdf = html2pdfModule.default || html2pdfModule;
 
     const blob: Blob = await html2pdf()
-      .from(container)
+      .from(element)
       .set({
         margin: [10, 10, 10, 10],
         filename: `${data.documentType}-${data.serviceOrder.service_order_number}.pdf`,
@@ -281,29 +296,22 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
           useCORS: true,
           allowTaint: false,
           backgroundColor: '#ffffff',
-          logging: true, // Habilitar logs do html2canvas para debug em staging
-          windowWidth: Math.max(scrollWidth, 794),
-          windowHeight: Math.max(scrollHeight, 1123),
-          width: Math.max(scrollWidth, 794),
-          height: scrollHeight,
-          scrollX: 0,
-          scrollY: 0,
+          logging: false,
+          windowWidth: 794,
+          width: 794,
         },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
         pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
       })
       .outputPdf('blob');
 
-    // Sanity check — blob suspeito (<2KB) costuma significar página em branco
-    if (blob.size < 5000) { // Aumentei o limite para 5KB, um PDF com texto real dificilmente é menor que isso
-      console.warn('[generatePDFBlob] PDF suspeito de estar vazio ou muito simples:', {
-        size: blob.size,
-        scrollHeight: container.scrollHeight,
-      });
+    if (blob.size < 5000) {
+      console.warn('[PDF] Blob gerado é suspeitamente pequeno:', blob.size);
     }
+
     return blob;
   } finally {
-    if (document.body.contains(container)) document.body.removeChild(container);
+    if (document.body.contains(iframe)) document.body.removeChild(iframe);
   }
 }
 
