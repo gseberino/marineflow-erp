@@ -113,9 +113,7 @@ export function PDFOptionsDialog({
   };
 
   const isLoading = isGenerating || isDataLoading;
-  const isDataMissing = !isLoading && !hasProductImages && documentType !== 'receipt' && documentType !== 'invoice'; 
-  // Note: hasProductImages is just one proxy, better to pass a 'hasData' prop or just rely on onGenerate check.
-  // Let's use isDataLoading and a new prop or check.
+  const canGenerate = !isLoading && !dataError;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -232,14 +230,14 @@ export function PDFOptionsDialog({
             <Button
               variant="secondary"
               onClick={() => handleAction('download')}
-              disabled={isLoading}
+              disabled={!canGenerate}
               className="gap-2"
             >
               {isGenerating ? 'Gerando...' : 'Baixar PDF'}
             </Button>
             <Button
               onClick={() => handleAction('print')}
-              disabled={isLoading}
+              disabled={!canGenerate}
               className="bg-accent text-accent-foreground hover:bg-accent/90 gap-2"
             >
               {isGenerating ? 'Gerando...' : 'Imprimir / Abrir'}

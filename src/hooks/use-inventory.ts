@@ -83,7 +83,7 @@ export function useInventoryMovements(filters: MovementFilters = {}) {
     queryFn: async () => {
       let q = supabase
         .from('inventory_movements')
-        .select('*, products(name, sku, unit)')
+        .select('*, products(name:product_name, sku, unit)')
         .order('created_at', { ascending: false })
         .limit(filters.limit || 200);
 

@@ -89,7 +89,7 @@ export default function PublicServiceOrderView() {
             : Promise.resolve({ data: null, error: null }),
           supabase
             .from('service_order_parts')
-            .select('*, products(name, sku)')
+            .select('*, products(name:product_name, sku)')
             .eq('service_order_id', order.id),
           supabase
             .from('service_order_services')

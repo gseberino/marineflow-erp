@@ -31,7 +31,7 @@ export default function ActiveProspectingPage() {
 
       const { data: quotes } = await supabase
         .from('service_orders')
-        .select('*, clients(name, phone, whatsapp)')
+        .select('*, clients(name:full_name_or_company_name, phone, whatsapp)')
         .eq('status', 'draft')
         .lte('created_at', twoDaysAgo.toISOString())
         .order('created_at', { ascending: false })
@@ -46,7 +46,7 @@ export default function ActiveProspectingPage() {
       // Usando uma query simples para pegar OS antigas e agrupar (simplificado para demonstração)
       const { data: oldOs } = await supabase
         .from('service_orders')
-        .select('*, clients(name, phone, whatsapp), vessels(name, engine_type)')
+        .select('*, clients(name:full_name_or_company_name, phone, whatsapp), vessels(name:boat_name, engine_type)')
         .eq('status', 'completed')
         .lte('created_at', sixMonthsAgo.toISOString())
         .order('created_at', { ascending: false })
