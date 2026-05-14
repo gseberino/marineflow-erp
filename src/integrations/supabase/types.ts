@@ -813,6 +813,7 @@ export type Database = {
           full_name_or_company_name: string
           id: string
           marina_name: string | null
+          name: string | null
           notes: string | null
           phone: string | null
           postal_code: string | null
@@ -840,6 +841,7 @@ export type Database = {
           full_name_or_company_name: string
           id?: string
           marina_name?: string | null
+          name?: string | null
           notes?: string | null
           phone?: string | null
           postal_code?: string | null
@@ -867,6 +869,7 @@ export type Database = {
           full_name_or_company_name?: string
           id?: string
           marina_name?: string | null
+          name?: string | null
           notes?: string | null
           phone?: string | null
           postal_code?: string | null
@@ -3554,6 +3557,7 @@ export type Database = {
           last_outbound_at: string | null
           linked_client_id: string | null
           message_count: number
+          name: string | null
           notes: string | null
           phone_normalized: string
           status: string
@@ -3572,6 +3576,7 @@ export type Database = {
           last_outbound_at?: string | null
           linked_client_id?: string | null
           message_count?: number
+          name?: string | null
           notes?: string | null
           phone_normalized: string
           status?: string
@@ -3590,6 +3595,7 @@ export type Database = {
           last_outbound_at?: string | null
           linked_client_id?: string | null
           message_count?: number
+          name?: string | null
           notes?: string | null
           phone_normalized?: string
           status?: string
