@@ -75,7 +75,7 @@ export function useConvertLeadToClient() {
     mutationFn: async ({ leadId, fullName, type = 'individual' }: { leadId: string; fullName: string; type?: string }) => {
       const { data: lead, error: lerr } = await supabase
         .from('whatsapp_leads')
-        .select('phone_normalized, name')
+        .select('phone_normalized, display_name')
         .eq('id', leadId)
         .single();
       if (lerr) throw lerr;
@@ -83,12 +83,12 @@ export function useConvertLeadToClient() {
       const { data: client, error: cerr } = await supabase
         .from('clients')
         .insert({
-          name: fullName || lead.name || `Lead ${lead.phone_normalized}`,
+          full_name_or_company_name: fullName || lead.display_name || `Lead ${lead.phone_normalized}`,
           type,
           whatsapp: lead.phone_normalized,
           phone: lead.phone_normalized,
           active: true,
-        })
+        } as any)
         .select('id')
         .single();
       if (cerr) throw cerr;

@@ -64,7 +64,7 @@ export function useCreatePayable() {
     }) => {
       const { data, error } = await supabase.from('payables').insert({
         ...p, balance_amount: p.amount, paid_amount: 0, status: 'pending',
-      }).select().single();
+      } as any).select().single();
       if (error) throw error;
       return data;
     },
