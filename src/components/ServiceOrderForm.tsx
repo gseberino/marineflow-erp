@@ -1325,7 +1325,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     const { data, error } = await supabase
       .from('services')
       .insert({
-        name: draft.name_snapshot,
+        service_name: draft.name_snapshot,
         default_price: draft.unit_price,
         billing_unit: draft.billing_unit_snapshot,
         active: true,
