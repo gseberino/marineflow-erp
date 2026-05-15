@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/select';
 import {
   MessageCircle, UserPlus, Link2, Trash2, Phone, Send, Ban, Search, ArrowLeft,
-  Plus, Zap, ShieldOff, AlertCircle, CheckCircle2,
+  Plus, Zap, ShieldOff, AlertCircle,
 } from 'lucide-react';
 import {
   useWhatsAppLeads, useWhatsAppLeadMessages,
@@ -65,7 +65,6 @@ function InboxView() {
   const [activePhone, setActivePhone] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [draft, setDraft] = useState('');
-  const [showLinkConfirm, setShowLinkConfirm] = useState(false);
   const sendMut = useSendWhatsAppText();
   const markRead = useMarkConversationRead();
   const addBlocked = useAddBlockedNumber();
@@ -93,7 +92,6 @@ function InboxView() {
 
   useEffect(() => {
     if (activePhone) markRead.mutate(activePhone);
-    setShowLinkConfirm(false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePhone]);
 
@@ -121,7 +119,6 @@ function InboxView() {
       clientId: active.suggested_client.id,
       clientName: active.suggested_client.name,
     });
-    setShowLinkConfirm(false);
   };
 
   const handleCreateLead = async () => {
@@ -200,7 +197,7 @@ function InboxView() {
                   </p>
                   <div className="flex items-center gap-1 mt-1 flex-wrap">
                     {linkedToClient && (
-                      <Badge variant="outline" className="text-[9px] py-0 border-emerald-500 text-emerald-700">Cliente</Badge>
+                      <Badge variant="outline" className="text-[9px] py-0 border-emerald-500 text-emerald-700">Cliente vinculado</Badge>
                     )}
                     {!linkedToClient && linkedViaLead && (
                       <Badge variant="outline" className="text-[9px] py-0 border-blue-500 text-blue-700">Vinculado</Badge>
@@ -209,7 +206,7 @@ function InboxView() {
                       <Badge variant="outline" className="text-[9px] py-0 border-amber-500 text-amber-700">Lead</Badge>
                     )}
                     {hasSuggestedClient && (
-                      <Badge variant="outline" className="text-[9px] py-0 border-sky-500 text-sky-700">Possível vínculo</Badge>
+                      <Badge variant="outline" className="text-[9px] py-0 border-sky-500 text-sky-700">Possível cliente</Badge>
                     )}
                     {isPending && (
                       <Badge variant="outline" className="text-[9px] py-0 border-gray-400 text-gray-500">Pendente</Badge>
@@ -251,50 +248,34 @@ function InboxView() {
               </Button>
             </div>
 
-            {/* Banner: Possível vínculo com cliente existente */}
-            {hasSuggestion && !showLinkConfirm && (
-              <div className="px-3 py-2 border-b bg-sky-50 dark:bg-sky-950/30 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0">
-                  <AlertCircle className="h-4 w-4 text-sky-600 shrink-0" />
-                  <p className="text-xs text-sky-700 dark:text-sky-400 truncate">
-                    Possível cliente: <strong>{active.suggested_client!.name}</strong>
+            {/* Banner: Possível cliente encontrado */}
+            {hasSuggestion && (
+              <div className="px-3 py-3 border-b bg-sky-50 dark:bg-sky-950/30 space-y-2">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="h-4 w-4 text-sky-600 shrink-0 mt-0.5" />
+                  <p className="text-xs text-sky-700 dark:text-sky-400 leading-relaxed">
+                    Possível cliente encontrado: <strong>{active.suggested_client!.name}</strong>. Confirme se deseja vincular esta conversa a esse cliente.
                   </p>
                 </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs border-sky-500 text-sky-700 hover:bg-sky-100 shrink-0"
-                  onClick={() => setShowLinkConfirm(true)}
-                >
-                  <Link2 className="h-3 w-3 mr-1" />
-                  Vincular
-                </Button>
-              </div>
-            )}
-
-            {/* Banner: Confirmação de vínculo */}
-            {hasSuggestion && showLinkConfirm && (
-              <div className="px-3 py-2 border-b bg-sky-50 dark:bg-sky-950/30 flex items-center justify-between gap-2">
-                <p className="text-xs text-sky-700 dark:text-sky-400">
-                  Confirmar vínculo com <strong>{active.suggested_client!.name}</strong>?
-                </p>
-                <div className="flex gap-1 shrink-0">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 text-xs"
-                    onClick={() => setShowLinkConfirm(false)}
-                  >
-                    Cancelar
-                  </Button>
+                <div className="flex gap-2 pl-6 flex-wrap">
                   <Button
                     size="sm"
                     className="h-7 text-xs bg-sky-600 hover:bg-sky-700"
                     onClick={handleLinkToSuggestedClient}
                     disabled={linkToClient.isPending}
                   >
-                    <CheckCircle2 className="h-3 w-3 mr-1" />
-                    Confirmar
+                    <Link2 className="h-3 w-3 mr-1" />
+                    Vincular a cliente
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs"
+                    onClick={handleCreateLead}
+                    disabled={createLead.isPending}
+                  >
+                    <UserPlus className="h-3 w-3 mr-1" />
+                    Criar lead mesmo assim
                   </Button>
                 </div>
               </div>
@@ -302,18 +283,20 @@ function InboxView() {
 
             {/* Banner: Conversa pendente sem nenhum vínculo */}
             {isUnlinked && (
-              <div className="px-3 py-2 border-b bg-muted/50 flex items-center justify-between gap-2">
-                <p className="text-xs text-muted-foreground">
-                  Conversa pendente — número não vinculado a nenhum cadastro.
-                </p>
+              <div className="px-3 py-3 border-b bg-amber-50 dark:bg-amber-950/30 flex items-center justify-between gap-3">
+                <div className="flex items-start gap-2 min-w-0">
+                  <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                  <p className="text-xs text-amber-700 dark:text-amber-400 leading-relaxed">
+                    Esta conversa ainda não está vinculada a cliente ou lead.
+                  </p>
+                </div>
                 <Button
                   size="sm"
-                  variant="outline"
-                  className="h-7 text-xs shrink-0"
+                  className="h-8 text-xs shrink-0 bg-amber-600 hover:bg-amber-700 text-white"
                   onClick={handleCreateLead}
                   disabled={createLead.isPending}
                 >
-                  <UserPlus className="h-3 w-3 mr-1" />
+                  <UserPlus className="h-3.5 w-3.5 mr-1" />
                   Criar lead
                 </Button>
               </div>
