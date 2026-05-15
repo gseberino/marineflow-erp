@@ -220,6 +220,27 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Habilitar notifySentByMe — permite receber no webhook mensagens enviadas pelo celular conectado
+    let notifyResult: any = { skipped: true };
+    try {
+      let notifyRes = await fetch(`${base}/update-notify-sent-by-me`, {
+        method: "POST",
+        headers: zapiHeaders,
+        body: JSON.stringify({ notifySentByMe: true }),
+      });
+      if (notifyRes.status === 405) {
+        notifyRes = await fetch(`${base}/update-notify-sent-by-me`, {
+          method: "PUT",
+          headers: zapiHeaders,
+          body: JSON.stringify({ notifySentByMe: true }),
+        });
+      }
+      const notifyData = await notifyRes.json().catch(() => ({}));
+      notifyResult = { ok: notifyRes.ok, status: notifyRes.status, response: notifyData };
+    } catch (e: any) {
+      notifyResult = { ok: false, error: e?.message || String(e) };
+    }
+
     const allOk = Object.values(results).every((r: any) => r.ok);
     return jr({
       ok: allOk,
@@ -227,6 +248,7 @@ Deno.serve(async (req) => {
       instance_id: INSTANCE_ID,
       credential_source: settingsMap["zapi_instance_id"] ? "database" : "environment",
       configured: results,
+      notify_sent_by_me: notifyResult,
       message: allOk
         ? "Todos os webhooks da Z-API foram apontados para o sistema."
         : "Alguns webhooks falharam. Veja detalhes em 'configured'.",

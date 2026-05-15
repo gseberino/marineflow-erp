@@ -39,6 +39,15 @@ function formatPhone(p: string) {
   return p;
 }
 
+function outboundStatusLabel(status: string | null | undefined): string {
+  switch (status) {
+    case 'read': case 'played': case 'read_by_me': return '✓✓';
+    case 'delivered': return '✓✓';
+    case 'failed': return 'Falhou';
+    default: return '✓';
+  }
+}
+
 function formatConvTime(at: string | null | undefined) {
   if (!at) return '';
   const d = new Date(at);
@@ -203,7 +212,11 @@ function InboxView() {
                     <p className="whitespace-pre-wrap break-words">{m.body}</p>
                     <p className={`text-[10px] mt-1 opacity-70`}>
                       {new Date(m.occurred_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                      {m.direction === 'outbound' && ` • ${m.delivery_status || 'sent'}`}
+                      {m.direction === 'outbound' && (
+                        <span className={m.delivery_status === 'read' || m.delivery_status === 'played' ? 'text-blue-400' : ''}>
+                          {` · ${outboundStatusLabel(m.delivery_status)}`}
+                        </span>
+                      )}
                     </p>
                   </div>
                 </div>

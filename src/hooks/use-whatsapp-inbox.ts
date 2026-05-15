@@ -192,7 +192,7 @@ export function useWhatsAppConversations() {
       // Enriquecer com clients e leads
       const [{ data: clients }, { data: leads }] = await Promise.all([
         supabase.from('clients').select('id, full_name_or_company_name, phone, whatsapp').eq('active', true),
-        supabase.from('whatsapp_leads').select('phone_normalized, name, status, unread_count, assigned_to').in('phone_normalized', phones),
+        supabase.from('whatsapp_leads').select('phone_normalized, display_name, name, status, unread_count, assigned_to').in('phone_normalized', phones),
       ]);
 
       const norm = (s: string | null | undefined) => (s || '').replace(/\D/g, '');
@@ -212,11 +212,11 @@ export function useWhatsAppConversations() {
           const lead = leadByPhone.get(conv.phone);
           return {
             ...conv,
-            client_name: client?.name || null,
+            client_name: client?.full_name_or_company_name || null,
             client_id: client?.id || conv.client_id,
             lead_status: lead?.status || null,
             unread_count: lead?.unread_count || 0,
-            name: client?.name || lead?.name || null,
+            name: client?.full_name_or_company_name || lead?.display_name || lead?.name || null,
           };
         })
         .sort((a, b) => new Date(b.last_at).getTime() - new Date(a.last_at).getTime());

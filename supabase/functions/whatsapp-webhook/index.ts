@@ -26,12 +26,19 @@ function normalizePhone(raw: string | null | undefined): string {
 }
 
 function extractBodyAndType(p: any): { body: string; messageType: string; mediaUrl: string | null } {
-  let mediaUrl: null | string = null;
   const text = p?.text?.message || p?.text || p?.message?.conversation || p?.message?.extendedTextMessage?.text || p?.body || p?.caption || "";
   if (p?.image) return { body: p.image.caption || "[imagem]", messageType: "image", mediaUrl: p.image.imageUrl || p.image.url || null };
   if (p?.audio) return { body: "[áudio]", messageType: "audio", mediaUrl: p.audio.audioUrl || p.audio.url || null };
   if (p?.video) return { body: p.video.caption || "[vídeo]", messageType: "video", mediaUrl: p.video.videoUrl || p.video.url || null };
   if (p?.document) return { body: p.document.caption || `[documento] ${p.document.fileName || ""}`.trim(), messageType: "document", mediaUrl: p.document.documentUrl || p.document.url || null };
+  if (p?.sticker) return { body: "[figurinha]", messageType: "sticker", mediaUrl: p.sticker.stickerUrl || null };
+  if (p?.location) return { body: `[localização] ${p.location.address || p.location.name || ""}`.trim(), messageType: "location", mediaUrl: null };
+  if (p?.contact) return { body: `[contato] ${p.contact.displayName || ""}`.trim(), messageType: "contact", mediaUrl: null };
+  if (p?.reaction) return { body: `[reação] ${p.reaction.value || ""}`.trim(), messageType: "reaction", mediaUrl: null };
+  if (p?.poll) return { body: `[enquete] ${p.poll.question || ""}`.trim(), messageType: "poll", mediaUrl: null };
+  if (p?.pollVote) return { body: "[voto em enquete]", messageType: "poll_vote", mediaUrl: null };
+  if (p?.buttonsResponseMessage) return { body: p.buttonsResponseMessage.message || "[resposta de botão]", messageType: "button_response", mediaUrl: null };
+  if (p?.listResponseMessage) return { body: p.listResponseMessage.message || "[seleção de lista]", messageType: "list_response", mediaUrl: null };
   return { body: String(text).trim() || "[conteúdo vazio]", messageType: "text", mediaUrl: null };
 }
 
@@ -166,16 +173,28 @@ Deno.serve(async (req) => {
     const ignoredTypes = ["PresenceChatCallback", "ChatStateCallback", "PresenceCallback", "ChatPresence", "Presence", "typing", "recording"];
     if (ignoredTypes.includes(type)) return jr({ ok: true, ignored: "system" });
     if (pAny.isGroup === true) return jr({ ok: true, ignored: "group" });
+    const ignoredNotifications = ["CALL_VOICE", "CALL_MISSED_VOICE", "CALL_MISSED_VIDEO", "E2E_ENCRYPTED", "CIPHERTEXT", "REVOKE", "GROUP_CREATE", "GROUP_CHANGE_SUBJECT", "GROUP_PARTICIPANT_ADD", "GROUP_PARTICIPANT_REMOVE", "GROUP_PARTICIPANT_LEAVE", "GROUP_PARTICIPANT_PROMOTE", "GROUP_PARTICIPANT_DEMOTE", "MEMBERSHIP_APPROVAL_REQUEST", "REVOKED_MEMBERSHIP_REQUESTS"];
+    if (pAny.notification && ignoredNotifications.includes(String(pAny.notification))) return jr({ ok: true, ignored: "notification" });
 
     const { data: settings } = await admin.from("app_settings").select("key, value").in("key", ["zapi_instance_id", "zapi_token", "zapi_client_token"]);
     const sMap = Object.fromEntries((settings || []).map(s => [s.key, s.value]));
     const zapiCreds = { id: sMap.zapi_instance_id, token: sMap.zapi_token, client: sMap.zapi_client_token };
 
     if (type === "MessageStatusCallback" || type === "MessageStatus") {
-      const status = String(pAny.status || "").toLowerCase();
-      const zapiId = pAny.messageId || (pAny.ids ? pAny.ids[0] : null);
-      if (zapiId && status) await admin.from("whatsapp_messages").update({ delivery_status: status }).eq("zapi_message_id", String(zapiId));
-      return jr({ ok: true, type: "status" });
+      const zapiStatusMap: Record<string, string> = { SENT: "sent", RECEIVED: "delivered", READ: "read", PLAYED: "played", READ_BY_ME: "read_by_me" };
+      const rawStatus = String(pAny.status || "").toUpperCase();
+      const mappedStatus = zapiStatusMap[rawStatus] || rawStatus.toLowerCase();
+      const ids: string[] = Array.isArray(pAny.ids) ? pAny.ids.map(String) : (pAny.messageId ? [String(pAny.messageId)] : []);
+      if (ids.length > 0 && mappedStatus) {
+        await Promise.all(ids.map(id => admin.from("whatsapp_messages").update({ delivery_status: mappedStatus }).eq("zapi_message_id", id)));
+      }
+      return jr({ ok: true, type: "status", status: mappedStatus, updated: ids.length });
+    }
+
+    if (type === "DeliveryCallback") {
+      const zapiId = pAny.messageId || pAny.zaapId || null;
+      if (zapiId) await admin.from("whatsapp_messages").update({ delivery_status: "sent" }).eq("zapi_message_id", String(zapiId));
+      return jr({ ok: true, type: "delivery", updated: !!zapiId });
     }
 
     const { body, messageType, mediaUrl } = extractBodyAndType(pAny);

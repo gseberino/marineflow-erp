@@ -41,14 +41,16 @@ Deno.serve(async (req) => {
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const INSTANCE_ID = Deno.env.get("ZAPI_INSTANCE_ID");
-    const TOKEN = Deno.env.get("ZAPI_TOKEN");
-    const CLIENT_TOKEN = Deno.env.get("ZAPI_CLIENT_TOKEN");
-    if (!INSTANCE_ID || !TOKEN) return jr({ error: "Z-API não configurado" }, 500);
-
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
+
+    const { data: zapiSettings } = await admin.from("app_settings").select("key, value").in("key", ["zapi_instance_id", "zapi_token", "zapi_client_token"]);
+    const zapiMap = Object.fromEntries((zapiSettings || []).map((s: any) => [s.key, s.value]));
+    const INSTANCE_ID = zapiMap["zapi_instance_id"] || Deno.env.get("ZAPI_INSTANCE_ID");
+    const TOKEN = zapiMap["zapi_token"] || Deno.env.get("ZAPI_TOKEN");
+    const CLIENT_TOKEN = zapiMap["zapi_client_token"] || Deno.env.get("ZAPI_CLIENT_TOKEN");
+    if (!INSTANCE_ID || !TOKEN) return jr({ error: "Z-API não configurado" }, 500);
 
     const enabled = await getSetting(admin, "whatsapp_queue_enabled", "true");
     if (enabled !== "true") {
