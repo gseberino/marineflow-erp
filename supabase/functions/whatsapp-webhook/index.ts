@@ -217,26 +217,17 @@ Deno.serve(async (req) => {
 
     let clientId = null;
     let leadId = null;
-    let isNewLead = false;
 
+    // 1. Try to match an existing client by phone (ILIKE substring search)
     const { data: client } = await admin.from("clients").select("id").or(`phone.ilike.%${phone}%,whatsapp.ilike.%${phone}%`).eq("active", true).maybeSingle();
     if (client) {
       clientId = client.id;
     } else {
+      // 2. Try to match an existing lead (exact normalized phone)
+      // Does NOT auto-create leads — lead creation requires explicit user action.
       const { data: lead } = await admin.from("whatsapp_leads").select("id").eq("phone_normalized", phone).maybeSingle();
       if (lead) {
         leadId = lead.id;
-      } else {
-        const isValidPhone = phone.startsWith("55") && (phone.length === 12 || phone.length === 13);
-        if (isValidPhone) {
-          const { data: newLead } = await admin.from("whatsapp_leads").insert({
-            phone_normalized: phone,
-            display_name: pAny.senderName || pAny.notifyName || null,
-            status: "pending"
-          }).select("id").single();
-          leadId = newLead?.id;
-          isNewLead = true;
-        }
       }
     }
 
@@ -254,7 +245,6 @@ Deno.serve(async (req) => {
     }).select("id").single();
 
     if (insErr) return jr({ error: "db_error", details: insErr.message }, 500);
-    if (isNewLead && !fromMe) notifyAssignedReminder(admin, phone, pAny.senderName || null, body, zapiCreds).catch(console.error);
     if (leadId) await admin.from("whatsapp_leads").update({ updated_at: new Date().toISOString() }).eq("id", leadId);
     else if (clientId) await admin.from("clients").update({ updated_at: new Date().toISOString() }).eq("id", clientId);
 

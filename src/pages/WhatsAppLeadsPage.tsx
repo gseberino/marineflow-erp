@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/select';
 import {
   MessageCircle, UserPlus, Link2, Trash2, Phone, Send, Ban, Search, ArrowLeft,
-  Plus, Zap, ShieldOff,
+  Plus, Zap, ShieldOff, AlertCircle, CheckCircle2,
 } from 'lucide-react';
 import {
   useWhatsAppLeads, useWhatsAppLeadMessages,
@@ -22,6 +22,7 @@ import {
   useWhatsAppConversations, useSendWhatsAppText, useMarkConversationRead,
   useBlockedNumbers, useAddBlockedNumber, useRemoveBlockedNumber,
   useQuickReplies, useUpsertQuickReply, useDeleteQuickReply,
+  useCreateWhatsAppLead, useLinkConversationToClient,
 } from '@/hooks/use-whatsapp-inbox';
 import { useClients } from '@/hooks/use-clients';
 import { useI18n } from '@/i18n';
@@ -64,9 +65,12 @@ function InboxView() {
   const [activePhone, setActivePhone] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [draft, setDraft] = useState('');
+  const [showLinkConfirm, setShowLinkConfirm] = useState(false);
   const sendMut = useSendWhatsAppText();
   const markRead = useMarkConversationRead();
   const addBlocked = useAddBlockedNumber();
+  const createLead = useCreateWhatsAppLead();
+  const linkToClient = useLinkConversationToClient();
   const { data: messages } = useWhatsAppLeadMessages(activePhone || undefined);
   const { data: quickReplies } = useQuickReplies();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -77,6 +81,7 @@ function InboxView() {
     const q = search.toLowerCase();
     return list.filter((c: any) =>
       (c.name || '').toLowerCase().includes(q) ||
+      (c.suggested_client?.name || '').toLowerCase().includes(q) ||
       c.phone.includes(q.replace(/\D/g, '')),
     );
   }, [conversations, search]);
@@ -88,6 +93,7 @@ function InboxView() {
 
   useEffect(() => {
     if (activePhone) markRead.mutate(activePhone);
+    setShowLinkConfirm(false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePhone]);
 
@@ -107,6 +113,29 @@ function InboxView() {
     await addBlocked.mutateAsync({ phone: activePhone, reason: 'Bloqueado pelo inbox' });
     setActivePhone(null);
   };
+
+  const handleLinkToSuggestedClient = async () => {
+    if (!active?.suggested_client) return;
+    await linkToClient.mutateAsync({
+      phone: active.phone,
+      clientId: active.suggested_client.id,
+      clientName: active.suggested_client.name,
+    });
+    setShowLinkConfirm(false);
+  };
+
+  const handleCreateLead = async () => {
+    if (!active) return;
+    await createLead.mutateAsync({
+      phone: active.phone,
+      displayName: active.name || null,
+    });
+  };
+
+  // Determine link status for active conversation
+  const isLinkedToClient = active && (active.client_id || active.lead_status === 'linked');
+  const hasSuggestion = active && active.suggested_client && !isLinkedToClient;
+  const isUnlinked = active && !isLinkedToClient && !active.suggested_client && !active.lead_status;
 
   return (
     <div className="grid md:grid-cols-[320px_1fr] gap-3 h-[calc(100vh-220px)] min-h-[500px]">
@@ -134,38 +163,64 @@ function InboxView() {
               Nenhuma conversa.
             </div>
           ) : (
-            filtered.map((c: any) => (
-              <button
-                key={c.phone}
-                onClick={() => setActivePhone(c.phone)}
-                className={`w-full text-left px-3 py-3 border-b hover:bg-muted/50 transition-colors ${
-                  activePhone === c.phone ? 'bg-muted' : ''
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium text-sm truncate">
-                    {c.name || formatPhone(c.phone)}
-                  </span>
-                  <div className="flex flex-col items-end shrink-0">
-                    <span className="text-[10px] text-muted-foreground">{formatConvTime(c.last_at)}</span>
-                    {c.unread_count > 0 && (
-                      <Badge className="bg-primary text-primary-foreground h-5 min-w-5 px-1.5 text-[10px] mt-0.5">
-                        {c.unread_count}
-                      </Badge>
+            filtered.map((c: any) => {
+              // Determine display name for list item
+              const displayName = c.name || (c.suggested_client ? c.suggested_client.name : null);
+              // Determine badge state
+              const linkedToClient = !!(c.client_id);
+              const linkedViaLead = c.lead_status === 'linked';
+              const isPendingLead = c.lead_status === 'pending';
+              const hasSuggestedClient = !!c.suggested_client && !linkedToClient && !linkedViaLead;
+              const isPending = !linkedToClient && !linkedViaLead && !isPendingLead && !hasSuggestedClient;
+
+              return (
+                <button
+                  key={c.phone}
+                  onClick={() => setActivePhone(c.phone)}
+                  className={`w-full text-left px-3 py-3 border-b hover:bg-muted/50 transition-colors ${
+                    activePhone === c.phone ? 'bg-muted' : ''
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-sm truncate">
+                      {displayName || formatPhone(c.phone)}
+                    </span>
+                    <div className="flex flex-col items-end shrink-0">
+                      <span className="text-[10px] text-muted-foreground">{formatConvTime(c.last_at)}</span>
+                      {c.unread_count > 0 && (
+                        <Badge className="bg-primary text-primary-foreground h-5 min-w-5 px-1.5 text-[10px] mt-0.5">
+                          {c.unread_count}
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground truncate mt-0.5">
+                    {c.last_direction === 'outbound' ? '✓ ' : ''}
+                    {c.last_body || '—'}
+                  </p>
+                  <div className="flex items-center gap-1 mt-1 flex-wrap">
+                    {linkedToClient && (
+                      <Badge variant="outline" className="text-[9px] py-0 border-emerald-500 text-emerald-700">Cliente</Badge>
+                    )}
+                    {!linkedToClient && linkedViaLead && (
+                      <Badge variant="outline" className="text-[9px] py-0 border-blue-500 text-blue-700">Vinculado</Badge>
+                    )}
+                    {isPendingLead && (
+                      <Badge variant="outline" className="text-[9px] py-0 border-amber-500 text-amber-700">Lead</Badge>
+                    )}
+                    {hasSuggestedClient && (
+                      <Badge variant="outline" className="text-[9px] py-0 border-sky-500 text-sky-700">Possível vínculo</Badge>
+                    )}
+                    {isPending && (
+                      <Badge variant="outline" className="text-[9px] py-0 border-gray-400 text-gray-500">Pendente</Badge>
+                    )}
+                    {c.is_broadcast && (
+                      <Badge variant="outline" className="text-[9px] py-0">Broadcast</Badge>
                     )}
                   </div>
-                </div>
-                <p className="text-xs text-muted-foreground truncate mt-0.5">
-                  {c.last_direction === 'outbound' ? '✓ ' : ''}
-                  {c.last_body || '—'}
-                </p>
-                <div className="flex items-center gap-1 mt-1">
-                  {c.client_id && <Badge variant="outline" className="text-[9px] py-0">Cliente</Badge>}
-                  {c.lead_status === 'pending' && <Badge variant="outline" className="text-[9px] py-0 border-amber-500 text-amber-700">Lead</Badge>}
-                  {c.is_broadcast && <Badge variant="outline" className="text-[9px] py-0">Broadcast</Badge>}
-                </div>
-              </button>
-            ))
+                </button>
+              );
+            })
           )}
         </div>
       </div>
@@ -195,6 +250,74 @@ function InboxView() {
                 <Ban className="h-3.5 w-3.5 mr-1" /> Bloquear
               </Button>
             </div>
+
+            {/* Banner: Possível vínculo com cliente existente */}
+            {hasSuggestion && !showLinkConfirm && (
+              <div className="px-3 py-2 border-b bg-sky-50 dark:bg-sky-950/30 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <AlertCircle className="h-4 w-4 text-sky-600 shrink-0" />
+                  <p className="text-xs text-sky-700 dark:text-sky-400 truncate">
+                    Possível cliente: <strong>{active.suggested_client!.name}</strong>
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs border-sky-500 text-sky-700 hover:bg-sky-100 shrink-0"
+                  onClick={() => setShowLinkConfirm(true)}
+                >
+                  <Link2 className="h-3 w-3 mr-1" />
+                  Vincular
+                </Button>
+              </div>
+            )}
+
+            {/* Banner: Confirmação de vínculo */}
+            {hasSuggestion && showLinkConfirm && (
+              <div className="px-3 py-2 border-b bg-sky-50 dark:bg-sky-950/30 flex items-center justify-between gap-2">
+                <p className="text-xs text-sky-700 dark:text-sky-400">
+                  Confirmar vínculo com <strong>{active.suggested_client!.name}</strong>?
+                </p>
+                <div className="flex gap-1 shrink-0">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-xs"
+                    onClick={() => setShowLinkConfirm(false)}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="h-7 text-xs bg-sky-600 hover:bg-sky-700"
+                    onClick={handleLinkToSuggestedClient}
+                    disabled={linkToClient.isPending}
+                  >
+                    <CheckCircle2 className="h-3 w-3 mr-1" />
+                    Confirmar
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Banner: Conversa pendente sem nenhum vínculo */}
+            {isUnlinked && (
+              <div className="px-3 py-2 border-b bg-muted/50 flex items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground">
+                  Conversa pendente — número não vinculado a nenhum cadastro.
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs shrink-0"
+                  onClick={handleCreateLead}
+                  disabled={createLead.isPending}
+                >
+                  <UserPlus className="h-3 w-3 mr-1" />
+                  Criar lead
+                </Button>
+              </div>
+            )}
 
             <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-2 bg-muted/30">
               {(messages || []).length === 0 && (
@@ -291,7 +414,7 @@ function LeadsView() {
     const q = search.toLowerCase();
     const digits = q.replace(/\D/g, '');
     return list.filter((l: any) =>
-      (l.name || '').toLowerCase().includes(q) ||
+      (l.display_name || '').toLowerCase().includes(q) ||
       (digits.length >= 4 && l.phone_normalized.includes(digits)),
     );
   }, [leads, search]);
@@ -343,7 +466,7 @@ function LeadsView() {
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="font-semibold truncate">{lead.name || 'Contato sem nome'}</h3>
+                        <h3 className="font-semibold truncate">{lead.display_name || 'Contato sem nome'}</h3>
                         {statusBadge(lead.status)}
                         {lead.is_broadcast && <Badge variant="outline" className="text-[10px]">Broadcast</Badge>}
                       </div>
@@ -360,13 +483,13 @@ function LeadsView() {
                     <p className="mt-3 text-sm text-muted-foreground line-clamp-2 italic">"{lead.first_message}"</p>
                   )}
                   {lead.linked_client && (
-                    <p className="mt-2 text-xs text-blue-700">→ {lead.linked_client.name}</p>
+                    <p className="mt-2 text-xs text-blue-700">→ {lead.linked_client.full_name_or_company_name}</p>
                   )}
                   <div className="mt-3 flex flex-wrap gap-2">
                     <Button size="sm" variant="outline" onClick={() => setSelected(lead)}>Ver mensagens</Button>
                     {lead.status === 'pending' && (
                       <>
-                        <Button size="sm" onClick={() => { setSelected(lead); setConvertName(lead.name || ''); setConvertOpen(true); }}><UserPlus className="h-3.5 w-3.5 mr-1" />Converter</Button>
+                        <Button size="sm" onClick={() => { setSelected(lead); setConvertName(lead.display_name || ''); setConvertOpen(true); }}><UserPlus className="h-3.5 w-3.5 mr-1" />Converter</Button>
                         <Button size="sm" variant="secondary" onClick={() => { setSelected(lead); setLinkClientId(null); setLinkOpen(true); }}><Link2 className="h-3.5 w-3.5 mr-1" />Vincular</Button>
                         <Button size="sm" variant="ghost" onClick={() => discardMut.mutate(lead.id)} className="text-destructive"><Trash2 className="h-3.5 w-3.5 mr-1" />Descartar</Button>
                         <Button size="sm" variant="ghost" onClick={() => addBlocked.mutate({ phone: lead.phone_normalized, reason: 'Bloqueado da lista de leads' })} className="text-destructive"><Ban className="h-3.5 w-3.5 mr-1" />Bloquear</Button>
@@ -383,7 +506,7 @@ function LeadsView() {
       <Dialog open={!!selected && !convertOpen && !linkOpen} onOpenChange={(v) => !v && setSelected(null)}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{selected?.name || 'Contato'} — {formatPhone(selected?.phone_normalized || '')}</DialogTitle>
+            <DialogTitle>{selected?.display_name || 'Contato'} — {formatPhone(selected?.phone_normalized || '')}</DialogTitle>
           </DialogHeader>
           <div className="max-h-[60vh] overflow-y-auto space-y-2 p-1">
             {messages?.length === 0 && <p className="text-sm text-muted-foreground text-center py-8">Sem mensagens.</p>}
