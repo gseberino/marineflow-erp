@@ -52,7 +52,7 @@ export function SupplierFormDialog({ open, onOpenChange, supplier }: Props) {
   useEffect(() => {
     if (supplier) {
       setForm({
-        name: supplier.name,
+        name: supplier.supplier_name,
         trade_name: supplier.trade_name ?? '',
         cnpj_cpf: supplier.cnpj_cpf ?? '',
         contact_name: supplier.contact_name ?? '',
@@ -83,7 +83,7 @@ export function SupplierFormDialog({ open, onOpenChange, supplier }: Props) {
     try {
       const fullAddress = [form.address_line_1, form.address_number, form.address_complement].filter(Boolean).join(', ');
       const payload: TablesInsert<'suppliers'> = {
-        name: form.name,
+        supplier_name: form.name,
         trade_name: form.trade_name || null,
         cnpj_cpf: form.cnpj_cpf || null,
         contact_name: form.contact_name || null,
