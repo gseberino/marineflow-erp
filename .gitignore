@@ -11,6 +11,8 @@ node_modules
 dist
 dist-ssr
 *.local
+.cron.secret
+build_output.txt
 .env.staging.local
 .env
 .env.*
