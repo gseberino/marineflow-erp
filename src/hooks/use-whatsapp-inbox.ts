@@ -123,9 +123,12 @@ export function useWhatsAppConversations() {
   return useQuery({
     queryKey: ['wa-conversations'],
     queryFn: async () => {
-      // Fetch inbound messages (always show) + outbound fromMe from webhook (sent_by IS NULL)
-      // ERP-sent outbounds have sent_by set and appear only in the thread, not the list.
-      const [inboundRes, fromMeRes] = await Promise.all([
+      // Two queries run in parallel:
+      // 1. Inbound — determines which phones have conversations (primary anchor)
+      // 2. All outbound — used to update preview/last_at for existing conversations
+      //    AND to add new entries for fromMe (sent_by IS NULL) with a lead or client.
+      //    ERP-sent outbound (sent_by IS NOT NULL) only updates preview, never adds new entries.
+      const [inboundRes, outboundRes] = await Promise.all([
         supabase
           .from('whatsapp_messages')
           .select('phone_normalized, occurred_at, body, direction, client_id, lead_id, is_broadcast')
@@ -134,9 +137,8 @@ export function useWhatsAppConversations() {
           .limit(1000),
         supabase
           .from('whatsapp_messages')
-          .select('phone_normalized, occurred_at, body, direction, client_id, lead_id, is_broadcast')
+          .select('phone_normalized, occurred_at, body, direction, client_id, lead_id, is_broadcast, sent_by')
           .eq('direction', 'outbound')
-          .is('sent_by', null)
           .order('occurred_at', { ascending: false })
           .limit(500),
       ]);
@@ -160,12 +162,18 @@ export function useWhatsAppConversations() {
         }
       }
 
-      // Include fromMe outbound only if it has a lead or client (avoids stray numbers)
-      for (const m of fromMeRes.data || []) {
-        if (!m.client_id && !m.lead_id) continue;
-
-        if (!map.has(m.phone_normalized)) {
-          // New conversation entry — phone only has outbound so far
+      // Process outbound messages
+      for (const m of outboundRes.data || []) {
+        if (map.has(m.phone_normalized)) {
+          // Update preview for any phone already in the conversation list (inbound existed)
+          const existing = map.get(m.phone_normalized)!;
+          if (new Date(m.occurred_at) > new Date(existing.last_at)) {
+            existing.last_at = m.occurred_at;
+            existing.last_body = m.body;
+            existing.last_direction = m.direction;
+          }
+        } else if (!m.sent_by && (m.client_id || m.lead_id)) {
+          // New entry only for fromMe webhook messages (sent_by IS NULL) with a known contact
           map.set(m.phone_normalized, {
             phone: m.phone_normalized,
             last_at: m.occurred_at,
@@ -175,14 +183,6 @@ export function useWhatsAppConversations() {
             lead_id: m.lead_id,
             is_broadcast: m.is_broadcast,
           });
-        } else {
-          // Update preview if this outbound is more recent than stored last_at
-          const existing = map.get(m.phone_normalized)!;
-          if (new Date(m.occurred_at) > new Date(existing.last_at)) {
-            existing.last_at = m.occurred_at;
-            existing.last_body = m.body;
-            existing.last_direction = m.direction;
-          }
         }
       }
 

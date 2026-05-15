@@ -39,6 +39,16 @@ function formatPhone(p: string) {
   return p;
 }
 
+function formatConvTime(at: string | null | undefined) {
+  if (!at) return '';
+  const d = new Date(at);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  return isToday
+    ? d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+}
+
 // =============== INBOX ===============
 function InboxView() {
   const { data: conversations, isLoading } = useWhatsAppConversations();
@@ -127,11 +137,14 @@ function InboxView() {
                   <span className="font-medium text-sm truncate">
                     {c.name || formatPhone(c.phone)}
                   </span>
-                  {c.unread_count > 0 && (
-                    <Badge className="bg-primary text-primary-foreground h-5 min-w-5 px-1.5 text-[10px]">
-                      {c.unread_count}
-                    </Badge>
-                  )}
+                  <div className="flex flex-col items-end shrink-0">
+                    <span className="text-[10px] text-muted-foreground">{formatConvTime(c.last_at)}</span>
+                    {c.unread_count > 0 && (
+                      <Badge className="bg-primary text-primary-foreground h-5 min-w-5 px-1.5 text-[10px] mt-0.5">
+                        {c.unread_count}
+                      </Badge>
+                    )}
+                  </div>
                 </div>
                 <p className="text-xs text-muted-foreground truncate mt-0.5">
                   {c.last_direction === 'outbound' ? '✓ ' : ''}
