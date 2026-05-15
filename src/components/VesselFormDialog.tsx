@@ -112,7 +112,7 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
         const result = await create.mutateAsync(payload);
         toast.success(t.vessels.createSuccess);
         if (onCreated && result) {
-          onCreated({ id: result.id, name: result.name, marina_id: result.marina_id });
+          onCreated({ id: result.id, name: (result as any).boat_name ?? (result as any).name ?? '', marina_id: result.marina_id });
         }
       }
       onOpenChange(false);
