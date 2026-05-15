@@ -81,7 +81,7 @@ export const VESSELS_COLUMNS: ExportColumn[] = [
   { header: 'Comprimento (m)', key: 'length_meters' },
   { header: 'Motorização', key: 'engine_type' },
   { header: 'Registro', key: 'registration_number' },
-  { header: 'Marina', key: 'name' },
+  { header: 'Marina', key: 'marinas', transform: (v: any) => v?.name ?? '' },
   { header: 'Situação', key: 'active', transform: (v: any) => v ? 'Ativo' : 'Inativo' },
 ];
 
