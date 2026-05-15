@@ -19,16 +19,19 @@ function jr(body: unknown, status = 200) {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
-    const INSTANCE_ID = Deno.env.get("ZAPI_INSTANCE_ID");
-    const TOKEN = Deno.env.get("ZAPI_TOKEN");
-    const CLIENT_TOKEN = Deno.env.get("ZAPI_CLIENT_TOKEN");
-    if (!INSTANCE_ID || !TOKEN) return jr({ error: "Z-API não configurado" }, 500);
-
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
+
+    // Load credentials from app_settings (DB) with env fallback — same pattern as whatsapp-send
+    const { data: settings } = await admin.from("app_settings").select("key, value");
+    const sm = Object.fromEntries((settings || []).map((s: any) => [s.key, s.value]));
+    const INSTANCE_ID = sm["zapi_instance_id"] || Deno.env.get("ZAPI_INSTANCE_ID");
+    const TOKEN = sm["zapi_token"] || Deno.env.get("ZAPI_TOKEN");
+    const CLIENT_TOKEN = sm["zapi_client_token"] || Deno.env.get("ZAPI_CLIENT_TOKEN");
+    if (!INSTANCE_ID || !TOKEN) return jr({ error: "Z-API não configurado. Configure em Configurações → WhatsApp." }, 500);
 
     // Auth do chamador
     const authHeader = req.headers.get("Authorization") || "";
