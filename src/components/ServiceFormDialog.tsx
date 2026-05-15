@@ -56,11 +56,13 @@ export function ServiceFormDialog({ open, onOpenChange, editData, onCreated }: P
   const handleSave = async () => {
     if (!form.name.trim()) return;
     try {
+      const { name, ...rest } = form;
+      const payload = { ...rest, service_name: name };
       if (editData?.id) {
-        await update.mutateAsync({ id: editData.id, ...form });
+        await update.mutateAsync({ id: editData.id, ...payload });
         toast.success(t.services.updateSuccess);
       } else {
-        const result = await create.mutateAsync(form);
+        const result = await create.mutateAsync(payload);
         toast.success(t.services.createSuccess);
         onCreated?.(result);
       }
