@@ -17,10 +17,12 @@ function jr(body: unknown, status = 200) {
 
 function normalizePhone(raw: string | null | undefined): string {
   if (!raw) return "";
+  // WhatsApp LID (@lid) — internal identifier, not a real phone number
+  if (String(raw).includes("@lid")) return "";
   const clean = String(raw).split("@")[0];
   const digits = clean.replace(/\D/g, "");
   if (!digits) return "";
-  if (digits.length >= 14) return digits; 
+  if (digits.length >= 14) return digits;
   if (digits.length === 10 || digits.length === 11) return `55${digits}`;
   return digits;
 }
@@ -170,9 +172,12 @@ Deno.serve(async (req) => {
       : (pAny.phone || pAny.chatId || pAny.senderLid || "");
     const phone = normalizePhone(phoneRaw);
 
-    const ignoredTypes = ["PresenceChatCallback", "ChatStateCallback", "PresenceCallback", "ChatPresence", "Presence", "typing", "recording"];
+    const ignoredTypes = ["PresenceChatCallback", "ChatStateCallback", "PresenceCallback", "ChatPresence", "Presence", "typing", "recording", "ConnectedCallback", "DisconnectedCallback", "AllMessagesReadCallback", "LoginCallback"];
     if (ignoredTypes.includes(type)) return jr({ ok: true, ignored: "system" });
     if (pAny.isGroup === true) return jr({ ok: true, ignored: "group" });
+
+    // Skip fromMe messages where recipient phone couldn't be resolved (e.g. LID-only payloads)
+    if (fromMe && !phone) return jr({ ok: true, ignored: "outbound_no_recipient_phone" });
     const ignoredNotifications = ["CALL_VOICE", "CALL_MISSED_VOICE", "CALL_MISSED_VIDEO", "E2E_ENCRYPTED", "CIPHERTEXT", "REVOKE", "GROUP_CREATE", "GROUP_CHANGE_SUBJECT", "GROUP_PARTICIPANT_ADD", "GROUP_PARTICIPANT_REMOVE", "GROUP_PARTICIPANT_LEAVE", "GROUP_PARTICIPANT_PROMOTE", "GROUP_PARTICIPANT_DEMOTE", "MEMBERSHIP_APPROVAL_REQUEST", "REVOKED_MEMBERSHIP_REQUESTS"];
     if (pAny.notification && ignoredNotifications.includes(String(pAny.notification))) return jr({ ok: true, ignored: "notification" });
 

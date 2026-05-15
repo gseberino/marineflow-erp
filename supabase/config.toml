@@ -8,3 +8,9 @@ verify_jwt = false
 
 [functions.whatsapp-process-scheduled]
 verify_jwt = false
+
+[functions.whatsapp-status-worker]
+verify_jwt = false
+
+[functions.whatsapp-queue-worker]
+verify_jwt = false
