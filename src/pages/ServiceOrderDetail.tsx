@@ -34,6 +34,19 @@ export default function ServiceOrderDetail() {
 
   const { data: order, isLoading, error } = useServiceOrder(isNew ? undefined : id);
 
+  // Hook must be declared before any conditional return (Rules of Hooks)
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyLink = () => {
+    if (!order?.share_token) return;
+    const url = `${window.location.origin}/view/${order.share_token}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      toast.success('Link público copiado!');
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
   if (!isNew && !isLoading && !order && !error) {
     return (
       <div className="flex flex-col items-center justify-center py-20">
@@ -62,17 +75,6 @@ export default function ServiceOrderDetail() {
       />
     );
   }
-
-  const [copied, setCopied] = useState(false);
-  const handleCopyLink = () => {
-    if (!order?.share_token) return;
-    const url = `${window.location.origin}/view/${order.share_token}`;
-    navigator.clipboard.writeText(url).then(() => {
-      setCopied(true);
-      toast.success('Link público copiado!');
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
 
   return (
     <Tabs defaultValue="details" className="flex flex-col gap-0">

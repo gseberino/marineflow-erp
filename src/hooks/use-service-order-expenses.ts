@@ -35,7 +35,7 @@ export function useServiceOrderExpenses(serviceOrderId: string | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('service_order_expenses')
-        .select('*, app_users!service_order_expenses_technician_user_id_fkey(full_name), suppliers!service_order_expenses_supplier_id_fkey(name)')
+        .select('*, app_users!service_order_expenses_technician_user_id_fkey(full_name), suppliers!service_order_expenses_supplier_id_fkey(name:supplier_name)')
         .eq('service_order_id', serviceOrderId!)
         .order('expense_date', { ascending: true });
       if (error) throw error;

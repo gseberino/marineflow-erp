@@ -1192,7 +1192,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     const { data, error } = await supabase
       .from('products')
       .insert({
-        name: draft.name,
+        product_name: draft.name,
         cost_price: draft.unit_cost,
         sale_price: draft.unit_sale,
         unit: draft.unit || 'un',
@@ -1737,7 +1737,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                     const url = `${window.location.origin}/view/${orderData.share_token}`;
                     const phoneRaw = (orderData?.clients as any)?.whatsapp || (orderData?.clients as any)?.phone || '';
                     const phone = normalizePhoneE164(phoneRaw);
-                    const clientName = (orderData?.clients as any)?.name || '';
+                    const clientName = (orderData?.clients as any)?.full_name_or_company_name || '';
                     const msg = `Olá${clientName ? ' ' + clientName : ''}, segue o link da Ordem de Serviço ${orderData.service_order_number}: ${url}`;
                     setWaEditPhone(phone);
                     setWaEditMessage(msg);
@@ -1791,7 +1791,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                         serviceOrderNumber: orderData.service_order_number,
                         shareToken: orderData.share_token,
                         clientId: (orderData?.clients as any)?.id || (orderData as any)?.client_id || null,
-                        clientName: (orderData?.clients as any)?.name || null,
+                        clientName: (orderData?.clients as any)?.full_name_or_company_name || null,
                         clientPhone: (orderData?.clients as any)?.whatsapp || (orderData?.clients as any)?.phone || null,
                         documentType: 'service_order',
                       })}
@@ -1805,7 +1805,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                         serviceOrderNumber: orderData.service_order_number,
                         shareToken: orderData.share_token,
                         clientId: (orderData?.clients as any)?.id || (orderData as any)?.client_id || null,
-                        clientName: (orderData?.clients as any)?.name || null,
+                        clientName: (orderData?.clients as any)?.full_name_or_company_name || null,
                         clientPhone: (orderData?.clients as any)?.whatsapp || (orderData?.clients as any)?.phone || null,
                         documentType: 'quote',
                       })}
