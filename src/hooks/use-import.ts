@@ -44,8 +44,8 @@ export function useCheckConflicts() {
         const skus = rows.map(r => r.sku).filter(Boolean) as string[];
         const names = rows.map(r => r.name).filter(Boolean) as string[];
         const [bySku, byName] = await Promise.all([
-          batchIn<any>('products', 'sku', skus, 'id,sku,name'),
-          batchIn<any>('products', 'name', names, 'id,sku,name'),
+          batchIn<any>('products', 'sku', skus, 'id,sku,name:product_name'),
+          batchIn<any>('products', 'product_name', names, 'id,sku,name:product_name'),
         ]);
         const skuMap = new Map(bySku.map(p => [p.sku, p]));
         const nameMap = new Map(byName.map(p => [p.name, p]));
@@ -61,7 +61,7 @@ export function useCheckConflicts() {
         }
       } else if (entityType === 'services') {
         const names = rows.map(r => r.name).filter(Boolean) as string[];
-        const existing = await batchIn<any>('services', 'name', names, 'id,name');
+        const existing = await batchIn<any>('services', 'service_name', names, 'id,name:service_name');
         const nameMap = new Map(existing.map(s => [s.name, s]));
         for (const row of rows) {
           const found = row.name ? nameMap.get(row.name) : null;
@@ -73,7 +73,7 @@ export function useCheckConflicts() {
         }
       } else if (entityType === 'clients') {
         const cnpjs = rows.map(r => r.cnpj_cpf).filter(Boolean) as string[];
-        const existing = await batchIn<any>('clients', 'cpf_cnpj', cnpjs, 'id,cpf_cnpj,name');
+        const existing = await batchIn<any>('clients', 'cpf_cnpj', cnpjs, 'id,cpf_cnpj');
         const cnpjMap = new Map(existing.map(c => [c.cpf_cnpj, c]));
         for (const row of rows) {
           const found = row.cnpj_cpf ? cnpjMap.get(row.cnpj_cpf) : null;
@@ -85,7 +85,7 @@ export function useCheckConflicts() {
         }
       } else if (entityType === 'suppliers') {
         const cnpjs = rows.map(r => r.cnpj_cpf).filter(Boolean) as string[];
-        const existing = await batchIn<any>('suppliers', 'cnpj_cpf', cnpjs, 'id,cnpj_cpf,name');
+        const existing = await batchIn<any>('suppliers', 'cnpj_cpf', cnpjs, 'id,cnpj_cpf');
         const cnpjMap = new Map(existing.map(s => [s.cnpj_cpf, s]));
         for (const row of rows) {
           const found = row.cnpj_cpf ? cnpjMap.get(row.cnpj_cpf) : null;
@@ -158,7 +158,7 @@ export function useImportRows() {
         const validProductRows = newRows.filter(r => r.name);
         for (const chunk of chunks(validProductRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            name: r.name as string,
+            product_name: r.name as string,
             sku: (r.sku || null) as string | null,
             sale_price: (r.sale_price || 0) as number,
             cost_price: (r.cost_price || 0) as number,
@@ -211,7 +211,7 @@ export function useImportRows() {
         const validServiceRows = newRows.filter(r => r.name);
         for (const chunk of chunks(validServiceRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            name: r.name as string,
+            service_name: r.name as string,
             default_price: (r.default_price || 0) as number,
             billing_unit: 'visit' as string,
             currency: 'BRL' as string,
@@ -232,11 +232,11 @@ export function useImportRows() {
         const validClientRows = newRows.filter(r => r.name);
         for (const chunk of chunks(validClientRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            name: r.name,
+            full_name_or_company_name: r.name,
             type: r._type || 'company',
             cpf_cnpj: r.cnpj_cpf || null,
             email: r.email || null,
-            phone: r.phone || r.phone || null,
+            phone: r.phone || null,
             address_line_1: r.address_line_1 || null,
             address_line_2: [r.address_number, r.neighborhood, r.address_complement].filter(Boolean).join(', ') || null,
             postal_code: r.postal_code || null,
@@ -252,14 +252,14 @@ export function useImportRows() {
       }
 
       if (entityType === 'suppliers') {
-        const validSupplierRows = newRows.filter(r => r.name || r.name);
+        const validSupplierRows = newRows.filter(r => r.name);
         for (const chunk of chunks(validSupplierRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            name: r.name || r.name,
+            supplier_name: r.name,
             trade_name: r.trade_name || null,
             cnpj_cpf: r.cnpj_cpf || null,
-            email: r.email || null,
-            phone: r.phone || r.phone || null,
+            contact_email: r.email || null,
+            contact_phone: r.phone || null,
             address_line_1: r.address_line_1 || null,
             postal_code: r.postal_code || null,
             city: r.city || null,
@@ -283,11 +283,11 @@ export function useImportRows() {
 
         for (const chunk of chunks(clientRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            name: r.name,
+            full_name_or_company_name: r.name,
             type: r._type || 'company',
             cpf_cnpj: r.cnpj_cpf || null,
             email: r.email || null,
-            phone: r.phone || r.phone || null,
+            phone: r.phone || null,
             address_line_1: r.address_line_1 || null,
             address_line_2: [r.address_number, r.neighborhood, r.address_complement].filter(Boolean).join(', ') || null,
             postal_code: r.postal_code || null,
@@ -302,11 +302,11 @@ export function useImportRows() {
 
         for (const chunk of chunks(supplierRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            name: r.name,
+            supplier_name: r.name,
             trade_name: r.trade_name || null,
             cnpj_cpf: r.cnpj_cpf || null,
-            email: r.email || null,
-            phone: r.phone || r.phone || null,
+            contact_email: r.email || null,
+            contact_phone: r.phone || null,
             address_line_1: r.address_line_1 || null,
             postal_code: r.postal_code || null,
             city: r.city || null,

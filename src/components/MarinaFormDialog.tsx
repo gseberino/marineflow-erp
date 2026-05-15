@@ -51,8 +51,8 @@ export function MarinaFormDialog({ open, onOpenChange, marina, onSaved }: Props)
       setForm({
         name: marina.marina_name,
         contact_name: marina.contact_name ?? '',
-        phone: marina.phone ?? '',
-        email: marina.email ?? '',
+        phone: marina.contact_phone ?? '',
+        email: marina.contact_email ?? '',
         postal_code: marina.postal_code ?? '',
         address_line_1: marina.address_line_1 ?? '',
         address_number: '',
@@ -81,8 +81,8 @@ export function MarinaFormDialog({ open, onOpenChange, marina, onSaved }: Props)
       const payload: TablesInsert<'marinas'> = {
         marina_name: form.name,
         contact_name: form.contact_name || null,
-        phone: form.phone || null,
-        email: form.email || null,
+        contact_phone: form.phone || null,
+        contact_email: form.email || null,
         address_line_1: fullAddress || null,
         city: form.city || null,
         state: form.state || null,

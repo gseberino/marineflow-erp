@@ -736,6 +736,8 @@ function buildOrderHTML(data: PDFData, options: PDFOptions): string {
     options.showTravelCost && data.serviceOrder.travel_cost_total > 0 ? `<tr><td>Deslocamento / Logística</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.travel_cost_total)}</td></tr>` : '',
     (data.serviceOrder.operational_cost_total ?? 0) > 0 ? `<tr><td>Outras Despesas</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.operational_cost_total!)}</td></tr>` : '',
     options.showDiscount && data.serviceOrder.discount_amount > 0 ? `<tr><td style="color:#dc2626;">Desconto Especial</td><td style="text-align:right;color:#dc2626;">− ${fmtCurrency(data.serviceOrder.discount_amount)}</td></tr>` : '',
+    options.showTax && (data.serviceOrder.tax_amount ?? 0) > 0 ? `<tr><td>Impostos / Taxas</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.tax_amount)}</td></tr>` : '',
+    options.showCommission && (data.serviceOrder.commission_amount ?? 0) > 0 ? `<tr><td style="color:#64748B;">Comissão${data.serviceOrder.commissioned_person ? ` — ${esc(data.serviceOrder.commissioned_person)}` : ''}${data.serviceOrder.commission_rate ? ` (${data.serviceOrder.commission_rate}%)` : ''}</td><td style="text-align:right;color:#64748B;">${fmtCurrency(data.serviceOrder.commission_amount!)}</td></tr>` : '',
   ].filter(Boolean).join('');
 
   const body = `
@@ -811,6 +813,13 @@ ${!isQuote && data.serviceOrder.technical_notes ? `
 </div>
 ` : ''}
 
+${data.serviceOrder.extra_notes ? `
+<div class="card" style="background:#FFFBEB;border-left:4px solid #D4AF37;">
+  <div class="section-title">Observações Adicionais</div>
+  <div style="white-space:pre-wrap;font-size:11px;">${esc(data.serviceOrder.extra_notes)}</div>
+</div>
+` : ''}
+
 <div class="totals-box" style="display:flex;justify-content:flex-end;">
   <div style="width:300px;">
     <table class="summary-table">
@@ -848,6 +857,7 @@ ${options.showBankDetails !== false && data.bank && (data.bank.bank_name || data
 </div>
 ` : ''}
 
+${options.showSignature ? `
 <div class="grid" style="margin-top:40px;">
   <div style="text-align:center;">
     <div style="height:60px;"></div>
@@ -864,6 +874,7 @@ ${options.showBankDetails !== false && data.bank && (data.bank.bank_name || data
     </div>
   </div>
 </div>
+` : ''}
 
 ${photoGallery}
 

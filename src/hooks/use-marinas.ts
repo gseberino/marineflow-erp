@@ -10,7 +10,7 @@ export function useMarinas() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('marinas')
-        .select('*, name:marina_name')
+        .select('*, name:marina_name, phone:contact_phone, email:contact_email')
         .order('marina_name', { ascending: true });
       if (error) throw error;
       return data as Marina[];
