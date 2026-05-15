@@ -156,7 +156,7 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
             </div>
             <div className="col-span-2 sm:col-span-1">
               <Label>Nome / Placa / ID *</Label>
-              <Input required value={form.name} onChange={e => set('name', e.target.value)} />
+              <Input required value={form.boat_name ?? ''} onChange={e => set('boat_name', e.target.value)} />
             </div>
             <div className="col-span-2">
               <Label>{t.vessels.selectClient} *</Label>
