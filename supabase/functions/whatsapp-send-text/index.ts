@@ -1,6 +1,7 @@
 // Edge Function: whatsapp-send-text
 // Envia mensagem de texto via Z-API a partir do painel (Inbox).
-// Requer usuário autenticado (verify_jwt = true por padrão da plataforma).
+// Credenciais: lidas de app_settings (fonte principal, configurada pela UI),
+// com fallback para variáveis de ambiente — alinhado ao whatsapp-send.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders = {

@@ -155,6 +155,7 @@ export function useWhatsAppConversations() {
 
       if (inboundRes.error) throw inboundRes.error;
 
+      // Build map keyed by phone — last inbound per phone (for fallback preview)
       const map = new Map<string, any>();
 
       // Build conversation map from inbound (most recent per phone)

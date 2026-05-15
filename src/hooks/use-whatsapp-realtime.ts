@@ -61,11 +61,16 @@ export function useWhatsAppUnread(): WhatsAppUnreadInfo & { markAllRead: () => P
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'whatsapp_messages' },
         (payload: any) => {
-          if (payload?.new?.direction === 'inbound') {
+          const dir = payload?.new?.direction;
+          // Bell counter only increments for inbound messages
+          if (dir === 'inbound') {
             refreshCount();
             qc.invalidateQueries({ queryKey: ['whatsapp-leads'] });
-            qc.invalidateQueries({ queryKey: ['whatsapp-messages'] });
           }
+          // Conversations and message thread refresh for any new message,
+          // including outbound replies and fromMe (physical phone) messages.
+          qc.invalidateQueries({ queryKey: ['whatsapp-messages'] });
+          qc.invalidateQueries({ queryKey: ['wa-conversations'] });
         })
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'whatsapp_leads' },

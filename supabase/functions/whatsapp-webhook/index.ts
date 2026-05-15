@@ -17,14 +17,24 @@ function jr(body: unknown, status = 200) {
 
 function normalizePhone(raw: string | null | undefined): string {
   if (!raw) return "";
-  // WhatsApp LID (@lid) — internal identifier, not a real phone number
-  if (String(raw).includes("@lid")) return "";
+  // Strip @-suffix: handles @c.us, @s.whatsapp.net, @lid, etc.
   const clean = String(raw).split("@")[0];
-  const digits = clean.replace(/\D/g, "");
+  let digits = clean.replace(/\D/g, "");
   if (!digits) return "";
-  if (digits.length >= 14) return digits;
-  if (digits.length === 10 || digits.length === 11) return `55${digits}`;
-  return digits;
+  // Strip leading 00 (international dialing prefix, e.g. 0055...)
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  // 10 or 11 digits without country code → assume BR, prepend 55
+  if (digits.length === 10 || digits.length === 11) digits = `55${digits}`;
+  // From here we require a Brazilian number (starts with 55)
+  if (!digits.startsWith("55")) return "";
+  if (digits.length === 12) {
+    // 55 + DDD(2) + 8-digit number: add 9th digit if mobile (starts with 6–9)
+    const numberPart = digits.slice(4);
+    if (/^[6-9]/.test(numberPart)) return `${digits.slice(0, 4)}9${numberPart}`;
+    return digits; // landline-style 12-digit — keep as-is
+  }
+  if (digits.length === 13) return digits; // 55 + DDD(2) + 9 + 8 digits — valid BR mobile
+  return ""; // too short, too long, or non-BR — reject
 }
 
 function extractBodyAndType(p: any): { body: string; messageType: string; mediaUrl: string | null } {
@@ -59,6 +69,37 @@ async function notifyAssignedReminder(admin: any, phone: string, senderName: str
     if (zapiCreds.client) headers["Client-Token"] = zapiCreds.client;
     await Promise.all(recipients.map(to => fetch(`${base}/send-text`, { method: "POST", headers, body: JSON.stringify({ phone: to, message }) }).catch(() => null)));
   } catch (e) { console.error("notifyAssignedReminder failed", e); }
+}
+
+// Matches an incoming normalized phone against active clients by normalizing
+// their stored phone/whatsapp fields in-memory.  Returns the client id only
+// when there is exactly one unambiguous match; returns null otherwise so the
+// conversation stays pending/unlinked for human review.
+async function findClientByPhone(
+  admin: ReturnType<typeof createClient>,
+  phone: string,
+): Promise<string | null> {
+  if (!phone) return null;
+  const { data: clients } = await admin
+    .from("clients")
+    .select("id, phone, whatsapp")
+    .eq("active", true)
+    .limit(2000);
+  if (!clients || clients.length === 0) return null;
+  const matched: string[] = [];
+  for (const c of clients) {
+    const cp = normalizePhone(c.phone as string | null);
+    const cw = normalizePhone(c.whatsapp as string | null);
+    if ((cp && cp === phone) || (cw && cw === phone)) {
+      if (!matched.includes(c.id as string)) matched.push(c.id as string);
+    }
+  }
+  if (matched.length === 1) return matched[0];
+  if (matched.length > 1) {
+    // Multiple clients share the same normalized phone — don't auto-link
+    console.warn(`[webhook] Ambiguous client match (${matched.length} clients) for phone ending …${phone.slice(-4)}`);
+  }
+  return null;
 }
 
 Deno.serve(async (req) => {
@@ -175,6 +216,9 @@ Deno.serve(async (req) => {
     const ignoredTypes = ["PresenceChatCallback", "ChatStateCallback", "PresenceCallback", "ChatPresence", "Presence", "typing", "recording", "ConnectedCallback", "DisconnectedCallback", "AllMessagesReadCallback", "LoginCallback"];
     if (ignoredTypes.includes(type)) return jr({ ok: true, ignored: "system" });
     if (pAny.isGroup === true) return jr({ ok: true, ignored: "group" });
+    // Reject @lid identifiers and any phone that does not resolve to a valid BR number.
+    // This prevents phantom leads and orphaned messages from WhatsApp Business @lid events.
+    if (!phone) return jr({ ok: true, ignored: "invalid_phone" });
 
     // Skip fromMe messages where recipient phone couldn't be resolved (e.g. LID-only payloads)
     if (fromMe && !phone) return jr({ ok: true, ignored: "outbound_no_recipient_phone" });
@@ -217,17 +261,34 @@ Deno.serve(async (req) => {
 
     let clientId = null;
     let leadId = null;
+    let isNewLead = false;
 
-    // 1. Try to match an existing client by phone (ILIKE substring search)
-    const { data: client } = await admin.from("clients").select("id").or(`phone.ilike.%${phone}%,whatsapp.ilike.%${phone}%`).eq("active", true).maybeSingle();
-    if (client) {
-      clientId = client.id;
+    // Exact normalized matching — no fuzzy ILIKE. If multiple clients share
+    // the same normalized phone the result is null (ambiguous → stay unlinked).
+    const matchedClientId = await findClientByPhone(admin, phone);
+    if (matchedClientId) {
+      clientId = matchedClientId;
     } else {
-      // 2. Try to match an existing lead (exact normalized phone)
-      // Does NOT auto-create leads — lead creation requires explicit user action.
-      const { data: lead } = await admin.from("whatsapp_leads").select("id").eq("phone_normalized", phone).maybeSingle();
-      if (lead) {
-        leadId = lead.id;
+      const { data: existingLead } = await admin
+        .from("whatsapp_leads")
+        .select("id")
+        .eq("phone_normalized", phone)
+        .maybeSingle();
+      if (existingLead) {
+        leadId = existingLead.id;
+      } else if (!fromMe) {
+        // phone is already validated by normalizePhone — safe to create lead
+        const { data: newLead } = await admin
+          .from("whatsapp_leads")
+          .insert({
+            phone_normalized: phone,
+            display_name: pAny.senderName || pAny.notifyName || null,
+            status: "pending",
+          })
+          .select("id")
+          .single();
+        leadId = newLead?.id ?? null;
+        isNewLead = true;
       }
     }
 
@@ -245,8 +306,28 @@ Deno.serve(async (req) => {
     }).select("id").single();
 
     if (insErr) return jr({ error: "db_error", details: insErr.message }, 500);
-    if (leadId) await admin.from("whatsapp_leads").update({ updated_at: new Date().toISOString() }).eq("id", leadId);
-    else if (clientId) await admin.from("clients").update({ updated_at: new Date().toISOString() }).eq("id", clientId);
+
+    const now = new Date().toISOString();
+    if (leadId) {
+      const leadUpdate: Record<string, unknown> = { last_message_at: now, updated_at: now };
+      if (!fromMe) {
+        // Inbound: track last inbound time and increment unread counter
+        leadUpdate.last_inbound_at = now;
+        const { data: cur } = await admin
+          .from("whatsapp_leads")
+          .select("unread_count")
+          .eq("id", leadId)
+          .maybeSingle();
+        leadUpdate.unread_count = ((cur?.unread_count as number) ?? 0) + 1;
+      } else {
+        // fromMe (physical phone or app outbound): track last outbound time
+        leadUpdate.last_outbound_at = now;
+      }
+      await admin.from("whatsapp_leads").update(leadUpdate).eq("id", leadId);
+    } else if (clientId) {
+      await admin.from("clients").update({ updated_at: now }).eq("id", clientId);
+    }
+    if (isNewLead && !fromMe) notifyAssignedReminder(admin, phone, pAny.senderName || null, body, zapiCreds).catch(console.error);
 
     return jr({ ok: true, message_id: msg?.id });
   } catch (err: any) { return jr({ error: err.message }, 500); }
