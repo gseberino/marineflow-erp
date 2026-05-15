@@ -123,18 +123,30 @@ export function useWhatsAppConversations() {
   return useQuery({
     queryKey: ['wa-conversations'],
     queryFn: async () => {
-      // Inbox mostra apenas mensagens recebidas (inbound) — outbound de lembretes do sistema
-      // não devem poluir o inbox; ficam visíveis na página de Logs.
-      const { data: msgs, error } = await supabase
-        .from('whatsapp_messages')
-        .select('phone_normalized, occurred_at, body, direction, client_id, lead_id, is_broadcast')
-        .eq('direction', 'inbound')
-        .order('occurred_at', { ascending: false })
-        .limit(1000);
-      if (error) throw error;
+      // Fetch inbound messages (always show) + outbound fromMe from webhook (sent_by IS NULL)
+      // ERP-sent outbounds have sent_by set and appear only in the thread, not the list.
+      const [inboundRes, fromMeRes] = await Promise.all([
+        supabase
+          .from('whatsapp_messages')
+          .select('phone_normalized, occurred_at, body, direction, client_id, lead_id, is_broadcast')
+          .eq('direction', 'inbound')
+          .order('occurred_at', { ascending: false })
+          .limit(1000),
+        supabase
+          .from('whatsapp_messages')
+          .select('phone_normalized, occurred_at, body, direction, client_id, lead_id, is_broadcast')
+          .eq('direction', 'outbound')
+          .is('sent_by', null)
+          .order('occurred_at', { ascending: false })
+          .limit(500),
+      ]);
+
+      if (inboundRes.error) throw inboundRes.error;
 
       const map = new Map<string, any>();
-      for (const m of msgs || []) {
+
+      // Build conversation map from inbound (most recent per phone)
+      for (const m of inboundRes.data || []) {
         if (!map.has(m.phone_normalized)) {
           map.set(m.phone_normalized, {
             phone: m.phone_normalized,
@@ -145,6 +157,32 @@ export function useWhatsAppConversations() {
             lead_id: m.lead_id,
             is_broadcast: m.is_broadcast,
           });
+        }
+      }
+
+      // Include fromMe outbound only if it has a lead or client (avoids stray numbers)
+      for (const m of fromMeRes.data || []) {
+        if (!m.client_id && !m.lead_id) continue;
+
+        if (!map.has(m.phone_normalized)) {
+          // New conversation entry — phone only has outbound so far
+          map.set(m.phone_normalized, {
+            phone: m.phone_normalized,
+            last_at: m.occurred_at,
+            last_body: m.body,
+            last_direction: m.direction,
+            client_id: m.client_id,
+            lead_id: m.lead_id,
+            is_broadcast: m.is_broadcast,
+          });
+        } else {
+          // Update preview if this outbound is more recent than stored last_at
+          const existing = map.get(m.phone_normalized)!;
+          if (new Date(m.occurred_at) > new Date(existing.last_at)) {
+            existing.last_at = m.occurred_at;
+            existing.last_body = m.body;
+            existing.last_direction = m.direction;
+          }
         }
       }
 
@@ -168,18 +206,20 @@ export function useWhatsAppConversations() {
       const leadByPhone = new Map<string, any>();
       for (const l of leads || []) leadByPhone.set(l.phone_normalized, l);
 
-      return Array.from(map.values()).map((conv) => {
-        const client = clientByPhone.get(conv.phone);
-        const lead = leadByPhone.get(conv.phone);
-        return {
-          ...conv,
-          client_name: client?.name || null,
-          client_id: client?.id || conv.client_id,
-          lead_status: lead?.status || null,
-          unread_count: lead?.unread_count || 0,
-          name: client?.name || lead?.name || null,
-        };
-      });
+      return Array.from(map.values())
+        .map((conv) => {
+          const client = clientByPhone.get(conv.phone);
+          const lead = leadByPhone.get(conv.phone);
+          return {
+            ...conv,
+            client_name: client?.name || null,
+            client_id: client?.id || conv.client_id,
+            lead_status: lead?.status || null,
+            unread_count: lead?.unread_count || 0,
+            name: client?.name || lead?.name || null,
+          };
+        })
+        .sort((a, b) => new Date(b.last_at).getTime() - new Date(a.last_at).getTime());
     },
     refetchInterval: 15000,
   });

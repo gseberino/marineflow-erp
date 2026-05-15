@@ -202,7 +202,7 @@ Deno.serve(async (req) => {
       const { data: lead } = await admin.from("whatsapp_leads").select("id").eq("phone_normalized", phone).maybeSingle();
       if (lead) {
         leadId = lead.id;
-      } else if (!fromMe) {
+      } else {
         const isValidPhone = phone.startsWith("55") && (phone.length === 12 || phone.length === 13);
         if (isValidPhone) {
           const { data: newLead } = await admin.from("whatsapp_leads").insert({
