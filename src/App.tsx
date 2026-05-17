@@ -52,6 +52,9 @@ import ExternalQuoteDetailPage from "./pages/ExternalQuoteDetailPage";
 import ExternalSellerLeadsPage from "./pages/ExternalSellerLeadsPage";
 import ExternalProductCatalogPage from "./pages/ExternalProductCatalogPage";
 import PurchaseOrdersPage from "./pages/PurchaseOrdersPage";
+import DesignPreview from "./pages/DesignPreview";
+import DesignPreviewV01 from "./pages/design-preview/versions/DesignPreviewV01";
+import DesignPreviewIndex from "./pages/design-preview/DesignPreviewIndex";
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -180,6 +183,21 @@ const App = () => (
                         <Route path="/tools/encoding-fixer" element={
                           <ProtectedRoute roles={['admin']} groupId="sistema">
                             <EncodingFixerPage />
+                          </ProtectedRoute>
+                        } />
+                        <Route path="/design-preview" element={
+                          <ProtectedRoute roles={['admin']} groupId="sistema">
+                            <DesignPreview />
+                          </ProtectedRoute>
+                        } />
+                        <Route path="/design-preview-v01" element={
+                          <ProtectedRoute roles={['admin']} groupId="sistema">
+                            <DesignPreviewV01 />
+                          </ProtectedRoute>
+                        } />
+                        <Route path="/design-preview-compare" element={
+                          <ProtectedRoute roles={['admin']} groupId="sistema">
+                            <DesignPreviewIndex />
                           </ProtectedRoute>
                         } />
                         <Route path="*" element={<NotFound />} />

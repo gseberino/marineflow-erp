@@ -1,0 +1,127 @@
+/* =============================================================================
+   Marineflow ERP — Design Tokens (Fase 1)
+   Arquivo de tokens isolado. Não altera index.css nem os tokens de produção.
+   Importado apenas pela página /design-preview.
+   ============================================================================= */
+
+@layer mf-tokens {
+
+  /* ── Paleta Navy ─────────────────────────────────────────────────────── */
+  :root {
+    --mf-navy-950: #03101F;
+    --mf-navy-900: #06182E;
+    --mf-navy-800: #0B2540;
+    --mf-navy-700: #102F52;
+    --mf-navy-600: #1A4274;
+    --mf-navy-500: #2A6FBF;
+    --mf-navy-400: #4D8EC7;
+    --mf-navy-300: #7AAFD3;
+    --mf-navy-200: #A9CBDF;
+    --mf-navy-100: #DBE6F2;
+    --mf-navy-50:  #EDF2F8;
+
+    /* ── Paleta Gold ─────────────────────────────────────────────────────── */
+    --mf-gold-700: #997126;
+    --mf-gold-600: #B8893C;
+    --mf-gold-500: #C8A24B;
+    --mf-gold-400: #D4B264;
+    --mf-gold-300: #E8CC85;
+    --mf-gold-200: #F0DCA8;
+    --mf-gold-100: #F6E9C4;
+    --mf-gold-50:  #FBF5E4;
+
+    /* ── Paleta Ink/Neutral ──────────────────────────────────────────────── */
+    --mf-ink-900:  #0E1726;
+    --mf-ink-800:  #1A2436;
+    --mf-ink-700:  #2A3344;
+    --mf-ink-600:  #3C4659;
+    --mf-ink-500:  #4C5468;
+    --mf-ink-400:  #6B7587;
+    --mf-ink-300:  #94A0B3;
+    --mf-ink-200:  #C5CDD9;
+    --mf-ink-100:  #E2E7EF;
+    --mf-ink-50:   #EEF1F6;
+    --mf-paper:    #FAFAF7;
+    --mf-paper-2:  #F4F4EF;
+    --mf-white:    #FFFFFF;
+
+    /* ── Semantic ────────────────────────────────────────────────────────── */
+    --mf-success-700: #1F7A4D;
+    --mf-success-500: #2BA56A;
+    --mf-success-100: #D7F0E1;
+    --mf-success-50:  #EEFBF5;
+
+    --mf-warning-700: #A56A0A;
+    --mf-warning-500: #D89117;
+    --mf-warning-100: #FCEACB;
+    --mf-warning-50:  #FFF8ED;
+
+    --mf-danger-700:  #B0322C;
+    --mf-danger-500:  #DA4A41;
+    --mf-danger-100:  #FBDEDB;
+    --mf-danger-50:   #FFF2F1;
+
+    --mf-info-700:    #1A5DB0;
+    --mf-info-500:    #2F7FE0;
+    --mf-info-100:    #D8E7FA;
+    --mf-info-50:     #EEF5FD;
+
+    /* ── Border Radius ───────────────────────────────────────────────────── */
+    --mf-r-xs:  4px;
+    --mf-r-sm:  6px;
+    --mf-r-md:  8px;
+    --mf-r-lg:  12px;
+    --mf-r-xl:  16px;
+    --mf-r-2xl: 24px;
+    --mf-r-full: 9999px;
+
+    /* ── Shadows ─────────────────────────────────────────────────────────── */
+    --mf-shadow-xs: 0 1px 2px rgba(11,37,64,0.04);
+    --mf-shadow-sm: 0 1px 2px rgba(11,37,64,0.04), 0 1px 1px rgba(11,37,64,0.03);
+    --mf-shadow-md: 0 6px 18px -8px rgba(11,37,64,0.12), 0 2px 4px rgba(11,37,64,0.04);
+    --mf-shadow-lg: 0 20px 60px -20px rgba(11,37,64,0.20), 0 4px 12px rgba(11,37,64,0.06);
+    --mf-shadow-inset: inset 0 1px 2px rgba(11,37,64,0.06);
+    --mf-shadow-gold: 0 0 0 3px rgba(200,162,75,0.25);
+
+    /* ── Spacing (referência visual) ─────────────────────────────────────── */
+    --mf-space-1:  4px;
+    --mf-space-2:  8px;
+    --mf-space-3:  12px;
+    --mf-space-4:  16px;
+    --mf-space-5:  20px;
+    --mf-space-6:  24px;
+    --mf-space-8:  32px;
+    --mf-space-10: 40px;
+    --mf-space-12: 48px;
+
+    /* ── Typography ──────────────────────────────────────────────────────── */
+    --mf-font-sans:  'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+    --mf-font-mono:  ui-monospace, 'Cascadia Code', 'Fira Mono', monospace;
+
+    --mf-text-xs:   0.6875rem;  /* 11px */
+    --mf-text-sm:   0.75rem;    /* 12px */
+    --mf-text-base: 0.875rem;   /* 14px */
+    --mf-text-md:   1rem;       /* 16px */
+    --mf-text-lg:   1.125rem;   /* 18px */
+    --mf-text-xl:   1.25rem;    /* 20px */
+    --mf-text-2xl:  1.5rem;     /* 24px */
+    --mf-text-3xl:  1.875rem;   /* 30px */
+
+    --mf-leading-tight:  1.25;
+    --mf-leading-snug:   1.375;
+    --mf-leading-normal: 1.5;
+    --mf-leading-relaxed:1.625;
+
+    /* ── Transition ──────────────────────────────────────────────────────── */
+    --mf-ease-fast:  120ms ease;
+    --mf-ease-base:  180ms ease;
+    --mf-ease-slow:  260ms ease;
+
+    /* ── Z-index ─────────────────────────────────────────────────────────── */
+    --mf-z-base:    0;
+    --mf-z-raised:  10;
+    --mf-z-overlay: 100;
+    --mf-z-modal:   200;
+    --mf-z-toast:   300;
+  }
+}
