@@ -54,6 +54,8 @@ import ExternalProductCatalogPage from "./pages/ExternalProductCatalogPage";
 import PurchaseOrdersPage from "./pages/PurchaseOrdersPage";
 import DesignPreview from "./pages/DesignPreview";
 import DesignPreviewV01 from "./pages/design-preview/versions/DesignPreviewV01";
+import DesignPreviewV02 from "./pages/design-preview/versions/DesignPreviewV02";
+import DesignPreviewV03 from "./pages/design-preview/versions/DesignPreviewV03";
 import DesignPreviewIndex from "./pages/design-preview/DesignPreviewIndex";
 
 const App = () => (
@@ -193,6 +195,16 @@ const App = () => (
                         <Route path="/design-preview-v01" element={
                           <ProtectedRoute roles={['admin']} groupId="sistema">
                             <DesignPreviewV01 />
+                          </ProtectedRoute>
+                        } />
+                        <Route path="/design-preview-v02" element={
+                          <ProtectedRoute roles={['admin']} groupId="sistema">
+                            <DesignPreviewV02 />
+                          </ProtectedRoute>
+                        } />
+                        <Route path="/design-preview-v03" element={
+                          <ProtectedRoute roles={['admin']} groupId="sistema">
+                            <DesignPreviewV03 />
                           </ProtectedRoute>
                         } />
                         <Route path="/design-preview-compare" element={
