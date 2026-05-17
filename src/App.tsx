@@ -52,6 +52,7 @@ import ExternalQuoteDetailPage from "./pages/ExternalQuoteDetailPage";
 import ExternalSellerLeadsPage from "./pages/ExternalSellerLeadsPage";
 import ExternalProductCatalogPage from "./pages/ExternalProductCatalogPage";
 import PurchaseOrdersPage from "./pages/PurchaseOrdersPage";
+import DashboardV2 from "./pages/DashboardV2";
 import DesignPreview from "./pages/DesignPreview";
 import DesignPreviewV01 from "./pages/design-preview/versions/DesignPreviewV01";
 import DesignPreviewV02 from "./pages/design-preview/versions/DesignPreviewV02";
@@ -185,6 +186,11 @@ const App = () => (
                         <Route path="/tools/encoding-fixer" element={
                           <ProtectedRoute roles={['admin']} groupId="sistema">
                             <EncodingFixerPage />
+                          </ProtectedRoute>
+                        } />
+                        <Route path="/dashboard-v2" element={
+                          <ProtectedRoute roles={['admin']} groupId="operacional">
+                            <DashboardV2 />
                           </ProtectedRoute>
                         } />
                         <Route path="/design-preview" element={
