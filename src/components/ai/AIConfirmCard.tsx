@@ -2,17 +2,19 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Button } from '@/components/ui/button';
 import { Check, X, ShieldCheck } from 'lucide-react';
-import type { Proposal } from '@/hooks/use-ai-agent';
+import type { Proposal, ProposalStatus } from '@/hooks/use-ai-agent';
 
 export function AIConfirmCard({
   proposal,
   status,
+  resultMessage,
   onConfirm,
   onCancel,
   disabled,
 }: {
   proposal: Proposal;
-  status: 'pending' | 'confirmed' | 'cancelled' | 'executed';
+  status: ProposalStatus;
+  resultMessage?: string;
   onConfirm: () => void;
   onCancel: () => void;
   disabled?: boolean;
@@ -45,7 +47,19 @@ export function AIConfirmCard({
         </p>
       )}
       {status === 'executed' && (
-        <p className="text-xs text-green-600 dark:text-green-400 italic">✅ Ação executada com sucesso.</p>
+        <p className="text-xs text-green-600 dark:text-green-400 italic">
+          ✅ {resultMessage ? resultMessage : 'Ação executada com sucesso.'}
+        </p>
+      )}
+      {status === 'partial' && (
+        <div className="text-xs text-amber-600 dark:text-amber-400 italic whitespace-pre-line">
+          ⚠️ Sucesso parcial.{resultMessage ? `\n${resultMessage}` : ''}
+        </div>
+      )}
+      {status === 'failed' && (
+        <div className="text-xs text-red-600 dark:text-red-400 italic whitespace-pre-line">
+          ❌ Não foi possível executar.{resultMessage ? `\n${resultMessage}` : ''}
+        </div>
       )}
       {status === 'cancelled' && (
         <p className="text-xs text-muted-foreground italic">✕ Cancelado pelo usuário.</p>

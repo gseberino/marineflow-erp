@@ -257,6 +257,7 @@ export function AIAgentWidget() {
                   key={i}
                   proposal={item.proposal}
                   status={item.status}
+                  resultMessage={item.resultMessage}
                   onConfirm={confirmProposal}
                   onCancel={cancelProposal}
                   disabled={loading || !activeProposal}

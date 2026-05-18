@@ -22,8 +22,8 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON = Deno.env.get("SUPABASE_ANON_KEY")!;
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY")!;
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai";
-const MODEL_FAST = "gemini-3-flash";
-const MODEL_SMART = "gemini-3-flash";
+const MODEL_FAST = Deno.env.get("GEMINI_MODEL_FAST") || Deno.env.get("GEMINI_MODEL") || "gemini-2.5-flash";
+const MODEL_SMART = Deno.env.get("GEMINI_MODEL_SMART") || Deno.env.get("GEMINI_MODEL") || "gemini-2.5-flash";
 const MAX_ITERATIONS = 8;
 
 // ---------------- TOOL DEFINITIONS ----------------
@@ -386,7 +386,7 @@ const TOOLS = [
     type: "function",
     function: {
       name: "add_service_to_order",
-      description: "Adiciona um serviço de mão de obra a uma OS existente.",
+      description: "Adiciona UM ÚNICO serviço de mão de obra a uma OS. Para múltiplos serviços (listas, tabelas) use add_services_to_order.",
       parameters: {
         type: "object",
         properties: {
@@ -399,6 +399,39 @@ const TOOLS = [
           notes: { type: "string" },
         },
         required: ["service_order_id", "service_name", "unit_price"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "add_services_to_order",
+      description:
+        "Adiciona MÚLTIPLOS serviços de mão de obra a uma OS de uma única vez. Use para listas, tabelas markdown, textos colados de WhatsApp/Excel ou qualquer caso onde o usuário enviar mais de um par 'descrição + valor'. Cada item vira uma linha separada. Recalcula totais uma única vez no final.",
+      parameters: {
+        type: "object",
+        properties: {
+          service_order_id: { type: "string" },
+          services: {
+            type: "array",
+            description: "Array de serviços a adicionar (cada item = uma linha separada)",
+            items: {
+              type: "object",
+              properties: {
+                service_name: { type: "string", description: "Nome/descrição do serviço (preserve textos longos)" },
+                service_id: { type: "string", description: "ID do serviço cadastrado (opcional)" },
+                description: { type: "string", description: "Descrição adicional (opcional)" },
+                quantity: { type: "number", default: 1 },
+                unit_price: { type: "number" },
+                billing_unit: { type: "string", enum: ["hour", "visit", "day", "unit"] },
+                notes: { type: "string" },
+              },
+              required: ["service_name", "unit_price"],
+            },
+            minItems: 1,
+          },
+        },
+        required: ["service_order_id", "services"],
       },
     },
   },
@@ -634,6 +667,122 @@ const TOOLS = [
     },
   },
 ];
+
+// ---------------- HELPERS ----------------
+
+/**
+ * Recalcula totais da OS (labor_cost_total, parts_cost_total, labor_hours_total, grand_total)
+ * Replica EXATAMENTE a lógica do frontend em src/hooks/use-service-orders.ts:284-327
+ * para garantir paridade entre escrita manual e escrita via IA.
+ *
+ * IMPORTANTE: usa `sb` (cliente JWT do usuário). Se RLS bloquear, propaga o erro —
+ * NÃO faz fallback silencioso para service_role.
+ */
+async function recalcSoTotals(sb: any, soId: string): Promise<void> {
+  const [partsRes, servicesRes, teRes, soRes] = await Promise.all([
+    sb.from("service_order_parts").select("line_total_sale").eq("service_order_id", soId),
+    sb.from("service_order_services").select("line_total").eq("service_order_id", soId),
+    sb.from("time_entries").select("duration_minutes, billable").eq("service_order_id", soId),
+    sb
+      .from("service_orders")
+      .select(
+        "travel_cost_total, subcontract_cost_total, discount_amount, tax_amount, operational_cost_total"
+      )
+      .eq("id", soId)
+      .single(),
+  ]);
+
+  const parts = partsRes.data || [];
+  const serviceLines = servicesRes.data || [];
+  const te = teRes.data || [];
+  const so = soRes.data || {};
+
+  const partsCost = parts.reduce(
+    (s: number, p: any) => s + (Number(p.line_total_sale) || 0),
+    0
+  );
+  const laborCost = serviceLines.reduce(
+    (s: number, l: any) => s + (Number(l.line_total) || 0),
+    0
+  );
+  const billableMinutes = te
+    .filter((e: any) => e.billable)
+    .reduce((s: number, e: any) => s + (Number(e.duration_minutes) || 0), 0);
+  const laborHours = Math.round((billableMinutes / 60) * 100) / 100;
+
+  const grand =
+    laborCost +
+    partsCost +
+    (Number(so.travel_cost_total) || 0) +
+    (Number(so.operational_cost_total) || 0) +
+    (Number(so.subcontract_cost_total) || 0) -
+    (Number(so.discount_amount) || 0) +
+    (Number(so.tax_amount) || 0);
+
+  const { error } = await sb
+    .from("service_orders")
+    .update({
+      parts_cost_total: Math.round(partsCost * 100) / 100,
+      labor_hours_total: laborHours,
+      labor_cost_total: Math.round(laborCost * 100) / 100,
+      grand_total: Math.round(grand * 100) / 100,
+    })
+    .eq("id", soId);
+  if (error) throw error;
+}
+
+/**
+ * Insere uma linha em service_order_services com os mesmos campos e cálculo
+ * do fluxo manual (src/hooks/use-service-orders.ts:530-561).
+ * NÃO chama recalcSoTotals — o caller decide quando recalcular.
+ */
+async function addServiceOrderServiceLine(
+  sb: any,
+  params: {
+    service_order_id: string;
+    service_name: string;
+    service_id?: string | null;
+    description?: string | null;
+    quantity?: number;
+    unit_price: number;
+    billing_unit?: string;
+    notes?: string | null;
+  },
+  settings: Record<string, string>
+): Promise<{ id: string; data: any }> {
+  let svc: any = null;
+  if (params.service_id) {
+    const { data } = await sb
+      .from("services")
+      .select("service_name, billing_unit, default_price")
+      .eq("id", params.service_id)
+      .maybeSingle();
+    svc = data;
+  }
+
+  const qty = Number(params.quantity) || 1;
+  const defaultHourlyRate = Number(settings.default_hourly_rate) || 0;
+  const price = Number(params.unit_price) || Number(svc?.default_price) || defaultHourlyRate || 0;
+  const lineTotal = Math.round(qty * price * 100) / 100;
+
+  const { data, error } = await sb
+    .from("service_order_services")
+    .insert({
+      service_order_id: params.service_order_id,
+      service_id: params.service_id || null,
+      service_name_snapshot: params.service_name || svc?.service_name || "",
+      description_snapshot: params.description || null,
+      billing_unit_snapshot: params.billing_unit || svc?.billing_unit || "visit",
+      quantity: qty,
+      unit_price_snapshot: price,
+      line_total: lineTotal,
+      notes: params.notes || null,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return { id: data.id, data };
+}
 
 // ---------------- TOOL EXECUTORS ----------------
 async function executeTool(
@@ -1040,7 +1189,12 @@ async function executeTool(
         }
         if (partsRows.length) await sb.from("service_order_parts").insert(partsRows);
       }
-      await sb.rpc("recalc_so_totals", { so_id: data.id }).catch(() => null);
+      try {
+        await recalcSoTotals(sb, data.id);
+      } catch (recalcErr: any) {
+        console.error("[ai-agent] recalcSoTotals failed after create_service_order:", recalcErr?.message);
+        return { ok: false, error: `OS criada mas falha ao recalcular totais: ${recalcErr?.message || recalcErr}`, service_order: data };
+      }
       return { ok: true, service_order: data };
     }
 
@@ -1077,34 +1231,119 @@ async function executeTool(
         .select()
         .single();
       if (error) throw error;
-      await sb.rpc("recalc_so_totals", { so_id: args.service_order_id || args.id }).catch(() => null);
+      try {
+        await recalcSoTotals(sb, args.service_order_id);
+      } catch (recalcErr: any) {
+        console.error("[ai-agent] recalcSoTotals failed after add_service_order_item:", recalcErr?.message);
+        return { ok: false, error: `Item inserido mas falha ao recalcular totais: ${recalcErr?.message || recalcErr}`, part: data };
+      }
       return { ok: true, part: data };
     }
 
     case "add_service_to_order": {
-      const { data: svc } = args.service_id
-        ? await sb.from("services").select("service_name, billing_unit, default_price").eq("id", args.service_id).maybeSingle()
-        : { data: null };
-      const qty = Number(args.quantity) || 1;
-      const defaultHourlyRate = Number(settings.default_hourly_rate) || 0;
-      const price = Number(args.unit_price) || svc?.default_price || defaultHourlyRate || 0;
-      const { data, error } = await sb
-        .from("service_order_services")
-        .insert({
-          service_order_id: args.service_order_id,
-          service_id: args.service_id || null,
-          service_name_snapshot: args.service_name || svc?.service_name || "",
-          billing_unit_snapshot: args.billing_unit || svc?.billing_unit || "visit",
-          quantity: qty,
-          unit_price_snapshot: price,
-          line_total: qty * price,
-          notes: args.notes || null,
-        })
-        .select()
-        .single();
-      if (error) throw error;
-      await sb.rpc("recalc_so_totals", { so_id: args.service_order_id }).catch(() => null);
-      return { ok: true, service: data };
+      if (!args.service_order_id) return { ok: false, error: "service_order_id é obrigatório" };
+      if (!args.service_name) return { ok: false, error: "service_name é obrigatório" };
+      try {
+        const { data } = await addServiceOrderServiceLine(
+          sb,
+          {
+            service_order_id: args.service_order_id,
+            service_name: args.service_name,
+            service_id: args.service_id || null,
+            quantity: args.quantity,
+            unit_price: args.unit_price,
+            billing_unit: args.billing_unit,
+            notes: args.notes,
+          },
+          settings
+        );
+        try {
+          await recalcSoTotals(sb, args.service_order_id);
+        } catch (recalcErr: any) {
+          console.error("[ai-agent] recalcSoTotals failed after add_service_to_order:", recalcErr?.message);
+          return {
+            ok: false,
+            error: `Serviço inserido mas falha ao recalcular totais: ${recalcErr?.message || recalcErr}`,
+            service: data,
+          };
+        }
+        return { ok: true, service: data, created_count: 1, failed_count: 0 };
+      } catch (e: any) {
+        console.error("[ai-agent] add_service_to_order failed:", e?.message);
+        return { ok: false, error: e?.message || "Falha ao inserir serviço" };
+      }
+    }
+
+    case "add_services_to_order": {
+      if (!args.service_order_id) return { ok: false, error: "service_order_id é obrigatório" };
+      const items: any[] = Array.isArray(args.services) ? args.services : [];
+      if (items.length === 0) return { ok: false, error: "Array 'services' vazio ou ausente" };
+
+      const created: Array<{ id: string; service_name: string; line_total: number }> = [];
+      const failed: Array<{ index: number; service_name: string; error: string }> = [];
+      let totalAdded = 0;
+
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i] || {};
+        const name = String(it.service_name || "").trim();
+        if (!name) {
+          failed.push({ index: i, service_name: "(vazio)", error: "service_name vazio" });
+          continue;
+        }
+        if (it.unit_price === undefined || it.unit_price === null) {
+          failed.push({ index: i, service_name: name, error: "unit_price obrigatório" });
+          continue;
+        }
+        try {
+          const { id, data } = await addServiceOrderServiceLine(
+            sb,
+            {
+              service_order_id: args.service_order_id,
+              service_name: name,
+              service_id: it.service_id || null,
+              description: it.description || null,
+              quantity: it.quantity,
+              unit_price: it.unit_price,
+              billing_unit: it.billing_unit,
+              notes: it.notes,
+            },
+            settings
+          );
+          created.push({ id, service_name: name, line_total: Number(data.line_total) || 0 });
+          totalAdded += Number(data.line_total) || 0;
+        } catch (e: any) {
+          console.error(`[ai-agent] add_services_to_order item ${i} failed:`, e?.message);
+          failed.push({ index: i, service_name: name, error: e?.message || "Falha no insert" });
+        }
+      }
+
+      let recalcError: string | null = null;
+      if (created.length > 0) {
+        try {
+          await recalcSoTotals(sb, args.service_order_id);
+        } catch (recalcErr: any) {
+          console.error("[ai-agent] recalcSoTotals failed after add_services_to_order:", recalcErr?.message);
+          recalcError = recalcErr?.message || String(recalcErr);
+        }
+      }
+
+      const created_count = created.length;
+      const failed_count = failed.length;
+      const ok = failed_count === 0 && recalcError === null;
+      const result: any = {
+        ok,
+        created_count,
+        failed_count,
+        created,
+        failed,
+        total_added: Math.round(totalAdded * 100) / 100,
+      };
+      if (recalcError) {
+        result.error = `Linhas inseridas (${created_count}) mas recalcSoTotals falhou: ${recalcError}`;
+      } else if (failed_count > 0 && created_count === 0) {
+        result.error = `Nenhum serviço foi inserido. Falhas: ${failed.map((f) => f.service_name + ': ' + f.error).join('; ')}`;
+      }
+      return result;
     }
 
     case "schedule_service_order": {
@@ -1158,14 +1397,21 @@ async function executeTool(
     }
 
     case "apply_service_order_discount": {
+      const soId = args.id || args.service_order_id;
+      if (!soId) return { ok: false, error: "id (UUID da OS) é obrigatório" };
       const { data, error } = await sb
         .from("service_orders")
         .update({ discount_amount: args.discount_amount })
-        .eq("id", args.id)
+        .eq("id", soId)
         .select()
         .single();
       if (error) throw error;
-      await sb.rpc("recalc_so_totals", { so_id: args.service_order_id || args.id }).catch(() => null);
+      try {
+        await recalcSoTotals(sb, soId);
+      } catch (recalcErr: any) {
+        console.error("[ai-agent] recalcSoTotals failed after apply_service_order_discount:", recalcErr?.message);
+        return { ok: false, error: `Desconto aplicado mas falha ao recalcular totais: ${recalcErr?.message || recalcErr}`, service_order: data };
+      }
       return { ok: true, service_order: data };
     }
 
@@ -1558,9 +1804,38 @@ FLUXO COMPLETO — enviar orçamento/OS:
 FLUXO DE CRIAÇÃO DE ORÇAMENTO COMPLETO:
   1. propose_action mostrando tudo que será feito
   2. Após confirmação: create_service_order (salva o ID retornado)
-  3. Para cada serviço: add_service_to_order com o ID da OS criada
+  3. Para os serviços: SE houver mais de 1 → add_services_to_order (plural, array de uma vez). SE houver apenas 1 → add_service_to_order.
   4. Para cada produto: add_service_order_item com o ID da OS criada
   5. Confirmar ao usuário que tudo foi criado.
+
+INCLUSÃO DE MÚLTIPLOS SERVIÇOS EM UMA OS EXISTENTE (REGRA OBRIGATÓRIA):
+  - Quando o usuário enviar mais de um par "descrição + valor", trate cada par como um item SEPARADO, INDEPENDENTE do formato:
+      * tabela markdown com "|"
+      * lista com hífens, asteriscos, números, "1)", "•"
+      * texto colado de WhatsApp/Excel/Markdown
+      * linhas separadas por vírgula, ponto-e-vírgula, quebra de linha, traço ou qualquer separador imperfeito
+      * frases tipo "etapa X — R$ Y", "serviço A: 100", "troca de bomba 300", "fusível R$ 30"
+  - REGRA DE DETECÇÃO: se você identifica uma descrição de serviço seguida (na mesma linha OU em linha próxima) de um valor monetário em reais, é UM ITEM SEPARADO. NUNCA funda múltiplos pares em um único serviço.
+  - Para 2 ou mais itens: use add_services_to_order com um array completo. Para 1 único item explícito: use add_service_to_order.
+  - Antes de executar SEMPRE chame propose_action com:
+      * "Adicionar N serviços à OS"
+      * Lista numerada de todos os itens: "1. <nome> — R$ X,XX"
+      * Linha de total: "Total: R$ X.XXX,XX"
+      * Payload com o array completo de services
+  - Quantidade padrão: 1. Unidade padrão: "visit". Use "hour" apenas se o usuário mencionar horas explicitamente.
+  - Preserve nomes longos e descrições completas no campo service_name. Não trunque.
+
+EXEMPLO 1 — tabela markdown:
+  Usuário cola tabela com 9 linhas "Etapa | Valor estimado".
+  Você monta payload com services: [9 itens], cada item com service_name = texto da etapa e unit_price = valor em number.
+
+EXEMPLO 2 — texto livre:
+  Usuário diz: "adicione troca de fusível 30 reais; troca de bomba R$ 100; troca de bateria - 200"
+  Você monta services: [
+    { service_name: "troca de fusível", unit_price: 30 },
+    { service_name: "troca de bomba", unit_price: 100 },
+    { service_name: "troca de bateria", unit_price: 200 }
+  ]
 
 FLUXO DE ENVIO DE ORÇAMENTO/OS:
   1. Se não houver OS em contexto, busque com list_service_orders
