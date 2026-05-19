@@ -7,9 +7,12 @@ import { useI18n } from '@/i18n';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useRecordHistory } from '@/hooks/use-audit-log';
 import { Badge } from '@/components/ui/badge';
-import { History, Link2, Check } from 'lucide-react';
+import { History, Link2, Check, ClipboardCheck } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
+import { ServiceOrderInspectionTab } from '@/components/inspection/ServiceOrderInspectionTab';
+
+const ENABLE_INSPECTION_REPORT_PREVIEW = true;
 
 function TimelineTab({ id }: { id: string }) {
   const { data: history } = useRecordHistory('service_orders', id);
@@ -89,6 +92,18 @@ export default function ServiceOrderDetail() {
           {id && (
             <TimelineTab id={id} />
           )}
+          {id && ENABLE_INSPECTION_REPORT_PREVIEW && (
+            <TabsTrigger
+              value="inspection"
+              className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:shadow-none data-[state=active]:text-primary px-1 pb-2 h-10 bg-transparent flex items-center gap-1.5"
+            >
+              <ClipboardCheck className="h-3.5 w-3.5" />
+              Laudos / Inspeção
+              <Badge variant="secondary" className="h-4 px-1 text-[10px] leading-none">
+                Preview
+              </Badge>
+            </TabsTrigger>
+          )}
         </TabsList>
         {order?.share_token && (
           <button
@@ -119,6 +134,12 @@ export default function ServiceOrderDetail() {
           <ServiceOrderTimeline orderId={id} />
         </div>
       </TabsContent>
+
+      {ENABLE_INSPECTION_REPORT_PREVIEW && (
+        <TabsContent value="inspection" className="mt-0 p-4 lg:p-6">
+          <ServiceOrderInspectionTab order={order} />
+        </TabsContent>
+      )}
     </Tabs>
   );
 }
