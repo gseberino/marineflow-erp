@@ -191,12 +191,12 @@ const TOOLS = [
     type: "function",
     function: {
       name: "get_technician_commissions",
-      description: "Calcula ou lista as comissões de um técnico.",
+      description: "Calcula ou lista as comissões de um técnico. O campo technician_id refere-se ao id do app_users (mesma coluna usada em list_technicians).",
       parameters: {
         type: "object",
         properties: {
-          technician_id: { type: "string" },
-          status: { type: "string", enum: ["pending", "paid"] },
+          technician_id: { type: "string", description: "UUID do técnico (app_users.id)." },
+          status: { type: "string", enum: ["pending", "paid", "cancelled"] },
         },
       },
     },
@@ -217,13 +217,13 @@ const TOOLS = [
     type: "function",
     function: {
       name: "adjust_inventory",
-      description: "Realiza um ajuste manual no estoque de um produto.",
+      description: "AÇÃO CRÍTICA — ajuste manual de estoque com privilégio elevado (service_role, bypassa RLS). Define a quantidade absoluta do produto e registra um inventory_movement do tipo 'manual_adjustment'. OBRIGATÓRIO chamar propose_action ANTES com summary_markdown explicitando: produto, quantidade ANTES, quantidade DEPOIS, delta (diferença) e razão detalhada. NUNCA executar sem confirmação humana explícita.",
       parameters: {
         type: "object",
         properties: {
-          product_id: { type: "string" },
-          new_quantity: { type: "number" },
-          reason: { type: "string" },
+          product_id: { type: "string", description: "UUID do produto (products.id)." },
+          new_quantity: { type: "number", description: "Nova quantidade ABSOLUTA (não é delta). O movement_delta é calculado automaticamente como new_quantity - stock_atual." },
+          reason: { type: "string", description: "Razão detalhada do ajuste — será registrada em inventory_movements.notes para auditoria." },
         },
         required: ["product_id", "new_quantity", "reason"],
       },
@@ -359,7 +359,8 @@ const TOOLS = [
           id: { type: "string" },
           status: {
             type: "string",
-            enum: ["draft", "approved", "scheduled", "in_progress", "completed", "cancelled", "invoiced"],
+            // Alinhado ao CHECK constraint service_orders_status_check.
+            enum: ["draft", "open", "scheduled", "in_progress", "awaiting_parts", "awaiting_client", "approved", "completed", "invoiced", "cancelled"],
           },
         },
         required: ["id", "status"],
@@ -370,7 +371,23 @@ const TOOLS = [
     type: "function",
     function: {
       name: "add_service_order_item",
-      description: "Adiciona um produto a uma OS.",
+      description: "[DEPRECATED — prefira add_product_to_order] Adiciona um PRODUTO/PEÇA (estoque) a uma OS. NÃO use para serviços de mão de obra — para isso, use add_service_to_order ou add_services_to_order.",
+      parameters: {
+        type: "object",
+        properties: {
+          service_order_id: { type: "string" },
+          product_id: { type: "string" },
+          quantity: { type: "number" },
+        },
+        required: ["service_order_id", "product_id", "quantity"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "add_product_to_order",
+      description: "Adiciona um PRODUTO/PEÇA do catálogo (tabela products) a uma Ordem de Serviço. Use SEMPRE que o usuário pedir para incluir uma peça, equipamento, item físico ou produto cadastrado. NÃO use para serviços de mão de obra (instalação, reparo, diagnóstico) — para esses, use add_service_to_order (1 item) ou add_services_to_order (vários).",
       parameters: {
         type: "object",
         properties: {
@@ -671,6 +688,52 @@ const TOOLS = [
 // ---------------- HELPERS ----------------
 
 /**
+ * Whitelist + alias normalizer para payloads de create_*.
+ * Evita que o modelo envie chaves inexistentes ao schema (que causam erro genérico do PostgREST).
+ * - `allowed`: lista exata de colunas aceitas na tabela alvo.
+ * - `aliases`: mapeia chaves comuns que o modelo costuma inferir (ex: "name") para a chave real ("full_name_or_company_name").
+ * Valores vazios (undefined/null/"") são removidos. Retorna também as chaves descartadas, para que a tool possa avisar.
+ */
+function pickAllowed(
+  args: Record<string, any> | null | undefined,
+  allowed: string[],
+  aliases: Record<string, string> = {}
+): { payload: Record<string, any>; dropped: string[] } {
+  const payload: Record<string, any> = {};
+  const dropped: string[] = [];
+  for (const [rawKey, rawVal] of Object.entries(args || {})) {
+    if (rawVal === undefined || rawVal === null || rawVal === "") continue;
+    const targetKey = aliases[rawKey] ?? rawKey;
+    if (allowed.includes(targetKey)) {
+      // Se o alias colide com um valor já presente pela chave real, mantém o real (não sobrescreve).
+      if (payload[targetKey] === undefined) payload[targetKey] = rawVal;
+    } else {
+      dropped.push(rawKey);
+    }
+  }
+  return { payload, dropped };
+}
+
+/**
+ * Gera próximo po_number sequencial no formato PO-YYYY-NNNN.
+ * Replica EXATAMENTE generatePONumber() do hook real (src/hooks/use-purchase-orders.ts:50-63).
+ */
+async function generatePONumber(sb: any): Promise<string> {
+  const year = new Date().getFullYear();
+  const { data } = await sb
+    .from("purchase_orders")
+    .select("po_number")
+    .order("created_at", { ascending: false })
+    .limit(1);
+  let seq = 1;
+  if (data?.[0]?.po_number) {
+    const match = String(data[0].po_number).match(/(\d+)$/);
+    if (match) seq = parseInt(match[1], 10) + 1;
+  }
+  return `PO-${year}-${String(seq).padStart(4, "0")}`;
+}
+
+/**
  * Recalcula totais da OS (labor_cost_total, parts_cost_total, labor_hours_total, grand_total)
  * Replica EXATAMENTE a lógica do frontend em src/hooks/use-service-orders.ts:284-327
  * para garantir paridade entre escrita manual e escrita via IA.
@@ -866,14 +929,23 @@ async function executeTool(
         .order("created_at", { ascending: false })
         .limit(Math.min(Number(args.limit) || 20, 50));
       if (args.status) {
+        // Mapa alinhado ao CHECK constraint real:
+        // service_orders_status_check IN
+        //   ('draft','scheduled','open','in_progress','awaiting_parts','awaiting_client',
+        //    'approved','completed','invoiced','cancelled')
         const STATUS_PT_EN: Record<string, string> = {
-          "rascunho": "draft", "pendente": "pending", "aprovado": "approved",
-          "agendado": "scheduled", "em andamento": "in_progress", "em execução": "in_progress",
-          "concluído": "completed", "concluido": "completed",
-          "cancelado": "cancelled", "faturado": "invoiced",
-          "aguardando peças": "waiting_parts", "aguardando aprovação": "waiting_approval", "reaberto": "reopened",
+          "rascunho": "draft", "draft": "draft",
+          "aberta": "open", "aberto": "open", "em aberto": "open", "open": "open",
+          "agendada": "scheduled", "agendado": "scheduled", "scheduled": "scheduled",
+          "em andamento": "in_progress", "em execução": "in_progress", "em execucao": "in_progress", "in_progress": "in_progress",
+          "aguardando peças": "awaiting_parts", "aguardando pecas": "awaiting_parts", "awaiting_parts": "awaiting_parts",
+          "aguardando cliente": "awaiting_client", "aguardando aprovação": "awaiting_client", "aguardando aprovacao": "awaiting_client", "awaiting_client": "awaiting_client",
+          "aprovada": "approved", "aprovado": "approved", "approved": "approved",
+          "concluída": "completed", "concluida": "completed", "concluído": "completed", "concluido": "completed", "completed": "completed",
+          "faturada": "invoiced", "faturado": "invoiced", "invoiced": "invoiced",
+          "cancelada": "cancelled", "cancelado": "cancelled", "cancelled": "cancelled",
         };
-        const mappedStatus = STATUS_PT_EN[args.status.toLowerCase()] ?? args.status;
+        const mappedStatus = STATUS_PT_EN[args.status.toLowerCase().trim()] ?? args.status;
         query = query.eq("status", mappedStatus);
       }
       if (args.client_id) query = query.eq("client_id", args.client_id);
@@ -950,10 +1022,12 @@ async function executeTool(
     }
 
     case "list_pending_collections": {
+      // CHECK constraint real: ['pending','sent','viewed','paid','overdue','disputed','cancelled'].
+      // 'scheduled' não existe. "Pendente operacionalmente" = ainda não paga e não cancelada.
       let query = sb
         .from("collections")
         .select("id, client_id, due_date, amount, status, contact_name, contact_whatsapp, description")
-        .in("status", ["pending", "overdue", "scheduled"])
+        .in("status", ["pending", "sent", "viewed", "overdue", "disputed"])
         .order("due_date", { ascending: true })
         .limit(50);
       if (args.client_id) query = query.eq("client_id", args.client_id);
@@ -1054,8 +1128,9 @@ async function executeTool(
     }
 
     case "get_technician_commissions": {
+      // Schema real: commissions.user_id (FK -> app_users.id). NÃO existe `technician_user_id`.
       let query = admin.from("commissions").select("*, service_orders(service_order_number)");
-      if (args.technician_id) query = query.eq("technician_user_id", args.technician_id);
+      if (args.technician_id) query = query.eq("user_id", args.technician_id);
       if (args.status) query = query.eq("status", args.status);
       const { data, error } = await query;
       if (error) throw error;
@@ -1209,6 +1284,7 @@ async function executeTool(
       return { ok: true, service_order: data };
     }
 
+    case "add_product_to_order":
     case "add_service_order_item": {
       const { data: prod } = await sb
         .from("products")
@@ -1347,6 +1423,29 @@ async function executeTool(
     }
 
     case "schedule_service_order": {
+      // Schema real: service_order_technicians (service_order_id uuid, user_id uuid)
+      // PK: (service_order_id, user_id). FK user_id -> app_users(id).
+      // 1) Validar técnico em app_users ANTES de qualquer escrita.
+      if (args.technician_user_id) {
+        const { data: tech } = await sb
+          .from("app_users")
+          .select("id, full_name, active")
+          .eq("id", args.technician_user_id)
+          .maybeSingle();
+        if (!tech) {
+          return {
+            ok: false,
+            error: `Técnico ${args.technician_user_id} não encontrado em app_users. Use list_technicians para obter um ID válido.`,
+          };
+        }
+        if (tech.active === false) {
+          return {
+            ok: false,
+            error: `Técnico ${tech.full_name || args.technician_user_id} está inativo. Escolha outro técnico ativo via list_technicians.`,
+          };
+        }
+      }
+
       const update: any = { scheduled_start_at: args.scheduled_start_at };
       if (args.scheduled_end_at) update.scheduled_end_at = args.scheduled_end_at;
       if (args.technician_user_id) update.status = "scheduled";
@@ -1357,10 +1456,23 @@ async function executeTool(
         .select()
         .single();
       if (error) throw error;
+
       if (args.technician_user_id) {
-        await sb.from("service_order_technicians")
-          .upsert({ service_order_id: args.service_order_id, technician_user_id: args.technician_user_id }, { onConflict: "service_order_id,technician_user_id" })
-          .catch(() => null);
+        // Coluna real é `user_id` (NÃO `technician_user_id`). Espelha o fluxo manual do app.
+        // Erro NÃO é silenciado — propaga ao chamador como sucesso parcial.
+        const { error: techErr } = await sb
+          .from("service_order_technicians")
+          .upsert(
+            { service_order_id: args.service_order_id, user_id: args.technician_user_id },
+            { onConflict: "service_order_id,user_id" }
+          );
+        if (techErr) {
+          return {
+            ok: false,
+            error: `OS agendada mas falha ao vincular técnico: ${techErr.message}`,
+            service_order: data,
+          };
+        }
       }
       return { ok: true, service_order: data };
     }
@@ -1416,37 +1528,150 @@ async function executeTool(
     }
 
     case "create_client": {
-      const { data, error } = await sb.from("clients").insert(args).select().single();
-      if (error) throw error;
-      return { ok: true, client: data };
+      // Whitelist alinhada ao schema real (public.clients).
+      const allowed = [
+        "type", "full_name_or_company_name", "cpf_cnpj", "phone", "whatsapp", "email",
+        "address_line_1", "address_line_2", "city", "state", "postal_code", "country",
+        "notes", "active",
+      ];
+      const aliases: Record<string, string> = {
+        name: "full_name_or_company_name",
+        full_name: "full_name_or_company_name",
+        company_name: "full_name_or_company_name",
+        nome: "full_name_or_company_name",
+        razao_social: "full_name_or_company_name",
+        cpf: "cpf_cnpj",
+        cnpj: "cpf_cnpj",
+        address: "address_line_1",
+        endereco: "address_line_1",
+        cidade: "city",
+        estado: "state",
+        cep: "postal_code",
+        observacoes: "notes",
+      };
+      const { payload, dropped } = pickAllowed(args, allowed, aliases);
+      // Normaliza `type` (CHECK constraint: 'individual' | 'company').
+      const typeMap: Record<string, string> = {
+        pf: "individual", pessoa_fisica: "individual", fisica: "individual",
+        física: "individual", individual: "individual", individuo: "individual",
+        pj: "company", pessoa_juridica: "company", juridica: "company",
+        jurídica: "company", company: "company", empresa: "company",
+      };
+      if (payload.type) {
+        const mapped = typeMap[String(payload.type).toLowerCase().trim()];
+        if (mapped) payload.type = mapped;
+      }
+      if (!payload.full_name_or_company_name) {
+        return { ok: false, error: "Campo obrigatório ausente: full_name_or_company_name (ou alias: name, nome, company_name, razao_social)." };
+      }
+      if (!payload.type || !["individual", "company"].includes(payload.type)) {
+        return { ok: false, error: "Campo obrigatório ausente/inválido: type. Valores aceitos: 'individual' ou 'company'." };
+      }
+      const { data, error } = await sb.from("clients").insert(payload).select().single();
+      if (error) return { ok: false, error: error.message };
+      return { ok: true, client: data, ignored_fields: dropped.length ? dropped : undefined };
     }
 
     case "create_vessel": {
-      const { data, error } = await sb.from("vessels").insert(args).select().single();
-      if (error) throw error;
-      return { ok: true, vessel: data };
+      // Whitelist alinhada ao schema real (public.vessels).
+      const allowed = [
+        "client_id", "marina_id", "boat_name", "manufacturer", "model", "year",
+        "hull_id_or_registration", "length_feet", "beam_feet", "draft_feet",
+        "engine_type", "engine_brand", "engine_model", "engine_quantity",
+        "propulsion_type", "shore_power_type", "battery_bank_summary",
+        "inverter_charger_summary", "navigation_electronics_summary",
+        "electrical_system_notes", "current_marina_name_snapshot",
+        "current_dock_position", "active", "asset_type",
+      ];
+      const aliases: Record<string, string> = {
+        name: "boat_name",
+        vessel_name: "boat_name",
+        nome: "boat_name",
+        brand: "manufacturer",
+        fabricante: "manufacturer",
+        ano: "year",
+        marina: "marina_id",
+        tipo: "asset_type",
+        type: "asset_type",
+      };
+      const { payload, dropped } = pickAllowed(args, allowed, aliases);
+      if (!payload.client_id) return { ok: false, error: "Campo obrigatório ausente: client_id." };
+      if (!payload.boat_name) return { ok: false, error: "Campo obrigatório ausente: boat_name (ou alias: name, vessel_name, nome)." };
+      if (!payload.asset_type) return { ok: false, error: "Campo obrigatório ausente: asset_type. Exemplos: 'Lancha', 'Veleiro', 'Catamarã', 'Motorhome', 'Camper', 'Trailer', 'Jet Ski'." };
+      const { data, error } = await sb.from("vessels").insert(payload).select().single();
+      if (error) return { ok: false, error: error.message };
+      return { ok: true, vessel: data, ignored_fields: dropped.length ? dropped : undefined };
     }
 
     case "create_product": {
-      const { data, error } = await sb.from("products").insert(args).select().single();
-      if (error) throw error;
-      return { ok: true, product: data };
+      // Whitelist alinhada ao schema real (public.products).
+      const allowed = [
+        "sku", "product_name", "category", "brand", "unit",
+        "cost_price", "sale_price", "cost_currency", "sale_currency",
+        "stock_quantity", "minimum_stock", "location_bin", "barcode", "notes", "active",
+        "ncm", "csosn", "fiscal_origin", "icms_rate", "ipi_rate", "pis_rate", "cofins_rate",
+        "commission_rate", "profit_margin", "use_global_fiscal", "product_category_id",
+        "is_commissionable", "image_url", "fiscal_complete", "default_warranty_days",
+        "supplier_id",
+      ];
+      const aliases: Record<string, string> = {
+        name: "product_name",
+        nome: "product_name",
+        marca: "brand",
+        price: "sale_price",
+        preco: "sale_price",
+        cost: "cost_price",
+        custo: "cost_price",
+        stock: "stock_quantity",
+        estoque: "stock_quantity",
+        unidade: "unit",
+        categoria: "category",
+      };
+      const { payload, dropped } = pickAllowed(args, allowed, aliases);
+      if (!payload.product_name) return { ok: false, error: "Campo obrigatório ausente: product_name (ou alias: name, nome)." };
+      const { data, error } = await sb.from("products").insert(payload).select().single();
+      if (error) return { ok: false, error: error.message };
+      return { ok: true, product: data, ignored_fields: dropped.length ? dropped : undefined };
     }
 
     case "create_purchase_order": {
-      const { supplier_id, service_order_id, items, ...rest } = args;
-      const { data: po, error } = await sb.from("purchase_orders").insert({
-        ...rest,
-        supplier_id,
-        service_order_id,
-        status: rest.status || "draft",
-        created_by: userId
-      }).select().single();
-      if (error) throw error;
+      // Schema: purchase_orders.po_number TEXT NOT NULL UNIQUE — precisa ser gerado
+      // (espelha src/hooks/use-purchase-orders.ts:generatePONumber).
+      const { items, ...rest } = args;
+      const poNumber = await generatePONumber(sb);
+      // purchase_orders.created_by é TEXT DEFAULT 'sistema' — passamos userId (UUID em texto),
+      // mantém comportamento atual da tool.
+      const poAllowed = [
+        "po_number", "status", "supplier_id", "service_order_id",
+        "expected_date", "received_date", "notes", "total_amount", "created_by",
+      ];
+      const { payload: poPayload } = pickAllowed(
+        { ...rest, po_number: poNumber, status: rest.status || "draft", created_by: userId },
+        poAllowed
+      );
+      const { data: po, error } = await sb
+        .from("purchase_orders")
+        .insert(poPayload)
+        .select()
+        .single();
+      if (error) {
+        return { ok: false, error: `Falha ao criar purchase_order: ${error.message}` };
+      }
       if (Array.isArray(items) && items.length > 0) {
-        await sb.from("purchase_order_items").insert(
-          items.map((it: any) => ({ ...it, purchase_order_id: po.id }))
-        );
+        // Whitelist por item — schema: product_id, description, quantity, unit_cost, received_qty.
+        const itemAllowed = ["product_id", "description", "quantity", "unit_cost", "received_qty"];
+        const itemsPayload = items.map((it: any) => {
+          const { payload } = pickAllowed(it, itemAllowed);
+          return { ...payload, purchase_order_id: po.id };
+        });
+        const { error: itemsErr } = await sb.from("purchase_order_items").insert(itemsPayload);
+        if (itemsErr) {
+          return {
+            ok: false,
+            error: `Purchase order criada (${poNumber}) mas falha ao inserir itens: ${itemsErr.message}`,
+            purchase_order: po,
+          };
+        }
       }
       return { ok: true, purchase_order: po };
     }
@@ -1804,9 +2029,23 @@ FLUXO COMPLETO — enviar orçamento/OS:
 FLUXO DE CRIAÇÃO DE ORÇAMENTO COMPLETO:
   1. propose_action mostrando tudo que será feito
   2. Após confirmação: create_service_order (salva o ID retornado)
-  3. Para os serviços: SE houver mais de 1 → add_services_to_order (plural, array de uma vez). SE houver apenas 1 → add_service_to_order.
-  4. Para cada produto: add_service_order_item com o ID da OS criada
+  3. Para os SERVIÇOS de mão de obra (instalação, reparo, diagnóstico, mão de obra em geral):
+     SE houver mais de 1 → add_services_to_order (plural, array de uma vez).
+     SE houver apenas 1 → add_service_to_order.
+  4. Para cada PRODUTO/PEÇA do catálogo (item físico, equipamento, peça de reposição):
+     use add_product_to_order com o ID da OS criada.
+     (A tool antiga add_service_order_item ainda funciona como alias, mas prefira add_product_to_order — o nome é mais claro.)
   5. Confirmar ao usuário que tudo foi criado.
+
+DISTINÇÃO PRODUTO vs. SERVIÇO — REGRA OBRIGATÓRIA:
+  - PRODUTO/PEÇA = item físico do catálogo products (tem SKU, sale_price, stock_quantity). Ex: "bateria 100Ah", "fusível 30A", "cabo elétrico 25m". → add_product_to_order.
+  - SERVIÇO = mão de obra cobrada (horas/visitas/diárias). Ex: "troca de bateria", "diagnóstico elétrico", "instalação de painel". → add_service_to_order / add_services_to_order.
+  - NUNCA use add_product_to_order para mão de obra; NUNCA use add_service_to_order para peça do catálogo.
+
+AÇÕES CRÍTICAS — adjust_inventory:
+  - É ajuste manual de estoque com privilégio elevado (bypassa RLS).
+  - SEMPRE chamar propose_action ANTES, com summary_markdown contendo: produto (nome + SKU), quantidade ANTES, quantidade DEPOIS, delta, razão detalhada.
+  - Recuse se a razão for vaga ("ajuste", "correção"). Peça detalhe específico (perda, quebra, inventário físico, divergência, etc.).
 
 INCLUSÃO DE MÚLTIPLOS SERVIÇOS EM UMA OS EXISTENTE (REGRA OBRIGATÓRIA):
   - Quando o usuário enviar mais de um par "descrição + valor", trate cada par como um item SEPARADO, INDEPENDENTE do formato:
@@ -1856,7 +2095,7 @@ QUALIDADE DAS RESPOSTAS:
 - NUNCA exiba IDs técnicos (UUIDs) ao usuário.
 - Datas: formato "28 de abril de 2026 às 09:00".
 - Valores: formato "R$ 1.500,00".
-- Status: draft=Rascunho, pending=Pendente, approved=Aprovado, scheduled=Agendado, in_progress=Em andamento, completed=Concluído, cancelled=Cancelado, invoiced=Faturado.
+- Status válidos de Ordem de Serviço (CHECK constraint do banco): draft=Rascunho, open=Aberta, scheduled=Agendada, in_progress=Em andamento, awaiting_parts=Aguardando peças, awaiting_client=Aguardando cliente, approved=Aprovada, completed=Concluída, invoiced=Faturada, cancelled=Cancelada. NUNCA use "pending", "waiting_parts", "waiting_approval", "reopened" — esses NÃO existem no schema.
 - Use listas markdown para múltiplos itens.
 - Respostas concisas e objetivas.
 CONFIGURAÇÕES DA EMPRESA (use sempre que relevante para calcular preços, sugerir valores ou criar registros):
