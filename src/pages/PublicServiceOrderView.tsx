@@ -158,6 +158,57 @@ export default function PublicServiceOrderView() {
     ].filter(Boolean).join('\n\n');
   }, [data]);
 
+  // Fonte única dos serviços/peças usada simultaneamente em UI, PDF e hash.
+  // Coluna canônica do banco é service_name_snapshot; o fallback para
+  // name_snapshot cobre apenas dados retornados com aliases antigos.
+  const normalizedServices = useMemo(() => {
+    if (!data) return [] as Array<{
+      id: string;
+      name: string;
+      description: string | null;
+      billingUnit: string;
+      quantity: number;
+      unitPrice: number;
+      lineTotal: number;
+    }>;
+    return (data.services || []).map((s: any) => {
+      const rawName = s?.service_name_snapshot ?? s?.name_snapshot ?? s?.services?.name;
+      const name = String(rawName ?? '').trim() || 'Serviço sem descrição';
+      return {
+        id: String(s?.id ?? ''),
+        name,
+        description: s?.description_snapshot ?? s?.service_description_snapshot ?? null,
+        billingUnit: s?.billing_unit_snapshot || 'unit',
+        quantity: Number(s?.quantity ?? 1),
+        unitPrice: Number(s?.unit_price_snapshot ?? 0),
+        lineTotal: Number(s?.line_total ?? 0),
+      };
+    });
+  }, [data]);
+
+  const normalizedParts = useMemo(() => {
+    if (!data) return [] as Array<{
+      id: string;
+      name: string;
+      sku: string | null;
+      quantity: number;
+      unitPrice: number;
+      lineTotal: number;
+    }>;
+    return (data.parts || []).map((p: any) => {
+      const rawName = p?.products?.name ?? p?.products?.product_name ?? p?.name_snapshot;
+      const name = String(rawName ?? '').trim() || 'Peça sem descrição';
+      return {
+        id: String(p?.id ?? ''),
+        name,
+        sku: p?.products?.sku ?? null,
+        quantity: Number(p?.quantity ?? 1),
+        unitPrice: Number(p?.unit_sale_snapshot ?? 0),
+        lineTotal: Number(p?.line_total_sale ?? 0),
+      };
+    });
+  }, [data]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-muted/30">
@@ -183,7 +234,7 @@ export default function PublicServiceOrderView() {
     );
   }
 
-  const { order, client, vessel, parts, services, company, signature } = data;
+  const { order, client, vessel, company, signature } = data;
 
   // Toggles de exibição (settings)
   const show = {
@@ -257,20 +308,20 @@ export default function PublicServiceOrderView() {
         year: vessel.year ?? undefined,
         registration: vessel.hull_id_or_registration ?? undefined,
       } : undefined,
-      services: services.map((s: any) => ({
-        name: s.name_snapshot || '—',
-        description: s.description_snapshot ?? undefined,
-        billing_unit: s.billing_unit_snapshot || 'unit',
+      services: normalizedServices.map((s) => ({
+        name: s.name,
+        description: s.description ?? undefined,
+        billing_unit: s.billingUnit,
         quantity: s.quantity || 1,
-        unit_price: s.unit_price_snapshot || 0,
-        line_total: s.line_total || 0,
+        unit_price: s.unitPrice,
+        line_total: s.lineTotal,
       })),
-      parts: parts.map((p: any) => ({
-        name: p.products?.name || '—',
-        sku: p.products?.sku ?? undefined,
+      parts: normalizedParts.map((p) => ({
+        name: p.name,
+        sku: p.sku ?? undefined,
         quantity: p.quantity || 1,
-        unit_price: p.unit_sale_snapshot || 0,
-        line_total: p.line_total_sale || 0,
+        unit_price: p.unitPrice,
+        line_total: p.lineTotal,
       })),
       terms: termsText || undefined,
     };
@@ -302,17 +353,17 @@ export default function PublicServiceOrderView() {
     try {
       const hash = await computeDocumentHash(
         order,
-        services.map((s: any) => ({
-          name: s.name_snapshot,
+        normalizedServices.map((s) => ({
+          name: s.name,
           qty: s.quantity,
-          unit_price: s.unit_price_snapshot,
-          line_total: s.line_total,
+          unit_price: s.unitPrice,
+          line_total: s.lineTotal,
         })),
-        parts.map((p: any) => ({
-          name: p.products?.name || '',
+        normalizedParts.map((p) => ({
+          name: p.name,
           qty: p.quantity,
-          unit_price: p.unit_sale_snapshot,
-          line_total: p.line_total_sale,
+          unit_price: p.unitPrice,
+          line_total: p.lineTotal,
         })),
         termsText,
       );
@@ -520,7 +571,7 @@ export default function PublicServiceOrderView() {
         </div>
 
         {/* Services */}
-        {services.length > 0 && (
+        {normalizedServices.length > 0 && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg">
@@ -530,21 +581,21 @@ export default function PublicServiceOrderView() {
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
-                {services.map((s) => (
+                {normalizedServices.map((s) => (
                   <div key={s.id} className="flex justify-between gap-4 text-sm py-2 border-b last:border-0">
                     <div className="flex-1">
-                      <p className="font-medium">{s.name_snapshot}</p>
-                      {s.description_snapshot && (
-                        <p className="text-xs text-muted-foreground">{s.description_snapshot}</p>
+                      <p className="font-medium">{s.name}</p>
+                      {s.description && (
+                        <p className="text-xs text-muted-foreground">{s.description}</p>
                       )}
                       {show.servicePrices && (
                         <p className="text-xs text-muted-foreground">
-                          {s.quantity} × {fmtCurrency(s.unit_price_snapshot)}
+                          {s.quantity} × {fmtCurrency(s.unitPrice)}
                         </p>
                       )}
                     </div>
                     {show.servicePrices && (
-                      <p className="font-medium tabular-nums">{fmtCurrency(s.line_total)}</p>
+                      <p className="font-medium tabular-nums">{fmtCurrency(s.lineTotal)}</p>
                     )}
                   </div>
                 ))}
@@ -554,7 +605,7 @@ export default function PublicServiceOrderView() {
         )}
 
         {/* Parts */}
-        {parts.length > 0 && (
+        {normalizedParts.length > 0 && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg">
@@ -564,21 +615,21 @@ export default function PublicServiceOrderView() {
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
-                {parts.map((p) => (
+                {normalizedParts.map((p) => (
                   <div key={p.id} className="flex justify-between gap-4 text-sm py-2 border-b last:border-0">
                     <div className="flex-1">
-                      <p className="font-medium">{p.products?.name || '—'}</p>
-                      {p.products?.sku && (
-                        <p className="text-xs text-muted-foreground">SKU: {p.products.sku}</p>
+                      <p className="font-medium">{p.name}</p>
+                      {p.sku && (
+                        <p className="text-xs text-muted-foreground">SKU: {p.sku}</p>
                       )}
                       {show.partsPrices && (
                         <p className="text-xs text-muted-foreground">
-                          {p.quantity} × {fmtCurrency(p.unit_sale_snapshot)}
+                          {p.quantity} × {fmtCurrency(p.unitPrice)}
                         </p>
                       )}
                     </div>
                     {show.partsPrices && (
-                      <p className="font-medium tabular-nums">{fmtCurrency(p.line_total_sale)}</p>
+                      <p className="font-medium tabular-nums">{fmtCurrency(p.lineTotal)}</p>
                     )}
                   </div>
                 ))}
