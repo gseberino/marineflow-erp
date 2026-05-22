@@ -20,21 +20,69 @@
 | 5.8 | Modelo hardcoded | ✅ Configurável | `AI_OPERATOR_MODEL` (env) com default `gemini-3-flash` (mesmo do legacy). |
 | 5.9 | RLS ampla demais | ✅ Corrigido | policies granulares — apenas SELECT por authenticated; nenhuma INSERT/UPDATE policy para `authenticated` em sessões/mensagens/drafts/items/pending/audit/memory/channel_events. Toda gravação passa pelo backend com service_role + validações explícitas. |
 
-## Matriz de autorização (`ai_op_can_approve`)
+## Matriz de aprovação — Macro Ciclo 1 RESTRITIVA
 
-| Action | admin | technician | financial | seller | external_seller | other |
+> Esta é a política para a **primeira homologação**. A delegação ampla
+> (seller para OS, financial para estoque, technician para agenda) foi
+> intencionalmente removida até existir executor real para cada classe
+> de ação. Macro ciclo seguinte reabrirá com atribuição formal.
+
+### approve (`ai_op_can_approve`)
+
+| Action class | admin | technician | financial | seller | external_seller | other |
 | --- | :-: | :-: | :-: | :-: | :-: | :-: |
-| send_whatsapp_message / send_collection_reminder / send_service_order_link | ✓ | – | – | – | – | – |
-| schedule_whatsapp_message / cancel_scheduled_whatsapp | ✓ | – | – | – | – | – |
-| adjust_inventory / create_purchase_order | ✓ | – | ✓ | – | – | – |
-| create_agenda_task / update_agenda_task / schedule_service_order | ✓ | ✓ | – | – | – | – |
-| create_service_order / update_service_order_status / add_service_order_item / add_service_to_order / apply_service_order_discount / convert_draft_to_service_order | ✓ | – | – | ✓ | – | – |
-| create_client / create_vessel / create_product | ✓ | – | ✓ | ✓ | – | – |
+| Qualquer ação operacional (WhatsApp, OS, agenda, estoque, compras, cadastros, conversão de rascunho, ações desconhecidas) | ✓ | – | – | – | – | – |
 | verify_memory_note / reject_memory_note | ✓ | ✓ | – | – | – | – |
-| (ações desconhecidas) | ✓ | – | – | – | – | – |
-| usuário inativo | – | – | – | – | – | – |
+| Usuário inativo (qualquer papel) | – | – | – | – | – | – |
 
-**`external_seller` nunca aprova nada do operator.** Fail-closed para qualquer combinação não listada.
+### reject (`ai_op_can_reject`)
+
+| Cenário | admin | technician | financial | seller | external_seller | other | solicitante |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
+| Ação operacional (qualquer) | ✓ | – | – | – | – | – | ✓ |
+| verify/reject de memória técnica | ✓ | ✓ | – | – | – | – | n/a (governança) |
+| Usuário inativo | – | – | – | – | – | – | – |
+
+Toda decisão (positiva ou negativa) é registrada em `ai_operator_audit`.
+Tentativas negadas usam `event_type='action_approve_denied'` ou
+`'action_reject_denied'` com `event_category='security'`.
+
+## Governança de leitura de memória técnica
+
+| `verification_status` | admin | technician | financial | seller | other | external_seller | created_by |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
+| `verified` | ✓ | ✓ | ✓ | ✓ | ✓ | – | – |
+| `candidate` | ✓ | ✓ | – | – | – | – | ✓ |
+| `rejected` | ✓ | ✓ | – | – | – | – | ✓ |
+
+`external_seller` nunca recebe candidatos/rejeitados nem mesmo notas verificadas (papel externo, fora do escopo operacional interno).
+
+## Validação de referências do ERP
+
+Antes de gravar qualquer `client_id`/`vessel_id`/`product_id`/`service_id`
+em `ai_operator_drafts`, `ai_operator_draft_items` ou `ai_operator_memory_notes`,
+o `ai-operator-core` valida que o usuário consegue ler a entidade com seu
+próprio JWT (cliente `sb` com a anon key + Authorization Bearer). Isso
+respeita as policies de RLS reais de `clients`/`vessels`/`products`/`services`.
+
+- **Visível** → grava a referência.
+- **Invisível por RLS / inexistente** → grava o registro SEM a referência e
+  audita `event_type='entity_reference_blocked'` (`event_category='security'`).
+- **Erro de DB** → tratado como invisível (fail-closed).
+- O helper [`entity-validation.ts`](../../supabase/functions/ai-operator-core/entity-validation.ts)
+  é testado isoladamente em [`ai-operator-entity-validation.test.ts`](../../src/test/ai-operator-entity-validation.test.ts).
+
+## Modelo de IA para homologação
+
+- Default do `ai-operator-core`: `gemini-2.5-flash` (alinhado ao `ai-agent`
+  legacy após upgrade do projeto). Override por env `AI_OPERATOR_MODEL`.
+- O legacy expõe `GEMINI_MODEL_SMART` / `GEMINI_MODEL_FAST` / `GEMINI_MODEL`
+  — o operador interno **não** lê esses para evitar contaminar configuração
+  do agente atual. Use `AI_OPERATOR_MODEL` se quiser desviar.
+- Recomendação para homologação do cenário Raymarine: manter o default
+  (mesmo modelo já validado em produção do agente). Não baixar para um
+  modelo mais simples; o operador depende de fidelidade alta a instrução
+  (tool calling + classificação técnica + criação estruturada de rascunho).
 
 ## Como aplicar em staging (passos para Gustavo)
 

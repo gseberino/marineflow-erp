@@ -15,6 +15,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { classifyAction } from "./risk.ts";
 import { OPERATOR_TOOLS } from "./tools.ts";
 import { buildSystemPrompt } from "./prompt.ts";
+import { validateAllReferences } from "./entity-validation.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -27,9 +28,15 @@ const ANON = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") || "";
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai";
-// Modelo configurável; o legacy `ai-agent` já usa "gemini-3-flash" — mantemos
-// como default para alinhamento, mas permite override via env sem redeploy de código.
-const MODEL = (Deno.env.get("AI_OPERATOR_MODEL") || "gemini-3-flash").trim();
+// Modelo configurável. O legacy `ai-agent` foi atualizado para
+// `gemini-2.5-flash` (default real em uso no projeto) — alinhamos aqui para
+// que o operador interno não rode com modelo diferente por acidente.
+// Override por env: `AI_OPERATOR_MODEL`.
+// Recomendação documentada (docs/ai-operator/macro-cycle-1-security-hardening.md):
+// para a homologação do cenário Raymarine, configure `AI_OPERATOR_MODEL` para
+// um modelo Gemini com forte fidelidade a instrução (ex: gemini-2.5-flash —
+// mesmo modelo já validado no agente atual).
+const MODEL = (Deno.env.get("AI_OPERATOR_MODEL") || "gemini-2.5-flash").trim();
 const MAX_ITERATIONS = 6;
 
 function jr(body: unknown, status = 200) {
@@ -96,6 +103,18 @@ async function canApprove(admin: any, userId: string, actionName: string): Promi
   const { data, error } = await admin.rpc("ai_op_can_approve", { _user_id: userId, _action: actionName });
   if (error) {
     console.error("[ai-operator-core] ai_op_can_approve rpc failed", error);
+    return false;
+  }
+  return !!data;
+}
+
+async function canReject(admin: any, userId: string, pendingActionId: string): Promise<boolean> {
+  const { data, error } = await admin.rpc("ai_op_can_reject", {
+    _user_id: userId,
+    _pending_action_id: pendingActionId,
+  });
+  if (error) {
+    console.error("[ai-operator-core] ai_op_can_reject rpc failed", error);
     return false;
   }
   return !!data;
@@ -186,6 +205,28 @@ async function execSafeTool(
       return { result: { results: data } };
     }
     case "create_draft": {
+      // Validar referências de cliente/embarcação com o JWT do usuário
+      // (respeita RLS real do ERP). Referências não visíveis NÃO são
+      // persistidas; o rascunho ainda pode ser criado sem o link, e a
+      // tentativa é auditada.
+      const refs = await validateAllReferences(sb, {
+        client: args.client_id,
+        vessel: args.vessel_id,
+      });
+      const safeClient = refs.client?.ok ? args.client_id : null;
+      const safeVessel = refs.vessel?.ok ? args.vessel_id : null;
+      for (const [k, r] of Object.entries(refs)) {
+        if (r && !r.ok) {
+          await audit(admin, {
+            session_id: sessionId,
+            actor_user_id: userId,
+            actor_kind: "system",
+            event_type: "entity_reference_blocked",
+            event_category: "security",
+            payload: { tool: "create_draft", kind: k, reason: r.reason },
+          });
+        }
+      }
       const { data: draft, error } = await admin
         .from("ai_operator_drafts")
         .insert({
@@ -194,8 +235,8 @@ async function execSafeTool(
           kind: args.kind,
           title: args.title || null,
           summary: args.summary || null,
-          client_id: args.client_id || null,
-          vessel_id: args.vessel_id || null,
+          client_id: safeClient,
+          vessel_id: safeVessel,
           interpreted_intent: args.interpreted_intent || null,
           interpreted_category: args.interpreted_category || null,
           estimated_labor_hours: args.estimated_labor_hours ?? null,
@@ -231,6 +272,26 @@ async function execSafeTool(
       if (!draftOwner || draftOwner.session_id !== sessionId) {
         return { result: { error: "Rascunho não pertence à sessão atual." } };
       }
+      // Validar referências de produto/serviço com RLS do usuário.
+      const itemRefs = await validateAllReferences(sb, {
+        product: args.product_id,
+        service: args.service_id,
+      });
+      const safeProduct = itemRefs.product?.ok ? args.product_id : null;
+      const safeService = itemRefs.service?.ok ? args.service_id : null;
+      for (const [k, r] of Object.entries(itemRefs)) {
+        if (r && !r.ok) {
+          await audit(admin, {
+            session_id: sessionId,
+            draft_id: args.draft_id,
+            actor_user_id: userId,
+            actor_kind: "system",
+            event_type: "entity_reference_blocked",
+            event_category: "security",
+            payload: { tool: "add_draft_item", kind: k, reason: r.reason },
+          });
+        }
+      }
       const { data: existing } = await admin
         .from("ai_operator_draft_items")
         .select("id")
@@ -241,8 +302,8 @@ async function execSafeTool(
         .insert({
           draft_id: args.draft_id,
           item_kind: args.item_kind,
-          service_id: args.service_id || null,
-          product_id: args.product_id || null,
+          service_id: safeService,
+          product_id: safeProduct,
           description: args.description,
           notes: args.notes || null,
           quantity: args.quantity ?? 1,
@@ -279,12 +340,31 @@ async function execSafeTool(
     case "register_memory_candidate": {
       // Nasce SEMPRE como candidate. Promoção a 'verified' exige endpoint
       // dedicado com role admin/technician (verify_memory_note).
-      const scope = args.vessel_id ? "vessel" : args.client_id ? "client" : "global";
+      // Validar referências de cliente/embarcação com RLS do usuário.
+      const memRefs = await validateAllReferences(sb, {
+        client: args.client_id,
+        vessel: args.vessel_id,
+      });
+      const safeMemClient = memRefs.client?.ok ? args.client_id : null;
+      const safeMemVessel = memRefs.vessel?.ok ? args.vessel_id : null;
+      for (const [k, r] of Object.entries(memRefs)) {
+        if (r && !r.ok) {
+          await audit(admin, {
+            session_id: sessionId,
+            actor_user_id: userId,
+            actor_kind: "system",
+            event_type: "entity_reference_blocked",
+            event_category: "security",
+            payload: { tool: "register_memory_candidate", kind: k, reason: r.reason },
+          });
+        }
+      }
+      const scope = safeMemVessel ? "vessel" : safeMemClient ? "client" : "global";
       const { data: note, error } = await admin
         .from("ai_operator_memory_notes")
         .insert({
-          client_id: args.client_id || null,
-          vessel_id: args.vessel_id || null,
+          client_id: safeMemClient,
+          vessel_id: safeMemVessel,
           scope,
           topic: args.topic,
           title: args.title,
@@ -393,8 +473,13 @@ Deno.serve(async (req) => {
         return jr({ error: `Ação já está no estado ${pending.status}` }, 409);
       }
 
-      // Authorization gate (DB-side matrix)
-      const ok = await canApprove(admin, userId, pending.action_name);
+      // Authorization gate (DB-side). approve usa ai_op_can_approve (Macro
+      // Ciclo 1 → restrito a admin / memória admin|technician); reject usa
+      // ai_op_can_reject (solicitante OU admin).
+      const ok =
+        action === "approve_action"
+          ? await canApprove(admin, userId, pending.action_name)
+          : await canReject(admin, userId, pendingId);
       if (!ok) {
         await audit(admin, {
           session_id: pending.session_id,

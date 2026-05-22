@@ -1,126 +1,198 @@
 import { describe, it, expect } from "vitest";
 
-// Espelho TS da função SQL `ai_op_can_approve(_user_id, _action)` definida em
-// supabase/migrations/20260522190000_ai_operator_foundation.sql. Mantemos os
-// dois sincronizados manualmente — a fonte da verdade em runtime é o SQL
-// (gate determinístico no banco). Este espelho serve como contrato testado:
-// se alguém alterar o SQL sem atualizar este arquivo (ou vice-versa), o teste
-// quebra e força revisão.
+// Espelho TS das funções SQL `ai_op_can_approve(_user_id, _action)` e
+// `ai_op_can_reject(_user_id, _pending_action_id)` definidas em
+// `supabase/migrations/20260522190000_ai_operator_foundation.sql`.
+// Mantemos os dois sincronizados manualmente — a fonte da verdade em runtime
+// é o SQL (gate determinístico no banco). Este espelho serve como contrato
+// testado: alterar SQL sem atualizar este arquivo (ou vice-versa) quebra os
+// testes e força revisão.
+//
+// Macro Ciclo 1 — política restritiva:
+//   * approve: somente admin para qualquer ação operacional;
+//             admin OU technician para verify/reject de memória técnica.
+//   * reject:  solicitante da ação OU admin (para ações operacionais);
+//             admin OU technician para verify/reject de memória técnica.
+
 type Role = "admin" | "technician" | "financial" | "seller" | "external_seller" | "other";
 
-function canApproveMirror(role: Role | null, active: boolean, action: string): boolean {
+const MEMORY_ACTIONS = new Set(["verify_memory_note", "reject_memory_note"]);
+
+function canApprove(role: Role | null, active: boolean, action: string): boolean {
   if (!role || !active) return false;
-  if (role === "external_seller") return false;
-  if (role === "admin") return true;
-
-  if (
-    [
-      "send_whatsapp_message",
-      "send_collection_reminder",
-      "send_service_order_link",
-      "schedule_whatsapp_message",
-      "cancel_scheduled_whatsapp",
-    ].includes(action)
-  ) {
-    return false; // só admin
-  }
-
-  if (["adjust_inventory", "create_purchase_order"].includes(action)) {
-    return role === "financial";
-  }
-  if (["create_agenda_task", "update_agenda_task", "schedule_service_order"].includes(action)) {
-    return role === "technician";
-  }
-  if (
-    [
-      "create_service_order",
-      "update_service_order_status",
-      "add_service_order_item",
-      "add_service_to_order",
-      "apply_service_order_discount",
-      "convert_draft_to_service_order",
-    ].includes(action)
-  ) {
-    return role === "seller";
-  }
-  if (["create_client", "create_vessel", "create_product"].includes(action)) {
-    return role === "seller" || role === "financial";
-  }
-  if (["verify_memory_note", "reject_memory_note"].includes(action)) {
-    return role === "technician";
-  }
-  return false; // fail-closed
+  if (MEMORY_ACTIONS.has(action)) return role === "admin" || role === "technician";
+  return role === "admin";
 }
 
-describe("AI Operator — approval matrix (role × action)", () => {
-  it("admin aprova qualquer ação", () => {
-    const actions = [
+function canReject(
+  role: Role | null,
+  active: boolean,
+  pendingAction: { requested_by_user_id: string; action_name: string },
+  userId: string
+): boolean {
+  if (!role || !active) return false;
+  if (role === "external_seller") return false;
+  if (MEMORY_ACTIONS.has(pendingAction.action_name)) {
+    return role === "admin" || role === "technician";
+  }
+  return role === "admin" || pendingAction.requested_by_user_id === userId;
+}
+
+describe("AI Operator — Macro Ciclo 1 — approve gate", () => {
+  it("admin aprova qualquer ação operacional", () => {
+    const ops = [
       "send_whatsapp_message",
       "create_service_order",
       "adjust_inventory",
+      "schedule_service_order",
       "convert_draft_to_service_order",
-      "verify_memory_note",
-      "ferramenta_inventada",
+      "create_purchase_order",
+      "create_client",
+      "ferramenta_desconhecida",
     ];
-    for (const a of actions) {
-      expect(canApproveMirror("admin", true, a), `admin deveria aprovar ${a}`).toBe(true);
+    for (const a of ops) {
+      expect(canApprove("admin", true, a), `admin deveria aprovar ${a}`).toBe(true);
     }
   });
 
-  it("external_seller NUNCA aprova nada", () => {
-    const actions = ["search_clients", "create_service_order", "send_whatsapp_message"];
-    for (const a of actions) {
-      expect(canApproveMirror("external_seller", true, a)).toBe(false);
+  it("technician/seller/financial NÃO aprovam ações operacionais mesmo dentro de seu domínio", () => {
+    const cases: { role: Role; action: string }[] = [
+      { role: "technician", action: "schedule_service_order" },
+      { role: "technician", action: "create_agenda_task" },
+      { role: "seller", action: "create_service_order" },
+      { role: "seller", action: "apply_service_order_discount" },
+      { role: "financial", action: "adjust_inventory" },
+      { role: "financial", action: "create_purchase_order" },
+    ];
+    for (const c of cases) {
+      expect(canApprove(c.role, true, c.action), `${c.role} NÃO deveria aprovar ${c.action}`).toBe(
+        false
+      );
+    }
+  });
+
+  it("external_seller e other nunca aprovam", () => {
+    for (const a of ["send_whatsapp_message", "create_service_order", "verify_memory_note"]) {
+      expect(canApprove("external_seller", true, a)).toBe(false);
+      expect(canApprove("other", true, a)).toBe(false);
     }
   });
 
   it("usuário inativo nunca aprova", () => {
-    expect(canApproveMirror("admin", false, "send_whatsapp_message")).toBe(false);
-    expect(canApproveMirror("technician", false, "create_agenda_task")).toBe(false);
+    expect(canApprove("admin", false, "send_whatsapp_message")).toBe(false);
   });
 
-  it("envios externos a clientes só admin aprova", () => {
-    for (const role of ["technician", "financial", "seller", "other"] as Role[]) {
-      expect(canApproveMirror(role, true, "send_whatsapp_message")).toBe(false);
-      expect(canApproveMirror(role, true, "send_service_order_link")).toBe(false);
-      expect(canApproveMirror(role, true, "send_collection_reminder")).toBe(false);
-    }
+  it("memória técnica: admin OU technician aprovam verify/reject", () => {
+    expect(canApprove("admin", true, "verify_memory_note")).toBe(true);
+    expect(canApprove("technician", true, "verify_memory_note")).toBe(true);
+    expect(canApprove("admin", true, "reject_memory_note")).toBe(true);
+    expect(canApprove("technician", true, "reject_memory_note")).toBe(true);
+    // Demais papéis: não.
+    expect(canApprove("seller", true, "verify_memory_note")).toBe(false);
+    expect(canApprove("financial", true, "verify_memory_note")).toBe(false);
+    expect(canApprove("other", true, "verify_memory_note")).toBe(false);
+  });
+});
+
+describe("AI Operator — Macro Ciclo 1 — reject gate", () => {
+  const REQ_USER = "user-requester-uuid";
+  const OTHER_USER = "user-other-uuid";
+
+  it("solicitante consegue rejeitar a própria ação operacional", () => {
+    expect(
+      canReject(
+        "seller",
+        true,
+        { requested_by_user_id: REQ_USER, action_name: "create_service_order" },
+        REQ_USER
+      )
+    ).toBe(true);
+    expect(
+      canReject(
+        "other",
+        true,
+        { requested_by_user_id: REQ_USER, action_name: "send_whatsapp_message" },
+        REQ_USER
+      )
+    ).toBe(true);
   });
 
-  it("estoque/compras: admin ou financial", () => {
-    expect(canApproveMirror("financial", true, "adjust_inventory")).toBe(true);
-    expect(canApproveMirror("financial", true, "create_purchase_order")).toBe(true);
-    expect(canApproveMirror("technician", true, "adjust_inventory")).toBe(false);
-    expect(canApproveMirror("seller", true, "adjust_inventory")).toBe(false);
-    expect(canApproveMirror("other", true, "adjust_inventory")).toBe(false);
+  it("usuário não-admin NÃO consegue rejeitar ação alheia", () => {
+    expect(
+      canReject(
+        "seller",
+        true,
+        { requested_by_user_id: REQ_USER, action_name: "create_service_order" },
+        OTHER_USER
+      )
+    ).toBe(false);
+    expect(
+      canReject(
+        "technician",
+        true,
+        { requested_by_user_id: REQ_USER, action_name: "create_service_order" },
+        OTHER_USER
+      )
+    ).toBe(false);
+    expect(
+      canReject(
+        "financial",
+        true,
+        { requested_by_user_id: REQ_USER, action_name: "create_service_order" },
+        OTHER_USER
+      )
+    ).toBe(false);
   });
 
-  it("agenda real: admin ou technician", () => {
-    expect(canApproveMirror("technician", true, "create_agenda_task")).toBe(true);
-    expect(canApproveMirror("technician", true, "schedule_service_order")).toBe(true);
-    expect(canApproveMirror("seller", true, "schedule_service_order")).toBe(false);
-    expect(canApproveMirror("financial", true, "schedule_service_order")).toBe(false);
+  it("admin consegue rejeitar qualquer ação", () => {
+    expect(
+      canReject(
+        "admin",
+        true,
+        { requested_by_user_id: REQ_USER, action_name: "send_whatsapp_message" },
+        OTHER_USER
+      )
+    ).toBe(true);
   });
 
-  it("OS/orçamento (criação/conversão/desconto): admin ou seller", () => {
-    expect(canApproveMirror("seller", true, "create_service_order")).toBe(true);
-    expect(canApproveMirror("seller", true, "convert_draft_to_service_order")).toBe(true);
-    expect(canApproveMirror("seller", true, "apply_service_order_discount")).toBe(true);
-    expect(canApproveMirror("technician", true, "create_service_order")).toBe(false);
-    expect(canApproveMirror("financial", true, "apply_service_order_discount")).toBe(false);
+  it("external_seller nunca rejeita", () => {
+    expect(
+      canReject(
+        "external_seller",
+        true,
+        { requested_by_user_id: REQ_USER, action_name: "create_service_order" },
+        REQ_USER
+      )
+    ).toBe(false);
   });
 
-  it("promoção/rejeição de memória técnica: admin ou technician", () => {
-    expect(canApproveMirror("technician", true, "verify_memory_note")).toBe(true);
-    expect(canApproveMirror("technician", true, "reject_memory_note")).toBe(true);
-    expect(canApproveMirror("seller", true, "verify_memory_note")).toBe(false);
-    expect(canApproveMirror("financial", true, "verify_memory_note")).toBe(false);
-    expect(canApproveMirror("other", true, "verify_memory_note")).toBe(false);
+  it("inativo nunca rejeita", () => {
+    expect(
+      canReject(
+        "admin",
+        false,
+        { requested_by_user_id: REQ_USER, action_name: "send_whatsapp_message" },
+        REQ_USER
+      )
+    ).toBe(false);
   });
 
-  it("ações desconhecidas são fail-closed (somente admin)", () => {
-    expect(canApproveMirror("technician", true, "ferramenta_inventada_por_atacante")).toBe(false);
-    expect(canApproveMirror("seller", true, "ferramenta_inventada_por_atacante")).toBe(false);
-    expect(canApproveMirror("admin", true, "ferramenta_inventada_por_atacante")).toBe(true);
+  it("memória técnica: admin/technician rejeitam mesmo sem ser solicitante", () => {
+    expect(
+      canReject(
+        "technician",
+        true,
+        { requested_by_user_id: REQ_USER, action_name: "verify_memory_note" },
+        OTHER_USER
+      )
+    ).toBe(true);
+    expect(
+      canReject(
+        "seller",
+        true,
+        { requested_by_user_id: REQ_USER, action_name: "verify_memory_note" },
+        OTHER_USER
+      )
+    ).toBe(false);
   });
 });

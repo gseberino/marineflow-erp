@@ -52,8 +52,41 @@ as $$
   );
 $$;
 
--- Matriz de aprovação determinística: dado um papel ativo e uma action_name,
--- pode aprovar? Roles: admin, technician, financial, seller, external_seller, other.
+-- Helper local: admin OU financial. Implementado para evitar dependência
+-- implícita da `public.is_admin_or_financial` (que vive fora do módulo).
+create or replace function public.ai_op_is_admin_or_financial(_user_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.app_users
+    where id = _user_id and role in ('admin','financial') and active = true
+  );
+$$;
+
+create or replace function public.ai_op_is_internal(_user_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.app_users
+    where id = _user_id and active = true
+      and role in ('admin', 'technician', 'financial', 'seller', 'other')
+  );
+$$;
+
+-- ----------------------------------------------------------------------------
+-- Matriz de aprovação — Macro Ciclo 1 RESTRITIVA.
+-- Decisão arquitetural: nesta primeira ativação NENHUMA delegação por papel é
+-- permitida. Apenas `admin` ativo aprova qualquer pending action. A regra
+-- ampliada para seller/financial/technician depende de termos um executor
+-- real para cada classe de ação e atribuição formal — fica para macro ciclo
+-- posterior. Memória técnica é exceção: como é uma validação técnica de
+-- conteúdo, admin OU technician podem verify/reject (operação afeta apenas
+-- a flag interna `verification_status`).
+-- ----------------------------------------------------------------------------
 create or replace function public.ai_op_can_approve(_user_id uuid, _action text)
 returns boolean
 language plpgsql stable security definer
@@ -66,49 +99,59 @@ begin
   select role, active into v_role, v_active
   from public.app_users where id = _user_id;
   if v_role is null or v_active is not true then return false; end if;
-  if v_role = 'external_seller' then return false; end if;  -- nunca aprova nada do operator
-  if v_role = 'admin' then return true; end if;             -- admin aprova tudo
 
-  -- Envios externos a clientes — só admin (acima já retornou true se admin).
-  if _action in ('send_whatsapp_message', 'send_collection_reminder', 'send_service_order_link',
-                 'schedule_whatsapp_message', 'cancel_scheduled_whatsapp') then
-    return false;
-  end if;
-
-  -- Estoque / compras / financeiro — admin OU financial.
-  if _action in ('adjust_inventory', 'create_purchase_order') then
-    return v_role = 'financial';
-  end if;
-
-  -- Agenda real — admin OU technician.
-  if _action in ('create_agenda_task', 'update_agenda_task', 'schedule_service_order') then
-    return v_role = 'technician';
-  end if;
-
-  -- OS / orçamento (criação, status, desconto, conversão) — admin OU seller.
-  if _action in ('create_service_order', 'update_service_order_status',
-                 'add_service_order_item', 'add_service_to_order',
-                 'apply_service_order_discount', 'convert_draft_to_service_order') then
-    return v_role = 'seller';
-  end if;
-
-  -- Cadastros básicos — admin OU seller OU financial.
-  if _action in ('create_client', 'create_vessel', 'create_product') then
-    return v_role in ('seller', 'financial');
-  end if;
-
-  -- Promoção de memória técnica — admin OU technician.
+  -- Governança de memória técnica: admin OU technician.
   if _action in ('verify_memory_note', 'reject_memory_note') then
-    return v_role = 'technician';
+    return v_role in ('admin', 'technician');
   end if;
 
-  -- Default fail-closed.
-  return false;
+  -- Macro Ciclo 1 — qualquer outra ação pendente: somente admin.
+  return v_role = 'admin';
 end;
 $$;
 
 comment on function public.ai_op_can_approve is
-  'MarineFlow AI Operator — matriz determinística role × action. Default fail-closed.';
+  'MarineFlow AI Operator — Macro Ciclo 1 restritivo: somente admin aprova ações operacionais; admin/technician validam memória técnica.';
+
+-- ----------------------------------------------------------------------------
+-- Helper para REJEIÇÃO: o próprio solicitante pode rejeitar a sua ação,
+-- ou um admin ativo pode rejeitar qualquer uma. Roles intermediários não
+-- têm autoridade de rejeição cruzada nesta fase.
+-- ----------------------------------------------------------------------------
+create or replace function public.ai_op_can_reject(_user_id uuid, _pending_action_id uuid)
+returns boolean
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  v_role text;
+  v_active boolean;
+  v_requested_by uuid;
+  v_action text;
+begin
+  select role, active into v_role, v_active
+  from public.app_users where id = _user_id;
+  if v_role is null or v_active is not true then return false; end if;
+
+  select requested_by_user_id, action_name into v_requested_by, v_action
+  from public.ai_operator_pending_actions where id = _pending_action_id;
+  if v_requested_by is null then return false; end if;
+
+  -- external_seller nunca participa de governança de pending actions do operator.
+  if v_role = 'external_seller' then return false; end if;
+
+  -- Memória técnica: aplica a mesma matriz de approve (admin/technician).
+  if v_action in ('verify_memory_note', 'reject_memory_note') then
+    return v_role in ('admin', 'technician');
+  end if;
+
+  -- Demais ações: admin OU o próprio solicitante.
+  return v_role = 'admin' or v_requested_by = _user_id;
+end;
+$$;
+
+comment on function public.ai_op_can_reject is
+  'MarineFlow AI Operator — Macro Ciclo 1: rejeição permitida ao solicitante da ação ou a um admin ativo.';
 
 -- ---------------------------------------------------------------------------
 -- 1. Sessões de conversa
@@ -355,9 +398,12 @@ create trigger trg_ai_op_memory_updated before update on public.ai_operator_memo
 -- ---------------------------------------------------------------------------
 -- Trigger: protege pending_actions de adulteração no servidor
 -- ---------------------------------------------------------------------------
--- Mesmo que policies sejam alteradas no futuro, este trigger impede que
--- campos sensíveis sejam modificados após a criação. Apenas service_role
--- conseguirá pular este trigger se necessário (settings.bypass_ai_op_guard).
+-- Independente das policies de RLS, este trigger impede que campos imutáveis
+-- sejam alterados após a criação E só permite transições de status válidas.
+-- O trigger roda em qualquer UPDATE — INCLUSIVE quando feito por service_role.
+-- Não existe mecanismo de bypass. Se uma evolução futura precisar mover algum
+-- campo do conjunto imutável, esta migration deve ser substituída por outra
+-- aditiva que altere conscientemente a função.
 create or replace function public.ai_op_protect_pending_action()
 returns trigger
 language plpgsql
@@ -491,19 +537,42 @@ create policy "ai_op_pending_select"
   );
 -- INSERT/UPDATE: somente service_role.
 
--- ----- AUDIT: leitura só admin/financial (registro forense) -----
+-- ----- AUDIT: leitura só admin OU financial (registro forense) -----
+-- Usa helper LOCAL do AI Operator (não dependência implícita de funções fora
+-- do módulo) para manter a migration autocontida.
 create policy "ai_op_audit_select"
   on public.ai_operator_audit for select to authenticated
-  using (
-    public.ai_op_is_admin(auth.uid())
-    or public.is_admin_or_financial(auth.uid())
-  );
+  using (public.ai_op_is_admin_or_financial(auth.uid()));
 -- INSERT/UPDATE/DELETE: nunca por authenticated. Apenas service_role.
 
--- ----- MEMORY NOTES: leitura para usuários ativos. Promoção via backend. -----
+-- ----- MEMORY NOTES: leitura granular por verification_status × papel -----
+-- Decisão Macro Ciclo 1:
+--   * verified  → visível a qualquer usuário INTERNO (admin/technician/
+--                 financial/seller/other). External_seller NÃO recebe.
+--   * candidate → visível somente a admin, technician ou ao criador
+--                 (created_by), para que a IA e quem registrou possam
+--                 trabalhar nela sem expor especulação a outros papéis.
+--   * rejected  → mesma visibilidade restrita do candidate (trilha
+--                 forense). External_seller nunca vê.
 create policy "ai_op_memory_select"
   on public.ai_operator_memory_notes for select to authenticated
-  using (public.ai_op_is_active(auth.uid()));
+  using (
+    (
+      verification_status = 'verified'
+      and public.ai_op_is_internal(auth.uid())
+    )
+    or (
+      verification_status in ('candidate', 'rejected')
+      and (
+        public.ai_op_is_admin(auth.uid())
+        or exists (
+          select 1 from public.app_users au
+          where au.id = auth.uid() and au.active = true and au.role = 'technician'
+        )
+        or created_by = auth.uid()
+      )
+    )
+  );
 -- INSERT/UPDATE: somente service_role.
 
 -- ----- CHANNEL EVENTS: leitura admin (forense). Ingestão via service_role. -----
