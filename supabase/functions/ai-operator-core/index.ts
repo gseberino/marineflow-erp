@@ -1,0 +1,663 @@
+// Edge Function: ai-operator-core
+// MarineFlow AI Operator — núcleo seguro com gate determinístico de aprovação.
+//
+// Diferenças em relação à legacy `ai-agent`:
+//   * Persiste sessão / mensagens / rascunhos / pending_actions / audit no banco.
+//   * Apenas tools SEGURAS (leitura + operações internas) são expostas ao modelo.
+//   * Ações sensíveis são propostas via propose_action → criam pending_action
+//     no DB e exigem aprovação humana explícita via endpoint /approve.
+//   * A `ai-agent` original continua existindo para preservar fluxos atuais.
+
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { classifyAction } from "./risk.ts";
+import { OPERATOR_TOOLS } from "./tools.ts";
+import { buildSystemPrompt } from "./prompt.ts";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const ANON = Deno.env.get("SUPABASE_ANON_KEY")!;
+const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") || "";
+const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai";
+const MODEL = "gemini-3-flash";
+const MAX_ITERATIONS = 6;
+
+function jr(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+// --------------------------------------------------------------------------
+// Audit helper
+// --------------------------------------------------------------------------
+async function audit(
+  admin: any,
+  params: {
+    session_id?: string | null;
+    draft_id?: string | null;
+    pending_action_id?: string | null;
+    actor_user_id?: string | null;
+    actor_kind: "user" | "ai_model" | "system" | "channel";
+    event_type: string;
+    event_category?: "info" | "security" | "data" | "channel" | "error";
+    payload?: Record<string, unknown>;
+  }
+) {
+  try {
+    await admin.from("ai_operator_audit").insert({
+      session_id: params.session_id ?? null,
+      draft_id: params.draft_id ?? null,
+      pending_action_id: params.pending_action_id ?? null,
+      actor_user_id: params.actor_user_id ?? null,
+      actor_kind: params.actor_kind,
+      event_type: params.event_type,
+      event_category: params.event_category ?? "info",
+      payload: params.payload ?? {},
+    });
+  } catch (e) {
+    console.error("[ai-operator-core] audit failed", e);
+  }
+}
+
+// --------------------------------------------------------------------------
+// Safe-tool executors (operam com client autenticado pelo JWT do usuário)
+// --------------------------------------------------------------------------
+async function execSafeTool(
+  name: string,
+  args: any,
+  ctx: { sb: any; admin: any; userId: string; sessionId: string }
+): Promise<{ result: any; draftId?: string | null }> {
+  const { sb, admin, userId, sessionId } = ctx;
+
+  switch (name) {
+    // -------- LEITURA --------
+    case "search_clients": {
+      const q = String(args.query || "").trim();
+      const limit = Math.min(Number(args.limit) || 10, 25);
+      const { data, error } = await sb
+        .from("clients")
+        .select("id, full_name_or_company_name, type, phone, whatsapp, email, cpf_cnpj")
+        .or(
+          `full_name_or_company_name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%,whatsapp.ilike.%${q}%,cpf_cnpj.ilike.%${q}%`
+        )
+        .eq("active", true)
+        .limit(limit);
+      if (error) throw error;
+      return { result: { results: data } };
+    }
+    case "search_vessels": {
+      const q = String(args.query || "").trim();
+      let query = sb
+        .from("vessels")
+        .select("id, boat_name, manufacturer, model, year, client_id, asset_type, marina_id")
+        .eq("active", true)
+        .or(`boat_name.ilike.%${q}%,model.ilike.%${q}%,manufacturer.ilike.%${q}%`)
+        .limit(15);
+      if (args.client_id) query = query.eq("client_id", args.client_id);
+      const { data, error } = await query;
+      if (error) throw error;
+      return { result: { results: data } };
+    }
+    case "search_products": {
+      const q = String(args.query || "").trim();
+      const limit = Math.min(Number(args.limit) || 10, 25);
+      const { data, error } = await sb
+        .from("products")
+        .select("id, product_name, sku, brand, sale_price, stock_quantity, unit")
+        .eq("active", true)
+        .or(`product_name.ilike.%${q}%,sku.ilike.%${q}%,brand.ilike.%${q}%`)
+        .limit(limit);
+      if (error) throw error;
+      return { result: { results: data } };
+    }
+    case "search_services": {
+      const q = String(args.query || "").trim();
+      const limit = Math.min(Number(args.limit) || 10, 25);
+      const { data, error } = await sb
+        .from("services")
+        .select("id, service_name, description, billing_unit, default_price")
+        .eq("active", true)
+        .or(`service_name.ilike.%${q}%,description.ilike.%${q}%`)
+        .limit(limit);
+      if (error) throw error;
+      return { result: { results: data } };
+    }
+    case "get_vessel_history": {
+      const { data, error } = await sb
+        .from("service_orders")
+        .select(
+          "id, service_order_number, status, scheduled_start_at, grand_total, created_at, problem_description, clients(full_name_or_company_name)"
+        )
+        .eq("vessel_id", args.vessel_id)
+        .order("created_at", { ascending: false })
+        .limit(20);
+      if (error) throw error;
+      return { result: { history: data } };
+    }
+    case "list_technicians": {
+      const { data, error } = await sb
+        .from("app_users")
+        .select("id, full_name, role")
+        .in("role", ["technician", "admin"])
+        .eq("active", true)
+        .order("full_name");
+      if (error) throw error;
+      return { result: { results: data } };
+    }
+    // -------- INTERNAS DO OPERATOR --------
+    case "create_draft": {
+      const { data: draft, error } = await admin
+        .from("ai_operator_drafts")
+        .insert({
+          session_id: sessionId,
+          created_by: userId,
+          kind: args.kind,
+          title: args.title || null,
+          summary: args.summary || null,
+          client_id: args.client_id || null,
+          vessel_id: args.vessel_id || null,
+          interpreted_intent: args.interpreted_intent || null,
+          interpreted_category: args.interpreted_category || null,
+          estimated_labor_hours: args.estimated_labor_hours ?? null,
+          estimated_labor_value: args.estimated_labor_value ?? null,
+          estimated_parts_value: args.estimated_parts_value ?? null,
+          estimated_travel_value: args.estimated_travel_value ?? null,
+          estimated_total: args.estimated_total ?? null,
+          pending_questions: Array.isArray(args.pending_questions) ? args.pending_questions : [],
+          next_steps: Array.isArray(args.next_steps) ? args.next_steps : [],
+          hypotheses: Array.isArray(args.hypotheses) ? args.hypotheses : [],
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      await audit(admin, {
+        session_id: sessionId,
+        draft_id: draft.id,
+        actor_user_id: userId,
+        actor_kind: "ai_model",
+        event_type: "draft_created",
+        event_category: "data",
+        payload: { kind: args.kind, title: args.title },
+      });
+      return { result: { ok: true, draft_id: draft.id, draft }, draftId: draft.id };
+    }
+    case "add_draft_item": {
+      const { data: existing } = await admin
+        .from("ai_operator_draft_items")
+        .select("id")
+        .eq("draft_id", args.draft_id);
+      const position = (existing?.length ?? 0) + 1;
+      const { data: item, error } = await admin
+        .from("ai_operator_draft_items")
+        .insert({
+          draft_id: args.draft_id,
+          item_kind: args.item_kind,
+          service_id: args.service_id || null,
+          product_id: args.product_id || null,
+          description: args.description,
+          notes: args.notes || null,
+          quantity: args.quantity ?? 1,
+          unit: args.unit || "unit",
+          unit_price: args.unit_price ?? null,
+          estimated_total: args.estimated_total ?? null,
+          confidence: args.confidence || "medium",
+          position,
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      return { result: { ok: true, item } };
+    }
+    case "ask_pending_question": {
+      const { data: draft, error: dErr } = await admin
+        .from("ai_operator_drafts")
+        .select("pending_questions")
+        .eq("id", args.draft_id)
+        .maybeSingle();
+      if (dErr) throw dErr;
+      const list = Array.isArray(draft?.pending_questions) ? draft.pending_questions : [];
+      list.push(args.question);
+      const { error: uErr } = await admin
+        .from("ai_operator_drafts")
+        .update({ pending_questions: list })
+        .eq("id", args.draft_id);
+      if (uErr) throw uErr;
+      return { result: { ok: true, count: list.length } };
+    }
+    case "register_memory_note": {
+      const scope = args.vessel_id ? "vessel" : args.client_id ? "client" : "global";
+      const { data: note, error } = await admin
+        .from("ai_operator_memory_notes")
+        .insert({
+          client_id: args.client_id || null,
+          vessel_id: args.vessel_id || null,
+          scope,
+          topic: args.topic,
+          title: args.title,
+          body: args.body,
+          confidence: args.confidence || "medium",
+          source: "ai",
+          created_by: userId,
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      return { result: { ok: true, note_id: note.id } };
+    }
+    default:
+      return { result: { error: `Tool segura desconhecida: ${name}` } };
+  }
+}
+
+// --------------------------------------------------------------------------
+// Persistência da mensagem da sessão
+// --------------------------------------------------------------------------
+async function recordMessage(
+  admin: any,
+  sessionId: string,
+  msg: {
+    role: "user" | "assistant" | "tool" | "system";
+    content?: string | null;
+    tool_calls?: any;
+    tool_call_id?: string;
+    tool_name?: string;
+    source?: string;
+  }
+) {
+  try {
+    await admin.from("ai_operator_messages").insert({
+      session_id: sessionId,
+      role: msg.role,
+      content: msg.content ?? null,
+      tool_calls: msg.tool_calls ?? null,
+      tool_call_id: msg.tool_call_id ?? null,
+      tool_name: msg.tool_name ?? null,
+      source: msg.source ?? "web",
+    });
+    await admin
+      .from("ai_operator_sessions")
+      .update({ last_activity_at: new Date().toISOString() })
+      .eq("id", sessionId);
+  } catch (e) {
+    console.error("[ai-operator-core] recordMessage failed", e);
+  }
+}
+
+// --------------------------------------------------------------------------
+// HTTP handler
+// --------------------------------------------------------------------------
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  try {
+    if (!GEMINI_API_KEY) return jr({ error: "GEMINI_API_KEY não configurada" }, 500);
+
+    const authHeader = req.headers.get("Authorization") || "";
+    const jwt = authHeader.replace(/^Bearer\s+/i, "");
+    if (!jwt) return jr({ error: "Não autenticado" }, 401);
+
+    const sb = createClient(SUPABASE_URL, ANON, {
+      global: { headers: { Authorization: `Bearer ${jwt}` } },
+    });
+    const admin = createClient(SUPABASE_URL, SERVICE_ROLE, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    const { data: userData, error: userErr } = await sb.auth.getUser(jwt);
+    if (userErr || !userData?.user?.id) return jr({ error: "Não autenticado" }, 401);
+    const userId = userData.user.id;
+    const { data: profile } = await sb
+      .from("app_users")
+      .select("id, role, full_name, active")
+      .eq("id", userId)
+      .maybeSingle();
+    if (!profile || profile.active === false) return jr({ error: "Usuário inativo ou não cadastrado" }, 403);
+
+    const body = await req.json().catch(() => ({}));
+    const action = String(body.action || "chat");
+
+    // ------------------------------------------------------------------
+    // Endpoint: approve pending action
+    // ------------------------------------------------------------------
+    if (action === "approve_action") {
+      const pendingId = String(body.pending_action_id || "");
+      if (!pendingId) return jr({ error: "pending_action_id obrigatório" }, 400);
+      const { data: pending, error: pErr } = await admin
+        .from("ai_operator_pending_actions")
+        .select("*")
+        .eq("id", pendingId)
+        .maybeSingle();
+      if (pErr || !pending) return jr({ error: "Ação pendente não encontrada" }, 404);
+      if (pending.status !== "pending") return jr({ error: `Ação já está no estado ${pending.status}` }, 409);
+
+      // Marca como aprovada — execução real fica a cargo dos workers/edge functions
+      // específicas (whatsapp-send, etc.) ou de uma próxima evolução do operador.
+      // Macro Ciclo 1: aprovação apenas registra intenção e NÃO dispara escrita
+      // automaticamente. Isso é intencional para evitar regressão em fluxos
+      // sensíveis enquanto a integração definitiva é validada.
+      await admin
+        .from("ai_operator_pending_actions")
+        .update({
+          status: "approved",
+          approved_by_user_id: userId,
+          approved_at: new Date().toISOString(),
+        })
+        .eq("id", pendingId);
+      await audit(admin, {
+        session_id: pending.session_id,
+        pending_action_id: pendingId,
+        actor_user_id: userId,
+        actor_kind: "user",
+        event_type: "action_approved",
+        event_category: "security",
+        payload: { action: pending.action_name, risk: pending.risk_level },
+      });
+      return jr({ ok: true, status: "approved", pending_action_id: pendingId });
+    }
+
+    if (action === "reject_action") {
+      const pendingId = String(body.pending_action_id || "");
+      if (!pendingId) return jr({ error: "pending_action_id obrigatório" }, 400);
+      await admin
+        .from("ai_operator_pending_actions")
+        .update({ status: "rejected", approved_by_user_id: userId, approved_at: new Date().toISOString() })
+        .eq("id", pendingId)
+        .eq("status", "pending");
+      await audit(admin, {
+        pending_action_id: pendingId,
+        actor_user_id: userId,
+        actor_kind: "user",
+        event_type: "action_rejected",
+        event_category: "security",
+        payload: {},
+      });
+      return jr({ ok: true, status: "rejected" });
+    }
+
+    // ------------------------------------------------------------------
+    // Endpoint: chat (default)
+    // ------------------------------------------------------------------
+    const incoming = Array.isArray(body.messages) ? body.messages : [];
+    const clientCtx = body.context || {};
+    const channel = (body.channel as "web" | "whatsapp" | "system") || "web";
+    let sessionId: string | null = body.session_id || null;
+
+    // Carrega settings comerciais
+    const { data: settingsRows } = await admin.from("app_settings").select("key, value");
+    const settings: Record<string, string> = {};
+    (settingsRows || []).forEach((r: any) => {
+      if (r.key) settings[r.key] = String(r.value ?? "");
+    });
+
+    // Cria/recupera sessão
+    if (!sessionId) {
+      const { data: created, error: sErr } = await admin
+        .from("ai_operator_sessions")
+        .insert({
+          channel,
+          channel_provider: channel === "whatsapp" ? "zapi" : "web",
+          owner_user_id: userId,
+          client_id: clientCtx.entityType === "client" ? clientCtx.entityId : null,
+          vessel_id: clientCtx.entityType === "vessel" ? clientCtx.entityId : null,
+          service_order_id: clientCtx.entityType === "service_order" ? clientCtx.entityId : null,
+          metadata: { route: clientCtx.route || null },
+        })
+        .select("id")
+        .single();
+      if (sErr) return jr({ error: "Falha ao abrir sessão", details: sErr.message }, 500);
+      sessionId = created.id;
+      await audit(admin, {
+        session_id: sessionId,
+        actor_user_id: userId,
+        actor_kind: "user",
+        event_type: "session_opened",
+        payload: { channel, route: clientCtx.route || null },
+      });
+    }
+
+    // Persiste a última mensagem do usuário
+    const lastUser = [...incoming].reverse().find((m: any) => m.role === "user");
+    if (lastUser) {
+      await recordMessage(admin, sessionId!, {
+        role: "user",
+        content: String(lastUser.content || ""),
+        source: channel,
+      });
+    }
+
+    const now = new Date();
+    const dateStr = now.toLocaleDateString("pt-BR", {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+    const timeStr = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+
+    const entityContext = clientCtx.entityType
+      ? `${clientCtx.entityType}${clientCtx.entityId ? ` (id interno presente)` : ""}`
+      : "nenhum";
+
+    const systemPrompt = buildSystemPrompt({
+      userName: profile.full_name || "Usuário",
+      userRole: profile.role || "user",
+      dateStr,
+      timeStr,
+      companyName: settings.company_name || "HBR Marine",
+      defaultHourlyRate: settings.default_hourly_rate || "200",
+      diagnosticHourlyRate: settings.diagnostic_hourly_rate || "300",
+      costPerKm: settings.cost_per_km || "0",
+      defaultProfitMargin: settings.default_profit_margin || "30",
+      channel,
+      routeOrChannel: clientCtx.route || channel,
+      entityContext,
+    });
+
+    const messages: any[] = [{ role: "system", content: systemPrompt }, ...incoming];
+    const toolEvents: any[] = [];
+    let createdDraftId: string | null = null;
+    let pendingActionForFrontend: any = null;
+
+    for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
+      const aiRes = await fetch(`${GEMINI_BASE_URL}/chat/completions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${GEMINI_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          messages,
+          tools: OPERATOR_TOOLS,
+          tool_choice: "auto",
+        }),
+      });
+      if (aiRes.status === 429) return jr({ error: "Limite de requisições do modelo atingido." }, 429);
+      if (!aiRes.ok) {
+        const txt = await aiRes.text();
+        console.error("[ai-operator-core] gateway error", aiRes.status, txt);
+        return jr({ error: `Gateway de IA falhou (${aiRes.status})` }, 500);
+      }
+      const aiJson = await aiRes.json();
+      const choice = aiJson.choices?.[0];
+      const aiMsg = choice?.message;
+      if (!aiMsg) return jr({ error: "Resposta vazia do modelo" }, 500);
+      messages.push(aiMsg);
+
+      const toolCalls = aiMsg.tool_calls || [];
+      if (toolCalls.length === 0) {
+        const finalContent = aiMsg.content || "";
+        await recordMessage(admin, sessionId!, {
+          role: "assistant",
+          content: finalContent,
+          source: channel,
+        });
+        return jr({
+          ok: true,
+          session_id: sessionId,
+          message: { role: "assistant", content: finalContent },
+          draft_id: createdDraftId,
+          pending_action: pendingActionForFrontend,
+          tool_events: toolEvents,
+        });
+      }
+
+      for (const tc of toolCalls) {
+        const fnName = String(tc.function?.name || "");
+        let fnArgs: any = {};
+        try {
+          fnArgs = JSON.parse(tc.function?.arguments || "{}");
+        } catch {
+          fnArgs = {};
+        }
+
+        const risk = classifyAction(fnName);
+
+        // ---- GATE DETERMINÍSTICO ----
+        if (fnName === "propose_action") {
+          // Cria pending action no banco e retorna imediatamente
+          const proposedAction = String(fnArgs.action || "unknown");
+          const proposedRisk = classifyAction(proposedAction);
+          const { data: pending, error: pErr } = await admin
+            .from("ai_operator_pending_actions")
+            .insert({
+              session_id: sessionId,
+              draft_id: fnArgs.draft_id || createdDraftId || null,
+              requested_by_user_id: userId,
+              action_name: proposedAction,
+              risk_level: proposedRisk.level,
+              risk_reason: proposedRisk.reason,
+              title: fnArgs.title || proposedAction,
+              summary: fnArgs.summary_markdown || null,
+              payload: fnArgs.payload || {},
+              status: "pending",
+            })
+            .select()
+            .single();
+          if (pErr) {
+            await audit(admin, {
+              session_id: sessionId,
+              actor_user_id: userId,
+              actor_kind: "system",
+              event_type: "pending_action_insert_failed",
+              event_category: "error",
+              payload: { error: pErr.message, action: proposedAction },
+            });
+            return jr({ error: "Falha ao registrar ação pendente", details: pErr.message }, 500);
+          }
+          await audit(admin, {
+            session_id: sessionId,
+            pending_action_id: pending.id,
+            actor_user_id: userId,
+            actor_kind: "ai_model",
+            event_type: "action_proposed",
+            event_category: "security",
+            payload: { action: proposedAction, risk: proposedRisk.level },
+          });
+          pendingActionForFrontend = {
+            id: pending.id,
+            action: proposedAction,
+            risk_level: proposedRisk.level,
+            risk_reason: proposedRisk.reason,
+            title: pending.title,
+            summary_markdown: fnArgs.summary_markdown || "",
+            payload: fnArgs.payload || {},
+          };
+          await recordMessage(admin, sessionId!, {
+            role: "assistant",
+            content: aiMsg.content || "",
+            tool_calls: aiMsg.tool_calls,
+            source: channel,
+          });
+          await recordMessage(admin, sessionId!, {
+            role: "tool",
+            tool_call_id: tc.id,
+            tool_name: fnName,
+            content: JSON.stringify({ ok: true, pending_action_id: pending.id }),
+            source: channel,
+          });
+          return jr({
+            ok: true,
+            session_id: sessionId,
+            message: { role: "assistant", content: aiMsg.content || "" },
+            draft_id: createdDraftId,
+            pending_action: pendingActionForFrontend,
+            tool_events: toolEvents,
+          });
+        }
+
+        // Bloqueia qualquer tool sensível chamada diretamente
+        if (risk.requires_approval) {
+          await audit(admin, {
+            session_id: sessionId,
+            actor_user_id: userId,
+            actor_kind: "system",
+            event_type: "tool_call_blocked",
+            event_category: "security",
+            payload: { action: fnName, risk: risk.level, reason: risk.reason },
+          });
+          const blocked = {
+            blocked: true,
+            reason: `A ação "${fnName}" é sensível (${risk.level}). Use propose_action.`,
+          };
+          toolEvents.push({ name: fnName, args: fnArgs, result: blocked, blocked: true });
+          messages.push({
+            role: "tool",
+            tool_call_id: tc.id,
+            content: JSON.stringify(blocked),
+          });
+          continue;
+        }
+
+        // Tool segura — executa
+        let toolResult: any;
+        try {
+          const exec = await execSafeTool(fnName, fnArgs, {
+            sb,
+            admin,
+            userId,
+            sessionId: sessionId!,
+          });
+          toolResult = exec.result;
+          if (exec.draftId && !createdDraftId) createdDraftId = exec.draftId;
+        } catch (e: any) {
+          toolResult = { error: e?.message || "Falha na execução da tool segura" };
+          await audit(admin, {
+            session_id: sessionId,
+            actor_user_id: userId,
+            actor_kind: "system",
+            event_type: "safe_tool_failed",
+            event_category: "error",
+            payload: { action: fnName, error: toolResult.error },
+          });
+        }
+        toolEvents.push({ name: fnName, args: fnArgs, result: toolResult });
+        messages.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: JSON.stringify(toolResult),
+        });
+        await audit(admin, {
+          session_id: sessionId,
+          draft_id: createdDraftId,
+          actor_user_id: userId,
+          actor_kind: "ai_model",
+          event_type: "safe_tool_executed",
+          event_category: "data",
+          payload: { action: fnName, args_keys: Object.keys(fnArgs) },
+        });
+      }
+    }
+
+    return jr({ error: "Limite de iterações atingido" }, 500);
+  } catch (e: any) {
+    console.error("[ai-operator-core] error", e);
+    return jr({ error: e?.message || "internal error" }, 500);
+  }
+});
