@@ -1,8 +1,7 @@
 // Edge Function: submit-signature
 // Recebe assinatura (desenho + nome) do cliente via link público,
-// valida share_token, faz upload da imagem e registra a assinatura.
-// Atualiza status da OS, cria trilha de auditoria e arquiva um PDF final
-// com página de evidência da assinatura digital.
+// valida share_token, cria o PDF final com página de evidências,
+// armazena os arquivos e conclui a assinatura somente após arquivamento válido.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import {
@@ -15,18 +14,17 @@ import {
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers':
-    'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
 interface Payload {
   share_token: string;
   accepted_name: string;
-  signature_png_base64: string; // data URL ou base64 puro
+  signature_png_base64: string;
   document_hash: string;
   accepted_terms_snapshot?: string | null;
-  signed_pdf_base64?: string | null; // PDF base da OS no momento da assinatura (data URL ou base64 puro)
+  signed_pdf_base64?: string | null;
 }
 
 interface SignatureEvidence {
@@ -51,8 +49,15 @@ function decodeBase64Payload(value: string, dataUrlPrefix: RegExp): Uint8Array {
   const clean = value.replace(dataUrlPrefix, '');
   const bin = atob(clean);
   const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
   return bytes;
+}
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 function formatSignedAtPtBr(iso: string): string {
@@ -67,40 +72,35 @@ function formatSignedAtPtBr(iso: string): string {
   }
 }
 
-function normalizeEvidenceText(value: string | null | undefined, fallback = 'Não disponível'): string {
+function cleanText(value: string | null | undefined, fallback = 'Não disponível'): string {
   const clean = String(value || '').replace(/\s+/g, ' ').trim();
   return clean || fallback;
 }
 
 function splitLongToken(value: string, size = 56): string[] {
-  const clean = normalizeEvidenceText(value);
-  if (clean.length <= size) return [clean];
-  const out: string[] = [];
-  for (let i = 0; i < clean.length; i += size) out.push(clean.slice(i, i + size));
-  return out;
+  const clean = cleanText(value);
+  const parts: string[] = [];
+  for (let i = 0; i < clean.length; i += size) parts.push(clean.slice(i, i + size));
+  return parts.length ? parts : ['Não disponível'];
 }
 
 function wrapText(text: string, font: PDFFont, fontSize: number, maxWidth: number): string[] {
-  const clean = normalizeEvidenceText(text, '');
+  const clean = cleanText(text, '');
   if (!clean) return [];
 
   const lines: string[] = [];
   let current = '';
-
   for (const rawWord of clean.split(' ')) {
     const word = rawWord.trim();
     if (!word) continue;
-
-    // User-agents e hashes podem ter tokens longos sem espaços.
     if (font.widthOfTextAtSize(word, fontSize) > maxWidth) {
       if (current) {
         lines.push(current);
         current = '';
       }
-      for (const part of splitLongToken(word, 48)) lines.push(part);
+      lines.push(...splitLongToken(word, 46));
       continue;
     }
-
     const candidate = current ? `${current} ${word}` : word;
     if (font.widthOfTextAtSize(candidate, fontSize) <= maxWidth) {
       current = candidate;
@@ -109,7 +109,6 @@ function wrapText(text: string, font: PDFFont, fontSize: number, maxWidth: numbe
       current = word;
     }
   }
-
   if (current) lines.push(current);
   return lines;
 }
@@ -124,16 +123,9 @@ function drawWrappedText(
   maxWidth: number,
   lineHeight: number,
 ): number {
-  const lines = wrapText(text, font, fontSize, maxWidth);
   let cursorY = y;
-  for (const line of lines) {
-    page.drawText(line, {
-      x,
-      y: cursorY,
-      size: fontSize,
-      font,
-      color: rgb(0.12, 0.16, 0.23),
-    });
+  for (const line of wrapText(text, font, fontSize, maxWidth)) {
+    page.drawText(line, { x, y: cursorY, size: fontSize, font, color: rgb(0.12, 0.16, 0.23) });
     cursorY -= lineHeight;
   }
   return cursorY;
@@ -149,13 +141,7 @@ function drawEvidenceRow(
   y: number,
   maxWidth: number,
 ): number {
-  page.drawText(label, {
-    x,
-    y,
-    size: 9,
-    font: boldFont,
-    color: rgb(0.0, 0.17, 0.36),
-  });
+  page.drawText(label, { x, y, size: 9, font: boldFont, color: rgb(0.0, 0.17, 0.36) });
   return drawWrappedText(page, value, font, 9, x + 112, y, maxWidth - 112, 12) - 4;
 }
 
@@ -165,135 +151,86 @@ async function appendSignatureEvidencePage(
   evidence: SignatureEvidence,
 ): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.load(basePdfBytes, { ignoreEncryption: true });
-  const page = pdfDoc.addPage([595.28, 841.89]); // A4 portrait in points
+  const page = pdfDoc.addPage([595.28, 841.89]);
   const { width, height } = page.getSize();
-
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const signatureImage = await pdfDoc.embedPng(signaturePngBytes);
   const signatureDims = signatureImage.scaleToFit(380, 120);
-
   const marginX = 48;
+  const rowWidth = width - marginX * 2;
   let y = height - 58;
 
   page.drawText('ASSINATURA DIGITAL DO CLIENTE', {
-    x: marginX,
-    y,
-    size: 17,
-    font: boldFont,
-    color: rgb(0.0, 0.17, 0.36),
+    x: marginX, y, size: 17, font: boldFont, color: rgb(0.0, 0.17, 0.36),
   });
-
   y -= 24;
   page.drawText('Página de evidência adicionada automaticamente no momento do aceite digital.', {
-    x: marginX,
-    y,
-    size: 9,
-    font,
-    color: rgb(0.39, 0.45, 0.55),
+    x: marginX, y, size: 9, font, color: rgb(0.39, 0.45, 0.55),
   });
 
   y -= 30;
   page.drawRectangle({
-    x: marginX,
-    y: y - 155,
-    width: width - marginX * 2,
-    height: 155,
-    borderColor: rgb(0.82, 0.88, 0.94),
-    borderWidth: 1,
-    color: rgb(0.98, 0.99, 1),
+    x: marginX, y: y - 155, width: rowWidth, height: 155,
+    borderColor: rgb(0.82, 0.88, 0.94), borderWidth: 1, color: rgb(0.98, 0.99, 1),
   });
-
-  const sigX = marginX + ((width - marginX * 2) - signatureDims.width) / 2;
+  const sigX = marginX + (rowWidth - signatureDims.width) / 2;
   page.drawImage(signatureImage, {
-    x: sigX,
-    y: y - 122,
-    width: signatureDims.width,
-    height: signatureDims.height,
+    x: sigX, y: y - 122, width: signatureDims.width, height: signatureDims.height,
   });
-
   page.drawText('Imagem da assinatura coletada no canvas do link público', {
-    x: marginX + 14,
-    y: y - 145,
-    size: 8,
-    font,
-    color: rgb(0.39, 0.45, 0.55),
+    x: marginX + 14, y: y - 145, size: 8, font, color: rgb(0.39, 0.45, 0.55),
   });
 
   y -= 190;
   page.drawText('Dados de autenticação', {
-    x: marginX,
-    y,
-    size: 12,
-    font: boldFont,
-    color: rgb(0.0, 0.17, 0.36),
+    x: marginX, y, size: 12, font: boldFont, color: rgb(0.0, 0.17, 0.36),
   });
-
   y -= 24;
-  const rowWidth = width - marginX * 2;
   y = drawEvidenceRow(page, 'OS:', evidence.serviceOrderNumber, font, boldFont, marginX, y, rowWidth);
   y = drawEvidenceRow(page, 'Assinado por:', evidence.acceptedName, font, boldFont, marginX, y, rowWidth);
   y = drawEvidenceRow(page, 'Data/hora:', `${formatSignedAtPtBr(evidence.signedAt)} (America/Sao_Paulo)`, font, boldFont, marginX, y, rowWidth);
-  y = drawEvidenceRow(page, 'IP:', normalizeEvidenceText(evidence.ipAddress), font, boldFont, marginX, y, rowWidth);
-  y = drawEvidenceRow(page, 'Dispositivo:', normalizeEvidenceText(evidence.userAgent), font, boldFont, marginX, y, rowWidth);
-  y = drawEvidenceRow(page, 'ID da assinatura:', evidence.signatureId, font, boldFont, marginX, y, rowWidth);
+  y = drawEvidenceRow(page, 'IP:', cleanText(evidence.ipAddress), font, boldFont, marginX, y, rowWidth);
+  y = drawEvidenceRow(page, 'Dispositivo:', cleanText(evidence.userAgent), font, boldFont, marginX, y, rowWidth);
+  y = drawEvidenceRow(page, 'ID assinatura:', evidence.signatureId, font, boldFont, marginX, y, rowWidth);
 
   y -= 4;
-  page.drawText('Hash SHA-256 do documento assinado:', {
-    x: marginX,
-    y,
-    size: 9,
-    font: boldFont,
-    color: rgb(0.0, 0.17, 0.36),
+  page.drawText('Hash SHA-256 do conteúdo aprovado da OS:', {
+    x: marginX, y, size: 9, font: boldFont, color: rgb(0.0, 0.17, 0.36),
   });
   y -= 14;
   for (const line of splitLongToken(evidence.documentHash, 64)) {
-    page.drawText(line, {
-      x: marginX,
-      y,
-      size: 8.5,
-      font,
-      color: rgb(0.12, 0.16, 0.23),
-    });
+    page.drawText(line, { x: marginX, y, size: 8.5, font, color: rgb(0.12, 0.16, 0.23) });
     y -= 11;
   }
 
-  if (evidence.acceptedTermsSnapshot) {
-    y -= 12;
+  if (evidence.acceptedTermsSnapshot && y > 176) {
+    y -= 10;
     page.drawText('Resumo dos termos aceitos:', {
-      x: marginX,
-      y,
-      size: 9,
-      font: boldFont,
-      color: rgb(0.0, 0.17, 0.36),
+      x: marginX, y, size: 9, font: boldFont, color: rgb(0.0, 0.17, 0.36),
     });
     y -= 14;
-    const termsPreview = evidence.acceptedTermsSnapshot.slice(0, 1200);
-    drawWrappedText(page, termsPreview, font, 7.5, marginX, y, rowWidth, 10);
+    const termsPreview = evidence.acceptedTermsSnapshot.slice(0, 650);
+    const lines = wrapText(termsPreview, font, 7.5, rowWidth).slice(0, Math.max(1, Math.floor((y - 76) / 10)));
+    for (const line of lines) {
+      page.drawText(line, { x: marginX, y, size: 7.5, font, color: rgb(0.12, 0.16, 0.23) });
+      y -= 10;
+    }
   }
 
   page.drawLine({
-    start: { x: marginX, y: 54 },
-    end: { x: width - marginX, y: 54 },
-    thickness: 0.5,
-    color: rgb(0.82, 0.88, 0.94),
+    start: { x: marginX, y: 54 }, end: { x: width - marginX, y: 54 },
+    thickness: 0.5, color: rgb(0.82, 0.88, 0.94),
   });
-
-  page.drawText('MarineFlow ERP · Documento digital arquivado com evidência de assinatura', {
-    x: marginX,
-    y: 36,
-    size: 8,
-    font,
-    color: rgb(0.39, 0.45, 0.55),
+  page.drawText('MarineFlow ERP - Documento digital arquivado com evidencia de assinatura', {
+    x: marginX, y: 36, size: 8, font, color: rgb(0.39, 0.45, 0.55),
   });
-
   return await pdfDoc.save();
 }
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
-  }
+  if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
+  if (req.method !== 'POST') return jsonResponse({ error: 'Método não permitido.' }, 405);
 
   try {
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
@@ -301,86 +238,65 @@ Deno.serve(async (req) => {
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
-
     const body = (await req.json()) as Payload;
 
-    // ---- validação básica ----
-    if (
-      !body?.share_token ||
-      !body?.accepted_name?.trim() ||
-      !body?.signature_png_base64 ||
-      !body?.document_hash
-    ) {
+    if (!body?.share_token || !body?.accepted_name?.trim() || !body?.signature_png_base64 || !body?.document_hash) {
       return jsonResponse({ error: 'Campos obrigatórios faltando.' }, 400);
     }
-    if (body.accepted_name.trim().length < 3) {
-      return jsonResponse({ error: 'Nome muito curto.' }, 400);
+    if (!body.signed_pdf_base64) {
+      return jsonResponse({ error: 'Não foi possível preparar o PDF final. Recarregue a página e tente assinar novamente.' }, 400);
     }
+    if (body.accepted_name.trim().length < 3) return jsonResponse({ error: 'Nome muito curto.' }, 400);
 
-    // ---- localizar OS pelo share_token ----
     const { data: order, error: orderErr } = await admin
       .from('service_orders')
       .select('id, service_order_number, status, signed_at, requires_resignature, share_token')
       .eq('share_token', body.share_token)
       .maybeSingle();
-
-    if (orderErr) {
-      return jsonResponse({ error: 'Erro ao buscar OS.', detail: orderErr.message }, 500);
-    }
-    if (!order) {
-      return jsonResponse({ error: 'Link inválido ou expirado.' }, 404);
-    }
-
-    // ---- bloquear nova assinatura se já assinada e não pediu reassinatura ----
+    if (orderErr) return jsonResponse({ error: 'Erro ao buscar OS.', detail: orderErr.message }, 500);
+    if (!order) return jsonResponse({ error: 'Link inválido ou expirado.' }, 404);
     if (order.signed_at && !order.requires_resignature) {
-      return jsonResponse(
-        { error: 'Este documento já foi assinado.', already_signed: true },
-        409,
-      );
+      return jsonResponse({ error: 'Este documento já foi assinado.', already_signed: true }, 409);
     }
 
-    // ---- decodificar PNG base64 ----
     let pngBytes: Uint8Array;
+    let basePdfBytes: Uint8Array;
     try {
       pngBytes = decodeBase64Payload(body.signature_png_base64, /^data:image\/\w+;base64,/);
+      basePdfBytes = decodeBase64Payload(body.signed_pdf_base64, /^data:application\/pdf;base64,/);
+      await PDFDocument.load(basePdfBytes, { ignoreEncryption: true });
     } catch {
-      return jsonResponse({ error: 'Imagem da assinatura inválida.' }, 400);
+      return jsonResponse({ error: 'Imagem de assinatura ou PDF base inválido.' }, 400);
     }
-    if (pngBytes.length > 2_000_000) {
-      return jsonResponse({ error: 'Imagem muito grande (máx 2MB).' }, 413);
-    }
+    if (pngBytes.length > 2_000_000) return jsonResponse({ error: 'Imagem muito grande (máx 2MB).' }, 413);
+    if (basePdfBytes.length > 10_000_000) return jsonResponse({ error: 'PDF muito grande (máx 10MB).' }, 413);
 
-    // ---- IP / user-agent ----
-    const ip =
-      req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-      req.headers.get('cf-connecting-ip') ||
-      null;
+    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+      || req.headers.get('cf-connecting-ip') || null;
     const userAgent = req.headers.get('user-agent') || null;
+    const timestamp = Date.now();
+    const imagePath = `${order.id}/${timestamp}.png`;
+    const pdfPath = `${order.id}/signed-${timestamp}.pdf`;
+    let signatureId: string | null = null;
+    let imageUploaded = false;
+    let pdfUploaded = false;
 
-    // ---- upload no bucket signatures ----
-    const filename = `${order.id}/${Date.now()}.png`;
-    const { error: uploadErr } = await admin.storage
+    const cleanupIncompleteSignature = async () => {
+      if (signatureId) await admin.from('service_order_signatures').delete().eq('id', signatureId);
+      const paths: string[] = [];
+      if (imageUploaded) paths.push(imagePath);
+      if (pdfUploaded) paths.push(pdfPath);
+      if (paths.length) await admin.storage.from('signatures').remove(paths);
+    };
+
+    const { error: imageUploadErr } = await admin.storage
       .from('signatures')
-      .upload(filename, pngBytes, {
-        contentType: 'image/png',
-        upsert: false,
-      });
-    if (uploadErr) {
-      return jsonResponse({ error: 'Falha ao salvar imagem.', detail: uploadErr.message }, 500);
-    }
-    const { data: pub } = admin.storage.from('signatures').getPublicUrl(filename);
-    const signatureUrl = pub.publicUrl;
+      .upload(imagePath, pngBytes, { contentType: 'image/png', upsert: false });
+    if (imageUploadErr) return jsonResponse({ error: 'Falha ao salvar imagem.', detail: imageUploadErr.message }, 500);
+    imageUploaded = true;
+    const { data: imagePublic } = admin.storage.from('signatures').getPublicUrl(imagePath);
+    const signatureUrl = imagePublic.publicUrl;
 
-    // ---- supersede assinaturas anteriores ----
-    if (order.requires_resignature) {
-      await admin
-        .from('service_order_signatures')
-        .update({ superseded_at: new Date().toISOString(), superseded_reason: 'Reassinatura solicitada' })
-        .eq('service_order_id', order.id)
-        .is('superseded_at', null);
-    }
-
-    // ---- inserir assinatura primeiro para obter id/signed_at do servidor ----
     const { data: sig, error: sigErr } = await admin
       .from('service_order_signatures')
       .insert({
@@ -396,81 +312,52 @@ Deno.serve(async (req) => {
       })
       .select()
       .single();
-
     if (sigErr) {
+      await cleanupIncompleteSignature();
       return jsonResponse({ error: 'Falha ao registrar assinatura.', detail: sigErr.message }, 500);
     }
+    signatureId = sig.id;
 
-    // ---- gerar e arquivar PDF final com página de evidência da assinatura ----
-    let signedPdfUrl: string | null = null;
-    let pdfArchiveWarning: string | null = null;
-
-    if (body.signed_pdf_base64) {
-      try {
-        const originalPdfBytes = decodeBase64Payload(
-          body.signed_pdf_base64,
-          /^data:application\/pdf;base64,/,
-        );
-
-        if (originalPdfBytes.length > 10_000_000) {
-          pdfArchiveWarning = 'PDF base muito grande para arquivamento automático.';
-          console.warn('[submit-signature] PDF base muito grande, ignorado.');
-        } else {
-          const finalPdfBytes = await appendSignatureEvidencePage(originalPdfBytes, pngBytes, {
-            signatureId: sig.id,
-            serviceOrderNumber: order.service_order_number,
-            acceptedName: body.accepted_name.trim(),
-            signedAt: sig.signed_at,
-            ipAddress: ip,
-            userAgent,
-            documentHash: body.document_hash,
-            acceptedTermsSnapshot: body.accepted_terms_snapshot || null,
-          });
-
-          const pdfFilename = `${order.id}/signed-${Date.now()}.pdf`;
-          const { error: pdfErr } = await admin.storage
-            .from('signatures')
-            .upload(pdfFilename, finalPdfBytes, {
-              contentType: 'application/pdf',
-              upsert: false,
-            });
-
-          if (pdfErr) {
-            pdfArchiveWarning = `Falha ao salvar PDF assinado: ${pdfErr.message}`;
-            console.warn('[submit-signature] PDF upload falhou:', pdfErr.message);
-          } else {
-            const { data: pdfPub } = admin.storage.from('signatures').getPublicUrl(pdfFilename);
-            signedPdfUrl = pdfPub.publicUrl;
-
-            const { error: sigPdfErr } = await admin
-              .from('service_order_signatures')
-              .update({ signed_pdf_url: signedPdfUrl })
-              .eq('id', sig.id);
-
-            if (sigPdfErr) {
-              pdfArchiveWarning = `PDF salvo, mas falhou ao vincular à assinatura: ${sigPdfErr.message}`;
-              console.warn('[submit-signature] signed_pdf_url update falhou:', sigPdfErr.message);
-            }
-          }
-        }
-      } catch (e: any) {
-        pdfArchiveWarning = 'Falha ao gerar PDF assinado com evidências.';
-        console.warn('[submit-signature] erro ao gerar PDF assinado:', e?.message || e);
-      }
-    } else {
-      pdfArchiveWarning = 'PDF base não foi recebido do navegador; assinatura registrada sem PDF arquivado.';
-      console.warn('[submit-signature] signed_pdf_base64 ausente.');
+    let finalPdfBytes: Uint8Array;
+    try {
+      finalPdfBytes = await appendSignatureEvidencePage(basePdfBytes, pngBytes, {
+        signatureId: sig.id,
+        serviceOrderNumber: order.service_order_number,
+        acceptedName: body.accepted_name.trim(),
+        signedAt: sig.signed_at,
+        ipAddress: ip,
+        userAgent,
+        documentHash: body.document_hash,
+        acceptedTermsSnapshot: body.accepted_terms_snapshot || null,
+      });
+    } catch (pdfBuildError: any) {
+      await cleanupIncompleteSignature();
+      return jsonResponse({ error: 'Falha ao gerar PDF final assinado.', detail: pdfBuildError?.message || String(pdfBuildError) }, 500);
     }
 
-    // ---- buscar status configurado para depois de assinar ----
-    const { data: settingRow } = await admin
-      .from('app_settings')
-      .select('value')
-      .eq('key', 'signature_status_after')
-      .maybeSingle();
-    const newStatus = settingRow?.value || 'completed';
+    const { error: pdfUploadErr } = await admin.storage
+      .from('signatures')
+      .upload(pdfPath, finalPdfBytes, { contentType: 'application/pdf', upsert: false });
+    if (pdfUploadErr) {
+      await cleanupIncompleteSignature();
+      return jsonResponse({ error: 'Falha ao armazenar PDF final assinado.', detail: pdfUploadErr.message }, 500);
+    }
+    pdfUploaded = true;
+    const { data: pdfPublic } = admin.storage.from('signatures').getPublicUrl(pdfPath);
+    const signedPdfUrl = pdfPublic.publicUrl;
+    const pdfFileHash = await sha256Hex(finalPdfBytes);
 
-    // ---- atualizar OS ----
+    const { error: sigLinkErr } = await admin
+      .from('service_order_signatures')
+      .update({ signed_pdf_url: signedPdfUrl })
+      .eq('id', sig.id);
+    if (sigLinkErr) {
+      await cleanupIncompleteSignature();
+      return jsonResponse({ error: 'PDF salvo, mas falhou ao vincular à assinatura.', detail: sigLinkErr.message }, 500);
+    }
+
+    const { data: settingRow } = await admin.from('app_settings').select('value').eq('key', 'signature_status_after').maybeSingle();
+    const newStatus = settingRow?.value || 'completed';
     const { error: updErr } = await admin
       .from('service_orders')
       .update({
@@ -483,12 +370,22 @@ Deno.serve(async (req) => {
         status: newStatus,
       })
       .eq('id', order.id);
-
     if (updErr) {
-      return jsonResponse({ error: 'Assinatura salva, mas falhou ao atualizar OS.', detail: updErr.message }, 500);
+      await cleanupIncompleteSignature();
+      return jsonResponse({ error: 'Assinatura arquivada, mas falhou ao atualizar OS.', detail: updErr.message }, 500);
     }
 
-    // ---- audit log ----
+    let historyWarning: string | null = null;
+    if (order.requires_resignature) {
+      const { error: supersedeErr } = await admin
+        .from('service_order_signatures')
+        .update({ superseded_at: new Date().toISOString(), superseded_reason: 'Reassinatura solicitada' })
+        .eq('service_order_id', order.id)
+        .neq('id', sig.id)
+        .is('superseded_at', null);
+      if (supersedeErr) historyWarning = `Falha ao marcar assinatura anterior como superada: ${supersedeErr.message}`;
+    }
+
     await admin.from('audit_log').insert({
       table_name: 'service_orders',
       record_id: order.id,
@@ -498,14 +395,14 @@ Deno.serve(async (req) => {
         signature_id: sig.id,
         signature_url: signatureUrl,
         signed_pdf_url: signedPdfUrl,
-        pdf_archived: !!signedPdfUrl,
-        pdf_archive_warning: pdfArchiveWarning,
+        pdf_sha256: pdfFileHash,
         ip,
         user_agent: userAgent,
         document_hash: body.document_hash,
         new_status: newStatus,
+        history_warning: historyWarning,
       },
-      reason: 'Assinatura digital recebida via link público',
+      reason: 'Assinatura digital recebida via link público com PDF final arquivado',
     });
 
     return jsonResponse({
@@ -517,15 +414,13 @@ Deno.serve(async (req) => {
       signed_by: body.accepted_name.trim(),
       signature_url: signatureUrl,
       signed_pdf_url: signedPdfUrl,
-      pdf_archived: !!signedPdfUrl,
-      pdf_archive_warning: pdfArchiveWarning,
+      pdf_archived: true,
+      pdf_sha256: pdfFileHash,
+      history_warning: historyWarning,
       ip_address: ip,
       document_hash: body.document_hash,
     });
   } catch (err: any) {
-    return jsonResponse(
-      { error: 'Erro inesperado no servidor.', detail: err?.message || String(err) },
-      500,
-    );
+    return jsonResponse({ error: 'Erro inesperado no servidor.', detail: err?.message || String(err) }, 500);
   }
 });
