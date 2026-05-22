@@ -32,6 +32,10 @@ function normalizeNumber(n: any): number {
   return Math.round(v * 100) / 100;
 }
 
+function normalizeName(value: unknown): string {
+  return String(value ?? '').trim();
+}
+
 export async function computeDocumentHash(
   order: HashableServiceOrder,
   services: HashableLine[],
@@ -57,18 +61,18 @@ export async function computeDocumentHash(
     op: normalizeNumber(order.operational_cost_total),
     svc: services
       .map((s) => ({
-        n: s.name,
-        q: normalizeNumber(s.qty),
-        u: normalizeNumber(s.unit_price),
-        t: normalizeNumber(s.line_total),
+        n: normalizeName(s?.name),
+        q: normalizeNumber(s?.qty),
+        u: normalizeNumber(s?.unit_price),
+        t: normalizeNumber(s?.line_total),
       }))
       .sort((a, b) => a.n.localeCompare(b.n)),
     prt: parts
       .map((p) => ({
-        n: p.name,
-        q: normalizeNumber(p.qty),
-        u: normalizeNumber(p.unit_price),
-        t: normalizeNumber(p.line_total),
+        n: normalizeName(p?.name),
+        q: normalizeNumber(p?.qty),
+        u: normalizeNumber(p?.unit_price),
+        t: normalizeNumber(p?.line_total),
       }))
       .sort((a, b) => a.n.localeCompare(b.n)),
     trm: (termsText || '').trim(),
