@@ -17,6 +17,7 @@
 // Evolution API ou n8n possam alimentar o operador sem reescrever lógica.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { validateIntakeAuth } from "./auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -26,7 +27,9 @@ const corsHeaders = {
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const INTERNAL_TOKEN = Deno.env.get("AI_OPERATOR_INTAKE_TOKEN") || "";
+// FAIL-CLOSED: a função SOMENTE atende requisições se a secret estiver definida
+// no ambiente. Sem secret → 503. Token incorreto → 403. Não há fallback aberto.
+const INTERNAL_TOKEN = (Deno.env.get("AI_OPERATOR_INTAKE_TOKEN") || "").trim();
 
 function jr(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -47,13 +50,9 @@ type IntakeBody = {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
-    // Autenticação por token interno (compartilhado entre webhook e core)
-    // Mantém a função fechada ao mundo externo: só sistemas que conhecem
-    // o token podem enfileirar eventos.
-    if (INTERNAL_TOKEN) {
-      const provided = req.headers.get("x-internal-token") || "";
-      if (provided !== INTERNAL_TOKEN) return jr({ error: "forbidden" }, 403);
-    }
+    // FAIL-CLOSED. Sem secret no ambiente → 503. Token inválido → 403.
+    const authCheck = validateIntakeAuth(INTERNAL_TOKEN, req.headers.get("x-internal-token"));
+    if (!authCheck.ok) return jr({ error: authCheck.error }, authCheck.status);
 
     const body = (await req.json().catch(() => null)) as IntakeBody | null;
     if (!body || !body.channel || !body.provider) return jr({ error: "envelope inválido" }, 400);

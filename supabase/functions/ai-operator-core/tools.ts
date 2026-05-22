@@ -166,8 +166,12 @@ export const OPERATOR_TOOLS = [
   {
     type: "function",
     function: {
-      name: "register_memory_note",
-      description: "Registra uma nota técnica reutilizável sobre embarcação/cliente (caderno de bordo).",
+      name: "register_memory_candidate",
+      description:
+        "Registra uma observação técnica CANDIDATA sobre embarcação/cliente. " +
+        "A nota nasce como 'candidate' (não verificada) e só será considerada fato " +
+        "operacional após validação humana por papel autorizado. Use para registrar " +
+        "informações úteis observadas durante o atendimento, sem afirmar verdade absoluta.",
       parameters: {
         type: "object",
         properties: {

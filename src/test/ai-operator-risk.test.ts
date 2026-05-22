@@ -1,8 +1,5 @@
 import { describe, it, expect } from "vitest";
-// Importa direto do módulo do edge function. O arquivo é TS puro (sem APIs Deno),
-// então o Vitest consegue carregá-lo. Mantém uma única fonte da verdade para
-// classificação de risco.
-// @ts-ignore - resolução do .ts é feita pelo Vite/Vitest
+// @ts-ignore — Vite/Vitest resolve .ts diretamente; o arquivo é TS puro.
 import { classifyAction, isSafeAction } from "../../supabase/functions/ai-operator-core/risk.ts";
 
 describe("AI Operator — risk classification gate", () => {
@@ -23,8 +20,14 @@ describe("AI Operator — risk classification gate", () => {
     }
   });
 
-  it("classifica operações internas do operador (rascunho/memória) como seguras", () => {
-    const internal = ["create_draft", "add_draft_item", "ask_pending_question", "register_memory_note"];
+  it("classifica operações internas do operador (rascunho/memória candidata) como seguras", () => {
+    const internal = [
+      "create_draft",
+      "add_draft_item",
+      "ask_pending_question",
+      "register_memory_candidate",
+      "register_memory_note", // alias retrocompatível também é seguro (cria candidate)
+    ];
     for (const name of internal) {
       const r = classifyAction(name);
       expect(r.requires_approval, `${name} deveria ser seguro`).toBe(false);
@@ -76,10 +79,19 @@ describe("AI Operator — risk classification gate", () => {
     expect(r.reason).toMatch(/não classificada/i);
   });
 
+  it("classifica promoção/rejeição de memória como sensível", () => {
+    // Promoção é mais sensível (gera fato verificado).
+    const verify = classifyAction("verify_memory_note");
+    expect(verify.requires_approval).toBe(true);
+    expect(verify.level).toBe("medium");
+
+    // Rejeição é baixo risco mas ainda exige autorização (audit trail).
+    const reject = classifyAction("reject_memory_note");
+    expect(reject.requires_approval).toBe(true);
+    expect(reject.level).toBe("low");
+  });
+
   it("não considera propose_action como atalho para execução automática", () => {
-    // propose_action em si é tratado como SAFE (apenas registra a intenção).
-    // O risco real vem da `action` PROPOSTA dentro dele, que é avaliada
-    // separadamente no handler.
     expect(isSafeAction("propose_action")).toBe(true);
   });
 });

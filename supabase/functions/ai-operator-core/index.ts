@@ -1,12 +1,15 @@
 // Edge Function: ai-operator-core
 // MarineFlow AI Operator — núcleo seguro com gate determinístico de aprovação.
 //
-// Diferenças em relação à legacy `ai-agent`:
-//   * Persiste sessão / mensagens / rascunhos / pending_actions / audit no banco.
-//   * Apenas tools SEGURAS (leitura + operações internas) são expostas ao modelo.
-//   * Ações sensíveis são propostas via propose_action → criam pending_action
-//     no DB e exigem aprovação humana explícita via endpoint /approve.
-//   * A `ai-agent` original continua existindo para preservar fluxos atuais.
+// Mudanças desta versão (continuação do Macro Ciclo 1):
+//   * Ownership de sessão validado antes de qualquer leitura/gravação.
+//   * Endpoints approve_action / reject_action validam matriz de
+//     autorização role × action via SQL helper `ai_op_can_approve`.
+//   * Tentativas negadas são auditadas (event_category='security').
+//   * Memória técnica criada pela IA nasce sempre `verification_status='candidate'`;
+//     promoção/rejeição vai por endpoints dedicados que checam papel.
+//   * Modelo configurável por env (`AI_OPERATOR_MODEL`) com fallback seguro.
+//   * Sem mudanças nos fluxos sensíveis (continuam bloqueados pelo gate).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { classifyAction } from "./risk.ts";
@@ -24,7 +27,9 @@ const ANON = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") || "";
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai";
-const MODEL = "gemini-3-flash";
+// Modelo configurável; o legacy `ai-agent` já usa "gemini-3-flash" — mantemos
+// como default para alinhamento, mas permite override via env sem redeploy de código.
+const MODEL = (Deno.env.get("AI_OPERATOR_MODEL") || "gemini-3-flash").trim();
 const MAX_ITERATIONS = 6;
 
 function jr(body: unknown, status = 200) {
@@ -67,7 +72,37 @@ async function audit(
 }
 
 // --------------------------------------------------------------------------
-// Safe-tool executors (operam com client autenticado pelo JWT do usuário)
+// Authorization helpers
+// --------------------------------------------------------------------------
+async function sessionBelongsTo(admin: any, sessionId: string, userId: string, isAdmin: boolean) {
+  if (isAdmin) {
+    const { data: s } = await admin
+      .from("ai_operator_sessions")
+      .select("id, owner_user_id")
+      .eq("id", sessionId)
+      .maybeSingle();
+    return !!s;
+  }
+  const { data: s } = await admin
+    .from("ai_operator_sessions")
+    .select("id")
+    .eq("id", sessionId)
+    .eq("owner_user_id", userId)
+    .maybeSingle();
+  return !!s;
+}
+
+async function canApprove(admin: any, userId: string, actionName: string): Promise<boolean> {
+  const { data, error } = await admin.rpc("ai_op_can_approve", { _user_id: userId, _action: actionName });
+  if (error) {
+    console.error("[ai-operator-core] ai_op_can_approve rpc failed", error);
+    return false;
+  }
+  return !!data;
+}
+
+// --------------------------------------------------------------------------
+// Safe-tool executors
 // --------------------------------------------------------------------------
 async function execSafeTool(
   name: string,
@@ -77,7 +112,6 @@ async function execSafeTool(
   const { sb, admin, userId, sessionId } = ctx;
 
   switch (name) {
-    // -------- LEITURA --------
     case "search_clients": {
       const q = String(args.query || "").trim();
       const limit = Math.min(Number(args.limit) || 10, 25);
@@ -151,7 +185,6 @@ async function execSafeTool(
       if (error) throw error;
       return { result: { results: data } };
     }
-    // -------- INTERNAS DO OPERATOR --------
     case "create_draft": {
       const { data: draft, error } = await admin
         .from("ai_operator_drafts")
@@ -189,6 +222,15 @@ async function execSafeTool(
       return { result: { ok: true, draft_id: draft.id, draft }, draftId: draft.id };
     }
     case "add_draft_item": {
+      // Garante que o draft pertence à sessão atual (anti-injection cross-session)
+      const { data: draftOwner } = await admin
+        .from("ai_operator_drafts")
+        .select("id, session_id")
+        .eq("id", args.draft_id)
+        .maybeSingle();
+      if (!draftOwner || draftOwner.session_id !== sessionId) {
+        return { result: { error: "Rascunho não pertence à sessão atual." } };
+      }
       const { data: existing } = await admin
         .from("ai_operator_draft_items")
         .select("id")
@@ -216,13 +258,15 @@ async function execSafeTool(
       return { result: { ok: true, item } };
     }
     case "ask_pending_question": {
-      const { data: draft, error: dErr } = await admin
+      const { data: draftOwner } = await admin
         .from("ai_operator_drafts")
-        .select("pending_questions")
+        .select("id, session_id, pending_questions")
         .eq("id", args.draft_id)
         .maybeSingle();
-      if (dErr) throw dErr;
-      const list = Array.isArray(draft?.pending_questions) ? draft.pending_questions : [];
+      if (!draftOwner || draftOwner.session_id !== sessionId) {
+        return { result: { error: "Rascunho não pertence à sessão atual." } };
+      }
+      const list = Array.isArray(draftOwner.pending_questions) ? draftOwner.pending_questions : [];
       list.push(args.question);
       const { error: uErr } = await admin
         .from("ai_operator_drafts")
@@ -231,7 +275,10 @@ async function execSafeTool(
       if (uErr) throw uErr;
       return { result: { ok: true, count: list.length } };
     }
-    case "register_memory_note": {
+    case "register_memory_note":  // alias retrocompatível
+    case "register_memory_candidate": {
+      // Nasce SEMPRE como candidate. Promoção a 'verified' exige endpoint
+      // dedicado com role admin/technician (verify_memory_note).
       const scope = args.vessel_id ? "vessel" : args.client_id ? "client" : "global";
       const { data: note, error } = await admin
         .from("ai_operator_memory_notes")
@@ -242,23 +289,29 @@ async function execSafeTool(
           topic: args.topic,
           title: args.title,
           body: args.body,
-          confidence: args.confidence || "medium",
+          confidence: args.confidence || "low",  // candidate → confiança baixa por default
           source: "ai",
+          verification_status: "candidate",
           created_by: userId,
         })
         .select()
         .single();
       if (error) throw error;
-      return { result: { ok: true, note_id: note.id } };
+      await audit(admin, {
+        session_id: sessionId,
+        actor_user_id: userId,
+        actor_kind: "ai_model",
+        event_type: "memory_candidate_created",
+        event_category: "data",
+        payload: { topic: args.topic, title: args.title },
+      });
+      return { result: { ok: true, note_id: note.id, verification_status: "candidate" } };
     }
     default:
       return { result: { error: `Tool segura desconhecida: ${name}` } };
   }
 }
 
-// --------------------------------------------------------------------------
-// Persistência da mensagem da sessão
-// --------------------------------------------------------------------------
 async function recordMessage(
   admin: any,
   sessionId: string,
@@ -318,85 +371,160 @@ Deno.serve(async (req) => {
       .eq("id", userId)
       .maybeSingle();
     if (!profile || profile.active === false) return jr({ error: "Usuário inativo ou não cadastrado" }, 403);
+    const isAdmin = profile.role === "admin";
 
     const body = await req.json().catch(() => ({}));
     const action = String(body.action || "chat");
 
-    // ------------------------------------------------------------------
-    // Endpoint: approve pending action
-    // ------------------------------------------------------------------
-    if (action === "approve_action") {
+    // --------------------------------------------------------------
+    // approve_action / reject_action — exige role autorizado pela matriz
+    // --------------------------------------------------------------
+    if (action === "approve_action" || action === "reject_action") {
       const pendingId = String(body.pending_action_id || "");
       if (!pendingId) return jr({ error: "pending_action_id obrigatório" }, 400);
-      const { data: pending, error: pErr } = await admin
+
+      const { data: pending } = await admin
         .from("ai_operator_pending_actions")
         .select("*")
         .eq("id", pendingId)
         .maybeSingle();
-      if (pErr || !pending) return jr({ error: "Ação pendente não encontrada" }, 404);
-      if (pending.status !== "pending") return jr({ error: `Ação já está no estado ${pending.status}` }, 409);
+      if (!pending) return jr({ error: "Ação pendente não encontrada" }, 404);
+      if (pending.status !== "pending") {
+        return jr({ error: `Ação já está no estado ${pending.status}` }, 409);
+      }
 
-      // Marca como aprovada — execução real fica a cargo dos workers/edge functions
-      // específicas (whatsapp-send, etc.) ou de uma próxima evolução do operador.
-      // Macro Ciclo 1: aprovação apenas registra intenção e NÃO dispara escrita
-      // automaticamente. Isso é intencional para evitar regressão em fluxos
-      // sensíveis enquanto a integração definitiva é validada.
-      await admin
-        .from("ai_operator_pending_actions")
-        .update({
-          status: "approved",
-          approved_by_user_id: userId,
-          approved_at: new Date().toISOString(),
-        })
-        .eq("id", pendingId);
-      await audit(admin, {
-        session_id: pending.session_id,
-        pending_action_id: pendingId,
-        actor_user_id: userId,
-        actor_kind: "user",
-        event_type: "action_approved",
-        event_category: "security",
-        payload: { action: pending.action_name, risk: pending.risk_level },
-      });
-      return jr({ ok: true, status: "approved", pending_action_id: pendingId });
+      // Authorization gate (DB-side matrix)
+      const ok = await canApprove(admin, userId, pending.action_name);
+      if (!ok) {
+        await audit(admin, {
+          session_id: pending.session_id,
+          pending_action_id: pendingId,
+          actor_user_id: userId,
+          actor_kind: "user",
+          event_type: action === "approve_action" ? "action_approve_denied" : "action_reject_denied",
+          event_category: "security",
+          payload: { action: pending.action_name, role: profile.role, risk: pending.risk_level },
+        });
+        return jr({ error: "Seu papel não pode resolver esta ação." }, 403);
+      }
+
+      const now = new Date().toISOString();
+      if (action === "approve_action") {
+        const { error: upErr } = await admin
+          .from("ai_operator_pending_actions")
+          .update({ status: "approved", approved_by_user_id: userId, approved_at: now })
+          .eq("id", pendingId)
+          .eq("status", "pending");
+        if (upErr) return jr({ error: "Falha ao aprovar", details: upErr.message }, 500);
+        await audit(admin, {
+          session_id: pending.session_id,
+          pending_action_id: pendingId,
+          actor_user_id: userId,
+          actor_kind: "user",
+          event_type: "action_approved",
+          event_category: "security",
+          payload: { action: pending.action_name, risk: pending.risk_level, role: profile.role },
+        });
+        return jr({ ok: true, status: "approved", pending_action_id: pendingId });
+      } else {
+        const { error: upErr } = await admin
+          .from("ai_operator_pending_actions")
+          .update({ status: "rejected", rejected_by_user_id: userId, rejected_at: now })
+          .eq("id", pendingId)
+          .eq("status", "pending");
+        if (upErr) return jr({ error: "Falha ao rejeitar", details: upErr.message }, 500);
+        await audit(admin, {
+          session_id: pending.session_id,
+          pending_action_id: pendingId,
+          actor_user_id: userId,
+          actor_kind: "user",
+          event_type: "action_rejected",
+          event_category: "security",
+          payload: { action: pending.action_name, risk: pending.risk_level, role: profile.role },
+        });
+        return jr({ ok: true, status: "rejected" });
+      }
     }
 
-    if (action === "reject_action") {
-      const pendingId = String(body.pending_action_id || "");
-      if (!pendingId) return jr({ error: "pending_action_id obrigatório" }, 400);
-      await admin
-        .from("ai_operator_pending_actions")
-        .update({ status: "rejected", approved_by_user_id: userId, approved_at: new Date().toISOString() })
-        .eq("id", pendingId)
-        .eq("status", "pending");
-      await audit(admin, {
-        pending_action_id: pendingId,
-        actor_user_id: userId,
-        actor_kind: "user",
-        event_type: "action_rejected",
-        event_category: "security",
-        payload: {},
-      });
-      return jr({ ok: true, status: "rejected" });
+    // --------------------------------------------------------------
+    // Memory governance — verify_memory_note / reject_memory_note
+    // --------------------------------------------------------------
+    if (action === "verify_memory_note" || action === "reject_memory_note") {
+      const noteId = String(body.memory_note_id || "");
+      if (!noteId) return jr({ error: "memory_note_id obrigatório" }, 400);
+      const ok = await canApprove(admin, userId, action);
+      if (!ok) {
+        await audit(admin, {
+          actor_user_id: userId,
+          actor_kind: "user",
+          event_type: action === "verify_memory_note" ? "memory_verify_denied" : "memory_reject_denied",
+          event_category: "security",
+          payload: { role: profile.role, memory_note_id: noteId },
+        });
+        return jr({ error: "Seu papel não pode promover/rejeitar memória técnica." }, 403);
+      }
+      const now = new Date().toISOString();
+      if (action === "verify_memory_note") {
+        const { error } = await admin
+          .from("ai_operator_memory_notes")
+          .update({ verification_status: "verified", verified_by: userId, verified_at: now })
+          .eq("id", noteId)
+          .eq("verification_status", "candidate");
+        if (error) return jr({ error: "Falha ao verificar nota", details: error.message }, 500);
+        await audit(admin, {
+          actor_user_id: userId,
+          actor_kind: "user",
+          event_type: "memory_verified",
+          event_category: "security",
+          payload: { memory_note_id: noteId, role: profile.role },
+        });
+        return jr({ ok: true, status: "verified" });
+      } else {
+        const { error } = await admin
+          .from("ai_operator_memory_notes")
+          .update({ verification_status: "rejected", rejected_by: userId, rejected_at: now })
+          .eq("id", noteId)
+          .eq("verification_status", "candidate");
+        if (error) return jr({ error: "Falha ao rejeitar nota", details: error.message }, 500);
+        await audit(admin, {
+          actor_user_id: userId,
+          actor_kind: "user",
+          event_type: "memory_rejected",
+          event_category: "security",
+          payload: { memory_note_id: noteId, role: profile.role },
+        });
+        return jr({ ok: true, status: "rejected" });
+      }
     }
 
-    // ------------------------------------------------------------------
-    // Endpoint: chat (default)
-    // ------------------------------------------------------------------
+    // --------------------------------------------------------------
+    // chat (default)
+    // --------------------------------------------------------------
     const incoming = Array.isArray(body.messages) ? body.messages : [];
     const clientCtx = body.context || {};
     const channel = (body.channel as "web" | "whatsapp" | "system") || "web";
     let sessionId: string | null = body.session_id || null;
 
-    // Carrega settings comerciais
     const { data: settingsRows } = await admin.from("app_settings").select("key, value");
     const settings: Record<string, string> = {};
     (settingsRows || []).forEach((r: any) => {
       if (r.key) settings[r.key] = String(r.value ?? "");
     });
 
-    // Cria/recupera sessão
-    if (!sessionId) {
+    // Cria/recupera sessão com validação de ownership
+    if (sessionId) {
+      const ok = await sessionBelongsTo(admin, sessionId, userId, isAdmin);
+      if (!ok) {
+        await audit(admin, {
+          actor_user_id: userId,
+          actor_kind: "user",
+          event_type: "session_access_denied",
+          event_category: "security",
+          payload: { session_id: sessionId, role: profile.role },
+        });
+        return jr({ error: "Sessão não pertence ao usuário." }, 403);
+      }
+    } else {
       const { data: created, error: sErr } = await admin
         .from("ai_operator_sessions")
         .insert({
@@ -421,7 +549,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Persiste a última mensagem do usuário
     const lastUser = [...incoming].reverse().find((m: any) => m.role === "user");
     if (lastUser) {
       await recordMessage(admin, sessionId!, {
@@ -439,7 +566,6 @@ Deno.serve(async (req) => {
       day: "numeric",
     });
     const timeStr = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-
     const entityContext = clientCtx.entityType
       ? `${clientCtx.entityType}${clientCtx.entityId ? ` (id interno presente)` : ""}`
       : "nenhum";
@@ -467,16 +593,8 @@ Deno.serve(async (req) => {
     for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
       const aiRes = await fetch(`${GEMINI_BASE_URL}/chat/completions`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${GEMINI_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: MODEL,
-          messages,
-          tools: OPERATOR_TOOLS,
-          tool_choice: "auto",
-        }),
+        headers: { Authorization: `Bearer ${GEMINI_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ model: MODEL, messages, tools: OPERATOR_TOOLS, tool_choice: "auto" }),
       });
       if (aiRes.status === 429) return jr({ error: "Limite de requisições do modelo atingido." }, 429);
       if (!aiRes.ok) {
@@ -493,11 +611,7 @@ Deno.serve(async (req) => {
       const toolCalls = aiMsg.tool_calls || [];
       if (toolCalls.length === 0) {
         const finalContent = aiMsg.content || "";
-        await recordMessage(admin, sessionId!, {
-          role: "assistant",
-          content: finalContent,
-          source: channel,
-        });
+        await recordMessage(admin, sessionId!, { role: "assistant", content: finalContent, source: channel });
         return jr({
           ok: true,
           session_id: sessionId,
@@ -517,11 +631,7 @@ Deno.serve(async (req) => {
           fnArgs = {};
         }
 
-        const risk = classifyAction(fnName);
-
-        // ---- GATE DETERMINÍSTICO ----
         if (fnName === "propose_action") {
-          // Cria pending action no banco e retorna imediatamente
           const proposedAction = String(fnArgs.action || "unknown");
           const proposedRisk = classifyAction(proposedAction);
           const { data: pending, error: pErr } = await admin
@@ -592,7 +702,7 @@ Deno.serve(async (req) => {
           });
         }
 
-        // Bloqueia qualquer tool sensível chamada diretamente
+        const risk = classifyAction(fnName);
         if (risk.requires_approval) {
           await audit(admin, {
             session_id: sessionId,
@@ -607,23 +717,13 @@ Deno.serve(async (req) => {
             reason: `A ação "${fnName}" é sensível (${risk.level}). Use propose_action.`,
           };
           toolEvents.push({ name: fnName, args: fnArgs, result: blocked, blocked: true });
-          messages.push({
-            role: "tool",
-            tool_call_id: tc.id,
-            content: JSON.stringify(blocked),
-          });
+          messages.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify(blocked) });
           continue;
         }
 
-        // Tool segura — executa
         let toolResult: any;
         try {
-          const exec = await execSafeTool(fnName, fnArgs, {
-            sb,
-            admin,
-            userId,
-            sessionId: sessionId!,
-          });
+          const exec = await execSafeTool(fnName, fnArgs, { sb, admin, userId, sessionId: sessionId! });
           toolResult = exec.result;
           if (exec.draftId && !createdDraftId) createdDraftId = exec.draftId;
         } catch (e: any) {
@@ -638,11 +738,7 @@ Deno.serve(async (req) => {
           });
         }
         toolEvents.push({ name: fnName, args: fnArgs, result: toolResult });
-        messages.push({
-          role: "tool",
-          tool_call_id: tc.id,
-          content: JSON.stringify(toolResult),
-        });
+        messages.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify(toolResult) });
         await audit(admin, {
           session_id: sessionId,
           draft_id: createdDraftId,

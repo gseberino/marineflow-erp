@@ -1,41 +1,127 @@
 -- ============================================================================
--- MarineFlow AI Operator — Macro Cycle 1 foundation (additive, non-destructive)
+-- MarineFlow AI Operator — Macro Cycle 1 foundation (v2: security hardened)
 -- ============================================================================
--- Objetivo: criar a fundação persistente do MarineFlow AI Operator com:
---   * sessões / mensagens
---   * rascunhos operacionais (quote/diagnosis/service_plan/...)
---   * itens de rascunho (serviços / produtos / itens a cotar / deslocamento / pendências)
---   * ações pendentes com classificação de risco (gate determinístico)
---   * auditoria append-only
---   * memória técnica reutilizável por entidade
---   * eventos brutos de canal (WhatsApp Z-API hoje; futuro Evolution/n8n)
+-- Esta migration é ADITIVA e NÃO destrutiva. Cria a fundação persistente do
+-- MarineFlow AI Operator com policies RLS granulares por papel.
 --
--- Regras:
---   - Nenhuma tabela existente é alterada destrutivamente.
---   - Nenhuma coluna existente é removida ou renomeada.
---   - Todas as tabelas novas são prefixadas `ai_operator_` para evitar colisão.
---   - RLS habilitado em tudo. Acesso de leitura para usuários autenticados
---     que existam em `app_users.active = true`. Escrita sensível só via
---     edge function rodando com service_role (RLS bypass).
+-- Mudanças em relação ao primeiro draft (que NÃO foi aplicado em staging):
+--   * Auditoria (`ai_operator_audit`) realmente append-only para qualquer
+--     papel autenticado — apenas SELECT condicionado a admin/financial; sem
+--     INSERT/UPDATE/DELETE por clientes (gravação só via service_role).
+--   * Pending actions imutáveis pelo cliente — leitura limitada ao dono
+--     da sessão ou admin; sem INSERT/UPDATE/DELETE por clientes.
+--   * Sessions / messages / drafts / draft_items: SELECT/UPDATE só pelo
+--     dono da sessão (`owner_user_id = auth.uid()`) ou admin. INSERT cliente
+--     bloqueado — gravação só via service_role (o backend valida ownership).
+--   * Memory notes: novo campo `verification_status` ('candidate', 'verified',
+--     'rejected'). Tudo que vem da IA nasce 'candidate'. Promoção a 'verified'
+--     só por admin/technician. Consultas operacionais devem filtrar.
+--   * Channel events: visíveis só para admin; ingestão pelo service_role.
+--   * Helpers SECURITY DEFINER para papel/ownership, com search_path fixo.
+--   * WhatsApp bridge: NÃO acompanha esta migration; o arquivo da bridge fica
+--     em `supabase/deferred-migrations/` (não aplicada automaticamente).
 --
 -- Rollback (manual, somente staging):
---   DROP TABLE em ordem reversa de FK. Sem efeito colateral sobre dados existentes.
+--   DROP TABLE em ordem reversa de FK. Sem efeito colateral sobre dados.
 -- ============================================================================
 
 create extension if not exists "pgcrypto";
 
 -- ---------------------------------------------------------------------------
--- 1. Sessões de conversa do AI Operator
+-- Helpers (SECURITY DEFINER, search_path fixo)
+-- ---------------------------------------------------------------------------
+create or replace function public.ai_op_is_admin(_user_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.app_users
+    where id = _user_id and role = 'admin' and active = true
+  );
+$$;
+
+create or replace function public.ai_op_is_active(_user_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.app_users
+    where id = _user_id and active = true
+  );
+$$;
+
+-- Matriz de aprovação determinística: dado um papel ativo e uma action_name,
+-- pode aprovar? Roles: admin, technician, financial, seller, external_seller, other.
+create or replace function public.ai_op_can_approve(_user_id uuid, _action text)
+returns boolean
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  v_role text;
+  v_active boolean;
+begin
+  select role, active into v_role, v_active
+  from public.app_users where id = _user_id;
+  if v_role is null or v_active is not true then return false; end if;
+  if v_role = 'external_seller' then return false; end if;  -- nunca aprova nada do operator
+  if v_role = 'admin' then return true; end if;             -- admin aprova tudo
+
+  -- Envios externos a clientes — só admin (acima já retornou true se admin).
+  if _action in ('send_whatsapp_message', 'send_collection_reminder', 'send_service_order_link',
+                 'schedule_whatsapp_message', 'cancel_scheduled_whatsapp') then
+    return false;
+  end if;
+
+  -- Estoque / compras / financeiro — admin OU financial.
+  if _action in ('adjust_inventory', 'create_purchase_order') then
+    return v_role = 'financial';
+  end if;
+
+  -- Agenda real — admin OU technician.
+  if _action in ('create_agenda_task', 'update_agenda_task', 'schedule_service_order') then
+    return v_role = 'technician';
+  end if;
+
+  -- OS / orçamento (criação, status, desconto, conversão) — admin OU seller.
+  if _action in ('create_service_order', 'update_service_order_status',
+                 'add_service_order_item', 'add_service_to_order',
+                 'apply_service_order_discount', 'convert_draft_to_service_order') then
+    return v_role = 'seller';
+  end if;
+
+  -- Cadastros básicos — admin OU seller OU financial.
+  if _action in ('create_client', 'create_vessel', 'create_product') then
+    return v_role in ('seller', 'financial');
+  end if;
+
+  -- Promoção de memória técnica — admin OU technician.
+  if _action in ('verify_memory_note', 'reject_memory_note') then
+    return v_role = 'technician';
+  end if;
+
+  -- Default fail-closed.
+  return false;
+end;
+$$;
+
+comment on function public.ai_op_can_approve is
+  'MarineFlow AI Operator — matriz determinística role × action. Default fail-closed.';
+
+-- ---------------------------------------------------------------------------
+-- 1. Sessões de conversa
 -- ---------------------------------------------------------------------------
 create table if not exists public.ai_operator_sessions (
   id uuid primary key default gen_random_uuid(),
   channel text not null check (channel in ('web', 'whatsapp', 'system')),
-  channel_provider text,                          -- 'zapi' | 'evolution' | 'n8n' | null
+  channel_provider text,
   owner_user_id uuid references public.app_users(id) on delete set null,
   client_id uuid references public.clients(id) on delete set null,
   vessel_id uuid references public.vessels(id) on delete set null,
   service_order_id uuid references public.service_orders(id) on delete set null,
-  external_thread_key text,                       -- ex: telefone normalizado para WhatsApp
+  external_thread_key text,
   status text not null default 'open' check (status in ('open', 'paused', 'closed')),
   metadata jsonb not null default '{}'::jsonb,
   last_activity_at timestamptz not null default now(),
@@ -50,7 +136,7 @@ create index if not exists idx_ai_op_sessions_vessel on public.ai_operator_sessi
 create index if not exists idx_ai_op_sessions_thread on public.ai_operator_sessions(external_thread_key) where external_thread_key is not null;
 
 -- ---------------------------------------------------------------------------
--- 2. Mensagens da sessão
+-- 2. Mensagens
 -- ---------------------------------------------------------------------------
 create table if not exists public.ai_operator_messages (
   id uuid primary key default gen_random_uuid(),
@@ -60,9 +146,9 @@ create table if not exists public.ai_operator_messages (
   tool_calls jsonb,
   tool_call_id text,
   tool_name text,
-  attachments jsonb,                              -- [{type:'image'|'audio'|'document', url, transcript?, summary?}]
+  attachments jsonb,
   source text default 'web' check (source in ('web', 'whatsapp', 'system', 'api')),
-  source_message_id uuid,                         -- whatsapp_messages.id quando aplicável
+  source_message_id uuid,
   created_at timestamptz not null default now()
 );
 
@@ -70,21 +156,14 @@ create index if not exists idx_ai_op_messages_session on public.ai_operator_mess
 create index if not exists idx_ai_op_messages_source on public.ai_operator_messages(source_message_id) where source_message_id is not null;
 
 -- ---------------------------------------------------------------------------
--- 3. Rascunhos operacionais persistentes
+-- 3. Rascunhos
 -- ---------------------------------------------------------------------------
--- Um rascunho é diferente de uma OS oficial. Ele captura entendimento do
--- operador antes que decisões comerciais ou agendamentos sejam confirmados.
 create table if not exists public.ai_operator_drafts (
   id uuid primary key default gen_random_uuid(),
   session_id uuid references public.ai_operator_sessions(id) on delete set null,
   created_by uuid references public.app_users(id) on delete set null,
   kind text not null check (kind in (
-    'quote',              -- orçamento em montagem
-    'diagnosis',          -- diagnóstico técnico
-    'service_plan',       -- plano de atendimento
-    'agenda_proposal',    -- proposta de agendamento
-    'response_suggestion',-- sugestão de resposta ao cliente
-    'note'                -- nota técnica avulsa
+    'quote', 'diagnosis', 'service_plan', 'agenda_proposal', 'response_suggestion', 'note'
   )),
   status text not null default 'draft' check (status in (
     'draft', 'awaiting_info', 'awaiting_approval', 'approved', 'rejected', 'converted'
@@ -94,24 +173,17 @@ create table if not exists public.ai_operator_drafts (
   client_id uuid references public.clients(id) on delete set null,
   vessel_id uuid references public.vessels(id) on delete set null,
   service_order_id uuid references public.service_orders(id) on delete set null,
-  -- vínculo "convertido para OS oficial" (após aprovação)
   converted_service_order_id uuid references public.service_orders(id) on delete set null,
-  -- Interpretação estruturada da demanda
-  interpreted_intent text,                        -- 'instalar_eletronica' | 'diagnostico' | 'reparo' | ...
-  interpreted_category text,                      -- 'eletronica_navegacao' | 'eletrica' | 'gerador' | ...
-  -- Estimativas comerciais (não-vinculantes — apenas referência)
+  interpreted_intent text,
+  interpreted_category text,
   estimated_labor_hours numeric,
   estimated_labor_value numeric,
   estimated_parts_value numeric,
   estimated_travel_value numeric,
   estimated_total numeric,
-  -- Perguntas pendentes que o operador precisa que sejam respondidas
   pending_questions jsonb not null default '[]'::jsonb,
-  -- Próximos passos sugeridos
   next_steps jsonb not null default '[]'::jsonb,
-  -- Hipóteses técnicas
   hypotheses jsonb not null default '[]'::jsonb,
-  -- Metadados livres
   metadata jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -123,20 +195,14 @@ create index if not exists idx_ai_op_drafts_vessel on public.ai_operator_drafts(
 create index if not exists idx_ai_op_drafts_status on public.ai_operator_drafts(status, kind);
 
 -- ---------------------------------------------------------------------------
--- 4. Itens dentro do rascunho
+-- 4. Itens
 -- ---------------------------------------------------------------------------
 create table if not exists public.ai_operator_draft_items (
   id uuid primary key default gen_random_uuid(),
   draft_id uuid not null references public.ai_operator_drafts(id) on delete cascade,
   item_kind text not null check (item_kind in (
-    'service',           -- mão de obra
-    'product',           -- produto cadastrado
-    'product_to_quote',  -- material não cadastrado, precisa cotar
-    'displacement',      -- deslocamento
-    'engineering',       -- engenharia / diagnóstico técnico
-    'pending_question',  -- pergunta técnica pendente
-    'risk',              -- risco / observação técnica
-    'reference'          -- referência externa (manual, datasheet, etc.)
+    'service', 'product', 'product_to_quote', 'displacement', 'engineering',
+    'pending_question', 'risk', 'reference'
   )),
   service_id uuid references public.services(id) on delete set null,
   product_id uuid references public.products(id) on delete set null,
@@ -147,7 +213,7 @@ create table if not exists public.ai_operator_draft_items (
   unit_price numeric,
   estimated_total numeric,
   confidence text default 'medium' check (confidence in ('low', 'medium', 'high')),
-  source_reference text,                          -- ex: "Z-API webhook 2026-05-22T14:00"
+  source_reference text,
   metadata jsonb not null default '{}'::jsonb,
   position int not null default 0,
   created_at timestamptz not null default now()
@@ -156,17 +222,16 @@ create table if not exists public.ai_operator_draft_items (
 create index if not exists idx_ai_op_draft_items_draft on public.ai_operator_draft_items(draft_id, position);
 
 -- ---------------------------------------------------------------------------
--- 5. Ações pendentes (gate determinístico de segurança)
+-- 5. Pending actions (gate)
 -- ---------------------------------------------------------------------------
--- TODA ação sensível decidida pelo modelo é PERSISTIDA aqui em status='pending'
--- e SOMENTE executada após approve explícito do usuário com permissão.
 create table if not exists public.ai_operator_pending_actions (
   id uuid primary key default gen_random_uuid(),
   session_id uuid references public.ai_operator_sessions(id) on delete set null,
   draft_id uuid references public.ai_operator_drafts(id) on delete set null,
   requested_by_user_id uuid references public.app_users(id) on delete set null,
   approved_by_user_id uuid references public.app_users(id) on delete set null,
-  action_name text not null,                      -- ex: 'send_whatsapp_message', 'create_service_order'
+  rejected_by_user_id uuid references public.app_users(id) on delete set null,
+  action_name text not null,
   risk_level text not null default 'medium' check (risk_level in ('low', 'medium', 'high', 'critical')),
   risk_reason text,
   title text,
@@ -178,6 +243,7 @@ create table if not exists public.ai_operator_pending_actions (
   result jsonb,
   expires_at timestamptz,
   approved_at timestamptz,
+  rejected_at timestamptz,
   executed_at timestamptz,
   created_at timestamptz not null default now()
 );
@@ -196,7 +262,7 @@ create table if not exists public.ai_operator_audit (
   pending_action_id uuid references public.ai_operator_pending_actions(id) on delete set null,
   actor_user_id uuid references public.app_users(id) on delete set null,
   actor_kind text not null check (actor_kind in ('user', 'ai_model', 'system', 'channel')),
-  event_type text not null,                       -- ex: 'tool_call_attempted', 'tool_call_blocked', 'action_approved', 'draft_created', 'channel_event_received'
+  event_type text not null,
   event_category text not null default 'info' check (event_category in ('info', 'security', 'data', 'channel', 'error')),
   payload jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
@@ -206,21 +272,26 @@ create index if not exists idx_ai_op_audit_session on public.ai_operator_audit(s
 create index if not exists idx_ai_op_audit_event on public.ai_operator_audit(event_type, created_at);
 
 -- ---------------------------------------------------------------------------
--- 7. Memória técnica reutilizável
+-- 7. Memória técnica reutilizável (com governança)
 -- ---------------------------------------------------------------------------
--- Equivalente a um caderno de bordo técnico: notas sobre embarcação,
--- equipamentos instalados, restrições conhecidas, histórico de incidentes.
 create table if not exists public.ai_operator_memory_notes (
   id uuid primary key default gen_random_uuid(),
   client_id uuid references public.clients(id) on delete cascade,
   vessel_id uuid references public.vessels(id) on delete cascade,
   scope text not null default 'vessel' check (scope in ('vessel', 'client', 'global')),
-  topic text not null,                            -- ex: 'eletronica_navegacao', 'gerador', 'bateria'
+  topic text not null,
   title text not null,
   body text not null,
   confidence text not null default 'medium' check (confidence in ('low', 'medium', 'high')),
   source text not null default 'ai' check (source in ('ai', 'human', 'imported')),
   source_reference text,
+  -- Governança: nota nasce 'candidate'. Só admin/technician promovem a 'verified'.
+  verification_status text not null default 'candidate'
+    check (verification_status in ('candidate', 'verified', 'rejected')),
+  verified_by uuid references public.app_users(id) on delete set null,
+  verified_at timestamptz,
+  rejected_by uuid references public.app_users(id) on delete set null,
+  rejected_at timestamptz,
   created_by uuid references public.app_users(id) on delete set null,
   draft_id uuid references public.ai_operator_drafts(id) on delete set null,
   created_at timestamptz not null default now(),
@@ -230,20 +301,17 @@ create table if not exists public.ai_operator_memory_notes (
 create index if not exists idx_ai_op_memory_vessel on public.ai_operator_memory_notes(vessel_id) where vessel_id is not null;
 create index if not exists idx_ai_op_memory_client on public.ai_operator_memory_notes(client_id) where client_id is not null;
 create index if not exists idx_ai_op_memory_topic on public.ai_operator_memory_notes(topic);
+create index if not exists idx_ai_op_memory_verified on public.ai_operator_memory_notes(verification_status);
 
 -- ---------------------------------------------------------------------------
--- 8. Eventos brutos de canal (fila de entrada para futura ingestão multimodal)
+-- 8. Eventos de canal
 -- ---------------------------------------------------------------------------
--- O webhook do WhatsApp continua salvando em whatsapp_messages como hoje.
--- Adicionalmente, eventos relevantes podem ser enfileirados aqui para o
--- AI Operator processar de forma assíncrona (transcrição, OCR, classificação
--- de intenção). Não cria dependência operacional — é estritamente aditivo.
 create table if not exists public.ai_operator_channel_events (
   id uuid primary key default gen_random_uuid(),
   channel text not null check (channel in ('whatsapp', 'web', 'system')),
   provider text not null check (provider in ('zapi', 'evolution', 'n8n', 'web', 'system')),
-  external_event_id text,                         -- whatsapp_messages.id ou outro
-  external_thread_key text,                       -- telefone normalizado
+  external_event_id text,
+  external_thread_key text,
   direction text not null default 'inbound' check (direction in ('inbound', 'outbound')),
   payload jsonb not null,
   status text not null default 'queued' check (status in (
@@ -262,7 +330,7 @@ create index if not exists idx_ai_op_channel_events_status on public.ai_operator
 create index if not exists idx_ai_op_channel_events_thread on public.ai_operator_channel_events(external_thread_key);
 
 -- ---------------------------------------------------------------------------
--- updated_at triggers (reaproveita função padrão se existir)
+-- updated_at triggers
 -- ---------------------------------------------------------------------------
 do $$
 begin
@@ -285,14 +353,54 @@ create trigger trg_ai_op_memory_updated before update on public.ai_operator_memo
   for each row execute function public.set_updated_at_now();
 
 -- ---------------------------------------------------------------------------
+-- Trigger: protege pending_actions de adulteração no servidor
+-- ---------------------------------------------------------------------------
+-- Mesmo que policies sejam alteradas no futuro, este trigger impede que
+-- campos sensíveis sejam modificados após a criação. Apenas service_role
+-- conseguirá pular este trigger se necessário (settings.bypass_ai_op_guard).
+create or replace function public.ai_op_protect_pending_action()
+returns trigger
+language plpgsql
+as $$
+begin
+  -- Bloqueia UPDATE em campos imutáveis após criação.
+  if TG_OP = 'UPDATE' then
+    if NEW.action_name is distinct from OLD.action_name
+       or NEW.risk_level is distinct from OLD.risk_level
+       or NEW.payload is distinct from OLD.payload
+       or NEW.requested_by_user_id is distinct from OLD.requested_by_user_id
+       or NEW.session_id is distinct from OLD.session_id
+       or NEW.draft_id is distinct from OLD.draft_id
+       or NEW.created_at is distinct from OLD.created_at then
+      raise exception 'ai_operator_pending_actions: campos imutáveis não podem ser alterados (action_name, risk_level, payload, requested_by, session_id, draft_id, created_at)';
+    end if;
+
+    -- Transições válidas:
+    --   pending -> approved | rejected | expired
+    --   approved -> executed | failed
+    if OLD.status = 'pending' and NEW.status not in ('pending', 'approved', 'rejected', 'expired') then
+      raise exception 'ai_operator_pending_actions: transição inválida % -> %', OLD.status, NEW.status;
+    end if;
+    if OLD.status = 'approved' and NEW.status not in ('approved', 'executed', 'failed') then
+      raise exception 'ai_operator_pending_actions: transição inválida % -> %', OLD.status, NEW.status;
+    end if;
+    if OLD.status in ('rejected', 'executed', 'failed', 'expired')
+       and NEW.status is distinct from OLD.status then
+      raise exception 'ai_operator_pending_actions: estado terminal não pode mudar (% -> %)', OLD.status, NEW.status;
+    end if;
+  end if;
+  return NEW;
+end;
+$$;
+
+drop trigger if exists trg_ai_op_pending_guard on public.ai_operator_pending_actions;
+create trigger trg_ai_op_pending_guard
+  before update on public.ai_operator_pending_actions
+  for each row execute function public.ai_op_protect_pending_action();
+
+-- ---------------------------------------------------------------------------
 -- RLS
 -- ---------------------------------------------------------------------------
--- Política: usuário autenticado presente em app_users.active = true pode ler
--- e gravar nas tabelas operacionais do AI Operator. Escrita sensível real é
--- gated em edge function (service_role bypass). Não há exposição para anon.
--- Mantemos o desenho simples para o macro ciclo 1 — granularidade por papel
--- pode ser adicionada em ciclos seguintes.
-
 alter table public.ai_operator_sessions enable row level security;
 alter table public.ai_operator_messages enable row level security;
 alter table public.ai_operator_drafts enable row level security;
@@ -302,63 +410,115 @@ alter table public.ai_operator_audit enable row level security;
 alter table public.ai_operator_memory_notes enable row level security;
 alter table public.ai_operator_channel_events enable row level security;
 
--- Helper inline: usuário ativo em app_users
--- (não criamos função separada para evitar pegadinha de search_path)
-
--- Sessões / mensagens / rascunhos / itens / memória: SELECT/INSERT/UPDATE por user ativo
+-- Limpa policies herdadas do draft inicial (caso já estejam aplicadas em ambiente de dev)
 do $$
 declare
   t text;
+  p text;
   tables text[] := array[
-    'ai_operator_sessions',
-    'ai_operator_messages',
-    'ai_operator_drafts',
-    'ai_operator_draft_items',
-    'ai_operator_pending_actions',
-    'ai_operator_audit',
-    'ai_operator_memory_notes',
-    'ai_operator_channel_events'
+    'ai_operator_sessions','ai_operator_messages','ai_operator_drafts',
+    'ai_operator_draft_items','ai_operator_pending_actions','ai_operator_audit',
+    'ai_operator_memory_notes','ai_operator_channel_events'
   ];
+  ops text[] := array['select','insert','update'];
 begin
   foreach t in array tables loop
-    -- SELECT
-    execute format($p$
-      drop policy if exists "ai_op_%1$s_select" on public.%1$I;
-      create policy "ai_op_%1$s_select" on public.%1$I
-        for select to authenticated
-        using (exists (select 1 from public.app_users au where au.id = auth.uid() and au.active = true));
-    $p$, t);
-    -- INSERT
-    execute format($p$
-      drop policy if exists "ai_op_%1$s_insert" on public.%1$I;
-      create policy "ai_op_%1$s_insert" on public.%1$I
-        for insert to authenticated
-        with check (exists (select 1 from public.app_users au where au.id = auth.uid() and au.active = true));
-    $p$, t);
-    -- UPDATE
-    execute format($p$
-      drop policy if exists "ai_op_%1$s_update" on public.%1$I;
-      create policy "ai_op_%1$s_update" on public.%1$I
-        for update to authenticated
-        using (exists (select 1 from public.app_users au where au.id = auth.uid() and au.active = true))
-        with check (exists (select 1 from public.app_users au where au.id = auth.uid() and au.active = true));
-    $p$, t);
+    foreach p in array ops loop
+      execute format('drop policy if exists "ai_op_%s_%s" on public.%I;', t, p, t);
+    end loop;
   end loop;
 end $$;
 
--- Auditoria: somente INSERT permitido a usuários autenticados; UPDATE/DELETE bloqueados
-drop policy if exists "ai_op_audit_no_update" on public.ai_operator_audit;
--- (não criamos política de update → nenhum update permitido para authenticated)
--- (não criamos política de delete → nenhum delete permitido para authenticated)
+-- ----- SESSIONS: dono OU admin -----
+create policy "ai_op_sessions_select"
+  on public.ai_operator_sessions for select to authenticated
+  using (owner_user_id = auth.uid() or public.ai_op_is_admin(auth.uid()));
+-- INSERT/UPDATE só via service_role (backend). Não criamos policy de INSERT/UPDATE
+-- para 'authenticated' — o backend valida ownership e usa SUPABASE_SERVICE_ROLE_KEY.
+
+-- ----- MESSAGES: visível só se a sessão é do user (ou admin) -----
+create policy "ai_op_messages_select"
+  on public.ai_operator_messages for select to authenticated
+  using (
+    exists (
+      select 1 from public.ai_operator_sessions s
+      where s.id = ai_operator_messages.session_id
+        and (s.owner_user_id = auth.uid() or public.ai_op_is_admin(auth.uid()))
+    )
+  );
+
+-- ----- DRAFTS: visível só se sessão do user (ou admin) OU se created_by = user -----
+create policy "ai_op_drafts_select"
+  on public.ai_operator_drafts for select to authenticated
+  using (
+    created_by = auth.uid()
+    or public.ai_op_is_admin(auth.uid())
+    or exists (
+      select 1 from public.ai_operator_sessions s
+      where s.id = ai_operator_drafts.session_id
+        and s.owner_user_id = auth.uid()
+    )
+  );
+
+create policy "ai_op_draft_items_select"
+  on public.ai_operator_draft_items for select to authenticated
+  using (
+    exists (
+      select 1 from public.ai_operator_drafts d
+      where d.id = ai_operator_draft_items.draft_id
+        and (
+          d.created_by = auth.uid()
+          or public.ai_op_is_admin(auth.uid())
+          or exists (
+            select 1 from public.ai_operator_sessions s
+            where s.id = d.session_id and s.owner_user_id = auth.uid()
+          )
+        )
+    )
+  );
+
+-- ----- PENDING ACTIONS: leitura só do dono da sessão ou admin -----
+create policy "ai_op_pending_select"
+  on public.ai_operator_pending_actions for select to authenticated
+  using (
+    requested_by_user_id = auth.uid()
+    or public.ai_op_is_admin(auth.uid())
+    or exists (
+      select 1 from public.ai_operator_sessions s
+      where s.id = ai_operator_pending_actions.session_id
+        and s.owner_user_id = auth.uid()
+    )
+  );
+-- INSERT/UPDATE: somente service_role.
+
+-- ----- AUDIT: leitura só admin/financial (registro forense) -----
+create policy "ai_op_audit_select"
+  on public.ai_operator_audit for select to authenticated
+  using (
+    public.ai_op_is_admin(auth.uid())
+    or public.is_admin_or_financial(auth.uid())
+  );
+-- INSERT/UPDATE/DELETE: nunca por authenticated. Apenas service_role.
+
+-- ----- MEMORY NOTES: leitura para usuários ativos. Promoção via backend. -----
+create policy "ai_op_memory_select"
+  on public.ai_operator_memory_notes for select to authenticated
+  using (public.ai_op_is_active(auth.uid()));
+-- INSERT/UPDATE: somente service_role.
+
+-- ----- CHANNEL EVENTS: leitura admin (forense). Ingestão via service_role. -----
+create policy "ai_op_channel_events_select"
+  on public.ai_operator_channel_events for select to authenticated
+  using (public.ai_op_is_admin(auth.uid()));
 
 -- ---------------------------------------------------------------------------
--- Comentários de documentação
+-- Comentários
 -- ---------------------------------------------------------------------------
-comment on table public.ai_operator_sessions is 'MarineFlow AI Operator — sessões de conversa cross-channel.';
-comment on table public.ai_operator_messages is 'MarineFlow AI Operator — histórico de mensagens com chamadas de tool.';
-comment on table public.ai_operator_drafts is 'MarineFlow AI Operator — rascunhos operacionais persistentes (orçamento/diagnóstico/etc.) separados da OS oficial.';
-comment on table public.ai_operator_draft_items is 'MarineFlow AI Operator — itens dentro de um rascunho (serviços, produtos, itens a cotar, perguntas).';
-comment on table public.ai_operator_pending_actions is 'MarineFlow AI Operator — gate determinístico: ações sensíveis ficam aqui em pending até aprovação explícita.';
-comment on table public.ai_operator_audit is 'MarineFlow AI Operator — auditoria append-only de todas as decisões do operador.';
-comment on table public.ai_operator_memory_notes is 'MarineFlow AI Operator — memória técnica reutilizável por embarcação/cliente.';
-comment on table public.ai_operator_channel_events is 'MarineFlow AI Operator — fila de eventos brutos de canal (WhatsApp Z-API hoje; Evolution/n8n no futuro).';
+comment on table public.ai_operator_sessions is 'MarineFlow AI Operator — sessões cross-channel. RLS: dono ou admin.';
+comment on table public.ai_operator_messages is 'MarineFlow AI Operator — mensagens. RLS via sessão.';
+comment on table public.ai_operator_drafts is 'MarineFlow AI Operator — rascunhos operacionais separados de OS oficial.';
+comment on table public.ai_operator_draft_items is 'MarineFlow AI Operator — itens de rascunho.';
+comment on table public.ai_operator_pending_actions is 'MarineFlow AI Operator — ações sensíveis em pending até aprovação por papel autorizado. Trigger guarda imutabilidade.';
+comment on table public.ai_operator_audit is 'MarineFlow AI Operator — auditoria append-only. Sem INSERT/UPDATE/DELETE por authenticated.';
+comment on table public.ai_operator_memory_notes is 'MarineFlow AI Operator — memória técnica com governança candidate/verified/rejected.';
+comment on table public.ai_operator_channel_events is 'MarineFlow AI Operator — fila de eventos brutos de canal. Provider-agnóstica.';

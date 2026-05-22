@@ -40,7 +40,8 @@ const SAFE_ACTIONS = new Set<string>([
   "update_draft",
   "add_draft_item",
   "ask_pending_question",
-  "register_memory_note",
+  "register_memory_candidate",
+  "register_memory_note", // alias legado — também tratado como candidate no executor
   "present_options",
   "propose_action",
   "summarize_request",
@@ -148,6 +149,17 @@ const RISK_MAP: Record<string, RiskClassification> = {
     level: "high",
     requires_approval: true,
     reason: "Materializa um rascunho como OS oficial.",
+  },
+  // ----- GOVERNANÇA DE MEMÓRIA -----
+  verify_memory_note: {
+    level: "medium",
+    requires_approval: true,
+    reason: "Promove memória técnica candidata a fato verificado.",
+  },
+  reject_memory_note: {
+    level: "low",
+    requires_approval: true,
+    reason: "Marca memória candidata como rejeitada.",
   },
 };
 
