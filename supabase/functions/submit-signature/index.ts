@@ -38,11 +38,24 @@ interface SignatureEvidence {
   acceptedTermsSnapshot?: string | null;
 }
 
+const SIGNATURE_ASSET_TTL_SECONDS = 15 * 60;
+type SupabaseAdmin = ReturnType<typeof createClient>;
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
+}
+
+async function createSignedSignatureUrl(admin: SupabaseAdmin, path: string): Promise<string> {
+  const { data, error } = await admin.storage
+    .from('signatures')
+    .createSignedUrl(path, SIGNATURE_ASSET_TTL_SECONDS);
+  if (error || !data?.signedUrl) {
+    throw new Error(error?.message || 'Falha ao criar URL temporÃ¡ria do arquivo assinado.');
+  }
+  return data.signedUrl;
 }
 
 function decodeBase64Payload(value: string, dataUrlPrefix: RegExp): Uint8Array {
@@ -250,11 +263,15 @@ Deno.serve(async (req) => {
 
     const { data: order, error: orderErr } = await admin
       .from('service_orders')
-      .select('id, service_order_number, status, signed_at, requires_resignature, share_token')
+      .select('id, service_order_number, status, signed_at, requires_resignature, share_token, share_token_expires_at, share_token_revoked_at')
       .eq('share_token', body.share_token)
       .maybeSingle();
     if (orderErr) return jsonResponse({ error: 'Erro ao buscar OS.', detail: orderErr.message }, 500);
     if (!order) return jsonResponse({ error: 'Link inválido ou expirado.' }, 404);
+    if (order.share_token_revoked_at) return jsonResponse({ error: 'Link revogado.' }, 410);
+    if (order.share_token_expires_at && new Date(order.share_token_expires_at).getTime() <= Date.now()) {
+      return jsonResponse({ error: 'Link expirado.' }, 410);
+    }
     if (order.signed_at && !order.requires_resignature) {
       return jsonResponse({ error: 'Este documento já foi assinado.', already_signed: true }, 409);
     }
@@ -294,16 +311,17 @@ Deno.serve(async (req) => {
       .upload(imagePath, pngBytes, { contentType: 'image/png', upsert: false });
     if (imageUploadErr) return jsonResponse({ error: 'Falha ao salvar imagem.', detail: imageUploadErr.message }, 500);
     imageUploaded = true;
-    const { data: imagePublic } = admin.storage.from('signatures').getPublicUrl(imagePath);
-    const signatureUrl = imagePublic.publicUrl;
 
     const { data: sig, error: sigErr } = await admin
       .from('service_order_signatures')
       .insert({
         service_order_id: order.id,
         share_token: body.share_token,
-        signature_image_url: signatureUrl,
+        signature_image_url: null,
+        signature_image_path: imagePath,
         signed_pdf_url: null,
+        signed_pdf_path: null,
+        pdf_sha256: null,
         accepted_name: body.accepted_name.trim(),
         accepted_terms_snapshot: body.accepted_terms_snapshot || null,
         document_hash: body.document_hash,
@@ -330,9 +348,10 @@ Deno.serve(async (req) => {
         documentHash: body.document_hash,
         acceptedTermsSnapshot: body.accepted_terms_snapshot || null,
       });
-    } catch (pdfBuildError: any) {
+    } catch (pdfBuildError: unknown) {
       await cleanupIncompleteSignature();
-      return jsonResponse({ error: 'Falha ao gerar PDF final assinado.', detail: pdfBuildError?.message || String(pdfBuildError) }, 500);
+      const detail = pdfBuildError instanceof Error ? pdfBuildError.message : String(pdfBuildError);
+      return jsonResponse({ error: 'Falha ao gerar PDF final assinado.', detail }, 500);
     }
 
     const { error: pdfUploadErr } = await admin.storage
@@ -343,17 +362,30 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: 'Falha ao armazenar PDF final assinado.', detail: pdfUploadErr.message }, 500);
     }
     pdfUploaded = true;
-    const { data: pdfPublic } = admin.storage.from('signatures').getPublicUrl(pdfPath);
-    const signedPdfUrl = pdfPublic.publicUrl;
     const pdfFileHash = await sha256Hex(finalPdfBytes);
 
     const { error: sigLinkErr } = await admin
       .from('service_order_signatures')
-      .update({ signed_pdf_url: signedPdfUrl })
+      .update({
+        signed_pdf_url: null,
+        signed_pdf_path: pdfPath,
+        pdf_sha256: pdfFileHash,
+      })
       .eq('id', sig.id);
     if (sigLinkErr) {
       await cleanupIncompleteSignature();
       return jsonResponse({ error: 'PDF salvo, mas falhou ao vincular à assinatura.', detail: sigLinkErr.message }, 500);
+    }
+
+    let signatureUrl: string;
+    let signedPdfUrl: string;
+    try {
+      signatureUrl = await createSignedSignatureUrl(admin, imagePath);
+      signedPdfUrl = await createSignedSignatureUrl(admin, pdfPath);
+    } catch (assetUrlError: unknown) {
+      await cleanupIncompleteSignature();
+      const detail = assetUrlError instanceof Error ? assetUrlError.message : String(assetUrlError);
+      return jsonResponse({ error: 'PDF salvo, mas falhou ao preparar acesso temporÃ¡rio.', detail }, 500);
     }
 
     const { data: settingRow } = await admin.from('app_settings').select('value').eq('key', 'signature_status_after').maybeSingle();
@@ -364,7 +396,7 @@ Deno.serve(async (req) => {
         signed_at: sig.signed_at,
         signed_document_hash: body.document_hash,
         signed_by_name: body.accepted_name.trim(),
-        client_signature_url: signatureUrl,
+        client_signature_url: null,
         requires_resignature: false,
         resignature_requested_at: null,
         status: newStatus,
@@ -393,8 +425,8 @@ Deno.serve(async (req) => {
       changed_by: `cliente:${body.accepted_name.trim()}`,
       new_value: {
         signature_id: sig.id,
-        signature_url: signatureUrl,
-        signed_pdf_url: signedPdfUrl,
+        signature_image_path: imagePath,
+        signed_pdf_path: pdfPath,
         pdf_sha256: pdfFileHash,
         ip,
         user_agent: userAgent,
@@ -420,7 +452,8 @@ Deno.serve(async (req) => {
       ip_address: ip,
       document_hash: body.document_hash,
     });
-  } catch (err: any) {
-    return jsonResponse({ error: 'Erro inesperado no servidor.', detail: err?.message || String(err) }, 500);
+  } catch (err: unknown) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return jsonResponse({ error: 'Erro inesperado no servidor.', detail }, 500);
   }
 });

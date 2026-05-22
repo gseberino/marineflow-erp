@@ -6,6 +6,12 @@ verify_jwt = false
 [functions.submit-signature]
 verify_jwt = false
 
+[functions.public-service-order]
+verify_jwt = false
+
+[functions.service-order-signature-assets]
+verify_jwt = true
+
 [functions.whatsapp-process-scheduled]
 verify_jwt = false
 

@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { isPublicSignatureAssetUrl } from '@/lib/signature-assets';
 import { PenLine, FileSignature, AlertTriangle, ExternalLink, FileText } from 'lucide-react';
 
 interface Props {
@@ -13,6 +14,7 @@ interface SignatureRow {
   signature_image_url: string | null;
   signed_pdf_url: string | null;
   document_hash: string;
+  pdf_sha256: string | null;
   ip_address: string | null;
   user_agent: string | null;
   superseded_at: string | null;
@@ -20,17 +22,22 @@ interface SignatureRow {
   accepted_terms_snapshot: string | null;
 }
 
+interface SignatureAssetsResponse {
+  error?: string;
+  signatures?: SignatureRow[];
+}
+
 export function ServiceOrderSignatures({ serviceOrderId }: Props) {
   const { data: signatures, isLoading } = useQuery({
     queryKey: ['so-signatures', serviceOrderId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('service_order_signatures')
-        .select('id, accepted_name, signed_at, signature_image_url, signed_pdf_url, document_hash, ip_address, user_agent, superseded_at, superseded_reason, accepted_terms_snapshot')
-        .eq('service_order_id', serviceOrderId)
-        .order('signed_at', { ascending: false });
+      const { data, error } = await supabase.functions.invoke('service-order-signature-assets', {
+        body: { service_order_id: serviceOrderId },
+      });
       if (error) throw error;
-      return data as SignatureRow[];
+      const result = data as SignatureAssetsResponse | null;
+      if (result?.error) throw new Error(result.error);
+      return result?.signatures || [];
     },
     enabled: !!serviceOrderId,
   });
@@ -74,6 +81,8 @@ export function ServiceOrderSignatures({ serviceOrderId }: Props) {
 
 function SignatureCard({ sig, status }: { sig: SignatureRow; status: 'active' | 'superseded' }) {
   const isSuperseded = status === 'superseded';
+  const hasSafeImage = !!sig.signature_image_url && !isPublicSignatureAssetUrl(sig.signature_image_url);
+  const hasSafePdf = !!sig.signed_pdf_url && !isPublicSignatureAssetUrl(sig.signed_pdf_url);
   return (
     <div
       className={`rounded-lg border p-4 space-y-3 ${
@@ -98,15 +107,15 @@ function SignatureCard({ sig, status }: { sig: SignatureRow; status: 'active' | 
         )}
       </div>
 
-      {sig.signature_image_url ? (
+      {hasSafeImage ? (
         <a
-          href={sig.signature_image_url}
+          href={sig.signature_image_url || undefined}
           target="_blank"
           rel="noopener noreferrer"
           className="block rounded-md border bg-background p-2 hover:border-accent transition-colors"
         >
           <img
-            src={sig.signature_image_url}
+            src={sig.signature_image_url || undefined}
             alt={`Assinatura de ${sig.accepted_name}`}
             className="h-24 w-auto mx-auto object-contain"
             loading="lazy"
@@ -120,9 +129,9 @@ function SignatureCard({ sig, status }: { sig: SignatureRow; status: 'active' | 
         <p className="text-xs text-muted-foreground italic">Imagem da assinatura indisponível.</p>
       )}
 
-      {sig.signed_pdf_url ? (
+      {hasSafePdf ? (
         <a
-          href={sig.signed_pdf_url}
+          href={sig.signed_pdf_url || undefined}
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center justify-between gap-2 rounded-md border bg-primary/5 hover:bg-primary/10 transition-colors p-3"
@@ -147,6 +156,12 @@ function SignatureCard({ sig, status }: { sig: SignatureRow; status: 'active' | 
           <span className="font-medium text-foreground">Hash do documento:</span>{' '}
           <code className="break-all">{sig.document_hash.slice(0, 24)}…</code>
         </div>
+        {sig.pdf_sha256 && (
+          <div>
+            <span className="font-medium text-foreground">Hash do PDF:</span>{' '}
+            <code className="break-all">{sig.pdf_sha256.slice(0, 24)}...</code>
+          </div>
+        )}
         {sig.ip_address && (
           <div>
             <span className="font-medium text-foreground">IP:</span> {sig.ip_address}

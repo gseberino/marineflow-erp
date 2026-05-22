@@ -2739,10 +2739,13 @@ export type Database = {
           document_hash: string
           id: string
           ip_address: string | null
+          pdf_sha256: string | null
           service_order_id: string
           share_token: string
+          signature_image_path: string | null
           signature_image_url: string | null
           signed_at: string
+          signed_pdf_path: string | null
           signed_pdf_url: string | null
           superseded_at: string | null
           superseded_reason: string | null
@@ -2755,10 +2758,13 @@ export type Database = {
           document_hash: string
           id?: string
           ip_address?: string | null
+          pdf_sha256?: string | null
           service_order_id: string
           share_token: string
+          signature_image_path?: string | null
           signature_image_url?: string | null
           signed_at?: string
+          signed_pdf_path?: string | null
           signed_pdf_url?: string | null
           superseded_at?: string | null
           superseded_reason?: string | null
@@ -2771,10 +2777,13 @@ export type Database = {
           document_hash?: string
           id?: string
           ip_address?: string | null
+          pdf_sha256?: string | null
           service_order_id?: string
           share_token?: string
+          signature_image_path?: string | null
           signature_image_url?: string | null
           signed_at?: string
+          signed_pdf_path?: string | null
           signed_pdf_url?: string | null
           superseded_at?: string | null
           superseded_reason?: string | null
@@ -2899,6 +2908,8 @@ export type Database = {
           scheduled_start_at: string | null
           service_order_number: string
           service_type: string | null
+          share_token_expires_at: string | null
+          share_token_revoked_at: string | null
           share_token: string | null
           signed_at: string | null
           signed_by_name: string | null
@@ -2969,6 +2980,8 @@ export type Database = {
           scheduled_start_at?: string | null
           service_order_number: string
           service_type?: string | null
+          share_token_expires_at?: string | null
+          share_token_revoked_at?: string | null
           share_token?: string | null
           signed_at?: string | null
           signed_by_name?: string | null
@@ -3039,6 +3052,8 @@ export type Database = {
           scheduled_start_at?: string | null
           service_order_number?: string
           service_type?: string | null
+          share_token_expires_at?: string | null
+          share_token_revoked_at?: string | null
           share_token?: string | null
           signed_at?: string | null
           signed_by_name?: string | null

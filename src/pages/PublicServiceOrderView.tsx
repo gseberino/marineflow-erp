@@ -13,6 +13,7 @@ import { generatePDFBlob, DEFAULT_PDF_OPTIONS, type PDFData } from '@/lib/pdf-ge
 import { generateAndHandlePDF } from '@/lib/pdf-actions';
 import { SignaturePad } from '@/components/SignaturePad';
 import { computeDocumentHash } from '@/lib/document-hash';
+import { getSignedPdfDownloadSource, isPublicSignatureAssetUrl } from '@/lib/signature-assets';
 import { toast } from 'sonner';
 
 const fmtCurrency = (n: number) =>
@@ -29,10 +30,12 @@ const isOn = (v?: string) => (v ?? 'true').toLowerCase() !== 'false';
 interface Signature {
   id: string;
   signature_image_url: string | null;
+  signed_pdf_url: string | null;
   accepted_name: string;
   signed_at: string;
   superseded_at: string | null;
   document_hash: string;
+  pdf_sha256?: string | null;
 }
 
 interface PublicData {
@@ -60,6 +63,15 @@ export default function PublicServiceOrderView() {
   const [signaturePng, setSignaturePng] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  const fetchPublicData = async (shareToken: string): Promise<PublicData> => {
+    const { data: result, error: fnErr } = await supabase.functions.invoke('public-service-order', {
+      body: { share_token: shareToken },
+    });
+    if (fnErr) throw fnErr;
+    if ((result as any)?.error) throw new Error((result as any).error);
+    return result as PublicData;
+  };
+
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
@@ -67,71 +79,14 @@ export default function PublicServiceOrderView() {
 
     (async () => {
       try {
-        const { data: order, error: orderErr } = await supabase
-          .from('service_orders')
-          .select('*')
-          .eq('share_token', token)
-          .maybeSingle();
-
-        if (orderErr) throw orderErr;
-        if (!order) {
-          if (!cancelled) {
-            setError('Documento não encontrado ou link inválido.');
-            setLoading(false);
-          }
-          return;
-        }
-
-        const [clientRes, vesselRes, partsRes, servicesRes, settingsRes, sigRes, presetRes] = await Promise.all([
-          supabase.from('clients').select('*').eq('id', order.client_id).maybeSingle(),
-          order.vessel_id
-            ? supabase.from('vessels').select('*').eq('id', order.vessel_id).maybeSingle()
-            : Promise.resolve({ data: null, error: null }),
-          supabase
-            .from('service_order_parts')
-            .select('*, products(name:product_name, sku)')
-            .eq('service_order_id', order.id),
-          supabase
-            .from('service_order_services')
-            .select('*')
-            .eq('service_order_id', order.id),
-          supabase.from('app_settings').select('key, value'),
-          supabase
-            .from('service_order_signatures')
-            .select('id, signature_image_url, accepted_name, signed_at, superseded_at, document_hash')
-            .eq('service_order_id', order.id)
-            .is('superseded_at', null)
-            .order('signed_at', { ascending: false })
-            .limit(1)
-            .maybeSingle(),
-          (order as any).payment_condition_preset_id
-            ? supabase
-                .from('payment_condition_presets')
-                .select('label, installments')
-                .eq('id', (order as any).payment_condition_preset_id)
-                .maybeSingle()
-            : Promise.resolve({ data: null, error: null }),
-        ]);
-
-        const company: Record<string, string> = {};
-        for (const row of (settingsRes.data || []) as Array<{ key: string; value: string }>) {
-          if (row.key) company[row.key] = String(row.value || '');
-        }
-
+        const publicData = await fetchPublicData(token);
         if (!cancelled) {
-          setLogoUrl(company.company_logo_url || null);
-          setData({
-            order,
-            client: clientRes.data,
-            vessel: vesselRes.data,
-            parts: partsRes.data || [],
-            services: servicesRes.data || [],
-            company,
-            signature: (sigRes.data as Signature) || null,
-            presetData: presetRes?.data || null,
-          });
+          setError(null);
+          setLogoUrl(publicData.company?.company_logo_url || null);
+          setData(publicData);
           setLoading(false);
         }
+        return;
       } catch (e: any) {
         if (!cancelled) {
           setError(e.message || 'Erro ao carregar documento.');
@@ -329,6 +284,20 @@ export default function PublicServiceOrderView() {
 
   const handleDownloadPDF = async () => {
     try {
+      if (isSigned && !signature?.signed_pdf_url) {
+        toast.error('PDF assinado arquivado indisponÃ­vel. Recarregue a pÃ¡gina e tente novamente.');
+        return;
+      }
+      const downloadSource = getSignedPdfDownloadSource(isSigned ? signature : null);
+      if (downloadSource.kind === 'archived') {
+        if (isPublicSignatureAssetUrl(downloadSource.url)) {
+          toast.error('PDF arquivado indisponível por política de segurança. Recarregue a página e tente novamente.');
+          return;
+        }
+        window.open(downloadSource.url, '_blank', 'noopener,noreferrer');
+        toast.success('PDF assinado aberto com sucesso!');
+        return;
+      }
       await generateAndHandlePDF(buildPdfData(), DEFAULT_PDF_OPTIONS, 'download');
     } catch (e) {
       // Toast handled in helper
@@ -395,6 +364,9 @@ export default function PublicServiceOrderView() {
 
       if (fnErr) throw fnErr;
       if ((result as any)?.error) throw new Error((result as any).error);
+      if ((result as any)?.signed_pdf_url && isPublicSignatureAssetUrl((result as any).signed_pdf_url)) {
+        throw new Error('O servidor retornou um PDF público permanente, o que não é permitido para assinaturas.');
+      }
 
       toast.success('Assinatura registrada com sucesso!');
       setAcceptedName('');
