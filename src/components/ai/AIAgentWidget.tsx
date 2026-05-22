@@ -1,14 +1,17 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Sparkles, Send, Loader2, RotateCcw, X, Mic, MicOff } from 'lucide-react';
+import { Sparkles, Send, Loader2, RotateCcw, X, Mic, MicOff, Bot } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/hooks/use-auth';
 import { useAIContext } from '@/lib/ai-context';
 import { useAIAgent } from '@/hooks/use-ai-agent';
+import { useAIOperator } from '@/hooks/use-ai-operator';
 import { AIChatMessage } from './AIChatMessage';
 import { AIConfirmCard } from './AIConfirmCard';
 import { AIOptionsCard } from './AIOptionsCard';
+import { AIOperatorDraftCard } from './AIOperatorDraftCard';
+import { AIOperatorPendingActionCard } from './AIOperatorPendingActionCard';
 import { toast } from 'sonner';
 
 function DraggableAIButton({ onOpen }: { onOpen: () => void }) {
@@ -92,9 +95,11 @@ export function AIAgentWidget() {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
+  const [operatorMode, setOperatorMode] = useState(false);
   const context = useAIContext();
   const { display, loading, loadingMsg, sendMessage, confirmProposal, cancelProposal, selectOption, reset, activeProposal, activeOptions } =
     useAIAgent(context);
+  const op = useAIOperator(context);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const vpHeight = useVisualViewportHeight();
@@ -147,15 +152,19 @@ export function AIAgentWidget() {
   // Scroll para o fim ao receber nova mensagem
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [display, loading]);
+  }, [display, loading, op.display, op.loading]);
 
   if (!user) return null;
 
   const handleSend = () => {
     const txt = input.trim();
-    if (!txt || loading) return;
+    if (!txt || loading || op.loading) return;
     setInput('');
-    sendMessage(txt);
+    if (operatorMode) {
+      op.sendMessage(txt);
+    } else {
+      sendMessage(txt);
+    }
   };
 
   const handleKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -220,7 +229,22 @@ export function AIAgentWidget() {
             )}
           </div>
           <div className="flex items-center gap-1 shrink-0">
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={reset} title="Nova conversa">
+            <Button
+              variant={operatorMode ? 'default' : 'ghost'}
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => setOperatorMode((v) => !v)}
+              title={operatorMode ? 'Modo Operador ATIVO (beta) — clique para voltar' : 'Ativar Modo Operador (beta)'}
+            >
+              <Bot className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => (operatorMode ? op.reset() : reset())}
+              title="Nova conversa"
+            >
               <RotateCcw className="h-3.5 w-3.5" />
             </Button>
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setOpen(false)} title="Fechar">
@@ -231,7 +255,15 @@ export function AIAgentWidget() {
 
         {/* Messages */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
-          {display.length === 0 && !loading && (
+          {operatorMode && (
+            <div className="text-[11px] text-muted-foreground border border-dashed rounded px-2 py-1.5">
+              🤖 <strong>Modo Operador (beta)</strong>: interpreta demandas técnicas e cria rascunhos
+              persistentes. Ações sensíveis (enviar WhatsApp, criar OS oficial, agendar técnico,
+              alterar estoque) ficam pendentes e exigem aprovação humana.
+            </div>
+          )}
+
+          {!operatorMode && display.length === 0 && !loading && (
             <div className="space-y-3">
               <p className="text-sm font-medium text-foreground">Como posso ajudar?</p>
               <div className="flex flex-col gap-1.5">
@@ -248,39 +280,81 @@ export function AIAgentWidget() {
             </div>
           )}
 
-          {display.map((item, i) => {
-            if (item.kind === 'message')
-              return <AIChatMessage key={i} role={item.role} content={item.content} />;
-            if (item.kind === 'proposal')
-              return (
-                <AIConfirmCard
-                  key={i}
-                  proposal={item.proposal}
-                  status={item.status}
-                  resultMessage={item.resultMessage}
-                  onConfirm={confirmProposal}
-                  onCancel={cancelProposal}
-                  disabled={loading || !activeProposal}
-                />
-              );
-            if (item.kind === 'options')
-              return (
-                <AIOptionsCard
-                  key={i}
-                  question={item.data.question}
-                  options={item.data.options}
-                  status={item.status}
-                  selectedValue={item.selectedValue}
-                  onSelect={selectOption}
-                />
-              );
-            return null;
-          })}
+          {operatorMode && op.display.length === 0 && !op.loading && (
+            <div className="space-y-3">
+              <p className="text-sm font-medium text-foreground">Descreva a demanda técnica.</p>
+              <div className="flex flex-col gap-1.5">
+                {[
+                  'Cliente quer orçamento para instalação de nova tela Raymarine no fly. Considere mão de obra, cabos, alimentação, NMEA 2000 e compatibilidade com equipamentos existentes.',
+                  'Diagnóstico de passarela Besenzoni com falha intermitente nos sensores.',
+                  'Orçamento para instalação de gerador Cummins Onan 5 kW.',
+                ].map((s, i) => (
+                  <button
+                    key={i}
+                    onClick={() => op.sendMessage(s)}
+                    className="text-left text-sm px-3 py-2 rounded-lg bg-muted hover:bg-muted/80 transition-colors text-muted-foreground hover:text-foreground"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
-          {loading && (
+          {!operatorMode &&
+            display.map((item, i) => {
+              if (item.kind === 'message')
+                return <AIChatMessage key={i} role={item.role} content={item.content} />;
+              if (item.kind === 'proposal')
+                return (
+                  <AIConfirmCard
+                    key={i}
+                    proposal={item.proposal}
+                    status={item.status}
+                    resultMessage={(item as any).resultMessage}
+                    onConfirm={confirmProposal}
+                    onCancel={cancelProposal}
+                    disabled={loading || !activeProposal}
+                  />
+                );
+              if (item.kind === 'options')
+                return (
+                  <AIOptionsCard
+                    key={i}
+                    question={item.data.question}
+                    options={item.data.options}
+                    status={item.status}
+                    selectedValue={item.selectedValue}
+                    onSelect={selectOption}
+                  />
+                );
+              return null;
+            })}
+
+          {operatorMode &&
+            op.display.map((item, i) => {
+              if (item.kind === 'message')
+                return <AIChatMessage key={i} role={item.role} content={item.content} />;
+              if (item.kind === 'draft_ref')
+                return <AIOperatorDraftCard key={i} draftId={item.draftId} />;
+              if (item.kind === 'pending_action')
+                return (
+                  <AIOperatorPendingActionCard
+                    key={i}
+                    action={item.action}
+                    status={item.status}
+                    disabled={op.loading}
+                    onApprove={op.approveAction}
+                    onReject={op.rejectAction}
+                  />
+                );
+              return null;
+            })}
+
+          {(loading || op.loading) && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
-              {loadingMsg || 'Processando…'}
+              {operatorMode ? 'Operador trabalhando…' : loadingMsg || 'Processando…'}
             </div>
           )}
         </div>
@@ -292,7 +366,7 @@ export function AIAgentWidget() {
               variant={isListening ? 'destructive' : 'outline'}
               size="icon"
               onClick={toggleListening}
-              disabled={loading}
+              disabled={loading || op.loading}
               className={`h-9 w-9 shrink-0 ${isListening ? 'animate-pulse' : ''}`}
               title={isListening ? 'Parar de ouvir' : 'Falar'}
             >
@@ -303,14 +377,14 @@ export function AIAgentWidget() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKey}
-              placeholder="Pergunte ou descreva uma ação…"
+              placeholder={operatorMode ? 'Descreva a demanda técnica…' : 'Pergunte ou descreva uma ação…'}
               rows={1}
-              disabled={loading}
+              disabled={loading || op.loading}
               className="resize-none text-sm min-h-[36px] max-h-[80px] py-2"
             />
             <Button
               onClick={handleSend}
-              disabled={loading || !input.trim()}
+              disabled={loading || op.loading || !input.trim()}
               size="icon"
               className="h-9 w-9 shrink-0"
             >
