@@ -205,6 +205,217 @@ export function resolveLinkProposal(input: LinkProposalInput): LinkProposalResul
 }
 
 // ---------------------------------------------------------------------------
+// RESOLUCAO ESTRUTURADA POR TERMOS HUMANOS
+// ---------------------------------------------------------------------------
+// O modelo informa intencao e nomes. IDs persistiveis ficam restritos ao
+// backend/payload estruturado autenticado usado pela UI para confirmacao.
+
+export type LinkResolutionClientCandidate = {
+  id: string;
+  name: string | null;
+  type?: string | null;
+};
+
+export type LinkResolutionVesselCandidate = {
+  id: string;
+  name: string | null;
+  manufacturer?: string | null;
+  model?: string | null;
+  year?: number | string | null;
+  client_id?: string | null;
+};
+
+export type SafeLinkCandidate = {
+  id: string;
+  name: string | null;
+  subtitle: string | null;
+};
+
+export type EntityLinkCompatibility = {
+  status: "already_linked_to_client" | "client_only" | "vessel_only";
+  message: string;
+};
+
+export type StructuredEntityLinkProposal = {
+  draft_id: string;
+  draft_title: string | null;
+  client: SafeLinkCandidate | null;
+  vessel: SafeLinkCandidate | null;
+  client_candidates?: SafeLinkCandidate[];
+  vessel_candidates?: SafeLinkCandidate[];
+  compatibility: EntityLinkCompatibility;
+  rationale: string | null;
+};
+
+export type EntityLinkResolutionResult =
+  | { ok: true; persisted: false; proposal: StructuredEntityLinkProposal }
+  | {
+      ok: false;
+      reason:
+        | "no_terms"
+        | "invalid_reference"
+        | "client_not_found"
+        | "vessel_not_found"
+        | "client_ambiguous"
+        | "vessel_ambiguous"
+        | "vessel_mismatch";
+      message: string;
+      clientCandidates?: SafeLinkCandidate[];
+      vesselCandidates?: SafeLinkCandidate[];
+    };
+
+function cleanHumanTerm(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed;
+}
+
+export function isSanitizedInternalReference(value: unknown): boolean {
+  return typeof value === "string" && /\[?\s*referencia interna oculta\s*\]?/i.test(value);
+}
+
+function clientSubtitle(client: LinkResolutionClientCandidate): string | null {
+  if (!client.type) return null;
+  if (client.type === "individual") return "Cliente individual";
+  if (client.type === "company") return "Cliente empresa";
+  return `Cliente ${client.type}`;
+}
+
+function vesselSubtitle(vessel: LinkResolutionVesselCandidate): string | null {
+  const manufacturer = vessel.manufacturer ? String(vessel.manufacturer) : "";
+  const model = vessel.model ? String(vessel.model) : "";
+  const parts = model.toLocaleLowerCase().includes(manufacturer.toLocaleLowerCase())
+    ? [model]
+    : [manufacturer, model].filter(Boolean);
+  if (parts.length > 0) return parts.join(" ");
+  return vessel.year ? String(vessel.year) : null;
+}
+
+export function toSafeClientCandidate(client: LinkResolutionClientCandidate): SafeLinkCandidate {
+  return {
+    id: client.id,
+    name: client.name,
+    subtitle: clientSubtitle(client),
+  };
+}
+
+export function toSafeVesselCandidate(vessel: LinkResolutionVesselCandidate): SafeLinkCandidate {
+  return {
+    id: vessel.id,
+    name: vessel.name,
+    subtitle: vesselSubtitle(vessel),
+  };
+}
+
+export function resolveEntityLinkByHumanTerms(input: {
+  draftId: string;
+  draftTitle: string | null;
+  clientQuery?: string | null;
+  vesselQuery?: string | null;
+  clientCandidates: LinkResolutionClientCandidate[];
+  vesselCandidates: LinkResolutionVesselCandidate[];
+  rationale?: string | null;
+}): EntityLinkResolutionResult {
+  const clientQuery = cleanHumanTerm(input.clientQuery);
+  const vesselQuery = cleanHumanTerm(input.vesselQuery);
+
+  if (!clientQuery && !vesselQuery) {
+    return {
+      ok: false,
+      reason: "no_terms",
+      message: "Informe o nome do cliente, da embarcacao, ou ambos.",
+    };
+  }
+  if (isSanitizedInternalReference(clientQuery) || isSanitizedInternalReference(vesselQuery)) {
+    return {
+      ok: false,
+      reason: "invalid_reference",
+      message: "A referencia interna usada na conversa expirou. Informe o nome do cliente ou da embarcacao.",
+    };
+  }
+
+  if (clientQuery && input.clientCandidates.length === 0) {
+    return { ok: false, reason: "client_not_found", message: "Cliente nao localizado para o termo informado." };
+  }
+  if (vesselQuery && input.vesselCandidates.length === 0) {
+    return {
+      ok: false,
+      reason: "vessel_not_found",
+      message: "Embarcacao nao localizada para o termo informado.",
+    };
+  }
+  if (clientQuery && input.clientCandidates.length > 1) {
+    return {
+      ok: false,
+      reason: "client_ambiguous",
+      message: "Encontrei mais de um cliente possivel. Selecione o correto antes de confirmar.",
+      clientCandidates: input.clientCandidates.map(toSafeClientCandidate),
+    };
+  }
+  if (vesselQuery && input.vesselCandidates.length > 1) {
+    return {
+      ok: false,
+      reason: "vessel_ambiguous",
+      message: "Encontrei mais de uma embarcacao possivel. Selecione a correta antes de confirmar.",
+      vesselCandidates: input.vesselCandidates.map(toSafeVesselCandidate),
+    };
+  }
+
+  const client = clientQuery ? input.clientCandidates[0] : null;
+  const vessel = vesselQuery ? input.vesselCandidates[0] : null;
+  if (client && vessel && vessel.client_id && vessel.client_id !== client.id) {
+    return {
+      ok: false,
+      reason: "vessel_mismatch",
+      message: "A embarcacao localizada nao pertence ao cliente informado.",
+    };
+  }
+
+  const compatibility: EntityLinkCompatibility =
+    client && vessel
+      ? {
+          status: "already_linked_to_client",
+          message: "Esta embarcacao ja esta cadastrada para este cliente.",
+        }
+      : client
+        ? { status: "client_only", message: "A proposta vincula apenas o cliente ao rascunho." }
+        : { status: "vessel_only", message: "A proposta vincula apenas a embarcacao ao rascunho." };
+
+  return {
+    ok: true,
+    persisted: false,
+    proposal: {
+      draft_id: input.draftId,
+      draft_title: input.draftTitle,
+      client: client ? toSafeClientCandidate(client) : null,
+      vessel: vessel ? toSafeVesselCandidate(vessel) : null,
+      compatibility,
+      rationale: cleanHumanTerm(input.rationale),
+    },
+  };
+}
+
+export function sanitizeToolEventsForFrontend(events: any[]) {
+  return (Array.isArray(events) ? events : []).map((event) => {
+    const result = event?.result && typeof event.result === "object" ? event.result : {};
+    const results = Array.isArray(result.results) ? result.results : null;
+    const history = Array.isArray(result.history) ? result.history : null;
+    return {
+      name: String(event?.name || "unknown"),
+      blocked: !!event?.blocked,
+      result_summary: {
+        ...(results ? { result_count: results.length } : {}),
+        ...(history ? { history_count: history.length } : {}),
+        ...(typeof result.ok === "boolean" ? { ok: result.ok } : {}),
+        ...(typeof result.proposed === "boolean" ? { proposed: result.proposed } : {}),
+        ...(typeof result.persisted === "boolean" ? { persisted: result.persisted } : {}),
+      },
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
 // CANCELAMENTO SEGURO DE DRAFT
 // ---------------------------------------------------------------------------
 // Cancelamento só é permitido em estados compatíveis com erro operacional

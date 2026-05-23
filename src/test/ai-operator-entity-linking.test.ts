@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
   buildDraftUpdatePatch,
   evaluateCancelDraft,
+  resolveEntityLinkByHumanTerms,
   resolveCreateDraftLinks,
   resolveExplicitDraftEntitySelection,
   resolveLinkProposal,
   resolveMemoryCandidateLinks,
+  sanitizeToolEventsForFrontend,
 } from "../../supabase/functions/ai-operator-core/entity-linking.ts";
 
 describe("AI Operator - explicit entity linking policy", () => {
@@ -292,6 +294,157 @@ describe("AI Operator - propose_entity_link (proposal only, never persists)", ()
       expect(result.proposal.client_id).toBe("client-a");
       expect(result.proposal.vessel_id).toBeNull();
     }
+  });
+});
+
+describe("AI Operator - human-term entity link resolution", () => {
+  const clientCelio = { id: "client-celio", name: "CELIO YUDI SHIOKAWA JUNIOR", type: "individual" };
+  const vesselDondoka = {
+    id: "vessel-dondoka",
+    name: "Dondoka",
+    manufacturer: "Porfino",
+    model: "Porfino 35 Fly",
+    year: 2012,
+    client_id: "client-celio",
+  };
+
+  it("creates a proposal from human terms without model-provided UUIDs", () => {
+    const result = resolveEntityLinkByHumanTerms({
+      draftId: "draft-raymarine",
+      draftTitle: "Orcamento: Instalacao Raymarine Axiom 12 no Fly",
+      clientQuery: "Celio Yudi Shiokawa Junior",
+      vesselQuery: "Dondoka",
+      clientCandidates: [clientCelio],
+      vesselCandidates: [vesselDondoka],
+      rationale: "Usuario pediu vinculo do rascunho ativo.",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.proposal.client).toEqual({
+        id: "client-celio",
+        name: "CELIO YUDI SHIOKAWA JUNIOR",
+        subtitle: "Cliente individual",
+      });
+      expect(result.proposal.vessel).toEqual({
+        id: "vessel-dondoka",
+        name: "Dondoka",
+        subtitle: "Porfino 35 Fly",
+      });
+      expect(result.proposal.compatibility).toEqual({
+        status: "already_linked_to_client",
+        message: "Esta embarcacao ja esta cadastrada para este cliente.",
+      });
+      expect(result.persisted).toBe(false);
+    }
+  });
+
+  it("treats Dondoka linked to Celio as compatible, not a false ownership conflict", () => {
+    const result = resolveEntityLinkByHumanTerms({
+      draftId: "draft-raymarine",
+      draftTitle: "Raymarine",
+      clientQuery: "Celio",
+      vesselQuery: "Dondoka",
+      clientCandidates: [clientCelio],
+      vesselCandidates: [vesselDondoka],
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.proposal.compatibility.status).toBe("already_linked_to_client");
+    }
+  });
+
+  it("blocks a true vessel-client mismatch with a specific reason", () => {
+    const result = resolveEntityLinkByHumanTerms({
+      draftId: "draft-raymarine",
+      draftTitle: "Raymarine",
+      clientQuery: "Celio",
+      vesselQuery: "Dondoka",
+      clientCandidates: [clientCelio],
+      vesselCandidates: [{ ...vesselDondoka, client_id: "client-other" }],
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe("vessel_mismatch");
+      expect(result.message).toMatch(/nao pertence ao cliente/i);
+    }
+  });
+
+  it("returns selection candidates instead of guessing when client is ambiguous", () => {
+    const result = resolveEntityLinkByHumanTerms({
+      draftId: "draft-raymarine",
+      draftTitle: "Raymarine",
+      clientQuery: "Celio",
+      vesselQuery: "Dondoka",
+      clientCandidates: [
+        clientCelio,
+        { id: "client-celio-2", name: "CELIO SHIOKAWA", type: "individual" },
+      ],
+      vesselCandidates: [vesselDondoka],
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe("client_ambiguous");
+      expect(result.clientCandidates).toHaveLength(2);
+      expect(result.clientCandidates?.[0]).not.toHaveProperty("cpf_cnpj");
+      expect(result.clientCandidates?.[0]).not.toHaveProperty("phone");
+    }
+  });
+
+  it("rejects sanitized placeholders as invalid references without resolving as UUIDs", () => {
+    const result = resolveEntityLinkByHumanTerms({
+      draftId: "draft-raymarine",
+      draftTitle: "Raymarine",
+      clientQuery: "[referencia interna oculta]",
+      vesselQuery: "Dondoka",
+      clientCandidates: [],
+      vesselCandidates: [vesselDondoka],
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe("invalid_reference");
+    }
+  });
+});
+
+describe("AI Operator - frontend tool event minimization", () => {
+  it("removes raw UUIDs and personal data from tool_events returned to the browser", () => {
+    const sanitized = sanitizeToolEventsForFrontend([
+      {
+        name: "search_clients",
+        args: { query: "Celio", client_id: "11111111-1111-4111-8111-111111111111" },
+        result: {
+          results: [
+            {
+              id: "22222222-2222-4222-8222-222222222222",
+              full_name_or_company_name: "CELIO YUDI SHIOKAWA JUNIOR",
+              cpf_cnpj: "123.456.789-10",
+              phone: "(11) 99999-9999",
+              whatsapp: "(11) 99999-9999",
+              email: "cliente@example.com",
+            },
+          ],
+        },
+      },
+    ]);
+
+    const serialized = JSON.stringify(sanitized);
+    expect(serialized).not.toContain("11111111-1111-4111-8111-111111111111");
+    expect(serialized).not.toContain("22222222-2222-4222-8222-222222222222");
+    expect(serialized).not.toContain("123.456.789-10");
+    expect(serialized).not.toContain("99999-9999");
+    expect(serialized).not.toContain("cliente@example.com");
+    expect(sanitized).toEqual([
+      {
+        name: "search_clients",
+        blocked: false,
+        result_summary: { result_count: 1 },
+      },
+    ]);
   });
 });
 

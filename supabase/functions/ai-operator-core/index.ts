@@ -29,10 +29,13 @@ import { buildDraftContextNote, redactUuidTokens, toModelConversationHistory } f
 import {
   buildDraftUpdatePatch,
   evaluateCancelDraft,
+  isSanitizedInternalReference,
+  resolveEntityLinkByHumanTerms,
   resolveCreateDraftLinks,
   resolveExplicitDraftEntitySelection,
   resolveLinkProposal,
   resolveMemoryCandidateLinks,
+  sanitizeToolEventsForFrontend,
   type UnexpectedEntityAttempt,
 } from "./entity-linking.ts";
 
@@ -259,6 +262,72 @@ async function buildActiveDraftContext(admin: any, draftId: string) {
   });
 }
 
+function safeLimit(value: unknown, fallback = 10, max = 25) {
+  const n = Number(value) || fallback;
+  return Math.min(Math.max(n, 1), max);
+}
+
+function formatClientForModel(row: any) {
+  return {
+    name: row?.full_name_or_company_name ?? null,
+    type: row?.type ?? null,
+  };
+}
+
+function formatVesselForModel(row: any) {
+  return {
+    name: row?.boat_name ?? null,
+    manufacturer: row?.manufacturer ?? null,
+    model: row?.model ?? null,
+    year: row?.year ?? null,
+    asset_type: row?.asset_type ?? null,
+  };
+}
+
+async function searchClientRowsForLink(sb: any, queryText: string) {
+  const q = String(queryText || "").trim();
+  if (!q || isSanitizedInternalReference(q)) return [];
+  const { data, error } = await sb
+    .from("clients")
+    .select("id, full_name_or_company_name, type")
+    .or(`full_name_or_company_name.ilike.%${q}%`)
+    .eq("active", true)
+    .limit(5);
+  if (error) throw error;
+  return (data || []).map((row: any) => ({
+    id: row.id,
+    name: row.full_name_or_company_name ?? null,
+    type: row.type ?? null,
+  }));
+}
+
+async function searchVesselRowsForLink(sb: any, queryText: string) {
+  const q = String(queryText || "").trim();
+  if (!q || isSanitizedInternalReference(q)) return [];
+  const { data, error } = await sb
+    .from("vessels")
+    .select("id, boat_name, manufacturer, model, year, client_id")
+    .eq("active", true)
+    .or(`boat_name.ilike.%${q}%,model.ilike.%${q}%,manufacturer.ilike.%${q}%`)
+    .limit(5);
+  if (error) throw error;
+  return (data || []).map((row: any) => ({
+    id: row.id,
+    name: row.boat_name ?? null,
+    manufacturer: row.manufacturer ?? null,
+    model: row.model ?? null,
+    year: row.year ?? null,
+    client_id: row.client_id ?? null,
+  }));
+}
+
+function resolveActiveDraftTarget(args: any, activeDraftId?: string | null) {
+  if (activeDraftId) return activeDraftId;
+  const legacy = typeof args?.draft_id === "string" ? args.draft_id.trim() : "";
+  if (!legacy || isSanitizedInternalReference(legacy)) return null;
+  return legacy;
+}
+
 async function auditUnexpectedEntityAttempts(
   admin: any,
   params: {
@@ -292,14 +361,14 @@ async function auditUnexpectedEntityAttempts(
 async function execSafeTool(
   name: string,
   args: any,
-  ctx: { sb: any; admin: any; userId: string; sessionId: string }
+  ctx: { sb: any; admin: any; userId: string; sessionId: string; activeDraftId?: string | null }
 ): Promise<{ result: any; draftId?: string | null }> {
-  const { sb, admin, userId, sessionId } = ctx;
+  const { sb, admin, userId, sessionId, activeDraftId } = ctx;
 
   switch (name) {
     case "search_clients": {
       const q = String(args.query || "").trim();
-      const limit = Math.min(Number(args.limit) || 10, 25);
+      const limit = safeLimit(args.limit, 10, 25);
       const { data, error } = await sb
         .from("clients")
         .select("id, full_name_or_company_name, type, phone, whatsapp, email, cpf_cnpj")
@@ -309,20 +378,28 @@ async function execSafeTool(
         .eq("active", true)
         .limit(limit);
       if (error) throw error;
-      return { result: { results: data } };
+      return { result: { results: (data || []).map(formatClientForModel), result_count: data?.length ?? 0 } };
     }
     case "search_vessels": {
       const q = String(args.query || "").trim();
-      let query = sb
+      const { data, error } = await sb
         .from("vessels")
         .select("id, boat_name, manufacturer, model, year, client_id, asset_type, marina_id")
         .eq("active", true)
         .or(`boat_name.ilike.%${q}%,model.ilike.%${q}%,manufacturer.ilike.%${q}%`)
         .limit(15);
-      if (args.client_id) query = query.eq("client_id", args.client_id);
-      const { data, error } = await query;
       if (error) throw error;
-      return { result: { results: data } };
+      if (args.client_id) {
+        await audit(admin, {
+          session_id: sessionId,
+          actor_user_id: userId,
+          actor_kind: "ai_model",
+          event_type: "model_client_filter_ignored",
+          event_category: "security",
+          payload: { tool: "search_vessels", attempted: true },
+        });
+      }
+      return { result: { results: (data || []).map(formatVesselForModel), result_count: data?.length ?? 0 } };
     }
     case "search_products": {
       const q = String(args.query || "").trim();
@@ -349,16 +426,42 @@ async function execSafeTool(
       return { result: { results: data } };
     }
     case "get_vessel_history": {
+      const vesselQuery = typeof args.vessel_query === "string" ? args.vessel_query.trim() : "";
+      if (!vesselQuery || isSanitizedInternalReference(vesselQuery)) {
+        return { result: { error: "Informe o nome da embarcacao para consultar historico." } };
+      }
+      const vesselCandidates = await searchVesselRowsForLink(sb, vesselQuery);
+      if (vesselCandidates.length === 0) return { result: { error: "Embarcacao nao localizada." } };
+      if (vesselCandidates.length > 1) {
+        return {
+          result: {
+            error: "Mais de uma embarcacao localizada. Especifique melhor o nome/modelo antes de consultar o historico.",
+            candidates: vesselCandidates.map((vessel: any) => formatVesselForModel({ boat_name: vessel.name, ...vessel })),
+          },
+        };
+      }
       const { data, error } = await sb
         .from("service_orders")
         .select(
           "id, service_order_number, status, scheduled_start_at, grand_total, created_at, problem_description, clients(full_name_or_company_name)"
         )
-        .eq("vessel_id", args.vessel_id)
+        .eq("vessel_id", vesselCandidates[0].id)
         .order("created_at", { ascending: false })
         .limit(20);
       if (error) throw error;
-      return { result: { history: data } };
+      return {
+        result: {
+          history: (data || []).map((row: any) => ({
+            service_order_number: row.service_order_number,
+            status: row.status,
+            scheduled_start_at: row.scheduled_start_at,
+            grand_total: row.grand_total,
+            created_at: row.created_at,
+            problem_description: row.problem_description,
+            client_name: row.clients?.full_name_or_company_name ?? null,
+          })),
+        },
+      };
     }
     case "list_technicians": {
       const { data, error } = await sb
@@ -432,10 +535,12 @@ async function execSafeTool(
       return { result: { ok: true, draft_id: draft.id, draft }, draftId: draft.id };
     }
     case "update_draft": {
+      const targetDraftId = resolveActiveDraftTarget(args, activeDraftId);
+      if (!targetDraftId) return { result: { error: "Nao ha rascunho ativo para atualizar." } };
       const { data: draftOwner } = await admin
         .from("ai_operator_drafts")
         .select("id, session_id, client_id, vessel_id")
-        .eq("id", args.draft_id)
+        .eq("id", targetDraftId)
         .maybeSingle();
       if (!draftOwner || draftOwner.session_id !== sessionId) {
         return { result: { error: "Rascunho nao pertence a sessao atual." } };
@@ -446,12 +551,12 @@ async function execSafeTool(
         userId,
         tool: "update_draft",
         attempts: updatePolicy.unexpected,
-        draftId: args.draft_id,
+        draftId: targetDraftId,
       });
       const { data: updated, error } = await admin
         .from("ai_operator_drafts")
         .update(updatePolicy.patch)
-        .eq("id", args.draft_id)
+        .eq("id", targetDraftId)
         .select()
         .single();
       if (error) throw error;
@@ -462,24 +567,26 @@ async function execSafeTool(
           vessel_id: updatePolicy.links.vessel_id,
         })
         .eq("id", sessionId);
-      await mergeSessionMetadata(admin, sessionId, { active_draft_id: args.draft_id });
+      await mergeSessionMetadata(admin, sessionId, { active_draft_id: targetDraftId });
       await audit(admin, {
         session_id: sessionId,
-        draft_id: args.draft_id,
+        draft_id: targetDraftId,
         actor_user_id: userId,
         actor_kind: "ai_model",
         event_type: "draft_updated",
         event_category: "data",
         payload: { fields: Object.keys(updatePolicy.patch) },
       });
-      return { result: { ok: true, draft_id: args.draft_id, draft: updated }, draftId: args.draft_id };
+      return { result: { ok: true, draft_id: targetDraftId, draft: updated }, draftId: targetDraftId };
     }
     case "add_draft_item": {
       // Garante que o draft pertence à sessão atual (anti-injection cross-session)
+      const targetDraftId = resolveActiveDraftTarget(args, activeDraftId);
+      if (!targetDraftId) return { result: { error: "Nao ha rascunho ativo para adicionar item." } };
       const { data: draftOwner } = await admin
         .from("ai_operator_drafts")
         .select("id, session_id")
-        .eq("id", args.draft_id)
+        .eq("id", targetDraftId)
         .maybeSingle();
       if (!draftOwner || draftOwner.session_id !== sessionId) {
         return { result: { error: "Rascunho não pertence à sessão atual." } };
@@ -495,7 +602,7 @@ async function execSafeTool(
         if (r && !r.ok) {
           await audit(admin, {
             session_id: sessionId,
-            draft_id: args.draft_id,
+            draft_id: targetDraftId,
             actor_user_id: userId,
             actor_kind: "system",
             event_type: "entity_reference_blocked",
@@ -507,12 +614,12 @@ async function execSafeTool(
       const { data: existing } = await admin
         .from("ai_operator_draft_items")
         .select("id")
-        .eq("draft_id", args.draft_id);
+        .eq("draft_id", targetDraftId);
       const position = (existing?.length ?? 0) + 1;
       const { data: item, error } = await admin
         .from("ai_operator_draft_items")
         .insert({
-          draft_id: args.draft_id,
+          draft_id: targetDraftId,
           item_kind: args.item_kind,
           service_id: safeService,
           product_id: safeProduct,
@@ -531,10 +638,12 @@ async function execSafeTool(
       return { result: { ok: true, item } };
     }
     case "ask_pending_question": {
+      const targetDraftId = resolveActiveDraftTarget(args, activeDraftId);
+      if (!targetDraftId) return { result: { error: "Nao ha rascunho ativo para registrar pergunta." } };
       const { data: draftOwner } = await admin
         .from("ai_operator_drafts")
         .select("id, session_id, pending_questions")
-        .eq("id", args.draft_id)
+        .eq("id", targetDraftId)
         .maybeSingle();
       if (!draftOwner || draftOwner.session_id !== sessionId) {
         return { result: { error: "Rascunho não pertence à sessão atual." } };
@@ -544,7 +653,7 @@ async function execSafeTool(
       const { error: uErr } = await admin
         .from("ai_operator_drafts")
         .update({ pending_questions: list })
-        .eq("id", args.draft_id);
+        .eq("id", targetDraftId);
       if (uErr) throw uErr;
       return { result: { ok: true, count: list.length } };
     }
@@ -1420,7 +1529,7 @@ Deno.serve(async (req) => {
           draft_id: createdDraftId,
           pending_action: pendingActionForFrontend,
           proposed_link: linkProposalForFrontend,
-          tool_events: toolEvents,
+          tool_events: sanitizeToolEventsForFrontend(toolEvents),
         });
       }
 
@@ -1439,7 +1548,7 @@ Deno.serve(async (req) => {
 
           // Validar draft_id em propose_action via helper testável.
           const draftRes = await resolveProposalDraftId({
-            requestedDraftId: fnArgs.draft_id ?? null,
+            requestedDraftId: createdDraftId ? null : (fnArgs.draft_id ?? null),
             createdDraftIdThisRun: createdDraftId,
             currentSessionId: sessionId!,
             lookup: async (id) => {
@@ -1535,31 +1644,23 @@ Deno.serve(async (req) => {
             draft_id: createdDraftId,
             pending_action: pendingActionForFrontend,
             proposed_link: linkProposalForFrontend,
-            tool_events: toolEvents,
+            tool_events: sanitizeToolEventsForFrontend(toolEvents),
           });
         }
 
         if (fnName === "propose_entity_link") {
-          // SEGURANCA: o modelo NUNCA escolhe o draft alvo. O alvo e sempre
-          // o draft ATIVO da sessao resolvido pelo backend (createdDraftId).
-          // Se nao houver draft ativo, devolvemos um erro estruturado pedindo
-          // que o usuario selecione um rascunho antes.
-          const targetDraftId = createdDraftId;
-          const requestedClientId =
-            typeof fnArgs.client_id === "string" && fnArgs.client_id.trim().length > 0
-              ? fnArgs.client_id.trim()
-              : null;
-          const requestedVesselId =
-            typeof fnArgs.vessel_id === "string" && fnArgs.vessel_id.trim().length > 0
-              ? fnArgs.vessel_id.trim()
-              : null;
-          if (!targetDraftId) {
+          const targetDraftIdV2 = createdDraftId;
+          const clientQuery = typeof fnArgs.client_query === "string" ? fnArgs.client_query.trim() : null;
+          const vesselQuery = typeof fnArgs.vessel_query === "string" ? fnArgs.vessel_query.trim() : null;
+          const safeToolArgs = { has_client_query: !!clientQuery, has_vessel_query: !!vesselQuery };
+
+          if (!targetDraftIdV2) {
             const blocked = {
               blocked: true,
               reason:
                 "Nao ha rascunho ativo na sessao. Peca ao usuario para selecionar um rascunho existente antes de propor vinculo.",
             };
-            toolEvents.push({ name: fnName, args: fnArgs, result: blocked, blocked: true });
+            toolEvents.push({ name: fnName, args: safeToolArgs, result: blocked, blocked: true });
             messages.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify(blocked) });
             await audit(admin, {
               session_id: sessionId,
@@ -1567,108 +1668,81 @@ Deno.serve(async (req) => {
               actor_kind: "system",
               event_type: "link_proposal_blocked_no_draft",
               event_category: "security",
-              payload: { proposed_client: !!requestedClientId, proposed_vessel: !!requestedVesselId },
+              payload: safeToolArgs,
             });
             continue;
           }
 
-          // Validar visibilidade via JWT do usuario (RLS real do ERP).
-          const refs = await validateAllReferences(sb, {
-            client: requestedClientId ?? undefined,
-            vessel: requestedVesselId ?? undefined,
+          const [draftRowV2, clientCandidates, vesselCandidates] = await Promise.all([
+            getDraftRow(admin, targetDraftIdV2),
+            clientQuery ? searchClientRowsForLink(sb, clientQuery) : Promise.resolve([]),
+            vesselQuery ? searchVesselRowsForLink(sb, vesselQuery) : Promise.resolve([]),
+          ]);
+          const resolution = resolveEntityLinkByHumanTerms({
+            draftId: targetDraftIdV2,
+            draftTitle: draftRowV2?.title ?? null,
+            clientQuery,
+            vesselQuery,
+            clientCandidates,
+            vesselCandidates,
+            rationale: typeof fnArgs.rationale === "string" ? fnArgs.rationale : null,
           });
-          let vesselBelongsToClient: boolean | null = null;
-          let clientName: string | null = null;
-          let vesselName: string | null = null;
-          if (requestedClientId && refs.client?.ok) {
-            const { data: clientRow } = await sb
-              .from("clients")
-              .select("id, full_name_or_company_name")
-              .eq("id", requestedClientId)
-              .maybeSingle();
-            clientName = clientRow?.full_name_or_company_name ?? null;
-          }
-          if (requestedVesselId && refs.vessel?.ok) {
-            const { data: vesselRow } = await sb
-              .from("vessels")
-              .select("id, boat_name, client_id")
-              .eq("id", requestedVesselId)
-              .maybeSingle();
-            vesselName = vesselRow?.boat_name ?? null;
-            if (requestedClientId && vesselRow?.client_id) {
-              vesselBelongsToClient = vesselRow.client_id === requestedClientId;
+
+          if (!resolution.ok) {
+            const blocked = { blocked: true, reason: resolution.message, code: resolution.reason };
+            if (resolution.reason === "client_ambiguous" || resolution.reason === "vessel_ambiguous") {
+              linkProposalForFrontend = {
+                draft_id: targetDraftIdV2,
+                draft_title: draftRowV2?.title ?? null,
+                client: null,
+                vessel: null,
+                client_candidates: resolution.clientCandidates ?? [],
+                vessel_candidates: resolution.vesselCandidates ?? [],
+                compatibility: {
+                  status: "needs_selection",
+                  message: resolution.message,
+                },
+                rationale: typeof fnArgs.rationale === "string" ? fnArgs.rationale : null,
+              };
             }
-          }
-
-          const proposalResult = resolveLinkProposal({
-            clientId: requestedClientId,
-            vesselId: requestedVesselId,
-            clientVisible: !requestedClientId || !!refs.client?.ok,
-            vesselVisible: !requestedVesselId || !!refs.vessel?.ok,
-            vesselBelongsToClient,
-          });
-
-          if (!proposalResult.ok) {
-            const blocked = {
-              blocked: true,
-              reason:
-                proposalResult.reason === "no_candidates"
-                  ? "Forneca pelo menos um candidato de cliente ou embarcacao."
-                  : proposalResult.reason === "client_invisible"
-                    ? "Cliente nao visivel para o usuario."
-                    : proposalResult.reason === "vessel_invisible"
-                      ? "Embarcacao nao visivel para o usuario."
-                      : "A embarcacao selecionada nao pertence ao cliente proposto.",
-            };
-            toolEvents.push({ name: fnName, args: fnArgs, result: blocked, blocked: true });
+            toolEvents.push({ name: fnName, args: safeToolArgs, result: blocked, blocked: true });
             messages.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify(blocked) });
             await audit(admin, {
               session_id: sessionId,
-              draft_id: targetDraftId,
+              draft_id: targetDraftIdV2,
               actor_user_id: userId,
               actor_kind: "system",
               event_type: "link_proposal_blocked",
               event_category: "security",
-              payload: { reason: proposalResult.reason },
+              payload: { reason: resolution.reason },
             });
             continue;
           }
 
-          // NAO persiste vinculo — apenas estrutura a proposta para a UI.
-          // Lookup do titulo do draft para mostrar nome humano na proposta.
-          const draftRow = await getDraftRow(admin, targetDraftId);
-          linkProposalForFrontend = {
-            draft_id: targetDraftId,
-            draft_title: draftRow?.title ?? null,
-            client: proposalResult.proposal.client_id
-              ? { id: proposalResult.proposal.client_id, name: clientName }
-              : null,
-            vessel: proposalResult.proposal.vessel_id
-              ? { id: proposalResult.proposal.vessel_id, name: vesselName }
-              : null,
-            rationale: typeof fnArgs.rationale === "string" ? fnArgs.rationale : null,
-          };
+          linkProposalForFrontend = resolution.proposal;
           const toolResult = {
             ok: true,
             proposed: true,
             persisted: false,
             requires_user_confirmation: true,
-            draft_title: draftRow?.title ?? null,
-            client_name: clientName,
-            vessel_name: vesselName,
+            draft_title: resolution.proposal.draft_title,
+            client_name: resolution.proposal.client?.name ?? null,
+            vessel_name: resolution.proposal.vessel?.name ?? null,
+            compatibility: resolution.proposal.compatibility.message,
           };
-          toolEvents.push({ name: fnName, args: fnArgs, result: toolResult });
+          toolEvents.push({ name: fnName, args: safeToolArgs, result: toolResult });
           messages.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify(toolResult) });
           await audit(admin, {
             session_id: sessionId,
-            draft_id: targetDraftId,
+            draft_id: targetDraftIdV2,
             actor_user_id: userId,
             actor_kind: "ai_model",
             event_type: "link_proposal_presented",
             event_category: "data",
             payload: {
-              client_proposed: !!proposalResult.proposal.client_id,
-              vessel_proposed: !!proposalResult.proposal.vessel_id,
+              client_proposed: !!resolution.proposal.client,
+              vessel_proposed: !!resolution.proposal.vessel,
+              compatibility: resolution.proposal.compatibility.status,
             },
           });
           continue;
@@ -1695,7 +1769,7 @@ Deno.serve(async (req) => {
 
         let toolResult: any;
         try {
-          const exec = await execSafeTool(fnName, fnArgs, { sb, admin, userId, sessionId: sessionId! });
+          const exec = await execSafeTool(fnName, fnArgs, { sb, admin, userId, sessionId: sessionId!, activeDraftId: createdDraftId });
           toolResult = exec.result;
           if (exec.draftId && !createdDraftId) createdDraftId = exec.draftId;
         } catch (e: any) {

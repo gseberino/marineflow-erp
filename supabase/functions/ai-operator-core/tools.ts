@@ -24,12 +24,11 @@ export const OPERATOR_TOOLS = [
     type: "function",
     function: {
       name: "search_vessels",
-      description: "Busca embarcações ou motorhomes por nome/modelo. Pode filtrar por client_id.",
+      description: "Busca embarcacoes ou motorhomes por nome/modelo usando termos humanos.",
       parameters: {
         type: "object",
         properties: {
           query: { type: "string" },
-          client_id: { type: "string" },
         },
         required: ["query"],
       },
@@ -69,11 +68,11 @@ export const OPERATOR_TOOLS = [
     type: "function",
     function: {
       name: "get_vessel_history",
-      description: "Retorna histórico técnico (OSs anteriores) de uma embarcação.",
+      description: "Retorna historico tecnico (OSs anteriores) de uma embarcacao localizada por termo humano.",
       parameters: {
         type: "object",
-        properties: { vessel_id: { type: "string" } },
-        required: ["vessel_id"],
+        properties: { vessel_query: { type: "string" } },
+        required: ["vessel_query"],
       },
     },
   },
@@ -131,7 +130,6 @@ export const OPERATOR_TOOLS = [
       parameters: {
         type: "object",
         properties: {
-          draft_id: { type: "string" },
           title: { type: "string" },
           status: {
             type: "string",
@@ -149,7 +147,6 @@ export const OPERATOR_TOOLS = [
           next_steps: { type: "array", items: { type: "string" } },
           hypotheses: { type: "array", items: { type: "string" } },
         },
-        required: ["draft_id"],
       },
     },
   },
@@ -162,7 +159,6 @@ export const OPERATOR_TOOLS = [
       parameters: {
         type: "object",
         properties: {
-          draft_id: { type: "string" },
           item_kind: {
             type: "string",
             enum: ["service", "product", "product_to_quote", "displacement", "engineering", "pending_question", "risk", "reference"],
@@ -177,7 +173,7 @@ export const OPERATOR_TOOLS = [
           service_id: { type: "string" },
           confidence: { type: "string", enum: ["low", "medium", "high"] },
         },
-        required: ["draft_id", "item_kind", "description"],
+        required: ["item_kind", "description"],
       },
     },
   },
@@ -189,10 +185,9 @@ export const OPERATOR_TOOLS = [
       parameters: {
         type: "object",
         properties: {
-          draft_id: { type: "string" },
           question: { type: "string" },
         },
-        required: ["draft_id", "question"],
+        required: ["question"],
       },
     },
   },
@@ -226,18 +221,18 @@ export const OPERATOR_TOOLS = [
         "Apresenta uma sugestao de vinculo de cliente e/ou embarcacao para o rascunho ATIVO da sessao atual. " +
         "NAO grava nada — apenas estrutura uma proposta com nomes humanos para o usuario confirmar na interface. " +
         "O draft alvo NAO e escolhido pelo modelo; e sempre o draft ativo resolvido pelo backend. " +
-        "Use somente apos search_clients / search_vessels terem retornado candidatos plausiveis. " +
+        "Use nomes ou termos humanos informados pelo usuario; nunca use IDs internos. " +
         "Se nao houver draft ativo, o backend respondera com erro indicando que o usuario precisa selecionar um rascunho primeiro.",
       parameters: {
         type: "object",
         properties: {
-          client_id: {
+          client_query: {
             type: "string",
-            description: "ID de cliente vindo de search_clients (opcional se for vincular apenas embarcacao).",
+            description: "Nome ou termo humano do cliente mencionado pelo usuario.",
           },
-          vessel_id: {
+          vessel_query: {
             type: "string",
-            description: "ID de embarcacao vindo de search_vessels (opcional se for vincular apenas cliente).",
+            description: "Nome, modelo ou termo humano da embarcacao mencionada pelo usuario.",
           },
           rationale: {
             type: "string",
@@ -262,7 +257,6 @@ export const OPERATOR_TOOLS = [
           title: { type: "string" },
           summary_markdown: { type: "string" },
           payload: { type: "object" },
-          draft_id: { type: "string" },
         },
         required: ["action", "title", "summary_markdown", "payload"],
       },

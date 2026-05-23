@@ -30,14 +30,36 @@ describe("AI Operator - tools contract for explicit entity linking", () => {
     expect(tool?.function.description).not.toMatch(/vinculos seguros|cliente|embarcacao/i);
   });
 
-  it("exposes propose_entity_link but it never accepts a model-controlled draft_id", () => {
+  it("search_vessels does not accept model-controlled client_id filters", () => {
+    const tool = findTool("search_vessels");
+    expect(tool).toBeDefined();
+    const properties = tool?.function.parameters.properties ?? {};
+    expect(properties).not.toHaveProperty("client_id");
+    expect(tool?.function.description).not.toMatch(/client_id/i);
+  });
+
+  it("draft-scoped tools do not require model-controlled draft_id for the active draft", () => {
+    for (const name of ["update_draft", "add_draft_item", "ask_pending_question", "propose_action"]) {
+      const tool = findTool(name);
+      expect(tool).toBeDefined();
+      const properties = tool?.function.parameters.properties ?? {};
+      const required = tool?.function.parameters.required ?? [];
+      expect(properties).not.toHaveProperty("draft_id");
+      expect(required).not.toContain("draft_id");
+    }
+  });
+
+  it("exposes propose_entity_link with human terms, not model-controlled UUIDs", () => {
     const tool = findTool("propose_entity_link");
     expect(tool).toBeDefined();
     const properties = tool?.function.parameters.properties ?? {};
     expect(properties).not.toHaveProperty("draft_id");
-    expect(properties).toHaveProperty("client_id");
-    expect(properties).toHaveProperty("vessel_id");
+    expect(properties).not.toHaveProperty("client_id");
+    expect(properties).not.toHaveProperty("vessel_id");
+    expect(properties).toHaveProperty("client_query");
+    expect(properties).toHaveProperty("vessel_query");
     expect(tool?.function.description).toMatch(/nao grava|nao escolhe|confirmar|interface/i);
+    expect(tool?.function.description).toMatch(/nome|termos humanos/i);
   });
 
   it("resume_draft is a backend action endpoint, not a model tool — the model cannot trigger session switches", () => {

@@ -59,6 +59,20 @@ describe("AI Operator — entity reference validation", () => {
     expect(called).toBe(0);
   });
 
+  it("referencia interna sanitizada e bloqueada antes de consultar coluna uuid", async () => {
+    let called = 0;
+    const sb = mockSb(() => {
+      called++;
+      return { data: { id: "x" }, error: null };
+    });
+    const r = await validateEntityVisible(sb, "vessel", "[referencia interna oculta]");
+    expect(r.ok).toBe(false);
+    expect(called).toBe(0);
+    if (!r.ok) {
+      expect(r.reason).toBe("invalid_reference");
+    }
+  });
+
   it("kind desconhecido bloqueia", async () => {
     const sb = mockSb(() => ({ data: { id: "x" }, error: null }));
     // @ts-expect-error testando entrada inválida intencionalmente

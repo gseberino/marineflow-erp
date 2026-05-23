@@ -32,8 +32,11 @@ export type OperatorDraftCandidate = {
 export type OperatorLinkProposal = {
   draft_id: string;
   draft_title: string | null;
-  client: { id: string; name: string | null } | null;
-  vessel: { id: string; name: string | null } | null;
+  client: { id: string; name: string | null; subtitle?: string | null } | null;
+  vessel: { id: string; name: string | null; subtitle?: string | null } | null;
+  client_candidates?: { id: string; name: string | null; subtitle?: string | null }[];
+  vessel_candidates?: { id: string; name: string | null; subtitle?: string | null }[];
+  compatibility?: { status: string; message: string };
   rationale: string | null;
 };
 

@@ -22,7 +22,7 @@ const TABLE_BY_KIND: Record<EntityKind, string> = {
 
 export type EntityValidationResult =
   | { ok: true }
-  | { ok: false; reason: "not_visible" | "not_found" | "db_error"; details?: string };
+  | { ok: false; reason: "not_visible" | "not_found" | "invalid_reference" | "db_error"; details?: string };
 
 // Tipo mínimo do client do supabase-js que precisamos — facilita mock no teste.
 export interface SupabaseLike {
@@ -44,6 +44,9 @@ export async function validateEntityVisible(
   if (!table) return { ok: false, reason: "not_found", details: `kind inválido: ${kind}` };
   if (!id || typeof id !== "string") {
     return { ok: false, reason: "not_found", details: "id ausente" };
+  }
+  if (/\[?\s*referencia interna oculta\s*\]?/i.test(id)) {
+    return { ok: false, reason: "invalid_reference", details: "referencia sanitizada" };
   }
   try {
     const { data, error } = await sb.from(table).select("id").eq("id", id).maybeSingle();

@@ -3,6 +3,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { AIOperatorDraftCard } from "@/components/ai/AIOperatorDraftCard";
+import { AIOperatorLinkProposalCard } from "@/components/ai/AIOperatorLinkProposalCard";
 import AIOperatorDraftListPage from "./AIOperatorDraftListPage";
 import AIOperatorDraftDetailPage from "./AIOperatorDraftDetailPage";
 
@@ -175,5 +176,40 @@ describe("AI Operator draft surfaces", () => {
     expect(screen.getByText(/Cliente não vinculado/i)).toBeInTheDocument();
     // Cancel button present for awaiting_info draft without open pending actions.
     expect(screen.getByRole("button", { name: /cancelar rascunho/i })).toBeInTheDocument();
+  });
+
+  it("link proposal card shows human names, compatibility and no internal ids", () => {
+    render(
+      <AIOperatorLinkProposalCard
+        proposal={{
+          draft_id: "6a5a1ba0-789c-403b-a391-8b0fc605e9b7",
+          draft_title: "Orcamento Raymarine",
+          client: {
+            id: "11111111-1111-4111-8111-111111111111",
+            name: "CELIO YUDI SHIOKAWA JUNIOR",
+            subtitle: "Cliente individual",
+          },
+          vessel: {
+            id: "22222222-2222-4222-8222-222222222222",
+            name: "Dondoka",
+            subtitle: "Porfino 35 Fly",
+          },
+          compatibility: {
+            status: "already_linked_to_client",
+            message: "Esta embarcacao ja esta cadastrada para este cliente.",
+          },
+          rationale: null,
+        }}
+        status="pending"
+        onConfirm={vi.fn()}
+        onReject={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText(/CELIO YUDI SHIOKAWA JUNIOR/i)).toBeInTheDocument();
+    expect(screen.getByText(/Dondoka/i)).toBeInTheDocument();
+    expect(screen.getByText(/Esta embarcacao ja esta cadastrada/i)).toBeInTheDocument();
+    expect(screen.queryByText(/11111111-1111-4111-8111-111111111111/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/22222222-2222-4222-8222-222222222222/)).not.toBeInTheDocument();
   });
 });

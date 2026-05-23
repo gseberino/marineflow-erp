@@ -394,3 +394,85 @@ ID) so users can still interact with the operator from the list context.
   agenda side effect is executed automatically;
 - migration applied only to Supabase staging `okurngvcodmljjicopdp`;
 - main, `staging/marineflow-functional` and Production untouched.
+
+---
+
+## Structured entity link resolution without model UUIDs (2026-05-23)
+
+### Root cause confirmed
+
+Manual homologation confirmed that `resume_draft` resumed the original
+Raymarine draft session successfully, but the next entity-linking turn failed
+because the model tried to reuse sanitized internal references. The visible and
+model conversation history had replaced UUIDs with `[referencia interna
+oculta]`; later, the old `propose_entity_link` contract still expected
+`client_id` and `vessel_id`, and `search_vessels` still accepted a
+model-controlled `client_id` filter. That allowed the placeholder to reach a
+UUID query path and produced a false permission/ownership diagnosis.
+
+This was not treated as an RLS proof. A safe staging read, without exposing IDs
+or personal data in reports, confirmed:
+
+- the Célio/Dondoka relation exists as a single compatible match;
+- the active Raymarine draft remains unlinked, so no incorrect entity link was
+  persisted;
+- `ai-operator-core` was ACTIVE before this fix, version 5, with
+  `verify_jwt=true`.
+
+### New contract
+
+The model now works with intention and human terms:
+
+- `propose_entity_link` accepts `client_query`, `vessel_query`, and optional
+  `rationale`;
+- it no longer exposes `client_id`, `vessel_id`, or `draft_id` in the model
+  tool schema;
+- `search_vessels` no longer exposes a `client_id` filter;
+- `get_vessel_history` resolves a vessel by `vessel_query`, not by a model
+  supplied `vessel_id`;
+- `update_draft`, `add_draft_item`, `ask_pending_question`, and
+  `propose_action` operate on the active draft resolved by backend context,
+  instead of requiring the model to repeat `draft_id`.
+
+### Resolution behavior
+
+`ai-operator-core` resolves candidates server-side with the authenticated JWT
+client, then returns a structured UI proposal only when the result is safe:
+
+- unique compatible client + vessel: show a confirmation card with human names
+  and the compatibility message "Esta embarcacao ja esta cadastrada para este
+  cliente.";
+- ambiguity: return minimized candidate choices for UI selection, not an
+  automatic guess;
+- not found, invalid sanitized reference, real mismatch, and unexpected
+  technical errors are distinct outcomes;
+- proposal never persists links. `link_draft_entities` remains the only write
+  path after explicit UI confirmation.
+
+### Data minimization
+
+Normal responses now sanitize `tool_events` returned to the browser:
+
+- no raw tool args with internal UUIDs;
+- no CPF/CNPJ, phone, WhatsApp, or email in frontend tool-event payloads;
+- search results exposed to the model for clients/vessels are minimized to
+  human labels needed for conversation;
+- full forensic/audit needs remain server-side in `ai_operator_audit`.
+
+### Tests added/updated
+
+- tool contract tests ensure model tools do not expose UUID-based linking or
+  draft-scoped IDs;
+- entity validation blocks `[referencia interna oculta]` before any DB lookup;
+- structured resolution tests cover Célio/Dondoka compatibility, true mismatch,
+  ambiguity, no pre-confirmation persistence, and frontend tool-event
+  minimization;
+- existing `resume_draft`, draft selection, cancellation, and draft-surface
+  tests remain passing.
+
+### Explicit non-scope
+
+No migration or migration repair was executed for this correction. The HTTP 400
+errors from legacy ERP screens (`external_quote_leads.name`, `clients.name`,
+`products.name`, and related schema-canonicalization debt) remain out of scope
+for this branch.
