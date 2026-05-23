@@ -199,3 +199,133 @@ out of scope for this branch, including canonical schema mismatches such as:
 
 Those issues should be handled in a separate branch focused on legacy schema
 normalization, not inside the AI Operator consolidation work.
+
+---
+
+## Operational evolution — deterministic intent routing, safe link proposal, cancel lifecycle (2026-05-23)
+
+> Commit: `a8ddde3` (HEAD at the time of this addendum)
+> Edge function: `ai-operator-core` v4 ACTIVE, `verify_jwt = true`
+> Migration applied to staging only: `20260523120000_ai_operator_draft_cancel_status.sql`
+
+### Why this addendum exists
+
+After the explicit-only entity linking hotfix shipped at `79cc7a1`, real usage
+showed that the area of drafts was still operationally rough:
+
+- the floating widget on `/operator/drafts` created a brand-new draft every
+  time the user typed something that referenced an existing draft, because
+  the deterministic intent detector matched single words like `orcamento` or
+  `instalacao` without considering link/cancel/lookup verbs;
+- "Continuar com o Operador" on the detail page only toggled an inline card
+  far below the page header, producing a confusing UX;
+- list and detail screens still displayed raw technical labels like `quote`
+  or `awaiting_info`;
+- there was no safe way to cancel a draft that the system itself created by
+  mistake.
+
+This addendum closes those gaps without reopening any of the security
+guarantees already in place.
+
+### Deterministic intent routing
+
+`operational-intent.ts` now exposes a trinary `classifyMessage(message)`:
+
+- `new_demand` — clear new operational request (quote/diagnosis/etc.)
+- `operate_on_existing` — reference to an existing draft (vincular,
+  cancelar, abrir/continuar, anaforic pronouns, "do <Nome>" ownership)
+- `none` — neither
+
+Reference detection wins over bootstrap. Messages like "vincule o rascunho
+do Célio à embarcação Andoca" or "cancele o rascunho criado errado" no
+longer cause a new bootstrap, even when they contain words like `orcamento`
+or `instalacao`. When `operate_on_existing` triggers and no active draft is
+in context, the chat handler returns a list of recent visible drafts so the
+UI can render a selection card. The model is not called and no draft is
+created in this path.
+
+### Safe natural linking — `propose_entity_link`
+
+A new safe tool `propose_entity_link` lets the model suggest a client
+and/or vessel candidate based on prior `search_clients` / `search_vessels`
+results. Critical contract:
+
+- the tool schema has no `draft_id` parameter; the backend always resolves
+  the target draft from the active session/UI context;
+- the tool does not persist anything; it produces a structured
+  `proposed_link` payload with human-readable names that the UI renders as
+  a confirmation card;
+- only after explicit user confirmation does the frontend call the existing
+  `link_draft_entities` endpoint, which remains the single write path for
+  client/vessel links;
+- visibility is validated via RLS-backed `validateAllReferences` before any
+  proposal is even rendered.
+
+### Cancel lifecycle
+
+A new `cancel_draft` endpoint allows the user to cancel drafts created in
+error. The migration `20260523120000_ai_operator_draft_cancel_status.sql`
+extends the status check constraint additively to include `cancelled`. The
+endpoint enforces:
+
+- only drafts in `draft` or `awaiting_info` can be cancelled (approved,
+  rejected, converted, awaiting_approval are blocked with explicit reasons);
+- drafts with pending_actions in `pending` status are blocked;
+- cancellation reason persisted in `metadata.cancellation_reason`;
+- event `draft_cancelled` recorded in `ai_operator_audit`.
+
+The list view hides `cancelled` drafts by default; a toggle reveals them.
+There is no hard delete in this cycle.
+
+### UX polish
+
+- `AIAgentWidget` now reads `entityType=operator_draft` from `ai-context`
+  and passes `initialDraftId` to `useAIOperator`, so opening the floating
+  chat on a draft detail page always scopes the conversation to that draft.
+- `AIOperatorDraftDetailPage` replaces the inline operator card with a
+  focused right-side `Sheet` drawer that auto-focuses the textarea on open
+  — clicking "Continuar com o Operador" now gives an obvious response.
+- PT-BR labels via `src/lib/ai-operator-display.ts` (`formatDraftKind`,
+  `formatDraftStatus`, `statusBadgeVariant`, etc.) replace technical labels
+  everywhere (`quote → Orçamento`, `awaiting_info → Aguardando
+  informações`, etc.).
+- "Abrir detalhe" → "Abrir detalhes" on cards and lists.
+
+### Files added in this addendum
+
+- `src/components/ai/AIOperatorDraftSelectionCard.tsx`
+- `src/components/ai/AIOperatorLinkProposalCard.tsx`
+- `supabase/migrations/20260523120000_ai_operator_draft_cancel_status.sql`
+
+### Files materially updated in this addendum
+
+- `src/components/ai/AIAgentWidget.tsx`
+- `src/components/ai/AIOperatorDraftCard.tsx`
+- `src/hooks/use-ai-operator.ts`
+- `src/hooks/use-ai-operator-drafts.ts`
+- `src/lib/ai-context.ts`
+- `src/lib/ai-operator-display.ts`
+- `src/pages/AIOperatorDraftDetailPage.tsx`
+- `src/pages/AIOperatorDraftListPage.tsx`
+- `src/pages/AIOperatorDraftPages.test.tsx`
+- `src/test/ai-operator-entity-linking.test.ts`
+- `src/test/ai-operator-operational-intent.test.ts`
+- `src/test/ai-operator-tools-contract.test.ts`
+- `supabase/functions/ai-operator-core/entity-linking.ts`
+- `supabase/functions/ai-operator-core/index.ts`
+- `supabase/functions/ai-operator-core/operational-intent.ts`
+- `supabase/functions/ai-operator-core/prompt.ts`
+- `supabase/functions/ai-operator-core/risk.ts`
+- `supabase/functions/ai-operator-core/tools.ts`
+
+### Security guarantees still preserved
+
+- `create_draft`, `update_draft` and `register_memory_candidate` continue to
+  reject model-controlled `client_id`/`vessel_id`;
+- `propose_entity_link` does not accept `draft_id` and does not persist;
+- `link_draft_entities` remains the only write path for entity links;
+- UUIDs continue to be redacted from chat text;
+- no official service order, WhatsApp message, inventory, financial or
+  agenda side effect is executed automatically;
+- migration applied only to Supabase staging `okurngvcodmljjicopdp`;
+- main, `staging/marineflow-functional` and Production untouched.
