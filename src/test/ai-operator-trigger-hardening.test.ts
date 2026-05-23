@@ -17,6 +17,7 @@ function read(rel: string): string {
 
 const FOUNDATION = "supabase/migrations/20260522190000_ai_operator_foundation.sql";
 const HARDENING = "supabase/migrations/20260523010000_ai_operator_harden_pending_trigger_search_path.sql";
+const PARITY = "supabase/migrations/20260523030326_ai_operator_restore_pending_trigger_definition_parity.sql";
 const DEFERRED_BRIDGE = "supabase/deferred-migrations/20260522190100_ai_operator_whatsapp_bridge.sql";
 const PIPELINE_BRIDGE = "supabase/migrations/20260522190100_ai_operator_whatsapp_bridge.sql";
 
@@ -29,6 +30,10 @@ function extractBlock(sql: string, fnName: string): string {
   const m = sql.match(re);
   if (!m) throw new Error(`Bloco da função public.${fnName} não encontrado`);
   return m[0];
+}
+
+function normalizeSql(sql: string): string {
+  return sql.replace(/\r\n/g, "\n").trim();
 }
 
 describe("AI Operator — trigger function hardening (search_path)", () => {
@@ -178,6 +183,67 @@ describe("AI Operator — trigger function hardening (search_path)", () => {
     it("bridge WhatsApp permanece em deferred-migrations/ (fora do pipeline)", () => {
       expect(existsSync(resolve(ROOT, DEFERRED_BRIDGE))).toBe(true);
       expect(existsSync(resolve(ROOT, PIPELINE_BRIDGE))).toBe(false);
+    });
+  });
+
+  describe("migration de paridade da trigger", () => {
+    it("existe no caminho esperado", () => {
+      expect(existsSync(resolve(ROOT, PARITY))).toBe(true);
+    });
+
+    it("altera somente public.ai_op_protect_pending_action()", () => {
+      const sql = read(PARITY);
+      const fnMatches = sql.match(/create\s+or\s+replace\s+function\s+\w+\.\w+/gi) || [];
+      expect(fnMatches.length).toBe(1);
+      expect(fnMatches[0]?.toLowerCase()).toContain("public.ai_op_protect_pending_action");
+      expect(sql).not.toMatch(/create\s+or\s+replace\s+function\s+public\.set_updated_at_now/i);
+    });
+
+    it("preserva exatamente o corpo corrigido do hardening aprovado", () => {
+      const hardeningSql = read(HARDENING);
+      const paritySql = read(PARITY);
+      expect(normalizeSql(extractBlock(paritySql, "ai_op_protect_pending_action"))).toBe(
+        normalizeSql(extractBlock(hardeningSql, "ai_op_protect_pending_action"))
+      );
+    });
+
+    it("preserva `set search_path = ''` e a mensagem terminal correta com `(% -> %)`", () => {
+      const sql = read(PARITY);
+      const block = extractBlock(sql, "ai_op_protect_pending_action");
+      expect(block).toMatch(/set\s+search_path\s*=\s*''/i);
+      expect(block).toContain("estado terminal não pode mudar (% -> %)");
+    });
+
+    it("reafirma REVOKE/GRANT server-only da função", () => {
+      const sql = read(PARITY);
+      expect(sql).toMatch(
+        /revoke\s+execute\s+on\s+function\s+public\.ai_op_protect_pending_action\(\)\s+from\s+public/i
+      );
+      expect(sql).toMatch(
+        /revoke\s+execute\s+on\s+function\s+public\.ai_op_protect_pending_action\(\)\s+from\s+anon,\s*authenticated/i
+      );
+      expect(sql).toMatch(
+        /grant\s+execute\s+on\s+function\s+public\.ai_op_protect_pending_action\(\)\s+to\s+service_role/i
+      );
+    });
+
+    it("não altera tabelas, policies, triggers extras ou objetos WhatsApp", () => {
+      const sql = read(PARITY);
+      expect(sql).not.toMatch(/create\s+table/i);
+      expect(sql).not.toMatch(/drop\s+table/i);
+      expect(sql).not.toMatch(/alter\s+table/i);
+      expect(sql).not.toMatch(/create\s+policy/i);
+      expect(sql).not.toMatch(/drop\s+policy/i);
+      expect(sql).not.toMatch(/create\s+trigger/i);
+      expect(sql).not.toMatch(/drop\s+trigger/i);
+
+      const ddlLines = sql
+        .split("\n")
+        .filter((line) => !line.trim().startsWith("--"))
+        .join("\n")
+        .toLowerCase();
+      expect(ddlLines).not.toContain("whatsapp");
+      expect(ddlLines).not.toContain("ai_operator_channel_events");
     });
   });
 });
