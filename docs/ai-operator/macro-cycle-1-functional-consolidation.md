@@ -318,6 +318,71 @@ There is no hard delete in this cycle.
 - `supabase/functions/ai-operator-core/risk.ts`
 - `supabase/functions/ai-operator-core/tools.ts`
 
+---
+
+## Session ownership fix — resume_draft endpoint (2026-05-23)
+
+> Commit: `a6b94de`
+> Edge function: `ai-operator-core` redeployed, `verify_jwt = true` preserved
+
+### Why this fix exists
+
+After the operational evolution addendum shipped at `a8ddde3`, `selectDraftCandidate`
+in `use-ai-operator.ts` had a session mismatch bug:
+
+- Selecting a draft candidate sent `session_id: <new widget session>` with
+  `draft_id: <original session's draft>`.
+- `findActiveDraft(admin, sessionId, requestedDraftId)` correctly rejected the
+  cross-session reference (`requested.session_id !== sessionId`).
+- The selection silently fell through and the UI returned to the candidate card
+  instead of resuming the selected draft.
+
+### New `resume_draft` action
+
+A new backend endpoint resolves the ownership issue:
+
+1. Accepts `draft_id` from the UI (human-selected, never model-controlled).
+2. Validates visibility via the user's JWT client (RLS — same as all other reads).
+3. Validates ownership via `sessionBelongsTo(admin, ...)` with service role.
+4. Returns `{ ok: true, session_id: originalSessionId, draft_id }` — the
+   backend is the authoritative source of the authorized `session_id`.
+5. Audits denied attempts as `draft_resume_denied` (security category) and
+   successful resumptions as `draft_resumed` (info category).
+
+### `selectDraftCandidate` — two-step secure flow
+
+The hook now:
+
+1. Calls `resume_draft` with the human-selected `draft_id`.
+2. Receives `authorizedSessionId` from the backend.
+3. Updates hook state: `setSessionId(authorizedSessionId)`, `setActiveDraftId(authorizedDraftId)`.
+4. Sends the follow-up chat message with `session_id: authorizedSessionId` — never
+   the widget's current `sessionId` from the closure.
+5. On error from `resume_draft`: shows error, does NOT call chat, does NOT
+   activate the foreign draft in state.
+
+### Floating widget suppressed on draft detail routes
+
+`AIAgentWidget` returns `null` when `context.entityType === 'operator_draft'`
+and `context.entityId` is set. The detail page already has a dedicated `Sheet`
+drawer (`AIOperatorDraftDetailPage`) — two simultaneous chat contexts for the
+same draft would diverge.
+
+The floating widget remains active on `/operator/drafts` (list route, no entity
+ID) so users can still interact with the operator from the list context.
+
+### Tests added in this fix
+
+- `ai-operator-tools-contract`: `resume_draft` is not in `OPERATOR_TOOLS` —
+  the model cannot trigger session switches.
+- `ai-operator-resume-draft` (new file): 4 behavioral tests for `selectDraftCandidate`:
+  - calls `resume_draft` first, then `chat` with authorized `session_id`;
+  - stops after `resume_draft` and shows error when backend denies ownership;
+  - stops after `resume_draft` and shows error on network failure;
+  - marks selection card as resolved even when `resume_draft` subsequently fails.
+
+168 tests / 24 test files — all pass.
+
 ### Security guarantees still preserved
 
 - `create_draft`, `update_draft` and `register_memory_candidate` continue to
