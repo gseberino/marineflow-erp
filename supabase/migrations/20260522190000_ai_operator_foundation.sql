@@ -426,11 +426,28 @@ create index if not exists idx_ai_op_channel_events_thread on public.ai_operator
 -- ---------------------------------------------------------------------------
 -- updated_at triggers
 -- ---------------------------------------------------------------------------
+-- ATENÇÃO: `set_updated_at_now` é um helper compartilhado por outros módulos
+-- do projeto. NÃO sobrescrevemos a versão existente em ambientes que já a
+-- possuem (preservamos a lógica condicional `if not exists`). Quando a
+-- foundation cria a função (novos ambientes), ela já nasce endurecida:
+--   * `set search_path = ''` — atende o aviso `function_search_path_mutable`;
+--   * `pg_catalog.now()` qualificado — elimina dependência de search_path
+--     para resolver a função temporal.
+-- A migration aditiva `20260523010000_*` faz `CREATE OR REPLACE` no
+-- ambiente já migrado para padronizar o hardening.
 do $$
 begin
   if not exists (select 1 from pg_proc where proname = 'set_updated_at_now') then
-    create function public.set_updated_at_now() returns trigger language plpgsql as $body$
-    begin new.updated_at = now(); return new; end; $body$;
+    create function public.set_updated_at_now()
+    returns trigger
+    language plpgsql
+    set search_path = ''
+    as $body$
+    begin
+      new.updated_at = pg_catalog.now();
+      return new;
+    end;
+    $body$;
   end if;
 end $$;
 

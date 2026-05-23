@@ -97,27 +97,45 @@ respeita as policies de RLS reais de `clients`/`vessels`/`products`/`services`.
 
 ## Pós-DDL Advisor — remediação de search_path
 
-Após a aplicação da foundation, o Supabase Security Advisor sinalizou:
+Após a aplicação da foundation, o Supabase Security Advisor sinalizou
+**dois** avisos `function_search_path_mutable` no caminho da foundation
+do AI Operator:
 
-- **`function_search_path_mutable`** em `public.ai_op_protect_pending_action`.
+1. **`public.ai_op_protect_pending_action`** — trigger server-only que
+   protege adulteração de pending_actions.
+2. **`public.set_updated_at_now`** — helper compartilhado de updated_at
+   (usado também por outros módulos do projeto).
 
-A função não consulta nenhuma tabela (usa apenas `NEW`/`OLD`/`TG_OP` e
-`raise exception`), logo a remediação adequada é `set search_path = ''`,
-que impede qualquer resolução de nome não-qualificado em runtime.
+O commit `44ea00f` já havia endereçado o item 1. Antes de aplicar a
+migration aditiva, ela foi **ampliada** para cobrir também o item 2 — as
+duas correções são entregues juntas em um único pacote aditivo.
 
-**Foi criada migration aditiva de hardening**:
+Nenhuma das funções consulta tabelas (`ai_op_protect_pending_action` usa
+só `NEW`/`OLD`/`TG_OP`/`raise exception`; `set_updated_at_now` apenas
+atribui o timestamp). `set search_path = ''` + `pg_catalog.now()`
+qualificado eliminam qualquer dependência de resolução implícita.
+
+**Migration aditiva atualizada (única):**
 `supabase/migrations/20260523010000_ai_operator_harden_pending_trigger_search_path.sql`
 
 Ela:
-- executa `CREATE OR REPLACE FUNCTION` mantendo o corpo idêntico (bloqueio
-  de campos imutáveis + transições válidas);
-- adiciona `SET search_path = ''`;
+- `CREATE OR REPLACE` para `public.ai_op_protect_pending_action()` —
+  corpo idêntico (bloqueio de campos imutáveis + transições válidas) +
+  `SET search_path = ''`;
 - reafirma `REVOKE EXECUTE FROM public, anon, authenticated` e
-  `GRANT EXECUTE TO service_role`;
-- **não** altera tabelas, policies, dados, outras funções nem bridge WhatsApp.
+  `GRANT EXECUTE TO service_role` para esta função;
+- `CREATE OR REPLACE` para `public.set_updated_at_now()` — corpo
+  preservado (`new.updated_at = pg_catalog.now(); return new`) +
+  `SET search_path = ''`. **Permissões não são alteradas** (função
+  compartilhada com outros módulos).
+- **Não** altera tabelas, policies, dados, outras funções nem bridge
+  WhatsApp.
 
-A foundation (`20260522190000`) também foi atualizada para ambientes novos
-— já nasce com `set search_path = ''` nesta trigger function.
+A foundation (`20260522190000`) também foi atualizada para ambientes
+novos — `ai_op_protect_pending_action` nasce com `set search_path = ''`,
+e a criação condicional de `set_updated_at_now` (preservada via
+`IF NOT EXISTS` para não sobrescrever versões já compartilhadas) também
+declara `set search_path = ''` e usa `pg_catalog.now()`.
 
 Os demais alertas globais do Advisor (RLS de outros módulos, buckets,
 funções legadas fora do AI Operator) **serão tratados em macro ciclo
