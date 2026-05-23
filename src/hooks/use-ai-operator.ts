@@ -197,12 +197,12 @@ export function useAIOperator(
     [activeDraftId, invokeChat, serializedContext, sessionId]
   );
 
-  // Seleção humana de um draft candidato apresentado pelo backend. Marca o
-  // card como resolvido, ativa o draft e envia uma mensagem curta de
-  // continuação para o operador para ele atualizar o contexto.
+  // Seleção humana de um draft candidato apresentado pelo backend.
+  // FLUXO SEGURO: primeiro chama resume_draft para obter o session_id
+  // ORIGINAL autorizado pelo backend (validado via RLS + ownership).
+  // Nunca usa o session_id atual do widget para o draft de outra sessão.
   const selectDraftCandidate = useCallback(
     async (candidate: OperatorDraftCandidate) => {
-      setActiveDraftId(candidate.id);
       setDisplay((current) =>
         current.map((item) =>
           item.kind === "draft_selection" && item.status === "pending"
@@ -210,16 +210,51 @@ export function useAIOperator(
             : item
         )
       );
+
+      // Passo 1: obter session_id autorizado para o draft selecionado.
+      // O backend valida ownership (visibilidade RLS + sessionBelongsTo admin)
+      // e devolve o session_id ORIGINAL — nunca o session_id atual do widget.
+      setLoading(true);
+      setError(null);
+      let authorizedSessionId = "";
+      let authorizedDraftId = "";
+      try {
+        const { data: resumeData, error: resumeErr } = await supabase.functions.invoke(
+          "ai-operator-core",
+          { body: { action: "resume_draft", draft_id: candidate.id } }
+        );
+        if (resumeErr) throw resumeErr;
+        if ((resumeData as any)?.error) throw new Error((resumeData as any).error);
+        authorizedSessionId = (resumeData as any).session_id as string;
+        authorizedDraftId = (resumeData as any).draft_id as string;
+        setSessionId(authorizedSessionId);
+        setActiveDraftId(authorizedDraftId);
+      } catch (e: any) {
+        const msg = e?.message || "Erro ao retomar rascunho";
+        setError(msg);
+        setDisplay((current) => [
+          ...current,
+          { kind: "message", role: "assistant", content: `Erro: ${msg}` },
+        ]);
+        setLoading(false);
+        return;
+      }
+
+      // Passo 2: enviar mensagem de continuação usando os identificadores
+      // autorizados. invokeChat gerencia loading e display a partir daqui.
+      const followUpText = `Rascunho selecionado: ${candidate.title ?? "(sem titulo)"}. Apresente o estado atual e aguarde instrucoes.`;
+      setMessages((current) => [...current, { role: "user", content: followUpText }]);
+      setDisplay((current) => [...current, { kind: "message", role: "user", content: followUpText }]);
       await invokeChat({
         action: "chat",
-        session_id: sessionId,
+        session_id: authorizedSessionId,
         channel: "web",
         context: JSON.parse(serializedContext),
-        message: `Continuar a partir do rascunho selecionado: ${candidate.title ?? "(sem titulo)"}.`,
-        draft_id: candidate.id,
+        message: followUpText,
+        draft_id: authorizedDraftId,
       });
     },
-    [invokeChat, serializedContext, sessionId]
+    [invokeChat, serializedContext]
   );
 
   // Confirmação humana de uma proposta de vínculo. Chama o endpoint seguro

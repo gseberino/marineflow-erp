@@ -40,6 +40,11 @@ describe("AI Operator - tools contract for explicit entity linking", () => {
     expect(tool?.function.description).toMatch(/nao grava|nao escolhe|confirmar|interface/i);
   });
 
+  it("resume_draft is a backend action endpoint, not a model tool — the model cannot trigger session switches", () => {
+    const names = OPERATOR_TOOLS.map((tool) => tool.function.name);
+    expect(names).not.toContain("resume_draft");
+  });
+
   it("the system prompt forbids model-controlled entity linking and points to the authenticated UI flow", () => {
     const prompt = buildSystemPrompt({
       userName: "Tester",

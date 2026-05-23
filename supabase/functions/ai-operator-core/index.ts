@@ -988,6 +988,63 @@ Deno.serve(async (req) => {
     }
 
     // --------------------------------------------------------------
+    // resume_draft — retoma a sessão original de um draft existente selecionado
+    // exclusivamente pela UI (seleção humana). O modelo nunca escolhe draft_id
+    // nem session_id: eles chegam da seleção explícita na interface.
+    // Dupla validação: RLS via JWT (visibilidade) + sessionBelongsTo admin
+    // (ownership). Devolve o session_id original autorizado para o frontend
+    // substituir o session_id atual do widget pelo correto.
+    // --------------------------------------------------------------
+    if (action === "resume_draft") {
+      const draftId = String(body.draft_id || "");
+      if (!draftId) return jr({ error: "draft_id obrigatorio" }, 400);
+
+      // Visibilidade via JWT do usuário (RLS real do ERP). Não revela diferença
+      // entre "não existe" e "não visível" — ambos resultam em 404 genérico.
+      const { data: draftVisible } = await sb
+        .from("ai_operator_drafts")
+        .select("id, session_id, title, status")
+        .eq("id", draftId)
+        .maybeSingle();
+      if (!draftVisible || !draftVisible.session_id) {
+        return jr({ error: "Rascunho nao encontrado ou nao visivel." }, 404);
+      }
+
+      // Ownership da sessão via admin (bypass RLS para verificação direta).
+      const ownsSession = await sessionBelongsTo(admin, draftVisible.session_id, userId, isAdmin);
+      if (!ownsSession) {
+        await audit(admin, {
+          draft_id: draftId,
+          actor_user_id: userId,
+          actor_kind: "user",
+          event_type: "draft_resume_denied",
+          event_category: "security",
+          payload: { session_id: draftVisible.session_id, role: profile.role },
+        });
+        return jr({ error: "Rascunho nao pertence ao usuario." }, 403);
+      }
+
+      // Garante que a sessão original aponta para este draft como ativo.
+      await mergeSessionMetadata(admin, draftVisible.session_id, { active_draft_id: draftId });
+      await audit(admin, {
+        session_id: draftVisible.session_id,
+        draft_id: draftId,
+        actor_user_id: userId,
+        actor_kind: "user",
+        event_type: "draft_resumed",
+        event_category: "info",
+        payload: { draft_title: draftVisible.title ?? null, draft_status: draftVisible.status ?? null },
+      });
+
+      return jr({
+        ok: true,
+        session_id: draftVisible.session_id,
+        draft_id: draftId,
+        draft_title: draftVisible.title ?? null,
+      });
+    }
+
+    // --------------------------------------------------------------
     // Memory governance — verify_memory_note / reject_memory_note
     // --------------------------------------------------------------
     if (action === "verify_memory_note" || action === "reject_memory_note") {

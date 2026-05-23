@@ -164,6 +164,11 @@ export function AIAgentWidget() {
 
   if (!user) return null;
 
+  // Na rota /operator/drafts/:id, a página de detalhe tem seu próprio Sheet
+  // drawer para o Modo Operador. Suprimir o widget flutuante evita dois
+  // contextos de chat divergentes apontando para o mesmo draft.
+  if (context.entityType === 'operator_draft' && context.entityId) return null;
+
   const handleSend = () => {
     const txt = input.trim();
     if (!txt || loading || op.loading) return;
