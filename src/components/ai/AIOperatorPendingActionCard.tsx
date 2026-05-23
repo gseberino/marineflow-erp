@@ -53,23 +53,33 @@ export function AIOperatorPendingActionCard({
         </div>
       )}
       {status === 'pending' && (
-        <div className="flex gap-2">
-          <Button size="sm" onClick={() => onApprove(action.id)} disabled={disabled} className="gap-1">
-            <Check className="h-4 w-4" /> Aprovar
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => onReject(action.id)}
-            disabled={disabled}
-            className="gap-1"
-          >
-            <X className="h-4 w-4" /> Rejeitar
-          </Button>
-        </div>
+        <>
+          <p className="text-[11px] text-muted-foreground italic mb-2">
+            Nesta fase, aprovar apenas <strong>registra sua intenção</strong>. A execução real
+            (envio ao cliente, criação de OS oficial, agendamento, alteração de estoque) será
+            habilitada em ciclo posterior, com executor dedicado.
+          </p>
+          <div className="flex gap-2">
+            <Button size="sm" onClick={() => onApprove(action.id)} disabled={disabled} className="gap-1">
+              <Check className="h-4 w-4" /> Aprovar intenção
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => onReject(action.id)}
+              disabled={disabled}
+              className="gap-1"
+            >
+              <X className="h-4 w-4" /> Rejeitar
+            </Button>
+          </div>
+        </>
       )}
       {status === 'approved' && (
-        <p className="text-xs italic">✅ Aprovado. A execução real será feita após validação operacional.</p>
+        <p className="text-xs italic">
+          ✅ Intenção registrada. <strong>Nada foi executado</strong> — a execução real virá em
+          ciclo posterior.
+        </p>
       )}
       {status === 'rejected' && <p className="text-xs italic">✕ Rejeitado pelo usuário.</p>}
     </div>

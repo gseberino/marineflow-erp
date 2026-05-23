@@ -475,41 +475,56 @@ begin
   end loop;
 end $$;
 
--- ----- SESSIONS: dono OU admin -----
+-- ATENÇÃO: TODAS as policies SELECT começam exigindo `ai_op_is_active(auth.uid())`.
+-- Isso fecha o caminho "owner_user_id = auth.uid()" / "created_by = auth.uid()"
+-- / "requested_by_user_id = auth.uid()" quando o usuário foi desativado mas
+-- ainda possui JWT válido. Helpers `ai_op_is_admin` e `ai_op_is_internal` já
+-- exigem active=true; ainda assim a checagem topo-de-policy é mantida como
+-- defesa em profundidade e para uniformizar a leitura das regras.
+
+-- ----- SESSIONS: dono ativo OU admin ativo -----
 create policy "ai_op_sessions_select"
   on public.ai_operator_sessions for select to authenticated
-  using (owner_user_id = auth.uid() or public.ai_op_is_admin(auth.uid()));
+  using (
+    public.ai_op_is_active(auth.uid())
+    and (owner_user_id = auth.uid() or public.ai_op_is_admin(auth.uid()))
+  );
 -- INSERT/UPDATE só via service_role (backend). Não criamos policy de INSERT/UPDATE
 -- para 'authenticated' — o backend valida ownership e usa SUPABASE_SERVICE_ROLE_KEY.
 
--- ----- MESSAGES: visível só se a sessão é do user (ou admin) -----
+-- ----- MESSAGES: visível só se a sessão é do user ativo (ou admin ativo) -----
 create policy "ai_op_messages_select"
   on public.ai_operator_messages for select to authenticated
   using (
-    exists (
+    public.ai_op_is_active(auth.uid())
+    and exists (
       select 1 from public.ai_operator_sessions s
       where s.id = ai_operator_messages.session_id
         and (s.owner_user_id = auth.uid() or public.ai_op_is_admin(auth.uid()))
     )
   );
 
--- ----- DRAFTS: visível só se sessão do user (ou admin) OU se created_by = user -----
+-- ----- DRAFTS: visível só se sessão do user ativo, ou admin ativo, ou created_by = user ativo -----
 create policy "ai_op_drafts_select"
   on public.ai_operator_drafts for select to authenticated
   using (
-    created_by = auth.uid()
-    or public.ai_op_is_admin(auth.uid())
-    or exists (
-      select 1 from public.ai_operator_sessions s
-      where s.id = ai_operator_drafts.session_id
-        and s.owner_user_id = auth.uid()
+    public.ai_op_is_active(auth.uid())
+    and (
+      created_by = auth.uid()
+      or public.ai_op_is_admin(auth.uid())
+      or exists (
+        select 1 from public.ai_operator_sessions s
+        where s.id = ai_operator_drafts.session_id
+          and s.owner_user_id = auth.uid()
+      )
     )
   );
 
 create policy "ai_op_draft_items_select"
   on public.ai_operator_draft_items for select to authenticated
   using (
-    exists (
+    public.ai_op_is_active(auth.uid())
+    and exists (
       select 1 from public.ai_operator_drafts d
       where d.id = ai_operator_draft_items.draft_id
         and (
@@ -523,59 +538,60 @@ create policy "ai_op_draft_items_select"
     )
   );
 
--- ----- PENDING ACTIONS: leitura só do dono da sessão ou admin -----
+-- ----- PENDING ACTIONS: leitura por solicitante ativo, dono ativo da sessão ou admin ativo -----
 create policy "ai_op_pending_select"
   on public.ai_operator_pending_actions for select to authenticated
   using (
-    requested_by_user_id = auth.uid()
-    or public.ai_op_is_admin(auth.uid())
-    or exists (
-      select 1 from public.ai_operator_sessions s
-      where s.id = ai_operator_pending_actions.session_id
-        and s.owner_user_id = auth.uid()
-    )
-  );
--- INSERT/UPDATE: somente service_role.
-
--- ----- AUDIT: leitura só admin OU financial (registro forense) -----
--- Usa helper LOCAL do AI Operator (não dependência implícita de funções fora
--- do módulo) para manter a migration autocontida.
-create policy "ai_op_audit_select"
-  on public.ai_operator_audit for select to authenticated
-  using (public.ai_op_is_admin_or_financial(auth.uid()));
--- INSERT/UPDATE/DELETE: nunca por authenticated. Apenas service_role.
-
--- ----- MEMORY NOTES: leitura granular por verification_status × papel -----
--- Decisão Macro Ciclo 1:
---   * verified  → visível a qualquer usuário INTERNO (admin/technician/
---                 financial/seller/other). External_seller NÃO recebe.
---   * candidate → visível somente a admin, technician ou ao criador
---                 (created_by), para que a IA e quem registrou possam
---                 trabalhar nela sem expor especulação a outros papéis.
---   * rejected  → mesma visibilidade restrita do candidate (trilha
---                 forense). External_seller nunca vê.
-create policy "ai_op_memory_select"
-  on public.ai_operator_memory_notes for select to authenticated
-  using (
-    (
-      verification_status = 'verified'
-      and public.ai_op_is_internal(auth.uid())
-    )
-    or (
-      verification_status in ('candidate', 'rejected')
-      and (
-        public.ai_op_is_admin(auth.uid())
-        or exists (
-          select 1 from public.app_users au
-          where au.id = auth.uid() and au.active = true and au.role = 'technician'
-        )
-        or created_by = auth.uid()
+    public.ai_op_is_active(auth.uid())
+    and (
+      requested_by_user_id = auth.uid()
+      or public.ai_op_is_admin(auth.uid())
+      or exists (
+        select 1 from public.ai_operator_sessions s
+        where s.id = ai_operator_pending_actions.session_id
+          and s.owner_user_id = auth.uid()
       )
     )
   );
 -- INSERT/UPDATE: somente service_role.
 
--- ----- CHANNEL EVENTS: leitura admin (forense). Ingestão via service_role. -----
+-- ----- AUDIT: leitura só admin OU financial ativos (registro forense) -----
+create policy "ai_op_audit_select"
+  on public.ai_operator_audit for select to authenticated
+  using (public.ai_op_is_admin_or_financial(auth.uid()));
+-- INSERT/UPDATE/DELETE: nunca por authenticated. Apenas service_role.
+
+-- ----- MEMORY NOTES: leitura granular por verification_status × papel × atividade -----
+-- Decisão Macro Ciclo 1:
+--   * verified  → visível a qualquer usuário INTERNO ativo (admin/technician/
+--                 financial/seller/other). External_seller NÃO recebe.
+--   * candidate → visível a admin/technician ativos OU ao criador ativo.
+--   * rejected  → mesma visibilidade restrita do candidate (trilha forense).
+create policy "ai_op_memory_select"
+  on public.ai_operator_memory_notes for select to authenticated
+  using (
+    public.ai_op_is_active(auth.uid())
+    and (
+      (
+        verification_status = 'verified'
+        and public.ai_op_is_internal(auth.uid())
+      )
+      or (
+        verification_status in ('candidate', 'rejected')
+        and (
+          public.ai_op_is_admin(auth.uid())
+          or exists (
+            select 1 from public.app_users au
+            where au.id = auth.uid() and au.active = true and au.role = 'technician'
+          )
+          or created_by = auth.uid()
+        )
+      )
+    )
+  );
+-- INSERT/UPDATE: somente service_role.
+
+-- ----- CHANNEL EVENTS: leitura admin ativo (forense). Ingestão via service_role. -----
 create policy "ai_op_channel_events_select"
   on public.ai_operator_channel_events for select to authenticated
   using (public.ai_op_is_admin(auth.uid()));

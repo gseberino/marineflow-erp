@@ -256,10 +256,17 @@ export function AIAgentWidget() {
         {/* Messages */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
           {operatorMode && (
-            <div className="text-[11px] text-muted-foreground border border-dashed rounded px-2 py-1.5">
-              🤖 <strong>Modo Operador (beta)</strong>: interpreta demandas técnicas e cria rascunhos
-              persistentes. Ações sensíveis (enviar WhatsApp, criar OS oficial, agendar técnico,
-              alterar estoque) ficam pendentes e exigem aprovação humana.
+            <div className="text-[11px] text-muted-foreground border border-dashed rounded px-2 py-1.5 space-y-1">
+              <div>
+                🤖 <strong>Modo Operador (beta)</strong>: interpreta demandas técnicas e cria
+                rascunhos persistentes.
+              </div>
+              <div>
+                Ações sensíveis (enviar WhatsApp, criar OS oficial, agendar técnico, alterar
+                estoque) ficam <strong>pendentes</strong>. Nesta fase, mesmo a aprovação humana
+                apenas <strong>registra intenção</strong> — nenhuma execução real é disparada.
+                WhatsApp e áudio inbound permanecem desativados.
+              </div>
             </div>
           )}
 

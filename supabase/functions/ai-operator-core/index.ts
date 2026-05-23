@@ -18,6 +18,8 @@ import { buildSystemPrompt } from "./prompt.ts";
 import { validateAllReferences } from "./entity-validation.ts";
 import { resolveProposalDraftId } from "./proposal.ts";
 import { interpretPendingUpdate, interpretMemoryUpdate } from "./transitions.ts";
+import { resolveCoreChannel } from "./channel-source.ts";
+import { preAuthorizeApprove } from "./approve-guard.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -459,47 +461,122 @@ Deno.serve(async (req) => {
     const action = String(body.action || "chat");
 
     // --------------------------------------------------------------
-    // approve_action / reject_action — exige role autorizado pela matriz
+    // approve_action / reject_action — autorização ANTES de revelar estado
     // --------------------------------------------------------------
+    // Princípio: usuários não autorizados não devem distinguir entre
+    //   (a) ação inexistente,
+    //   (b) ação alheia que existe e ainda está pending,
+    //   (c) ação alheia já resolvida.
+    // Estratégia:
+    //   * approve  → admin pode aprovar qualquer pending; technician pode
+    //                aprovar verify/reject de memória. Qualquer outro papel
+    //                recebe 403 GENÉRICO antes de consultar a ação.
+    //   * reject   → admin pode rejeitar qualquer pending; technician pode
+    //                rejeitar verify/reject de memória; o solicitante pode
+    //                rejeitar sua própria ação (não-memória). Usamos o
+    //                helper SQL `ai_op_can_reject` que devolve false para
+    //                ação inexistente, indistinguindo isso de não-autorização.
+    // Em ambos os casos, a resposta de bloqueio é a MESMA mensagem 403; o
+    // motivo real fica em audit (event_category='security') para forense.
+    const GENERIC_RESOLVE_DENIED = "Você não pode resolver esta ação.";
     if (action === "approve_action" || action === "reject_action") {
       const pendingId = String(body.pending_action_id || "");
       if (!pendingId) return jr({ error: "pending_action_id obrigatório" }, 400);
 
-      const { data: pending } = await admin
-        .from("ai_operator_pending_actions")
-        .select("*")
-        .eq("id", pendingId)
-        .maybeSingle();
-      if (!pending) return jr({ error: "Ação pendente não encontrada" }, 404);
+      let pending: any = null;
+      let authorized = false;
+
+      if (action === "approve_action") {
+        // Pre-authorization (atalho de papel) extraído para helper testável.
+        const pre = preAuthorizeApprove(profile.role);
+        if (!pre.allowedToRead) {
+          await audit(admin, {
+            actor_user_id: userId,
+            actor_kind: "user",
+            event_type: "action_approve_denied",
+            event_category: "security",
+            payload: { pending_action_id: pendingId, role: profile.role, reason: pre.reason },
+          });
+          return jr({ error: GENERIC_RESOLVE_DENIED }, 403);
+        }
+        // Buscar a ação só para admin/technician. Mesmo aqui, NÃO retornamos
+        // 404 distintamente — qualquer falha vira o mesmo 403 genérico.
+        const { data: p } = await admin
+          .from("ai_operator_pending_actions")
+          .select("*")
+          .eq("id", pendingId)
+          .maybeSingle();
+        pending = p ?? null;
+        if (!pending) {
+          await audit(admin, {
+            actor_user_id: userId,
+            actor_kind: "user",
+            event_type: "action_approve_denied",
+            event_category: "security",
+            payload: { pending_action_id: pendingId, role: profile.role, reason: "not_found" },
+          });
+          return jr({ error: GENERIC_RESOLVE_DENIED }, 403);
+        }
+        const okApprove = await canApprove(admin, userId, pending.action_name);
+        authorized = okApprove;
+        if (!authorized) {
+          await audit(admin, {
+            session_id: pending.session_id,
+            pending_action_id: pendingId,
+            actor_user_id: userId,
+            actor_kind: "user",
+            event_type: "action_approve_denied",
+            event_category: "security",
+            payload: { action: pending.action_name, role: profile.role, reason: "scope" },
+          });
+          return jr({ error: GENERIC_RESOLVE_DENIED }, 403);
+        }
+      } else {
+        // reject_action — autorização determinística no DB. Helper retorna
+        // false tanto para "ação inexistente" quanto para "não autorizado",
+        // o que dá uma resposta uniforme ao chamador.
+        const okReject = await canReject(admin, userId, pendingId);
+        if (!okReject) {
+          await audit(admin, {
+            actor_user_id: userId,
+            actor_kind: "user",
+            event_type: "action_reject_denied",
+            event_category: "security",
+            payload: { pending_action_id: pendingId, role: profile.role, reason: "not_found_or_unauthorized" },
+          });
+          return jr({ error: GENERIC_RESOLVE_DENIED }, 403);
+        }
+        // Só agora (autorizado) lemos o restante para checar conflito de
+        // estado e emitir audit com detalhes.
+        const { data: p } = await admin
+          .from("ai_operator_pending_actions")
+          .select("*")
+          .eq("id", pendingId)
+          .maybeSingle();
+        pending = p ?? null;
+        // O helper garante existência, mas se houve corrida entre helper e
+        // leitura (delete por exemplo), tratamos como denied genérico.
+        if (!pending) {
+          await audit(admin, {
+            actor_user_id: userId,
+            actor_kind: "user",
+            event_type: "action_reject_denied",
+            event_category: "security",
+            payload: { pending_action_id: pendingId, role: profile.role, reason: "vanished" },
+          });
+          return jr({ error: GENERIC_RESOLVE_DENIED }, 403);
+        }
+        authorized = true;
+      }
+
+      // Conflito de estado só é revelado A USUÁRIOS AUTORIZADOS.
       if (pending.status !== "pending") {
         return jr({ error: `Ação já está no estado ${pending.status}` }, 409);
       }
 
-      // Authorization gate (DB-side). approve usa ai_op_can_approve (Macro
-      // Ciclo 1 → restrito a admin / memória admin|technician); reject usa
-      // ai_op_can_reject (solicitante OU admin).
-      const ok =
-        action === "approve_action"
-          ? await canApprove(admin, userId, pending.action_name)
-          : await canReject(admin, userId, pendingId);
-      if (!ok) {
-        await audit(admin, {
-          session_id: pending.session_id,
-          pending_action_id: pendingId,
-          actor_user_id: userId,
-          actor_kind: "user",
-          event_type: action === "approve_action" ? "action_approve_denied" : "action_reject_denied",
-          event_category: "security",
-          payload: { action: pending.action_name, role: profile.role, risk: pending.risk_level },
-        });
-        return jr({ error: "Seu papel não pode resolver esta ação." }, 403);
-      }
-
       const now = new Date().toISOString();
-      // UPDATE com retorno: protege contra corrida entre a leitura inicial
-      // (status='pending') e o update. Se nenhuma linha for atualizada, é
-      // 409 (alguém alterou no meio). 404 não acontece aqui — já confirmamos
-      // que o registro existia ao buscá-lo acima.
+      // UPDATE com retorno: protege contra corrida entre a leitura e o update.
+      // Se nada foi atualizado mesmo autorizado → 409 conflict.
       if (action === "approve_action") {
         const { data: updated, error: upErr } = await admin
           .from("ai_operator_pending_actions")
@@ -647,7 +724,16 @@ Deno.serve(async (req) => {
     // --------------------------------------------------------------
     const incoming = Array.isArray(body.messages) ? body.messages : [];
     const clientCtx = body.context || {};
-    const channel = (body.channel as "web" | "whatsapp" | "system") || "web";
+
+    // Procedência de canal FIXADA via helper testável (ver channel-source.ts).
+    // Esta Edge Function é o único endpoint autenticado por JWT do operator
+    // nesta fase, acionado pela interface web. Canais futuros (WhatsApp etc.)
+    // entrarão por endpoints dedicados — não por este corpo.
+    const channelInfo = resolveCoreChannel(body.channel);
+    const channel = channelInfo.enforced; // "web"
+    const channelSpoofAttempt = channelInfo.spoofAttempt;
+    const declaredChannel = channelInfo.declared;
+
     let sessionId: string | null = body.session_id || null;
 
     const { data: settingsRows } = await admin.from("app_settings").select("key, value");
@@ -669,6 +755,16 @@ Deno.serve(async (req) => {
         });
         return jr({ error: "Sessão não pertence ao usuário." }, 403);
       }
+      if (channelSpoofAttempt) {
+        await audit(admin, {
+          session_id: sessionId,
+          actor_user_id: userId,
+          actor_kind: "system",
+          event_type: "channel_spoof_attempted",
+          event_category: "security",
+          payload: { declared: declaredChannel, enforced: "web" },
+        });
+      }
     } else {
       // Valida referências contextuais (client/vessel/service_order) com RLS
       // real do usuário. Refs invisíveis são DESCARTADAS e auditadas — a
@@ -687,8 +783,9 @@ Deno.serve(async (req) => {
       const { data: created, error: sErr } = await admin
         .from("ai_operator_sessions")
         .insert({
-          channel,
-          channel_provider: channel === "whatsapp" ? "zapi" : "web",
+          // Sempre 'web' nesta Edge Function — vide bloco "procedência de canal".
+          channel: "web",
+          channel_provider: "web",
           owner_user_id: userId,
           client_id: safeCtxClient ?? null,
           vessel_id: safeCtxVessel ?? null,
@@ -704,8 +801,18 @@ Deno.serve(async (req) => {
         actor_user_id: userId,
         actor_kind: "user",
         event_type: "session_opened",
-        payload: { channel, route: clientCtx.route || null },
+        payload: { channel: "web", route: clientCtx.route || null },
       });
+      if (channelSpoofAttempt) {
+        await audit(admin, {
+          session_id: sessionId,
+          actor_user_id: userId,
+          actor_kind: "system",
+          event_type: "channel_spoof_attempted",
+          event_category: "security",
+          payload: { declared: declaredChannel, enforced: "web" },
+        });
+      }
       for (const [k, r] of Object.entries(ctxResults)) {
         if (r && !r.ok) {
           await audit(admin, {
