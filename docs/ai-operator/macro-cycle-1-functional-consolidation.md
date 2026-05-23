@@ -6,6 +6,30 @@
 > truthful UI/operator responses, and immediate bootstrap drafts for clear
 > operational demands.
 
+## Hotfix note - explicit-only entity linking
+
+An independent review after the functional consolidation found that the
+published code still had parallel write paths where the model could send
+`client_id` and `vessel_id` through `create_draft`, `update_draft`, and
+`register_memory_candidate`.
+
+RLS visibility was still being enforced, but that was not enough: a wrong UUID
+that was valid and visible could still be persisted without explicit user
+confirmation.
+
+This hotfix closes that gap:
+
+- `create_draft`, `update_draft`, and `register_memory_candidate` no longer
+  accept model-controlled entity links as writable inputs;
+- the backend now inherits only already-confirmed `client_id` and `vessel_id`
+  from the active session and/or active draft context;
+- unexpected entity-link arguments coming from the model are ignored and
+  audited;
+- `link_draft_entities`, called by the authenticated UI, remains the only
+  allowed path to create or change a client/vessel link;
+- RLS is still required, but is treated as a visibility gate, not as a
+  substitute for explicit human confirmation.
+
 ## Why this phase exists
 
 The security foundation of the AI Operator was already active in staging, but
@@ -60,9 +84,22 @@ The implemented flow is:
 3. Persist the link through `link_draft_entities`.
 4. Re-validate visibility and ownership in the backend before saving.
 5. Audit the link event in `ai_operator_audit`.
+6. Keep model tools restricted to content updates only; no link mutation is
+   allowed there.
 
 If the reference is invalid or not visible under RLS, the backend still blocks
 it.
+
+After the explicit-link hotfix, draft and memory writes inherit only
+server-confirmed context:
+
+- `create_draft` can create an unlinked draft when the session has no confirmed
+  entity yet;
+- `create_draft` can inherit links only from an already-confirmed session;
+- `update_draft` can update content, but cannot create, swap, or remove entity
+  links on behalf of the model;
+- `register_memory_candidate` can inherit the confirmed draft/session context,
+  but cannot attach a new entity chosen by the model.
 
 ### 4. Immediate bootstrap drafts for clear operational intent
 
@@ -126,6 +163,7 @@ This phase aligns the experience with reality by ensuring:
 - `src/lib/ai-operator-display.ts`
 - `supabase/functions/ai-operator-core/operational-intent.ts`
 - `supabase/functions/ai-operator-core/session-history.ts`
+- `supabase/functions/ai-operator-core/entity-linking.ts`
 
 ## Files materially updated in this phase
 
@@ -136,6 +174,8 @@ This phase aligns the experience with reality by ensuring:
 - `supabase/functions/ai-operator-core/index.ts`
 - `supabase/functions/ai-operator-core/prompt.ts`
 - `supabase/functions/ai-operator-core/tools.ts`
+- `src/test/ai-operator-entity-linking.test.ts`
+- `src/test/ai-operator-tools-contract.test.ts`
 
 ## Security boundaries preserved
 

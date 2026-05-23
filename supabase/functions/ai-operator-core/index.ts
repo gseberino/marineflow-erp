@@ -22,6 +22,13 @@ import { resolveCoreChannel } from "./channel-source.ts";
 import { preAuthorizeApprove } from "./approve-guard.ts";
 import { buildBootstrapDraft, detectOperationalIntent } from "./operational-intent.ts";
 import { buildDraftContextNote, redactUuidTokens, toModelConversationHistory } from "./session-history.ts";
+import {
+  buildDraftUpdatePatch,
+  resolveCreateDraftLinks,
+  resolveExplicitDraftEntitySelection,
+  resolveMemoryCandidateLinks,
+  type UnexpectedEntityAttempt,
+} from "./entity-linking.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -205,6 +212,33 @@ async function buildActiveDraftContext(admin: any, draftId: string) {
   });
 }
 
+async function auditUnexpectedEntityAttempts(
+  admin: any,
+  params: {
+    sessionId: string;
+    userId: string;
+    tool: string;
+    attempts: UnexpectedEntityAttempt[];
+    draftId?: string | null;
+  }
+) {
+  for (const attempt of params.attempts) {
+    await audit(admin, {
+      session_id: params.sessionId,
+      draft_id: params.draftId ?? null,
+      actor_user_id: params.userId,
+      actor_kind: "ai_model",
+      event_type: "model_entity_link_ignored",
+      event_category: "security",
+      payload: {
+        tool: params.tool,
+        field: attempt.field,
+        attempted: true,
+      },
+    });
+  }
+}
+
 // --------------------------------------------------------------------------
 // Safe-tool executors
 // --------------------------------------------------------------------------
@@ -295,26 +329,13 @@ async function execSafeTool(
       // persistidas; o rascunho ainda pode ser criado sem o link, e a
       // tentativa é auditada.
       const session = await getSessionRow(admin, sessionId);
-      const requestedClientId = args.client_id || session?.client_id || null;
-      const requestedVesselId = args.vessel_id || session?.vessel_id || null;
-      const refs = await validateAllReferences(sb, {
-        client: requestedClientId,
-        vessel: requestedVesselId,
+      const linkPolicy = resolveCreateDraftLinks(args, session);
+      await auditUnexpectedEntityAttempts(admin, {
+        sessionId: sessionId,
+        userId,
+        tool: "create_draft",
+        attempts: linkPolicy.unexpected,
       });
-      const safeClient = refs.client?.ok ? requestedClientId : session?.client_id ?? null;
-      const safeVessel = refs.vessel?.ok ? requestedVesselId : session?.vessel_id ?? null;
-      for (const [k, r] of Object.entries(refs)) {
-        if (r && !r.ok) {
-          await audit(admin, {
-            session_id: sessionId,
-            actor_user_id: userId,
-            actor_kind: "system",
-            event_type: "entity_reference_blocked",
-            event_category: "security",
-            payload: { tool: "create_draft", kind: k, reason: r.reason },
-          });
-        }
-      }
       const { data: draft, error } = await admin
         .from("ai_operator_drafts")
         .insert({
@@ -328,8 +349,8 @@ async function execSafeTool(
               : "draft"),
           title: args.title || null,
           summary: args.summary || null,
-          client_id: safeClient,
-          vessel_id: safeVessel,
+          client_id: linkPolicy.links.client_id,
+          vessel_id: linkPolicy.links.vessel_id,
           interpreted_intent: args.interpreted_intent || null,
           interpreted_category: args.interpreted_category || null,
           estimated_labor_hours: args.estimated_labor_hours ?? null,
@@ -355,7 +376,10 @@ async function execSafeTool(
       });
       await admin
         .from("ai_operator_sessions")
-        .update({ client_id: safeClient, vessel_id: safeVessel })
+        .update({
+          client_id: linkPolicy.links.client_id,
+          vessel_id: linkPolicy.links.vessel_id,
+        })
         .eq("id", sessionId);
       await mergeSessionMetadata(admin, sessionId, { active_draft_id: draft.id });
       return { result: { ok: true, draft_id: draft.id, draft }, draftId: draft.id };
@@ -369,42 +393,27 @@ async function execSafeTool(
       if (!draftOwner || draftOwner.session_id !== sessionId) {
         return { result: { error: "Rascunho nao pertence a sessao atual." } };
       }
-      const requestedClientId = args.client_id ?? draftOwner.client_id ?? null;
-      const requestedVesselId = args.vessel_id ?? draftOwner.vessel_id ?? null;
-      const refs = await validateAllReferences(sb, {
-        client: requestedClientId,
-        vessel: requestedVesselId,
+      const updatePolicy = buildDraftUpdatePatch(args, draftOwner);
+      await auditUnexpectedEntityAttempts(admin, {
+        sessionId: sessionId,
+        userId,
+        tool: "update_draft",
+        attempts: updatePolicy.unexpected,
+        draftId: args.draft_id,
       });
-      const safeClient = refs.client?.ok ? requestedClientId : draftOwner.client_id ?? null;
-      const safeVessel = refs.vessel?.ok ? requestedVesselId : draftOwner.vessel_id ?? null;
-      const patch: Record<string, unknown> = { client_id: safeClient, vessel_id: safeVessel };
-      for (const key of [
-        "title",
-        "status",
-        "summary",
-        "interpreted_intent",
-        "interpreted_category",
-        "estimated_labor_hours",
-        "estimated_labor_value",
-        "estimated_parts_value",
-        "estimated_travel_value",
-        "estimated_total",
-      ]) {
-        if (typeof args[key] !== "undefined") patch[key] = args[key];
-      }
-      if (Array.isArray(args.pending_questions)) patch.pending_questions = args.pending_questions;
-      if (Array.isArray(args.next_steps)) patch.next_steps = args.next_steps;
-      if (Array.isArray(args.hypotheses)) patch.hypotheses = args.hypotheses;
       const { data: updated, error } = await admin
         .from("ai_operator_drafts")
-        .update(patch)
+        .update(updatePolicy.patch)
         .eq("id", args.draft_id)
         .select()
         .single();
       if (error) throw error;
       await admin
         .from("ai_operator_sessions")
-        .update({ client_id: safeClient, vessel_id: safeVessel })
+        .update({
+          client_id: updatePolicy.links.client_id,
+          vessel_id: updatePolicy.links.vessel_id,
+        })
         .eq("id", sessionId);
       await mergeSessionMetadata(admin, sessionId, { active_draft_id: args.draft_id });
       await audit(admin, {
@@ -414,7 +423,7 @@ async function execSafeTool(
         actor_kind: "ai_model",
         event_type: "draft_updated",
         event_category: "data",
-        payload: { fields: Object.keys(patch) },
+        payload: { fields: Object.keys(updatePolicy.patch) },
       });
       return { result: { ok: true, draft_id: args.draft_id, draft: updated }, draftId: args.draft_id };
     }
@@ -497,31 +506,27 @@ async function execSafeTool(
       // Nasce SEMPRE como candidate. Promoção a 'verified' exige endpoint
       // dedicado com role admin/technician (verify_memory_note).
       // Validar referências de cliente/embarcação com RLS do usuário.
-      const memRefs = await validateAllReferences(sb, {
-        client: args.client_id,
-        vessel: args.vessel_id,
+      const [session, activeDraft] = await Promise.all([
+        getSessionRow(admin, sessionId),
+        findActiveDraft(admin, sessionId, null),
+      ]);
+      const memoryPolicy = resolveMemoryCandidateLinks(args, {
+        draft: activeDraft,
+        session,
       });
-      const safeMemClient = memRefs.client?.ok ? args.client_id : null;
-      const safeMemVessel = memRefs.vessel?.ok ? args.vessel_id : null;
-      for (const [k, r] of Object.entries(memRefs)) {
-        if (r && !r.ok) {
-          await audit(admin, {
-            session_id: sessionId,
-            actor_user_id: userId,
-            actor_kind: "system",
-            event_type: "entity_reference_blocked",
-            event_category: "security",
-            payload: { tool: "register_memory_candidate", kind: k, reason: r.reason },
-          });
-        }
-      }
-      const scope = safeMemVessel ? "vessel" : safeMemClient ? "client" : "global";
+      await auditUnexpectedEntityAttempts(admin, {
+        sessionId: sessionId,
+        userId,
+        tool: name,
+        attempts: memoryPolicy.unexpected,
+        draftId: activeDraft?.id ?? null,
+      });
       const { data: note, error } = await admin
         .from("ai_operator_memory_notes")
         .insert({
-          client_id: safeMemClient,
-          vessel_id: safeMemVessel,
-          scope,
+          client_id: memoryPolicy.client_id,
+          vessel_id: memoryPolicy.vessel_id,
+          scope: memoryPolicy.scope,
           topic: args.topic,
           title: args.title,
           body: args.body,
@@ -811,32 +816,34 @@ Deno.serve(async (req) => {
         client: requestedClientId,
         vessel: requestedVesselId,
       });
-
-      if (requestedClientId && !refs.client?.ok) {
-        return jr({ error: "Cliente nao visivel para o usuario." }, 403);
-      }
-      if (requestedVesselId && !refs.vessel?.ok) {
-        return jr({ error: "Embarcacao nao visivel para o usuario." }, 403);
-      }
-
+      let vesselClientId: string | null = null;
       if (requestedClientId && requestedVesselId) {
         const { data: vesselRow } = await sb
           .from("vessels")
           .select("id, client_id")
           .eq("id", requestedVesselId)
           .maybeSingle();
-        if (vesselRow?.client_id && vesselRow.client_id !== requestedClientId) {
-          return jr({ error: "A embarcacao selecionada nao pertence ao cliente informado." }, 400);
-        }
+        vesselClientId = vesselRow?.client_id ?? null;
+      }
+
+      const selection = resolveExplicitDraftEntitySelection({
+        requestedClientId,
+        requestedVesselId,
+        clientVisible: !requestedClientId || !!refs.client?.ok,
+        vesselVisible: !requestedVesselId || !!refs.vessel?.ok,
+        vesselClientId,
+      });
+      if (!selection.ok) {
+        return jr({ error: selection.error }, selection.status);
       }
 
       await admin
         .from("ai_operator_drafts")
-        .update({ client_id: requestedClientId, vessel_id: requestedVesselId })
+        .update({ client_id: selection.client_id, vessel_id: selection.vessel_id })
         .eq("id", draftId);
       await admin
         .from("ai_operator_sessions")
-        .update({ client_id: requestedClientId, vessel_id: requestedVesselId })
+        .update({ client_id: selection.client_id, vessel_id: selection.vessel_id })
         .eq("id", draft.session_id);
       await mergeSessionMetadata(admin, draft.session_id, { active_draft_id: draftId });
       await audit(admin, {
@@ -847,15 +854,15 @@ Deno.serve(async (req) => {
         event_type: "draft_entities_linked",
         event_category: "data",
         payload: {
-          client_linked: !!requestedClientId,
-          vessel_linked: !!requestedVesselId,
+          client_linked: !!selection.client_id,
+          vessel_linked: !!selection.vessel_id,
         },
       });
       return jr({
         ok: true,
         draft_id: draftId,
-        client_id: requestedClientId,
-        vessel_id: requestedVesselId,
+        client_id: selection.client_id,
+        vessel_id: selection.vessel_id,
       });
     }
 

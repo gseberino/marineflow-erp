@@ -107,8 +107,6 @@ export const OPERATOR_TOOLS = [
             enum: ["draft", "awaiting_info", "awaiting_approval", "approved", "rejected", "converted"],
           },
           summary: { type: "string" },
-          client_id: { type: "string" },
-          vessel_id: { type: "string" },
           interpreted_intent: { type: "string" },
           interpreted_category: { type: "string" },
           estimated_labor_hours: { type: "number" },
@@ -129,7 +127,7 @@ export const OPERATOR_TOOLS = [
     function: {
       name: "update_draft",
       description:
-        "Atualiza o rascunho ativo sem criar uma nova OS. Use quando ja existir um draft persistente e voce apenas precisar refinar resumo, status, perguntas, proximos passos, hipoteses ou vinculos seguros.",
+        "Atualiza o rascunho ativo sem criar uma nova OS. Use quando ja existir um draft persistente e voce apenas precisar refinar titulo, resumo, status, perguntas pendentes, proximos passos, hipoteses e estimativas internas.",
       parameters: {
         type: "object",
         properties: {
@@ -140,8 +138,6 @@ export const OPERATOR_TOOLS = [
             enum: ["draft", "awaiting_info", "awaiting_approval", "approved", "rejected", "converted"],
           },
           summary: { type: "string" },
-          client_id: { type: "string" },
-          vessel_id: { type: "string" },
           interpreted_intent: { type: "string" },
           interpreted_category: { type: "string" },
           estimated_labor_hours: { type: "number" },
@@ -212,8 +208,6 @@ export const OPERATOR_TOOLS = [
       parameters: {
         type: "object",
         properties: {
-          vessel_id: { type: "string" },
-          client_id: { type: "string" },
           topic: { type: "string" },
           title: { type: "string" },
           body: { type: "string" },
