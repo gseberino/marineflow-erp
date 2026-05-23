@@ -20,6 +20,8 @@ import { resolveProposalDraftId } from "./proposal.ts";
 import { interpretPendingUpdate, interpretMemoryUpdate } from "./transitions.ts";
 import { resolveCoreChannel } from "./channel-source.ts";
 import { preAuthorizeApprove } from "./approve-guard.ts";
+import { buildBootstrapDraft, detectOperationalIntent } from "./operational-intent.ts";
+import { buildDraftContextNote, redactUuidTokens, toModelConversationHistory } from "./session-history.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -124,6 +126,85 @@ async function canReject(admin: any, userId: string, pendingActionId: string): P
   return !!data;
 }
 
+async function getSessionRow(admin: any, sessionId: string) {
+  const { data } = await admin
+    .from("ai_operator_sessions")
+    .select("id, client_id, vessel_id, service_order_id, metadata, created_at, last_activity_at")
+    .eq("id", sessionId)
+    .maybeSingle();
+  return data ?? null;
+}
+
+async function mergeSessionMetadata(admin: any, sessionId: string, patch: Record<string, unknown>) {
+  const current = await getSessionRow(admin, sessionId);
+  const metadata = current?.metadata && typeof current.metadata === "object" ? current.metadata : {};
+  await admin
+    .from("ai_operator_sessions")
+    .update({ metadata: { ...metadata, ...patch } })
+    .eq("id", sessionId);
+}
+
+async function getDraftRow(admin: any, draftId: string) {
+  const { data } = await admin
+    .from("ai_operator_drafts")
+    .select(
+      "id, session_id, title, status, summary, pending_questions, next_steps, hypotheses, client_id, vessel_id, created_at, updated_at, clients(full_name_or_company_name), vessels(boat_name)"
+    )
+    .eq("id", draftId)
+    .maybeSingle();
+  return data ?? null;
+}
+
+async function findActiveDraft(admin: any, sessionId: string, requestedDraftId?: string | null) {
+  if (requestedDraftId) {
+    const requested = await getDraftRow(admin, requestedDraftId);
+    if (requested && requested.session_id === sessionId) return requested;
+  }
+
+  const session = await getSessionRow(admin, sessionId);
+  const sessionActiveDraftId =
+    session?.metadata && typeof session.metadata === "object"
+      ? (session.metadata as Record<string, unknown>).active_draft_id
+      : null;
+  if (typeof sessionActiveDraftId === "string") {
+    const fromSession = await getDraftRow(admin, sessionActiveDraftId);
+    if (fromSession && fromSession.session_id === sessionId) return fromSession;
+  }
+
+  const { data } = await admin
+    .from("ai_operator_drafts")
+    .select(
+      "id, session_id, title, status, summary, pending_questions, next_steps, hypotheses, client_id, vessel_id, created_at, updated_at, clients(full_name_or_company_name), vessels(boat_name)"
+    )
+    .eq("session_id", sessionId)
+    .order("updated_at", { ascending: false })
+    .limit(1);
+  return data?.[0] ?? null;
+}
+
+async function buildActiveDraftContext(admin: any, draftId: string) {
+  const [draft, itemsResult] = await Promise.all([
+    getDraftRow(admin, draftId),
+    admin.from("ai_operator_draft_items").select("item_kind, description").eq("draft_id", draftId).order("position"),
+  ]);
+  if (!draft) return null;
+
+  return buildDraftContextNote({
+    title: draft.title ?? null,
+    status: draft.status ?? null,
+    summary: draft.summary ?? null,
+    clientName: draft.clients?.full_name_or_company_name ?? null,
+    vesselName: draft.vessels?.boat_name ?? null,
+    pendingQuestions: Array.isArray(draft.pending_questions) ? draft.pending_questions : [],
+    nextSteps: Array.isArray(draft.next_steps) ? draft.next_steps : [],
+    hypotheses: Array.isArray(draft.hypotheses) ? draft.hypotheses : [],
+    items: (itemsResult.data || []).map((item: any) => ({
+      item_kind: item.item_kind,
+      description: item.description,
+    })),
+  });
+}
+
 // --------------------------------------------------------------------------
 // Safe-tool executors
 // --------------------------------------------------------------------------
@@ -213,12 +294,15 @@ async function execSafeTool(
       // (respeita RLS real do ERP). Referências não visíveis NÃO são
       // persistidas; o rascunho ainda pode ser criado sem o link, e a
       // tentativa é auditada.
+      const session = await getSessionRow(admin, sessionId);
+      const requestedClientId = args.client_id || session?.client_id || null;
+      const requestedVesselId = args.vessel_id || session?.vessel_id || null;
       const refs = await validateAllReferences(sb, {
-        client: args.client_id,
-        vessel: args.vessel_id,
+        client: requestedClientId,
+        vessel: requestedVesselId,
       });
-      const safeClient = refs.client?.ok ? args.client_id : null;
-      const safeVessel = refs.vessel?.ok ? args.vessel_id : null;
+      const safeClient = refs.client?.ok ? requestedClientId : session?.client_id ?? null;
+      const safeVessel = refs.vessel?.ok ? requestedVesselId : session?.vessel_id ?? null;
       for (const [k, r] of Object.entries(refs)) {
         if (r && !r.ok) {
           await audit(admin, {
@@ -237,6 +321,11 @@ async function execSafeTool(
           session_id: sessionId,
           created_by: userId,
           kind: args.kind,
+          status:
+            args.status ||
+            (Array.isArray(args.pending_questions) && args.pending_questions.length > 0
+              ? "awaiting_info"
+              : "draft"),
           title: args.title || null,
           summary: args.summary || null,
           client_id: safeClient,
@@ -264,7 +353,70 @@ async function execSafeTool(
         event_category: "data",
         payload: { kind: args.kind, title: args.title },
       });
+      await admin
+        .from("ai_operator_sessions")
+        .update({ client_id: safeClient, vessel_id: safeVessel })
+        .eq("id", sessionId);
+      await mergeSessionMetadata(admin, sessionId, { active_draft_id: draft.id });
       return { result: { ok: true, draft_id: draft.id, draft }, draftId: draft.id };
+    }
+    case "update_draft": {
+      const { data: draftOwner } = await admin
+        .from("ai_operator_drafts")
+        .select("id, session_id, client_id, vessel_id")
+        .eq("id", args.draft_id)
+        .maybeSingle();
+      if (!draftOwner || draftOwner.session_id !== sessionId) {
+        return { result: { error: "Rascunho nao pertence a sessao atual." } };
+      }
+      const requestedClientId = args.client_id ?? draftOwner.client_id ?? null;
+      const requestedVesselId = args.vessel_id ?? draftOwner.vessel_id ?? null;
+      const refs = await validateAllReferences(sb, {
+        client: requestedClientId,
+        vessel: requestedVesselId,
+      });
+      const safeClient = refs.client?.ok ? requestedClientId : draftOwner.client_id ?? null;
+      const safeVessel = refs.vessel?.ok ? requestedVesselId : draftOwner.vessel_id ?? null;
+      const patch: Record<string, unknown> = { client_id: safeClient, vessel_id: safeVessel };
+      for (const key of [
+        "title",
+        "status",
+        "summary",
+        "interpreted_intent",
+        "interpreted_category",
+        "estimated_labor_hours",
+        "estimated_labor_value",
+        "estimated_parts_value",
+        "estimated_travel_value",
+        "estimated_total",
+      ]) {
+        if (typeof args[key] !== "undefined") patch[key] = args[key];
+      }
+      if (Array.isArray(args.pending_questions)) patch.pending_questions = args.pending_questions;
+      if (Array.isArray(args.next_steps)) patch.next_steps = args.next_steps;
+      if (Array.isArray(args.hypotheses)) patch.hypotheses = args.hypotheses;
+      const { data: updated, error } = await admin
+        .from("ai_operator_drafts")
+        .update(patch)
+        .eq("id", args.draft_id)
+        .select()
+        .single();
+      if (error) throw error;
+      await admin
+        .from("ai_operator_sessions")
+        .update({ client_id: safeClient, vessel_id: safeVessel })
+        .eq("id", sessionId);
+      await mergeSessionMetadata(admin, sessionId, { active_draft_id: args.draft_id });
+      await audit(admin, {
+        session_id: sessionId,
+        draft_id: args.draft_id,
+        actor_user_id: userId,
+        actor_kind: "ai_model",
+        event_type: "draft_updated",
+        event_category: "data",
+        payload: { fields: Object.keys(patch) },
+      });
+      return { result: { ok: true, draft_id: args.draft_id, draft: updated }, draftId: args.draft_id };
     }
     case "add_draft_item": {
       // Garante que o draft pertence à sessão atual (anti-injection cross-session)
@@ -644,6 +796,69 @@ Deno.serve(async (req) => {
       }
     }
 
+    if (action === "link_draft_entities") {
+      const draftId = String(body.draft_id || "");
+      if (!draftId) return jr({ error: "draft_id obrigatorio" }, 400);
+
+      const draft = await getDraftRow(admin, draftId);
+      if (!draft || !draft.session_id) return jr({ error: "Rascunho nao encontrado." }, 404);
+      const ownsSession = await sessionBelongsTo(admin, draft.session_id, userId, isAdmin);
+      if (!ownsSession) return jr({ error: "Rascunho nao pertence ao usuario." }, 403);
+
+      const requestedClientId = body.client_id ? String(body.client_id) : null;
+      const requestedVesselId = body.vessel_id ? String(body.vessel_id) : null;
+      const refs = await validateAllReferences(sb, {
+        client: requestedClientId,
+        vessel: requestedVesselId,
+      });
+
+      if (requestedClientId && !refs.client?.ok) {
+        return jr({ error: "Cliente nao visivel para o usuario." }, 403);
+      }
+      if (requestedVesselId && !refs.vessel?.ok) {
+        return jr({ error: "Embarcacao nao visivel para o usuario." }, 403);
+      }
+
+      if (requestedClientId && requestedVesselId) {
+        const { data: vesselRow } = await sb
+          .from("vessels")
+          .select("id, client_id")
+          .eq("id", requestedVesselId)
+          .maybeSingle();
+        if (vesselRow?.client_id && vesselRow.client_id !== requestedClientId) {
+          return jr({ error: "A embarcacao selecionada nao pertence ao cliente informado." }, 400);
+        }
+      }
+
+      await admin
+        .from("ai_operator_drafts")
+        .update({ client_id: requestedClientId, vessel_id: requestedVesselId })
+        .eq("id", draftId);
+      await admin
+        .from("ai_operator_sessions")
+        .update({ client_id: requestedClientId, vessel_id: requestedVesselId })
+        .eq("id", draft.session_id);
+      await mergeSessionMetadata(admin, draft.session_id, { active_draft_id: draftId });
+      await audit(admin, {
+        session_id: draft.session_id,
+        draft_id: draftId,
+        actor_user_id: userId,
+        actor_kind: "user",
+        event_type: "draft_entities_linked",
+        event_category: "data",
+        payload: {
+          client_linked: !!requestedClientId,
+          vessel_linked: !!requestedVesselId,
+        },
+      });
+      return jr({
+        ok: true,
+        draft_id: draftId,
+        client_id: requestedClientId,
+        vessel_id: requestedVesselId,
+      });
+    }
+
     // --------------------------------------------------------------
     // Memory governance — verify_memory_note / reject_memory_note
     // --------------------------------------------------------------
@@ -723,6 +938,10 @@ Deno.serve(async (req) => {
     // chat (default)
     // --------------------------------------------------------------
     const incoming = Array.isArray(body.messages) ? body.messages : [];
+    const latestMessageText =
+      typeof body.message === "string"
+        ? body.message
+        : String([...incoming].reverse().find((m: any) => m.role === "user")?.content || "");
     const clientCtx = body.context || {};
 
     // Procedência de canal FIXADA via helper testável (ver channel-source.ts).
@@ -827,11 +1046,10 @@ Deno.serve(async (req) => {
       }
     }
 
-    const lastUser = [...incoming].reverse().find((m: any) => m.role === "user");
-    if (lastUser) {
+    if (latestMessageText) {
       await recordMessage(admin, sessionId!, {
         role: "user",
-        content: String(lastUser.content || ""),
+        content: latestMessageText,
         source: channel,
       });
     }
@@ -847,6 +1065,62 @@ Deno.serve(async (req) => {
     const entityContext = clientCtx.entityType
       ? `${clientCtx.entityType}${clientCtx.entityId ? ` (id interno presente)` : ""}`
       : "nenhum";
+    const currentSession = await getSessionRow(admin, sessionId!);
+    let activeDraft = await findActiveDraft(admin, sessionId!, body.draft_id ? String(body.draft_id) : null);
+    if (!activeDraft && latestMessageText) {
+      const detectedIntent = detectOperationalIntent(latestMessageText);
+      if (detectedIntent?.shouldBootstrapDraft) {
+        const bootstrap = buildBootstrapDraft(detectedIntent, { message: latestMessageText });
+        const { data: createdBootstrap, error: bootstrapError } = await admin
+          .from("ai_operator_drafts")
+          .insert({
+            session_id: sessionId,
+            created_by: userId,
+            kind: bootstrap.kind,
+            status: bootstrap.status,
+            title: bootstrap.title,
+            summary: bootstrap.summary,
+            client_id: currentSession?.client_id ?? null,
+            vessel_id: currentSession?.vessel_id ?? null,
+            interpreted_intent: bootstrap.interpreted_intent,
+            interpreted_category: bootstrap.interpreted_category,
+            pending_questions: bootstrap.pending_questions,
+            next_steps: bootstrap.next_steps,
+            hypotheses: bootstrap.hypotheses,
+          })
+          .select()
+          .single();
+        if (bootstrapError) {
+          return jr({ error: "Falha ao criar rascunho inicial", details: bootstrapError.message }, 500);
+        }
+        if (bootstrap.items.length > 0) {
+          await admin.from("ai_operator_draft_items").insert(
+            bootstrap.items.map((item, index) => ({
+              draft_id: createdBootstrap.id,
+              item_kind: item.item_kind,
+              description: item.description,
+              notes: item.notes || null,
+              quantity: item.quantity ?? 1,
+              unit: item.unit || "unit",
+              estimated_total: item.estimated_total ?? null,
+              position: index + 1,
+              confidence: "medium",
+            }))
+          );
+        }
+        await mergeSessionMetadata(admin, sessionId!, { active_draft_id: createdBootstrap.id });
+        await audit(admin, {
+          session_id: sessionId,
+          draft_id: createdBootstrap.id,
+          actor_user_id: userId,
+          actor_kind: "system",
+          event_type: "draft_bootstrap_created",
+          event_category: "data",
+          payload: { kind: bootstrap.kind, status: bootstrap.status },
+        });
+        activeDraft = await findActiveDraft(admin, sessionId!, createdBootstrap.id);
+      }
+    }
 
     const systemPrompt = buildSystemPrompt({
       userName: profile.full_name || "Usuário",
@@ -863,9 +1137,24 @@ Deno.serve(async (req) => {
       entityContext,
     });
 
-    const messages: any[] = [{ role: "system", content: systemPrompt }, ...incoming];
+    const { data: persistedMessages } = await admin
+      .from("ai_operator_messages")
+      .select("role, content")
+      .eq("session_id", sessionId!)
+      .order("created_at");
+    const draftContextNote = activeDraft ? await buildActiveDraftContext(admin, activeDraft.id) : null;
+    const messages: any[] = [{ role: "system", content: systemPrompt }];
+    if (draftContextNote) {
+      messages.push({
+        role: "system",
+        content:
+          `${draftContextNote}\n\nUse este rascunho ativo como fonte de continuidade. ` +
+          `Se precisar refinar o mesmo atendimento, prefira update_draft e add_draft_item.`,
+      });
+    }
+    messages.push(...toModelConversationHistory((persistedMessages as any[]) || []));
     const toolEvents: any[] = [];
-    let createdDraftId: string | null = null;
+    let createdDraftId: string | null = activeDraft?.id ?? null;
     let pendingActionForFrontend: any = null;
 
     for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
@@ -888,7 +1177,7 @@ Deno.serve(async (req) => {
 
       const toolCalls = aiMsg.tool_calls || [];
       if (toolCalls.length === 0) {
-        const finalContent = aiMsg.content || "";
+        const finalContent = redactUuidTokens(aiMsg.content || "");
         await recordMessage(admin, sessionId!, { role: "assistant", content: finalContent, source: channel });
         return jr({
           ok: true,
@@ -993,7 +1282,7 @@ Deno.serve(async (req) => {
           };
           await recordMessage(admin, sessionId!, {
             role: "assistant",
-            content: aiMsg.content || "",
+            content: redactUuidTokens(aiMsg.content || ""),
             tool_calls: aiMsg.tool_calls,
             source: channel,
           });
@@ -1007,7 +1296,7 @@ Deno.serve(async (req) => {
           return jr({
             ok: true,
             session_id: sessionId,
-            message: { role: "assistant", content: aiMsg.content || "" },
+            message: { role: "assistant", content: redactUuidTokens(aiMsg.content || "") },
             draft_id: createdDraftId,
             pending_action: pendingActionForFrontend,
             tool_events: toolEvents,
