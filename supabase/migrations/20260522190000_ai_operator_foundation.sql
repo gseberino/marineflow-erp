@@ -458,6 +458,12 @@ create trigger trg_ai_op_memory_updated before update on public.ai_operator_memo
 create or replace function public.ai_op_protect_pending_action()
 returns trigger
 language plpgsql
+-- search_path FIXO E VAZIO. A função não consulta nenhuma tabela (usa apenas
+-- NEW/OLD/TG_OP e raise exception), então não precisa resolver nomes não-
+-- qualificados. Isso atende o aviso `function_search_path_mutable` do
+-- Supabase Security Advisor e impede que qualquer alteração de search_path
+-- em runtime influencie o comportamento do trigger.
+set search_path = ''
 as $$
 begin
   -- Bloqueia UPDATE em campos imutáveis após criação.

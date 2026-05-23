@@ -83,6 +83,46 @@ respeita as policies de RLS reais de `clients`/`vessels`/`products`/`services`.
 - O helper [`entity-validation.ts`](../../supabase/functions/ai-operator-core/entity-validation.ts)
   é testado isoladamente em [`ai-operator-entity-validation.test.ts`](../../src/test/ai-operator-entity-validation.test.ts).
 
+## Aplicação em staging — estado atual
+
+- **Supabase staging** `okurngvcodmljjicopdp`: a foundation
+  `ai_operator_foundation` foi aplicada antes do deploy do core
+  (registro Supabase `20260523005653`). Tabelas, helpers privados,
+  funções server-only, policies, triggers e schema `private` criados.
+- **`ai-operator-core`**: AINDA não implantada — depende do hardening
+  abaixo entrar primeiro.
+- **`ai-operator-channel-intake`**: não implantada.
+- **Bridge WhatsApp** (`supabase/deferred-migrations/20260522190100_*`):
+  não aplicada.
+
+## Pós-DDL Advisor — remediação de search_path
+
+Após a aplicação da foundation, o Supabase Security Advisor sinalizou:
+
+- **`function_search_path_mutable`** em `public.ai_op_protect_pending_action`.
+
+A função não consulta nenhuma tabela (usa apenas `NEW`/`OLD`/`TG_OP` e
+`raise exception`), logo a remediação adequada é `set search_path = ''`,
+que impede qualquer resolução de nome não-qualificado em runtime.
+
+**Foi criada migration aditiva de hardening**:
+`supabase/migrations/20260523010000_ai_operator_harden_pending_trigger_search_path.sql`
+
+Ela:
+- executa `CREATE OR REPLACE FUNCTION` mantendo o corpo idêntico (bloqueio
+  de campos imutáveis + transições válidas);
+- adiciona `SET search_path = ''`;
+- reafirma `REVOKE EXECUTE FROM public, anon, authenticated` e
+  `GRANT EXECUTE TO service_role`;
+- **não** altera tabelas, policies, dados, outras funções nem bridge WhatsApp.
+
+A foundation (`20260522190000`) também foi atualizada para ambientes novos
+— já nasce com `set search_path = ''` nesta trigger function.
+
+Os demais alertas globais do Advisor (RLS de outros módulos, buckets,
+funções legadas fora do AI Operator) **serão tratados em macro ciclo
+separado** — fogem ao escopo desta correção.
+
 ## Modelo de IA para homologação
 
 - Default do `ai-operator-core`: `gemini-2.5-flash` (alinhado ao `ai-agent`
