@@ -217,6 +217,36 @@ export const OPERATOR_TOOLS = [
       },
     },
   },
+  // ---------- PROPOSTA DE VINCULO (somente sugestao, exige confirmacao UI) ----------
+  {
+    type: "function",
+    function: {
+      name: "propose_entity_link",
+      description:
+        "Apresenta uma sugestao de vinculo de cliente e/ou embarcacao para o rascunho ATIVO da sessao atual. " +
+        "NAO grava nada — apenas estrutura uma proposta com nomes humanos para o usuario confirmar na interface. " +
+        "O draft alvo NAO e escolhido pelo modelo; e sempre o draft ativo resolvido pelo backend. " +
+        "Use somente apos search_clients / search_vessels terem retornado candidatos plausiveis. " +
+        "Se nao houver draft ativo, o backend respondera com erro indicando que o usuario precisa selecionar um rascunho primeiro.",
+      parameters: {
+        type: "object",
+        properties: {
+          client_id: {
+            type: "string",
+            description: "ID de cliente vindo de search_clients (opcional se for vincular apenas embarcacao).",
+          },
+          vessel_id: {
+            type: "string",
+            description: "ID de embarcacao vindo de search_vessels (opcional se for vincular apenas cliente).",
+          },
+          rationale: {
+            type: "string",
+            description: "Breve justificativa em portugues sobre porque estes candidatos foram escolhidos.",
+          },
+        },
+      },
+    },
+  },
   // ---------- PROPOSTA DE AÇÃO SENSÍVEL ----------
   {
     type: "function",

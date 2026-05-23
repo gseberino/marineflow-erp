@@ -2,26 +2,11 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { FileText, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
 import { useAIOperatorDraftDetail } from "@/hooks/use-ai-operator-drafts";
-
-const KIND_LABELS: Record<string, string> = {
-  quote: "Orcamento (rascunho)",
-  diagnosis: "Diagnostico",
-  service_plan: "Plano de Servico",
-  agenda_proposal: "Proposta de Agenda",
-  response_suggestion: "Sugestao de Resposta",
-  note: "Nota tecnica",
-};
-
-const ITEM_KIND_LABELS: Record<string, string> = {
-  service: "Mao de obra",
-  product: "Produto",
-  product_to_quote: "Item a cotar",
-  displacement: "Deslocamento",
-  engineering: "Engenharia/Diagnostico",
-  pending_question: "Pergunta pendente",
-  risk: "Risco / observacao",
-  reference: "Referencia",
-};
+import {
+  formatDraftKind,
+  formatDraftItemKind,
+  formatDraftStatus,
+} from "@/lib/ai-operator-display";
 
 export function AIOperatorDraftCard({ draftId }: { draftId: string }) {
   const [expanded, setExpanded] = useState(true);
@@ -55,10 +40,10 @@ export function AIOperatorDraftCard({ draftId }: { draftId: string }) {
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-semibold uppercase tracking-wide text-primary">
-              {KIND_LABELS[draft.kind] ?? draft.kind}
+              {formatDraftKind(draft.kind)}
             </span>
             <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-              {draft.status}
+              {formatDraftStatus(draft.status)}
             </span>
           </div>
           <h4 className="mt-1 text-sm font-semibold">{draft.title || "Sem titulo"}</h4>
@@ -95,7 +80,7 @@ export function AIOperatorDraftCard({ draftId }: { draftId: string }) {
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                          {ITEM_KIND_LABELS[item.item_kind] ?? item.item_kind}
+                          {formatDraftItemKind(item.item_kind)}
                         </span>
                         <div>{item.description}</div>
                         {item.notes && <div className="italic text-muted-foreground">{item.notes}</div>}
@@ -147,9 +132,9 @@ export function AIOperatorDraftCard({ draftId }: { draftId: string }) {
             <Link
               to={`/operator/drafts/${draft.id}`}
               className="text-xs font-medium text-primary hover:underline"
-              aria-label="Abrir detalhe do rascunho"
+              aria-label="Abrir detalhes do rascunho"
             >
-              Abrir detalhe do rascunho
+              Abrir detalhes do rascunho
             </Link>
           </div>
         </div>

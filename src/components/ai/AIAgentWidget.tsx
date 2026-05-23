@@ -11,6 +11,8 @@ import { AIChatMessage } from './AIChatMessage';
 import { AIConfirmCard } from './AIConfirmCard';
 import { AIOptionsCard } from './AIOptionsCard';
 import { AIOperatorDraftCard } from './AIOperatorDraftCard';
+import { AIOperatorDraftSelectionCard } from './AIOperatorDraftSelectionCard';
+import { AIOperatorLinkProposalCard } from './AIOperatorLinkProposalCard';
 import { AIOperatorPendingActionCard } from './AIOperatorPendingActionCard';
 import { toast } from 'sonner';
 
@@ -99,7 +101,13 @@ export function AIAgentWidget() {
   const context = useAIContext();
   const { display, loading, loadingMsg, sendMessage, confirmProposal, cancelProposal, selectOption, reset, activeProposal, activeOptions } =
     useAIAgent(context);
-  const op = useAIOperator(context);
+  // Quando o widget abre na pagina de detalhe de um draft, o draft alvo vem
+  // do contexto da rota (ai-context detecta /operator/drafts/:id). Em outras
+  // paginas, o widget abre sem draft ativo — o backend decidira se inicia
+  // novo (bootstrap) ou pede selecao (operate_on_existing).
+  const initialDraftId =
+    context.entityType === 'operator_draft' && context.entityId ? context.entityId : null;
+  const op = useAIOperator(context, { initialDraftId });
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const vpHeight = useVisualViewportHeight();
@@ -344,6 +352,28 @@ export function AIAgentWidget() {
                 return <AIChatMessage key={i} role={item.role} content={item.content} />;
               if (item.kind === 'draft_ref')
                 return <AIOperatorDraftCard key={i} draftId={item.draftId} />;
+              if (item.kind === 'draft_selection')
+                return (
+                  <AIOperatorDraftSelectionCard
+                    key={i}
+                    candidates={item.candidates}
+                    status={item.status}
+                    selectedDraftId={item.selectedDraftId}
+                    disabled={op.loading}
+                    onSelect={op.selectDraftCandidate}
+                  />
+                );
+              if (item.kind === 'link_proposal')
+                return (
+                  <AIOperatorLinkProposalCard
+                    key={i}
+                    proposal={item.proposal}
+                    status={item.status}
+                    disabled={op.loading}
+                    onConfirm={op.confirmLinkProposal}
+                    onReject={op.rejectLinkProposal}
+                  />
+                );
               if (item.kind === 'pending_action')
                 return (
                   <AIOperatorPendingActionCard

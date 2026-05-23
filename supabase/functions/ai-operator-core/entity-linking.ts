@@ -148,3 +148,100 @@ export function resolveExplicitDraftEntitySelection(params: {
     vessel_id: params.requestedVesselId,
   };
 }
+
+// ---------------------------------------------------------------------------
+// PROPOSTA DE VINCULO (não persiste — apenas estrutura para confirmação UI)
+// ---------------------------------------------------------------------------
+// Macro Ciclo evolução operacional:
+//   * Modelo NÃO controla draft_id. O draft alvo é definido pelo backend a
+//     partir do contexto estruturado da sessão/UI.
+//   * Modelo pode SUGERIR cliente e/ou embarcacao por id (obtidos de
+//     search_clients / search_vessels), mas a proposta volta para a UI com
+//     NOMES legíveis. Persistência só acontece via link_draft_entities após
+//     confirmação humana explícita.
+
+export type LinkProposalInput = {
+  clientId: string | null;
+  vesselId: string | null;
+  clientVisible: boolean;
+  vesselVisible: boolean;
+  vesselBelongsToClient: boolean | null;
+};
+
+export type LinkProposalResult =
+  | {
+      ok: true;
+      proposal: {
+        client_id: string | null;
+        vessel_id: string | null;
+      };
+    }
+  | { ok: false; reason: "no_candidates" | "client_invisible" | "vessel_invisible" | "vessel_mismatch" };
+
+export function resolveLinkProposal(input: LinkProposalInput): LinkProposalResult {
+  if (!input.clientId && !input.vesselId) {
+    return { ok: false, reason: "no_candidates" };
+  }
+  if (input.clientId && !input.clientVisible) {
+    return { ok: false, reason: "client_invisible" };
+  }
+  if (input.vesselId && !input.vesselVisible) {
+    return { ok: false, reason: "vessel_invisible" };
+  }
+  if (
+    input.clientId &&
+    input.vesselId &&
+    input.vesselBelongsToClient === false
+  ) {
+    return { ok: false, reason: "vessel_mismatch" };
+  }
+  return {
+    ok: true,
+    proposal: {
+      client_id: input.clientId,
+      vessel_id: input.vesselId,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// CANCELAMENTO SEGURO DE DRAFT
+// ---------------------------------------------------------------------------
+// Cancelamento só é permitido em estados compatíveis com erro operacional
+// (draft, awaiting_info). Estados de governança/conversão (approved,
+// rejected, awaiting_approval, converted) NÃO podem ser cancelados
+// silenciosamente nesta fase. Drafts com pending_actions em status `pending`
+// também não podem ser cancelados — o usuário precisa resolver ou rejeitar
+// a ação pendente antes.
+
+export type CancelDraftCheck =
+  | { ok: true }
+  | { ok: false; status: 409; reason: "invalid_status"; currentStatus: string }
+  | { ok: false; status: 409; reason: "pending_actions_open"; openCount: number }
+  | { ok: false; status: 404; reason: "not_found" };
+
+const CANCELLABLE_STATUSES = new Set<string>(["draft", "awaiting_info"]);
+
+export function evaluateCancelDraft(params: {
+  draftStatus: string | null;
+  pendingOpenCount: number;
+}): CancelDraftCheck {
+  if (!params.draftStatus) return { ok: false, status: 404, reason: "not_found" };
+  if (!CANCELLABLE_STATUSES.has(params.draftStatus)) {
+    return {
+      ok: false,
+      status: 409,
+      reason: "invalid_status",
+      currentStatus: params.draftStatus,
+    };
+  }
+  if (params.pendingOpenCount > 0) {
+    return {
+      ok: false,
+      status: 409,
+      reason: "pending_actions_open",
+      openCount: params.pendingOpenCount,
+    };
+  }
+  return { ok: true };
+}

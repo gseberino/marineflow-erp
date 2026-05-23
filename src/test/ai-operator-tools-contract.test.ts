@@ -30,6 +30,16 @@ describe("AI Operator - tools contract for explicit entity linking", () => {
     expect(tool?.function.description).not.toMatch(/vinculos seguros|cliente|embarcacao/i);
   });
 
+  it("exposes propose_entity_link but it never accepts a model-controlled draft_id", () => {
+    const tool = findTool("propose_entity_link");
+    expect(tool).toBeDefined();
+    const properties = tool?.function.parameters.properties ?? {};
+    expect(properties).not.toHaveProperty("draft_id");
+    expect(properties).toHaveProperty("client_id");
+    expect(properties).toHaveProperty("vessel_id");
+    expect(tool?.function.description).toMatch(/nao grava|nao escolhe|confirmar|interface/i);
+  });
+
   it("the system prompt forbids model-controlled entity linking and points to the authenticated UI flow", () => {
     const prompt = buildSystemPrompt({
       userName: "Tester",

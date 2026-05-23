@@ -76,6 +76,29 @@ vi.mock("@/hooks/use-ai-operator-drafts", () => ({
     mutateAsync: vi.fn(),
     isPending: false,
   }),
+  useCancelAIOperatorDraft: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
+}));
+
+vi.mock("@/hooks/use-ai-operator", () => ({
+  useAIOperator: () => ({
+    sessionId: "session-1",
+    display: [],
+    loading: false,
+    error: null,
+    activeDraftId: draftFixture.id,
+    activePendingActionId: null,
+    messages: [],
+    sendMessage: vi.fn(),
+    selectDraftCandidate: vi.fn(),
+    confirmLinkProposal: vi.fn(),
+    rejectLinkProposal: vi.fn(),
+    approveAction: vi.fn(),
+    rejectAction: vi.fn(),
+    reset: vi.fn(),
+  }),
 }));
 
 vi.mock("@/hooks/use-clients", () => ({
@@ -110,28 +133,34 @@ function renderWithRouter(ui: React.ReactNode, initialEntries = ["/operator/draf
 }
 
 describe("AI Operator draft surfaces", () => {
-  it("draft card offers a real navigation path to the persisted detail page", async () => {
+  it("draft card offers a real navigation path to the persisted detail page with PT label", async () => {
     renderWithRouter(<AIOperatorDraftCard draftId={draftFixture.id} />);
 
     expect(await screen.findByText(/Orcamento: Instalacao Raymarine Axiom 12 no Fly/i)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /abrir detalhe do rascunho/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /abrir detalhes do rascunho/i })).toHaveAttribute(
       "href",
       `/operator/drafts/${draftFixture.id}`
     );
     expect(screen.queryByText(draftFixture.id)).not.toBeInTheDocument();
+    // PT status label, not raw "awaiting_info".
+    expect(screen.getByText(/Aguardando informações/i)).toBeInTheDocument();
   });
 
-  it("list page shows persisted drafts as internal operator drafts, not official service orders", async () => {
+  it("list page shows persisted drafts with PT labels and an 'Abrir detalhes' action", async () => {
     renderWithRouter(<AIOperatorDraftListPage />);
 
     expect(await screen.findByText(/Rascunhos do Operador/i)).toBeInTheDocument();
     expect(screen.getByText(/Orcamento: Instalacao Raymarine Axiom 12 no Fly/i)).toBeInTheDocument();
     expect(screen.getByText(/Rascunho interno do Operador/i)).toBeInTheDocument();
-    expect(screen.getByText(/Cliente nao vinculado/i)).toBeInTheDocument();
+    expect(screen.getByText(/Cliente não vinculado/i)).toBeInTheDocument();
     expect(screen.getByText(/12 itens/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /abrir detalhes/i })).toBeInTheDocument();
+    expect(screen.getByText(/Aguardando informações/i)).toBeInTheDocument();
+    // Cancel button exists for cancellable status.
+    expect(screen.getByRole("button", { name: /cancelar/i })).toBeInTheDocument();
   });
 
-  it("detail page shows internal warning, draft items and continue action", async () => {
+  it("detail page shows internal warning, draft items and 'Continuar com o Operador' button", async () => {
     renderWithRouter(
       <Routes>
         <Route path="/operator/drafts/:id" element={<AIOperatorDraftDetailPage />} />
@@ -140,9 +169,11 @@ describe("AI Operator draft surfaces", () => {
     );
 
     expect(await screen.findByText(/Rascunho interno do Operador/i)).toBeInTheDocument();
-    expect(screen.getByText(/ainda nao e uma Ordem de Servico/i)).toBeInTheDocument();
+    expect(screen.getByText(/ainda não é uma Ordem de Serviço/i)).toBeInTheDocument();
     expect(screen.getByText(/Mao de obra para instalacao/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /continuar com o operador/i })).toBeInTheDocument();
-    expect(screen.getByText(/Cliente nao vinculado/i)).toBeInTheDocument();
+    expect(screen.getByText(/Cliente não vinculado/i)).toBeInTheDocument();
+    // Cancel button present for awaiting_info draft without open pending actions.
+    expect(screen.getByRole("button", { name: /cancelar rascunho/i })).toBeInTheDocument();
   });
 });

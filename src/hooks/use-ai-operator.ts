@@ -18,10 +18,40 @@ export type OperatorPendingAction = {
   payload: any;
 };
 
+export type OperatorDraftCandidate = {
+  id: string;
+  title: string | null;
+  kind: string;
+  status: string;
+  summary: string | null;
+  client_name: string | null;
+  vessel_name: string | null;
+  updated_at: string;
+};
+
+export type OperatorLinkProposal = {
+  draft_id: string;
+  draft_title: string | null;
+  client: { id: string; name: string | null } | null;
+  vessel: { id: string; name: string | null } | null;
+  rationale: string | null;
+};
+
 export type OperatorDisplayItem =
   | { kind: "message"; role: "user" | "assistant"; content: string }
   | { kind: "draft_ref"; draftId: string }
-  | { kind: "pending_action"; action: OperatorPendingAction; status: "pending" | "approved" | "rejected" };
+  | { kind: "pending_action"; action: OperatorPendingAction; status: "pending" | "approved" | "rejected" }
+  | {
+      kind: "draft_selection";
+      candidates: OperatorDraftCandidate[];
+      status: "pending" | "resolved";
+      selectedDraftId?: string | null;
+    }
+  | {
+      kind: "link_proposal";
+      proposal: OperatorLinkProposal;
+      status: "pending" | "confirmed" | "rejected";
+    };
 
 export function useAIOperator(
   context: AIContext,
@@ -93,24 +123,12 @@ export function useAIOperator(
     });
   }, [activeDraftId]);
 
-  const sendMessage = useCallback(
-    async (text: string) => {
-      const userMsg: OperatorChatMessage = { role: "user", content: text };
-      setMessages((current) => [...current, userMsg]);
-      setDisplay((current) => [...current, { kind: "message", role: "user", content: text }]);
+  const invokeChat = useCallback(
+    async (body: Record<string, unknown>) => {
       setLoading(true);
       setError(null);
       try {
-        const { data, error: invokeErr } = await supabase.functions.invoke("ai-operator-core", {
-          body: {
-            action: "chat",
-            session_id: sessionId,
-            channel: "web",
-            context: JSON.parse(serializedContext),
-            message: text,
-            draft_id: activeDraftId,
-          },
-        });
+        const { data, error: invokeErr } = await supabase.functions.invoke("ai-operator-core", { body });
         if (invokeErr) throw invokeErr;
         if ((data as any)?.error) throw new Error((data as any).error);
 
@@ -127,21 +145,137 @@ export function useAIOperator(
         const draftId = (data as any).draft_id as string | null;
         if (draftId) setActiveDraftId(draftId);
 
+        const candidates = (data as any).draft_candidates as OperatorDraftCandidate[] | null;
+        if (Array.isArray(candidates) && candidates.length > 0) {
+          setDisplay((current) => [
+            ...current,
+            { kind: "draft_selection", candidates, status: "pending" },
+          ]);
+        }
+
+        const proposedLink = (data as any).proposed_link as OperatorLinkProposal | null;
+        if (proposedLink) {
+          setDisplay((current) => [
+            ...current,
+            { kind: "link_proposal", proposal: proposedLink, status: "pending" },
+          ]);
+        }
+
         const pa = (data as any).pending_action as OperatorPendingAction | null;
         if (pa) {
           setActivePendingActionId(pa.id);
           setDisplay((current) => [...current, { kind: "pending_action", action: pa, status: "pending" }]);
         }
+
+        return data;
       } catch (e: any) {
         const msg = e?.message || "Erro no operador";
         setError(msg);
         setDisplay((current) => [...current, { kind: "message", role: "assistant", content: `Erro: ${msg}` }]);
+        return null;
       } finally {
         setLoading(false);
       }
     },
-    [activeDraftId, serializedContext, sessionId]
+    [sessionId]
   );
+
+  const sendMessage = useCallback(
+    async (text: string, opts?: { draftId?: string | null }) => {
+      const userMsg: OperatorChatMessage = { role: "user", content: text };
+      setMessages((current) => [...current, userMsg]);
+      setDisplay((current) => [...current, { kind: "message", role: "user", content: text }]);
+      await invokeChat({
+        action: "chat",
+        session_id: sessionId,
+        channel: "web",
+        context: JSON.parse(serializedContext),
+        message: text,
+        draft_id: opts?.draftId ?? activeDraftId,
+      });
+    },
+    [activeDraftId, invokeChat, serializedContext, sessionId]
+  );
+
+  // Seleção humana de um draft candidato apresentado pelo backend. Marca o
+  // card como resolvido, ativa o draft e envia uma mensagem curta de
+  // continuação para o operador para ele atualizar o contexto.
+  const selectDraftCandidate = useCallback(
+    async (candidate: OperatorDraftCandidate) => {
+      setActiveDraftId(candidate.id);
+      setDisplay((current) =>
+        current.map((item) =>
+          item.kind === "draft_selection" && item.status === "pending"
+            ? { ...item, status: "resolved" as const, selectedDraftId: candidate.id }
+            : item
+        )
+      );
+      await invokeChat({
+        action: "chat",
+        session_id: sessionId,
+        channel: "web",
+        context: JSON.parse(serializedContext),
+        message: `Continuar a partir do rascunho selecionado: ${candidate.title ?? "(sem titulo)"}.`,
+        draft_id: candidate.id,
+      });
+    },
+    [invokeChat, serializedContext, sessionId]
+  );
+
+  // Confirmação humana de uma proposta de vínculo. Chama o endpoint seguro
+  // link_draft_entities com IDs vindos do payload estruturado (não do texto).
+  const confirmLinkProposal = useCallback(
+    async (proposal: OperatorLinkProposal) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const { data, error: invokeErr } = await supabase.functions.invoke("ai-operator-core", {
+          body: {
+            action: "link_draft_entities",
+            draft_id: proposal.draft_id,
+            client_id: proposal.client?.id ?? null,
+            vessel_id: proposal.vessel?.id ?? null,
+          },
+        });
+        if (invokeErr) throw invokeErr;
+        if ((data as any)?.error) throw new Error((data as any).error);
+        setDisplay((current) =>
+          current.map((item) =>
+            item.kind === "link_proposal" && item.proposal.draft_id === proposal.draft_id && item.status === "pending"
+              ? { ...item, status: "confirmed" as const }
+              : item
+          )
+        );
+        const confirmed = [
+          proposal.client?.name ? `cliente ${proposal.client.name}` : null,
+          proposal.vessel?.name ? `embarcacao ${proposal.vessel.name}` : null,
+        ]
+          .filter(Boolean)
+          .join(" e ");
+        const confirmMsg = `Vinculo confirmado: ${confirmed || "atualizado"} no rascunho ativo.`;
+        setMessages((current) => [...current, { role: "assistant", content: confirmMsg }]);
+        setDisplay((current) => [
+          ...current,
+          { kind: "message", role: "assistant", content: confirmMsg },
+        ]);
+      } catch (e: any) {
+        setError(e?.message || "Falha ao confirmar vinculo");
+      } finally {
+        setLoading(false);
+      }
+    },
+    []
+  );
+
+  const rejectLinkProposal = useCallback((draftId: string) => {
+    setDisplay((current) =>
+      current.map((item) =>
+        item.kind === "link_proposal" && item.proposal.draft_id === draftId && item.status === "pending"
+          ? { ...item, status: "rejected" as const }
+          : item
+      )
+    );
+  }, []);
 
   const approveAction = useCallback(async (pendingActionId: string) => {
     setLoading(true);
@@ -208,6 +342,9 @@ export function useAIOperator(
     activePendingActionId,
     messages,
     sendMessage,
+    selectDraftCandidate,
+    confirmLinkProposal,
+    rejectLinkProposal,
     approveAction,
     rejectAction,
     reset,

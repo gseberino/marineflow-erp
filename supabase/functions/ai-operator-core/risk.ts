@@ -44,6 +44,8 @@ const SAFE_ACTIONS = new Set<string>([
   "register_memory_note", // alias legado — também tratado como candidate no executor
   "present_options",
   "propose_action",
+  "propose_entity_link",
+  "list_recent_drafts",
   "summarize_request",
   "estimate_quote",
 ]);

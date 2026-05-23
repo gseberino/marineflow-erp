@@ -31,6 +31,23 @@ export type OperationalIntent = {
   shouldBootstrapDraft: true;
 };
 
+export type ExistingDraftReferenceKind =
+  | "lookup"
+  | "continue"
+  | "link"
+  | "cancel"
+  | "anaphora";
+
+export type ExistingDraftReference = {
+  kind: ExistingDraftReferenceKind;
+  matched: string[];
+};
+
+export type MessageClassification =
+  | { type: "new_demand"; intent: OperationalIntent }
+  | { type: "operate_on_existing"; reference: ExistingDraftReference }
+  | { type: "none" };
+
 export type BootstrapDraft = {
   kind: OperatorDraftKind;
   status: "awaiting_info" | "draft";
@@ -47,7 +64,7 @@ export type BootstrapDraft = {
 function normalizeText(text: string) {
   return text
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[̀-ͯ]/g, "")
     .toLowerCase();
 }
 
@@ -90,6 +107,70 @@ function inferKind(normalized: string): OperatorDraftKind | null {
   return null;
 }
 
+// Regex agrupadas por intenção. Mantidas explícitas e simples para serem
+// auditáveis e testáveis sem ambiguidade. Ordem importa: cancel/link/continue
+// têm prioridade sobre anáfora pura.
+const REF_LOOKUP_REGEX =
+  /\b(localiz[ae]r?|encontr[ae]r?|abr[ae]?|pegu[ae]?|pegue|busca|busqu[ae]r?|procura|procur[ae]r?|liste|listar)\b/;
+const REF_CONTINUE_REGEX =
+  /\b(continu[ae]r?|retom[ae]r?|finaliz[ae]r?|complet[ae]r?|conclu[ai]r?|atualiz[ae]r?|refin[ae]r?|ajust[ae]r?)\b/;
+const REF_LINK_REGEX =
+  /\b(vincul[ae]r?|vincule|linke|linkar|associ[ae]r?|conect[ae]r?|amarr[ae]r?|liga[r]?\s+(?:o\s+|a\s+)?(?:cliente|embarcacao|barco))\b/;
+const REF_CANCEL_REGEX =
+  /\b(cancel[ae]r?|cancele|arquiv[ae]r?|descart[ae]r?|apagu?[ae]r?\s+(?:o\s+|esse\s+)?(?:rascunho|orcamento)|remov[ae]r?\s+(?:o\s+|esse\s+)?(?:rascunho|orcamento))\b/;
+// Pronome demonstrativo + substantivo de draft. Inclui "do/da NOME" como
+// reforço, mas o sinal principal é a anáfora demonstrativa.
+const REF_ANAPHORA_REGEX =
+  /\b(aquel[ae]|esse|essa|este|esta)\s+(rascunho|orcamento|cotacao|diagnostico|plano|atendimento)\b/;
+// "rascunho" sozinho — sempre indica referência a algo existente. "O cliente
+// quer orçamento" é demanda nova; "o rascunho do cliente" é referência.
+const REF_RASCUNHO_REGEX = /\brascunho\b/;
+// Pertencimento explícito: "do <Nome com inicial maiúscula>" em mensagem que
+// também mencione um substantivo de draft. Pega "orcamento do Celio".
+function matchOwnershipPattern(message: string, normalized: string): boolean {
+  if (!/(orcamento|cotacao|rascunho|diagnostico|plano|atendimento)/.test(normalized)) return false;
+  return /\b(do|da|de|d['’])\s+[A-ZÁ-Ú][\wÁ-ú-]{2,}\b/.test(message);
+}
+
+export function detectExistingDraftReference(message: string): ExistingDraftReference | null {
+  const normalized = normalizeText(message);
+  const matched: string[] = [];
+  let kind: ExistingDraftReferenceKind | null = null;
+
+  if (REF_CANCEL_REGEX.test(normalized)) {
+    kind = "cancel";
+    matched.push("cancel");
+  }
+  if (REF_LINK_REGEX.test(normalized)) {
+    kind = kind ?? "link";
+    matched.push("link");
+  }
+  if (REF_LOOKUP_REGEX.test(normalized)) {
+    kind = kind ?? "lookup";
+    matched.push("lookup");
+  }
+  if (REF_CONTINUE_REGEX.test(normalized)) {
+    kind = kind ?? "continue";
+    matched.push("continue");
+  }
+  if (REF_ANAPHORA_REGEX.test(normalized)) {
+    kind = kind ?? "anaphora";
+    matched.push("anaphora");
+  }
+  if (REF_RASCUNHO_REGEX.test(normalized)) {
+    // "rascunho" sozinho só conta se também tiver um verbo de operação ou
+    // anáfora — evita falso positivo para frases como "crie um rascunho".
+    if (matched.length > 0) matched.push("rascunho_token");
+  }
+  if (matchOwnershipPattern(message, normalized)) {
+    kind = kind ?? "lookup";
+    matched.push("ownership");
+  }
+
+  if (!kind) return null;
+  return { kind, matched };
+}
+
 export function detectOperationalIntent(message: string): OperationalIntent | null {
   const normalized = normalizeText(message);
   const kind = inferKind(normalized);
@@ -109,6 +190,27 @@ export function detectOperationalIntent(message: string): OperationalIntent | nu
             : "prepare_response_suggestion",
     shouldBootstrapDraft: true,
   };
+}
+
+/**
+ * Classificação trinária determinística da mensagem.
+ *
+ * Regra crítica: se a mensagem contém sinais de referência a draft existente
+ * (vincule/cancele/aquele orcamento/do <Nome>/etc.), ela é classificada como
+ * `operate_on_existing` mesmo que também contenha palavras-gatilho como
+ * "orcamento" ou "instalacao". Isso impede que o backend bootstrape um draft
+ * novo quando a real intenção do usuário é operar sobre um draft já existente.
+ */
+export function classifyMessage(message: string): MessageClassification {
+  const reference = detectExistingDraftReference(message);
+  if (reference) {
+    return { type: "operate_on_existing", reference };
+  }
+  const intent = detectOperationalIntent(message);
+  if (intent) {
+    return { type: "new_demand", intent };
+  }
+  return { type: "none" };
 }
 
 function buildTitle(kind: OperatorDraftKind, normalized: string, message: string) {

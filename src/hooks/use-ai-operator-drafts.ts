@@ -196,3 +196,28 @@ export function useLinkAIOperatorDraftEntities() {
     },
   });
 }
+
+export function useCancelAIOperatorDraft() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (input: { draftId: string; reason?: string }) => {
+      const { data, error } = await supabase.functions.invoke("ai-operator-core", {
+        body: {
+          action: "cancel_draft",
+          draft_id: input.draftId,
+          reason: input.reason ?? null,
+        },
+      });
+      if (error) throw error;
+      if ((data as any)?.error) {
+        throw new Error((data as any).error);
+      }
+      return data;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["ai-operator-drafts"] });
+      queryClient.invalidateQueries({ queryKey: ["ai-operator-drafts", variables.draftId] });
+    },
+  });
+}

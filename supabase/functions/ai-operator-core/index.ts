@@ -20,12 +20,18 @@ import { resolveProposalDraftId } from "./proposal.ts";
 import { interpretPendingUpdate, interpretMemoryUpdate } from "./transitions.ts";
 import { resolveCoreChannel } from "./channel-source.ts";
 import { preAuthorizeApprove } from "./approve-guard.ts";
-import { buildBootstrapDraft, detectOperationalIntent } from "./operational-intent.ts";
+import {
+  buildBootstrapDraft,
+  classifyMessage,
+  detectOperationalIntent,
+} from "./operational-intent.ts";
 import { buildDraftContextNote, redactUuidTokens, toModelConversationHistory } from "./session-history.ts";
 import {
   buildDraftUpdatePatch,
+  evaluateCancelDraft,
   resolveCreateDraftLinks,
   resolveExplicitDraftEntitySelection,
+  resolveLinkProposal,
   resolveMemoryCandidateLinks,
   type UnexpectedEntityAttempt,
 } from "./entity-linking.ts";
@@ -155,7 +161,7 @@ async function getDraftRow(admin: any, draftId: string) {
   const { data } = await admin
     .from("ai_operator_drafts")
     .select(
-      "id, session_id, title, status, summary, pending_questions, next_steps, hypotheses, client_id, vessel_id, created_at, updated_at, clients(full_name_or_company_name), vessels(boat_name)"
+      "id, session_id, title, status, summary, metadata, pending_questions, next_steps, hypotheses, client_id, vessel_id, created_at, updated_at, clients(full_name_or_company_name), vessels(boat_name)"
     )
     .eq("id", draftId)
     .maybeSingle();
@@ -187,6 +193,47 @@ async function findActiveDraft(admin: any, sessionId: string, requestedDraftId?:
     .order("updated_at", { ascending: false })
     .limit(1);
   return data?.[0] ?? null;
+}
+
+export type DraftCandidateForSelection = {
+  id: string;
+  title: string | null;
+  kind: string;
+  status: string;
+  summary: string | null;
+  client_name: string | null;
+  vessel_name: string | null;
+  updated_at: string;
+};
+
+// Lista os drafts mais recentes visíveis ao usuário autenticado para fluxos
+// em que ele referenciou um rascunho existente sem ter passado draft_id.
+// Usa o cliente `sb` (JWT do usuário) — RLS impõe a visibilidade. Filtra
+// estados terminais e cancelados.
+async function findDraftCandidatesForSelection(
+  sb: any,
+  opts: { limit?: number } = {}
+): Promise<DraftCandidateForSelection[]> {
+  const limit = Math.min(Math.max(opts.limit ?? 5, 1), 10);
+  const { data, error } = await sb
+    .from("ai_operator_drafts")
+    .select(
+      "id, title, kind, status, summary, updated_at, clients(full_name_or_company_name), vessels(boat_name)"
+    )
+    .in("status", ["draft", "awaiting_info", "awaiting_approval"])
+    .order("updated_at", { ascending: false })
+    .limit(limit);
+  if (error) return [];
+  return (data || []).map((row: any) => ({
+    id: row.id,
+    title: row.title,
+    kind: row.kind,
+    status: row.status,
+    summary: row.summary,
+    client_name: row.clients?.full_name_or_company_name ?? null,
+    vessel_name: row.vessels?.boat_name ?? null,
+    updated_at: row.updated_at,
+  }));
 }
 
 async function buildActiveDraftContext(admin: any, draftId: string) {
@@ -867,6 +914,80 @@ Deno.serve(async (req) => {
     }
 
     // --------------------------------------------------------------
+    // cancel_draft — fluxo seguro para rascunhos criados incorretamente.
+    // Permite cancelar apenas drafts em estados compativeis com erro
+    // operacional (draft, awaiting_info) e sem pending_actions em status
+    // pending. Estados de governanca/conversao (approved/rejected/converted/
+    // awaiting_approval) NUNCA podem ser cancelados silenciosamente.
+    // --------------------------------------------------------------
+    if (action === "cancel_draft") {
+      const draftId = String(body.draft_id || "");
+      if (!draftId) return jr({ error: "draft_id obrigatorio" }, 400);
+
+      const draft = await getDraftRow(admin, draftId);
+      if (!draft) return jr({ error: "Rascunho nao encontrado." }, 404);
+      if (!draft.session_id) return jr({ error: "Rascunho sem sessao associada." }, 409);
+      const ownsSession = await sessionBelongsTo(admin, draft.session_id, userId, isAdmin);
+      if (!ownsSession) return jr({ error: "Rascunho nao pertence ao usuario." }, 403);
+
+      const { count: pendingCount } = await admin
+        .from("ai_operator_pending_actions")
+        .select("id", { count: "exact", head: true })
+        .eq("draft_id", draftId)
+        .eq("status", "pending");
+
+      const check = evaluateCancelDraft({
+        draftStatus: draft.status,
+        pendingOpenCount: pendingCount ?? 0,
+      });
+      if (!check.ok) {
+        await audit(admin, {
+          session_id: draft.session_id,
+          draft_id: draftId,
+          actor_user_id: userId,
+          actor_kind: "user",
+          event_type: "draft_cancel_denied",
+          event_category: "security",
+          payload: { reason: check.reason },
+        });
+        const message =
+          check.reason === "invalid_status"
+            ? `Rascunho em status '${check.currentStatus}' nao pode ser cancelado nesta fase.`
+            : check.reason === "pending_actions_open"
+              ? `Rascunho possui ${check.openCount} acao(oes) pendente(s). Resolva ou rejeite antes de cancelar.`
+              : "Rascunho nao encontrado.";
+        return jr({ error: message, reason: check.reason }, check.status);
+      }
+
+      const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 500) : "";
+      const draftMetadata =
+        draft.metadata && typeof draft.metadata === "object" ? (draft.metadata as Record<string, unknown>) : {};
+      const cancelMetadata = {
+        ...draftMetadata,
+        cancelled_at: new Date().toISOString(),
+        cancelled_by: userId,
+        cancellation_reason: reason || null,
+      };
+      const { error: cancelErr } = await admin
+        .from("ai_operator_drafts")
+        .update({ status: "cancelled", metadata: cancelMetadata })
+        .eq("id", draftId);
+      if (cancelErr) {
+        return jr({ error: "Falha ao cancelar rascunho", details: cancelErr.message }, 500);
+      }
+      await audit(admin, {
+        session_id: draft.session_id,
+        draft_id: draftId,
+        actor_user_id: userId,
+        actor_kind: "user",
+        event_type: "draft_cancelled",
+        event_category: "data",
+        payload: { reason: reason || null, previous_status: draft.status },
+      });
+      return jr({ ok: true, draft_id: draftId, status: "cancelled" });
+    }
+
+    // --------------------------------------------------------------
     // Memory governance — verify_memory_note / reject_memory_note
     // --------------------------------------------------------------
     if (action === "verify_memory_note" || action === "reject_memory_note") {
@@ -1074,9 +1195,57 @@ Deno.serve(async (req) => {
       : "nenhum";
     const currentSession = await getSessionRow(admin, sessionId!);
     let activeDraft = await findActiveDraft(admin, sessionId!, body.draft_id ? String(body.draft_id) : null);
+    let draftCandidatesForFrontend: DraftCandidateForSelection[] | null = null;
+
     if (!activeDraft && latestMessageText) {
-      const detectedIntent = detectOperationalIntent(latestMessageText);
-      if (detectedIntent?.shouldBootstrapDraft) {
+      // Classificação determinística: distingue nova demanda de operação sobre
+      // draft existente. Bootstrap só dispara em new_demand puro — referências
+      // a rascunho existente (vincule/cancele/aquele orcamento/do <Nome>)
+      // bloqueiam bootstrap mesmo quando a mensagem cita "orcamento" ou
+      // "instalacao".
+      const classification = classifyMessage(latestMessageText);
+
+      if (classification.type === "operate_on_existing") {
+        const candidates = await findDraftCandidatesForSelection(sb, { limit: 5 });
+        await audit(admin, {
+          session_id: sessionId,
+          actor_user_id: userId,
+          actor_kind: "system",
+          event_type: "draft_selection_requested",
+          event_category: "data",
+          payload: {
+            reference_kind: classification.reference.kind,
+            reference_matched: classification.reference.matched,
+            candidate_count: candidates.length,
+          },
+        });
+        await recordMessage(admin, sessionId!, {
+          role: "assistant",
+          content:
+            candidates.length > 0
+              ? "Identifiquei que voce quer operar sobre um rascunho existente. Selecione abaixo qual rascunho deseja continuar."
+              : "Voce mencionou um rascunho existente, mas nao encontrei rascunhos ativos seus para selecionar.",
+          source: channel,
+        });
+        draftCandidatesForFrontend = candidates;
+        return jr({
+          ok: true,
+          session_id: sessionId,
+          message: {
+            role: "assistant",
+            content:
+              candidates.length > 0
+                ? "Identifiquei que voce quer operar sobre um rascunho existente. Selecione abaixo qual rascunho deseja continuar."
+                : "Voce mencionou um rascunho existente, mas nao encontrei rascunhos ativos seus para selecionar.",
+          },
+          draft_id: null,
+          draft_candidates: draftCandidatesForFrontend,
+          reference_kind: classification.reference.kind,
+        });
+      }
+
+      if (classification.type === "new_demand") {
+        const detectedIntent = classification.intent;
         const bootstrap = buildBootstrapDraft(detectedIntent, { message: latestMessageText });
         const { data: createdBootstrap, error: bootstrapError } = await admin
           .from("ai_operator_drafts")
@@ -1163,6 +1332,7 @@ Deno.serve(async (req) => {
     const toolEvents: any[] = [];
     let createdDraftId: string | null = activeDraft?.id ?? null;
     let pendingActionForFrontend: any = null;
+    let linkProposalForFrontend: any = null;
 
     for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
       const aiRes = await fetch(`${GEMINI_BASE_URL}/chat/completions`, {
@@ -1192,6 +1362,7 @@ Deno.serve(async (req) => {
           message: { role: "assistant", content: finalContent },
           draft_id: createdDraftId,
           pending_action: pendingActionForFrontend,
+          proposed_link: linkProposalForFrontend,
           tool_events: toolEvents,
         });
       }
@@ -1306,8 +1477,144 @@ Deno.serve(async (req) => {
             message: { role: "assistant", content: redactUuidTokens(aiMsg.content || "") },
             draft_id: createdDraftId,
             pending_action: pendingActionForFrontend,
+            proposed_link: linkProposalForFrontend,
             tool_events: toolEvents,
           });
+        }
+
+        if (fnName === "propose_entity_link") {
+          // SEGURANCA: o modelo NUNCA escolhe o draft alvo. O alvo e sempre
+          // o draft ATIVO da sessao resolvido pelo backend (createdDraftId).
+          // Se nao houver draft ativo, devolvemos um erro estruturado pedindo
+          // que o usuario selecione um rascunho antes.
+          const targetDraftId = createdDraftId;
+          const requestedClientId =
+            typeof fnArgs.client_id === "string" && fnArgs.client_id.trim().length > 0
+              ? fnArgs.client_id.trim()
+              : null;
+          const requestedVesselId =
+            typeof fnArgs.vessel_id === "string" && fnArgs.vessel_id.trim().length > 0
+              ? fnArgs.vessel_id.trim()
+              : null;
+          if (!targetDraftId) {
+            const blocked = {
+              blocked: true,
+              reason:
+                "Nao ha rascunho ativo na sessao. Peca ao usuario para selecionar um rascunho existente antes de propor vinculo.",
+            };
+            toolEvents.push({ name: fnName, args: fnArgs, result: blocked, blocked: true });
+            messages.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify(blocked) });
+            await audit(admin, {
+              session_id: sessionId,
+              actor_user_id: userId,
+              actor_kind: "system",
+              event_type: "link_proposal_blocked_no_draft",
+              event_category: "security",
+              payload: { proposed_client: !!requestedClientId, proposed_vessel: !!requestedVesselId },
+            });
+            continue;
+          }
+
+          // Validar visibilidade via JWT do usuario (RLS real do ERP).
+          const refs = await validateAllReferences(sb, {
+            client: requestedClientId ?? undefined,
+            vessel: requestedVesselId ?? undefined,
+          });
+          let vesselBelongsToClient: boolean | null = null;
+          let clientName: string | null = null;
+          let vesselName: string | null = null;
+          if (requestedClientId && refs.client?.ok) {
+            const { data: clientRow } = await sb
+              .from("clients")
+              .select("id, full_name_or_company_name")
+              .eq("id", requestedClientId)
+              .maybeSingle();
+            clientName = clientRow?.full_name_or_company_name ?? null;
+          }
+          if (requestedVesselId && refs.vessel?.ok) {
+            const { data: vesselRow } = await sb
+              .from("vessels")
+              .select("id, boat_name, client_id")
+              .eq("id", requestedVesselId)
+              .maybeSingle();
+            vesselName = vesselRow?.boat_name ?? null;
+            if (requestedClientId && vesselRow?.client_id) {
+              vesselBelongsToClient = vesselRow.client_id === requestedClientId;
+            }
+          }
+
+          const proposalResult = resolveLinkProposal({
+            clientId: requestedClientId,
+            vesselId: requestedVesselId,
+            clientVisible: !requestedClientId || !!refs.client?.ok,
+            vesselVisible: !requestedVesselId || !!refs.vessel?.ok,
+            vesselBelongsToClient,
+          });
+
+          if (!proposalResult.ok) {
+            const blocked = {
+              blocked: true,
+              reason:
+                proposalResult.reason === "no_candidates"
+                  ? "Forneca pelo menos um candidato de cliente ou embarcacao."
+                  : proposalResult.reason === "client_invisible"
+                    ? "Cliente nao visivel para o usuario."
+                    : proposalResult.reason === "vessel_invisible"
+                      ? "Embarcacao nao visivel para o usuario."
+                      : "A embarcacao selecionada nao pertence ao cliente proposto.",
+            };
+            toolEvents.push({ name: fnName, args: fnArgs, result: blocked, blocked: true });
+            messages.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify(blocked) });
+            await audit(admin, {
+              session_id: sessionId,
+              draft_id: targetDraftId,
+              actor_user_id: userId,
+              actor_kind: "system",
+              event_type: "link_proposal_blocked",
+              event_category: "security",
+              payload: { reason: proposalResult.reason },
+            });
+            continue;
+          }
+
+          // NAO persiste vinculo — apenas estrutura a proposta para a UI.
+          // Lookup do titulo do draft para mostrar nome humano na proposta.
+          const draftRow = await getDraftRow(admin, targetDraftId);
+          linkProposalForFrontend = {
+            draft_id: targetDraftId,
+            draft_title: draftRow?.title ?? null,
+            client: proposalResult.proposal.client_id
+              ? { id: proposalResult.proposal.client_id, name: clientName }
+              : null,
+            vessel: proposalResult.proposal.vessel_id
+              ? { id: proposalResult.proposal.vessel_id, name: vesselName }
+              : null,
+            rationale: typeof fnArgs.rationale === "string" ? fnArgs.rationale : null,
+          };
+          const toolResult = {
+            ok: true,
+            proposed: true,
+            persisted: false,
+            requires_user_confirmation: true,
+            draft_title: draftRow?.title ?? null,
+            client_name: clientName,
+            vessel_name: vesselName,
+          };
+          toolEvents.push({ name: fnName, args: fnArgs, result: toolResult });
+          messages.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify(toolResult) });
+          await audit(admin, {
+            session_id: sessionId,
+            draft_id: targetDraftId,
+            actor_user_id: userId,
+            actor_kind: "ai_model",
+            event_type: "link_proposal_presented",
+            event_category: "data",
+            payload: {
+              client_proposed: !!proposalResult.proposal.client_id,
+              vessel_proposed: !!proposalResult.proposal.vessel_id,
+            },
+          });
+          continue;
         }
 
         const risk = classifyAction(fnName);

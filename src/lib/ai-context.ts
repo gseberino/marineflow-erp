@@ -7,6 +7,7 @@ export type AIContext = {
 };
 
 const ROUTE_ENTITY_MAP: Array<{ pattern: RegExp; type: string }> = [
+  { pattern: /^\/operator\/drafts\/([0-9a-f-]{36})/i, type: 'operator_draft' },
   { pattern: /^\/clients\/([0-9a-f-]{36})/i, type: 'client' },
   { pattern: /^\/vessels\/([0-9a-f-]{36})/i, type: 'vessel' },
   { pattern: /^\/service-orders\/([0-9a-f-]{36})/i, type: 'service_order' },
