@@ -107,4 +107,40 @@ describe("AI Operator — entity reference validation", () => {
     expect(r2.ok).toBe(false);
     if (!r1.ok && !r2.ok) expect(r1.reason).toBe(r2.reason);
   });
+
+  it("suporta service_order → tabela service_orders", async () => {
+    let queriedTable = "";
+    const sb = mockSb((table) => {
+      queriedTable = table;
+      return { data: { id: "so-1" }, error: null };
+    });
+    const r = await validateEntityVisible(sb, "service_order", "so-1");
+    expect(r.ok).toBe(true);
+    expect(queriedTable).toBe("service_orders");
+  });
+
+  it("validateAllReferences cobre o quinteto completo", async () => {
+    const visible = new Set([
+      "clients:c1",
+      "vessels:v1",
+      "products:p1",
+      "services:s1",
+      "service_orders:so1",
+    ]);
+    const sb = mockSb((table, id) =>
+      visible.has(`${table}:${id}`) ? { data: { id }, error: null } : { data: null, error: null }
+    );
+    const r = await validateAllReferences(sb, {
+      client: "c1",
+      vessel: "v1",
+      product: "p1",
+      service: "s1",
+      service_order: "so1",
+    } as any);
+    expect(r.client?.ok).toBe(true);
+    expect(r.vessel?.ok).toBe(true);
+    expect(r.product?.ok).toBe(true);
+    expect(r.service?.ok).toBe(true);
+    expect(r.service_order?.ok).toBe(true);
+  });
 });

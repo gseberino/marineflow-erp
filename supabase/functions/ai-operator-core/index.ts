@@ -16,6 +16,8 @@ import { classifyAction } from "./risk.ts";
 import { OPERATOR_TOOLS } from "./tools.ts";
 import { buildSystemPrompt } from "./prompt.ts";
 import { validateAllReferences } from "./entity-validation.ts";
+import { resolveProposalDraftId } from "./proposal.ts";
+import { interpretPendingUpdate, interpretMemoryUpdate } from "./transitions.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -494,13 +496,32 @@ Deno.serve(async (req) => {
       }
 
       const now = new Date().toISOString();
+      // UPDATE com retorno: protege contra corrida entre a leitura inicial
+      // (status='pending') e o update. Se nenhuma linha for atualizada, é
+      // 409 (alguém alterou no meio). 404 não acontece aqui — já confirmamos
+      // que o registro existia ao buscá-lo acima.
       if (action === "approve_action") {
-        const { error: upErr } = await admin
+        const { data: updated, error: upErr } = await admin
           .from("ai_operator_pending_actions")
           .update({ status: "approved", approved_by_user_id: userId, approved_at: now })
           .eq("id", pendingId)
-          .eq("status", "pending");
+          .eq("status", "pending")
+          .select("id, status")
+          .maybeSingle();
         if (upErr) return jr({ error: "Falha ao aprovar", details: upErr.message }, 500);
+        const out = interpretPendingUpdate(updated);
+        if (!out.ok) {
+          await audit(admin, {
+            session_id: pending.session_id,
+            pending_action_id: pendingId,
+            actor_user_id: userId,
+            actor_kind: "user",
+            event_type: "action_approve_conflict",
+            event_category: "security",
+            payload: { action: pending.action_name, role: profile.role },
+          });
+          return jr({ error: "Ação já não está em estado pending." }, out.status);
+        }
         await audit(admin, {
           session_id: pending.session_id,
           pending_action_id: pendingId,
@@ -512,12 +533,27 @@ Deno.serve(async (req) => {
         });
         return jr({ ok: true, status: "approved", pending_action_id: pendingId });
       } else {
-        const { error: upErr } = await admin
+        const { data: updated, error: upErr } = await admin
           .from("ai_operator_pending_actions")
           .update({ status: "rejected", rejected_by_user_id: userId, rejected_at: now })
           .eq("id", pendingId)
-          .eq("status", "pending");
+          .eq("status", "pending")
+          .select("id, status")
+          .maybeSingle();
         if (upErr) return jr({ error: "Falha ao rejeitar", details: upErr.message }, 500);
+        const out = interpretPendingUpdate(updated);
+        if (!out.ok) {
+          await audit(admin, {
+            session_id: pending.session_id,
+            pending_action_id: pendingId,
+            actor_user_id: userId,
+            actor_kind: "user",
+            event_type: "action_reject_conflict",
+            event_category: "security",
+            payload: { action: pending.action_name, role: profile.role },
+          });
+          return jr({ error: "Ação já não está em estado pending." }, out.status);
+        }
         await audit(admin, {
           session_id: pending.session_id,
           pending_action_id: pendingId,
@@ -549,37 +585,61 @@ Deno.serve(async (req) => {
         return jr({ error: "Seu papel não pode promover/rejeitar memória técnica." }, 403);
       }
       const now = new Date().toISOString();
-      if (action === "verify_memory_note") {
-        const { error } = await admin
-          .from("ai_operator_memory_notes")
-          .update({ verification_status: "verified", verified_by: userId, verified_at: now })
-          .eq("id", noteId)
-          .eq("verification_status", "candidate");
-        if (error) return jr({ error: "Falha ao verificar nota", details: error.message }, 500);
-        await audit(admin, {
-          actor_user_id: userId,
-          actor_kind: "user",
-          event_type: "memory_verified",
-          event_category: "security",
-          payload: { memory_note_id: noteId, role: profile.role },
-        });
-        return jr({ ok: true, status: "verified" });
-      } else {
-        const { error } = await admin
-          .from("ai_operator_memory_notes")
-          .update({ verification_status: "rejected", rejected_by: userId, rejected_at: now })
-          .eq("id", noteId)
-          .eq("verification_status", "candidate");
-        if (error) return jr({ error: "Falha ao rejeitar nota", details: error.message }, 500);
-        await audit(admin, {
-          actor_user_id: userId,
-          actor_kind: "user",
-          event_type: "memory_rejected",
-          event_category: "security",
-          payload: { memory_note_id: noteId, role: profile.role },
-        });
-        return jr({ ok: true, status: "rejected" });
+      const newStatus = action === "verify_memory_note" ? "verified" : "rejected";
+      const updatePayload =
+        action === "verify_memory_note"
+          ? { verification_status: "verified", verified_by: userId, verified_at: now }
+          : { verification_status: "rejected", rejected_by: userId, rejected_at: now };
+
+      const { data: updatedNote, error: upErr } = await admin
+        .from("ai_operator_memory_notes")
+        .update(updatePayload)
+        .eq("id", noteId)
+        .eq("verification_status", "candidate")
+        .select("id, verification_status")
+        .maybeSingle();
+      if (upErr) {
+        return jr({ error: `Falha ao ${newStatus} nota`, details: upErr.message }, 500);
       }
+      {
+        // Confirmação determinística via helper testável. Se não atualizou,
+        // checamos se a nota existe (404) ou está em outro estado (409).
+        let existing: { verification_status: string } | null = null;
+        if (!updatedNote) {
+          const { data: existingRow } = await admin
+            .from("ai_operator_memory_notes")
+            .select("id, verification_status")
+            .eq("id", noteId)
+            .maybeSingle();
+          existing = existingRow ?? null;
+        }
+        const out = interpretMemoryUpdate(updatedNote, existing);
+        if (!out.ok) {
+          const event =
+            action === "verify_memory_note" ? "memory_verify_conflict" : "memory_reject_conflict";
+          await audit(admin, {
+            actor_user_id: userId,
+            actor_kind: "user",
+            event_type: event,
+            event_category: "security",
+            payload: {
+              memory_note_id: noteId,
+              role: profile.role,
+              existing_status: existing?.verification_status ?? null,
+            },
+          });
+          if (out.reason === "not_found") return jr({ error: "Nota de memória não encontrada." }, 404);
+          return jr({ error: `Nota já está em estado ${out.existingStatus}.` }, out.status);
+        }
+      }
+      await audit(admin, {
+        actor_user_id: userId,
+        actor_kind: "user",
+        event_type: action === "verify_memory_note" ? "memory_verified" : "memory_rejected",
+        event_category: "security",
+        payload: { memory_note_id: noteId, role: profile.role },
+      });
+      return jr({ ok: true, status: newStatus });
     }
 
     // --------------------------------------------------------------
@@ -610,15 +670,29 @@ Deno.serve(async (req) => {
         return jr({ error: "Sessão não pertence ao usuário." }, 403);
       }
     } else {
+      // Valida referências contextuais (client/vessel/service_order) com RLS
+      // real do usuário. Refs invisíveis são DESCARTADAS e auditadas — a
+      // sessão é criada sem vínculo (não vaza diferença entre inexistente
+      // e oculto por RLS).
+      const ctxRefs: Partial<Record<"client" | "vessel" | "service_order", string>> = {};
+      if (clientCtx.entityType === "client" && clientCtx.entityId) ctxRefs.client = clientCtx.entityId;
+      if (clientCtx.entityType === "vessel" && clientCtx.entityId) ctxRefs.vessel = clientCtx.entityId;
+      if (clientCtx.entityType === "service_order" && clientCtx.entityId)
+        ctxRefs.service_order = clientCtx.entityId;
+      const ctxResults = await validateAllReferences(sb, ctxRefs);
+      const safeCtxClient = ctxResults.client?.ok ? ctxRefs.client : null;
+      const safeCtxVessel = ctxResults.vessel?.ok ? ctxRefs.vessel : null;
+      const safeCtxSO = ctxResults.service_order?.ok ? ctxRefs.service_order : null;
+
       const { data: created, error: sErr } = await admin
         .from("ai_operator_sessions")
         .insert({
           channel,
           channel_provider: channel === "whatsapp" ? "zapi" : "web",
           owner_user_id: userId,
-          client_id: clientCtx.entityType === "client" ? clientCtx.entityId : null,
-          vessel_id: clientCtx.entityType === "vessel" ? clientCtx.entityId : null,
-          service_order_id: clientCtx.entityType === "service_order" ? clientCtx.entityId : null,
+          client_id: safeCtxClient ?? null,
+          vessel_id: safeCtxVessel ?? null,
+          service_order_id: safeCtxSO ?? null,
           metadata: { route: clientCtx.route || null },
         })
         .select("id")
@@ -632,6 +706,18 @@ Deno.serve(async (req) => {
         event_type: "session_opened",
         payload: { channel, route: clientCtx.route || null },
       });
+      for (const [k, r] of Object.entries(ctxResults)) {
+        if (r && !r.ok) {
+          await audit(admin, {
+            session_id: sessionId,
+            actor_user_id: userId,
+            actor_kind: "system",
+            event_type: "entity_reference_blocked",
+            event_category: "security",
+            payload: { tool: "open_session_context", kind: k, reason: r.reason },
+          });
+        }
+      }
     }
 
     const lastUser = [...incoming].reverse().find((m: any) => m.role === "user");
@@ -719,11 +805,45 @@ Deno.serve(async (req) => {
         if (fnName === "propose_action") {
           const proposedAction = String(fnArgs.action || "unknown");
           const proposedRisk = classifyAction(proposedAction);
+
+          // Validar draft_id em propose_action via helper testável.
+          const draftRes = await resolveProposalDraftId({
+            requestedDraftId: fnArgs.draft_id ?? null,
+            createdDraftIdThisRun: createdDraftId,
+            currentSessionId: sessionId!,
+            lookup: async (id) => {
+              const { data } = await admin
+                .from("ai_operator_drafts")
+                .select("id, session_id")
+                .eq("id", id)
+                .maybeSingle();
+              return data ?? null;
+            },
+          });
+          if (!draftRes.ok) {
+            await audit(admin, {
+              session_id: sessionId,
+              actor_user_id: userId,
+              actor_kind: "system",
+              event_type: "propose_action_blocked_foreign_draft",
+              event_category: "security",
+              payload: { proposed_action: proposedAction, requested_draft_id: draftRes.requestedDraftId },
+            });
+            const blocked = {
+              blocked: true,
+              reason: "draft_id referenciado não pertence à sessão atual; proposta recusada.",
+            };
+            toolEvents.push({ name: fnName, args: fnArgs, result: blocked, blocked: true });
+            messages.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify(blocked) });
+            continue;
+          }
+          const proposalDraftId = draftRes.draftId;
+
           const { data: pending, error: pErr } = await admin
             .from("ai_operator_pending_actions")
             .insert({
               session_id: sessionId,
-              draft_id: fnArgs.draft_id || createdDraftId || null,
+              draft_id: proposalDraftId,
               requested_by_user_id: userId,
               action_name: proposedAction,
               risk_level: proposedRisk.level,

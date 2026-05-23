@@ -10,13 +10,14 @@
 // O helper é isolado em módulo próprio para que possa ser testado por
 // Vitest sem precisar do runtime Deno.
 
-export type EntityKind = "client" | "vessel" | "product" | "service";
+export type EntityKind = "client" | "vessel" | "product" | "service" | "service_order";
 
 const TABLE_BY_KIND: Record<EntityKind, string> = {
   client: "clients",
   vessel: "vessels",
   product: "products",
   service: "services",
+  service_order: "service_orders",
 };
 
 export type EntityValidationResult =
