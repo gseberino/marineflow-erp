@@ -28,9 +28,22 @@
 create extension if not exists "pgcrypto";
 
 -- ---------------------------------------------------------------------------
--- Helpers (SECURITY DEFINER, search_path fixo)
+-- Schema `private` — funções não expostas pela Data API (PostgREST).
 -- ---------------------------------------------------------------------------
-create or replace function public.ai_op_is_admin(_user_id uuid)
+-- O Supabase só expõe via Data API funções que vivem em schemas listados em
+-- `db-schemas` (padrão `public`). Movendo os helpers de papel/atividade para
+-- `private` impedimos que clientes autenticados façam RPC arbitrário sobre
+-- UUIDs alheios. Os mesmos helpers continuam invocáveis pelas POLICIES de
+-- RLS porque concedemos EXECUTE diretamente a `authenticated` (a chamada
+-- ocorre dentro do plano de execução do Postgres, não pelo PostgREST).
+create schema if not exists private;
+grant usage on schema private to authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- Helpers de papel/atividade (SECURITY DEFINER, search_path fixo)
+-- Vivendo em `private` — não expostos via Data API.
+-- ---------------------------------------------------------------------------
+create or replace function private.ai_op_is_admin(_user_id uuid)
 returns boolean
 language sql stable security definer
 set search_path = public
@@ -41,7 +54,7 @@ as $$
   );
 $$;
 
-create or replace function public.ai_op_is_active(_user_id uuid)
+create or replace function private.ai_op_is_active(_user_id uuid)
 returns boolean
 language sql stable security definer
 set search_path = public
@@ -52,9 +65,7 @@ as $$
   );
 $$;
 
--- Helper local: admin OU financial. Implementado para evitar dependência
--- implícita da `public.is_admin_or_financial` (que vive fora do módulo).
-create or replace function public.ai_op_is_admin_or_financial(_user_id uuid)
+create or replace function private.ai_op_is_admin_or_financial(_user_id uuid)
 returns boolean
 language sql stable security definer
 set search_path = public
@@ -65,7 +76,7 @@ as $$
   );
 $$;
 
-create or replace function public.ai_op_is_internal(_user_id uuid)
+create or replace function private.ai_op_is_internal(_user_id uuid)
 returns boolean
 language sql stable security definer
 set search_path = public
@@ -76,6 +87,35 @@ as $$
       and role in ('admin', 'technician', 'financial', 'seller', 'other')
   );
 $$;
+
+-- EXECUTE: revogar de PUBLIC; conceder a authenticated (para uso em RLS) e
+-- service_role (uso interno pelo backend). anon não recebe — nenhum endpoint
+-- anônimo precisa avaliar papel.
+revoke execute on function private.ai_op_is_admin(uuid) from public;
+revoke execute on function private.ai_op_is_active(uuid) from public;
+revoke execute on function private.ai_op_is_admin_or_financial(uuid) from public;
+revoke execute on function private.ai_op_is_internal(uuid) from public;
+grant execute on function private.ai_op_is_admin(uuid) to authenticated, service_role;
+grant execute on function private.ai_op_is_active(uuid) to authenticated, service_role;
+grant execute on function private.ai_op_is_admin_or_financial(uuid) to authenticated, service_role;
+grant execute on function private.ai_op_is_internal(uuid) to authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- Limpa versões legadas em `public` (caso ambientes de dev já tenham os
+-- helpers em public). A foundation migration ainda não foi aplicada em
+-- okurngvcodmljjicopdp; o `drop if exists` torna a aplicação idempotente.
+-- ---------------------------------------------------------------------------
+-- Drop com assinatura explícita para evitar colisão com funções homônimas
+-- de outros módulos.
+do $cleanup$
+begin
+  -- IF EXISTS no schema public; ignora se a função nunca foi criada lá.
+  execute 'drop function if exists public.ai_op_is_admin(uuid)';
+  execute 'drop function if exists public.ai_op_is_active(uuid)';
+  execute 'drop function if exists public.ai_op_is_admin_or_financial(uuid)';
+  execute 'drop function if exists public.ai_op_is_internal(uuid)';
+end
+$cleanup$;
 
 -- ----------------------------------------------------------------------------
 -- Matriz de aprovação — Macro Ciclo 1 RESTRITIVA.
@@ -112,6 +152,12 @@ $$;
 
 comment on function public.ai_op_can_approve is
   'MarineFlow AI Operator — Macro Ciclo 1 restritivo: somente admin aprova ações operacionais; admin/technician validam memória técnica.';
+
+-- Server-only RPC: revogar de PUBLIC/anon/authenticated; só service_role chama
+-- (via PostgREST com a chave de service_role do backend).
+revoke execute on function public.ai_op_can_approve(uuid, text) from public;
+revoke execute on function public.ai_op_can_approve(uuid, text) from anon, authenticated;
+grant execute on function public.ai_op_can_approve(uuid, text) to service_role;
 
 -- ----------------------------------------------------------------------------
 -- Helper para REJEIÇÃO: o próprio solicitante pode rejeitar a sua ação,
@@ -152,6 +198,11 @@ $$;
 
 comment on function public.ai_op_can_reject is
   'MarineFlow AI Operator — Macro Ciclo 1: rejeição permitida ao solicitante da ação ou a um admin ativo.';
+
+-- Server-only RPC.
+revoke execute on function public.ai_op_can_reject(uuid, uuid) from public;
+revoke execute on function public.ai_op_can_reject(uuid, uuid) from anon, authenticated;
+grant execute on function public.ai_op_can_reject(uuid, uuid) to service_role;
 
 -- ---------------------------------------------------------------------------
 -- 1. Sessões de conversa
@@ -444,6 +495,15 @@ create trigger trg_ai_op_pending_guard
   before update on public.ai_operator_pending_actions
   for each row execute function public.ai_op_protect_pending_action();
 
+-- Trigger function: chamada pelo engine do Postgres em UPDATE; não é uma RPC
+-- voltada à Data API. Ainda assim, revogamos EXECUTE de PUBLIC/anon/
+-- authenticated para impedir chamadas diretas via PostgREST. service_role
+-- mantém EXECUTE porque é quem grava em pending_actions (o trigger é
+-- transparente para o engine, mas a conta de execução precisa de privilégio).
+revoke execute on function public.ai_op_protect_pending_action() from public;
+revoke execute on function public.ai_op_protect_pending_action() from anon, authenticated;
+grant execute on function public.ai_op_protect_pending_action() to service_role;
+
 -- ---------------------------------------------------------------------------
 -- RLS
 -- ---------------------------------------------------------------------------
@@ -486,8 +546,8 @@ end $$;
 create policy "ai_op_sessions_select"
   on public.ai_operator_sessions for select to authenticated
   using (
-    public.ai_op_is_active(auth.uid())
-    and (owner_user_id = auth.uid() or public.ai_op_is_admin(auth.uid()))
+    private.ai_op_is_active(auth.uid())
+    and (owner_user_id = auth.uid() or private.ai_op_is_admin(auth.uid()))
   );
 -- INSERT/UPDATE só via service_role (backend). Não criamos policy de INSERT/UPDATE
 -- para 'authenticated' — o backend valida ownership e usa SUPABASE_SERVICE_ROLE_KEY.
@@ -496,11 +556,11 @@ create policy "ai_op_sessions_select"
 create policy "ai_op_messages_select"
   on public.ai_operator_messages for select to authenticated
   using (
-    public.ai_op_is_active(auth.uid())
+    private.ai_op_is_active(auth.uid())
     and exists (
       select 1 from public.ai_operator_sessions s
       where s.id = ai_operator_messages.session_id
-        and (s.owner_user_id = auth.uid() or public.ai_op_is_admin(auth.uid()))
+        and (s.owner_user_id = auth.uid() or private.ai_op_is_admin(auth.uid()))
     )
   );
 
@@ -508,10 +568,10 @@ create policy "ai_op_messages_select"
 create policy "ai_op_drafts_select"
   on public.ai_operator_drafts for select to authenticated
   using (
-    public.ai_op_is_active(auth.uid())
+    private.ai_op_is_active(auth.uid())
     and (
       created_by = auth.uid()
-      or public.ai_op_is_admin(auth.uid())
+      or private.ai_op_is_admin(auth.uid())
       or exists (
         select 1 from public.ai_operator_sessions s
         where s.id = ai_operator_drafts.session_id
@@ -523,13 +583,13 @@ create policy "ai_op_drafts_select"
 create policy "ai_op_draft_items_select"
   on public.ai_operator_draft_items for select to authenticated
   using (
-    public.ai_op_is_active(auth.uid())
+    private.ai_op_is_active(auth.uid())
     and exists (
       select 1 from public.ai_operator_drafts d
       where d.id = ai_operator_draft_items.draft_id
         and (
           d.created_by = auth.uid()
-          or public.ai_op_is_admin(auth.uid())
+          or private.ai_op_is_admin(auth.uid())
           or exists (
             select 1 from public.ai_operator_sessions s
             where s.id = d.session_id and s.owner_user_id = auth.uid()
@@ -542,10 +602,10 @@ create policy "ai_op_draft_items_select"
 create policy "ai_op_pending_select"
   on public.ai_operator_pending_actions for select to authenticated
   using (
-    public.ai_op_is_active(auth.uid())
+    private.ai_op_is_active(auth.uid())
     and (
       requested_by_user_id = auth.uid()
-      or public.ai_op_is_admin(auth.uid())
+      or private.ai_op_is_admin(auth.uid())
       or exists (
         select 1 from public.ai_operator_sessions s
         where s.id = ai_operator_pending_actions.session_id
@@ -558,7 +618,7 @@ create policy "ai_op_pending_select"
 -- ----- AUDIT: leitura só admin OU financial ativos (registro forense) -----
 create policy "ai_op_audit_select"
   on public.ai_operator_audit for select to authenticated
-  using (public.ai_op_is_admin_or_financial(auth.uid()));
+  using (private.ai_op_is_admin_or_financial(auth.uid()));
 -- INSERT/UPDATE/DELETE: nunca por authenticated. Apenas service_role.
 
 -- ----- MEMORY NOTES: leitura granular por verification_status × papel × atividade -----
@@ -570,16 +630,16 @@ create policy "ai_op_audit_select"
 create policy "ai_op_memory_select"
   on public.ai_operator_memory_notes for select to authenticated
   using (
-    public.ai_op_is_active(auth.uid())
+    private.ai_op_is_active(auth.uid())
     and (
       (
         verification_status = 'verified'
-        and public.ai_op_is_internal(auth.uid())
+        and private.ai_op_is_internal(auth.uid())
       )
       or (
         verification_status in ('candidate', 'rejected')
         and (
-          public.ai_op_is_admin(auth.uid())
+          private.ai_op_is_admin(auth.uid())
           or exists (
             select 1 from public.app_users au
             where au.id = auth.uid() and au.active = true and au.role = 'technician'
@@ -594,7 +654,7 @@ create policy "ai_op_memory_select"
 -- ----- CHANNEL EVENTS: leitura admin ativo (forense). Ingestão via service_role. -----
 create policy "ai_op_channel_events_select"
   on public.ai_operator_channel_events for select to authenticated
-  using (public.ai_op_is_admin(auth.uid()));
+  using (private.ai_op_is_admin(auth.uid()));
 
 -- ---------------------------------------------------------------------------
 -- Comentários

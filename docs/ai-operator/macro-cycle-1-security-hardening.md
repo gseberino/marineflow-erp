@@ -27,13 +27,24 @@
 > intencionalmente removida até existir executor real para cada classe
 > de ação. Macro ciclo seguinte reabrirá com atribuição formal.
 
-### approve (`ai_op_can_approve`)
+### approve_action endpoint (admin-only)
+
+Pre-auth (`preAuthorizeApprove`) bloqueia qualquer role ≠ admin **antes** de
+qualquer leitura de `ai_operator_pending_actions`. SQL `ai_op_can_approve`
+faz a segunda checagem (admin-only para operacional). Memória técnica não
+passa por este endpoint — ver `verify_memory_note`/`reject_memory_note`.
 
 | Action class | admin | technician | financial | seller | external_seller | other |
 | --- | :-: | :-: | :-: | :-: | :-: | :-: |
-| Qualquer ação operacional (WhatsApp, OS, agenda, estoque, compras, cadastros, conversão de rascunho, ações desconhecidas) | ✓ | – | – | – | – | – |
-| verify_memory_note / reject_memory_note | ✓ | ✓ | – | – | – | – |
+| Qualquer pending action (operacional, conversão, cadastros, envios, agenda, estoque, compras, desconhecidas) | ✓ | – | – | – | – | – |
 | Usuário inativo (qualquer papel) | – | – | – | – | – | – |
+
+### Memory governance endpoints (admin OR technician)
+
+| Endpoint | admin | technician | demais |
+| --- | :-: | :-: | :-: |
+| `verify_memory_note` | ✓ | ✓ | – |
+| `reject_memory_note` | ✓ | ✓ | – |
 
 ### reject (`ai_op_can_reject`)
 
@@ -83,6 +94,47 @@ respeita as policies de RLS reais de `clients`/`vessels`/`products`/`services`.
   (mesmo modelo já validado em produção do agente). Não baixar para um
   modelo mais simples; o operador depende de fidelidade alta a instrução
   (tool calling + classificação técnica + criação estruturada de rascunho).
+
+## Superfície RPC / SECURITY DEFINER (varredura final)
+
+### Funções em `private` (não expostas pela Data API)
+
+Helpers de papel/atividade vivem em `schema private`. PostgREST só expõe
+schemas listados em `db-schemas` (padrão `public`) — `private` fica fora
+de RPC. As funções permanecem invocáveis pelas POLICIES de RLS porque
+`authenticated` recebe `EXECUTE` direto via `GRANT`.
+
+| Função | EXECUTE |
+| --- | --- |
+| `private.ai_op_is_admin(uuid)` | `authenticated`, `service_role` (sem PUBLIC, sem anon, sem RPC) |
+| `private.ai_op_is_active(uuid)` | idem |
+| `private.ai_op_is_admin_or_financial(uuid)` | idem |
+| `private.ai_op_is_internal(uuid)` | idem |
+
+Usadas pelas policies de SELECT de `ai_operator_*`. Cliente
+autenticado não consegue invocá-las via Data API (PostgREST não mapeia
+`private`).
+
+### Funções em `public` server-only (locked down)
+
+Permanecem em `public` apenas porque o `ai-operator-core` precisa chamá-las
+via `supabase-js .rpc()` com a service role. EXECUTE revogado de
+`PUBLIC/anon/authenticated`; só `service_role` tem permissão:
+
+| Função | Quem chama |
+| --- | --- |
+| `public.ai_op_can_approve(uuid, text)` | `ai-operator-core` (service_role) |
+| `public.ai_op_can_reject(uuid, uuid)` | `ai-operator-core` (service_role) |
+| `public.ai_op_protect_pending_action()` | trigger `trg_ai_op_pending_guard` (executado pelo engine sob service_role no UPDATE) |
+
+Mesmo um cliente `authenticated` com conhecimento dos nomes não consegue
+chamar via Data API — RPC retorna 401/403.
+
+### Approve gate: admin-only no Macro Ciclo 1
+
+`preAuthorizeApprove` permite apenas `admin`. `technician` continua com
+endpoints próprios (`verify_memory_note` / `reject_memory_note`) para
+governança de memória — não precisa nem deve passar por `approve_action`.
 
 ## Como aplicar em staging (passos para Gustavo)
 
