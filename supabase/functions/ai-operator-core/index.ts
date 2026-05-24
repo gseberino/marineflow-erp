@@ -552,7 +552,7 @@ async function execSafeTool(
       if (!targetDraftId) return { result: { error: "Nao ha rascunho ativo para atualizar." } };
       const { data: draftOwner } = await admin
         .from("ai_operator_drafts")
-        .select("id, session_id, client_id, vessel_id")
+        .select("id, session_id, client_id, vessel_id, status")
         .eq("id", targetDraftId)
         .maybeSingle();
       if (!draftOwner || draftOwner.session_id !== sessionId) {
@@ -576,6 +576,31 @@ async function execSafeTool(
           event_category: "security",
           payload: { tool: "update_draft", attempted_status: updatePolicy.blockedStatus },
         });
+      }
+      if (updatePolicy.blockedCurrentStatus) {
+        await audit(admin, {
+          session_id: sessionId,
+          draft_id: targetDraftId,
+          actor_user_id: userId,
+          actor_kind: "ai_model",
+          event_type: "model_draft_update_blocked_protected_state",
+          event_category: "security",
+          payload: {
+            tool: "update_draft",
+            current_status: updatePolicy.blockedCurrentStatus,
+            attempted_status: updatePolicy.blockedStatus,
+          },
+        });
+        return {
+          result: {
+            ok: false,
+            blocked: true,
+            reason: "draft_current_status_protected",
+            message:
+              "Este rascunho esta em estado protegido e exige um fluxo humano especifico de revisao ou reabertura antes de qualquer alteracao.",
+            current_status: updatePolicy.blockedCurrentStatus,
+          },
+        };
       }
       if (Object.keys(updatePolicy.patch).length === 0) {
         return {

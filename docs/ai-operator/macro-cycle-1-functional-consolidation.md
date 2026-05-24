@@ -554,7 +554,7 @@ Cycle 1 and no `external_quotes` rows are created by this hardening.
   model;
 - action-governance tests cover informational intent, direct quote-to-OS block,
   allowed explicit diagnosis proposal, and deduplication;
-- existing tests for `resume_draft`, structured CÃ©lio/Dondoka linking,
+- existing tests for `resume_draft`, structured Célio/Dondoka linking,
   `link_draft_entities`, cancellation and tool-event minimization remain in the
   regression suite.
 
@@ -563,9 +563,39 @@ Cycle 1 and no `external_quotes` rows are created by this hardening.
 The contaminated staging data must not be remediated automatically. A future
 authorized remediation should:
 
-- preserve the confirmed CÃ©lio/Dondoka link;
+- preserve the confirmed Célio/Dondoka link;
 - move the Raymarine draft back to an operational state appropriate to its
   remaining questions, likely `awaiting_info`;
 - reject or otherwise close the three unexecuted `create_service_order`
   pending actions with explicit audit records;
 - document that no OS or formal quote was created during the correction.
+
+---
+
+## Protected-state immutability fix (2026-05-24)
+
+Independent review after `4c54f63` found one remaining lifecycle risk:
+`update_draft` filtered model-provided governance statuses, but still allowed
+content updates when the persisted draft was already in a protected state.
+
+The final policy is now:
+
+- current `draft` or `awaiting_info`: the model may refine safe content and may
+  alternate only between these two operational statuses;
+- current `awaiting_approval`, `approved`, `rejected`, `converted`, or
+  `cancelled`: `update_draft` from the model is fully blocked before any patch
+  is applied.
+
+The protected-state block prevents:
+
+- silent remediation of contaminated staging data by the model;
+- post-approval changes to title, summary, scope, estimates, questions, next
+  steps, or hypotheses;
+- reopening or rewriting converted, cancelled, rejected, or awaiting-review
+  drafts without a future explicit human flow.
+
+Blocked attempts are audited as
+`model_draft_update_blocked_protected_state`. This patch does not add a reopen,
+approval, review, quote formalization, or conversion endpoint. The Raymarine
+staging draft and the three historical `create_service_order` actions remain
+unchanged pending explicit remediation authorization.

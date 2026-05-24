@@ -4,6 +4,10 @@ export type ConfirmedEntityLinks = {
 };
 
 export type LinkCarrier = Partial<ConfirmedEntityLinks> | null | undefined;
+export type DraftUpdateCarrier =
+  | (Partial<ConfirmedEntityLinks> & { status?: string | null })
+  | null
+  | undefined;
 
 export type UnexpectedEntityField =
   | "client_id"
@@ -37,6 +41,18 @@ const DRAFT_WRITABLE_FIELDS = [
 ] as const;
 
 const MODEL_WRITABLE_DRAFT_STATUSES = new Set(["draft", "awaiting_info"]);
+const MODEL_IMMUTABLE_DRAFT_STATUSES = new Set([
+  "awaiting_approval",
+  "approved",
+  "rejected",
+  "converted",
+  "cancelled",
+]);
+
+export function isDraftStatusProtectedFromModel(status: unknown): boolean {
+  const currentStatus = normalizeId(status);
+  return currentStatus ? MODEL_IMMUTABLE_DRAFT_STATUSES.has(currentStatus) : false;
+}
 
 export function resolveCreateDraftStatus(requestedStatus: unknown, hasPendingQuestions: boolean) {
   const requested = normalizeId(requestedStatus);
@@ -83,8 +99,23 @@ export function resolveCreateDraftLinks(args: Record<string, unknown>, session: 
   };
 }
 
-export function buildDraftUpdatePatch(args: Record<string, unknown>, current: LinkCarrier) {
+export function buildDraftUpdatePatch(args: Record<string, unknown>, current: DraftUpdateCarrier) {
   const patch: Record<string, unknown> = {};
+  const currentStatus = normalizeId(current?.status);
+  const blockedCurrentStatus = isDraftStatusProtectedFromModel(currentStatus) ? currentStatus : null;
+  const requestedStatus = normalizeId(args.status);
+  const blockedStatus =
+    requestedStatus && !MODEL_WRITABLE_DRAFT_STATUSES.has(requestedStatus) ? requestedStatus : null;
+
+  if (blockedCurrentStatus) {
+    return {
+      patch,
+      links: inheritConfirmedLinks(current),
+      unexpected: collectUnexpectedEntityAttempts(args),
+      blockedStatus,
+      blockedCurrentStatus,
+    };
+  }
 
   for (const key of DRAFT_WRITABLE_FIELDS) {
     if (typeof args[key] !== "undefined") patch[key] = args[key];
@@ -92,9 +123,6 @@ export function buildDraftUpdatePatch(args: Record<string, unknown>, current: Li
   if (Array.isArray(args.pending_questions)) patch.pending_questions = args.pending_questions;
   if (Array.isArray(args.next_steps)) patch.next_steps = args.next_steps;
   if (Array.isArray(args.hypotheses)) patch.hypotheses = args.hypotheses;
-  const requestedStatus = normalizeId(args.status);
-  const blockedStatus =
-    requestedStatus && !MODEL_WRITABLE_DRAFT_STATUSES.has(requestedStatus) ? requestedStatus : null;
   if (requestedStatus && !blockedStatus) patch.status = requestedStatus;
 
   return {
@@ -102,6 +130,7 @@ export function buildDraftUpdatePatch(args: Record<string, unknown>, current: Li
     links: inheritConfirmedLinks(current),
     unexpected: collectUnexpectedEntityAttempts(args),
     blockedStatus,
+    blockedCurrentStatus: null,
   };
 }
 

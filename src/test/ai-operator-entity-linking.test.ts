@@ -93,6 +93,7 @@ describe("AI Operator - explicit entity linking policy", () => {
       {
         client_id: "client-confirmed",
         vessel_id: "vessel-confirmed",
+        status: "draft",
       }
     );
 
@@ -106,6 +107,7 @@ describe("AI Operator - explicit entity linking policy", () => {
       vessel_id: "vessel-confirmed",
     });
     expect(result.blockedStatus).toBeNull();
+    expect(result.blockedCurrentStatus).toBeNull();
     expect(result.unexpected).toEqual([
       { field: "client_id", value: "client-visible-but-wrong" },
       { field: "vessel_id", value: "vessel-visible-but-wrong" },
@@ -125,6 +127,7 @@ describe("AI Operator - explicit entity linking policy", () => {
         {
           client_id: "client-confirmed",
           vessel_id: "vessel-confirmed",
+          status: "awaiting_info",
         }
       );
 
@@ -133,7 +136,64 @@ describe("AI Operator - explicit entity linking policy", () => {
         summary: "Resumo seguro",
       });
       expect(result.blockedStatus).toBe(status);
+      expect(result.blockedCurrentStatus).toBeNull();
     }
+  });
+
+  it("update_draft allows operational drafts to alternate between draft and awaiting_info", () => {
+    expect(
+      buildDraftUpdatePatch({ status: "awaiting_info", summary: "Aguardando dado" }, { status: "draft" }).patch
+    ).toEqual({
+      status: "awaiting_info",
+      summary: "Aguardando dado",
+    });
+    expect(
+      buildDraftUpdatePatch({ status: "draft", summary: "Escopo refinado" }, { status: "awaiting_info" }).patch
+    ).toEqual({
+      status: "draft",
+      summary: "Escopo refinado",
+    });
+  });
+
+  it("update_draft blocks every model mutation when current draft status is protected", () => {
+    for (const currentStatus of ["awaiting_approval", "approved", "rejected", "converted", "cancelled"]) {
+      const result = buildDraftUpdatePatch(
+        {
+          title: "Nao pode mudar",
+          status: "awaiting_info",
+          summary: "Nao pode mudar",
+          estimated_total: 12345,
+          pending_questions: ["Nao persistir"],
+          next_steps: ["Nao persistir"],
+          hypotheses: ["Nao persistir"],
+        },
+        {
+          client_id: "client-confirmed",
+          vessel_id: "vessel-confirmed",
+          status: currentStatus,
+        }
+      );
+
+      expect(result.patch).toEqual({});
+      expect(result.blockedCurrentStatus).toBe(currentStatus);
+      expect(result.blockedStatus).toBeNull();
+    }
+  });
+
+  it("update_draft still reports attempted governance status when current draft is protected", () => {
+    const result = buildDraftUpdatePatch(
+      {
+        status: "converted",
+        summary: "Nao pode mudar",
+      },
+      {
+        status: "approved",
+      }
+    );
+
+    expect(result.patch).toEqual({});
+    expect(result.blockedCurrentStatus).toBe("approved");
+    expect(result.blockedStatus).toBe("converted");
   });
 
   it("register_memory_candidate inherits confirmed draft context instead of model-provided entity ids", () => {
