@@ -97,6 +97,8 @@ describe("AI Operator - tools contract for explicit entity linking", () => {
     expect(prompt).toMatch(/rascunho interno nao e orcamento formal/i);
     expect(prompt).toMatch(/external_quotes/i);
     expect(prompt).toMatch(/nao trate status interno.*approved.*aprovacao comercial/i);
+    expect(prompt).toMatch(/drafts em awaiting_approval, approved, rejected, converted ou cancelled/i);
+    expect(prompt).toMatch(/nao chame update_draft, add_draft_item ou ask_pending_question/i);
     expect(prompt).not.toMatch(/vinculos seguros/i);
   });
 });

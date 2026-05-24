@@ -32,7 +32,9 @@ import {
 import { buildDraftContextNote, redactUuidTokens, toModelConversationHistory } from "./session-history.ts";
 import {
   buildDraftUpdatePatch,
+  draftProtectedAuditEventForOperation,
   evaluateCancelDraft,
+  evaluateDraftMutationPolicy,
   isSanitizedInternalReference,
   resolveEntityLinkByHumanTerms,
   resolveCreateDraftLinks,
@@ -583,7 +585,7 @@ async function execSafeTool(
           draft_id: targetDraftId,
           actor_user_id: userId,
           actor_kind: "ai_model",
-          event_type: "model_draft_update_blocked_protected_state",
+          event_type: draftProtectedAuditEventForOperation("model_update_draft"),
           event_category: "security",
           payload: {
             tool: "update_draft",
@@ -646,11 +648,39 @@ async function execSafeTool(
       if (!targetDraftId) return { result: { error: "Nao ha rascunho ativo para adicionar item." } };
       const { data: draftOwner } = await admin
         .from("ai_operator_drafts")
-        .select("id, session_id")
+        .select("id, session_id, status")
         .eq("id", targetDraftId)
         .maybeSingle();
       if (!draftOwner || draftOwner.session_id !== sessionId) {
         return { result: { error: "Rascunho não pertence à sessão atual." } };
+      }
+      const mutationPolicy = evaluateDraftMutationPolicy({
+        draftStatus: draftOwner.status,
+        operation: "model_add_draft_item",
+      });
+      if (!mutationPolicy.ok) {
+        await audit(admin, {
+          session_id: sessionId,
+          draft_id: targetDraftId,
+          actor_user_id: userId,
+          actor_kind: "ai_model",
+          event_type: draftProtectedAuditEventForOperation("model_add_draft_item"),
+          event_category: "security",
+          payload: {
+            tool: "add_draft_item",
+            current_status: mutationPolicy.currentStatus,
+            reason: mutationPolicy.reason,
+          },
+        });
+        return {
+          result: {
+            ok: false,
+            blocked: true,
+            reason: mutationPolicy.reason,
+            message: mutationPolicy.message,
+            current_status: mutationPolicy.currentStatus,
+          },
+        };
       }
       // Validar referências de produto/serviço com RLS do usuário.
       const itemRefs = await validateAllReferences(sb, {
@@ -703,11 +733,39 @@ async function execSafeTool(
       if (!targetDraftId) return { result: { error: "Nao ha rascunho ativo para registrar pergunta." } };
       const { data: draftOwner } = await admin
         .from("ai_operator_drafts")
-        .select("id, session_id, pending_questions")
+        .select("id, session_id, status, pending_questions")
         .eq("id", targetDraftId)
         .maybeSingle();
       if (!draftOwner || draftOwner.session_id !== sessionId) {
         return { result: { error: "Rascunho não pertence à sessão atual." } };
+      }
+      const mutationPolicy = evaluateDraftMutationPolicy({
+        draftStatus: draftOwner.status,
+        operation: "model_ask_pending_question",
+      });
+      if (!mutationPolicy.ok) {
+        await audit(admin, {
+          session_id: sessionId,
+          draft_id: targetDraftId,
+          actor_user_id: userId,
+          actor_kind: "ai_model",
+          event_type: draftProtectedAuditEventForOperation("model_ask_pending_question"),
+          event_category: "security",
+          payload: {
+            tool: "ask_pending_question",
+            current_status: mutationPolicy.currentStatus,
+            reason: mutationPolicy.reason,
+          },
+        });
+        return {
+          result: {
+            ok: false,
+            blocked: true,
+            reason: mutationPolicy.reason,
+            message: mutationPolicy.message,
+            current_status: mutationPolicy.currentStatus,
+          },
+        };
       }
       const list = Array.isArray(draftOwner.pending_questions) ? draftOwner.pending_questions : [];
       list.push(args.question);
@@ -1026,6 +1084,34 @@ Deno.serve(async (req) => {
       if (!draft || !draft.session_id) return jr({ error: "Rascunho nao encontrado." }, 404);
       const ownsSession = await sessionBelongsTo(admin, draft.session_id, userId, isAdmin);
       if (!ownsSession) return jr({ error: "Rascunho nao pertence ao usuario." }, 403);
+
+      const mutationPolicy = evaluateDraftMutationPolicy({
+        draftStatus: draft.status,
+        operation: "ui_link_entities",
+      });
+      if (!mutationPolicy.ok) {
+        await audit(admin, {
+          session_id: draft.session_id,
+          draft_id: draftId,
+          actor_user_id: userId,
+          actor_kind: "user",
+          event_type: draftProtectedAuditEventForOperation("ui_link_entities"),
+          event_category: "security",
+          payload: {
+            current_status: mutationPolicy.currentStatus,
+            reason: mutationPolicy.reason,
+          },
+        });
+        return jr(
+          {
+            error: mutationPolicy.message,
+            blocked: true,
+            reason: mutationPolicy.reason,
+            current_status: mutationPolicy.currentStatus,
+          },
+          mutationPolicy.status
+        );
+      }
 
       const requestedClientId = body.client_id ? String(body.client_id) : null;
       const requestedVesselId = body.vessel_id ? String(body.vessel_id) : null;

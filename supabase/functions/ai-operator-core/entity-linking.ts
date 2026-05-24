@@ -41,7 +41,8 @@ const DRAFT_WRITABLE_FIELDS = [
 ] as const;
 
 const MODEL_WRITABLE_DRAFT_STATUSES = new Set(["draft", "awaiting_info"]);
-const MODEL_IMMUTABLE_DRAFT_STATUSES = new Set([
+const DRAFT_OPERATIONAL_MUTABLE_STATUSES = new Set(["draft", "awaiting_info"]);
+const DRAFT_PROTECTED_STATUSES = new Set([
   "awaiting_approval",
   "approved",
   "rejected",
@@ -49,9 +50,121 @@ const MODEL_IMMUTABLE_DRAFT_STATUSES = new Set([
   "cancelled",
 ]);
 
-export function isDraftStatusProtectedFromModel(status: unknown): boolean {
+export type DraftMutationOperation =
+  | "model_update_draft"
+  | "model_add_draft_item"
+  | "model_ask_pending_question"
+  | "ui_link_entities"
+  | "resume_draft"
+  | "register_memory_candidate"
+  | "propose_action"
+  | "cancel_draft";
+
+export type DraftMutationPolicy =
+  | {
+      ok: true;
+      operation: DraftMutationOperation;
+      currentStatus: string | null;
+      protected: boolean;
+      mutatesDraft: boolean;
+    }
+  | {
+      ok: false;
+      status: 404 | 409;
+      reason: "draft_not_found" | "draft_current_status_protected" | "draft_current_status_not_mutable";
+      operation: DraftMutationOperation;
+      currentStatus: string | null;
+      protected: boolean;
+      mutatesDraft: boolean;
+      message: string;
+    };
+
+const DRAFT_MUTATION_OPERATIONS = new Set<DraftMutationOperation>([
+  "model_update_draft",
+  "model_add_draft_item",
+  "model_ask_pending_question",
+  "ui_link_entities",
+]);
+
+const PROTECTED_DRAFT_MESSAGE =
+  "Este rascunho esta em estado protegido e exige um fluxo humano especifico de revisao ou reabertura antes de qualquer alteracao.";
+
+const PROTECTED_DRAFT_LINK_MESSAGE =
+  "Este rascunho esta em estado protegido. Para alterar cliente ou embarcacao, ele precisa passar por um fluxo formal de reabertura ou correcao.";
+
+export function isDraftStatusOperationallyMutable(status: unknown): boolean {
   const currentStatus = normalizeId(status);
-  return currentStatus ? MODEL_IMMUTABLE_DRAFT_STATUSES.has(currentStatus) : false;
+  return currentStatus ? DRAFT_OPERATIONAL_MUTABLE_STATUSES.has(currentStatus) : false;
+}
+
+export function isDraftStatusProtected(status: unknown): boolean {
+  const currentStatus = normalizeId(status);
+  return currentStatus ? DRAFT_PROTECTED_STATUSES.has(currentStatus) : false;
+}
+
+export function isDraftStatusProtectedFromModel(status: unknown): boolean {
+  return isDraftStatusProtected(status);
+}
+
+export function draftProtectedAuditEventForOperation(operation: DraftMutationOperation): string {
+  if (operation === "model_update_draft") return "model_draft_update_blocked_protected_state";
+  if (operation === "model_add_draft_item") return "model_draft_item_blocked_protected_state";
+  if (operation === "model_ask_pending_question") return "model_draft_question_blocked_protected_state";
+  if (operation === "ui_link_entities") return "draft_entity_link_blocked_protected_state";
+  return "draft_mutation_blocked_protected_state";
+}
+
+export function evaluateDraftMutationPolicy(params: {
+  draftStatus: unknown;
+  operation: DraftMutationOperation;
+}): DraftMutationPolicy {
+  const currentStatus = normalizeId(params.draftStatus);
+  const mutatesDraft = DRAFT_MUTATION_OPERATIONS.has(params.operation);
+  const protectedStatus = isDraftStatusProtected(currentStatus);
+
+  if (!mutatesDraft) {
+    return {
+      ok: true,
+      operation: params.operation,
+      currentStatus,
+      protected: protectedStatus,
+      mutatesDraft,
+    };
+  }
+
+  if (!currentStatus) {
+    return {
+      ok: false,
+      status: 404,
+      reason: "draft_not_found",
+      operation: params.operation,
+      currentStatus: null,
+      protected: false,
+      mutatesDraft,
+      message: "Rascunho nao encontrado.",
+    };
+  }
+
+  if (isDraftStatusOperationallyMutable(currentStatus)) {
+    return {
+      ok: true,
+      operation: params.operation,
+      currentStatus,
+      protected: false,
+      mutatesDraft,
+    };
+  }
+
+  return {
+    ok: false,
+    status: 409,
+    reason: protectedStatus ? "draft_current_status_protected" : "draft_current_status_not_mutable",
+    operation: params.operation,
+    currentStatus,
+    protected: protectedStatus,
+    mutatesDraft,
+    message: params.operation === "ui_link_entities" ? PROTECTED_DRAFT_LINK_MESSAGE : PROTECTED_DRAFT_MESSAGE,
+  };
 }
 
 export function resolveCreateDraftStatus(requestedStatus: unknown, hasPendingQuestions: boolean) {
@@ -102,7 +215,11 @@ export function resolveCreateDraftLinks(args: Record<string, unknown>, session: 
 export function buildDraftUpdatePatch(args: Record<string, unknown>, current: DraftUpdateCarrier) {
   const patch: Record<string, unknown> = {};
   const currentStatus = normalizeId(current?.status);
-  const blockedCurrentStatus = isDraftStatusProtectedFromModel(currentStatus) ? currentStatus : null;
+  const currentPolicy = evaluateDraftMutationPolicy({
+    draftStatus: currentStatus,
+    operation: "model_update_draft",
+  });
+  const blockedCurrentStatus = currentPolicy.ok ? null : currentPolicy.currentStatus;
   const requestedStatus = normalizeId(args.status);
   const blockedStatus =
     requestedStatus && !MODEL_WRITABLE_DRAFT_STATUSES.has(requestedStatus) ? requestedStatus : null;

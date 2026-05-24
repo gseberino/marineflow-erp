@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 // @ts-ignore Vitest resolve .ts
 import {
   buildDraftUpdatePatch,
+  draftProtectedAuditEventForOperation,
   evaluateCancelDraft,
+  evaluateDraftMutationPolicy,
+  isDraftStatusOperationallyMutable,
+  isDraftStatusProtected,
   resolveCreateDraftStatus,
   resolveEntityLinkByHumanTerms,
   resolveCreateDraftLinks,
@@ -11,6 +15,96 @@ import {
   resolveMemoryCandidateLinks,
   sanitizeToolEventsForFrontend,
 } from "../../supabase/functions/ai-operator-core/entity-linking.ts";
+
+describe("AI Operator - central draft mutability policy", () => {
+  it("recognizes draft and awaiting_info as mutable operational statuses", () => {
+    for (const status of ["draft", "awaiting_info"]) {
+      expect(isDraftStatusOperationallyMutable(status)).toBe(true);
+      expect(isDraftStatusProtected(status)).toBe(false);
+      for (const operation of ["model_add_draft_item", "model_ask_pending_question", "ui_link_entities"] as const) {
+        expect(
+          evaluateDraftMutationPolicy({
+            draftStatus: status,
+            operation,
+          })
+        ).toMatchObject({ ok: true, currentStatus: status, operation });
+      }
+    }
+  });
+
+  it("recognizes governance and terminal statuses as protected", () => {
+    for (const status of ["awaiting_approval", "approved", "rejected", "converted", "cancelled"]) {
+      expect(isDraftStatusOperationallyMutable(status)).toBe(false);
+      expect(isDraftStatusProtected(status)).toBe(true);
+      for (const operation of ["model_add_draft_item", "model_ask_pending_question", "ui_link_entities"] as const) {
+        expect(
+          evaluateDraftMutationPolicy({
+            draftStatus: status,
+            operation,
+          })
+        ).toMatchObject({
+          ok: false,
+          status: 409,
+          reason: "draft_current_status_protected",
+          currentStatus: status,
+          operation,
+        });
+      }
+    }
+  });
+
+  it("does not block read-only resume operations for protected drafts", () => {
+    expect(
+      evaluateDraftMutationPolicy({
+        draftStatus: "approved",
+        operation: "resume_draft",
+      })
+    ).toMatchObject({
+      ok: true,
+      currentStatus: "approved",
+      operation: "resume_draft",
+    });
+  });
+
+  it("blocks add item, pending question and UI link mutations on protected drafts with auditable events", () => {
+    const expectations = [
+      ["model_add_draft_item", "model_draft_item_blocked_protected_state"],
+      ["model_ask_pending_question", "model_draft_question_blocked_protected_state"],
+      ["ui_link_entities", "draft_entity_link_blocked_protected_state"],
+    ] as const;
+
+    for (const [operation, eventType] of expectations) {
+      expect(
+        evaluateDraftMutationPolicy({
+          draftStatus: "approved",
+          operation,
+        })
+      ).toMatchObject({
+        ok: false,
+        status: 409,
+        reason: "draft_current_status_protected",
+        currentStatus: "approved",
+        operation,
+      });
+      expect(draftProtectedAuditEventForOperation(operation)).toBe(eventType);
+    }
+  });
+
+  it("keeps register_memory_candidate and propose_action outside direct draft-content mutation", () => {
+    for (const operation of ["register_memory_candidate", "propose_action"] as const) {
+      expect(
+        evaluateDraftMutationPolicy({
+          draftStatus: "converted",
+          operation,
+        })
+      ).toMatchObject({
+        ok: true,
+        currentStatus: "converted",
+        operation,
+      });
+    }
+  });
+});
 
 describe("AI Operator - explicit entity linking policy", () => {
   it("create_draft downgrades model-provided governance statuses to operational statuses", () => {

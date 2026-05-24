@@ -599,3 +599,49 @@ Blocked attempts are audited as
 approval, review, quote formalization, or conversion endpoint. The Raymarine
 staging draft and the three historical `create_service_order` actions remain
 unchanged pending explicit remediation authorization.
+
+---
+
+## Global protected-draft mutation gate (2026-05-24)
+
+Independent review after the v8 immutability patch found that the invariant was
+implemented only on `update_draft`. Three parallel mutation paths still needed
+the same protection:
+
+- `add_draft_item` could insert new services, products, materials, prices or
+  notes into a protected draft;
+- `ask_pending_question` could append pending questions to a protected draft;
+- `link_draft_entities`, although UI-confirmed, could still change
+  client/vessel links on a protected draft without a formal reopen/correction
+  flow.
+
+The policy is now centralized:
+
+- mutable operational statuses: `draft`, `awaiting_info`;
+- protected statuses: `awaiting_approval`, `approved`, `rejected`,
+  `converted`, `cancelled`;
+- read/resume operations remain allowed;
+- separate-record operations such as `register_memory_candidate` and
+  proposal-only operations such as `propose_action` keep their own governance
+  because they do not directly mutate draft content.
+
+The following mutation gates are enforced before writes:
+
+- `update_draft`: blocks all model content/status mutations on protected drafts
+  and audits `model_draft_update_blocked_protected_state`;
+- `add_draft_item`: blocks item insertion and audits
+  `model_draft_item_blocked_protected_state`;
+- `ask_pending_question`: blocks pending-question updates and audits
+  `model_draft_question_blocked_protected_state`;
+- `link_draft_entities`: blocks UI entity-link changes and audits
+  `draft_entity_link_blocked_protected_state`.
+
+`resume_draft` remains allowed because it resumes viewing/conversation without
+changing draft content. `cancel_draft` keeps its existing explicit endpoint
+policy: only operational drafts without open pending actions can be cancelled.
+
+This patch still does not remediate staging data, does not create
+`external_quotes`, does not create service orders, and does not implement a
+reopen/remediation endpoint. The Raymarine draft, its Célio/Dondoka link, its
+existing items/questions, and the three historical `create_service_order`
+pending actions remain untouched until explicit remediation authorization.
