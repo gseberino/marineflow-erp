@@ -17,6 +17,10 @@ import { OPERATOR_TOOLS } from "./tools.ts";
 import { buildSystemPrompt } from "./prompt.ts";
 import { validateAllReferences } from "./entity-validation.ts";
 import { resolveProposalDraftId } from "./proposal.ts";
+import {
+  evaluateActionProposalGovernance,
+  findOpenEquivalentPendingAction,
+} from "./action-governance.ts";
 import { interpretPendingUpdate, interpretMemoryUpdate } from "./transitions.ts";
 import { resolveCoreChannel } from "./channel-source.ts";
 import { preAuthorizeApprove } from "./approve-guard.ts";
@@ -32,6 +36,7 @@ import {
   isSanitizedInternalReference,
   resolveEntityLinkByHumanTerms,
   resolveCreateDraftLinks,
+  resolveCreateDraftStatus,
   resolveExplicitDraftEntitySelection,
   resolveLinkProposal,
   resolveMemoryCandidateLinks,
@@ -480,23 +485,31 @@ async function execSafeTool(
       // tentativa é auditada.
       const session = await getSessionRow(admin, sessionId);
       const linkPolicy = resolveCreateDraftLinks(args, session);
+      const pendingQuestions = Array.isArray(args.pending_questions) ? args.pending_questions : [];
+      const draftStatus = resolveCreateDraftStatus(args.status, pendingQuestions.length > 0);
       await auditUnexpectedEntityAttempts(admin, {
         sessionId: sessionId,
         userId,
         tool: "create_draft",
         attempts: linkPolicy.unexpected,
       });
+      if (draftStatus.blockedStatus) {
+        await audit(admin, {
+          session_id: sessionId,
+          actor_user_id: userId,
+          actor_kind: "ai_model",
+          event_type: "model_draft_status_blocked",
+          event_category: "security",
+          payload: { tool: "create_draft", attempted_status: draftStatus.blockedStatus },
+        });
+      }
       const { data: draft, error } = await admin
         .from("ai_operator_drafts")
         .insert({
           session_id: sessionId,
           created_by: userId,
           kind: args.kind,
-          status:
-            args.status ||
-            (Array.isArray(args.pending_questions) && args.pending_questions.length > 0
-              ? "awaiting_info"
-              : "draft"),
+          status: draftStatus.status,
           title: args.title || null,
           summary: args.summary || null,
           client_id: linkPolicy.links.client_id,
@@ -508,7 +521,7 @@ async function execSafeTool(
           estimated_parts_value: args.estimated_parts_value ?? null,
           estimated_travel_value: args.estimated_travel_value ?? null,
           estimated_total: args.estimated_total ?? null,
-          pending_questions: Array.isArray(args.pending_questions) ? args.pending_questions : [],
+          pending_questions: pendingQuestions,
           next_steps: Array.isArray(args.next_steps) ? args.next_steps : [],
           hypotheses: Array.isArray(args.hypotheses) ? args.hypotheses : [],
         })
@@ -553,6 +566,29 @@ async function execSafeTool(
         attempts: updatePolicy.unexpected,
         draftId: targetDraftId,
       });
+      if (updatePolicy.blockedStatus) {
+        await audit(admin, {
+          session_id: sessionId,
+          draft_id: targetDraftId,
+          actor_user_id: userId,
+          actor_kind: "ai_model",
+          event_type: "model_draft_status_blocked",
+          event_category: "security",
+          payload: { tool: "update_draft", attempted_status: updatePolicy.blockedStatus },
+        });
+      }
+      if (Object.keys(updatePolicy.patch).length === 0) {
+        return {
+          result: {
+            ok: false,
+            blocked: !!updatePolicy.blockedStatus,
+            reason: updatePolicy.blockedStatus ? "draft_status_governance_protected" : "no_safe_fields",
+            message: updatePolicy.blockedStatus
+              ? "Status de governanca do draft nao pode ser alterado pelo modelo."
+              : "Nenhum campo seguro informado para atualizar o rascunho.",
+          },
+        };
+      }
       const { data: updated, error } = await admin
         .from("ai_operator_drafts")
         .update(updatePolicy.patch)
@@ -1578,6 +1614,59 @@ Deno.serve(async (req) => {
             continue;
           }
           const proposalDraftId = draftRes.draftId;
+          const { data: proposalDraft } = proposalDraftId
+            ? await admin
+                .from("ai_operator_drafts")
+                .select("id, session_id, kind, status")
+                .eq("id", proposalDraftId)
+                .maybeSingle()
+            : { data: null };
+          const { data: duplicateRows } = proposalDraftId
+            ? await admin
+                .from("ai_operator_pending_actions")
+                .select("id, draft_id, action_name, status, executed_at")
+                .eq("draft_id", proposalDraftId)
+                .eq("action_name", proposedAction)
+                .in("status", ["pending", "approved"])
+                .is("executed_at", null)
+                .limit(5)
+            : { data: [] };
+          const duplicateAction = findOpenEquivalentPendingAction(
+            (duplicateRows || []) as any[],
+            proposalDraftId,
+            proposedAction
+          );
+          const actionGate = evaluateActionProposalGovernance({
+            latestUserMessage: latestMessageText,
+            actionName: proposedAction,
+            draft: proposalDraft
+              ? { id: proposalDraft.id, kind: proposalDraft.kind ?? null }
+              : proposalDraftId
+                ? { id: proposalDraftId, kind: null }
+                : null,
+            duplicate: duplicateAction,
+          });
+          if (!actionGate.ok) {
+            await audit(admin, {
+              session_id: sessionId,
+              draft_id: proposalDraftId,
+              pending_action_id: actionGate.existingActionId ?? null,
+              actor_user_id: userId,
+              actor_kind: "system",
+              event_type: actionGate.auditEvent,
+              event_category: "security",
+              payload: { action: proposedAction, reason: actionGate.reason },
+            });
+            const blocked = {
+              blocked: true,
+              reason: actionGate.reason,
+              message: actionGate.message,
+              existing_action_id: actionGate.existingActionId ?? null,
+            };
+            toolEvents.push({ name: fnName, args: fnArgs, result: blocked, blocked: true });
+            messages.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify(blocked) });
+            continue;
+          }
 
           const { data: pending, error: pErr } = await admin
             .from("ai_operator_pending_actions")

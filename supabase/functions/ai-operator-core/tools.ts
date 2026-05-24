@@ -103,7 +103,7 @@ export const OPERATOR_TOOLS = [
           title: { type: "string" },
           status: {
             type: "string",
-            enum: ["draft", "awaiting_info", "awaiting_approval", "approved", "rejected", "converted"],
+            enum: ["draft", "awaiting_info"],
           },
           summary: { type: "string" },
           interpreted_intent: { type: "string" },
@@ -126,14 +126,14 @@ export const OPERATOR_TOOLS = [
     function: {
       name: "update_draft",
       description:
-        "Atualiza o rascunho ativo sem criar uma nova OS. Use quando ja existir um draft persistente e voce apenas precisar refinar titulo, resumo, status, perguntas pendentes, proximos passos, hipoteses e estimativas internas.",
+        "Atualiza o rascunho ativo sem criar uma nova OS. Use quando ja existir um draft persistente e voce apenas precisar refinar titulo, resumo, estado operacional, perguntas pendentes, proximos passos, hipoteses e estimativas internas. Status de governanca como approved, rejected, converted ou cancelled nao podem ser definidos pelo modelo.",
       parameters: {
         type: "object",
         properties: {
           title: { type: "string" },
           status: {
             type: "string",
-            enum: ["draft", "awaiting_info", "awaiting_approval", "approved", "rejected", "converted"],
+            enum: ["draft", "awaiting_info"],
           },
           summary: { type: "string" },
           interpreted_intent: { type: "string" },

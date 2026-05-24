@@ -26,7 +26,6 @@ const ALL_FORBIDDEN_WRITE_FIELDS: UnexpectedEntityField[] = [
 
 const DRAFT_WRITABLE_FIELDS = [
   "title",
-  "status",
   "summary",
   "interpreted_intent",
   "interpreted_category",
@@ -36,6 +35,19 @@ const DRAFT_WRITABLE_FIELDS = [
   "estimated_travel_value",
   "estimated_total",
 ] as const;
+
+const MODEL_WRITABLE_DRAFT_STATUSES = new Set(["draft", "awaiting_info"]);
+
+export function resolveCreateDraftStatus(requestedStatus: unknown, hasPendingQuestions: boolean) {
+  const requested = normalizeId(requestedStatus);
+  if (requested && MODEL_WRITABLE_DRAFT_STATUSES.has(requested)) {
+    return { status: requested, blockedStatus: null };
+  }
+  return {
+    status: hasPendingQuestions ? "awaiting_info" : "draft",
+    blockedStatus: requested ? requested : null,
+  };
+}
 
 function normalizeId(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -80,11 +92,16 @@ export function buildDraftUpdatePatch(args: Record<string, unknown>, current: Li
   if (Array.isArray(args.pending_questions)) patch.pending_questions = args.pending_questions;
   if (Array.isArray(args.next_steps)) patch.next_steps = args.next_steps;
   if (Array.isArray(args.hypotheses)) patch.hypotheses = args.hypotheses;
+  const requestedStatus = normalizeId(args.status);
+  const blockedStatus =
+    requestedStatus && !MODEL_WRITABLE_DRAFT_STATUSES.has(requestedStatus) ? requestedStatus : null;
+  if (requestedStatus && !blockedStatus) patch.status = requestedStatus;
 
   return {
     patch,
     links: inheritConfirmedLinks(current),
     unexpected: collectUnexpectedEntityAttempts(args),
+    blockedStatus,
   };
 }
 

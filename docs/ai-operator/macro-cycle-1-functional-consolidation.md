@@ -476,3 +476,96 @@ No migration or migration repair was executed for this correction. The HTTP 400
 errors from legacy ERP screens (`external_quote_leads.name`, `clients.name`,
 `products.name`, and related schema-canonicalization debt) remain out of scope
 for this branch.
+
+---
+
+## Draft lifecycle and pending-action governance hardening (2026-05-24)
+
+### Homologation update
+
+Manual staging homologation after commit `3e1ca50` confirmed:
+
+- `resume_draft` continued to resume the existing Raymarine draft correctly;
+- structured entity linking by human terms successfully linked the draft to
+  CELIO YUDI SHIOKAWA JUNIOR and the vessel Dondoka;
+- compatibility was shown correctly: the vessel was already registered for
+  that client;
+- no official service order, formal `external_quotes` record, WhatsApp,
+  inventory, financial or agenda side effect was executed.
+
+### Governance issue discovered
+
+The same homologation exposed a Macro Cycle 1 governance gap:
+
+- the internal AI Operator draft was promoted to `approved` without a formal
+  ERP quote in `external_quotes`;
+- three `create_service_order` pending actions existed for the same draft, all
+  `approved` and unexecuted;
+- an informational question about how to turn the draft into an OS had created
+  a high-risk pending action instead of receiving procedural guidance;
+- a quote draft was allowed to propose direct OS creation, even though the
+  correct product flow is draft -> formal quote -> review/approval -> service
+  order.
+
+This state was confirmed by safe staging reads only. No data remediation was
+performed in this cycle.
+
+### Lifecycle policy implemented
+
+Model-controlled draft status is now limited to operational states:
+
+- allowed from model tools: `draft`, `awaiting_info`;
+- blocked from model tools: `awaiting_approval`, `approved`, `rejected`,
+  `converted`, `cancelled`.
+
+If the model attempts a blocked status during `create_draft`, the backend
+downgrades to the safe operational default (`awaiting_info` when there are
+pending questions, otherwise `draft`) and audits `model_draft_status_blocked`.
+If it attempts a blocked status during `update_draft`, safe content updates
+still proceed but the governance status is stripped and audited.
+
+`cancelled` remains reachable only through the authenticated cancel endpoint.
+`converted` remains reserved for a future formal conversion executor.
+
+### Action proposal governance
+
+`propose_action` now passes through deterministic backend gates before any
+`ai_operator_pending_actions` insert:
+
+- informational/hypothetical user messages such as "qual o procedimento",
+  "como vira OS" and "quais os proximos passos" are blocked with
+  `action_proposal_blocked_informational_request`;
+- `create_service_order` for an internal quote draft is blocked with
+  `service_order_proposal_blocked_quote_requires_formalization`;
+- duplicate open actions for the same `draft_id` and `action_name` in
+  `pending` or `approved` status with `executed_at is null` are suppressed with
+  `duplicate_pending_action_suppressed`;
+- rejected or already executed actions do not count as open duplicates.
+
+The quote-draft block intentionally points to the next Macro Cycle 2 capability:
+`create_external_quote_from_draft`. This capability is not implemented in Macro
+Cycle 1 and no `external_quotes` rows are created by this hardening.
+
+### Tests added/updated
+
+- lifecycle tests cover blocked governance statuses on `create_draft` and
+  `update_draft`;
+- tool-contract tests ensure only operational statuses are exposed to the
+  model;
+- action-governance tests cover informational intent, direct quote-to-OS block,
+  allowed explicit diagnosis proposal, and deduplication;
+- existing tests for `resume_draft`, structured CÃ©lio/Dondoka linking,
+  `link_draft_entities`, cancellation and tool-event minimization remain in the
+  regression suite.
+
+### Staging remediation remains pending
+
+The contaminated staging data must not be remediated automatically. A future
+authorized remediation should:
+
+- preserve the confirmed CÃ©lio/Dondoka link;
+- move the Raymarine draft back to an operational state appropriate to its
+  remaining questions, likely `awaiting_info`;
+- reject or otherwise close the three unexecuted `create_service_order`
+  pending actions with explicit audit records;
+- document that no OS or formal quote was created during the correction.

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildDraftUpdatePatch,
   evaluateCancelDraft,
+  resolveCreateDraftStatus,
   resolveEntityLinkByHumanTerms,
   resolveCreateDraftLinks,
   resolveExplicitDraftEntitySelection,
@@ -12,6 +13,29 @@ import {
 } from "../../supabase/functions/ai-operator-core/entity-linking.ts";
 
 describe("AI Operator - explicit entity linking policy", () => {
+  it("create_draft downgrades model-provided governance statuses to operational statuses", () => {
+    for (const status of ["approved", "rejected", "converted", "cancelled", "awaiting_approval"]) {
+      const result = resolveCreateDraftStatus(status, false);
+      expect(result.status).toBe("draft");
+      expect(result.blockedStatus).toBe(status);
+    }
+  });
+
+  it("create_draft can only use model-provided operational statuses", () => {
+    expect(resolveCreateDraftStatus("draft", true)).toEqual({
+      status: "draft",
+      blockedStatus: null,
+    });
+    expect(resolveCreateDraftStatus("awaiting_info", false)).toEqual({
+      status: "awaiting_info",
+      blockedStatus: null,
+    });
+    expect(resolveCreateDraftStatus(null, true)).toEqual({
+      status: "awaiting_info",
+      blockedStatus: null,
+    });
+  });
+
   it("create_draft ignores model-provided client_id and vessel_id, even when present", () => {
     const result = resolveCreateDraftLinks(
       {
@@ -81,12 +105,35 @@ describe("AI Operator - explicit entity linking policy", () => {
       client_id: "client-confirmed",
       vessel_id: "vessel-confirmed",
     });
+    expect(result.blockedStatus).toBeNull();
     expect(result.unexpected).toEqual([
       { field: "client_id", value: "client-visible-but-wrong" },
       { field: "vessel_id", value: "vessel-visible-but-wrong" },
       { field: "service_order_id", value: "so-visible-but-wrong" },
       { field: "converted_service_order_id", value: "so-converted-visible-but-wrong" },
     ]);
+  });
+
+  it("update_draft blocks governance statuses while preserving safe content changes", () => {
+    for (const status of ["approved", "rejected", "converted", "cancelled", "awaiting_approval"]) {
+      const result = buildDraftUpdatePatch(
+        {
+          title: "Novo titulo seguro",
+          status,
+          summary: "Resumo seguro",
+        },
+        {
+          client_id: "client-confirmed",
+          vessel_id: "vessel-confirmed",
+        }
+      );
+
+      expect(result.patch).toEqual({
+        title: "Novo titulo seguro",
+        summary: "Resumo seguro",
+      });
+      expect(result.blockedStatus).toBe(status);
+    }
   });
 
   it("register_memory_candidate inherits confirmed draft context instead of model-provided entity ids", () => {

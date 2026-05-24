@@ -24,9 +24,18 @@ describe("AI Operator - tools contract for explicit entity linking", () => {
     }
   });
 
+  it("create_draft and update_draft expose only operational model-controlled statuses", () => {
+    for (const name of ["create_draft", "update_draft"]) {
+      const tool = findTool(name);
+      expect(tool).toBeDefined();
+      const status = tool?.function.parameters.properties?.status;
+      expect(status?.enum).toEqual(["draft", "awaiting_info"]);
+    }
+  });
+
   it("update_draft remains focused on draft content, not entity links", () => {
     const tool = findTool("update_draft");
-    expect(tool?.function.description).toMatch(/resumo|status|perguntas|proximos passos|hipoteses/i);
+    expect(tool?.function.description).toMatch(/resumo|estado operacional|perguntas|proximos passos|hipoteses/i);
     expect(tool?.function.description).not.toMatch(/vinculos seguros|cliente|embarcacao/i);
   });
 
@@ -85,6 +94,9 @@ describe("AI Operator - tools contract for explicit entity linking", () => {
 
     expect(prompt).toMatch(/nunca use create_draft, update_draft ou register_memory_candidate para vincular cliente ou embarcacao/i);
     expect(prompt).toMatch(/link_draft_entities/i);
+    expect(prompt).toMatch(/rascunho interno nao e orcamento formal/i);
+    expect(prompt).toMatch(/external_quotes/i);
+    expect(prompt).toMatch(/nao trate status interno.*approved.*aprovacao comercial/i);
     expect(prompt).not.toMatch(/vinculos seguros/i);
   });
 });
