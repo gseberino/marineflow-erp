@@ -26,6 +26,26 @@ export type ExternalQuote = Database['public']['Tables']['external_quotes']['Row
   approved_at?: string;
 };
 
+export function getExternalQuotePartyName(quote: Pick<ExternalQuote, 'client' | 'lead'>) {
+  return (
+    quote.client?.full_name_or_company_name ||
+    quote.lead?.full_name_or_company_name ||
+    'Cliente/lead nao informado'
+  );
+}
+
+export function getExternalQuoteVesselName(quote: Pick<ExternalQuote, 'vessel' | 'lead'>) {
+  return quote.vessel?.boat_name || quote.lead?.boat_name || 'Embarcacao nao informada';
+}
+
+export function getExternalQuotePartName(part: Database['public']['Tables']['external_quote_parts']['Row']) {
+  return part.product_name_snapshot || 'Produto sem nome';
+}
+
+export function getExternalQuoteServiceName(service: Database['public']['Tables']['external_quote_services']['Row']) {
+  return service.service_name_snapshot || 'Servico sem nome';
+}
+
 export function useExternalQuotes(filters?: { status?: string; created_by?: string }) {
   return useQuery({
     queryKey: ['external-quotes', filters],
@@ -34,9 +54,12 @@ export function useExternalQuotes(filters?: { status?: string; created_by?: stri
         .from('external_quotes')
         .select(`
           *,
+          seller:app_users(id, full_name),
           client:clients(id, full_name_or_company_name, phone),
-          lead:external_quote_leads(id, full_name_or_company_name, phone),
-          vessel:vessels(id, boat_name)
+          lead:external_quote_leads(id, full_name_or_company_name, phone, boat_name, boat_model),
+          vessel:vessels(id, boat_name, model),
+          parts:external_quote_parts(id),
+          services:external_quote_services(id)
         `)
         .order('created_at', { ascending: false });
 

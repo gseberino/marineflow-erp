@@ -645,3 +645,78 @@ This patch still does not remediate staging data, does not create
 reopen/remediation endpoint. The Raymarine draft, its Célio/Dondoka link, its
 existing items/questions, and the three historical `create_service_order`
 pending actions remain untouched until explicit remediation authorization.
+
+---
+
+## Macro Cycle 2 start - formal quote grounding and creation (2026-05-25)
+
+After Macro Cycle 1 was closed, staging was remediated under explicit
+authorization:
+
+- the Raymarine operator draft was returned from `approved` to
+  `awaiting_info`;
+- the existing Celio/Dondoka link was preserved;
+- three historical `create_service_order` pending actions were
+  administratively closed as `failed` before execution;
+- no official service order and no formal ERP quote were created during that
+  remediation.
+
+The first Macro Cycle 2 runtime test showed a grounding issue: the persistence
+gates worked, but a contaminated historical conversation still led the model to
+state that the quote was approved. The current persisted draft state must now
+override incompatible chat history.
+
+The operator core now injects a persisted snapshot of the active draft before
+model generation. The snapshot includes:
+
+- draft kind and current persisted status;
+- human client/vessel labels;
+- whether an `external_quotes` record exists for the draft;
+- whether an official service order exists;
+- persisted item count, pending-question count, and open sensitive actions.
+
+Informational procedure questions are answered deterministically from this
+snapshot before the model can create proposals. A draft in `awaiting_info` is
+therefore not described as approved, and absence of an `external_quotes` record
+prevents claims of formal quote approval.
+
+### Formal quote creation
+
+Macro Cycle 2 introduces the confirmation-only flow
+`create_external_quote_from_draft`:
+
+1. The model may call `propose_external_quote_from_draft` only after an
+   explicit user request to formalize the active quote draft.
+2. The tool only prepares a confirmation card; it does not persist data.
+3. The authenticated UI calls `create_external_quote_from_draft` after the
+   user confirms.
+4. The backend rereads the active draft and its items from the database,
+   validates eligibility, and creates `external_quotes`,
+   `external_quote_parts`, and `external_quote_services`.
+5. The flow never creates service orders, never calls
+   `convert_external_quote_to_so`, never moves stock, never creates finance
+   records, never schedules work, and never sends WhatsApp.
+
+Idempotency is enforced by the additive link column
+`external_quotes.ai_operator_draft_id` plus a partial unique index. Duplicate
+formalization attempts return the existing quote instead of creating another.
+
+For the Raymarine draft, the expected initial formal status is
+`pending_product`, because the draft still has products to quote and pending
+questions. Known priced lines are copied with their known totals; items without
+price remain explicitly pending and receive no invented price.
+
+### External quote module cleanup
+
+The formal quote pages and hooks were aligned with canonical staging schema:
+
+- clients/leads use `full_name_or_company_name`;
+- vessels use `boat_name`;
+- formal quote parts use `product_name_snapshot`;
+- formal quote services use `service_name_snapshot`;
+- list/detail/approval views can render operator-originated quotes.
+
+The existing RPC `public.convert_external_quote_to_so(_quote_id uuid)` was
+audited but not executed or exposed by the AI Operator. It creates official
+service orders and changes quote status, so enabling AI-assisted conversion to
+OS remains a separate future governance cycle.

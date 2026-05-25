@@ -3,7 +3,14 @@ import { PageHeader } from '@/components/PageHeader';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { useExternalQuotes, useUpdateExternalQuoteStatus } from '@/hooks/use-external-quotes';
+import {
+  getExternalQuotePartName,
+  getExternalQuotePartyName,
+  getExternalQuoteServiceName,
+  getExternalQuoteVesselName,
+  useExternalQuotes,
+  useUpdateExternalQuoteStatus,
+} from '@/hooks/use-external-quotes';
 import { Check, X, Eye, User, Phone, Anchor, MessageCircle, AlertCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -83,7 +90,7 @@ export default function ExternalQuoteApprovalPage() {
                       </div>
                       <h3 className="text-xl font-bold flex items-center gap-2">
                         <User className="h-5 w-5 text-muted-foreground" />
-                        {quote.client?.name || quote.lead?.name || '—'}
+                        {getExternalQuotePartyName(quote)}
                       </h3>
                     </div>
                     <div className="text-right">
@@ -99,10 +106,10 @@ export default function ExternalQuoteApprovalPage() {
                       <Phone className="h-4 w-4 text-muted-foreground" />
                       {quote.client?.phone || quote.lead?.phone || '—'}
                     </div>
-                    {quote.vessel?.name && (
+                    {(quote.vessel?.boat_name || quote.lead?.boat_name) && (
                       <div className="flex items-center gap-2">
                         <Anchor className="h-4 w-4 text-muted-foreground" />
-                        {quote.vessel.name}
+                        {getExternalQuoteVesselName(quote)}
                       </div>
                     )}
                     <div className="flex items-center gap-2">
@@ -116,13 +123,13 @@ export default function ExternalQuoteApprovalPage() {
                     <div className="space-y-1">
                       {quote.parts?.map((item: any) => (
                         <div key={item.id} className="flex justify-between text-sm py-1 border-b border-dashed last:border-0">
-                          <span>{item.quantity}x {item.name_snapshot || 'Item s/ nome'} (Peça)</span>
+                          <span>{item.quantity}x {getExternalQuotePartName(item)} (Peça)</span>
                           <span className="font-medium">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.line_total_sale)}</span>
                         </div>
                       ))}
                       {quote.services?.map((item: any) => (
                         <div key={item.id} className="flex justify-between text-sm py-1 border-b border-dashed last:border-0">
-                          <span>{item.quantity}x {item.name_snapshot || 'Item s/ nome'} (Serviço)</span>
+                          <span>{item.quantity}x {getExternalQuoteServiceName(item)} (Serviço)</span>
                           <span className="font-medium">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.line_total)}</span>
                         </div>
                       ))}

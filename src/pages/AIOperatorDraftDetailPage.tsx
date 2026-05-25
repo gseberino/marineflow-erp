@@ -39,6 +39,7 @@ import { AIChatMessage } from "@/components/ai/AIChatMessage";
 import { AIOperatorDraftSelectionCard } from "@/components/ai/AIOperatorDraftSelectionCard";
 import { AIOperatorLinkProposalCard } from "@/components/ai/AIOperatorLinkProposalCard";
 import { AIOperatorPendingActionCard } from "@/components/ai/AIOperatorPendingActionCard";
+import { AIOperatorQuoteProposalCard } from "@/components/ai/AIOperatorQuoteProposalCard";
 import {
   formatDraftKind,
   formatDraftItemKind,
@@ -329,6 +330,20 @@ export default function AIOperatorDraftDetailPage() {
                   {new Date(data.session.last_activity_at).toLocaleString("pt-BR")}
                 </p>
               )}
+              {data.formalQuote ? (
+                <p>
+                  Orçamento formal vinculado:{" "}
+                  <a
+                    href={`/external-quotes/${data.formalQuote.id}`}
+                    className="font-medium text-primary underline-offset-4 hover:underline"
+                  >
+                    {data.formalQuote.quote_number || "abrir orçamento"}
+                  </a>{" "}
+                  ({data.formalQuote.status})
+                </p>
+              ) : (
+                <p>Nenhum orçamento formal vinculado a este rascunho.</p>
+              )}
               <p>Nenhuma OS oficial vinculada a este rascunho.</p>
             </CardContent>
           </Card>
@@ -394,6 +409,19 @@ export default function AIOperatorDraftDetailPage() {
                     disabled={operator.loading}
                     onApprove={operator.approveAction}
                     onReject={operator.rejectAction}
+                  />
+                );
+              }
+              if (item.kind === "quote_proposal") {
+                return (
+                  <AIOperatorQuoteProposalCard
+                    key={index}
+                    proposal={item.proposal}
+                    status={item.status}
+                    externalQuote={item.externalQuote}
+                    disabled={operator.loading}
+                    onConfirm={operator.confirmQuoteProposal}
+                    onReject={operator.rejectQuoteProposal}
                   />
                 );
               }

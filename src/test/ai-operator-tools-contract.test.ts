@@ -71,6 +71,17 @@ describe("AI Operator - tools contract for explicit entity linking", () => {
     expect(tool?.function.description).toMatch(/nome|termos humanos/i);
   });
 
+  it("exposes formal quote proposal as a confirmation-only tool for the active draft", () => {
+    const tool = findTool("propose_external_quote_from_draft");
+    expect(tool).toBeDefined();
+    const properties = tool?.function.parameters.properties ?? {};
+    expect(properties).not.toHaveProperty("draft_id");
+    expect(properties).not.toHaveProperty("client_id");
+    expect(properties).not.toHaveProperty("vessel_id");
+    expect(tool?.function.description).toMatch(/orcamento formal/i);
+    expect(tool?.function.description).toMatch(/nao cria OS|confirmacao/i);
+  });
+
   it("resume_draft is a backend action endpoint, not a model tool — the model cannot trigger session switches", () => {
     const names = OPERATOR_TOOLS.map((tool) => tool.function.name);
     expect(names).not.toContain("resume_draft");
@@ -99,6 +110,9 @@ describe("AI Operator - tools contract for explicit entity linking", () => {
     expect(prompt).toMatch(/nao trate status interno.*approved.*aprovacao comercial/i);
     expect(prompt).toMatch(/drafts em awaiting_approval, approved, rejected, converted ou cancelled/i);
     expect(prompt).toMatch(/nao chame update_draft, add_draft_item ou ask_pending_question/i);
+    expect(prompt).toMatch(/snapshot persistido atual/i);
+    expect(prompt).toMatch(/propose_external_quote_from_draft/i);
+    expect(prompt).toMatch(/create_external_quote_from_draft/i);
     expect(prompt).not.toMatch(/vinculos seguros/i);
   });
 });

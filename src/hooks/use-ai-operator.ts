@@ -40,6 +40,28 @@ export type OperatorLinkProposal = {
   rationale: string | null;
 };
 
+export type OperatorQuoteProposal = {
+  draft_id: string;
+  draft_title: string | null;
+  client_name: string | null;
+  vessel_name: string | null;
+  item_count: number;
+  service_count: number;
+  part_count: number;
+  pending_item_count: number;
+  pending_questions_count: number;
+  known_total: number;
+  initial_status: "draft" | "pending_product";
+  effects: {
+    creates_external_quote: true;
+    creates_service_order: false;
+    sends_whatsapp: false;
+    changes_stock: false;
+    changes_financials: false;
+    changes_schedule: false;
+  };
+};
+
 export type OperatorDisplayItem =
   | { kind: "message"; role: "user" | "assistant"; content: string }
   | { kind: "draft_ref"; draftId: string }
@@ -54,6 +76,12 @@ export type OperatorDisplayItem =
       kind: "link_proposal";
       proposal: OperatorLinkProposal;
       status: "pending" | "confirmed" | "rejected";
+    }
+  | {
+      kind: "quote_proposal";
+      proposal: OperatorQuoteProposal;
+      status: "pending" | "created" | "rejected";
+      externalQuote?: { id: string; quote_number: string | null; status: string | null; path: string } | null;
     };
 
 export function useAIOperator(
@@ -161,6 +189,14 @@ export function useAIOperator(
           setDisplay((current) => [
             ...current,
             { kind: "link_proposal", proposal: proposedLink, status: "pending" },
+          ]);
+        }
+
+        const quoteProposal = (data as any).quote_proposal as OperatorQuoteProposal | null;
+        if (quoteProposal) {
+          setDisplay((current) => [
+            ...current,
+            { kind: "quote_proposal", proposal: quoteProposal, status: "pending" },
           ]);
         }
 
@@ -315,6 +351,52 @@ export function useAIOperator(
     );
   }, []);
 
+  const confirmQuoteProposal = useCallback(async (proposal: OperatorQuoteProposal) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const { data, error: invokeErr } = await supabase.functions.invoke("ai-operator-core", {
+        body: {
+          action: "create_external_quote_from_draft",
+          draft_id: proposal.draft_id,
+        },
+      });
+      if (invokeErr) throw invokeErr;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      const externalQuote = (data as any).external_quote ?? null;
+      setDisplay((current) =>
+        current.map((item) =>
+          item.kind === "quote_proposal" && item.proposal.draft_id === proposal.draft_id && item.status === "pending"
+            ? { ...item, status: "created" as const, externalQuote }
+            : item
+        )
+      );
+      const quoteNumber = externalQuote?.quote_number ? ` ${externalQuote.quote_number}` : "";
+      const confirmMsg = `Orcamento formal${quoteNumber} criado no ERP. Nenhuma OS foi criada.`;
+      setMessages((current) => [...current, { role: "assistant", content: confirmMsg }]);
+      setDisplay((current) => [
+        ...current,
+        { kind: "message", role: "assistant", content: confirmMsg },
+      ]);
+    } catch (e: any) {
+      const msg = e?.message || "Falha ao criar orcamento formal";
+      setError(msg);
+      setDisplay((current) => [...current, { kind: "message", role: "assistant", content: `Erro: ${msg}` }]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const rejectQuoteProposal = useCallback((draftId: string) => {
+    setDisplay((current) =>
+      current.map((item) =>
+        item.kind === "quote_proposal" && item.proposal.draft_id === draftId && item.status === "pending"
+          ? { ...item, status: "rejected" as const }
+          : item
+      )
+    );
+  }, []);
+
   const approveAction = useCallback(async (pendingActionId: string) => {
     setLoading(true);
     try {
@@ -383,6 +465,8 @@ export function useAIOperator(
     selectDraftCandidate,
     confirmLinkProposal,
     rejectLinkProposal,
+    confirmQuoteProposal,
+    rejectQuoteProposal,
     approveAction,
     rejectAction,
     reset,

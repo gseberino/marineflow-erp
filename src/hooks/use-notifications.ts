@@ -56,7 +56,7 @@ async function generateNotifications(userId: string, role: string): Promise<AppN
   if (isExternal || isAdmin) {
     const { data: quotes } = await supabase
       .from('external_quotes')
-      .select('id, quote_number, status, updated_at, lead:external_quote_leads(name)')
+      .select('id, quote_number, status, updated_at, lead:external_quote_leads(full_name_or_company_name)')
       .eq('created_by', userId)
       .in('status', ['approved', 'cancelled'])
       .order('updated_at', { ascending: false })
@@ -68,7 +68,7 @@ async function generateNotifications(userId: string, role: string): Promise<AppN
         id: `quote:${q.id}:${q.status}`,
         type: isApproved ? 'QUOTE_APPROVED' : 'QUOTE_REJECTED',
         title: isApproved ? 'Orçamento Aprovado' : 'Orçamento Reprovado',
-        description: `${q.quote_number} — ${q.lead?.name ?? 'Cliente'}`,
+        description: `${q.quote_number} — ${q.lead?.full_name_or_company_name ?? 'Cliente'}`,
         created_at: q.updated_at,
         navigate_to: `/external-quotes/${q.id}`,
       });

@@ -3,7 +3,11 @@ import { PageHeader } from '@/components/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { useExternalQuotes, type ExternalQuoteStatus } from '@/hooks/use-external-quotes';
+import {
+  getExternalQuotePartyName,
+  useExternalQuotes,
+  type ExternalQuoteStatus,
+} from '@/hooks/use-external-quotes';
 import { Plus, Clock, CheckCircle2, XCircle, ShoppingBag, FileText, TrendingUp, Filter } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
@@ -116,6 +120,7 @@ export default function ExternalQuoteListPage() {
             <SelectItem value="all">Todos os Status</SelectItem>
             <SelectItem value="draft">Rascunho</SelectItem>
             <SelectItem value="pending_approval">Pendente</SelectItem>
+            <SelectItem value="pending_product">Produto/Cotacao</SelectItem>
             <SelectItem value="approved">Aprovado</SelectItem>
             <SelectItem value="converted">Convertido</SelectItem>
             <SelectItem value="cancelled">Cancelado</SelectItem>
@@ -145,7 +150,7 @@ export default function ExternalQuoteListPage() {
                     {getStatusIcon(quote.status as ExternalQuoteStatus)}
                   </div>
                   <div>
-                    <CardTitle className="text-sm font-medium">{quote.client?.name || quote.lead?.name || '—'}</CardTitle>
+                    <CardTitle className="text-sm font-medium">{getExternalQuotePartyName(quote)}</CardTitle>
                     <p className="text-xs text-muted-foreground">
                       {format(new Date(quote.created_at), "dd 'de' MMMM", { locale: ptBR })}
                     </p>

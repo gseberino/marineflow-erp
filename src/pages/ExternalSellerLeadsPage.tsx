@@ -49,8 +49,8 @@ export default function ExternalSellerLeadsPage() {
         .from('external_quote_leads')
         .insert([{
           created_by: user.id,
-          type: 'person',
-          name: vars.name,
+          type: 'individual',
+          full_name_or_company_name: vars.name,
           phone: vars.phone,
           boat_name: vars.vessel
         } as any])
@@ -72,9 +72,9 @@ export default function ExternalSellerLeadsPage() {
   });
 
   const filteredLeads = leads?.filter(l => 
-    l.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    l.full_name_or_company_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     l.phone?.includes(searchTerm) ||
-    l.name?.toLowerCase().includes(searchTerm.toLowerCase())
+    l.boat_name?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (
@@ -164,7 +164,7 @@ export default function ExternalSellerLeadsPage() {
                 <div className="flex justify-between items-start">
                   <div className="space-y-1">
                     <h3 className="font-bold text-lg group-hover:text-primary transition-colors">
-                      {lead.name}
+                      {lead.full_name_or_company_name}
                     </h3>
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <Phone className="h-3.5 w-3.5" />
@@ -176,10 +176,10 @@ export default function ExternalSellerLeadsPage() {
                   </Badge>
                 </div>
 
-                {lead.name && (
+                {lead.boat_name && (
                   <div className="flex items-center gap-2 text-sm bg-primary/5 p-2 rounded-lg text-primary font-medium">
                     <Anchor className="h-4 w-4" />
-                    {lead.name}
+                    {lead.boat_name}
                   </div>
                 )}
 

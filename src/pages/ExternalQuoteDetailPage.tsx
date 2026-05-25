@@ -4,7 +4,13 @@ import { PageHeader } from '@/components/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { useExternalQuote, useUpdateExternalQuoteStatus } from '@/hooks/use-external-quotes';
+import {
+  getExternalQuotePartName,
+  getExternalQuotePartyName,
+  getExternalQuoteServiceName,
+  getExternalQuoteVesselName,
+  useExternalQuote,
+} from '@/hooks/use-external-quotes';
 import { ChevronLeft, Phone, Anchor, User, Calendar, MessageCircle, AlertCircle, ShoppingCart, CheckCircle } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -85,7 +91,7 @@ export default function ExternalQuoteDetailPage() {
                   {quote.parts?.map((item, index) => (
                     <div key={item.id} className="flex justify-between items-start py-3 border-b last:border-0">
                       <div>
-                        <p className="font-medium">{item.name_snapshot || 'Peça sem nome'}</p>
+                        <p className="font-medium">{getExternalQuotePartName(item)}</p>
                         <p className="text-xs text-muted-foreground">Qtd: {item.quantity}</p>
                       </div>
                       <div className="text-right">
@@ -101,7 +107,7 @@ export default function ExternalQuoteDetailPage() {
                   {quote.services?.map((item, index) => (
                     <div key={item.id} className="flex justify-between items-start py-3 border-b last:border-0">
                       <div>
-                        <p className="font-medium">{item.name_snapshot || 'Serviço sem nome'}</p>
+                        <p className="font-medium">{getExternalQuoteServiceName(item)}</p>
                         <p className="text-xs text-muted-foreground">Qtd: {item.quantity}</p>
                       </div>
                       <div className="text-right">
@@ -170,18 +176,18 @@ export default function ExternalQuoteDetailPage() {
                   <User className="h-4 w-4 text-primary" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium">{quote.client?.name || quote.lead?.name || '—'}</p>
+                  <p className="text-sm font-medium">{getExternalQuotePartyName(quote)}</p>
                   <p className="text-xs text-muted-foreground">{quote.client?.phone || quote.lead?.phone || '—'}</p>
                 </div>
               </div>
-              {quote.vessel?.name && (
+              {(quote.vessel?.boat_name || quote.lead?.boat_name) && (
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-blue-100 rounded-full">
                     <Anchor className="h-4 w-4 text-blue-600" />
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Embarcação/Unidade</p>
-                    <p className="text-sm font-medium">{quote.vessel.name}</p>
+                    <p className="text-sm font-medium">{getExternalQuoteVesselName(quote)}</p>
                   </div>
                 </div>
               )}

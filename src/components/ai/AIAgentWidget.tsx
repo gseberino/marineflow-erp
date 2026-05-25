@@ -14,6 +14,7 @@ import { AIOperatorDraftCard } from './AIOperatorDraftCard';
 import { AIOperatorDraftSelectionCard } from './AIOperatorDraftSelectionCard';
 import { AIOperatorLinkProposalCard } from './AIOperatorLinkProposalCard';
 import { AIOperatorPendingActionCard } from './AIOperatorPendingActionCard';
+import { AIOperatorQuoteProposalCard } from './AIOperatorQuoteProposalCard';
 import { toast } from 'sonner';
 
 function DraggableAIButton({ onOpen }: { onOpen: () => void }) {
@@ -388,6 +389,18 @@ export function AIAgentWidget() {
                     disabled={op.loading}
                     onApprove={op.approveAction}
                     onReject={op.rejectAction}
+                  />
+                );
+              if (item.kind === 'quote_proposal')
+                return (
+                  <AIOperatorQuoteProposalCard
+                    key={i}
+                    proposal={item.proposal}
+                    status={item.status}
+                    externalQuote={item.externalQuote}
+                    disabled={op.loading}
+                    onConfirm={op.confirmQuoteProposal}
+                    onReject={op.rejectQuoteProposal}
                   />
                 );
               return null;

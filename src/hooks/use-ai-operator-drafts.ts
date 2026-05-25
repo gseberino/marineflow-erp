@@ -41,6 +41,7 @@ export type AIOperatorDraftDetail = {
   draft: AIOperatorDraftListItem;
   items: AIOperatorDraftItem[];
   pendingActions: Array<{ id: string; status: string; action_name: string; title: string | null }>;
+  formalQuote: { id: string; quote_number: string | null; status: string | null } | null;
   session: {
     id: string;
     created_at: string;
@@ -117,7 +118,12 @@ export function useAIOperatorDraftDetail(draftId: string | undefined) {
       if (error) throw error;
       if (!draft) throw new Error("Rascunho nao encontrado");
 
-      const [{ data: items, error: itemsError }, { data: pendingActions, error: pendingError }, sessionResult] =
+      const [
+        { data: items, error: itemsError },
+        { data: pendingActions, error: pendingError },
+        { data: formalQuote, error: formalQuoteError },
+        sessionResult,
+      ] =
         await Promise.all([
           supabase.from("ai_operator_draft_items").select("*").eq("draft_id", draftId).order("position"),
           supabase
@@ -125,6 +131,11 @@ export function useAIOperatorDraftDetail(draftId: string | undefined) {
             .select("id, status, action_name, title")
             .eq("draft_id", draftId)
             .order("created_at", { ascending: false }),
+          supabase
+            .from("external_quotes")
+            .select("id, quote_number, status")
+            .eq("ai_operator_draft_id", draftId)
+            .maybeSingle(),
           draft.session_id
             ? supabase
                 .from("ai_operator_sessions")
@@ -136,6 +147,7 @@ export function useAIOperatorDraftDetail(draftId: string | undefined) {
 
       if (itemsError) throw itemsError;
       if (pendingError) throw pendingError;
+      if (formalQuoteError) throw formalQuoteError;
       if (sessionResult.error) throw sessionResult.error;
 
       return {
@@ -162,6 +174,7 @@ export function useAIOperatorDraftDetail(draftId: string | undefined) {
         },
         items: (items || []) as AIOperatorDraftItem[],
         pendingActions: (pendingActions || []) as AIOperatorDraftDetail["pendingActions"],
+        formalQuote: formalQuote ?? null,
         session: sessionResult.data,
       } as AIOperatorDraftDetail;
     },

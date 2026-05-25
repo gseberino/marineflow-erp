@@ -16,6 +16,7 @@ export type Database = {
     Tables: {
       agenda_tasks: {
         Row: {
+          ai_operator_draft_id: string | null
           client_id: string | null
           created_at: string
           created_by: string | null
@@ -32,6 +33,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          ai_operator_draft_id?: string | null
           client_id?: string | null
           created_at?: string
           created_by?: string | null
@@ -48,6 +50,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          ai_operator_draft_id?: string | null
           client_id?: string | null
           created_at?: string
           created_by?: string | null
@@ -64,6 +67,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "external_quotes_ai_operator_draft_id_fkey"
+            columns: ["ai_operator_draft_id"]
+            isOneToOne: false
+            referencedRelation: "ai_operator_drafts"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "agenda_tasks_client_id_fkey"
             columns: ["client_id"]

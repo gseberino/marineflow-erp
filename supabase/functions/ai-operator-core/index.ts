@@ -20,7 +20,16 @@ import { resolveProposalDraftId } from "./proposal.ts";
 import {
   evaluateActionProposalGovernance,
   findOpenEquivalentPendingAction,
+  isInformationalActionRequest,
 } from "./action-governance.ts";
+import {
+  buildDraftGroundingSnapshotNote,
+  buildExternalQuoteFormalizationProposal,
+  buildGroundedInformationalResponse,
+  evaluateExternalQuoteFormalization,
+  mapDraftItemsToExternalQuoteRows,
+  type DraftItemForExternalQuote,
+} from "./formal-quote.ts";
 import { interpretPendingUpdate, interpretMemoryUpdate } from "./transitions.ts";
 import { resolveCoreChannel } from "./channel-source.ts";
 import { preAuthorizeApprove } from "./approve-guard.ts";
@@ -171,7 +180,7 @@ async function getDraftRow(admin: any, draftId: string) {
   const { data } = await admin
     .from("ai_operator_drafts")
     .select(
-      "id, session_id, title, status, summary, metadata, pending_questions, next_steps, hypotheses, client_id, vessel_id, created_at, updated_at, clients(full_name_or_company_name), vessels(boat_name)"
+      "id, session_id, kind, title, status, summary, metadata, pending_questions, next_steps, hypotheses, client_id, vessel_id, service_order_id, converted_service_order_id, interpreted_category, estimated_labor_hours, estimated_labor_value, estimated_parts_value, estimated_travel_value, estimated_total, created_at, updated_at, clients(full_name_or_company_name), vessels(boat_name)"
     )
     .eq("id", draftId)
     .maybeSingle();
@@ -197,7 +206,7 @@ async function findActiveDraft(admin: any, sessionId: string, requestedDraftId?:
   const { data } = await admin
     .from("ai_operator_drafts")
     .select(
-      "id, session_id, title, status, summary, pending_questions, next_steps, hypotheses, client_id, vessel_id, created_at, updated_at, clients(full_name_or_company_name), vessels(boat_name)"
+      "id, session_id, kind, title, status, summary, pending_questions, next_steps, hypotheses, client_id, vessel_id, service_order_id, converted_service_order_id, interpreted_category, estimated_labor_hours, estimated_labor_value, estimated_parts_value, estimated_travel_value, estimated_total, created_at, updated_at, clients(full_name_or_company_name), vessels(boat_name)"
     )
     .eq("session_id", sessionId)
     .order("updated_at", { ascending: false })
@@ -247,19 +256,24 @@ async function findDraftCandidatesForSelection(
 }
 
 async function buildActiveDraftContext(admin: any, draftId: string) {
-  const [draft, itemsResult] = await Promise.all([
+  const [draft, itemsResult, formalQuote, openActions] = await Promise.all([
     getDraftRow(admin, draftId),
     admin.from("ai_operator_draft_items").select("item_kind, description").eq("draft_id", draftId).order("position"),
+    getFormalQuoteForDraft(admin, draftId),
+    countOpenPendingActionsForDraft(admin, draftId),
   ]);
   if (!draft) return null;
 
-  return buildDraftContextNote({
+  const officialServiceOrder = await getOfficialServiceOrderForDraft(admin, draft);
+  const pendingQuestions = Array.isArray(draft.pending_questions) ? draft.pending_questions : [];
+
+  const legacyContext = buildDraftContextNote({
     title: draft.title ?? null,
     status: draft.status ?? null,
     summary: draft.summary ?? null,
     clientName: draft.clients?.full_name_or_company_name ?? null,
     vesselName: draft.vessels?.boat_name ?? null,
-    pendingQuestions: Array.isArray(draft.pending_questions) ? draft.pending_questions : [],
+    pendingQuestions,
     nextSteps: Array.isArray(draft.next_steps) ? draft.next_steps : [],
     hypotheses: Array.isArray(draft.hypotheses) ? draft.hypotheses : [],
     items: (itemsResult.data || []).map((item: any) => ({
@@ -267,6 +281,107 @@ async function buildActiveDraftContext(admin: any, draftId: string) {
       description: item.description,
     })),
   });
+  const snapshot = buildDraftGroundingSnapshotNote({
+    draft: draftForExternalQuote(draft, formalQuote?.id ?? null),
+    itemCount: itemsResult.data?.length ?? 0,
+    pendingQuestionCount: pendingQuestions.length,
+    openActionCount: openActions,
+    formalQuote,
+    officialServiceOrder,
+  });
+
+  return `${snapshot}\n\n${legacyContext}`;
+}
+
+function draftForExternalQuote(draft: any, externalQuoteId: string | null = null) {
+  return {
+    id: draft.id,
+    title: draft.title ?? null,
+    kind: draft.kind ?? null,
+    status: draft.status ?? null,
+    summary: draft.summary ?? null,
+    client_id: draft.client_id ?? null,
+    vessel_id: draft.vessel_id ?? null,
+    client_name: draft.clients?.full_name_or_company_name ?? null,
+    vessel_name: draft.vessels?.boat_name ?? null,
+    converted_service_order_id: draft.converted_service_order_id ?? null,
+    service_order_id: draft.service_order_id ?? null,
+    external_quote_id: externalQuoteId,
+    pending_questions: Array.isArray(draft.pending_questions) ? draft.pending_questions : [],
+    next_steps: Array.isArray(draft.next_steps) ? draft.next_steps : [],
+    hypotheses: Array.isArray(draft.hypotheses) ? draft.hypotheses : [],
+  };
+}
+
+async function getFormalQuoteForDraft(admin: any, draftId: string) {
+  const { data } = await admin
+    .from("external_quotes")
+    .select("id, quote_number, status")
+    .eq("ai_operator_draft_id", draftId)
+    .maybeSingle();
+  return data ?? null;
+}
+
+async function getOfficialServiceOrderForDraft(admin: any, draft: any) {
+  const serviceOrderId = draft?.converted_service_order_id ?? draft?.service_order_id ?? null;
+  if (!serviceOrderId) return null;
+  const { data } = await admin
+    .from("service_orders")
+    .select("id, service_order_number, status")
+    .eq("id", serviceOrderId)
+    .maybeSingle();
+  return data ?? null;
+}
+
+async function countOpenPendingActionsForDraft(admin: any, draftId: string) {
+  const { count } = await admin
+    .from("ai_operator_pending_actions")
+    .select("id", { count: "exact", head: true })
+    .eq("draft_id", draftId)
+    .in("status", ["pending", "approved"])
+    .is("executed_at", null);
+  return count ?? 0;
+}
+
+async function getDraftItemsForExternalQuote(admin: any, draftId: string): Promise<DraftItemForExternalQuote[]> {
+  const { data, error } = await admin
+    .from("ai_operator_draft_items")
+    .select("id, item_kind, service_id, product_id, description, notes, quantity, unit, unit_price, estimated_total, position")
+    .eq("draft_id", draftId)
+    .order("position");
+  if (error) throw error;
+  return (data || []) as DraftItemForExternalQuote[];
+}
+
+function buildFormalQuoteInternalNotes(input: {
+  draft: any;
+  nonBillableNotes: string[];
+  pendingQuestionCount: number;
+}) {
+  const pendingQuestions = Array.isArray(input.draft.pending_questions) ? input.draft.pending_questions : [];
+  const nextSteps = Array.isArray(input.draft.next_steps) ? input.draft.next_steps : [];
+  const hypotheses = Array.isArray(input.draft.hypotheses) ? input.draft.hypotheses : [];
+  const blocks = [
+    "Origem: MarineFlow AI Operator.",
+    input.pendingQuestionCount > 0
+      ? `Perguntas pendentes (${input.pendingQuestionCount}):\n${pendingQuestions.map((q: string) => `- ${q}`).join("\n")}`
+      : null,
+    nextSteps.length > 0 ? `Proximos passos sugeridos:\n${nextSteps.map((step: string) => `- ${step}`).join("\n")}` : null,
+    hypotheses.length > 0 ? `Hipoteses tecnicas:\n${hypotheses.map((h: string) => `- ${h}`).join("\n")}` : null,
+    input.nonBillableNotes.length > 0
+      ? `Observacoes nao cobradas:\n${input.nonBillableNotes.map((note) => `- ${note}`).join("\n")}`
+      : null,
+  ].filter(Boolean);
+  return blocks.join("\n\n");
+}
+
+function minimizedExternalQuotePayload(row: any) {
+  return {
+    id: row.id,
+    quote_number: row.quote_number ?? null,
+    status: row.status ?? null,
+    path: `/external-quotes/${row.id}`,
+  };
 }
 
 function safeLimit(value: unknown, fallback = 10, max = 25) {
@@ -1169,6 +1284,169 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (action === "create_external_quote_from_draft") {
+      const draftId = String(body.draft_id || "");
+      if (!draftId) return jr({ error: "draft_id obrigatorio" }, 400);
+
+      const draft = await getDraftRow(admin, draftId);
+      if (!draft || !draft.session_id) return jr({ error: "Rascunho nao encontrado." }, 404);
+      const ownsSession = await sessionBelongsTo(admin, draft.session_id, userId, isAdmin);
+      if (!ownsSession) return jr({ error: "Rascunho nao pertence ao usuario." }, 403);
+
+      const existingQuote = await getFormalQuoteForDraft(admin, draftId);
+      const items = await getDraftItemsForExternalQuote(admin, draftId);
+      const eligibility = evaluateExternalQuoteFormalization({
+        draft: draftForExternalQuote(draft, existingQuote?.id ?? null),
+        itemCount: items.length,
+        existingExternalQuoteId: existingQuote?.id ?? null,
+        latestUserMessage: "Formalize este rascunho como orcamento no ERP.",
+      });
+
+      if (!eligibility.ok) {
+        if (eligibility.reason === "already_formalized" && existingQuote) {
+          await audit(admin, {
+            session_id: draft.session_id,
+            draft_id: draftId,
+            actor_user_id: userId,
+            actor_kind: "system",
+            event_type: "external_quote_formalization_duplicate_suppressed",
+            event_category: "data",
+            payload: { existing_quote: true },
+          });
+          return jr({
+            ok: true,
+            created: false,
+            existing: true,
+            external_quote: minimizedExternalQuotePayload(existingQuote),
+          });
+        }
+
+        await audit(admin, {
+          session_id: draft.session_id,
+          draft_id: draftId,
+          actor_user_id: userId,
+          actor_kind: "system",
+          event_type: "external_quote_formalization_blocked",
+          event_category: "security",
+          payload: { reason: eligibility.reason },
+        });
+        return jr({ error: eligibility.message, blocked: true, reason: eligibility.reason }, 409);
+      }
+
+      const proposal = buildExternalQuoteFormalizationProposal({
+        draft: draftForExternalQuote(draft, null),
+        items,
+      });
+      const mapped = mapDraftItemsToExternalQuoteRows(items);
+      const pendingQuestionCount = Array.isArray(draft.pending_questions) ? draft.pending_questions.length : 0;
+      const knownServiceTotal = mapped.services.reduce((sum, row: any) => sum + Number(row.line_total || 0), 0);
+      const knownPartTotal = mapped.parts.reduce((sum, row: any) => sum + Number(row.line_total_sale || 0), 0);
+      let createdQuote: any = null;
+
+      try {
+        const { data: quote, error: quoteErr } = await admin
+          .from("external_quotes")
+          .insert({
+            ai_operator_draft_id: draftId,
+            created_by: userId,
+            client_id: draft.client_id,
+            vessel_id: draft.vessel_id,
+            status: proposal.initial_status,
+            service_type: draft.interpreted_category || draft.kind || "quote",
+            problem_description: draft.title || "Orcamento formal gerado a partir de rascunho do AI Operator",
+            initial_findings: draft.summary || null,
+            customer_visible_report: draft.summary || null,
+            internal_notes: buildFormalQuoteInternalNotes({
+              draft,
+              nonBillableNotes: mapped.nonBillableNotes,
+              pendingQuestionCount,
+            }),
+            estimated_hours: draft.estimated_labor_hours ?? null,
+            labor_cost_total: knownServiceTotal,
+            parts_cost_total: knownPartTotal,
+            travel_cost_total: 0,
+            grand_total: mapped.knownGrandTotal,
+            currency: "BRL",
+          })
+          .select("id, quote_number, status")
+          .single();
+        if (quoteErr) {
+          if (String(quoteErr.code || "") === "23505") {
+            const already = await getFormalQuoteForDraft(admin, draftId);
+            if (already) {
+              return jr({
+                ok: true,
+                created: false,
+                existing: true,
+                external_quote: minimizedExternalQuotePayload(already),
+              });
+            }
+          }
+          throw quoteErr;
+        }
+        createdQuote = quote;
+
+        if (mapped.parts.length > 0) {
+          const { error: partsErr } = await admin
+            .from("external_quote_parts")
+            .insert(mapped.parts.map((part) => ({ ...part, external_quote_id: quote.id })));
+          if (partsErr) throw partsErr;
+        }
+
+        if (mapped.services.length > 0) {
+          const { error: servicesErr } = await admin
+            .from("external_quote_services")
+            .insert(mapped.services.map((service) => ({ ...service, external_quote_id: quote.id })));
+          if (servicesErr) throw servicesErr;
+        }
+
+        await audit(admin, {
+          session_id: draft.session_id,
+          draft_id: draftId,
+          actor_user_id: userId,
+          actor_kind: "user",
+          event_type: "external_quote_formalization_created",
+          event_category: "data",
+          payload: {
+            initial_status: proposal.initial_status,
+            part_count: mapped.parts.length,
+            service_count: mapped.services.length,
+            pending_item_count: mapped.pendingItemCount,
+            no_service_order_created: true,
+          },
+        });
+
+        return jr({
+          ok: true,
+          created: true,
+          external_quote: minimizedExternalQuotePayload(quote),
+          counts: {
+            parts: mapped.parts.length,
+            services: mapped.services.length,
+            pending_items: mapped.pendingItemCount,
+            pending_questions: pendingQuestionCount,
+          },
+          effects: proposal.effects,
+        });
+      } catch (e: any) {
+        if (createdQuote?.id) {
+          await admin.from("external_quote_services").delete().eq("external_quote_id", createdQuote.id);
+          await admin.from("external_quote_parts").delete().eq("external_quote_id", createdQuote.id);
+          await admin.from("external_quotes").delete().eq("id", createdQuote.id);
+        }
+        await audit(admin, {
+          session_id: draft.session_id,
+          draft_id: draftId,
+          actor_user_id: userId,
+          actor_kind: "system",
+          event_type: "external_quote_formalization_failed",
+          event_category: "error",
+          payload: { error: e?.message || "unknown", rolled_back: !!createdQuote?.id },
+        });
+        return jr({ error: "Falha ao criar orcamento formal", details: e?.message || "erro desconhecido" }, 500);
+      }
+    }
+
     // --------------------------------------------------------------
     // cancel_draft — fluxo seguro para rascunhos criados incorretamente.
     // Permite cancelar apenas drafts em estados compativeis com erro
@@ -1611,6 +1889,45 @@ Deno.serve(async (req) => {
       }
     }
 
+    if (activeDraft && latestMessageText && isInformationalActionRequest(latestMessageText)) {
+      const [freshDraft, items, formalQuote] = await Promise.all([
+        getDraftRow(admin, activeDraft.id),
+        getDraftItemsForExternalQuote(admin, activeDraft.id),
+        getFormalQuoteForDraft(admin, activeDraft.id),
+      ]);
+      const officialServiceOrder = freshDraft ? await getOfficialServiceOrderForDraft(admin, freshDraft) : null;
+      if (freshDraft) {
+        const content = buildGroundedInformationalResponse({
+          draft: draftForExternalQuote(freshDraft, formalQuote?.id ?? null),
+          itemCount: items.length,
+          pendingQuestionCount: Array.isArray(freshDraft.pending_questions) ? freshDraft.pending_questions.length : 0,
+          formalQuote,
+          officialServiceOrder,
+        });
+        await recordMessage(admin, sessionId!, { role: "assistant", content, source: channel });
+        await audit(admin, {
+          session_id: sessionId,
+          draft_id: freshDraft.id,
+          actor_user_id: userId,
+          actor_kind: "system",
+          event_type: "grounded_informational_response",
+          event_category: "info",
+          payload: {
+            draft_status: freshDraft.status ?? null,
+            formal_quote_exists: !!formalQuote,
+            service_order_exists: !!officialServiceOrder,
+          },
+        });
+        return jr({
+          ok: true,
+          session_id: sessionId,
+          message: { role: "assistant", content },
+          draft_id: freshDraft.id,
+          tool_events: [],
+        });
+      }
+    }
+
     const systemPrompt = buildSystemPrompt({
       userName: profile.full_name || "Usuário",
       userRole: profile.role || "user",
@@ -1646,6 +1963,7 @@ Deno.serve(async (req) => {
     let createdDraftId: string | null = activeDraft?.id ?? null;
     let pendingActionForFrontend: any = null;
     let linkProposalForFrontend: any = null;
+    let quoteProposalForFrontend: any = null;
 
     for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
       const aiRes = await fetch(`${GEMINI_BASE_URL}/chat/completions`, {
@@ -1676,6 +1994,7 @@ Deno.serve(async (req) => {
           draft_id: createdDraftId,
           pending_action: pendingActionForFrontend,
           proposed_link: linkProposalForFrontend,
+          quote_proposal: quoteProposalForFrontend,
           tool_events: sanitizeToolEventsForFrontend(toolEvents),
         });
       }
@@ -1687,6 +2006,88 @@ Deno.serve(async (req) => {
           fnArgs = JSON.parse(tc.function?.arguments || "{}");
         } catch {
           fnArgs = {};
+        }
+
+        if (fnName === "propose_external_quote_from_draft") {
+          const targetDraftId = createdDraftId;
+          if (!targetDraftId) {
+            const blocked = {
+              blocked: true,
+              reason: "no_active_draft",
+              message: "Nao ha rascunho ativo para formalizar como orcamento.",
+            };
+            toolEvents.push({ name: fnName, args: {}, result: blocked, blocked: true });
+            messages.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify(blocked) });
+            continue;
+          }
+
+          const [draft, items, formalQuote] = await Promise.all([
+            getDraftRow(admin, targetDraftId),
+            getDraftItemsForExternalQuote(admin, targetDraftId),
+            getFormalQuoteForDraft(admin, targetDraftId),
+          ]);
+          const eligibility = evaluateExternalQuoteFormalization({
+            draft: draft ? draftForExternalQuote(draft, formalQuote?.id ?? null) : null,
+            itemCount: items.length,
+            existingExternalQuoteId: formalQuote?.id ?? null,
+            latestUserMessage: latestMessageText,
+          });
+
+          if (!eligibility.ok) {
+            await audit(admin, {
+              session_id: sessionId,
+              draft_id: targetDraftId,
+              actor_user_id: userId,
+              actor_kind: "system",
+              event_type: "external_quote_formalization_proposal_blocked",
+              event_category: eligibility.reason === "informational_request" ? "info" : "security",
+              payload: { reason: eligibility.reason },
+            });
+            const blocked = {
+              blocked: true,
+              reason: eligibility.reason,
+              message: eligibility.message,
+              existing_external_quote_id: eligibility.existingExternalQuoteId ?? null,
+            };
+            toolEvents.push({ name: fnName, args: {}, result: blocked, blocked: true });
+            messages.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify(blocked) });
+            continue;
+          }
+
+          quoteProposalForFrontend = buildExternalQuoteFormalizationProposal({
+            draft: draftForExternalQuote(draft, null),
+            items,
+          });
+          const toolResult = {
+            ok: true,
+            proposed: true,
+            persisted: false,
+            requires_user_confirmation: true,
+            initial_status: quoteProposalForFrontend.initial_status,
+            item_count: quoteProposalForFrontend.item_count,
+            part_count: quoteProposalForFrontend.part_count,
+            service_count: quoteProposalForFrontend.service_count,
+            pending_item_count: quoteProposalForFrontend.pending_item_count,
+            pending_questions_count: quoteProposalForFrontend.pending_questions_count,
+            creates_service_order: false,
+          };
+          toolEvents.push({ name: fnName, args: {}, result: toolResult });
+          messages.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify(toolResult) });
+          await audit(admin, {
+            session_id: sessionId,
+            draft_id: targetDraftId,
+            actor_user_id: userId,
+            actor_kind: "ai_model",
+            event_type: "external_quote_formalization_proposed",
+            event_category: "data",
+            payload: {
+              initial_status: quoteProposalForFrontend.initial_status,
+              part_count: quoteProposalForFrontend.part_count,
+              service_count: quoteProposalForFrontend.service_count,
+              pending_item_count: quoteProposalForFrontend.pending_item_count,
+            },
+          });
+          continue;
         }
 
         if (fnName === "propose_action") {
@@ -1844,6 +2245,7 @@ Deno.serve(async (req) => {
             draft_id: createdDraftId,
             pending_action: pendingActionForFrontend,
             proposed_link: linkProposalForFrontend,
+            quote_proposal: quoteProposalForFrontend,
             tool_events: sanitizeToolEventsForFrontend(toolEvents),
           });
         }

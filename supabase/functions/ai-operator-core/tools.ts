@@ -246,6 +246,26 @@ export const OPERATOR_TOOLS = [
   {
     type: "function",
     function: {
+      name: "propose_external_quote_from_draft",
+      description:
+        "Prepara um card de confirmacao para formalizar o rascunho ATIVO como orcamento formal em external_quotes. " +
+        "NAO persiste o orcamento, NAO cria OS, NAO envia WhatsApp, NAO altera estoque, financeiro ou agenda. " +
+        "A criacao real ocorre somente apos confirmacao humana pela interface no endpoint create_external_quote_from_draft. " +
+        "O draft, cliente e embarcacao sao resolvidos pelo backend a partir do contexto seguro; nunca envie IDs internos.",
+      parameters: {
+        type: "object",
+        properties: {
+          rationale: {
+            type: "string",
+            description: "Breve justificativa em portugues para formalizar o draft ativo como orcamento.",
+          },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "propose_action",
       description:
         "OBRIGATÓRIO antes de qualquer ação sensível (criar OS oficial, enviar WhatsApp ao cliente, agendar técnico, alterar estoque, " +
