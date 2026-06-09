@@ -376,8 +376,8 @@ const TOOLS = [
   {
     type: "function",
     function: {
-      name: "add_service_order_item",
-      description: "[DEPRECATED — prefira add_product_to_order] Adiciona um PRODUTO/PEÇA (estoque) a uma OS. NÃO use para serviços de mão de obra — para isso, use add_service_to_order ou add_services_to_order.",
+      name: "add_product_to_order",
+      description: "Adiciona UM ÚNICO produto/peça do catálogo a uma OS. Para MÚLTIPLOS produtos (listas, tabelas, vários equipamentos de uma vez) use add_products_to_order.",
       parameters: {
         type: "object",
         properties: {
@@ -392,16 +392,29 @@ const TOOLS = [
   {
     type: "function",
     function: {
-      name: "add_product_to_order",
-      description: "Adiciona um PRODUTO/PEÇA do catálogo (tabela products) a uma Ordem de Serviço. Use SEMPRE que o usuário pedir para incluir uma peça, equipamento, item físico ou produto cadastrado. NÃO use para serviços de mão de obra (instalação, reparo, diagnóstico) — para esses, use add_service_to_order (1 item) ou add_services_to_order (vários).",
+      name: "add_products_to_order",
+      description:
+        "Adiciona MÚLTIPLOS produtos/peças/equipamentos a uma OS de uma única vez. Use para listas de produtos, tabelas, ou qualquer caso com mais de 1 produto. Aceita product_id OU product_name (busca no catálogo). Recalcula totais uma única vez no final.",
       parameters: {
         type: "object",
         properties: {
           service_order_id: { type: "string" },
-          product_id: { type: "string" },
-          quantity: { type: "number" },
+          products: {
+            type: "array",
+            description: "Lista de produtos a adicionar",
+            items: {
+              type: "object",
+              properties: {
+                product_id: { type: "string", description: "UUID do produto (se já conhecido)" },
+                product_name: { type: "string", description: "Nome do produto para busca no catálogo (se product_id não disponível)" },
+                quantity: { type: "number", default: 1 },
+                unit_price: { type: "number", description: "Preço de venda unitário (opcional — usa sale_price do catálogo se omitido)" },
+              },
+            },
+            minItems: 1,
+          },
         },
-        required: ["service_order_id", "product_id", "quantity"],
+        required: ["service_order_id", "products"],
       },
     },
   },
@@ -1340,6 +1353,103 @@ async function executeTool(
       return { ok: true, part: data };
     }
 
+    case "add_products_to_order": {
+      if (!args.service_order_id) return { ok: false, error: "service_order_id é obrigatório" };
+      const items: any[] = Array.isArray(args.products) ? args.products : [];
+      if (items.length === 0) return { ok: false, error: "Array 'products' vazio ou ausente" };
+
+      const created: Array<{ product_id: string; product_name: string; quantity: number; line_total: number }> = [];
+      const failed: Array<{ index: number; product_name: string; error: string }> = [];
+      let totalAdded = 0;
+
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i] || {};
+        let productId: string | null = it.product_id || null;
+        let productName: string = it.product_name || "";
+        let prod: any = null;
+
+        if (productId) {
+          const { data } = await sb
+            .from("products")
+            .select("id, product_name, cost_price, sale_price, cost_currency")
+            .eq("id", productId)
+            .maybeSingle();
+          prod = data;
+          if (!prod) {
+            failed.push({ index: i, product_name: productName || productId, error: "Produto não encontrado por ID" });
+            continue;
+          }
+          productName = prod.product_name;
+        } else if (productName) {
+          const { data } = await sb
+            .from("products")
+            .select("id, product_name, cost_price, sale_price, cost_currency")
+            .ilike("product_name", `%${productName}%`)
+            .limit(1)
+            .maybeSingle();
+          prod = data;
+          if (!prod) {
+            failed.push({ index: i, product_name: productName, error: `Produto "${productName}" não encontrado no catálogo` });
+            continue;
+          }
+          productId = prod.id;
+          productName = prod.product_name;
+        } else {
+          failed.push({ index: i, product_name: "(sem nome)", error: "product_id ou product_name é obrigatório" });
+          continue;
+        }
+
+        const quantity = Number(it.quantity) || 1;
+        const costPrice = prod.cost_price || 0;
+        const salePrice = it.unit_price !== undefined && it.unit_price !== null
+          ? Number(it.unit_price)
+          : (prod.sale_price || 0);
+
+        try {
+          const { data, error: insertErr } = await sb
+            .from("service_order_parts")
+            .insert({
+              service_order_id: args.service_order_id,
+              product_id: productId,
+              quantity,
+              unit_cost_snapshot: costPrice,
+              unit_sale_snapshot: salePrice,
+              currency_snapshot: prod.cost_currency || "BRL",
+              line_total_cost: costPrice * quantity,
+              line_total_sale: salePrice * quantity,
+            })
+            .select()
+            .single();
+          if (insertErr) throw insertErr;
+          created.push({ product_id: productId!, product_name: productName, quantity, line_total: salePrice * quantity });
+          totalAdded += salePrice * quantity;
+        } catch (e: any) {
+          console.error(`[ai-agent] add_products_to_order item ${i} failed:`, e?.message);
+          failed.push({ index: i, product_name: productName, error: e?.message || "Falha ao inserir" });
+        }
+      }
+
+      if (created.length > 0) {
+        try {
+          await recalcSoTotals(sb, args.service_order_id);
+        } catch (recalcErr: any) {
+          console.error("[ai-agent] recalcSoTotals failed after add_products_to_order:", recalcErr?.message);
+        }
+      }
+
+      const created_count = created.length;
+      const failed_count = failed.length;
+      return {
+        ok: failed_count === 0,
+        created_count,
+        failed_count,
+        created,
+        failed,
+        total_added: Math.round(totalAdded * 100) / 100,
+        ...(failed_count > 0 ? { warning: `${failed_count} produto(s) não inserido(s) — verifique os nomes no catálogo` } : {}),
+      };
+    }
+
     case "add_service_to_order": {
       if (!args.service_order_id) return { ok: false, error: "service_order_id é obrigatório" };
       if (!args.service_name) return { ok: false, error: "service_name é obrigatório" };
@@ -2078,13 +2188,13 @@ FLUXO DE CRIAÇÃO DE ORÇAMENTO COMPLETO:
   3. Para os SERVIÇOS de mão de obra (instalação, reparo, diagnóstico, mão de obra em geral):
      SE houver mais de 1 → add_services_to_order (plural, array de uma vez).
      SE houver apenas 1 → add_service_to_order.
-  4. Para cada PRODUTO/PEÇA do catálogo (item físico, equipamento, peça de reposição):
-     use add_product_to_order com o ID da OS criada.
-     (A tool antiga add_service_order_item ainda funciona como alias, mas prefira add_product_to_order — o nome é mais claro.)
+  4. Para PRODUTOS/PEÇAS do catálogo (itens físicos, equipamentos, peças de reposição):
+     SE houver mais de 1 produto → add_products_to_order (plural, array de uma vez — aceita product_name para busca).
+     SE houver apenas 1 produto → add_product_to_order.
   5. Confirmar ao usuário que tudo foi criado.
 
 DISTINÇÃO PRODUTO vs. SERVIÇO — REGRA OBRIGATÓRIA:
-  - PRODUTO/PEÇA = item físico do catálogo products (tem SKU, sale_price, stock_quantity). Ex: "bateria 100Ah", "fusível 30A", "cabo elétrico 25m". → add_product_to_order.
+  - PRODUTO/PEÇA = item físico do catálogo products (tem SKU, sale_price, stock_quantity). Ex: "bateria 100Ah", "fusível 30A", "cabo elétrico 25m". → add_product_to_order (1 item) ou add_products_to_order (vários).
   - SERVIÇO = mão de obra cobrada (horas/visitas/diárias). Ex: "troca de bateria", "diagnóstico elétrico", "instalação de painel". → add_service_to_order / add_services_to_order.
   - NUNCA use add_product_to_order para mão de obra; NUNCA use add_service_to_order para peça do catálogo.
 
@@ -2101,7 +2211,7 @@ INCLUSÃO DE MÚLTIPLOS SERVIÇOS EM UMA OS EXISTENTE (REGRA OBRIGATÓRIA):
       * linhas separadas por vírgula, ponto-e-vírgula, quebra de linha, traço ou qualquer separador imperfeito
       * frases tipo "etapa X — R$ Y", "serviço A: 100", "troca de bomba 300", "fusível R$ 30"
   - REGRA DE DETECÇÃO: se você identifica uma descrição de serviço seguida (na mesma linha OU em linha próxima) de um valor monetário em reais, é UM ITEM SEPARADO. NUNCA funda múltiplos pares em um único serviço.
-  - Para 2 ou mais itens: use add_services_to_order com um array completo. Para 1 único item explícito: use add_service_to_order.
+  - Para 2 ou mais itens de SERVIÇO: use add_services_to_order com um array completo. Para 1 único item: use add_service_to_order.
   - Antes de executar SEMPRE chame propose_action com:
       * "Adicionar N serviços à OS"
       * Lista numerada de todos os itens: "1. <nome> — R$ X,XX"
@@ -2121,6 +2231,20 @@ EXEMPLO 2 — texto livre:
     { service_name: "troca de bomba", unit_price: 100 },
     { service_name: "troca de bateria", unit_price: 200 }
   ]
+
+INCLUSÃO DE MÚLTIPLOS PRODUTOS EM UMA OS EXISTENTE (REGRA OBRIGATÓRIA):
+  - Quando o usuário listar mais de 1 produto/equipamento/peça para adicionar à OS, use add_products_to_order com um array.
+  - O campo product_name é suficiente — a tool busca o produto no catálogo automaticamente.
+  - Se um produto não for encontrado no catálogo, a tool reporta no campo failed[] e continua os outros.
+  - Antes de executar SEMPRE chame propose_action com lista de todos os produtos e quantidades.
+
+EXEMPLO — "adicione estes equipamentos: Bateria Lítio 12V/200Ah, SmartShunt 500A, Cerbo GX":
+  propose_action → add_products_to_order({ service_order_id: "...", products: [
+    { product_name: "Bateria Lítio 12V/200Ah", quantity: 1 },
+    { product_name: "SmartShunt 500A", quantity: 1 },
+    { product_name: "Cerbo GX", quantity: 1 },
+  ]})
+  → 1 chamada, 3 produtos inseridos, totais recalculados 1 vez.
 
 FLUXO DE ENVIO DE ORÇAMENTO/OS:
   1. Se não houver OS em contexto, busque com list_service_orders
