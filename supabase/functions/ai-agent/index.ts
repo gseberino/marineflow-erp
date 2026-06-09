@@ -6,6 +6,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
   fetchAIWithRetry,
   resolveOverloadUserMessage,
+  resolveRateLimitUserMessage,
 } from "../_shared/ai-error.ts";
 
 const corsHeaders = {
@@ -1952,7 +1953,7 @@ Responda APENAS com o texto da mensagem pronta para envio, sem explicações ou 
           return jr({ error: resolveOverloadUserMessage(0) }, 503);
         }
         if (fetchResult.classification === "rate_limit") {
-          return jr({ error: "Limite de requisições da IA atingido. Tente novamente em instantes." }, 429);
+          return jr({ error: resolveRateLimitUserMessage(0) }, 429);
         }
         if (fetchResult.classification === "billing") {
           return jr({ error: "Créditos da IA esgotados." }, 402);
@@ -2170,7 +2171,7 @@ Quando o usuário disser "este cliente", "esta OS", "este barco", use o ID em co
           return jr({ error: resolveOverloadUserMessage(iter) }, 503);
         }
         if (fetchResult.classification === "rate_limit") {
-          return jr({ error: "Limite de requisições da IA atingido. Tente novamente em instantes." }, 429);
+          return jr({ error: resolveRateLimitUserMessage(iter) }, 429);
         }
         if (fetchResult.classification === "billing") {
           return jr({ error: "Créditos da IA esgotados. Adicione créditos em Settings > Workspace > Usage." }, 402);

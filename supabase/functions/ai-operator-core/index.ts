@@ -15,6 +15,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
   fetchAIWithRetry,
   resolveOverloadUserMessage,
+  resolveRateLimitUserMessage,
 } from "../_shared/ai-error.ts";
 import { classifyAction } from "./risk.ts";
 import { OPERATOR_TOOLS } from "./tools.ts";
@@ -1985,7 +1986,7 @@ Deno.serve(async (req) => {
           return jr({ error: resolveOverloadUserMessage(iter) }, 503);
         }
         if (fetchResult.classification === "rate_limit") {
-          return jr({ error: "Limite de requisições do modelo atingido." }, 429);
+          return jr({ error: resolveRateLimitUserMessage(iter) }, 429);
         }
         if (fetchResult.classification === "billing") {
           return jr({ error: "Créditos da IA esgotados. Verifique as configurações de faturamento." }, 402);

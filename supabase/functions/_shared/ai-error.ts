@@ -1,6 +1,6 @@
 // Shared AI provider error handling utilities.
 // Classifies provider errors, implements safe retry with exponential backoff,
-// and provides user-facing messages for overload scenarios.
+// and provides user-facing messages for overload and rate-limit scenarios.
 //
 // Observability notes:
 // - logs only provider metadata and sanitized error previews;
@@ -35,8 +35,19 @@ type AIProviderLogPayload = {
   max_retries: number;
   retrying?: boolean;
   next_delay_ms?: number;
+  retry_after?: number;
   body_preview?: string;
 };
+
+// Retryable classifications: only these get retried when maxRetries > 0.
+// 403 (permission), 402 (billing), unknown → never retried.
+const RETRYABLE: ReadonlySet<AIErrorClassification> = new Set([
+  "provider_overloaded",
+  "rate_limit",
+]);
+
+// Cap Retry-After at 15s so Edge Functions don't time out.
+const RETRY_AFTER_CAP_MS = 15_000;
 
 /**
  * Classifies a provider HTTP error.
@@ -96,6 +107,21 @@ function sanitizeProviderBody(rawBody: string): string {
     .slice(0, 500);
 }
 
+/**
+ * Extracts Retry-After delay in milliseconds from the response header.
+ * Supports integer seconds only (most common for API rate limits).
+ * Returns null if the header is absent or unparseable.
+ */
+export function extractRetryAfterMs(response: Response): number | null {
+  const header = response.headers.get("Retry-After");
+  if (!header) return null;
+  const seconds = parseInt(header, 10);
+  if (!isNaN(seconds) && seconds > 0) {
+    return Math.min(seconds * 1000, RETRY_AFTER_CAP_MS);
+  }
+  return null;
+}
+
 function logProviderEvent(payload: AIProviderLogPayload): void {
   const logLine = JSON.stringify(payload);
   if (payload.event === "ai_provider_retry") {
@@ -110,10 +136,16 @@ function logProviderEvent(payload: AIProviderLogPayload): void {
 }
 
 /**
- * Fetches an AI endpoint with safe retry for provider_overloaded errors.
+ * Fetches an AI endpoint with safe retry for provider_overloaded and rate_limit errors.
  * Returns a discriminated result — on failure, rawBody is pre-read so
  * callers MUST NOT call response.text() again (body already consumed).
  * On success, response body is untouched — callers use response.json() normally.
+ *
+ * Retry policy:
+ *   - Only provider_overloaded and rate_limit are retried.
+ *   - 403/402/unknown → never retried regardless of maxRetries.
+ *   - Respects Retry-After header (capped at 15s) for rate_limit responses.
+ *   - Pass maxRetries=0 to disable all retries (used for iter > 0 in main loops).
  */
 export async function fetchAIWithRetry(
   url: string,
@@ -149,7 +181,7 @@ export async function fetchAIWithRetry(
     const classification = classifyAIProviderError(response.status, rawBody);
 
     const isLast = i === maxRetries;
-    if (classification !== "provider_overloaded" || isLast) {
+    if (!RETRYABLE.has(classification) || isLast) {
       logProviderEvent({
         event: "ai_provider_final_error",
         ...endpoint,
@@ -164,7 +196,8 @@ export async function fetchAIWithRetry(
       return { ok: false, response, rawBody, classification, attempts };
     }
 
-    const nextDelayMs = baseDelayMs * Math.pow(2, i);
+    const retryAfterMs = extractRetryAfterMs(response);
+    const nextDelayMs = retryAfterMs ?? baseDelayMs * Math.pow(2, i);
     logProviderEvent({
       event: "ai_provider_retry",
       ...endpoint,
@@ -175,6 +208,7 @@ export async function fetchAIWithRetry(
       max_retries: maxRetries,
       retrying: true,
       next_delay_ms: nextDelayMs,
+      ...(retryAfterMs !== null ? { retry_after: retryAfterMs } : {}),
       body_preview: sanitizeProviderBody(rawBody),
     });
 
@@ -186,7 +220,7 @@ export async function fetchAIWithRetry(
 }
 
 /**
- * Returns a safe, user-facing overload message.
+ * Returns a safe, user-facing overload message (503 / provider_overloaded).
  * iter === 0: no tool calls have been made yet, no side effects possible.
  * iter > 0: tool calls may have run; conservative message required.
  */
@@ -195,4 +229,16 @@ export function resolveOverloadUserMessage(iter: number): string {
     return "A IA está temporariamente sobrecarregada no provedor. Tente novamente em instantes. Nenhum dado foi alterado.";
   }
   return "A IA está temporariamente sobrecarregada no provedor. A operação foi interrompida antes da resposta final. Verifique o histórico/registro antes de repetir a ação.";
+}
+
+/**
+ * Returns a safe, user-facing rate-limit message (429 / rate_limit).
+ * iter === 0: no tool calls have been made yet, no side effects possible.
+ * iter > 0: tool calls may have run; conservative message required.
+ */
+export function resolveRateLimitUserMessage(iter: number): string {
+  if (iter === 0) {
+    return "O limite temporário do provedor de IA foi atingido. Aguarde cerca de 1 minuto e tente novamente. Nenhum dado foi alterado.";
+  }
+  return "O limite temporário do provedor de IA foi atingido. A operação foi interrompida antes da resposta final. Verifique o histórico/registro antes de repetir a ação.";
 }

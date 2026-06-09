@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   classifyAIProviderError,
   fetchAIWithRetry,
+  extractRetryAfterMs,
   resolveOverloadUserMessage,
+  resolveRateLimitUserMessage,
 } from "../../supabase/functions/_shared/ai-error.ts";
 
 // ---------------------------------------------------------------------------
@@ -93,6 +95,69 @@ describe("resolveOverloadUserMessage", () => {
     expect(resolveOverloadUserMessage(0)).not.toBe(
       resolveOverloadUserMessage(1)
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveRateLimitUserMessage
+// ---------------------------------------------------------------------------
+describe("resolveRateLimitUserMessage", () => {
+  it("returns no-side-effects message for iter === 0", () => {
+    const msg = resolveRateLimitUserMessage(0);
+    expect(msg).toContain("Nenhum dado foi alterado");
+  });
+
+  it("returns conservative message for iter === 1", () => {
+    const msg = resolveRateLimitUserMessage(1);
+    expect(msg).toContain("Verifique o histórico");
+  });
+
+  it("returns conservative message for any iter > 0", () => {
+    expect(resolveRateLimitUserMessage(5)).toContain("Verifique o histórico");
+  });
+
+  it("messages for iter === 0 and iter > 0 are different", () => {
+    expect(resolveRateLimitUserMessage(0)).not.toBe(
+      resolveRateLimitUserMessage(1)
+    );
+  });
+
+  it("iter=0 message is different from overload iter=0 message", () => {
+    expect(resolveRateLimitUserMessage(0)).not.toBe(resolveOverloadUserMessage(0));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractRetryAfterMs
+// ---------------------------------------------------------------------------
+describe("extractRetryAfterMs", () => {
+  it("returns null when header is absent", () => {
+    const res = new Response("", { status: 429 });
+    expect(extractRetryAfterMs(res)).toBeNull();
+  });
+
+  it("parses integer seconds and converts to ms", () => {
+    const res = new Response("", {
+      status: 429,
+      headers: { "Retry-After": "5" },
+    });
+    expect(extractRetryAfterMs(res)).toBe(5000);
+  });
+
+  it("caps at 15 000 ms", () => {
+    const res = new Response("", {
+      status: 429,
+      headers: { "Retry-After": "120" },
+    });
+    expect(extractRetryAfterMs(res)).toBe(15_000);
+  });
+
+  it("returns null for non-integer value", () => {
+    const res = new Response("", {
+      status: 429,
+      headers: { "Retry-After": "not-a-number" },
+    });
+    expect(extractRetryAfterMs(res)).toBeNull();
   });
 });
 
@@ -208,14 +273,83 @@ describe("fetchAIWithRetry", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("does NOT retry 429 (rate_limit)", async () => {
+  it("retries 429 (rate_limit) when maxRetries > 0", async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response("rate limit", { status: 429 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ choices: [] }), { status: 200 })
+      );
+
+    const result = await fetchAIWithRetry("https://example.com", {}, {
+      maxRetries: 2,
+      baseDelayMs: 0,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.attempts).toBe(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does NOT retry 429 when maxRetries === 0 (safe for iter > 0)", async () => {
     fetchMock.mockResolvedValueOnce(
       new Response("rate limit", { status: 429 })
     );
 
-    await fetchAIWithRetry("https://example.com", {}, { maxRetries: 2 });
+    const result = await fetchAIWithRetry("https://example.com", {}, { maxRetries: 0 });
 
+    expect(result.ok).toBe(false);
+    expect(result.attempts).toBe(1);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    if (!result.ok) {
+      expect(result.classification).toBe("rate_limit");
+    }
+  });
+
+  it("attempts reflects real attempts: 429 with 2 retries and final failure → attempts=3", async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response("rate limit", { status: 429 }))
+      .mockResolvedValueOnce(new Response("rate limit", { status: 429 }))
+      .mockResolvedValueOnce(new Response("rate limit", { status: 429 }));
+
+    const result = await fetchAIWithRetry("https://example.com", {}, {
+      maxRetries: 2,
+      baseDelayMs: 0,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.attempts).toBe(3);
+    if (!result.ok) {
+      expect(result.classification).toBe("rate_limit");
+    }
+  });
+
+  it("respects Retry-After header for 429 responses", async () => {
+    const delaysSeen: number[] = [];
+    const origSetTimeout = globalThis.setTimeout;
+    vi.spyOn(globalThis, "setTimeout").mockImplementation((fn: any, ms?: number) => {
+      delaysSeen.push(ms ?? 0);
+      fn();
+      return 0 as any;
+    });
+
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response("rate limit", {
+          status: 429,
+          headers: { "Retry-After": "3" },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true }), { status: 200 })
+      );
+
+    await fetchAIWithRetry("https://example.com", {}, {
+      maxRetries: 1,
+      baseDelayMs: 1000,
+    });
+
+    expect(delaysSeen[0]).toBe(3000);
+    vi.restoreAllMocks();
   });
 
   it("503 allows retry (provider_overloaded is retryable)", async () => {
