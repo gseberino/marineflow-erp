@@ -1359,7 +1359,7 @@ async function executeTool(
       if (items.length === 0) return { ok: false, error: "Array 'products' vazio ou ausente" };
 
       const created: Array<{ product_id: string; product_name: string; quantity: number; line_total: number }> = [];
-      const failed: Array<{ index: number; product_name: string; error: string }> = [];
+      const failed: Array<{ index: number; product_name: string; error: string; candidates?: Array<{ id: string; product_name: string; sale_price: number | null }> }> = [];
       let totalAdded = 0;
 
       for (let i = 0; i < items.length; i++) {
@@ -1381,19 +1381,53 @@ async function executeTool(
           }
           productName = prod.product_name;
         } else if (productName) {
-          const { data } = await sb
-            .from("products")
-            .select("id, product_name, cost_price, sale_price, cost_currency")
-            .ilike("product_name", `%${productName}%`)
-            .limit(1)
-            .maybeSingle();
-          prod = data;
-          if (!prod) {
+          const selectCols = "id, product_name, cost_price, sale_price, cost_currency";
+          let productCandidates: Array<{ id: string; product_name: string; sale_price: number | null }> | null = null;
+
+          // Pass 1: full name ilike
+          const { data: r1 } = await sb.from("products").select(selectCols)
+            .ilike("product_name", `%${productName}%`).limit(3);
+          if (r1 && r1.length === 1) {
+            prod = r1[0];
+          } else if (r1 && r1.length > 1) {
+            productCandidates = r1.map((c: any) => ({ id: c.id, product_name: c.product_name, sale_price: c.sale_price ?? null }));
+          }
+
+          // Pass 2: multi-term AND search — strips parens/stop-words, AND-chains each token
+          if (!prod && !productCandidates) {
+            const TRIVIAL = new Set(["de","do","da","dos","das","e","em","no","na","para","com","o","a","os","as"]);
+            const terms = productName
+              .replace(/\([^)]*\)/g, "")
+              .split(/[\s/\-]+/)
+              .filter((w: string) => w.length > 3 && !TRIVIAL.has(w.toLowerCase()))
+              .slice(0, 3);
+            if (terms.length > 0) {
+              let qk: any = sb.from("products").select(selectCols);
+              for (const t of terms) qk = qk.ilike("product_name", `%${t}%`);
+              const { data: r2 } = await qk.limit(5);
+              if (r2 && r2.length === 1) {
+                prod = r2[0];
+              } else if (r2 && r2.length > 1) {
+                productCandidates = r2.map((c: any) => ({ id: c.id, product_name: c.product_name, sale_price: c.sale_price ?? null }));
+              }
+            }
+          }
+
+          if (prod) {
+            productId = prod.id;
+            productName = prod.product_name;
+          } else if (productCandidates) {
+            failed.push({
+              index: i,
+              product_name: productName,
+              error: `"${productName}" não encontrado exatamente — ${productCandidates.length} produto(s) similar(es) encontrado(s) no catálogo`,
+              candidates: productCandidates,
+            });
+            continue;
+          } else {
             failed.push({ index: i, product_name: productName, error: `Produto "${productName}" não encontrado no catálogo` });
             continue;
           }
-          productId = prod.id;
-          productName = prod.product_name;
         } else {
           failed.push({ index: i, product_name: "(sem nome)", error: "product_id ou product_name é obrigatório" });
           continue;
@@ -2234,9 +2268,13 @@ EXEMPLO 2 — texto livre:
 
 INCLUSÃO DE MÚLTIPLOS PRODUTOS EM UMA OS EXISTENTE (REGRA OBRIGATÓRIA):
   - Quando o usuário listar mais de 1 produto/equipamento/peça para adicionar à OS, use add_products_to_order com um array.
-  - O campo product_name é suficiente — a tool busca o produto no catálogo automaticamente.
-  - Se um produto não for encontrado no catálogo, a tool reporta no campo failed[] e continua os outros.
+  - O campo product_name é suficiente — a tool busca automaticamente: primeiro pelo nome completo, depois por termos-chave (sem parênteses, sem stop words, AND por token).
   - Antes de executar SEMPRE chame propose_action com lista de todos os produtos e quantidades.
+  - QUANDO add_products_to_order retornar failed_count > 0, NUNCA responda apenas "não foi possível adicionar". Siga OBRIGATORIAMENTE:
+      * Item com campo "candidates" no failed[]: chame present_options imediatamente com as opções retornadas (label = product_name + preço, value = id) para o usuário escolher o produto correto.
+      * Item sem candidates (não encontrado nem por termos-chave): ofereça explicitamente ao usuário: (a) tentar buscar por outro nome usando search_products, (b) informar que o produto precisa ser cadastrado no catálogo antes de ser adicionado.
+      * Após escolha do usuário, use add_product_to_order com o product_id selecionado.
+      * Relate claramente quais produtos foram inseridos com sucesso e quais precisam de ação.
 
 EXEMPLO — "adicione estes equipamentos: Bateria Lítio 12V/200Ah, SmartShunt 500A, Cerbo GX":
   propose_action → add_products_to_order({ service_order_id: "...", products: [
@@ -2244,7 +2282,7 @@ EXEMPLO — "adicione estes equipamentos: Bateria Lítio 12V/200Ah, SmartShunt 5
     { product_name: "SmartShunt 500A", quantity: 1 },
     { product_name: "Cerbo GX", quantity: 1 },
   ]})
-  → 1 chamada, 3 produtos inseridos, totais recalculados 1 vez.
+  → 1 chamada. Produtos encontrados: inseridos direto. Se failed[] com candidates: present_options para cada um. Se failed[] sem candidates: oferece busca manual ou cadastro.
 
 FLUXO DE ENVIO DE ORÇAMENTO/OS:
   1. Se não houver OS em contexto, busque com list_service_orders
