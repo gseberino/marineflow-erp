@@ -800,6 +800,51 @@ const TOOLS = [
       },
     },
   },
+  // ====== FEEDBACK / APRENDIZADO ======
+  {
+    type: "function",
+    function: {
+      name: "save_correction",
+      description: "Salva um padrão de correção quando o operador rejeita ou corrige uma proposta do agente. Chame SEMPRE que uma proposta for rejeitada com feedback. Isso permite que o agente aprenda com correções e melhore propostas futuras para o mesmo cliente.",
+      parameters: {
+        type: "object",
+        properties: {
+          correction_type: {
+            type: "string",
+            enum: ["price_too_high", "price_too_low", "wrong_client", "wrong_service", "format_preference", "workflow_preference", "message_tone", "discount_preference", "other"],
+            description: "Categoria da correção.",
+          },
+          context: { type: "string", description: "Breve descrição do que foi proposto (ex: 'Proposta de instalação de painel solar por R$ 5.000')." },
+          original_value: { type: "string", description: "O que o agente propôs (valor, texto, ação)." },
+          corrected_value: { type: "string", description: "O que o operador corrigiu/queria." },
+          lesson_learned: { type: "string", description: "Lição em 1-2 frases para referência futura (ex: 'Cliente João prefere orçamentos abaixo de R$ 3.000. Proposta acima desse valor foi rejeitada.')." },
+          client_id: { type: "string", description: "UUID do cliente, se a correção for específica para ele." },
+          scope: { type: "string", enum: ["global", "client", "operator"], description: "Escopo da correção. 'client' para comportamento específico de um cliente. Padrão: global." },
+          entity_type: { type: "string" },
+          entity_id: { type: "string" },
+          entity_number: { type: "string" },
+        },
+        required: ["correction_type", "context", "lesson_learned"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_corrections",
+      description: "Carrega padrões de correção aprendidos de interações anteriores. Use ANTES de fazer propose_action quando tiver um client_id — isso ajuda o agente a ajustar propostas baseado em preferências conhecidas do cliente.",
+      parameters: {
+        type: "object",
+        properties: {
+          client_id: { type: "string", description: "UUID do cliente para buscar correções específicas dele." },
+          correction_type: { type: "string", description: "Filtrar por tipo de correção (ex: price_too_high)." },
+          scope: { type: "string", enum: ["global", "client", "all"], description: "Escopo. Padrão: all." },
+          limit: { type: "number", description: "Máximo de padrões. Padrão: 10." },
+        },
+      },
+    },
+  },
+
   {
     type: "function",
     function: {
@@ -2311,6 +2356,48 @@ async function executeTool(
       return { alerts: sorted, summary };
     }
 
+    case "save_correction": {
+      const { data, error } = await sb
+        .from("ai_correction_patterns")
+        .insert({
+          correction_type: args.correction_type,
+          context: args.context,
+          original_value: args.original_value || null,
+          corrected_value: args.corrected_value || null,
+          lesson_learned: args.lesson_learned,
+          client_id: args.client_id || null,
+          operator_user_id: userId,
+          scope: args.scope || (args.client_id ? "client" : "global"),
+          entity_type: args.entity_type || null,
+          entity_id: args.entity_id || null,
+          entity_number: args.entity_number || null,
+        })
+        .select()
+        .single();
+      if (error) return { ok: false, error: error.message };
+      return { ok: true, id: data.id };
+    }
+
+    case "get_corrections": {
+      const limit = Math.min(Number(args.limit) || 10, 30);
+      const scope = args.scope || "all";
+      let q = admin
+        .from("ai_correction_patterns")
+        .select("id, correction_type, context, original_value, corrected_value, lesson_learned, scope, client_id, created_at")
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      if (args.client_id) {
+        // client-scoped OR global
+        q = (q as any).or(`client_id.eq.${args.client_id},scope.eq.global`);
+      } else if (scope !== "all") {
+        q = (q as any).eq("scope", scope);
+      }
+      if (args.correction_type) q = (q as any).eq("correction_type", args.correction_type);
+      const { data, error } = await q;
+      if (error) throw error;
+      return { patterns: data || [], total: (data || []).length };
+    }
+
     default:
       return { error: `Tool desconhecida: ${name}` };
   }
@@ -2624,6 +2711,18 @@ MEMÓRIA PERSISTENTE — REGRAS OBRIGATÓRIAS:
 - Quando aprender algo relevante durante a conversa (preferência de contato, problema recorrente, equipamento instalado, decisão do cliente), chame save_memory ao final.
 - Exemplos de memórias valiosas: "prefere ser contactado pelo WhatsApp à tarde", "barco tem bateria recarregada mensalmente desde problema em Mar/2025", "cliente costuma aprovar orçamentos acima de R$ 5k sem questionar".
 - Não salve fatos óbvios ou já armazenados no banco (dados cadastrais). Salve INSIGHTS e PADRÕES comportamentais.
+
+APRENDIZADO COM CORREÇÕES — REGRAS OBRIGATÓRIAS:
+- ANTES de qualquer propose_action para um cliente específico: chame get_corrections(client_id=UUID) para verificar padrões de correção anteriores. Se houver padrões relevantes, incorpore-os na proposta (ex: ajuste de preço conforme preferência conhecida).
+- QUANDO uma proposta for rejeitada pelo operador com feedback explícito (ex: "preço muito alto", "esse não era o cliente", "use outro serviço"): chame save_correction IMEDIATAMENTE antes de retentar, com:
+    - correction_type: categoria que melhor descreve a correção
+    - context: o que você propôs
+    - original_value: valor/item original proposto
+    - corrected_value: o que o operador queria
+    - lesson_learned: lição clara em 1-2 frases
+    - client_id: UUID do cliente (quando aplicável)
+    - scope: "client" se for preferência específica do cliente, "global" se for regra geral
+- Exemplo: operador rejeita "R$ 1.200 pela instalação" e pede "R$ 800" → save_correction(correction_type="price_too_high", original_value="R$ 1.200", corrected_value="R$ 800", lesson_learned="Instalação de painel para esse cliente tem teto de R$ 800. Preço de R$ 1.200 foi rejeitado.", client_id=UUID, scope="client")
 
 FOLLOW-UPS AUTÔNOMOS VIA WHATSAPP — REGRA OBRIGATÓRIA:
 Ao enviar um orçamento (send_service_order_link), imediatamente após chame schedule_agent_task com:
