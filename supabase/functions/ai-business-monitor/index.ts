@@ -308,6 +308,35 @@ Deno.serve(async (req) => {
       }
       await resolveStale("agent_task_due", dueTaskIds);
     }
+
+    // ── 8. Stalled workflows (active, next_action_at overdue or no progress > 5d) ──
+    {
+      const cut5d = new Date(now.getTime() - 5 * 86_400_000).toISOString();
+      const { data: stalledWorkflows } = await admin
+        .from("ai_workflows")
+        .select("id, workflow_type, entity_id, entity_number, client_id, current_step, updated_at, context")
+        .eq("status", "active")
+        .lt("updated_at", cut5d)
+        .limit(20);
+
+      const activeEntityIds: string[] = [];
+      for (const wf of stalledWorkflows ?? []) {
+        activeEntityIds.push(wf.entity_id); // track by OS entity_id for dedup
+        const d = Math.round((now.getTime() - new Date(wf.updated_at).getTime()) / 86_400_000);
+        const stepLabel = wf.current_step.replace(/_/g, " ");
+        await upsertAlert({
+          alert_type: "workflow_stalled",
+          severity: d > 10 ? "critical" : "warning",
+          title: `Workflow parado: ${wf.entity_number || "OS"} (${wf.workflow_type.replace(/_/g, " ")})`,
+          description: `Workflow "${wf.workflow_type}" parado na etapa "${stepLabel}" há ${d} dia${d !== 1 ? "s" : ""}.`,
+          entity_type: "service_order",
+          entity_id: wf.entity_id,
+          entity_number: wf.entity_number ?? null,
+          metadata: { workflow_id: wf.id, current_step: wf.current_step, days_stalled: d, client_id: wf.client_id },
+        });
+      }
+      await resolveStale("workflow_stalled", activeEntityIds);
+    }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     stats.errors.push(`main: ${msg}`);

@@ -800,6 +800,59 @@ const TOOLS = [
       },
     },
   },
+  // ====== WORKFLOWS ======
+  {
+    type: "function",
+    function: {
+      name: "start_workflow",
+      description: "Inicia um workflow multi-etapa para uma OS. Rastreia o progresso e guia o agente pelas próximas etapas. Use ao criar um novo orçamento ou ao retomar uma OS sem workflow ativo. Tipos: 'quote_approval' (criação → aprovação), 'service_execution' (agendamento → conclusão), 'invoicing' (conclusão → pagamento).",
+      parameters: {
+        type: "object",
+        properties: {
+          workflow_type: { type: "string", enum: ["quote_approval", "service_execution", "invoicing"], description: "Tipo do workflow." },
+          entity_id: { type: "string", description: "UUID da OS." },
+          entity_number: { type: "string", description: "Número da OS (ex: SO-2026-001)." },
+          client_id: { type: "string", description: "UUID do cliente." },
+          initial_step: { type: "string", description: "Primeira etapa do workflow (ex: 'os_created', 'scheduled', 'ready_to_invoice')." },
+          context: { type: "object", description: "Contexto adicional (cliente, embarcação, serviço, etc)." },
+        },
+        required: ["workflow_type", "entity_id", "initial_step"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_workflow_status",
+      description: "Retorna o workflow ativo de uma OS: etapa atual, etapas concluídas e próxima ação. Use ao iniciar conversa sobre uma OS específica para ver onde está no processo.",
+      parameters: {
+        type: "object",
+        properties: {
+          entity_id: { type: "string", description: "UUID da OS." },
+        },
+        required: ["entity_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "advance_workflow_step",
+      description: "Avança o workflow para a próxima etapa. Chame imediatamente após executar uma ação relevante (ex: enviar orçamento → next_step='awaiting_approval'; OS aprovada → next_step='approved'; serviço concluído → next_step='workflow_complete').",
+      parameters: {
+        type: "object",
+        properties: {
+          workflow_id: { type: "string", description: "UUID do workflow (retornado por start_workflow ou get_workflow_status)." },
+          completed_step: { type: "string", description: "Etapa que acabou de ser concluída." },
+          next_step: { type: "string", description: "Próxima etapa do workflow." },
+          next_action_at: { type: "string", description: "Quando a próxima ação deve acontecer (ISO 8601). Opcional." },
+          context_update: { type: "object", description: "Dados extras para adicionar ao contexto do workflow." },
+        },
+        required: ["workflow_id", "completed_step", "next_step"],
+      },
+    },
+  },
+
   // ====== FEEDBACK / APRENDIZADO ======
   {
     type: "function",
@@ -2356,6 +2409,92 @@ async function executeTool(
       return { alerts: sorted, summary };
     }
 
+    case "start_workflow": {
+      const { data, error } = await sb
+        .from("ai_workflows")
+        .upsert(
+          {
+            workflow_type: args.workflow_type,
+            entity_type: "service_order",
+            entity_id: args.entity_id,
+            entity_number: args.entity_number || null,
+            client_id: args.client_id || null,
+            current_step: args.initial_step,
+            steps_completed: [],
+            status: "active",
+            context: args.context || {},
+            next_action_at: null,
+          },
+          { onConflict: "workflow_type,entity_id" }
+        )
+        .select()
+        .single();
+      if (error) return { ok: false, error: error.message };
+      return { ok: true, workflow_id: data.id, workflow_type: data.workflow_type, current_step: data.current_step };
+    }
+
+    case "get_workflow_status": {
+      const { data, error } = await sb
+        .from("ai_workflows")
+        .select("id, workflow_type, current_step, steps_completed, status, context, next_action_at, updated_at")
+        .eq("entity_id", args.entity_id)
+        .eq("status", "active")
+        .order("updated_at", { ascending: false })
+        .limit(3);
+      if (error) throw error;
+      if (!data || data.length === 0) return { active_workflow: null, message: "Nenhum workflow ativo para esta OS." };
+      const NEXT_STEP_MAP: Record<string, Record<string, string>> = {
+        quote_approval: {
+          os_created: "items_added",
+          items_added: "quote_sent",
+          quote_sent: "awaiting_approval",
+          followup_scheduled: "awaiting_approval",
+          awaiting_approval: "approved",
+          approved: "technician_assigned",
+          technician_assigned: "workflow_complete",
+        },
+        service_execution: {
+          scheduled: "in_progress",
+          in_progress: "completed",
+          completed: "workflow_complete",
+        },
+        invoicing: {
+          ready_to_invoice: "invoice_created",
+          invoice_created: "invoice_sent",
+          invoice_sent: "paid",
+          paid: "workflow_complete",
+        },
+      };
+      return {
+        workflows: data.map((w: any) => ({
+          ...w,
+          suggested_next_step: NEXT_STEP_MAP[w.workflow_type]?.[w.current_step] ?? null,
+        })),
+      };
+    }
+
+    case "advance_workflow_step": {
+      const { data: current, error: fetchErr } = await sb
+        .from("ai_workflows")
+        .select("steps_completed, context")
+        .eq("id", args.workflow_id)
+        .maybeSingle();
+      if (fetchErr || !current) return { ok: false, error: "Workflow não encontrado." };
+      const completed = Array.isArray(current.steps_completed) ? current.steps_completed : [];
+      if (!completed.includes(args.completed_step)) completed.push(args.completed_step);
+      const isComplete = args.next_step === "workflow_complete";
+      const update: any = {
+        current_step: args.next_step,
+        steps_completed: completed,
+        status: isComplete ? "completed" : "active",
+        context: { ...(current.context || {}), ...(args.context_update || {}) },
+      };
+      if (args.next_action_at) update.next_action_at = new Date(args.next_action_at).toISOString();
+      const { error } = await sb.from("ai_workflows").update(update).eq("id", args.workflow_id);
+      if (error) return { ok: false, error: error.message };
+      return { ok: true, new_step: args.next_step, completed: isComplete };
+    }
+
     case "save_correction": {
       const { data, error } = await sb
         .from("ai_correction_patterns")
@@ -2742,6 +2881,28 @@ TAREFAS DO AGENTE — FOLLOW-UPS INTERNOS (sem WhatsApp):
 - Use task_type="follow_up" (padrão) para lembretes internos: "checar chegada de peças em 5 dias", "lembrar de faturar OS X na sexta".
 - Use list_agent_tasks para mostrar o que está pendente quando o usuário perguntar.
 - Use complete_agent_task quando uma tarefa for resolvida durante a conversa.
+
+WORKFLOWS MULTI-ETAPA — GUIA DO AGENTE:
+Ao trabalhar com uma OS específica, sempre verifique get_workflow_status(entity_id=UUID).
+Se não houver workflow ativo: ofereça iniciar um via start_workflow. Se houver: mostre a etapa atual e sugira a próxima ação.
+
+Fluxo quote_approval (orçamento novo → aprovação):
+  os_created → items_added → quote_sent → awaiting_approval → approved → technician_assigned → workflow_complete
+  Avance automaticamente após cada ação:
+  - Após create_service_order: start_workflow(quote_approval, initial_step="os_created")
+  - Após add_*_to_order: advance_workflow_step(completed_step="items_added", next_step="quote_sent")
+  - Após send_service_order_link: advance_workflow_step(completed_step="quote_sent", next_step="awaiting_approval")
+  - Após update_service_order_status(approved): advance_workflow_step(completed_step="approved", next_step="technician_assigned")
+  - Após schedule_service_order: advance_workflow_step(completed_step="technician_assigned", next_step="workflow_complete")
+
+Fluxo service_execution (agendado → concluído):
+  scheduled → in_progress → completed → workflow_complete
+  Inicie com start_workflow(service_execution, initial_step="scheduled") ao agendar a OS.
+  Avance conforme status muda.
+
+Fluxo invoicing (concluído → pago):
+  ready_to_invoice → invoice_created → invoice_sent → paid → workflow_complete
+  Inicie quando OS vai para "completed" sem faturamento.
 
 PROATIVIDADE E NEGÓCIOS:
 - Use get_business_alerts quando o usuário perguntar sobre 'o que precisa de atenção', 'alertas', 'pendências do negócio', 'status geral', 'o que está parado', 'briefing' ou qualquer variação de resumo operacional. Apresente os alertas críticos primeiro com ícone 🔴, warnings com 🟡 e infos com 🔵.
