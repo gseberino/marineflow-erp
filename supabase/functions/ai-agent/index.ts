@@ -688,6 +688,58 @@ const TOOLS = [
     },
   },
 
+  // ====== AGENT TASKS ======
+  {
+    type: "function",
+    function: {
+      name: "schedule_agent_task",
+      description: "Agenda uma tarefa de acompanhamento para o agente executar futuramente. Use para criar follow-ups: 'checar em 2 dias se cliente aprovou', 'perguntar se peças chegaram em 5 dias', 'lembrar de faturar OS X na sexta'. O sistema irá notificar via alertas quando a tarefa vencer.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Título curto e descritivo da tarefa." },
+          description: { type: "string", description: "Detalhes completos — o que verificar, com quem, sobre o quê." },
+          due_at: { type: "string", description: "Data/hora de vencimento em ISO 8601 (ex: 2026-06-12T09:00:00)." },
+          entity_type: { type: "string", description: "Tipo da entidade relacionada: service_order, client, vessel, etc." },
+          entity_id: { type: "string", description: "UUID da entidade relacionada (OS, cliente, etc)." },
+          entity_number: { type: "string", description: "Número legível da entidade (ex: OS-2026-001)." },
+          priority: { type: "string", enum: ["low", "normal", "high", "urgent"], description: "Prioridade. Padrão: normal." },
+        },
+        required: ["title", "description", "due_at"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_agent_tasks",
+      description: "Lista as tarefas agendadas pelo agente. Use para ver o que está pendente ou vencido.",
+      parameters: {
+        type: "object",
+        properties: {
+          status: { type: "string", enum: ["pending", "done", "cancelled", "snoozed", "all"], description: "Filtro. Padrão: pending." },
+          entity_id: { type: "string", description: "Filtrar por entidade específica." },
+          limit: { type: "number" },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "complete_agent_task",
+      description: "Marca uma tarefa do agente como concluída.",
+      parameters: {
+        type: "object",
+        properties: {
+          task_id: { type: "string", description: "UUID da tarefa." },
+          notes: { type: "string", description: "Observações sobre o que foi feito (opcional)." },
+        },
+        required: ["task_id"],
+      },
+    },
+  },
+
   // ====== MEMORY ======
   {
     type: "function",
@@ -2093,6 +2145,57 @@ async function executeTool(
       return { ok: true, cancelled_id: args.scheduled_id };
     }
 
+    case "schedule_agent_task": {
+      const { data, error } = await admin
+        .from("ai_agent_tasks")
+        .insert({
+          title: args.title,
+          description: args.description,
+          due_at: new Date(args.due_at).toISOString(),
+          entity_type: args.entity_type || null,
+          entity_id: args.entity_id || null,
+          entity_number: args.entity_number || null,
+          priority: args.priority || "normal",
+          status: "pending",
+          created_by_agent: true,
+        })
+        .select()
+        .single();
+      if (error) return { ok: false, error: error.message };
+      return { ok: true, task_id: data.id, due_at: data.due_at };
+    }
+
+    case "list_agent_tasks": {
+      const status = args.status || "pending";
+      const limit = Math.min(Number(args.limit) || 15, 30);
+      let q = admin
+        .from("ai_agent_tasks")
+        .select("id, title, description, due_at, entity_type, entity_number, priority, status, created_at")
+        .order("due_at", { ascending: true })
+        .limit(limit);
+      if (status !== "all") q = (q as any).eq("status", status);
+      if (args.entity_id) q = (q as any).eq("entity_id", args.entity_id);
+      const { data, error } = await q;
+      if (error) throw error;
+      return { tasks: data || [], total: (data || []).length };
+    }
+
+    case "complete_agent_task": {
+      const { error } = await admin
+        .from("ai_agent_tasks")
+        .update({ status: "done", metadata: args.notes ? { completion_notes: args.notes } : {} })
+        .eq("id", args.task_id);
+      if (error) return { ok: false, error: error.message };
+      // Resolve the corresponding alert if it exists
+      await admin
+        .from("ai_business_alerts")
+        .update({ resolved_at: new Date().toISOString() })
+        .eq("entity_id", args.task_id)
+        .eq("alert_type", "agent_task_due")
+        .is("resolved_at", null);
+      return { ok: true };
+    }
+
     case "get_lifecycle_events": {
       const soId = args.service_order_id;
       const limit = Math.min(Number(args.limit) || 20, 50);
@@ -2481,6 +2584,12 @@ MEMÓRIA PERSISTENTE — REGRAS OBRIGATÓRIAS:
 - Quando aprender algo relevante durante a conversa (preferência de contato, problema recorrente, equipamento instalado, decisão do cliente), chame save_memory ao final.
 - Exemplos de memórias valiosas: "prefere ser contactado pelo WhatsApp à tarde", "barco tem bateria recarregada mensalmente desde problema em Mar/2025", "cliente costuma aprovar orçamentos acima de R$ 5k sem questionar".
 - Não salve fatos óbvios ou já armazenados no banco (dados cadastrais). Salve INSIGHTS e PADRÕES comportamentais.
+
+TAREFAS DO AGENTE — PROATIVIDADE:
+- Use schedule_agent_task para criar follow-ups automáticos: "checar aprovação em 48h", "verificar chegada de peças em 5 dias", "lembrar de faturar OS X".
+- Sempre que enviar um orçamento ao cliente, agende automaticamente: schedule_agent_task(title="Follow-up: aprovação de orçamento", due_at=now+48h, entity_id=so_id).
+- Use list_agent_tasks para mostrar o que está pendente quando o usuário perguntar.
+- Use complete_agent_task quando uma tarefa for resolvida durante a conversa.
 
 PROATIVIDADE E NEGÓCIOS:
 - Use get_business_alerts quando o usuário perguntar sobre 'o que precisa de atenção', 'alertas', 'pendências do negócio', 'status geral', 'o que está parado', 'briefing' ou qualquer variação de resumo operacional. Apresente os alertas críticos primeiro com ícone 🔴, warnings com 🟡 e infos com 🔵.

@@ -282,6 +282,32 @@ Deno.serve(async (req) => {
       }
       await resolveStale("os_no_technician", activeIds);
     }
+
+    // ── 7. Due agent tasks → surface as alerts ──────────────────────────────
+    {
+      const { data: dueTasks } = await admin
+        .from("ai_agent_tasks")
+        .select("id, title, description, due_at, entity_type, entity_id, entity_number, priority")
+        .eq("status", "pending")
+        .lte("due_at", now.toISOString())
+        .limit(20);
+
+      const dueTaskIds: string[] = [];
+      for (const task of dueTasks ?? []) {
+        dueTaskIds.push(task.id);
+        await upsertAlert({
+          alert_type: "agent_task_due",
+          severity: task.priority === "urgent" || task.priority === "high" ? "critical" : "warning",
+          title: `Tarefa: ${task.title}`,
+          description: task.description,
+          entity_type: task.entity_type ?? "agent_task",
+          entity_id: task.id,
+          entity_number: task.entity_number ?? null,
+          metadata: { task_entity_id: task.entity_id, task_entity_type: task.entity_type, priority: task.priority },
+        });
+      }
+      await resolveStale("agent_task_due", dueTaskIds);
+    }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     stats.errors.push(`main: ${msg}`);
