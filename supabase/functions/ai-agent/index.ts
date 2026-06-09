@@ -707,17 +707,26 @@ const TOOLS = [
     type: "function",
     function: {
       name: "schedule_agent_task",
-      description: "Agenda uma tarefa de acompanhamento para o agente executar futuramente. Use para criar follow-ups: 'checar em 2 dias se cliente aprovou', 'perguntar se peças chegaram em 5 dias', 'lembrar de faturar OS X na sexta'. O sistema irá notificar via alertas quando a tarefa vencer.",
+      description: "Agenda uma tarefa de acompanhamento para o agente executar futuramente. Para follow-ups AUTOMÁTICOS via WhatsApp (sem operador), use task_type='whatsapp_followup' com metadata.client_id e metadata.message — o cron enviará a mensagem automaticamente no horário definido. Para follow-ups internos sem WhatsApp, use task_type='follow_up' (padrão).",
       parameters: {
         type: "object",
         properties: {
           title: { type: "string", description: "Título curto e descritivo da tarefa." },
           description: { type: "string", description: "Detalhes completos — o que verificar, com quem, sobre o quê." },
+          task_type: {
+            type: "string",
+            enum: ["follow_up", "whatsapp_followup", "quote_followup", "satisfaction_followup"],
+            description: "Tipo da tarefa. 'whatsapp_followup': envia WhatsApp automaticamente (requer metadata.client_id + metadata.message). 'follow_up': tarefa interna sem envio automático.",
+          },
           due_at: { type: "string", description: "Data/hora de vencimento em ISO 8601 (ex: 2026-06-12T09:00:00)." },
           entity_type: { type: "string", description: "Tipo da entidade relacionada: service_order, client, vessel, etc." },
           entity_id: { type: "string", description: "UUID da entidade relacionada (OS, cliente, etc)." },
           entity_number: { type: "string", description: "Número legível da entidade (ex: OS-2026-001)." },
           priority: { type: "string", enum: ["low", "normal", "high", "urgent"], description: "Prioridade. Padrão: normal." },
+          metadata: {
+            type: "object",
+            description: "Para whatsapp_followup: { client_id: 'UUID', client_name: 'Nome', message: 'Texto completo da mensagem WhatsApp' }. Para outros tipos: dados extras relevantes.",
+          },
         },
         required: ["title", "description", "due_at"],
       },
@@ -2178,6 +2187,7 @@ async function executeTool(
       const { data, error } = await admin
         .from("ai_agent_tasks")
         .insert({
+          task_type: args.task_type || "follow_up",
           title: args.title,
           description: args.description,
           due_at: new Date(args.due_at).toISOString(),
@@ -2186,12 +2196,13 @@ async function executeTool(
           entity_number: args.entity_number || null,
           priority: args.priority || "normal",
           status: "pending",
+          metadata: args.metadata || {},
           created_by_agent: true,
         })
         .select()
         .single();
       if (error) return { ok: false, error: error.message };
-      return { ok: true, task_id: data.id, due_at: data.due_at };
+      return { ok: true, task_id: data.id, task_type: data.task_type, due_at: data.due_at };
     }
 
     case "list_agent_tasks": {
@@ -2614,9 +2625,22 @@ MEMÓRIA PERSISTENTE — REGRAS OBRIGATÓRIAS:
 - Exemplos de memórias valiosas: "prefere ser contactado pelo WhatsApp à tarde", "barco tem bateria recarregada mensalmente desde problema em Mar/2025", "cliente costuma aprovar orçamentos acima de R$ 5k sem questionar".
 - Não salve fatos óbvios ou já armazenados no banco (dados cadastrais). Salve INSIGHTS e PADRÕES comportamentais.
 
-TAREFAS DO AGENTE — PROATIVIDADE:
-- Use schedule_agent_task para criar follow-ups automáticos: "checar aprovação em 48h", "verificar chegada de peças em 5 dias", "lembrar de faturar OS X".
-- Sempre que enviar um orçamento ao cliente, agende automaticamente: schedule_agent_task(title="Follow-up: aprovação de orçamento", due_at=now+48h, entity_id=so_id).
+FOLLOW-UPS AUTÔNOMOS VIA WHATSAPP — REGRA OBRIGATÓRIA:
+Ao enviar um orçamento (send_service_order_link), imediatamente após chame schedule_agent_task com:
+  - task_type: "whatsapp_followup"
+  - title: "Follow-up orçamento [número OS]"
+  - description: "[resumo: orçamento enviado, aguardando aprovação]"
+  - due_at: [agora + 48h em ISO 8601]
+  - entity_type: "service_order", entity_id: [UUID], entity_number: [número]
+  - metadata: { client_id: "[UUID cliente]", client_name: "[Nome]", message: "Olá [Nome]! 👋 Enviamos o orçamento [número OS] há 2 dias. Ficou alguma dúvida ou podemos agendar o serviço? Estamos à disposição! ⚓" }
+O cron enviará a mensagem WhatsApp automaticamente no horário definido, sem precisar de operador.
+
+Outros follow-ups automáticos úteis (crie proativamente):
+- OS concluída: task_type="satisfaction_followup", due_at=now+24h, message="Olá [Nome]! Como está [embarcação] após o serviço? Qualquer dúvida é só chamar! 🛥️"
+- Peça chegou (in_progress após awaiting_parts): task_type="whatsapp_followup", message avisa que o serviço vai começar.
+
+TAREFAS DO AGENTE — FOLLOW-UPS INTERNOS (sem WhatsApp):
+- Use task_type="follow_up" (padrão) para lembretes internos: "checar chegada de peças em 5 dias", "lembrar de faturar OS X na sexta".
 - Use list_agent_tasks para mostrar o que está pendente quando o usuário perguntar.
 - Use complete_agent_task quando uma tarefa for resolvida durante a conversa.
 
