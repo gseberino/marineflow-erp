@@ -1529,7 +1529,7 @@ async function executeTool(
             tool_choice: "none",
           }),
         },
-        { maxRetries: 1 }
+        { maxRetries: 1, fallbackModel: MODEL_FAST }
       );
       if (!optimizeResult.ok) {
         return { original: args.text, optimized: args.text };
@@ -1975,7 +1975,7 @@ Responda APENAS com o texto da mensagem pronta para envio, sem explicações ou 
             messages: salesMessages,
           }),
         },
-        { maxRetries: 2 }
+        { maxRetries: 2, fallbackModel: MODEL_FAST }
       );
       if (!fetchResult.ok) {
         console.error("AI gateway sales error:", fetchResult.response.status, fetchResult.rawBody.slice(0, 200));
@@ -2200,7 +2200,7 @@ Quando o usuário disser "este cliente", "esta OS", "este barco", use o ID em co
             tool_choice: isSalesCopy ? undefined : "auto",
           }),
         },
-        { maxRetries: iter === 0 ? 2 : 0 }
+        { maxRetries: iter === 0 ? 2 : 0, fallbackModel: MODEL_FAST }
       );
       if (!fetchResult.ok) {
         console.error("AI gateway error:", fetchResult.response.status, fetchResult.rawBody.slice(0, 200));

@@ -160,7 +160,19 @@ export function useAIOperator(
       setError(null);
       try {
         const { data, error: invokeErr } = await supabase.functions.invoke("ai-operator-core", { body });
-        if (invokeErr) throw invokeErr;
+        if (invokeErr) {
+          const rawBody = (invokeErr as any)?.context?.responseBody ?? '';
+          if (rawBody) {
+            try {
+              const parsed = JSON.parse(rawBody);
+              throw new Error(parsed.error || rawBody);
+            } catch (parseErr: any) {
+              if (parseErr?.message !== rawBody) throw parseErr;
+              throw new Error(rawBody);
+            }
+          }
+          throw invokeErr;
+        }
         if ((data as any)?.error) throw new Error((data as any).error);
 
         const respSession = (data as any).session_id as string | null;

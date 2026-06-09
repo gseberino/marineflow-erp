@@ -71,6 +71,34 @@ describe("classifyAIProviderError", () => {
   it("classifies 504 with unrecognized body as unknown", () => {
     expect(classifyAIProviderError(504, "gateway timeout")).toBe("unknown");
   });
+
+  it("classifies 403 with RESOURCE_EXHAUSTED body as rate_limit (Google quota exhaustion)", () => {
+    expect(
+      classifyAIProviderError(
+        403,
+        '{"error":{"code":403,"status":"RESOURCE_EXHAUSTED","message":"Quota exceeded"}}'
+      )
+    ).toBe("rate_limit");
+  });
+
+  it("classifies 429 with RESOURCE_EXHAUSTED body as rate_limit", () => {
+    expect(
+      classifyAIProviderError(429, '{"error":{"status":"RESOURCE_EXHAUSTED"}}')
+    ).toBe("rate_limit");
+  });
+
+  it("classifies rateLimitExceeded body as rate_limit regardless of status", () => {
+    expect(classifyAIProviderError(400, "rateLimitExceeded")).toBe("rate_limit");
+  });
+
+  it("403 with RESOURCE_EXHAUSTED is NOT classified as permission", () => {
+    const result = classifyAIProviderError(
+      403,
+      '{"error":{"status":"RESOURCE_EXHAUSTED"}}'
+    );
+    expect(result).not.toBe("permission");
+    expect(result).toBe("rate_limit");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -375,5 +403,60 @@ describe("fetchAIWithRetry", () => {
 
     const result = await fetchAIWithRetry("https://example.com", {});
     expect(result.attempts).toBe(1);
+  });
+
+  it("falls back to fallbackModel after rate_limit exhaustion and returns ok:true", async () => {
+    const body = JSON.stringify({ model: "gemini-2.5-pro", messages: [] });
+    fetchMock
+      .mockResolvedValueOnce(new Response("rate limit", { status: 429 }))
+      .mockResolvedValueOnce(new Response("rate limit", { status: 429 }))
+      .mockResolvedValueOnce(new Response("rate limit", { status: 429 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ choices: [] }), { status: 200 })
+      );
+
+    const result = await fetchAIWithRetry(
+      "https://example.com",
+      { method: "POST", body },
+      { maxRetries: 2, baseDelayMs: 0, fallbackModel: "gemini-2.5-flash" }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.attempts).toBe(4);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    // The 4th call must use the fallback model
+    const lastCallBody = JSON.parse(fetchMock.mock.calls[3][1].body);
+    expect(lastCallBody.model).toBe("gemini-2.5-flash");
+  });
+
+  it("does NOT attempt fallback when fallbackModel equals the current model", async () => {
+    const body = JSON.stringify({ model: "gemini-2.5-flash", messages: [] });
+    fetchMock.mockResolvedValueOnce(new Response("rate limit", { status: 429 }));
+
+    const result = await fetchAIWithRetry(
+      "https://example.com",
+      { method: "POST", body },
+      { maxRetries: 0, baseDelayMs: 0, fallbackModel: "gemini-2.5-flash" }
+    );
+
+    expect(result.ok).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT attempt fallback for non-rate-limit errors (permission stays permission)", async () => {
+    const body = JSON.stringify({ model: "gemini-2.5-pro", messages: [] });
+    fetchMock.mockResolvedValueOnce(
+      new Response("PERMISSION_DENIED", { status: 403 })
+    );
+
+    const result = await fetchAIWithRetry(
+      "https://example.com",
+      { method: "POST", body },
+      { maxRetries: 2, fallbackModel: "gemini-2.5-flash" }
+    );
+
+    expect(result.ok).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    if (!result.ok) expect(result.classification).toBe("permission");
   });
 });

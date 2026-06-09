@@ -51,13 +51,18 @@ const RETRY_AFTER_CAP_MS = 15_000;
 
 /**
  * Classifies a provider HTTP error.
- * Permission errors (403, PERMISSION_DENIED, dunning) always take precedence
- * and are never reclassified as overload.
+ * RESOURCE_EXHAUSTED / rateLimitExceeded are checked first — Google APIs can
+ * return these on 403 (quota exhausted), which must be treated as rate_limit
+ * (retryable / fallback-eligible), not as a permanent permission error.
  */
 export function classifyAIProviderError(
   status: number,
   body: string
 ): AIErrorClassification {
+  // Quota exhaustion can arrive as 429 OR 403 from Google APIs — body wins.
+  if (body.includes("RESOURCE_EXHAUSTED") || body.includes("rateLimitExceeded")) {
+    return "rate_limit";
+  }
   if (
     status === 403 ||
     body.includes("PERMISSION_DENIED") ||
@@ -150,14 +155,18 @@ function logProviderEvent(payload: AIProviderLogPayload): void {
 export async function fetchAIWithRetry(
   url: string,
   init: RequestInit,
-  opts: { maxRetries?: number; baseDelayMs?: number } = {}
+  opts: { maxRetries?: number; baseDelayMs?: number; fallbackModel?: string } = {}
 ): Promise<AIFetchResult> {
-  const maxRetries = opts.maxRetries ?? 2;
-  const baseDelayMs = opts.baseDelayMs ?? 1000;
+  const { maxRetries = 2, baseDelayMs = 1000, fallbackModel } = opts;
   const endpoint = summarizeEndpoint(url);
   const model = extractModel(init);
 
   let attempts = 0;
+  let lastFailure: {
+    response: Response;
+    rawBody: string;
+    classification: AIErrorClassification;
+  } | null = null;
 
   for (let i = 0; i <= maxRetries; i++) {
     attempts++;
@@ -182,18 +191,8 @@ export async function fetchAIWithRetry(
 
     const isLast = i === maxRetries;
     if (!RETRYABLE.has(classification) || isLast) {
-      logProviderEvent({
-        event: "ai_provider_final_error",
-        ...endpoint,
-        model,
-        status: response.status,
-        classification,
-        attempts,
-        max_retries: maxRetries,
-        retrying: false,
-        body_preview: sanitizeProviderBody(rawBody),
-      });
-      return { ok: false, response, rawBody, classification, attempts };
+      lastFailure = { response, rawBody, classification };
+      break;
     }
 
     const retryAfterMs = extractRetryAfterMs(response);
@@ -215,8 +214,59 @@ export async function fetchAIWithRetry(
     await new Promise<void>((resolve) => setTimeout(resolve, nextDelayMs));
   }
 
-  // Unreachable — TypeScript requires exhaustive return path.
-  throw new Error("fetchAIWithRetry: unexpected loop exit");
+  if (!lastFailure) throw new Error("fetchAIWithRetry: unexpected loop exit");
+
+  // When rate_limit is exhausted, try once with a fallback model (e.g. Flash
+  // instead of Pro) — different quota bucket, much higher free-tier RPM.
+  if (
+    lastFailure.classification === "rate_limit" &&
+    fallbackModel &&
+    typeof init.body === "string"
+  ) {
+    try {
+      const parsed = JSON.parse(init.body);
+      if (typeof parsed?.model === "string" && parsed.model !== fallbackModel) {
+        const fallbackInit = {
+          ...init,
+          body: JSON.stringify({ ...parsed, model: fallbackModel }),
+        };
+        attempts++;
+        const fbResponse = await fetch(url, fallbackInit);
+        if (fbResponse.ok) {
+          logProviderEvent({
+            event: "ai_provider_recovered",
+            ...endpoint,
+            model: fallbackModel,
+            status: fbResponse.status,
+            attempts,
+            max_retries: maxRetries,
+          });
+          return { ok: true, response: fbResponse, attempts };
+        }
+      }
+    } catch {
+      // fall through to return lastFailure
+    }
+  }
+
+  logProviderEvent({
+    event: "ai_provider_final_error",
+    ...endpoint,
+    model,
+    status: lastFailure.response.status,
+    classification: lastFailure.classification,
+    attempts,
+    max_retries: maxRetries,
+    retrying: false,
+    body_preview: sanitizeProviderBody(lastFailure.rawBody),
+  });
+  return {
+    ok: false,
+    response: lastFailure.response,
+    rawBody: lastFailure.rawBody,
+    classification: lastFailure.classification,
+    attempts,
+  };
 }
 
 /**

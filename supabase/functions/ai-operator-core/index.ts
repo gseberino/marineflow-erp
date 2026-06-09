@@ -80,12 +80,15 @@ const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai
 // um modelo Gemini com forte fidelidade a instrução (ex: gemini-2.5-flash —
 // mesmo modelo já validado no agente atual).
 const MODEL = (Deno.env.get("AI_OPERATOR_MODEL") || "gemini-2.5-flash").trim();
+const MODEL_FAST_FALLBACK = (Deno.env.get("GEMINI_MODEL_FAST") || "gemini-2.5-flash").trim();
 const MAX_ITERATIONS = 6;
 
+// Always returns HTTP 200 so Supabase invoke() never throws FunctionsHttpError.
+// The real status is forwarded via X-Actual-Status for client-side inspection.
 function jr(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    status: 200,
+    headers: { ...corsHeaders, "Content-Type": "application/json", "X-Actual-Status": String(status) },
   });
 }
 
@@ -1978,7 +1981,7 @@ Deno.serve(async (req) => {
           headers: { Authorization: `Bearer ${GEMINI_API_KEY}`, "Content-Type": "application/json" },
           body: JSON.stringify({ model: MODEL, messages, tools: OPERATOR_TOOLS, tool_choice: "auto" }),
         },
-        { maxRetries: iter === 0 ? 2 : 0 }
+        { maxRetries: iter === 0 ? 2 : 0, fallbackModel: MODEL_FAST_FALLBACK }
       );
       if (!fetchResult.ok) {
         console.error("[ai-operator-core] gateway error", fetchResult.response.status, fetchResult.rawBody.slice(0, 200));
