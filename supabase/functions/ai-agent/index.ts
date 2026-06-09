@@ -675,6 +675,21 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "get_business_alerts",
+      description: "Retorna alertas de negócio ativos: OSs paradas, recebíveis vencidos, orçamentos sem faturamento, etc. Use quando o usuário perguntar sobre 'o que precisa de atenção', 'alertas', 'pendências', 'o que está parado', 'resumo do negócio' ou ao iniciar uma conversa proativamente.",
+      parameters: {
+        type: "object",
+        properties: {
+          severity: { type: "string", enum: ["critical", "warning", "info", "all"], description: "Filtrar por severidade. Padrão: all." },
+          alert_type: { type: "string", description: "Filtrar por tipo específico (ex: os_awaiting_client_long, receivable_overdue, os_no_technician)." },
+          limit: { type: "number", description: "Máximo de alertas. Padrão: 20." },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "create_purchase_order",
       description: "Cria uma nova ordem de compra para um fornecedor.",
       parameters: {
@@ -2025,6 +2040,31 @@ async function executeTool(
       return { ok: true, cancelled_id: args.scheduled_id };
     }
 
+    case "get_business_alerts": {
+      const limit = Math.min(Number(args.limit) || 20, 50);
+      let q = admin
+        .from("ai_business_alerts")
+        .select("id, alert_type, severity, title, description, entity_type, entity_number, first_seen_at, last_seen_at, metadata")
+        .is("resolved_at", null)
+        .order("last_seen_at", { ascending: false })
+        .limit(limit);
+      if (args.severity && args.severity !== "all") q = (q as any).eq("severity", args.severity);
+      if (args.alert_type) q = (q as any).eq("alert_type", args.alert_type);
+      const { data, error } = await q;
+      if (error) throw error;
+      const SORDER: Record<string, number> = { critical: 0, warning: 1, info: 2 };
+      const sorted = (data || []).sort(
+        (a: any, b: any) => (SORDER[a.severity] ?? 3) - (SORDER[b.severity] ?? 3)
+      );
+      const summary = {
+        total: sorted.length,
+        critical: sorted.filter((a: any) => a.severity === "critical").length,
+        warning: sorted.filter((a: any) => a.severity === "warning").length,
+        info: sorted.filter((a: any) => a.severity === "info").length,
+      };
+      return { alerts: sorted, summary };
+    }
+
     default:
       return { error: `Tool desconhecida: ${name}` };
   }
@@ -2334,6 +2374,7 @@ INSTRUÇÕES DE PERMISSÃO E ACESSO DO USUÁRIO ATUAL:
 - Entidade em contexto: ${context.entityType || "nenhuma"} ${context.entityId ? `(id: ${context.entityId})` : ""}
 
 PROATIVIDADE E NEGÓCIOS:
+- Use get_business_alerts quando o usuário perguntar sobre 'o que precisa de atenção', 'alertas', 'pendências do negócio', 'status geral', 'o que está parado', 'briefing' ou qualquer variação de resumo operacional. Apresente os alertas críticos primeiro com ícone 🔴, warnings com 🟡 e infos com 🔵.
 - Se você notar que um cliente não tem OS recente ou tem orçamentos parados em 'draft', sugira proativamente um follow-up.
 - Se identificar baixa lucratividade em uma OS (margem < 20%), alerte o ADMIN de forma discreta.
 - Sempre tente resolver ambiguidades buscando no banco antes de perguntar ao usuário.
