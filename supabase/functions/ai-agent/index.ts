@@ -3,6 +3,10 @@
 // Recebe { messages, context } e roda loop de tool-calling até resposta final.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import {
+  fetchAIWithRetry,
+  resolveOverloadUserMessage,
+} from "../_shared/ai-error.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -1927,34 +1931,38 @@ Responda APENAS com o texto da mensagem pronta para envio, sem explicações ou 
 
       const salesMessages: any[] = [{ role: "system", content: salesPrompt }, ...incoming];
 
-      const aiRes = await fetch(`${GEMINI_BASE_URL}/chat/completions`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${GEMINI_API_KEY}`,
-          "Content-Type": "application/json",
+      const fetchResult = await fetchAIWithRetry(
+        `${GEMINI_BASE_URL}/chat/completions`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${GEMINI_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: MODEL_SMART,
+            messages: salesMessages,
+          }),
         },
-        body: JSON.stringify({
-          model: MODEL_SMART,
-          messages: salesMessages,
-        }),
-      });
-
-      if (aiRes.status === 429) {
-        const t = await aiRes.text();
-        let msg = "Limite de requisições atingido.";
-        try {
-          const j = JSON.parse(t);
-          msg = j.error?.message || t;
-        } catch { msg = t; }
-        return jr({ error: `IA Limite (429): ${msg}` }, 429);
-      }
-      if (aiRes.status === 402) return jr({ error: "Créditos da IA esgotados." }, 402);
-      if (!aiRes.ok) {
-        const t = await aiRes.text();
-        console.error("AI gateway sales error:", aiRes.status, t);
+        { maxRetries: 2 }
+      );
+      if (!fetchResult.ok) {
+        console.error("AI gateway sales error:", fetchResult.response.status, fetchResult.rawBody.slice(0, 200));
+        if (fetchResult.classification === "provider_overloaded") {
+          return jr({ error: resolveOverloadUserMessage(0) }, 503);
+        }
+        if (fetchResult.classification === "rate_limit") {
+          return jr({ error: "Limite de requisições da IA atingido. Tente novamente em instantes." }, 429);
+        }
+        if (fetchResult.classification === "billing") {
+          return jr({ error: "Créditos da IA esgotados." }, 402);
+        }
+        if (fetchResult.classification === "permission") {
+          return jr({ error: "Permissão negada pelo provedor de IA. Verifique as configurações de API key e faturamento." }, 403);
+        }
         return jr({ error: "Erro no gateway de IA" }, 500);
       }
-      const aiJson = await aiRes.json();
+      const aiJson = await fetchResult.response.json();
       const content = aiJson.choices?.[0]?.message?.content || "";
       return jr({ message: { role: "assistant", content }, tool_events: [] });
     }
@@ -2139,44 +2147,41 @@ Quando o usuário disser "este cliente", "esta OS", "este barco", use o ID em co
       // e escrevia listas em texto em vez de chamar a tool. Pro garante maior fidelidade.
       const modelToUse = MODEL_SMART;
 
-      const aiRes = await fetch(`${GEMINI_BASE_URL}/chat/completions`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${GEMINI_API_KEY}`,
-          "Content-Type": "application/json",
+      const fetchResult = await fetchAIWithRetry(
+        `${GEMINI_BASE_URL}/chat/completions`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${GEMINI_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: modelToUse,
+            messages,
+            tools: isSalesCopy ? undefined : TOOLS,
+            tool_choice: isSalesCopy ? undefined : "auto",
+          }),
         },
-        body: JSON.stringify({
-          model: modelToUse,
-          messages,
-          tools: isSalesCopy ? undefined : TOOLS,
-          tool_choice: isSalesCopy ? undefined : "auto",
-        }),
-      });
-
-      if (aiRes.status === 429) {
-        const t = await aiRes.text();
-        let msg = "Limite de requisições atingido.";
-        try {
-          const j = JSON.parse(t);
-          msg = j.error?.message || t;
-        } catch { msg = t; }
-        return jr({ error: `IA Limite (429): ${msg}` }, 429);
-      }
-      if (aiRes.status === 402) return jr({ error: "Créditos da IA esgotados. Adicione créditos em Settings > Workspace > Usage." }, 402);
-      if (!aiRes.ok) {
-        const t = await aiRes.text();
-        console.error("AI gateway error:", aiRes.status, t);
-        let errorMsg = `Erro no gateway de IA (${aiRes.status})`;
-        try {
-          const errJson = JSON.parse(t);
-          errorMsg = errJson.error?.message || t;
-        } catch {
-          errorMsg = t;
+        { maxRetries: iter === 0 ? 2 : 0 }
+      );
+      if (!fetchResult.ok) {
+        console.error("AI gateway error:", fetchResult.response.status, fetchResult.rawBody.slice(0, 200));
+        if (fetchResult.classification === "provider_overloaded") {
+          return jr({ error: resolveOverloadUserMessage(iter) }, 503);
         }
-        return jr({ error: `IA Falhou: ${errorMsg}` }, aiRes.status);
+        if (fetchResult.classification === "rate_limit") {
+          return jr({ error: "Limite de requisições da IA atingido. Tente novamente em instantes." }, 429);
+        }
+        if (fetchResult.classification === "billing") {
+          return jr({ error: "Créditos da IA esgotados. Adicione créditos em Settings > Workspace > Usage." }, 402);
+        }
+        if (fetchResult.classification === "permission") {
+          return jr({ error: "Permissão negada pelo provedor de IA. Verifique as configurações de API key e faturamento." }, 403);
+        }
+        return jr({ error: `Erro no gateway de IA (${fetchResult.response.status})` }, 500);
       }
 
-      const aiJson = await aiRes.json();
+      const aiJson = await fetchResult.response.json();
       const choice = aiJson.choices?.[0];
       const aiMsg = choice?.message;
       if (!aiMsg) return jr({ error: "Resposta vazia do modelo" }, 500);

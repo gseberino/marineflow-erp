@@ -12,6 +12,10 @@
 //   * Sem mudanças nos fluxos sensíveis (continuam bloqueados pelo gate).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import {
+  fetchAIWithRetry,
+  resolveOverloadUserMessage,
+} from "../_shared/ai-error.ts";
 import { classifyAction } from "./risk.ts";
 import { OPERATOR_TOOLS } from "./tools.ts";
 import { buildSystemPrompt } from "./prompt.ts";
@@ -1966,18 +1970,32 @@ Deno.serve(async (req) => {
     let quoteProposalForFrontend: any = null;
 
     for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
-      const aiRes = await fetch(`${GEMINI_BASE_URL}/chat/completions`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${GEMINI_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ model: MODEL, messages, tools: OPERATOR_TOOLS, tool_choice: "auto" }),
-      });
-      if (aiRes.status === 429) return jr({ error: "Limite de requisições do modelo atingido." }, 429);
-      if (!aiRes.ok) {
-        const txt = await aiRes.text();
-        console.error("[ai-operator-core] gateway error", aiRes.status, txt);
-        return jr({ error: `Gateway de IA falhou (${aiRes.status})` }, 500);
+      const fetchResult = await fetchAIWithRetry(
+        `${GEMINI_BASE_URL}/chat/completions`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${GEMINI_API_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ model: MODEL, messages, tools: OPERATOR_TOOLS, tool_choice: "auto" }),
+        },
+        { maxRetries: iter === 0 ? 2 : 0 }
+      );
+      if (!fetchResult.ok) {
+        console.error("[ai-operator-core] gateway error", fetchResult.response.status, fetchResult.rawBody.slice(0, 200));
+        if (fetchResult.classification === "provider_overloaded") {
+          return jr({ error: resolveOverloadUserMessage(iter) }, 503);
+        }
+        if (fetchResult.classification === "rate_limit") {
+          return jr({ error: "Limite de requisições do modelo atingido." }, 429);
+        }
+        if (fetchResult.classification === "billing") {
+          return jr({ error: "Créditos da IA esgotados. Verifique as configurações de faturamento." }, 402);
+        }
+        if (fetchResult.classification === "permission") {
+          return jr({ error: "Permissão negada pelo provedor de IA. Verifique as configurações de API key e faturamento." }, 403);
+        }
+        return jr({ error: `Gateway de IA falhou (${fetchResult.response.status})` }, 500);
       }
-      const aiJson = await aiRes.json();
+      const aiJson = await fetchResult.response.json();
       const choice = aiJson.choices?.[0];
       const aiMsg = choice?.message;
       if (!aiMsg) return jr({ error: "Resposta vazia do modelo" }, 500);
