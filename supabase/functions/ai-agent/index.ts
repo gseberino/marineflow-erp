@@ -800,6 +800,24 @@ const TOOLS = [
       },
     },
   },
+  // ====== PRICING INTELLIGENCE ======
+  {
+    type: "function",
+    function: {
+      name: "get_pricing_intelligence",
+      description: "Consulta histórico de preços cobrados para um serviço ou produto. Retorna preço médio, mínimo, máximo, mediana e número de ocorrências nos últimos meses. Use ANTES de definir preços num orçamento para sugerir valores baseados em histórico real.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Nome do serviço ou produto a consultar (busca parcial)." },
+          type: { type: "string", enum: ["service", "product", "both"], description: "Tipo: 'service' para mão de obra, 'product' para peças, 'both' para ambos. Padrão: both." },
+          months: { type: "number", description: "Quantos meses de histórico consultar. Padrão: 6." },
+        },
+        required: ["query"],
+      },
+    },
+  },
+
   // ====== WORKFLOWS ======
   {
     type: "function",
@@ -2409,6 +2427,116 @@ async function executeTool(
       return { alerts: sorted, summary };
     }
 
+    case "get_pricing_intelligence": {
+      const q = String(args.query || "").trim();
+      const months = Math.min(Number(args.months) || 6, 24);
+      const type = args.type || "both";
+      const cutoff = new Date(now.getTime() - months * 30 * 86_400_000).toISOString();
+      const result: any = { query: q, period_months: months };
+
+      function percentile(sorted: number[], p: number): number {
+        if (sorted.length === 0) return 0;
+        const idx = Math.floor((p / 100) * sorted.length);
+        return Math.round(sorted[Math.min(idx, sorted.length - 1)] * 100) / 100;
+      }
+
+      if (type === "service" || type === "both") {
+        const { data: svcRows } = await admin
+          .from("service_order_services")
+          .select("unit_price_snapshot, quantity, line_total, created_at")
+          .ilike("service_name_snapshot", `%${q}%`)
+          .gte("created_at", cutoff)
+          .limit(200);
+
+        if (svcRows && svcRows.length > 0) {
+          const prices = svcRows.map((r: any) => Number(r.unit_price_snapshot) || 0).filter((p: number) => p > 0);
+          const sorted = [...prices].sort((a, b) => a - b);
+          const avg = prices.reduce((s: number, p: number) => s + p, 0) / prices.length;
+          result.service = {
+            count: prices.length,
+            avg: Math.round(avg * 100) / 100,
+            min: sorted[0],
+            max: sorted[sorted.length - 1],
+            p25: percentile(sorted, 25),
+            median: percentile(sorted, 50),
+            p75: percentile(sorted, 75),
+            recommendation: `Com base em ${prices.length} cobrança(s), preço sugerido: R$ ${Math.round(percentile(sorted, 50) * 100) / 100} (mediana). Faixa usual: R$ ${sorted[0]} – R$ ${sorted[sorted.length - 1]}.`,
+          };
+        } else {
+          // Fallback: check services catalog
+          const { data: svcCatalog } = await admin
+            .from("services")
+            .select("service_name, default_price, billing_unit")
+            .ilike("service_name", `%${q}%`)
+            .limit(5);
+          result.service = {
+            count: 0,
+            catalog_matches: svcCatalog || [],
+            recommendation: svcCatalog?.length
+              ? `Sem histórico de cobrança. Preço padrão do catálogo: R$ ${svcCatalog[0]?.default_price || "não definido"}.`
+              : "Sem histórico nem cadastro no catálogo para este serviço.",
+          };
+        }
+      }
+
+      if (type === "product" || type === "both") {
+        // Find matching products in catalog
+        const { data: prodCatalog } = await admin
+          .from("products")
+          .select("id, product_name, cost_price, sale_price, profit_margin, stock_quantity")
+          .ilike("product_name", `%${q}%`)
+          .eq("active", true)
+          .limit(5);
+
+        // For the first matched product, look up historical sales
+        let historicalStats: any = null;
+        if (prodCatalog && prodCatalog.length > 0) {
+          const prodId = prodCatalog[0].id;
+          const { data: partRows } = await admin
+            .from("service_order_parts")
+            .select("unit_sale_snapshot, unit_cost_snapshot")
+            .eq("product_id", prodId)
+            .gte("created_at", cutoff)
+            .limit(100);
+
+          if (partRows && partRows.length > 0) {
+            const salePrices = partRows.map((r: any) => Number(r.unit_sale_snapshot) || 0).filter((p: number) => p > 0);
+            const costPrices = partRows.map((r: any) => Number(r.unit_cost_snapshot) || 0).filter((p: number) => p > 0);
+            if (salePrices.length > 0) {
+              const sorted = [...salePrices].sort((a, b) => a - b);
+              const avgSale = salePrices.reduce((s: number, p: number) => s + p, 0) / salePrices.length;
+              const avgCost = costPrices.length > 0 ? costPrices.reduce((s: number, p: number) => s + p, 0) / costPrices.length : 0;
+              const avgMargin = avgSale > 0 ? Math.round(((avgSale - avgCost) / avgSale) * 100) : null;
+              historicalStats = {
+                sales_count: salePrices.length,
+                avg_sale: Math.round(avgSale * 100) / 100,
+                avg_cost: Math.round(avgCost * 100) / 100,
+                avg_margin_pct: avgMargin,
+                min: sorted[0],
+                max: sorted[sorted.length - 1],
+                median: percentile(sorted, 50),
+              };
+            }
+          }
+        }
+
+        const firstProd = prodCatalog?.[0];
+        const recText = historicalStats
+          ? `Com base em ${historicalStats.sales_count} venda(s), preço mediano: R$ ${historicalStats.median}. Margem média: ${historicalStats.avg_margin_pct !== null ? historicalStats.avg_margin_pct + "%" : "N/A"}.`
+          : firstProd
+            ? `Preço do catálogo: R$ ${firstProd.sale_price || "não definido"} (custo: R$ ${firstProd.cost_price || "N/A"}, margem: ${firstProd.profit_margin || "N/A"}%).`
+            : "Produto não encontrado no catálogo.";
+
+        result.product = {
+          catalog: prodCatalog || [],
+          historical: historicalStats,
+          recommendation: recText,
+        };
+      }
+
+      return result;
+    }
+
     case "start_workflow": {
       const { data, error } = await sb
         .from("ai_workflows")
@@ -2903,6 +3031,12 @@ Fluxo service_execution (agendado → concluído):
 Fluxo invoicing (concluído → pago):
   ready_to_invoice → invoice_created → invoice_sent → paid → workflow_complete
   Inicie quando OS vai para "completed" sem faturamento.
+
+INTELIGÊNCIA DE PREÇOS — QUANDO USAR:
+- Ao adicionar serviços ou produtos em um orçamento sem preço definido: chame get_pricing_intelligence(query="nome do serviço") para ver o histórico de preços cobrados.
+- Use a mediana histórica como ponto de partida para sugerir preços.
+- Se o preço sugerido pelo usuário estiver abaixo da mediana histórica ou abaixo do custo do produto, alerte discretamente: "Historicamente cobramos R$ X por este serviço — deseja manter R$ Y?"
+- Chame get_os_profitability após completar um orçamento para verificar margem. Se < margem padrão (${settings.default_profit_margin || "30"}%), alerte o ADMIN.
 
 PROATIVIDADE E NEGÓCIOS:
 - Use get_business_alerts quando o usuário perguntar sobre 'o que precisa de atenção', 'alertas', 'pendências do negócio', 'status geral', 'o que está parado', 'briefing' ou qualquer variação de resumo operacional. Apresente os alertas críticos primeiro com ícone 🔴, warnings com 🟡 e infos com 🔵.
