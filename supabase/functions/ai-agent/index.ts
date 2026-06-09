@@ -8,6 +8,7 @@ import {
   resolveOverloadUserMessage,
   resolveRateLimitUserMessage,
 } from "../_shared/ai-error.ts";
+import { tryFastPathResponse } from "./deterministic-intents.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -852,6 +853,24 @@ async function addServiceOrderServiceLine(
   return { id: data.id, data };
 }
 
+// Trims conversation history before sending to the AI provider.
+// Caps at maxMessages to reduce token consumption.
+// Ensures the result starts with a clean turn (not an orphaned tool result).
+function trimConversationHistory(msgs: any[], maxMessages: number): any[] {
+  if (msgs.length <= maxMessages) return msgs;
+  let trimmed = msgs.slice(msgs.length - maxMessages);
+  while (
+    trimmed.length > 0 &&
+    (trimmed[0].role === "tool" ||
+      (trimmed[0].role === "assistant" &&
+        Array.isArray(trimmed[0].tool_calls) &&
+        trimmed[0].tool_calls.length > 0))
+  ) {
+    trimmed = trimmed.slice(1);
+  }
+  return trimmed;
+}
+
 // ---------------- TOOL EXECUTORS ----------------
 async function executeTool(
   name: string,
@@ -1490,25 +1509,32 @@ async function executeTool(
         observation: "observação técnica",
       };
       const label = contextLabels[args.context] || args.context;
-      const optimizeRes = await fetch(`${GEMINI_BASE_URL}/chat/completions`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${GEMINI_API_KEY}`,
-          "Content-Type": "application/json",
+      const optimizeResult = await fetchAIWithRetry(
+        `${GEMINI_BASE_URL}/chat/completions`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${GEMINI_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: MODEL_SMART,
+            messages: [
+              {
+                role: "system",
+                content: `Você é um especialista em comunicação técnica náutica. Reescreva o texto a seguir como ${label}, mantendo as informações originais mas tornando-o mais claro, profissional e preciso. Responda APENAS com o texto reescrito, sem explicações.`,
+              },
+              { role: "user", content: args.text },
+            ],
+            tool_choice: "none",
+          }),
         },
-        body: JSON.stringify({
-          model: MODEL_SMART,
-          messages: [
-            {
-              role: "system",
-              content: `Você é um especialista em comunicação técnica náutica. Reescreva o texto a seguir como ${label}, mantendo as informações originais mas tornando-o mais claro, profissional e preciso. Responda APENAS com o texto reescrito, sem explicações.`,
-            },
-            { role: "user", content: args.text },
-          ],
-          tool_choice: "none",
-        }),
-      });
-      const optimizeJson = await optimizeRes.json();
+        { maxRetries: 1 }
+      );
+      if (!optimizeResult.ok) {
+        return { original: args.text, optimized: args.text };
+      }
+      const optimizeJson = await optimizeResult.response.json();
       const optimized = optimizeJson.choices?.[0]?.message?.content || args.text;
       return { original: args.text, optimized };
     }
@@ -1902,7 +1928,11 @@ Deno.serve(async (req) => {
     (settingsRows || []).forEach((r: any) => { if (r.key) settings[r.key] = String(r.value ?? ""); });
 
     const body = await req.json().catch(() => ({}));
-    const incoming = Array.isArray(body.messages) ? body.messages : [];
+    // Cap history at 20 messages (frontend sends up to 30) to reduce per-call token count.
+    const incoming = trimConversationHistory(
+      Array.isArray(body.messages) ? body.messages : [],
+      20
+    );
     const context = body.context || {};
     const isSalesCopy = body.is_sales_copy === true;
 
@@ -1966,6 +1996,13 @@ Responda APENAS com o texto da mensagem pronta para envio, sem explicações ou 
       const aiJson = await fetchResult.response.json();
       const content = aiJson.choices?.[0]?.message?.content || "";
       return jr({ message: { role: "assistant", content }, tool_events: [] });
+    }
+
+    // Fast-path: answer common OS read queries directly from the database —
+    // zero AI provider calls made, zero RPM/RPD consumed.
+    const fastPathAnswer = await tryFastPathResponse(incoming, context, sb);
+    if (fastPathAnswer !== null) {
+      return jr({ message: { role: "assistant", content: fastPathAnswer }, tool_events: [] });
     }
 
     const appOrigin =
