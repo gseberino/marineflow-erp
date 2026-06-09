@@ -688,6 +688,20 @@ const TOOLS = [
     },
   },
 
+  {
+    type: "function",
+    function: {
+      name: "get_daily_briefing",
+      description: "Retorna o briefing de inteligência de negócios do dia (gerado às 07:30). Contém alertas críticos, tarefas vencidas, agenda do dia e atividade recente de OSs. Use quando o usuário pedir 'briefing', 'resumo do dia', 'como está o negócio hoje', 'o que aconteceu ontem'.",
+      parameters: {
+        type: "object",
+        properties: {
+          date: { type: "string", description: "Data no formato YYYY-MM-DD. Padrão: hoje." },
+        },
+      },
+    },
+  },
+
   // ====== AGENT TASKS ======
   {
     type: "function",
@@ -2143,6 +2157,21 @@ async function executeTool(
         .eq("id", args.scheduled_id);
       if (error) return { error: error.message };
       return { ok: true, cancelled_id: args.scheduled_id };
+    }
+
+    case "get_daily_briefing": {
+      const todayDate = args.date || new Date().toISOString().split("T")[0];
+      const { data, error } = await admin
+        .from("ai_daily_briefings")
+        .select("date, summary_text, critical_count, warning_count, tasks_due_count, agenda_count, sections, generated_at")
+        .eq("date", todayDate)
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) {
+        // Generate on-the-fly if not yet created (before the 7:30am cron ran)
+        return { not_generated_yet: true, message: "Briefing ainda não gerado para hoje (gerado às 07:30). Use get_business_alerts para ver alertas atuais." };
+      }
+      return data;
     }
 
     case "schedule_agent_task": {
