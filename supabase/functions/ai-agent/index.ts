@@ -672,6 +672,22 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "get_lifecycle_events",
+      description: "Retorna o histórico de transições de status de uma OS (quando ficou em andamento, concluída, etc). Use para responder 'o que aconteceu com essa OS?' ou para contexto de linha do tempo.",
+      parameters: {
+        type: "object",
+        properties: {
+          service_order_id: { type: "string", description: "UUID da OS." },
+          limit: { type: "number", description: "Máximo de eventos. Padrão: 20." },
+        },
+        required: ["service_order_id"],
+      },
+    },
+  },
+
   // ====== MEMORY ======
   {
     type: "function",
@@ -2075,6 +2091,19 @@ async function executeTool(
         .eq("id", args.scheduled_id);
       if (error) return { error: error.message };
       return { ok: true, cancelled_id: args.scheduled_id };
+    }
+
+    case "get_lifecycle_events": {
+      const soId = args.service_order_id;
+      const limit = Math.min(Number(args.limit) || 20, 50);
+      const { data, error } = await admin
+        .from("ai_lifecycle_events")
+        .select("id, event_type, old_value, new_value, metadata, created_at")
+        .eq("entity_id", soId)
+        .order("created_at", { ascending: true })
+        .limit(limit);
+      if (error) throw error;
+      return { events: data || [], total: (data || []).length };
     }
 
     case "search_memory": {
