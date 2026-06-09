@@ -672,6 +672,43 @@ const TOOLS = [
       },
     },
   },
+  // ====== MEMORY ======
+  {
+    type: "function",
+    function: {
+      name: "search_memory",
+      description: "Busca memórias persistentes sobre clientes, embarcações ou padrões de negócio. Use SEMPRE que iniciar uma conversa sobre um cliente ou embarcação específico. Retorna fatos aprendidos em interações anteriores: preferências, histórico relevante, padrões recorrentes.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Termos de busca — nome do cliente, embarcação, tipo de problema, etc." },
+          entity_id: { type: "string", description: "UUID do cliente, embarcação ou OS para filtrar memórias específicas." },
+          scope: { type: "string", enum: ["global", "client", "vessel", "service_order", "operator", "all"], description: "Escopo. Padrão: all." },
+          limit: { type: "number", description: "Máximo de resultados. Padrão: 10." },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "save_memory",
+      description: "Salva um fato importante na memória persistente. Use quando aprender algo relevante sobre um cliente ou embarcação: preferências de contato, problemas recorrentes, equipamentos instalados, histórico significativo, decisões do cliente. Evite duplicar memórias já existentes — verifique com search_memory primeiro.",
+      parameters: {
+        type: "object",
+        properties: {
+          scope: { type: "string", enum: ["global", "client", "vessel", "service_order", "operator"], description: "Escopo da memória." },
+          entity_id: { type: "string", description: "UUID do cliente, embarcação ou OS relacionado (se aplicável)." },
+          entity_name: { type: "string", description: "Nome legível da entidade (ex: nome do cliente, nome da embarcação) — facilita buscas futuras." },
+          memory_key: { type: "string", description: "Tipo ou categoria do fato (ex: 'preferencia_contato', 'problema_recorrente', 'equipamento_instalado', 'observacao_cliente'). Use snake_case descritivo." },
+          memory_value: { type: "string", description: "Conteúdo do fato a ser lembrado. Seja específico e completo." },
+          confidence: { type: "string", enum: ["high", "medium", "low"], description: "Confiança no fato. Padrão: high." },
+        },
+        required: ["scope", "memory_key", "memory_value"],
+      },
+    },
+  },
   {
     type: "function",
     function: {
@@ -2040,6 +2077,43 @@ async function executeTool(
       return { ok: true, cancelled_id: args.scheduled_id };
     }
 
+    case "search_memory": {
+      const q = String(args.query || "").trim();
+      const limit = Math.min(Number(args.limit) || 10, 30);
+      let dbq = admin
+        .from("ai_agent_memory")
+        .select("id, scope, entity_id, entity_name, memory_key, memory_value, confidence, created_at, updated_at")
+        .order("updated_at", { ascending: false })
+        .limit(limit);
+      if (args.entity_id) dbq = (dbq as any).eq("entity_id", args.entity_id);
+      if (args.scope && args.scope !== "all") dbq = (dbq as any).eq("scope", args.scope);
+      if (q) dbq = (dbq as any).or(
+        `memory_key.ilike.%${q}%,memory_value.ilike.%${q}%,entity_name.ilike.%${q}%`
+      );
+      const { data, error } = await dbq;
+      if (error) throw error;
+      return { results: data || [], total: (data || []).length };
+    }
+
+    case "save_memory": {
+      const { data, error } = await admin
+        .from("ai_agent_memory")
+        .insert({
+          scope: args.scope,
+          entity_id: args.entity_id || null,
+          entity_name: args.entity_name || null,
+          memory_key: args.memory_key,
+          memory_value: args.memory_value,
+          confidence: args.confidence || "high",
+          source: "ai_agent",
+          created_by_user_id: userId,
+        })
+        .select()
+        .single();
+      if (error) return { ok: false, error: error.message };
+      return { ok: true, id: data.id };
+    }
+
     case "get_business_alerts": {
       const limit = Math.min(Number(args.limit) || 20, 50);
       let q = admin
@@ -2372,6 +2446,12 @@ INSTRUÇÕES DE PERMISSÃO E ACESSO DO USUÁRIO ATUAL:
 - Como o banco de dados também impõe RLS, operações não permitidas falharão no backend, mas sua principal função é instruir o usuário antes mesmo de tentar executar a tarefa.
 - Rota atual: ${context.route || "desconhecida"}
 - Entidade em contexto: ${context.entityType || "nenhuma"} ${context.entityId ? `(id: ${context.entityId})` : ""}
+
+MEMÓRIA PERSISTENTE — REGRAS OBRIGATÓRIAS:
+- Ao iniciar conversa sobre um cliente ou embarcação específico, chame search_memory(entity_id=UUID) ANTES de fazer qualquer ação.
+- Quando aprender algo relevante durante a conversa (preferência de contato, problema recorrente, equipamento instalado, decisão do cliente), chame save_memory ao final.
+- Exemplos de memórias valiosas: "prefere ser contactado pelo WhatsApp à tarde", "barco tem bateria recarregada mensalmente desde problema em Mar/2025", "cliente costuma aprovar orçamentos acima de R$ 5k sem questionar".
+- Não salve fatos óbvios ou já armazenados no banco (dados cadastrais). Salve INSIGHTS e PADRÕES comportamentais.
 
 PROATIVIDADE E NEGÓCIOS:
 - Use get_business_alerts quando o usuário perguntar sobre 'o que precisa de atenção', 'alertas', 'pendências do negócio', 'status geral', 'o que está parado', 'briefing' ou qualquer variação de resumo operacional. Apresente os alertas críticos primeiro com ícone 🔴, warnings com 🟡 e infos com 🔵.
