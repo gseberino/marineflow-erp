@@ -20,6 +20,7 @@ export type OptionItem = { label: string; value: string };
 export type OptionsData = {
   question: string;
   options: OptionItem[];
+  entity_type?: string;
 };
 
 export type ProposalStatus = 'pending' | 'confirmed' | 'cancelled' | 'executed' | 'partial' | 'failed';
@@ -60,7 +61,7 @@ function classifyToolResult(events: any[], proposalAction: string): ToolClassifi
   const failedCount = typeof r.failed_count === 'number' ? r.failed_count : null;
   if (created !== null && failedCount !== null) {
     const detail = Array.isArray(r.failed) && r.failed.length
-      ? r.failed.map((f: any) => `• ${f.service_name || f.index}: ${f.error}`).join('\n')
+      ? r.failed.map((f: any) => `• ${f.product_name || f.service_name || `item ${f.index}`}: ${f.error}`).join('\n')
       : '';
     if (created === 0 && failedCount > 0) {
       const baseMsg = `Nenhum item foi inserido.${detail ? '\n' + detail : ''}`;
@@ -292,5 +293,5 @@ export function useAIAgent(context: AIContext) {
     setError(null);
   }, []);
 
-  return { display, loading, loadingMsg, error, activeProposal, activeOptions, sendMessage, confirmProposal, cancelProposal, selectOption, reset };
+  return { messages, display, loading, loadingMsg, error, activeProposal, activeOptions, sendMessage, confirmProposal, cancelProposal, selectOption, reset };
 }

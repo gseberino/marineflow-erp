@@ -1616,7 +1616,12 @@ async function executeTool(
 
       const update: any = { scheduled_start_at: args.scheduled_start_at };
       if (args.scheduled_end_at) update.scheduled_end_at = args.scheduled_end_at;
-      if (args.technician_user_id) update.status = "scheduled";
+      if (args.technician_user_id) {
+        // Só avança para "scheduled" se o status atual não é terminal (completed/invoiced/cancelled)
+        const { data: cur } = await sb.from("service_orders").select("status").eq("id", args.service_order_id).maybeSingle();
+        const TERMINAL = new Set(["completed", "invoiced", "cancelled"]);
+        if (!cur?.status || !TERMINAL.has(cur.status)) update.status = "scheduled";
+      }
       const { data, error } = await sb
         .from("service_orders")
         .update(update)
@@ -2452,8 +2457,21 @@ Quando o usuário disser "este cliente", "esta OS", "este barco", use o ID em co
             question: (q, n) => n > 5
               ? `Encontrei ${n} produtos para "${q}". Escolha ou refine:`
               : `Qual produto para "${q}"?`,
-            label: (p) => `${p.product_name}${p.sale_price ? ` — R$ ${Number(p.sale_price).toFixed(2)}` : ""}`,
+            label: (p) => {
+              const parts = [p.product_name];
+              if (p.sale_price) parts.push(`R$ ${Number(p.sale_price).toFixed(2)}`);
+              if (p.sku) parts.push(`SKU: ${p.sku}`);
+              if (p.stock_quantity != null) parts.push(`Estoque: ${p.stock_quantity}`);
+              return parts.join(" — ");
+            },
             value: (p) => p.id,
+          },
+          search_services: {
+            question: (q, n) => n > 5
+              ? `Encontrei ${n} serviços para "${q}". Escolha ou refine:`
+              : `Qual serviço para "${q}"?`,
+            label: (s) => `${s.service_name}${s.default_price ? ` — R$ ${Number(s.default_price).toFixed(2)}` : ""}`,
+            value: (s) => s.id,
           },
           list_service_orders: {
             question: (_q, n) => n > 5
@@ -2471,7 +2489,7 @@ Quando o usuário disser "este cliente", "esta OS", "este barco", use o ID em co
             const searchQuery = fnArgs.query || fnArgs.client_id || "";
             const top5 = items.slice(0, 5);
             const options = top5.map((item: any) => ({
-              label: cfg.label(item).slice(0, 60),
+              label: cfg.label(item).slice(0, 120),
               value: cfg.value(item),
             }));
             if (items.length > 5) {
@@ -2480,7 +2498,7 @@ Quando o usuário disser "este cliente", "esta OS", "este barco", use o ID em co
             const question = cfg.question(searchQuery, items.length);
             return jr({
               message: { role: "assistant", content: `Encontrei ${items.length} resultado(s). Selecione:` },
-              options: { question, options },
+              options: { question, options, entity_type: fnName },
               tool_events: toolEvents,
               updated_messages: messages.slice(1),
             });

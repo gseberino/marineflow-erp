@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Sparkles, Send, Loader2, RotateCcw, X, Mic, MicOff, Bot } from 'lucide-react';
+import { Sparkles, Send, Loader2, RotateCcw, X, Mic, MicOff, Bot, ClipboardCopy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/hooks/use-auth';
@@ -100,7 +100,7 @@ export function AIAgentWidget() {
   const [input, setInput] = useState('');
   const [operatorMode, setOperatorMode] = useState(false);
   const context = useAIContext();
-  const { display, loading, loadingMsg, sendMessage, confirmProposal, cancelProposal, selectOption, reset, activeProposal, activeOptions } =
+  const { messages, display, loading, loadingMsg, sendMessage, confirmProposal, cancelProposal, selectOption, reset, activeProposal, activeOptions } =
     useAIAgent(context);
   // Quando o widget abre na pagina de detalhe de um draft, o draft alvo vem
   // do contexto da rota (ai-context detecta /operator/drafts/:id). Em outras
@@ -169,6 +169,19 @@ export function AIAgentWidget() {
   // drawer para o Modo Operador. Suprimir o widget flutuante evita dois
   // contextos de chat divergentes apontando para o mesmo draft.
   if (context.entityType === 'operator_draft' && context.entityId) return null;
+
+  const handleCopyLog = useCallback(() => {
+    const log = {
+      exported_at: new Date().toISOString(),
+      context: { entityType: context.entityType, entityId: context.entityId },
+      mode: operatorMode ? 'operator' : 'agent',
+      messages: operatorMode ? (op as any).messages ?? [] : messages,
+      display: operatorMode ? op.display : display,
+    };
+    navigator.clipboard.writeText(JSON.stringify(log, null, 2))
+      .then(() => toast.success('Log copiado como JSON'))
+      .catch(() => toast.error('Não foi possível copiar — verifique as permissões do navegador'));
+  }, [operatorMode, messages, display, op, context]);
 
   const handleSend = () => {
     const txt = input.trim();
@@ -251,6 +264,15 @@ export function AIAgentWidget() {
               title={operatorMode ? 'Modo Operador ATIVO (beta) — clique para voltar' : 'Ativar Modo Operador (beta)'}
             >
               <Bot className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={handleCopyLog}
+              title="Copiar log da conversa (JSON)"
+            >
+              <ClipboardCopy className="h-3.5 w-3.5" />
             </Button>
             <Button
               variant="ghost"
@@ -347,6 +369,7 @@ export function AIAgentWidget() {
                     status={item.status}
                     selectedValue={item.selectedValue}
                     onSelect={selectOption}
+                    entityType={item.data.entity_type}
                   />
                 );
               return null;
