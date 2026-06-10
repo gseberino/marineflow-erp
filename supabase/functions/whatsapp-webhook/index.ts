@@ -1,8 +1,9 @@
 // Edge Function: whatsapp-webhook
-// Versão: 6.0 (Provider-abstracted)
+// Versão: 7.0 (Evolution-ready)
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { ZapiProvider } from "../_shared/whatsapp/zapi-provider.ts";
-import { normalizePhoneNumber } from "../_shared/whatsapp/normalize.ts";
+import { createWhatsAppProvider } from "../_shared/whatsapp/factory.ts";
+import { EVOLUTION_STATUS_MAP } from "../_shared/whatsapp/evolution-provider.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -183,7 +184,7 @@ Deno.serve(async (req) => {
       client: sMap.zapi_client_token || null,
     };
 
-    // Status delivery callback — handled before parseIncomingWebhook
+    // Z-API delivery status callback
     if (type === "MessageStatusCallback" || type === "MessageStatus") {
       const status = String(pAny.status || "").toLowerCase();
       const zapiId = pAny.messageId || (pAny.ids ? pAny.ids[0] : null);
@@ -196,8 +197,26 @@ Deno.serve(async (req) => {
       return jr({ ok: true, type: "status" });
     }
 
-    // Parse via provider — replaces inline normalizePhone + extractBodyAndType
-    const provider = new ZapiProvider({
+    // Evolution delivery status update (messages.update)
+    if (type === "messages.update") {
+      const updates = Array.isArray(pAny.data) ? pAny.data : [];
+      for (const upd of updates as Array<Record<string, unknown>>) {
+        const key = upd["key"] as Record<string, unknown> | undefined;
+        const msgId = key?.["id"];
+        const statusNum = (upd["update"] as Record<string, unknown> | undefined)?.["status"];
+        if (msgId && statusNum !== undefined) {
+          const status = EVOLUTION_STATUS_MAP[statusNum as number] ?? String(statusNum);
+          await admin
+            .from("whatsapp_messages")
+            .update({ delivery_status: status })
+            .eq("zapi_message_id", String(msgId));
+        }
+      }
+      return jr({ ok: true, type: "status" });
+    }
+
+    // Parse incoming message via active provider
+    const provider = createWhatsAppProvider({
       instanceId: zapiCreds.id || "noop",
       token: zapiCreds.token || "noop",
       clientToken: zapiCreds.client,
