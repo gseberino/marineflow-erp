@@ -1,6 +1,12 @@
 // Edge Function: whatsapp-status-worker
-// Processa agendamentos de Status do WhatsApp via Z-API
+// Processa agendamentos de Status do WhatsApp via Z-API.
 // Roda periodicamente (cron) para verificar posts pendentes.
+//
+// NOTE (B4): WhatsApp Status (Stories) endpoints (/send-text-status,
+// /send-image-status, /send-video-status) are Z-API-specific and have no
+// equivalent in the WhatsAppProvider interface (secondary feature, low usage).
+// This function retains direct Z-API calls until Evolution support is confirmed
+// and a sendStatus() method is added to the interface in a future task.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 

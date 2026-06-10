@@ -1,11 +1,13 @@
 // Edge Function: whatsapp-send
-// Envia mensagens via Z-API (https://z-api.io)
+// Envia mensagens via WhatsApp (provider configurado por WHATSAPP_PROVIDER).
 // Suporta:
-//   kind=text     → /send-text                 { phone, message }
-//   kind=link     → /send-link                 { phone, message, image, linkUrl, title, linkDescription }
-//   kind=document → /send-document/pdf         { phone, document(URL), fileName, caption? }
+//   kind=text     → sendText
+//   kind=link     → sendLink
+//   kind=document → sendDocument
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { z } from "https://esm.sh/zod@3.23.8";
+import { createWhatsAppProvider } from "../_shared/whatsapp/factory.ts";
+import { normalizePhoneNumber } from "../_shared/whatsapp/normalize.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -47,7 +49,6 @@ Deno.serve(async (req) => {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    // Auth — aceita token de usuário (chamadas do frontend) ou service role (chamadas internas)
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) return jr({ error: "Unauthorized" }, 401);
     const supabaseAdmin = createClient(SUPABASE_URL, SERVICE_ROLE);
@@ -69,12 +70,12 @@ Deno.serve(async (req) => {
     const { data: settings } = await supabaseAdmin.from("app_settings").select("key, value");
     const settingsMap = Object.fromEntries((settings || []).map((s: any) => [s.key, s.value]));
 
-    const INSTANCE_ID = settingsMap["zapi_instance_id"] || Deno.env.get("ZAPI_INSTANCE_ID");
-    const TOKEN = settingsMap["zapi_token"] || Deno.env.get("ZAPI_TOKEN");
-    const CLIENT_TOKEN = settingsMap["zapi_client_token"] || Deno.env.get("ZAPI_CLIENT_TOKEN");
+    const instanceId = settingsMap["zapi_instance_id"] || Deno.env.get("ZAPI_INSTANCE_ID");
+    const zapiToken = settingsMap["zapi_token"] || Deno.env.get("ZAPI_TOKEN");
+    const clientToken = settingsMap["zapi_client_token"] || Deno.env.get("ZAPI_CLIENT_TOKEN");
 
-    if (!INSTANCE_ID || !TOKEN) {
-      return jr({ error: "Z-API credentials not configured. Configure em Configurações → WhatsApp." }, 500);
+    if (!instanceId || !zapiToken) {
+      return jr({ error: "WhatsApp credentials not configured. Configure em Configurações → WhatsApp." }, 500);
     }
 
     const json = await req.json().catch(() => null);
@@ -85,10 +86,10 @@ Deno.serve(async (req) => {
     const testMode = settingsMap["zapi_test_mode"] === "true";
     const testNumber = settingsMap["zapi_test_number"]?.replace(/\D/g, "");
 
-    let phoneClean = body.phone.replace(/\D/g, "");
-    
+    let phoneClean = normalizePhoneNumber(body.phone);
+
     if (testMode && testNumber) {
-      console.log(`Z-API: Test Mode Active. Redirecting from ${phoneClean} to ${testNumber}`);
+      console.log(`WhatsApp: Test Mode Active. Redirecting from ${phoneClean} to ${testNumber}`);
       phoneClean = testNumber;
     }
 
@@ -96,57 +97,47 @@ Deno.serve(async (req) => {
       return jr({ error: "Telefone inválido (precisa incluir DDI+DDD)" }, 400);
     }
 
-    // Monta endpoint + payload por tipo
-    const base = `https://api.z-api.io/instances/${INSTANCE_ID}/token/${TOKEN}`;
-    let zapiUrl = "";
-    let zapiPayload: Record<string, unknown> = {};
+    const provider = createWhatsAppProvider({
+      instanceId,
+      token: zapiToken,
+      clientToken,
+    });
+
+    let sendResult;
     let messagePreview = "";
 
     if (body.kind === "text") {
       if (!body.message) return jr({ error: "message é obrigatório para kind=text" }, 400);
-      zapiUrl = `${base}/send-text`;
-      zapiPayload = { phone: phoneClean, message: body.message };
+      sendResult = await provider.sendText(phoneClean, body.message);
       messagePreview = body.message.slice(0, 200);
     } else if (body.kind === "link") {
       if (!body.link_url || !body.message) {
         return jr({ error: "link_url e message são obrigatórios para kind=link" }, 400);
       }
-      zapiUrl = `${base}/send-link`;
-      zapiPayload = {
-        phone: phoneClean,
-        message: body.message,
-        linkUrl: body.link_url,
-        title: body.link_title || "",
-        linkDescription: body.link_description || "",
-      };
-      if (body.link_image && body.link_image.trim() !== "") {
-        zapiPayload.image = body.link_image;
-      }
+      sendResult = await provider.sendLink(
+        phoneClean,
+        body.message,
+        body.link_url,
+        body.link_title,
+        body.link_description,
+        body.link_image && body.link_image.trim() !== "" ? body.link_image : undefined,
+      );
       messagePreview = `[link] ${body.link_url} — ${body.message.slice(0, 160)}`;
-    } else if (body.kind === "document") {
+    } else {
+      // kind === "document"
       if (!body.document_url) return jr({ error: "document_url é obrigatório para kind=document" }, 400);
-      zapiUrl = `${base}/send-document/pdf`;
-      zapiPayload = {
-        phone: phoneClean,
-        document: body.document_url,
-        fileName: body.document_filename || "documento.pdf",
-        caption: body.document_caption || body.message || "",
-      };
+      sendResult = await provider.sendDocument(
+        phoneClean,
+        body.document_url,
+        body.document_filename || "documento.pdf",
+        body.document_caption || body.message,
+      );
       messagePreview = `[pdf] ${body.document_filename || "documento.pdf"}`;
     }
 
-    const zapiHeaders: Record<string, string> = { "Content-Type": "application/json" };
-    if (CLIENT_TOKEN) zapiHeaders["Client-Token"] = CLIENT_TOKEN;
+    const success = sendResult.ok;
 
-    const zapiRes = await fetch(zapiUrl, {
-      method: "POST",
-      headers: zapiHeaders,
-      body: JSON.stringify(zapiPayload),
-    });
-    const zapiBody = await zapiRes.json().catch(() => ({}));
-    const success = zapiRes.ok && !(zapiBody as any).error;
-
-    // Log de auditoria
+    // Audit log — structure preserved from original; provider field updated.
     const auditTable = body.receivable_id ? "receivables" : "service_orders";
     const auditId = body.receivable_id || body.service_order_id || "00000000-0000-0000-0000-000000000000";
 
@@ -164,17 +155,16 @@ Deno.serve(async (req) => {
         link_url: body.link_url || null,
         document_url: body.document_url || null,
         document_filename: body.document_filename || null,
-        zapi_response: zapiBody,
-        http_status: zapiRes.status,
+        provider_result: sendResult,
       },
       reason: success
-        ? `Envio Z-API (${body.kind}) realizado com sucesso${testMode ? " [TEST MODE ACTIVE]" : ""}`
-        : `Falha no envio Z-API (${body.kind}): ${(zapiBody as any).error || zapiRes.status}`,
+        ? `Envio WhatsApp (${body.kind}) realizado com sucesso${testMode ? " [TEST MODE ACTIVE]" : ""}`
+        : `Falha no envio WhatsApp (${body.kind}): ${!sendResult.ok ? sendResult.error : ""}`,
     });
 
     if (!success) {
       return jr(
-        { error: (zapiBody as any).error || `Z-API HTTP ${zapiRes.status}`, details: zapiBody },
+        { error: !sendResult.ok ? sendResult.error : "send failed" },
         502,
       );
     }
@@ -182,8 +172,7 @@ Deno.serve(async (req) => {
     return jr({
       success: true,
       kind: body.kind,
-      messageId: (zapiBody as any).messageId || (zapiBody as any).id || null,
-      zapi: zapiBody,
+      messageId: sendResult.providerMessageId || null,
     });
   } catch (err) {
     console.error("whatsapp-send error", err);

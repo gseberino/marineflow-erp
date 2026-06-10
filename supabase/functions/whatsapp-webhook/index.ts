@@ -1,6 +1,8 @@
 // Edge Function: whatsapp-webhook
-// Versão: 5.1 (Blindada & Limpa)
+// Versão: 6.0 (Provider-abstracted)
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { ZapiProvider } from "../_shared/whatsapp/zapi-provider.ts";
+import { normalizePhoneNumber } from "../_shared/whatsapp/normalize.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -15,53 +17,58 @@ function jr(body: unknown, status = 200) {
   });
 }
 
-function normalizePhone(raw: string | null | undefined): string {
-  if (!raw) return "";
-  const clean = String(raw).split("@")[0];
-  const digits = clean.replace(/\D/g, "");
-  if (!digits) return "";
-  if (digits.length >= 14) return digits; 
-  if (digits.length === 10 || digits.length === 11) return `55${digits}`;
-  return digits;
-}
-
-function extractBodyAndType(p: any): { body: string; messageType: string; mediaUrl: string | null } {
-  let mediaUrl: null | string = null;
-  const text = p?.text?.message || p?.text || p?.message?.conversation || p?.message?.extendedTextMessage?.text || p?.body || p?.caption || "";
-  if (p?.image) return { body: p.image.caption || "[imagem]", messageType: "image", mediaUrl: p.image.imageUrl || p.image.url || null };
-  if (p?.audio) return { body: "[áudio]", messageType: "audio", mediaUrl: p.audio.audioUrl || p.audio.url || null };
-  if (p?.video) return { body: p.video.caption || "[vídeo]", messageType: "video", mediaUrl: p.video.videoUrl || p.video.url || null };
-  if (p?.document) return { body: p.document.caption || `[documento] ${p.document.fileName || ""}`.trim(), messageType: "document", mediaUrl: p.document.documentUrl || p.document.url || null };
-  return { body: String(text).trim() || "[conteúdo vazio]", messageType: "text", mediaUrl: null };
-}
-
-async function notifyAssignedReminder(admin: any, phone: string, senderName: string | null, preview: string, zapiCreds: { id: string; token: string; client: string | null }) {
+async function notifyAssignedReminder(
+  admin: any,
+  phone: string,
+  senderName: string | null,
+  preview: string,
+  zapiCreds: { id: string; token: string; client: string | null },
+) {
   try {
     if (!zapiCreds.id || !zapiCreds.token) return;
-    const { data: settings } = await admin.from("app_settings").select("key, value").in("key", ["whatsapp_reminder_enabled", "whatsapp_reminder_recipients"]);
-    const sMap = Object.fromEntries((settings || []).map(s => [s.key, s.value]));
-    if (String(sMap.whatsapp_reminder_enabled).toLowerCase() !== "true" && sMap.whatsapp_reminder_enabled !== "1") return;
+    const { data: settings } = await admin
+      .from("app_settings")
+      .select("key, value")
+      .in("key", ["whatsapp_reminder_enabled", "whatsapp_reminder_recipients"]);
+    const sMap = Object.fromEntries((settings || []).map((s: any) => [s.key, s.value]));
+    if (
+      String(sMap.whatsapp_reminder_enabled).toLowerCase() !== "true" &&
+      sMap.whatsapp_reminder_enabled !== "1"
+    ) return;
     if (phone.length > 15) return;
-    let recipients: string[] = String(sMap.whatsapp_reminder_recipients || "").split(/[,\s]+/).map(p => p.replace(/\D/g, "")).filter(p => p.length >= 10);
+    const recipients: string[] = String(sMap.whatsapp_reminder_recipients || "")
+      .split(/[,\s]+/)
+      .map((p: string) => p.replace(/\D/g, ""))
+      .filter((p: string) => p.length >= 10);
     const who = senderName ? `${senderName} (+${phone})` : `+${phone}`;
     const message = `🆕 *Novo lead WhatsApp*\n\n${who}\n"${preview.slice(0, 160)}"\n\nResponda no painel hbrmarine.online`;
-    const base = `https://api.z-api.io/instances/${zapiCreds.id}/token/${zapiCreds.token}`;
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (zapiCreds.client) headers["Client-Token"] = zapiCreds.client;
-    await Promise.all(recipients.map(to => fetch(`${base}/send-text`, { method: "POST", headers, body: JSON.stringify({ phone: to, message }) }).catch(() => null)));
-  } catch (e) { console.error("notifyAssignedReminder failed", e); }
+
+    const provider = new ZapiProvider({
+      instanceId: zapiCreds.id,
+      token: zapiCreds.token,
+      clientToken: zapiCreds.client,
+    });
+    await Promise.all(
+      recipients.map((to) => provider.sendText(to, message).catch(() => null)),
+    );
+  } catch (e) {
+    console.error("notifyAssignedReminder failed", e);
+  }
 }
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
-  const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false, autoRefreshToken: false } });
+  const admin = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    { auth: { persistSession: false, autoRefreshToken: false } },
+  );
 
   // --- MODO FAXINA E BLINDAGEM (GET) ---
   if (req.method === "GET") {
     const url = new URL(req.url);
 
-    // Healthcheck — retorna JSON com métricas para o painel de configuração
     if (url.searchParams.get("healthcheck") === "1") {
       try {
         const webhookUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/whatsapp-webhook`;
@@ -136,15 +143,23 @@ Deno.serve(async (req) => {
         const phone = l.phone_normalized || "";
         const isWeird = phone.length < 10 || !phone.startsWith("55") || phone.length > 15;
         if (isWeird) {
-          const { count: msgCount } = await admin.from("whatsapp_messages").select("*", { count: "exact", head: true }).eq("lead_id", l.id);
+          const { count: msgCount } = await admin
+            .from("whatsapp_messages")
+            .select("*", { count: "exact", head: true })
+            .eq("lead_id", l.id);
           if (!msgCount || msgCount === 0) {
             await admin.from("whatsapp_leads").delete().eq("id", l.id);
             count++;
           }
         }
       }
-      return new Response(`Faxina Concluída! ${count} leads fantasmas removidos. O sistema agora está blindado contra novos registros inválidos.`, { headers: { ...corsHeaders, "Content-Type": "text/plain; charset=utf-8" } });
-    } catch (e) { return new Response("Erro: " + e.message, { status: 500, headers: corsHeaders }); }
+      return new Response(
+        `Faxina Concluída! ${count} leads fantasmas removidos. O sistema agora está blindado contra novos registros inválidos.`,
+        { headers: { ...corsHeaders, "Content-Type": "text/plain; charset=utf-8" } },
+      );
+    } catch (e: any) {
+      return new Response("Erro: " + e.message, { status: 500, headers: corsHeaders });
+    }
   }
 
   // --- WEBHOOK POST ---
@@ -156,38 +171,55 @@ Deno.serve(async (req) => {
     const type = String(pAny.type || pAny.event || "");
     const fromMe = !!pAny.fromMe;
 
-    // Para mensagens enviadas por nós (fromMe=true), o destinatário está em pAny.to ou pAny.chatId.
-    // Para mensagens recebidas, o remetente está em pAny.phone.
-    const phoneRaw = fromMe
-      ? (pAny.to || pAny.chatId || pAny.phone || "")
-      : (pAny.phone || pAny.chatId || pAny.senderLid || "");
-    const phone = normalizePhone(phoneRaw);
+    // Load Z-API creds for notifyAssignedReminder (stays here — business logic)
+    const { data: credSettings } = await admin
+      .from("app_settings")
+      .select("key, value")
+      .in("key", ["zapi_instance_id", "zapi_token", "zapi_client_token"]);
+    const sMap = Object.fromEntries((credSettings || []).map((s: any) => [s.key, s.value]));
+    const zapiCreds = {
+      id: sMap.zapi_instance_id,
+      token: sMap.zapi_token,
+      client: sMap.zapi_client_token || null,
+    };
 
-    const ignoredTypes = ["PresenceChatCallback", "ChatStateCallback", "PresenceCallback", "ChatPresence", "Presence", "typing", "recording"];
-    if (ignoredTypes.includes(type)) return jr({ ok: true, ignored: "system" });
-    if (pAny.isGroup === true) return jr({ ok: true, ignored: "group" });
-
-    const { data: settings } = await admin.from("app_settings").select("key, value").in("key", ["zapi_instance_id", "zapi_token", "zapi_client_token"]);
-    const sMap = Object.fromEntries((settings || []).map(s => [s.key, s.value]));
-    const zapiCreds = { id: sMap.zapi_instance_id, token: sMap.zapi_token, client: sMap.zapi_client_token };
-
+    // Status delivery callback — handled before parseIncomingWebhook
     if (type === "MessageStatusCallback" || type === "MessageStatus") {
       const status = String(pAny.status || "").toLowerCase();
       const zapiId = pAny.messageId || (pAny.ids ? pAny.ids[0] : null);
-      if (zapiId && status) await admin.from("whatsapp_messages").update({ delivery_status: status }).eq("zapi_message_id", String(zapiId));
+      if (zapiId && status) {
+        await admin
+          .from("whatsapp_messages")
+          .update({ delivery_status: status })
+          .eq("zapi_message_id", String(zapiId));
+      }
       return jr({ ok: true, type: "status" });
     }
 
-    const { body, messageType, mediaUrl } = extractBodyAndType(pAny);
+    // Parse via provider — replaces inline normalizePhone + extractBodyAndType
+    const provider = new ZapiProvider({
+      instanceId: zapiCreds.id || "noop",
+      token: zapiCreds.token || "noop",
+      clientToken: zapiCreds.client,
+    });
+    const event = provider.parseIncomingWebhook(payload);
 
-    // Ignorar eventos outbound sem conteúdo (ex: notificações de sistema do Z-API)
-    if (fromMe && (!body || body === "[conteúdo vazio]")) {
+    if (!event) {
+      return jr({ ok: true, ignored: "system_or_group" });
+    }
+
+    // Outbound messages with no content — ignored
+    if (event.fromMe && !event.text && !event.mediaUrl) {
       return jr({ ok: true, ignored: "outbound_no_body" });
     }
 
-    const zapiId = pAny.messageId || pAny.id || null;
-    if (zapiId) {
-      const { data: dup } = await admin.from("whatsapp_messages").select("id").eq("zapi_message_id", String(zapiId)).maybeSingle();
+    // Dedup by provider message ID
+    if (event.messageId) {
+      const { data: dup } = await admin
+        .from("whatsapp_messages")
+        .select("id")
+        .eq("zapi_message_id", event.messageId)
+        .maybeSingle();
       if (dup) return jr({ ok: true, dedup: true });
     }
 
@@ -195,45 +227,88 @@ Deno.serve(async (req) => {
     let leadId = null;
     let isNewLead = false;
 
-    const { data: client } = await admin.from("clients").select("id").or(`phone.ilike.%${phone}%,whatsapp.ilike.%${phone}%`).eq("active", true).maybeSingle();
+    const phone = event.from;
+
+    const { data: client } = await admin
+      .from("clients")
+      .select("id")
+      .or(`phone.ilike.%${phone}%,whatsapp.ilike.%${phone}%`)
+      .eq("active", true)
+      .maybeSingle();
+
     if (client) {
       clientId = client.id;
     } else {
-      const { data: lead } = await admin.from("whatsapp_leads").select("id").eq("phone_normalized", phone).maybeSingle();
+      const { data: lead } = await admin
+        .from("whatsapp_leads")
+        .select("id")
+        .eq("phone_normalized", phone)
+        .maybeSingle();
       if (lead) {
         leadId = lead.id;
-      } else if (!fromMe) {
+      } else if (!event.fromMe) {
         const isValidPhone = phone.startsWith("55") && (phone.length === 12 || phone.length === 13);
         if (isValidPhone) {
-          const { data: newLead } = await admin.from("whatsapp_leads").insert({
-            phone_normalized: phone,
-            display_name: pAny.senderName || pAny.notifyName || null,
-            status: "pending"
-          }).select("id").single();
+          const { data: newLead } = await admin
+            .from("whatsapp_leads")
+            .insert({
+              phone_normalized: phone,
+              display_name: event.senderName || null,
+              status: "pending",
+            })
+            .select("id")
+            .single();
           leadId = newLead?.id;
           isNewLead = true;
         }
       }
     }
 
-    const { data: msg, error: insErr } = await admin.from("whatsapp_messages").insert({
-      direction: fromMe ? "outbound" : "inbound",
-      phone_normalized: phone,
-      message_type: messageType,
-      body: body.slice(0, 4000),
-      media_url: mediaUrl,
-      client_id: clientId,
-      lead_id: leadId,
-      zapi_message_id: zapiId ? String(zapiId) : null,
-      delivery_status: fromMe ? "sent" : "received",
-      raw_payload: pAny
-    }).select("id").single();
+    const body = (event.text || (event.messageType !== "text" ? `[${event.messageType}]` : "[conteúdo vazio]")).slice(0, 4000);
+
+    const { data: msg, error: insErr } = await admin
+      .from("whatsapp_messages")
+      .insert({
+        direction: event.fromMe ? "outbound" : "inbound",
+        phone_normalized: phone,
+        message_type: event.messageType,
+        body,
+        media_url: event.mediaUrl,
+        client_id: clientId,
+        lead_id: leadId,
+        zapi_message_id: event.messageId || null,
+        delivery_status: event.fromMe ? "sent" : "received",
+        raw_payload: pAny,
+      })
+      .select("id")
+      .single();
 
     if (insErr) return jr({ error: "db_error", details: insErr.message }, 500);
-    if (isNewLead && !fromMe) notifyAssignedReminder(admin, phone, pAny.senderName || null, body, zapiCreds).catch(console.error);
-    if (leadId) await admin.from("whatsapp_leads").update({ updated_at: new Date().toISOString() }).eq("id", leadId);
-    else if (clientId) await admin.from("clients").update({ updated_at: new Date().toISOString() }).eq("id", clientId);
+
+    if (isNewLead && !event.fromMe) {
+      notifyAssignedReminder(
+        admin,
+        phone,
+        event.senderName,
+        body,
+        zapiCreds,
+      ).catch(console.error);
+    }
+
+    if (leadId) {
+      await admin
+        .from("whatsapp_leads")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", leadId);
+    } else if (clientId) {
+      await admin
+        .from("clients")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", clientId);
+    }
 
     return jr({ ok: true, message_id: msg?.id });
-  } catch (err: any) { return jr({ error: err.message }, 500); }
+  } catch (err: any) {
+    return jr({ error: err.message }, 500);
+  }
 });
