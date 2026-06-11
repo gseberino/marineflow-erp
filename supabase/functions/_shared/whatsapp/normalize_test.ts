@@ -15,8 +15,23 @@ Deno.test("11-digit number (DDD+9+number, no DDI) gets 55 prepended", () => {
   assertEquals(normalizePhoneNumber("47999999999"), "5547999999999");
 });
 
-Deno.test("10-digit number (DDD+number, no DDI) gets 55 prepended", () => {
-  assertEquals(normalizePhoneNumber("4799999999"), "554799999999");
+Deno.test("10-digit mobile (DDD+8 digits) gets 55 prepended and 9th digit inserted", () => {
+  // 4799999999 → 554799999999 (12) → mobile (starts 9) → 5547999999999 (13)
+  assertEquals(normalizePhoneNumber("4799999999"), "5547999999999");
+});
+
+Deno.test("12-digit BR mobile without 9th digit gets the 9 inserted", () => {
+  // Real Evolution senderPn case: 554799159654 → 5547999159654
+  assertEquals(normalizePhoneNumber("554799159654"), "5547999159654");
+});
+
+Deno.test("12-digit BR landline (subscriber starts 2-5) is left unchanged", () => {
+  // 553133334444 → DDD 31 + 33334444 (starts 3) → not a mobile → no 9 inserted
+  assertEquals(normalizePhoneNumber("553133334444"), "553133334444");
+});
+
+Deno.test("@lid suffix is stripped (LID is not a phone, digits returned as-is)", () => {
+  assertEquals(normalizePhoneNumber("113408678621372@lid"), "113408678621372");
 });
 
 Deno.test("leading 00 international prefix is stripped", () => {

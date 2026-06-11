@@ -204,6 +204,47 @@ Deno.test("checkNumberExists: hits correct endpoint with numbers array", async (
 
 // ─── parseIncomingWebhook ────────────────────────────────────────────────────
 
+Deno.test("parseIncomingWebhook: LID remoteJid uses senderPn for the real phone", () => {
+  // WhatsApp multi-device: remoteJid is a @lid, real phone comes in key.senderPn.
+  // senderPn 554799159654 (12-digit) → 9th digit inserted → 5547999159654.
+  const payload = {
+    event: "messages.upsert",
+    instance: "hbr-local",
+    data: {
+      key: {
+        id: "LID001",
+        fromMe: false,
+        senderPn: "554799159654@s.whatsapp.net",
+        remoteJid: "113408678621372@lid",
+      },
+      pushName: "Gustavo",
+      messageTimestamp: 1781145909,
+      message: { conversation: "teste lid" },
+    },
+  };
+  const event = provider.parseIncomingWebhook(payload);
+  assertEquals(event?.from, "5547999159654");
+  assertEquals(event?.text, "teste lid");
+  assertEquals(event?.senderName, "Gustavo");
+});
+
+Deno.test("parseIncomingWebhook: LID falls back to remoteJidAlt when senderPn absent", () => {
+  const payload = {
+    event: "messages.upsert",
+    data: {
+      key: {
+        id: "LID002",
+        fromMe: false,
+        remoteJidAlt: "5547988887777@s.whatsapp.net",
+        remoteJid: "999999999999999@lid",
+      },
+      message: { conversation: "alt" },
+    },
+  };
+  const event = provider.parseIncomingWebhook(payload);
+  assertEquals(event?.from, "5547988887777");
+});
+
 Deno.test("parseIncomingWebhook: MESSAGES_UPSERT text message returns correct event", () => {
   const payload = {
     event: "messages.upsert",
@@ -229,6 +270,24 @@ Deno.test("parseIncomingWebhook: non messages.upsert event returns null", () => 
   assertEquals(provider.parseIncomingWebhook({ event: "connection.update" }), null);
   assertEquals(provider.parseIncomingWebhook({ event: "messages.update" }), null);
   assertEquals(provider.parseIncomingWebhook({ event: "qrcode.updated" }), null);
+});
+
+Deno.test("parseIncomingWebhook: MESSAGES_UPSERT in type field returns correct event", () => {
+  const payload = {
+    type: "MESSAGES_UPSERT",
+    instance: "marineflow",
+    data: {
+      key: { remoteJid: "5547999999999@s.whatsapp.net", fromMe: false, id: "BAE999" },
+      pushName: "Maria",
+      messageTimestamp: 1700000000,
+      message: { conversation: "Olá, esta é uma mensagem inbound" },
+    },
+  };
+  const event = provider.parseIncomingWebhook(payload);
+  assertEquals(event?.from, "5547999999999");
+  assertEquals(event?.messageId, "BAE999");
+  assertEquals(event?.text, "Olá, esta é uma mensagem inbound");
+  assertEquals(event?.senderName, "Maria");
 });
 
 Deno.test("parseIncomingWebhook: group JID (@g.us) returns null", () => {

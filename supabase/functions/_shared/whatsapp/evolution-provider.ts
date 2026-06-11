@@ -124,7 +124,8 @@ export class EvolutionProvider implements WhatsAppProvider {
   parseIncomingWebhook(payload: unknown): IncomingMessageEvent | null {
     try {
       const p = payload as Record<string, unknown>;
-      const event = String(p["event"] ?? "");
+      const eventRaw = String(p["event"] ?? p["type"] ?? "");
+      const event = eventRaw.replace(/_/g, ".").toLowerCase();
 
       // Only MESSAGES_UPSERT carries new inbound/outbound content.
       if (event !== "messages.upsert") return null;
@@ -142,8 +143,17 @@ export class EvolutionProvider implements WhatsAppProvider {
       const fromMe = key["fromMe"] === true;
       const messageId = String(key["id"] ?? "");
 
+      // WhatsApp multi-device: when remoteJid is a LID ("<id>@lid"), it is NOT a
+      // phone number. The real phone is delivered separately in key.senderPn
+      // (inbound) or key.remoteJidAlt. Fall back to remoteJid only as a last resort.
+      const senderPn = String(key["senderPn"] ?? "");
+      const remoteJidAlt = String(key["remoteJidAlt"] ?? "");
+      const phoneSource = remoteJid.endsWith("@lid")
+        ? (senderPn || remoteJidAlt || remoteJid)
+        : remoteJid;
+
       // normalizePhoneNumber strips @s.whatsapp.net and normalises DDI.
-      const from = normalizePhoneNumber(remoteJid);
+      const from = normalizePhoneNumber(phoneSource);
       if (!from) return null;
 
       const senderName = String(data["pushName"] ?? "") || null;
