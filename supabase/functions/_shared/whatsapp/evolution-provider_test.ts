@@ -64,7 +64,7 @@ Deno.test("sendText: sends phone and text in correct payload shape", async () =>
   await withFetch(fetchStub, () => provider.sendText("5547999999999", "Mensagem"));
   const body = JSON.parse(calls[0].init?.body as string);
   assertEquals(body.number, "5547999999999");
-  assertEquals(body.textMessage.text, "Mensagem");
+  assertEquals(body.text, "Mensagem");
 });
 
 Deno.test("sendText: normalizes phone number before sending", async () => {
@@ -119,7 +119,7 @@ Deno.test("sendLink: uses sendText endpoint with linkPreview:true", async () => 
   );
   assertEquals(calls[0].url, `${BASE}/message/sendText/marineflow`);
   const body = JSON.parse(calls[0].init?.body as string);
-  assertEquals(body.textMessage.linkPreview, true);
+  assertEquals(body.linkPreview, true);
 });
 
 Deno.test("sendLink: appends URL to message when not already included", async () => {
@@ -128,7 +128,7 @@ Deno.test("sendLink: appends URL to message when not already included", async ()
     provider.sendLink("5547999999999", "Confira nosso site", "https://example.com"),
   );
   const body = JSON.parse(calls[0].init?.body as string);
-  assertStringIncludes(body.textMessage.text, "https://example.com");
+  assertStringIncludes(body.text, "https://example.com");
 });
 
 Deno.test("sendLink: does not duplicate URL when message already contains it", async () => {
@@ -138,7 +138,7 @@ Deno.test("sendLink: does not duplicate URL when message already contains it", a
     provider.sendLink("5547999999999", msg, "https://example.com"),
   );
   const body = JSON.parse(calls[0].init?.body as string);
-  const occurrences = (body.textMessage.text.match(/https:\/\/example\.com/g) || []).length;
+  const occurrences = (body.text.match(/https:\/\/example\.com/g) || []).length;
   assertEquals(occurrences, 1);
 });
 

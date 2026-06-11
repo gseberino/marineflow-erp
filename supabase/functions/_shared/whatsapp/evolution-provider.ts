@@ -61,9 +61,10 @@ export class EvolutionProvider implements WhatsAppProvider {
   }
 
   async sendText(to: string, message: string): Promise<SendResult> {
+    // Evolution v2: flat payload { number, text } (v1 used { textMessage: { text } }).
     return this.post(`message/sendText/${this.instance}`, {
       number: normalizePhoneNumber(to),
-      textMessage: { text: message },
+      text: message,
     });
   }
 
@@ -79,9 +80,11 @@ export class EvolutionProvider implements WhatsAppProvider {
     // body and linkPreview:true lets WhatsApp fetch OG metadata automatically.
     // title, description, imageUrl are not customisable via the Evolution API.
     const text = message.includes(linkUrl) ? message : `${message}\n${linkUrl}`;
+    // Evolution v2: flat payload { number, text, linkPreview }.
     return this.post(`message/sendText/${this.instance}`, {
       number: normalizePhoneNumber(to),
-      textMessage: { text, linkPreview: true },
+      text,
+      linkPreview: true,
     });
   }
 
