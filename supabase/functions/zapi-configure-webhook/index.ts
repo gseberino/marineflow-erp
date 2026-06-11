@@ -1,6 +1,11 @@
 // Edge Function: zapi-configure-webhook
 // Configura automaticamente os webhooks na Z-API.
 // Lê credenciais do app_settings (DB) com fallback para variáveis de ambiente.
+//
+// NOTE (B4): This is a one-time admin utility specific to Z-API's webhook
+// configuration API. It is intentionally NOT abstracted behind WhatsAppProvider.
+// For the Evolution cutover (B5), a separate evolution-configure-webhook
+// function (or a script calling POST /webhook/set/{instance}) will be created.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders = {

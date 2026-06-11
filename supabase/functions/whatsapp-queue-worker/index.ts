@@ -1,7 +1,7 @@
 // Edge Function: whatsapp-queue-worker
 // Roda via cron a cada minuto. Pega mensagens pendentes da fila
 // (whatsapp_send_queue), aplica rate limit (max por execução +
-// limite global por hora) e envia via Z-API com delay entre cada uma.
+// limite global por hora) e envia via WhatsApp com delay entre cada uma.
 //
 // Settings (app_settings):
 //   whatsapp_queue_enabled       (bool string)  default 'true'
@@ -10,6 +10,7 @@
 //   whatsapp_queue_max_per_hour  (int)          default 60
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { createWhatsAppProvider } from "../_shared/whatsapp/factory.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -41,10 +42,22 @@ Deno.serve(async (req) => {
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const INSTANCE_ID = Deno.env.get("ZAPI_INSTANCE_ID");
-    const TOKEN = Deno.env.get("ZAPI_TOKEN");
-    const CLIENT_TOKEN = Deno.env.get("ZAPI_CLIENT_TOKEN");
-    if (!INSTANCE_ID || !TOKEN) return jr({ error: "Z-API não configurado" }, 500);
+
+    // Validate provider credentials early — provider-aware (Z-API or Evolution).
+    const activeProvider = Deno.env.get("WHATSAPP_PROVIDER") ?? "zapi";
+    if (activeProvider === "evolution") {
+      if (
+        !Deno.env.get("EVOLUTION_API_URL") ||
+        !Deno.env.get("EVOLUTION_API_KEY") ||
+        !Deno.env.get("EVOLUTION_INSTANCE")
+      ) {
+        return jr({ error: "Evolution API não configurada" }, 500);
+      }
+    } else {
+      const instanceId = Deno.env.get("ZAPI_INSTANCE_ID");
+      const token = Deno.env.get("ZAPI_TOKEN");
+      if (!instanceId || !token) return jr({ error: "Z-API não configurado" }, 500);
+    }
 
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -59,7 +72,6 @@ Deno.serve(async (req) => {
     const delayMs = Math.max(0, parseInt(await getSetting(admin, "whatsapp_queue_delay_ms", "1500"), 10));
     const maxPerHour = Math.max(1, parseInt(await getSetting(admin, "whatsapp_queue_max_per_hour", "60"), 10));
 
-    // Rate limit global: contar enviados na última hora
     const sinceHour = new Date(Date.now() - 60 * 60_000).toISOString();
     const { count: sentLastHour } = await admin
       .from("whatsapp_send_queue")
@@ -78,9 +90,8 @@ Deno.serve(async (req) => {
     }
 
     const batchSize = Math.min(maxPerRun, remainingHourly);
-
-    // Pega lote: pending + scheduled_for <= now, prioridade ASC, mais antigos primeiro
     const nowIso = new Date().toISOString();
+
     const { data: batch, error: fetchErr } = await admin
       .from("whatsapp_send_queue")
       .select("*")
@@ -95,7 +106,6 @@ Deno.serve(async (req) => {
       return jr({ ok: true, processed: 0, remaining_hourly: remainingHourly });
     }
 
-    // Marca todos como 'sending' já (lock otimista)
     const ids = batch.map((b: any) => b.id);
     await admin
       .from("whatsapp_send_queue")
@@ -103,27 +113,20 @@ Deno.serve(async (req) => {
       .in("id", ids)
       .eq("status", "pending");
 
-    const base = `https://api.z-api.io/instances/${INSTANCE_ID}/token/${TOKEN}`;
-    const zHeaders: Record<string, string> = { "Content-Type": "application/json" };
-    if (CLIENT_TOKEN) zHeaders["Client-Token"] = CLIENT_TOKEN;
+    // Provider resolves credentials from env (same source as before)
+    const provider = createWhatsAppProvider();
 
     const results: any[] = [];
     for (let i = 0; i < batch.length; i++) {
       const item: any = batch[i];
       try {
-        const res = await fetch(`${base}/send-text`, {
-          method: "POST",
-          headers: zHeaders,
-          body: JSON.stringify({ phone: item.phone_normalized, message: item.message }),
-        });
-        const body = await res.json().catch(() => ({}));
-        const ok = res.ok && !(body as any).error;
+        const sendResult = await provider.sendText(item.phone_normalized, item.message);
 
-        if (ok) {
+        if (sendResult.ok) {
           await admin.from("whatsapp_send_queue").update({
             status: "sent",
             sent_at: new Date().toISOString(),
-            zapi_message_id: (body as any)?.messageId || (body as any)?.id || null,
+            zapi_message_id: sendResult.providerMessageId || null,
             attempts: (item.attempts || 0) + 1,
           }).eq("id", item.id);
           results.push({ id: item.id, ok: true });
@@ -133,26 +136,30 @@ Deno.serve(async (req) => {
           await admin.from("whatsapp_send_queue").update({
             status: giveUp ? "failed" : "pending",
             attempts: newAttempts,
-            failed_reason: (body as any)?.error || `HTTP ${res.status}`,
-            scheduled_for: giveUp ? item.scheduled_for : new Date(Date.now() + 5 * 60_000).toISOString(),
+            failed_reason: sendResult.error,
+            scheduled_for: giveUp
+              ? item.scheduled_for
+              : new Date(Date.now() + 5 * 60_000).toISOString(),
             processing_started_at: null,
           }).eq("id", item.id);
-          results.push({ id: item.id, ok: false, error: (body as any)?.error || `HTTP ${res.status}`, give_up: giveUp });
+          results.push({ id: item.id, ok: false, error: sendResult.error, give_up: giveUp });
         }
       } catch (e) {
         const newAttempts = (item.attempts || 0) + 1;
         const giveUp = newAttempts >= (item.max_attempts || 3);
+        const errMsg = e instanceof Error ? e.message : String(e);
         await admin.from("whatsapp_send_queue").update({
           status: giveUp ? "failed" : "pending",
           attempts: newAttempts,
-          failed_reason: e instanceof Error ? e.message : String(e),
-          scheduled_for: giveUp ? item.scheduled_for : new Date(Date.now() + 5 * 60_000).toISOString(),
+          failed_reason: errMsg,
+          scheduled_for: giveUp
+            ? item.scheduled_for
+            : new Date(Date.now() + 5 * 60_000).toISOString(),
           processing_started_at: null,
         }).eq("id", item.id);
-        results.push({ id: item.id, ok: false, error: e instanceof Error ? e.message : String(e), give_up: giveUp });
+        results.push({ id: item.id, ok: false, error: errMsg, give_up: giveUp });
       }
 
-      // delay entre envios (não no último)
       if (i < batch.length - 1 && delayMs > 0) await sleep(delayMs);
     }
 
