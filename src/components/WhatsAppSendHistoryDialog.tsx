@@ -25,7 +25,7 @@ export function WhatsAppSendHistoryDialog({ serviceOrderId, serviceOrderNumber, 
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Histórico de envios Z-API</DialogTitle>
+          <DialogTitle>Histórico de envios WhatsApp</DialogTitle>
           <DialogDescription>
             {serviceOrderNumber ? `OS ${serviceOrderNumber}` : 'Tentativas de envio via WhatsApp'}
           </DialogDescription>
@@ -37,7 +37,7 @@ export function WhatsAppSendHistoryDialog({ serviceOrderId, serviceOrderNumber, 
           </div>
         ) : !entries || entries.length === 0 ? (
           <div className="py-8 text-center text-muted-foreground text-sm">
-            Nenhum envio via Z-API registrado para esta OS.
+            Nenhum envio via WhatsApp registrado para esta OS.
           </div>
         ) : (
           <ScrollArea className="max-h-[60vh] pr-2">
@@ -46,7 +46,7 @@ export function WhatsAppSendHistoryDialog({ serviceOrderId, serviceOrderNumber, 
                 const nv: any = e.new_value || {};
                 const phone = nv?.phone;
                 const httpStatus = nv?.http_status;
-                const zapiErr = nv?.zapi_response?.error;
+                const zapiErr = nv?.provider_result?.error || nv?.zapi_response?.error;
                 return (
                   <li key={e.id} className="rounded-lg border bg-card p-3 text-sm space-y-2">
                     <div className="flex items-center justify-between gap-2">

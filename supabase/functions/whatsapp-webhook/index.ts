@@ -1,7 +1,6 @@
 // Edge Function: whatsapp-webhook
 // Versão: 7.0 (Evolution-ready)
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { ZapiProvider } from "../_shared/whatsapp/zapi-provider.ts";
 import { createWhatsAppProvider } from "../_shared/whatsapp/factory.ts";
 import { EVOLUTION_STATUS_MAP } from "../_shared/whatsapp/evolution-provider.ts";
 
@@ -23,10 +22,8 @@ async function notifyAssignedReminder(
   phone: string,
   senderName: string | null,
   preview: string,
-  zapiCreds: { id: string; token: string; client: string | null },
 ) {
   try {
-    if (!zapiCreds.id || !zapiCreds.token) return;
     const { data: settings } = await admin
       .from("app_settings")
       .select("key, value")
@@ -41,14 +38,11 @@ async function notifyAssignedReminder(
       .split(/[,\s]+/)
       .map((p: string) => p.replace(/\D/g, ""))
       .filter((p: string) => p.length >= 10);
+    if (recipients.length === 0) return;
     const who = senderName ? `${senderName} (+${phone})` : `+${phone}`;
     const message = `🆕 *Novo lead WhatsApp*\n\n${who}\n"${preview.slice(0, 160)}"\n\nResponda no painel hbrmarine.online`;
 
-    const provider = new ZapiProvider({
-      instanceId: zapiCreds.id,
-      token: zapiCreds.token,
-      clientToken: zapiCreds.client,
-    });
+    const provider = createWhatsAppProvider();
     await Promise.all(
       recipients.map((to) => provider.sendText(to, message).catch(() => null)),
     );
@@ -172,31 +166,6 @@ Deno.serve(async (req) => {
     const type = String(pAny.type || pAny.event || "");
     const fromMe = !!pAny.fromMe;
 
-    // Load Z-API creds for notifyAssignedReminder (stays here — business logic)
-    const { data: credSettings } = await admin
-      .from("app_settings")
-      .select("key, value")
-      .in("key", ["zapi_instance_id", "zapi_token", "zapi_client_token"]);
-    const sMap = Object.fromEntries((credSettings || []).map((s: any) => [s.key, s.value]));
-    const zapiCreds = {
-      id: sMap.zapi_instance_id,
-      token: sMap.zapi_token,
-      client: sMap.zapi_client_token || null,
-    };
-
-    // Z-API delivery status callback
-    if (type === "MessageStatusCallback" || type === "MessageStatus") {
-      const status = String(pAny.status || "").toLowerCase();
-      const zapiId = pAny.messageId || (pAny.ids ? pAny.ids[0] : null);
-      if (zapiId && status) {
-        await admin
-          .from("whatsapp_messages")
-          .update({ delivery_status: status })
-          .eq("zapi_message_id", String(zapiId));
-      }
-      return jr({ ok: true, type: "status" });
-    }
-
     // Evolution delivery status update (messages.update)
     if (type === "messages.update") {
       const updates = Array.isArray(pAny.data) ? pAny.data : [];
@@ -216,11 +185,7 @@ Deno.serve(async (req) => {
     }
 
     // Parse incoming message via active provider
-    const provider = createWhatsAppProvider({
-      instanceId: zapiCreds.id || "noop",
-      token: zapiCreds.token || "noop",
-      clientToken: zapiCreds.client,
-    });
+    const provider = createWhatsAppProvider();
     const event = provider.parseIncomingWebhook(payload);
 
     if (!event) {
@@ -305,13 +270,7 @@ Deno.serve(async (req) => {
     if (insErr) return jr({ error: "db_error", details: insErr.message }, 500);
 
     if (isNewLead && !event.fromMe) {
-      notifyAssignedReminder(
-        admin,
-        phone,
-        event.senderName,
-        body,
-        zapiCreds,
-      ).catch(console.error);
+      notifyAssignedReminder(admin, phone, event.senderName, body).catch(console.error);
     }
 
     if (leadId) {

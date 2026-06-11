@@ -27,7 +27,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { generatePDF, DEFAULT_PDF_OPTIONS, type PDFData } from '@/lib/pdf-generator';
 import { toast } from 'sonner';
 import { BulkBillingReminderDialog } from '@/components/BulkBillingReminderDialog';
-import { SendViaZAPIDialog, type SendViaZAPITarget } from '@/components/SendViaZAPIDialog';
+import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/SendViaZAPIDialog';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { Send } from 'lucide-react';
 
@@ -117,7 +117,7 @@ export default function FinancialPage() {
   const [paymentTarget, setPaymentTarget] = useState<{ receivable?: any; payable?: any } | null>(null);
   const [showNewReceivable, setShowNewReceivable] = useState(false);
   const [showNewPayable, setShowNewPayable] = useState(false);
-  const [zapiTarget, setZapiTarget] = useState<SendViaZAPITarget | null>(null);
+  const [zapiTarget, setZapiTarget] = useState<SendViaWhatsAppTarget | null>(null);
   const [recFilters, setRecFilters] = useState<FinancialFilters>({ ...defaultFilters });
   const [payFilters, setPayFilters] = useState<FinancialFilters>({ ...defaultFilters });
   const [paySubTab, setPaySubTab] = useState<'list' | 'reimbursements'>('list');
@@ -583,11 +583,11 @@ export default function FinancialPage() {
                             <Button
                               size="sm"
                               variant="ghost"
-                              title="Enviar via Z-API (Recibo/Cobrança)"
+                              title="Enviar via WhatsApp (Recibo/Cobrança)"
                               onClick={() => {
                                 const client = (r as any).clients;
                                 const so = (r as any).service_orders;
-                                const target: SendViaZAPITarget = {
+                                const target: SendViaWhatsAppTarget = {
                                   kind: 'receivable',
                                   receivableId: r.id,
                                   description: r.description,
@@ -603,7 +603,7 @@ export default function FinancialPage() {
                                 void writeAuditLog({
                                   table_name: 'receivables',
                                   record_id: r.id,
-                                  action: 'whatsapp_zapi_open' as any,
+                                  action: 'whatsapp_send_open' as any,
                                   new_value: {
                                     description: r.description,
                                     amount: Number(r.amount),
@@ -613,11 +613,11 @@ export default function FinancialPage() {
                                     service_order_id: target.serviceOrderId,
                                     has_share_token: !!target.shareToken,
                                   },
-                                  reason: 'Abriu envio Z-API de recibo/cobrança',
+                                  reason: 'Abriu envio WhatsApp de recibo/cobrança',
                                 });
                               }}
                             >
-                              <Send className="h-4 w-4 mr-1" /> Z-API
+                              <Send className="h-4 w-4 mr-1" /> WhatsApp
                             </Button>
                             {r.status !== 'paid' && (
                               <Button size="sm" variant="outline" onClick={() => setPaymentTarget({ receivable: r })}>
@@ -766,7 +766,7 @@ export default function FinancialPage() {
       )}
       <ReceivableFormDialog open={showNewReceivable} onOpenChange={setShowNewReceivable} />
       <PayableFormDialog open={showNewPayable} onOpenChange={setShowNewPayable} />
-      <SendViaZAPIDialog
+      <SendViaWhatsAppDialog
         open={!!zapiTarget}
         onOpenChange={v => { if (!v) setZapiTarget(null); }}
         target={zapiTarget}

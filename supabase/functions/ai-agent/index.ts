@@ -510,7 +510,7 @@ const TOOLS = [
     function: {
       name: "send_whatsapp_message",
       description:
-        "Envia mensagem de WhatsApp via Z-API. Forneça to_phone OU client_id (busca o WhatsApp/telefone do cliente).",
+        "Envia mensagem de WhatsApp via Evolution API. Forneça to_phone OU client_id (busca o WhatsApp/telefone do cliente).",
       parameters: {
         type: "object",
         properties: {

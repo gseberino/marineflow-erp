@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { useNavigate } from 'react-router-dom';
 import { useI18n } from '@/i18n';
 import { Skeleton } from '@/components/ui/skeleton';
-import { SendViaZAPIDialog } from '@/components/SendViaZAPIDialog';
+import { SendViaWhatsAppDialog } from '@/components/SendViaZAPIDialog';
 
 const COLUMNS = [
   { id: 'draft', title: 'Oportunidade / Rascunho', color: 'bg-amber-100/50 border-amber-200' },
@@ -134,7 +134,7 @@ export default function CRMKanbanPage() {
       </div>
 
       {zapiTarget && (
-        <SendViaZAPIDialog
+        <SendViaWhatsAppDialog
           open={!!zapiTarget}
           onOpenChange={(op) => !op && setZapiTarget(null)}
           target={zapiTarget}

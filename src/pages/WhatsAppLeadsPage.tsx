@@ -27,7 +27,7 @@ import {
 import { useClients } from '@/hooks/use-clients';
 import { useI18n } from '@/i18n';
 import { WhatsAppWebhookValidator } from '@/components/WhatsAppWebhookValidator';
-import { WhatsAppZApiSettings } from '@/components/WhatsAppZApiSettings';
+import { WhatsAppConnectionSettings } from '@/components/WhatsAppZApiSettings';
 import { WhatsAppReminderSettings } from '@/components/WhatsAppReminderSettings';
 import { WhatsAppQueuePanel } from '@/components/WhatsAppQueuePanel';
 import { WhatsAppTemplatesManager } from '@/components/WhatsAppTemplatesManager';
@@ -696,7 +696,7 @@ function SettingsView() {
   return (
     <div className="space-y-6">
       <WhatsAppWebhookValidator />
-      <WhatsAppZApiSettings />
+      <WhatsAppConnectionSettings />
       <WhatsAppReminderSettings />
       <WhatsAppQueuePanel />
       <WhatsAppTemplatesManager />

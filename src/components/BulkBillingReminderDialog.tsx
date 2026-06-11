@@ -344,7 +344,7 @@ export function BulkBillingReminderDialog({
             <Send className="h-5 w-5" /> Cobrança em massa via WhatsApp
           </DialogTitle>
           <DialogDescription>
-            Selecione cobranças e envie via Z-API com throttle, retry automático e progresso ao vivo.
+            Selecione cobranças e envie via WhatsApp com throttle, retry automático e progresso ao vivo.
           </DialogDescription>
         </DialogHeader>
 
@@ -391,7 +391,7 @@ export function BulkBillingReminderDialog({
                 onChange={e => setThrottleMs(Math.max(500, Math.min(60000, parseInt(e.target.value || '2500', 10) || 2500)))}
               />
               <p className="text-[11px] text-muted-foreground mt-1">
-                Recomendado: 2000–5000ms para evitar bloqueio Z-API.
+                Recomendado: 2000–5000ms para evitar bloqueio pelo provedor.
               </p>
             </div>
             <div>

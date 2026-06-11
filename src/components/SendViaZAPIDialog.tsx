@@ -19,11 +19,11 @@ import { ModeSelector, type SendMode } from '@/components/zapi/ModeSelector';
 import { RetrySettings } from '@/components/zapi/RetrySettings';
 import { MessageEditor } from '@/components/zapi/MessageEditor';
 import { ScheduleSettings, defaultScheduleConfig, type ScheduleConfig } from '@/components/zapi/ScheduleSettings';
-import { useZApiSend } from '@/hooks/use-zapi-send';
+import { useWhatsAppSend } from '@/hooks/use-zapi-send';
 import { useCreateScheduledSend } from '@/hooks/use-scheduled-sends';
 import { supabase } from '@/integrations/supabase/client';
 
-export type SendViaZAPITarget =
+export type SendViaWhatsAppTarget =
   | {
       kind: 'service_order';
       serviceOrderId: string;
@@ -50,10 +50,10 @@ export type SendViaZAPITarget =
 interface Props {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  target: SendViaZAPITarget | null;
+  target: SendViaWhatsAppTarget | null;
 }
 
-export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
+export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
   const [mode, setMode] = useState<SendMode>('link');
   const [phone, setPhone] = useState('');
   const [message, setMessage] = useState('');
@@ -62,24 +62,24 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
   const [isGenerating, setIsGenerating] = useState(false);
 
   const [autoRetry, setAutoRetry] = useState<boolean>(() => {
-    try { return localStorage.getItem('zapi.autoRetry') !== '0'; } catch { return true; }
+    try { return localStorage.getItem('wa.autoRetry') !== '0'; } catch { return true; }
   });
   const [maxAttempts, setMaxAttempts] = useState<number>(() => {
     try {
-      const v = parseInt(localStorage.getItem('zapi.maxAttempts') || '3', 10);
+      const v = parseInt(localStorage.getItem('wa.maxAttempts') || '3', 10);
       return Number.isFinite(v) && v >= 1 && v <= 5 ? v : 3;
     } catch { return 3; }
   });
 
   const [schedule, setSchedule] = useState<ScheduleConfig>(defaultScheduleConfig());
-  const { send, sending, attemptInfo } = useZApiSend();
+  const { send, sending, attemptInfo } = useWhatsAppSend();
   const createScheduled = useCreateScheduledSend();
 
   useEffect(() => {
-    try { localStorage.setItem('zapi.autoRetry', autoRetry ? '1' : '0'); } catch {}
+    try { localStorage.setItem('wa.autoRetry', autoRetry ? '1' : '0'); } catch {}
   }, [autoRetry]);
   useEffect(() => {
-    try { localStorage.setItem('zapi.maxAttempts', String(maxAttempts)); } catch {}
+    try { localStorage.setItem('wa.maxAttempts', String(maxAttempts)); } catch {}
   }, [maxAttempts]);
 
   // Modelos de Vendas Embutidos
@@ -347,7 +347,7 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Send className="h-5 w-5" /> Enviar via Z-API
+            <Send className="h-5 w-5" /> Enviar via WhatsApp
           </DialogTitle>
           <DialogDescription>{titleLabel}</DialogDescription>
         </DialogHeader>
@@ -361,9 +361,9 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
           />
 
           <div className="space-y-2">
-            <Label htmlFor="phone-zapi">Telefone (com DDI)</Label>
+            <Label htmlFor="phone-whatsapp">Telefone (com DDI)</Label>
             <Input
-              id="phone-zapi"
+              id="phone-whatsapp"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
               placeholder="5521999998888"

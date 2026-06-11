@@ -1,5 +1,5 @@
 // Edge Function: whatsapp-status-worker
-// Processa agendamentos de Status do WhatsApp via Z-API
+// Processa agendamentos de Status do WhatsApp via Evolution API
 // Roda periodicamente (cron) para verificar posts pendentes.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
@@ -32,17 +32,19 @@ Deno.serve(async (req) => {
       });
     }
 
-    // 2. Carrega credenciais da Z-API
-    const { data: settings } = await supabase.from("app_settings").select("key, value");
-    const settingsMap = Object.fromEntries((settings || []).map((s: any) => [s.key, s.value]));
+    // 2. Carrega credenciais Evolution API de backend secrets/environment.
+    const EVO_URL = (Deno.env.get("EVOLUTION_API_URL") || "").replace(/\/$/, "");
+    const EVO_KEY = Deno.env.get("EVOLUTION_API_KEY") || "";
+    const EVO_INSTANCE = Deno.env.get("EVOLUTION_INSTANCE") || "";
 
-    const INSTANCE_ID = settingsMap["zapi_instance_id"];
-    const TOKEN = settingsMap["zapi_token"];
-    const CLIENT_TOKEN = settingsMap["zapi_client_token"];
-
-    if (!INSTANCE_ID || !TOKEN) {
-      throw new Error("Z-API credentials not configured");
+    if (!EVO_URL || !EVO_KEY || !EVO_INSTANCE) {
+      throw new Error("Evolution API credentials not configured");
     }
+
+    const evoHeaders = {
+      "Content-Type": "application/json",
+      "apikey": EVO_KEY,
+    };
 
     const results = [];
 
@@ -51,59 +53,58 @@ Deno.serve(async (req) => {
         // Marca como processando para evitar duplicidade
         await supabase.from("whatsapp_status_scheduled").update({ status: "processing" }).eq("id", item.id);
 
-        let endpoint = "";
         let payload: any = {};
 
-        const base = `https://api.z-api.io/instances/${INSTANCE_ID}/token/${TOKEN}`;
-
         if (item.content_type === "text") {
-          endpoint = `${base}/send-text-status`;
           payload = {
-            message: item.text_content,
+            type: "text",
+            content: item.text_content,
             backgroundColor: item.background_color || "#746764",
-            font: item.font_type || 0
+            font: item.font_type || 1,
+            allContacts: true,
           };
         } else if (item.content_type === "image") {
-          endpoint = `${base}/send-image-status`;
           payload = {
-            image: item.media_url,
-            caption: item.text_content || ""
+            type: "image",
+            content: item.media_url,
+            caption: item.text_content || "",
+            allContacts: true,
           };
         } else if (item.content_type === "video") {
-          endpoint = `${base}/send-video-status`;
           payload = {
-            video: item.media_url,
-            caption: item.text_content || ""
+            type: "video",
+            content: item.media_url,
+            caption: item.text_content || "",
+            allContacts: true,
           };
         }
 
-        const headers: any = { "Content-Type": "application/json" };
-        if (CLIENT_TOKEN) headers["Client-Token"] = CLIENT_TOKEN;
-
-        const res = await fetch(endpoint, {
+        const res = await fetch(`${EVO_URL}/message/sendStatus/${EVO_INSTANCE}`, {
           method: "POST",
-          headers,
-          body: JSON.stringify(payload)
+          headers: evoHeaders,
+          body: JSON.stringify(payload),
         });
 
-        const zapiRes = await res.json().catch(() => ({}));
+        const evoRes = await res.json().catch(() => ({}));
 
-        if (res.ok && !zapiRes.error) {
+        if (res.ok && !evoRes.error) {
+          const key = evoRes.key as Record<string, unknown> | undefined;
+          const msgId = String(key?.id ?? evoRes.id ?? evoRes.messageId ?? "");
           await supabase.from("whatsapp_status_scheduled").update({
             status: "sent",
-            zapi_message_id: zapiRes.messageId || zapiRes.id,
-            error_message: null
+            zapi_message_id: msgId || null,
+            error_message: null,
           }).eq("id", item.id);
           results.push({ id: item.id, success: true });
         } else {
-          throw new Error(zapiRes.error || `HTTP ${res.status}`);
+          throw new Error(String(evoRes.error ?? evoRes.message ?? `HTTP ${res.status}`));
         }
 
       } catch (err: any) {
         console.error(`Error processing status ${item.id}:`, err);
         await supabase.from("whatsapp_status_scheduled").update({
           status: "failed",
-          error_message: err.message
+          error_message: err.message,
         }).eq("id", item.id);
         results.push({ id: item.id, success: false, error: err.message });
       }

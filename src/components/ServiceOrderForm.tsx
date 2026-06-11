@@ -55,7 +55,7 @@ import { ServiceFormDialog } from '@/components/ServiceFormDialog';
 import { ServiceOrderSignatures } from '@/components/ServiceOrderSignatures';
 import { ServiceOrderPhotos } from '@/components/ServiceOrderPhotos';
 import { WhatsAppSendHistoryDialog } from '@/components/WhatsAppSendHistoryDialog';
-import { SendViaZAPIDialog, type SendViaZAPITarget } from '@/components/SendViaZAPIDialog';
+import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/SendViaZAPIDialog';
 import { useWhatsAppSendHistory } from '@/hooks/use-whatsapp-send-log';
 import { CheckCircle2, XCircle, History as HistoryIcon, Send, Sparkles } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -836,7 +836,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [cancelReason, setCancelReason] = useState('');
   const [reopenReason, setReopenReason] = useState('');
   const [showZapiHistory, setShowZapiHistory] = useState(false);
-  const [zapiTarget, setZapiTarget] = useState<SendViaZAPITarget | null>(null);
+  const [zapiTarget, setZapiTarget] = useState<SendViaWhatsAppTarget | null>(null);
   const { data: zapiHistory } = useWhatsAppSendHistory(orderId || null);
   const lastZapiSend = zapiHistory?.[0];
   const [pdfDialogType, setPdfDialogType] = useState<'quote' | 'service_order' | 'invoice' | null>(null);
@@ -1677,7 +1677,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                         type="button"
                         onClick={() => setShowZapiHistory(true)}
                         className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs hover:bg-muted transition-colors"
-                        aria-label="Ver histórico de envios Z-API"
+                        aria-label="Ver histórico de envios WhatsApp"
                       >
                         {lastZapiSend.success ? (
                           <CheckCircle2 className="h-3.5 w-3.5 text-success" />
@@ -1685,7 +1685,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                           <XCircle className="h-3.5 w-3.5 text-destructive" />
                         )}
                         <span className={lastZapiSend.success ? 'text-success' : 'text-destructive'}>
-                          Z-API: {lastZapiSend.success ? 'enviado' : 'falhou'}
+                          WhatsApp: {lastZapiSend.success ? 'enviado' : 'falhou'}
                         </span>
                         <HistoryIcon className="h-3 w-3 text-muted-foreground" />
                       </button>
@@ -1697,7 +1697,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                         </div>
                         {!lastZapiSend.success && (
                           <div className="text-destructive">
-                            {(lastZapiSend.new_value as any)?.zapi_response?.error
+                            {(lastZapiSend.new_value as any)?.provider_result?.error
+                              || (lastZapiSend.new_value as any)?.zapi_response?.error
                               || lastZapiSend.reason
                               || `HTTP ${(lastZapiSend.new_value as any)?.http_status ?? '?'}`}
                           </div>
@@ -1779,7 +1780,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                       className="gap-1 border-accent text-accent hover:bg-accent/10"
                     >
                       <Send className="h-4 w-4" />
-                      Enviar Z-API
+                      Enviar WhatsApp
                       <ChevronDown className="h-3 w-3 opacity-60" />
                     </Button>
                   </DropdownMenuTrigger>
@@ -3627,7 +3628,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         serviceOrderNumber={orderData?.service_order_number}
       />
 
-      <SendViaZAPIDialog
+      <SendViaWhatsAppDialog
         open={!!zapiTarget}
         onOpenChange={v => { if (!v) setZapiTarget(null); }}
         target={zapiTarget}

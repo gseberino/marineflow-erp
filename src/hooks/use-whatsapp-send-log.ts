@@ -12,7 +12,7 @@ export interface WhatsAppSendLogEntry {
 }
 
 /**
- * Última tentativa de envio via Z-API por OS (mapa: service_order_id -> entry).
+ * Última tentativa de envio via WhatsApp por OS (mapa: service_order_id -> entry).
  */
 export function useWhatsAppSendStatusMap(serviceOrderIds: string[]) {
   const idsKey = [...serviceOrderIds].sort().join(',');
@@ -35,8 +35,8 @@ export function useWhatsAppSendStatusMap(serviceOrderIds: string[]) {
         if (!map.has(row.record_id)) {
           const nv: any = row.new_value || {};
           const httpStatus = nv?.http_status;
-          const zapiErr = nv?.zapi_response?.error;
-          const success = httpStatus >= 200 && httpStatus < 300 && !zapiErr;
+          const providerErr = nv?.provider_result?.error || nv?.zapi_response?.error;
+          const success = httpStatus >= 200 && httpStatus < 300 && !providerErr;
           map.set(row.record_id, { ...row, success } as WhatsAppSendLogEntry);
         }
       }

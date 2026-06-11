@@ -130,7 +130,7 @@ export function WhatsAppReminderSettings() {
           <Bell className="h-4 w-4" /> Lembretes de mensagens não respondidas
         </CardTitle>
         <CardDescription>
-          O sistema verifica a cada 15 minutos e envia um resumo via Z-API para os responsáveis
+          O sistema verifica a cada 15 minutos e envia um resumo via WhatsApp para os responsáveis
           quando há conversas WhatsApp recebidas sem resposta.
         </CardDescription>
       </CardHeader>

@@ -160,7 +160,7 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
           <TabsList className="grid grid-cols-2 w-full">
             <TabsTrigger value="data">Dados do cliente</TabsTrigger>
             <TabsTrigger value="zapi" disabled={!isEdit}>
-              WhatsApp / Z-API
+              WhatsApp
             </TabsTrigger>
           </TabsList>
 
@@ -248,7 +248,7 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
               <ZapiSettingsTab clientId={client.id} />
             ) : (
               <p className="text-sm text-muted-foreground py-6 text-center">
-                Salve o cliente primeiro para configurar mensagens Z-API.
+                Salve o cliente primeiro para configurar mensagens WhatsApp.
               </p>
             )}
           </TabsContent>
@@ -258,7 +258,7 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
   );
 }
 
-// ----------------- Aba Z-API -----------------
+// ----------------- Aba WhatsApp -----------------
 
 const CONTEXT_LABELS: Record<ClientWhatsAppContext, string> = {
   service_order: 'Ordem de Serviço',

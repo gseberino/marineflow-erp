@@ -416,7 +416,7 @@ export default function WhatsAppStatusPage() {
               <div className="p-4 bg-primary/5 rounded-xl border border-primary/10 flex gap-3">
                 <AlertCircle className="h-5 w-5 text-primary shrink-0" />
                 <p className="text-xs text-primary/80 leading-relaxed">
-                  Os status são processados automaticamente no horário agendado. Certifique-se de que sua instância Z-API esteja conectada.
+                  Os status são processados automaticamente no horário agendado. Certifique-se de que sua instância WhatsApp esteja conectada.
                 </p>
               </div>
             )}

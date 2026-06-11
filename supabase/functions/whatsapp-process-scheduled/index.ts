@@ -30,7 +30,7 @@ Deno.serve(async (req) => {
 
     // ── Zombie recovery ──────────────────────────────────────────────────────
     // If a job got stuck in 'processing' for more than 10 minutes (e.g. due to
-    // a function timeout or Z-API hang), reset it back to 'pending' so it can
+    // a function timeout or provider hang), reset it back to 'pending' so it can
     // be retried on the next cron tick. Without this, a timed-out job stays
     // in 'processing' forever and is never retried.
     const zombieThreshold = new Date(Date.now() - 10 * 60 * 1000).toISOString();

@@ -98,7 +98,7 @@ export function useDeleteQuickReply() {
   });
 }
 
-// ---------- Send text via Z-API ----------
+// ---------- Send text via WhatsApp ----------
 export function useSendWhatsAppText() {
   const qc = useQueryClient();
   return useMutation({

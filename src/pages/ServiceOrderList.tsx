@@ -17,7 +17,7 @@ import { useMultiFilter } from '@/hooks/use-multi-filter';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { PDFOptionsDialog } from '@/components/PDFOptionsDialog';
 import { WhatsAppSendHistoryDialog } from '@/components/WhatsAppSendHistoryDialog';
-import { SendViaZAPIDialog, type SendViaZAPITarget } from '@/components/SendViaZAPIDialog';
+import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/SendViaZAPIDialog';
 import { useWhatsAppSendStatusMap } from '@/hooks/use-whatsapp-send-log';
 import { usePDFData } from '@/hooks/use-pdf';
 import { generatePDF, type PDFOptions } from '@/lib/pdf-generator';
@@ -75,7 +75,7 @@ export default function ServiceOrderList() {
 
   const [pdfTarget, setPdfTarget] = useState<{ id: string; type: 'quote' | 'service_order' } | null>(null);
   const [historyTarget, setHistoryTarget] = useState<{ id: string; number: string } | null>(null);
-  const [zapiTarget, setZapiTarget] = useState<SendViaZAPITarget | null>(null);
+  const [zapiTarget, setZapiTarget] = useState<SendViaWhatsAppTarget | null>(null);
   const { data: pdfData } = usePDFData(pdfTarget?.id);
 
   const orderIds = (orders || []).map((o: any) => o.id);
@@ -375,7 +375,7 @@ export default function ServiceOrderList() {
                             return <span className="text-xs text-muted-foreground">—</span>;
                           }
                           const nv: any = entry.new_value || {};
-                          const reason = nv?.zapi_response?.error || entry.reason || `HTTP ${nv?.http_status ?? '?'}`;
+                          const reason = nv?.provider_result?.error || nv?.zapi_response?.error || entry.reason || `HTTP ${nv?.http_status ?? '?'}`;
                           const when = new Date(entry.changed_at).toLocaleString('pt-BR');
                           return (
                             <TooltipProvider>
@@ -385,7 +385,7 @@ export default function ServiceOrderList() {
                                     type="button"
                                     onClick={() => setHistoryTarget({ id: so.id, number: so.service_order_number })}
                                     className="inline-flex items-center"
-                                    aria-label="Ver histórico de envios Z-API"
+                                    aria-label="Ver histórico de envios WhatsApp"
                                   >
                                     {entry.success ? (
                                       <CheckCircle2 className="h-4 w-4 text-success" />
@@ -397,7 +397,7 @@ export default function ServiceOrderList() {
                                 <TooltipContent side="left" className="max-w-xs">
                                   <div className="text-xs space-y-1">
                                     <div className="font-medium">
-                                      {entry.success ? 'Enviado via Z-API' : 'Falha no envio Z-API'}
+                                      {entry.success ? 'Enviado via WhatsApp' : 'Falha no envio WhatsApp'}
                                     </div>
                                     <div className="text-muted-foreground">{when}</div>
                                     {!entry.success && (
@@ -456,7 +456,7 @@ export default function ServiceOrderList() {
                               className="gap-2"
                             >
                               <Send className="h-4 w-4" />
-                              Enviar OS via Z-API…
+                              Enviar OS via WhatsApp…
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() => openZapiDialog(so, 'quote')}
@@ -464,14 +464,14 @@ export default function ServiceOrderList() {
                               className="gap-2"
                             >
                               <Send className="h-4 w-4" />
-                              Enviar Orçamento via Z-API…
+                              Enviar Orçamento via WhatsApp…
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() => setHistoryTarget({ id: so.id, number: so.service_order_number })}
                               className="gap-2"
                             >
                               <History className="h-4 w-4" />
-                              Histórico de envios Z-API
+                              Histórico de envios WhatsApp
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -519,7 +519,7 @@ export default function ServiceOrderList() {
         serviceOrderNumber={historyTarget?.number}
       />
 
-      <SendViaZAPIDialog
+      <SendViaWhatsAppDialog
         open={!!zapiTarget}
         onOpenChange={v => { if (!v) setZapiTarget(null); }}
         target={zapiTarget}

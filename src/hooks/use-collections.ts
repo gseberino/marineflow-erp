@@ -353,7 +353,7 @@ export function useMarkCollectionPaid() {
   });
 }
 
-// ----- Z-API send -----
+// ----- WhatsApp send -----
 function fmtBRL(v: number) {
   return v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -367,7 +367,7 @@ export function renderTemplate(
   ctx: { nome: string; numero_os: string; valor: number; vencimento: string; pix: string; empresa: string },
 ) {
   // Aceita {chave} e {{chave}} (retro-compatível) e expõe aliases amigáveis
-  // (cliente, os) iguais aos usados em SendViaZAPIDialog/TEMPLATE_VARIABLES.
+  // (cliente, os) iguais aos usados em SendViaWhatsAppDialog/TEMPLATE_VARIABLES.
   const replacements: Record<string, string> = {
     nome: ctx.nome,
     numero_os: ctx.numero_os,

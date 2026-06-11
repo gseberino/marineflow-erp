@@ -1,6 +1,6 @@
 // Edge Function: whatsapp-unread-reminder
 // Roda periodicamente (cron). Detecta conversas WhatsApp com mensagens inbound
-// não respondidas há > N minutos e envia lembrete via Z-API para os
+// não respondidas há > N minutos e enfileira lembrete via whatsapp_send_queue para os
 // responsáveis configurados.
 //
 // Configuração via app_settings (key/value):
@@ -60,13 +60,6 @@ Deno.serve(async (req) => {
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const INSTANCE_ID = Deno.env.get("ZAPI_INSTANCE_ID");
-    const TOKEN = Deno.env.get("ZAPI_TOKEN");
-    const CLIENT_TOKEN = Deno.env.get("ZAPI_CLIENT_TOKEN");
-
-    if (!INSTANCE_ID || !TOKEN) {
-      return jr({ error: "Z-API não configurado" }, 500);
-    }
 
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE);
 

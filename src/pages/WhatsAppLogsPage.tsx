@@ -136,7 +136,7 @@ export default function WhatsAppLogsPage() {
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <PageHeader
           title="Logs do Webhook WhatsApp"
-          description="Veja toda mensagem que entrou ou saiu via Z-API. Filtre por tipo e status para diagnosticar 'mensagens não reconhecidas'."
+          description="Veja toda mensagem que entrou ou saiu via WhatsApp. Filtre por tipo e status para diagnosticar 'mensagens não reconhecidas'."
         />
         <Button onClick={reprocessUnknown} disabled={reprocessing} variant="outline">
           <Wand2 className={`h-4 w-4 mr-2 ${reprocessing ? 'animate-spin' : ''}`} />
@@ -277,7 +277,7 @@ export default function WhatsAppLogsPage() {
               <div className="space-y-3 text-sm">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div><div className="text-xs text-muted-foreground">ID</div><div className="font-mono text-xs break-all">{selected.id}</div></div>
-                  <div><div className="text-xs text-muted-foreground">Z-API ID</div><div className="font-mono text-xs break-all">{selected.zapi_message_id || '—'}</div></div>
+                  <div><div className="text-xs text-muted-foreground">Provider ID</div><div className="font-mono text-xs break-all">{selected.zapi_message_id || '—'}</div></div>
                   <div><div className="text-xs text-muted-foreground">Data</div><div>{format(new Date(selected.occurred_at), 'dd/MM/yyyy HH:mm:ss')}</div></div>
                   <div><div className="text-xs text-muted-foreground">Telefone</div><div className="font-mono">{selected.phone_normalized}</div></div>
                   <div><div className="text-xs text-muted-foreground">Direção</div><Badge>{selected.direction}</Badge></div>
@@ -291,11 +291,11 @@ export default function WhatsAppLogsPage() {
                 </div>
                 {selected.message_type === 'other' && (
                   <div className="bg-destructive/10 border border-destructive/30 rounded p-3 text-xs">
-                    <strong>Por que &ldquo;não reconhecida&rdquo;?</strong> O webhook não encontrou nenhum dos campos esperados (text, image, audio, video, document, location, contact). Veja o payload bruto abaixo — geralmente é um callback do Z-API (status, presença, ack) que não traz conteúdo de mensagem.
+                    <strong>Por que &ldquo;não reconhecida&rdquo;?</strong> O webhook não encontrou nenhum dos campos esperados (text, image, audio, video, document, location, contact). Veja o payload bruto abaixo — geralmente é um callback do provider (status, presença, ack) que não traz conteúdo de mensagem.
                   </div>
                 )}
                 <div>
-                  <div className="text-xs text-muted-foreground mb-1">Payload bruto (Z-API)</div>
+                  <div className="text-xs text-muted-foreground mb-1">Payload bruto</div>
                   <pre className="bg-muted p-3 rounded text-xs overflow-auto max-h-80">{JSON.stringify(selected.raw_payload, null, 2)}</pre>
                 </div>
               </div>

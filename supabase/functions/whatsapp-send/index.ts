@@ -66,20 +66,11 @@ Deno.serve(async (req) => {
       callerIdentity = userData.user.email || userData.user.id;
     }
 
-    // Load credentials from app_settings (DB) with env fallback
+    // Load app settings for test mode
     const { data: settings } = await supabaseAdmin.from("app_settings").select("key, value");
     const settingsMap = Object.fromEntries((settings || []).map((s: any) => [s.key, s.value]));
 
-    const instanceId = settingsMap["zapi_instance_id"] || Deno.env.get("ZAPI_INSTANCE_ID");
-    const zapiToken = settingsMap["zapi_token"] || Deno.env.get("ZAPI_TOKEN");
-    const clientToken = settingsMap["zapi_client_token"] || Deno.env.get("ZAPI_CLIENT_TOKEN");
-
-    const activeProvider = Deno.env.get("WHATSAPP_PROVIDER") ?? "zapi";
-    if (activeProvider === "zapi" && (!instanceId || !zapiToken)) {
-      return jr({ error: "WhatsApp credentials not configured. Configure em Configurações → WhatsApp." }, 500);
-    }
-    if (activeProvider === "evolution" &&
-      (!Deno.env.get("EVOLUTION_API_URL") || !Deno.env.get("EVOLUTION_API_KEY") || !Deno.env.get("EVOLUTION_INSTANCE"))) {
+    if (!Deno.env.get("EVOLUTION_API_URL") || !Deno.env.get("EVOLUTION_API_KEY") || !Deno.env.get("EVOLUTION_INSTANCE")) {
       return jr({ error: "Evolution API credentials not configured (EVOLUTION_API_URL, EVOLUTION_API_KEY, EVOLUTION_INSTANCE)." }, 500);
     }
 
@@ -102,11 +93,7 @@ Deno.serve(async (req) => {
       return jr({ error: "Telefone inválido (precisa incluir DDI+DDD)" }, 400);
     }
 
-    const provider = createWhatsAppProvider({
-      instanceId,
-      token: zapiToken,
-      clientToken,
-    });
+    const provider = createWhatsAppProvider();
 
     let sendResult;
     let messagePreview = "";
@@ -152,7 +139,7 @@ Deno.serve(async (req) => {
       action: "whatsapp_send_api",
       changed_by: callerIdentity,
       new_value: {
-        provider: "z-api",
+        provider: Deno.env.get("WHATSAPP_PROVIDER") ?? "evolution",
         kind: body.kind,
         context: body.context || null,
         phone: phoneClean,

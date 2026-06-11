@@ -98,7 +98,7 @@ vi.mock('@/components/WhatsAppSendHistoryDialog', () => ({
 }));
 
 vi.mock('@/components/SendViaZAPIDialog', () => ({
-  SendViaZAPIDialog: () => null,
+  SendViaWhatsAppDialog: () => null,
 }));
 
 function renderList() {

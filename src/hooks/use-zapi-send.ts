@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { generatePDFBlob, DEFAULT_PDF_OPTIONS, type PDFDocumentType } from '@/lib/pdf-generator';
 
-export interface ZApiSendPayload {
+export interface WhatsAppSendPayload {
   phone: string;
   message: string;
   mode: 'link' | 'document';
@@ -38,7 +38,7 @@ async function uploadPdfBlob(blob: Blob, filename: string): Promise<string> {
   return data.publicUrl;
 }
 
-export function useZApiSend() {
+export function useWhatsAppSend() {
   const [sending, setSending] = useState(false);
   const [attemptInfo, setAttemptInfo] = useState('');
   const queryClient = useQueryClient();
@@ -108,7 +108,7 @@ export function useZApiSend() {
           return true;
         } catch (err: any) {
           lastErr = err;
-          console.warn(`Z-API tentativa ${attempt}/${total} falhou`, err);
+          console.warn(`WhatsApp tentativa ${attempt}/${total} falhou`, err);
           if (attempt < total) {
             const delay = Math.min(8000, 1000 * Math.pow(2, attempt - 1));
             await new Promise((r) => setTimeout(r, delay));
@@ -117,7 +117,7 @@ export function useZApiSend() {
       }
       throw lastErr || new Error('Falha desconhecida');
     } catch (err: any) {
-      console.error('Z-API erro final', err);
+      console.error('WhatsApp erro final', err);
       toast.error(
         `Falha após ${total} tentativa${total > 1 ? 's' : ''}: ${err?.message || 'erro desconhecido'}`,
         { id: tId },
