@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -123,18 +124,21 @@ export function useWhatsAppConversations() {
   return useQuery({
     queryKey: ['wa-conversations'],
     queryFn: async () => {
-      // Inbox mostra apenas mensagens recebidas (inbound) — outbound de lembretes do sistema
-      // não devem poluir o inbox; ficam visíveis na página de Logs.
+      // Carrega as 1000 mensagens mais recentes (qualquer direção) para determinar
+      // quais conversas existem e qual foi a última mensagem de cada uma.
+      // Apenas phones que receberam pelo menos uma mensagem inbound aparecem no inbox
+      // (evita que envios em lote ou lembretes automáticos criem "conversas fantasma").
       const { data: msgs, error } = await supabase
         .from('whatsapp_messages')
         .select('phone_normalized, occurred_at, body, direction, client_id, lead_id, is_broadcast')
-        .eq('direction', 'inbound')
         .order('occurred_at', { ascending: false })
         .limit(1000);
       if (error) throw error;
 
+      const phonesWithInbound = new Set<string>();
       const map = new Map<string, any>();
       for (const m of msgs || []) {
+        if (m.direction === 'inbound') phonesWithInbound.add(m.phone_normalized);
         if (!map.has(m.phone_normalized)) {
           map.set(m.phone_normalized, {
             phone: m.phone_normalized,
@@ -143,9 +147,13 @@ export function useWhatsAppConversations() {
             last_direction: m.direction,
             client_id: m.client_id,
             lead_id: m.lead_id,
-            is_broadcast: m.is_broadcast,
+            is_broadcast: m.is_broadcast || false,
           });
         }
+      }
+      // Remove conversas que só têm outbound (envios automáticos do sistema)
+      for (const phone of Array.from(map.keys())) {
+        if (!phonesWithInbound.has(phone)) map.delete(phone);
       }
 
       const phones = Array.from(map.keys());
@@ -181,8 +189,47 @@ export function useWhatsAppConversations() {
         };
       });
     },
-    refetchInterval: 15000,
+    refetchInterval: 30000, // Fallback — Realtime (useWhatsAppInboxRealtime) cuida das atualizações frequentes
   });
+}
+
+// ---------- Realtime (Inbox) ----------
+// Subscreve INSERT em whatsapp_messages + UPDATE em whatsapp_leads.
+// Invalida as queries de mensagens e conversas automaticamente, sem necessidade de polling frequente.
+// onNewInbound é chamado quando chega uma mensagem inbound nova (para tocar som / atualizar badge).
+export function useWhatsAppInboxRealtime(onNewInbound?: (phone: string) => void) {
+  const qc = useQueryClient();
+  // Ref evita que a mudança do callback recrie a subscription a cada render
+  const cbRef = useRef(onNewInbound);
+  cbRef.current = onNewInbound;
+
+  useEffect(() => {
+    const ch = supabase
+      .channel('wa-inbox-realtime')
+      .on(
+        'postgres_changes' as any,
+        { event: 'INSERT', schema: 'public', table: 'whatsapp_messages' },
+        (payload: any) => {
+          const phone: string | undefined = payload.new?.phone_normalized;
+          if (phone) {
+            qc.invalidateQueries({ queryKey: ['whatsapp-messages', phone] });
+            qc.invalidateQueries({ queryKey: ['wa-conversations'] });
+            if (payload.new?.direction === 'inbound') {
+              cbRef.current?.(phone);
+            }
+          }
+        },
+      )
+      .on(
+        'postgres_changes' as any,
+        { event: 'UPDATE', schema: 'public', table: 'whatsapp_leads' },
+        () => {
+          qc.invalidateQueries({ queryKey: ['wa-conversations'] });
+        },
+      )
+      .subscribe();
+    return () => { void supabase.removeChannel(ch); };
+  }, [qc]);
 }
 
 export function useMarkConversationRead() {

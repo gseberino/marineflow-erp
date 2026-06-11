@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/select';
 import {
   MessageCircle, UserPlus, Link2, Trash2, Phone, Send, Ban, Search, ArrowLeft,
-  Plus, Zap, ShieldOff, ArrowDown,
+  Plus, Zap, ShieldOff, ArrowDown, Check, CheckCheck, Mic, FileText,
 } from 'lucide-react';
 import {
   useWhatsAppLeads, useWhatsAppLeadMessages,
@@ -22,6 +22,7 @@ import {
   useWhatsAppConversations, useSendWhatsAppText, useMarkConversationRead,
   useBlockedNumbers, useAddBlockedNumber, useRemoveBlockedNumber,
   useQuickReplies, useUpsertQuickReply, useDeleteQuickReply,
+  useWhatsAppInboxRealtime,
 } from '@/hooks/use-whatsapp-inbox';
 import { useClients } from '@/hooks/use-clients';
 import { useI18n } from '@/i18n';
@@ -39,6 +40,116 @@ function formatPhone(p: string) {
   return p;
 }
 
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function playNotif() {
+  try {
+    const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.type = 'sine';
+    o.frequency.setValueAtTime(880, ctx.currentTime);
+    o.frequency.exponentialRampToValueAtTime(660, ctx.currentTime + 0.15);
+    g.gain.setValueAtTime(0.12, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
+    o.start(); o.stop(ctx.currentTime + 0.45);
+    ctx.close().catch(() => {});
+  } catch { /* unsupported */ }
+}
+
+function relativeTime(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(ms / 60_000);
+  const h = Math.floor(ms / 3_600_000);
+  const d = Math.floor(ms / 86_400_000);
+  if (m < 1) return 'agora';
+  if (m < 60) return `${m}min`;
+  if (h < 24) return `${h}h`;
+  if (d === 1) return 'ontem';
+  return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+}
+
+function isSameDay(a: Date, b: Date) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+function getDateLabel(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  if (isSameDay(d, now)) return 'Hoje';
+  const yd = new Date(now); yd.setDate(now.getDate() - 1);
+  if (isSameDay(d, yd)) return 'Ontem';
+  return d.toLocaleDateString('pt-BR');
+}
+
+function DateSeparator({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-2 my-2 select-none">
+      <div className="flex-1 h-px bg-border/50" />
+      <span className="text-[11px] text-muted-foreground px-2 py-0.5 bg-muted rounded-full">{label}</span>
+      <div className="flex-1 h-px bg-border/50" />
+    </div>
+  );
+}
+
+function DeliveryIcon({ status }: { status: string | null | undefined }) {
+  if (status === 'read' || status === 'played')
+    return <CheckCheck className="h-3 w-3 text-blue-300 inline ml-0.5 shrink-0" />;
+  if (status === 'delivered')
+    return <CheckCheck className="h-3 w-3 opacity-60 inline ml-0.5 shrink-0" />;
+  return <Check className="h-3 w-3 opacity-60 inline ml-0.5 shrink-0" />;
+}
+
+function MessageBubble({ m }: { m: any }) {
+  const isOut = m.direction === 'outbound';
+  return (
+    <div className={`flex ${isOut ? 'justify-end' : 'justify-start'}`}>
+      <div className={`max-w-[75%] rounded-2xl px-3 py-2 text-sm shadow-sm ${
+        isOut ? 'bg-primary text-primary-foreground rounded-br-sm' : 'bg-card border rounded-bl-sm'
+      }`}>
+        {/* Imagem inline */}
+        {m.message_type === 'image' && m.media_url && (
+          <img
+            src={m.media_url}
+            alt="imagem"
+            className="max-w-full rounded-lg mb-1 max-h-48 object-contain cursor-zoom-in"
+            loading="lazy"
+            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+          />
+        )}
+        {/* Áudio */}
+        {m.message_type === 'audio' && (
+          <div className={`flex items-center gap-1.5 mb-0.5 ${isOut ? 'opacity-80' : 'text-muted-foreground'}`}>
+            <Mic className="h-3.5 w-3.5 shrink-0" />
+            <span className="text-xs italic">Mensagem de áudio</span>
+          </div>
+        )}
+        {/* Documento */}
+        {m.message_type === 'document' && (
+          <div className={`flex items-center gap-1.5 mb-0.5 ${isOut ? 'opacity-80' : 'text-muted-foreground'}`}>
+            <FileText className="h-3.5 w-3.5 shrink-0" />
+            <span className="text-xs truncate max-w-[200px]">{m.body || 'Documento'}</span>
+          </div>
+        )}
+        {/* Corpo da mensagem */}
+        {m.body && m.message_type !== 'document' && (
+          <p className="whitespace-pre-wrap break-words leading-snug">{m.body}</p>
+        )}
+        {/* Rodapé: hora + status */}
+        <div className={`flex items-center gap-0.5 mt-0.5 ${isOut ? 'justify-end' : ''}`}>
+          <span className={`text-[10px] leading-none ${isOut ? 'opacity-70' : 'text-muted-foreground'}`}>
+            {new Date(m.occurred_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+          </span>
+          {isOut && <DeliveryIcon status={m.delivery_status} />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // =============== INBOX ===============
 function InboxView() {
   const { data: conversations, isLoading } = useWhatsAppConversations();
@@ -52,6 +163,22 @@ function InboxView() {
   const { data: quickReplies } = useQuickReplies();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
+  const prevUnreadRef = useRef(0);
+  const windowFocusedRef = useRef(true);
+
+  // Rastreia foco da janela para decidir quando tocar som
+  useEffect(() => {
+    const onFocus = () => { windowFocusedRef.current = true; };
+    const onBlur = () => { windowFocusedRef.current = false; };
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('blur', onBlur);
+    return () => { window.removeEventListener('focus', onFocus); window.removeEventListener('blur', onBlur); };
+  }, []);
+
+  // Realtime: invalida queries automaticamente e toca som em mensagens inbound novas
+  useWhatsAppInboxRealtime((phone) => {
+    if (!windowFocusedRef.current || phone !== activePhone) playNotif();
+  });
 
   const scrollToBottom = (behavior: ScrollBehavior = 'auto') => {
     requestAnimationFrame(() => {
@@ -81,6 +208,34 @@ function InboxView() {
     () => filtered.find((c: any) => c.phone === activePhone) || null,
     [filtered, activePhone],
   );
+
+  // Total de não lidas → badge no título da aba
+  const totalUnread = useMemo(
+    () => (conversations || []).reduce((s: number, c: any) => s + (c.unread_count || 0), 0),
+    [conversations],
+  );
+  useEffect(() => {
+    if (totalUnread > prevUnreadRef.current && prevUnreadRef.current >= 0) {
+      if (!windowFocusedRef.current) playNotif();
+    }
+    prevUnreadRef.current = totalUnread;
+    const bare = document.title.replace(/^\(\d+\) /, '');
+    document.title = totalUnread > 0 ? `(${totalUnread}) ${bare}` : bare;
+    return () => { document.title = document.title.replace(/^\(\d+\) /, ''); };
+  }, [totalUnread]);
+
+  // Lista de itens para renderização: separadores de data + mensagens
+  const renderedMessages = useMemo(() => {
+    const list = messages || [];
+    const items: Array<{ kind: 'sep'; label: string } | { kind: 'msg'; m: any }> = [];
+    let lastLabel = '';
+    for (const m of list) {
+      const label = getDateLabel(m.occurred_at);
+      if (label !== lastLabel) { items.push({ kind: 'sep', label }); lastLabel = label; }
+      items.push({ kind: 'msg', m });
+    }
+    return items;
+  }, [messages]);
 
   useEffect(() => {
     if (activePhone) markRead.mutate(activePhone);
@@ -145,14 +300,17 @@ function InboxView() {
                   <span className="font-medium text-sm truncate">
                     {c.name || formatPhone(c.phone)}
                   </span>
-                  {c.unread_count > 0 && (
-                    <Badge className="bg-primary text-primary-foreground h-5 min-w-5 px-1.5 text-[10px]">
-                      {c.unread_count}
-                    </Badge>
-                  )}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="text-[10px] text-muted-foreground">{relativeTime(c.last_at)}</span>
+                    {c.unread_count > 0 && (
+                      <Badge className="bg-primary text-primary-foreground h-5 min-w-5 px-1.5 text-[10px]">
+                        {c.unread_count}
+                      </Badge>
+                    )}
+                  </div>
                 </div>
                 <p className="text-xs text-muted-foreground truncate mt-0.5">
-                  {c.last_direction === 'outbound' ? '✓ ' : ''}
+                  {c.last_direction === 'outbound' && <Check className="h-3 w-3 opacity-50 inline mr-0.5" />}
                   {c.last_body || '—'}
                 </p>
                 <div className="flex items-center gap-1 mt-1">
@@ -192,27 +350,15 @@ function InboxView() {
               </Button>
             </div>
 
-            <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto p-3 space-y-2 bg-muted/30">
-              {(messages || []).length === 0 && (
+            <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto p-3 space-y-1 bg-muted/30">
+              {renderedMessages.length === 0 && (
                 <p className="text-sm text-muted-foreground text-center py-8">Sem mensagens.</p>
               )}
-              {(messages || []).map((m: any) => (
-                <div key={m.id} className={`flex ${m.direction === 'outbound' ? 'justify-end' : 'justify-start'}`}>
-                  <div
-                    className={`max-w-[75%] rounded-2xl px-3 py-2 text-sm ${
-                      m.direction === 'outbound'
-                        ? 'bg-primary text-primary-foreground rounded-br-sm'
-                        : 'bg-card border rounded-bl-sm'
-                    }`}
-                  >
-                    <p className="whitespace-pre-wrap break-words">{m.body}</p>
-                    <p className={`text-[10px] mt-1 opacity-70`}>
-                      {new Date(m.occurred_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                      {m.direction === 'outbound' && ` • ${m.delivery_status || 'sent'}`}
-                    </p>
-                  </div>
-                </div>
-              ))}
+              {renderedMessages.map((item, i) =>
+                item.kind === 'sep'
+                  ? <DateSeparator key={`sep-${item.label}-${i}`} label={item.label} />
+                  : <MessageBubble key={item.m.id} m={item.m} />
+              )}
             </div>
 
             {/* Botão flutuante: ir para a mensagem mais recente */}
@@ -399,14 +545,22 @@ function LeadsView() {
           <DialogHeader>
             <DialogTitle>{selected?.name || 'Contato'} — {formatPhone(selected?.phone_normalized || '')}</DialogTitle>
           </DialogHeader>
-          <div ref={dialogScrollRef} className="max-h-[60vh] overflow-y-auto space-y-2 p-1">
+          <div ref={dialogScrollRef} className="max-h-[60vh] overflow-y-auto space-y-1 p-1">
             {messages?.length === 0 && <p className="text-sm text-muted-foreground text-center py-8">Sem mensagens.</p>}
-            {messages?.map((m: any) => (
-              <div key={m.id} className={`p-2 rounded-lg text-sm ${m.direction === 'inbound' ? 'bg-muted mr-12' : 'bg-primary/10 ml-12 text-right'}`}>
-                <p>{m.body}</p>
-                <p className="text-[10px] text-muted-foreground mt-1">{new Date(m.occurred_at).toLocaleString('pt-BR')} • {m.delivery_status}</p>
-              </div>
-            ))}
+            {(() => {
+              const items: Array<{ kind: 'sep'; label: string } | { kind: 'msg'; m: any }> = [];
+              let lastLabel = '';
+              for (const m of messages || []) {
+                const label = getDateLabel(m.occurred_at);
+                if (label !== lastLabel) { items.push({ kind: 'sep', label }); lastLabel = label; }
+                items.push({ kind: 'msg', m });
+              }
+              return items.map((item, i) =>
+                item.kind === 'sep'
+                  ? <DateSeparator key={`sep-${item.label}-${i}`} label={item.label} />
+                  : <MessageBubble key={item.m.id} m={item.m} />
+              );
+            })()}
           </div>
         </DialogContent>
       </Dialog>
