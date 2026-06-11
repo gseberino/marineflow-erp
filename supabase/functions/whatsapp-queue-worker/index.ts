@@ -43,10 +43,21 @@ Deno.serve(async (req) => {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    // Validate provider credentials early — same guard as before.
-    const instanceId = Deno.env.get("ZAPI_INSTANCE_ID");
-    const token = Deno.env.get("ZAPI_TOKEN");
-    if (!instanceId || !token) return jr({ error: "WhatsApp provider não configurado" }, 500);
+    // Validate provider credentials early — provider-aware (Z-API or Evolution).
+    const activeProvider = Deno.env.get("WHATSAPP_PROVIDER") ?? "zapi";
+    if (activeProvider === "evolution") {
+      if (
+        !Deno.env.get("EVOLUTION_API_URL") ||
+        !Deno.env.get("EVOLUTION_API_KEY") ||
+        !Deno.env.get("EVOLUTION_INSTANCE")
+      ) {
+        return jr({ error: "Evolution API não configurada" }, 500);
+      }
+    } else {
+      const instanceId = Deno.env.get("ZAPI_INSTANCE_ID");
+      const token = Deno.env.get("ZAPI_TOKEN");
+      if (!instanceId || !token) return jr({ error: "Z-API não configurado" }, 500);
+    }
 
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE, {
       auth: { persistSession: false, autoRefreshToken: false },
