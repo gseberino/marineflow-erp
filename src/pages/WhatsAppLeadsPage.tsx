@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/select';
 import {
   MessageCircle, UserPlus, Link2, Trash2, Phone, Send, Ban, Search, ArrowLeft,
-  Plus, Zap, ShieldOff,
+  Plus, Zap, ShieldOff, ArrowDown,
 } from 'lucide-react';
 import {
   useWhatsAppLeads, useWhatsAppLeadMessages,
@@ -51,6 +51,21 @@ function InboxView() {
   const { data: messages } = useWhatsAppLeadMessages(activePhone || undefined);
   const { data: quickReplies } = useQuickReplies();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [showScrollDown, setShowScrollDown] = useState(false);
+
+  const scrollToBottom = (behavior: ScrollBehavior = 'auto') => {
+    requestAnimationFrame(() => {
+      const el = scrollRef.current;
+      if (el) el.scrollTo({ top: el.scrollHeight, behavior });
+    });
+  };
+
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setShowScrollDown(distanceFromBottom > 200);
+  };
 
   const filtered = useMemo(() => {
     const list = conversations || [];
@@ -72,9 +87,12 @@ function InboxView() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePhone]);
 
+  // Salta para a mensagem mais recente ao abrir a conversa ou quando chegam novas.
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [messages]);
+    scrollToBottom('auto');
+    setShowScrollDown(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, activePhone]);
 
   const send = async () => {
     if (!activePhone || !draft.trim()) return;
@@ -149,7 +167,7 @@ function InboxView() {
       </div>
 
       {/* Painel de conversa */}
-      <div className={`rounded-xl border bg-card flex flex-col ${!activePhone ? 'hidden md:flex' : 'flex'}`}>
+      <div className={`relative rounded-xl border bg-card flex flex-col ${!activePhone ? 'hidden md:flex' : 'flex'}`}>
         {!active ? (
           <div className="flex-1 flex items-center justify-center text-muted-foreground">
             <div className="text-center">
@@ -174,7 +192,7 @@ function InboxView() {
               </Button>
             </div>
 
-            <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-2 bg-muted/30">
+            <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto p-3 space-y-2 bg-muted/30">
               {(messages || []).length === 0 && (
                 <p className="text-sm text-muted-foreground text-center py-8">Sem mensagens.</p>
               )}
@@ -196,6 +214,18 @@ function InboxView() {
                 </div>
               ))}
             </div>
+
+            {/* Botão flutuante: ir para a mensagem mais recente */}
+            {showScrollDown && (
+              <button
+                type="button"
+                onClick={() => scrollToBottom('smooth')}
+                aria-label="Ir para a mensagem mais recente"
+                className="absolute right-5 bottom-28 z-10 h-10 w-10 rounded-full bg-primary text-primary-foreground shadow-lg flex items-center justify-center hover:opacity-90 transition-opacity"
+              >
+                <ArrowDown className="h-5 w-5" />
+              </button>
+            )}
 
             {/* Quick replies */}
             {(quickReplies || []).length > 0 && (
@@ -258,6 +288,16 @@ function LeadsView() {
   const addBlocked = useAddBlockedNumber();
   const { formatDate } = useI18n();
   const { data: messages } = useWhatsAppLeadMessages(selected?.phone_normalized);
+  const dialogScrollRef = useRef<HTMLDivElement>(null);
+
+  // Ao abrir o histórico de um lead, rola para a mensagem mais recente.
+  useEffect(() => {
+    if (!selected || !messages) return;
+    requestAnimationFrame(() => {
+      const el = dialogScrollRef.current;
+      if (el) el.scrollTo({ top: el.scrollHeight });
+    });
+  }, [messages, selected]);
 
   const filteredLeads = useMemo(() => {
     const list = leads || [];
@@ -359,7 +399,7 @@ function LeadsView() {
           <DialogHeader>
             <DialogTitle>{selected?.name || 'Contato'} — {formatPhone(selected?.phone_normalized || '')}</DialogTitle>
           </DialogHeader>
-          <div className="max-h-[60vh] overflow-y-auto space-y-2 p-1">
+          <div ref={dialogScrollRef} className="max-h-[60vh] overflow-y-auto space-y-2 p-1">
             {messages?.length === 0 && <p className="text-sm text-muted-foreground text-center py-8">Sem mensagens.</p>}
             {messages?.map((m: any) => (
               <div key={m.id} className={`p-2 rounded-lg text-sm ${m.direction === 'inbound' ? 'bg-muted mr-12' : 'bg-primary/10 ml-12 text-right'}`}>
