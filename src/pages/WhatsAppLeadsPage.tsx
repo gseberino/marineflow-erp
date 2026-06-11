@@ -12,11 +12,8 @@ import {
 } from '@/components/ui/select';
 import {
   MessageCircle, UserPlus, Link2, Trash2, Phone, Send, Ban, Search, ArrowLeft,
-  Plus, Zap, ShieldOff, ArrowDown, Check, CheckCheck, Mic, FileText,
-  Settings, Wifi, WifiOff, Activity, Copy, RefreshCw, AlertCircle,
+  Plus, Zap, ShieldOff, ArrowDown, Check, CheckCheck, Mic, FileText, Settings,
 } from 'lucide-react';
-import { Switch } from '@/components/ui/switch';
-import { Label } from '@/components/ui/label';
 import {
   useWhatsAppLeads, useWhatsAppLeadMessages,
   useConvertLeadToClient, useLinkLeadToClient, useDiscardLead,
@@ -29,8 +26,11 @@ import {
 } from '@/hooks/use-whatsapp-inbox';
 import { useClients } from '@/hooks/use-clients';
 import { useI18n } from '@/i18n';
-import { useAppSettings, useUpdateAppSettings } from '@/hooks/use-app-settings';
-import { supabase } from '@/integrations/supabase/client';
+import { WhatsAppWebhookValidator } from '@/components/WhatsAppWebhookValidator';
+import { WhatsAppZApiSettings } from '@/components/WhatsAppZApiSettings';
+import { WhatsAppReminderSettings } from '@/components/WhatsAppReminderSettings';
+import { WhatsAppQueuePanel } from '@/components/WhatsAppQueuePanel';
+import { WhatsAppTemplatesManager } from '@/components/WhatsAppTemplatesManager';
 
 function formatPhone(p: string) {
   if (!p) return '';
@@ -693,220 +693,13 @@ function QuickRepliesView() {
 
 // =============== SETTINGS ===============
 function SettingsView() {
-  const { data: settings, isLoading: settingsLoading, refetch: refetchSettings } = useAppSettings();
-  const updateSettings = useUpdateAppSettings();
-
-  // Local draft state — only persisted when "Salvar" is clicked
-  const [draft, setDraft] = useState<Record<string, string>>({});
-  const [health, setHealth] = useState<any>(null);
-  const [healthLoading, setHealthLoading] = useState(false);
-
-  // Sync draft from remote when data arrives
-  useEffect(() => {
-    if (!settings) return;
-    setDraft({
-      whatsapp_reminder_enabled: settings.whatsapp_reminder_enabled || 'false',
-      whatsapp_reminder_minutes: settings.whatsapp_reminder_minutes || '60',
-      whatsapp_reminder_cooldown_minutes: settings.whatsapp_reminder_cooldown_minutes || '1440',
-      whatsapp_reminder_recipients: settings.whatsapp_reminder_recipients || '',
-      whatsapp_queue_enabled: settings.whatsapp_queue_enabled || 'false',
-      whatsapp_queue_max_per_run: settings.whatsapp_queue_max_per_run || '10',
-      whatsapp_queue_delay_ms: settings.whatsapp_queue_delay_ms || '3000',
-      whatsapp_queue_max_per_hour: settings.whatsapp_queue_max_per_hour || '60',
-      zapi_test_mode: settings.zapi_test_mode || 'false',
-      zapi_test_number: settings.zapi_test_number || '',
-    });
-  }, [settings]);
-
-  const get = (key: string) => draft[key] ?? '';
-  const set = (key: string, value: string) => setDraft((d) => ({ ...d, [key]: value }));
-  const toggle = (key: string) => set(key, get(key) === 'true' ? 'false' : 'true');
-
-  const fetchHealth = async () => {
-    setHealthLoading(true);
-    try {
-      const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/whatsapp-webhook?healthcheck=1`;
-      const token = (await supabase.auth.getSession()).data.session?.access_token;
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const json = await res.json();
-      setHealth(json);
-    } catch (e: any) {
-      setHealth({ error: e?.message || 'Erro desconhecido' });
-    } finally {
-      setHealthLoading(false);
-    }
-  };
-
-  const save = () => updateSettings.mutate(draft);
-
-  const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/whatsapp-webhook`;
-  const copyWebhook = () => { navigator.clipboard.writeText(webhookUrl); };
-
-  const healthColor = health?.health_status === 'ok' ? 'text-emerald-600' : health?.health_status === 'stale' ? 'text-amber-500' : 'text-destructive';
-
-  if (settingsLoading) return <div className="p-8 text-center"><RefreshCw className="h-6 w-6 animate-spin mx-auto text-muted-foreground" /></div>;
-
   return (
-    <div className="space-y-6 max-w-2xl">
-
-      {/* ── Conexão ──────────────────────────────────────────────── */}
-      <div className="rounded-xl border bg-card p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Activity className="h-4 w-4 text-primary" />
-            <h3 className="font-semibold">Status da Conexão</h3>
-          </div>
-          <Button size="sm" variant="outline" onClick={fetchHealth} disabled={healthLoading}>
-            <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${healthLoading ? 'animate-spin' : ''}`} />
-            Verificar
-          </Button>
-        </div>
-
-        {health ? (
-          health.error ? (
-            <div className="flex items-center gap-2 text-sm text-destructive">
-              <AlertCircle className="h-4 w-4 shrink-0" />
-              {health.error}
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div className="rounded-lg bg-muted p-3">
-                <p className="text-xs text-muted-foreground mb-1">Status</p>
-                <div className={`flex items-center gap-1.5 font-semibold ${healthColor}`}>
-                  {health.health_status === 'ok' ? <Wifi className="h-4 w-4" /> : <WifiOff className="h-4 w-4" />}
-                  {health.health_status === 'ok' ? 'Online' : health.health_status === 'stale' ? 'Sem mensagens recentes' : 'Nunca conectado'}
-                </div>
-              </div>
-              <div className="rounded-lg bg-muted p-3">
-                <p className="text-xs text-muted-foreground mb-1">Mensagens (24h)</p>
-                <p className="font-semibold">{health.last_24h ?? '—'}</p>
-              </div>
-              <div className="rounded-lg bg-muted p-3">
-                <p className="text-xs text-muted-foreground mb-1">Total recebidas</p>
-                <p className="font-semibold">{health.total_inbound ?? '—'}</p>
-              </div>
-              <div className="rounded-lg bg-muted p-3">
-                <p className="text-xs text-muted-foreground mb-1">Última mensagem</p>
-                <p className="font-semibold text-xs">
-                  {health.last_message_at ? relativeTime(health.last_message_at) : '—'}
-                </p>
-              </div>
-              {health.last_message_preview && (
-                <div className="col-span-2 rounded-lg bg-muted p-3">
-                  <p className="text-xs text-muted-foreground mb-1">Última mensagem recebida</p>
-                  <p className="text-sm font-medium">{health.last_message_preview.phone}</p>
-                  <p className="text-xs text-muted-foreground truncate">{health.last_message_preview.body}</p>
-                </div>
-              )}
-            </div>
-          )
-        ) : (
-          <p className="text-sm text-muted-foreground">Clique em "Verificar" para checar o status da integração WhatsApp.</p>
-        )}
-      </div>
-
-      {/* ── URL do Webhook ───────────────────────────────────────── */}
-      <div className="rounded-xl border bg-card p-5 space-y-3">
-        <div className="flex items-center gap-2">
-          <Link2 className="h-4 w-4 text-primary" />
-          <h3 className="font-semibold">URL do Webhook</h3>
-        </div>
-        <p className="text-xs text-muted-foreground">Configure esta URL no painel da Evolution API ou Z-API como destino das notificações.</p>
-        <div className="flex gap-2">
-          <Input readOnly value={webhookUrl} className="font-mono text-xs" />
-          <Button size="sm" variant="outline" onClick={copyWebhook}>
-            <Copy className="h-4 w-4 mr-1" />Copiar
-          </Button>
-        </div>
-      </div>
-
-      {/* ── Lembrete de novo lead ────────────────────────────────── */}
-      <div className="rounded-xl border bg-card p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Settings className="h-4 w-4 text-primary" />
-            <h3 className="font-semibold">Lembrete de Novo Lead</h3>
-          </div>
-          <Switch
-            checked={get('whatsapp_reminder_enabled') === 'true'}
-            onCheckedChange={() => toggle('whatsapp_reminder_enabled')}
-          />
-        </div>
-        <p className="text-xs text-muted-foreground -mt-2">Envia aviso no WhatsApp quando chega um novo lead (apenas Z-API).</p>
-        <div className={`grid md:grid-cols-3 gap-3 ${get('whatsapp_reminder_enabled') !== 'true' ? 'opacity-50 pointer-events-none' : ''}`}>
-          <div className="space-y-1">
-            <Label className="text-xs">Intervalo mínimo (min)</Label>
-            <Input type="number" min={1} value={get('whatsapp_reminder_minutes')} onChange={(e) => set('whatsapp_reminder_minutes', e.target.value)} />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Cooldown por lead (min)</Label>
-            <Input type="number" min={1} value={get('whatsapp_reminder_cooldown_minutes')} onChange={(e) => set('whatsapp_reminder_cooldown_minutes', e.target.value)} />
-          </div>
-          <div className="space-y-1 md:col-span-3">
-            <Label className="text-xs">Destinatários (separados por vírgula)</Label>
-            <Input placeholder="5521999998888, 5511988887777" value={get('whatsapp_reminder_recipients')} onChange={(e) => set('whatsapp_reminder_recipients', e.target.value)} />
-          </div>
-        </div>
-      </div>
-
-      {/* ── Fila de envio ────────────────────────────────────────── */}
-      <div className="rounded-xl border bg-card p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Zap className="h-4 w-4 text-primary" />
-            <h3 className="font-semibold">Fila de Envio</h3>
-          </div>
-          <Switch
-            checked={get('whatsapp_queue_enabled') === 'true'}
-            onCheckedChange={() => toggle('whatsapp_queue_enabled')}
-          />
-        </div>
-        <p className="text-xs text-muted-foreground -mt-2">Controla o worker que processa mensagens agendadas na fila.</p>
-        <div className={`grid md:grid-cols-3 gap-3 ${get('whatsapp_queue_enabled') !== 'true' ? 'opacity-50 pointer-events-none' : ''}`}>
-          <div className="space-y-1">
-            <Label className="text-xs">Max por execução</Label>
-            <Input type="number" min={1} max={100} value={get('whatsapp_queue_max_per_run')} onChange={(e) => set('whatsapp_queue_max_per_run', e.target.value)} />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Delay entre envios (ms)</Label>
-            <Input type="number" min={500} step={500} value={get('whatsapp_queue_delay_ms')} onChange={(e) => set('whatsapp_queue_delay_ms', e.target.value)} />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Max por hora</Label>
-            <Input type="number" min={1} max={1000} value={get('whatsapp_queue_max_per_hour')} onChange={(e) => set('whatsapp_queue_max_per_hour', e.target.value)} />
-          </div>
-        </div>
-      </div>
-
-      {/* ── Modo Teste ───────────────────────────────────────────── */}
-      <div className="rounded-xl border bg-card p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Phone className="h-4 w-4 text-primary" />
-            <h3 className="font-semibold">Modo Teste</h3>
-          </div>
-          <Switch
-            checked={get('zapi_test_mode') === 'true'}
-            onCheckedChange={() => toggle('zapi_test_mode')}
-          />
-        </div>
-        <p className="text-xs text-muted-foreground -mt-2">Redireciona todos os envios para o número de teste abaixo (não afeta mensagens recebidas).</p>
-        <div className={`${get('zapi_test_mode') !== 'true' ? 'opacity-50 pointer-events-none' : ''}`}>
-          <div className="space-y-1">
-            <Label className="text-xs">Número de teste (somente dígitos, com DDI)</Label>
-            <Input placeholder="5521999998888" value={get('zapi_test_number')} onChange={(e) => set('zapi_test_number', e.target.value.replace(/\D/g, ''))} />
-          </div>
-        </div>
-      </div>
-
-      {/* ── Salvar ───────────────────────────────────────────────── */}
-      <div className="flex justify-end">
-        <Button onClick={save} disabled={updateSettings.isPending} className="min-w-[120px]">
-          {updateSettings.isPending ? <RefreshCw className="h-4 w-4 animate-spin" /> : 'Salvar configurações'}
-        </Button>
-      </div>
+    <div className="space-y-6">
+      <WhatsAppWebhookValidator />
+      <WhatsAppZApiSettings />
+      <WhatsAppReminderSettings />
+      <WhatsAppQueuePanel />
+      <WhatsAppTemplatesManager />
     </div>
   );
 }

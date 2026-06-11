@@ -6,13 +6,8 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { MapPin, DollarSign, Users, Globe, Banknote, CreditCard, FileText, Tag, Receipt, Package, Mail, MessageCircle, Pencil } from 'lucide-react';
-import { WhatsAppTemplatesManager } from '@/components/WhatsAppTemplatesManager';
+import { MapPin, DollarSign, Users, Globe, Banknote, CreditCard, FileText, Tag, Receipt, Package, Mail, Pencil } from 'lucide-react';
 import { LogoCropDialog } from '@/components/LogoCropDialog';
-import { WhatsAppReminderSettings } from '@/components/WhatsAppReminderSettings';
-import { WhatsAppQueuePanel } from '@/components/WhatsAppQueuePanel';
-import { WhatsAppWebhookValidator } from '@/components/WhatsAppWebhookValidator';
-import { WhatsAppZApiSettings } from '@/components/WhatsAppZApiSettings';
 import { AppUserEditDialog } from '@/components/AppUserEditDialog';
 import { MasterDataPanel } from '@/components/MasterDataManagement';
 import { useAuth } from '@/hooks/use-auth';
@@ -253,10 +248,6 @@ export default function SettingsPage() {
             <Package className="h-3.5 w-3.5 mr-1" />
             Categorias de Produto
           </TabsTrigger>
-          <TabsTrigger value="whatsapp">
-            <MessageCircle className="h-3.5 w-3.5 mr-1" />
-            WhatsApp
-          </TabsTrigger>
           <TabsTrigger value="system">Sistema</TabsTrigger>
         </TabsList>
 
@@ -287,14 +278,6 @@ export default function SettingsPage() {
 
         <TabsContent value="categories" className="mt-4 space-y-4">
           <ProductCategoriesTab />
-        </TabsContent>
-
-        <TabsContent value="whatsapp" className="mt-4 space-y-6">
-          <WhatsAppZApiSettings />
-          <WhatsAppTemplatesManager />
-          <WhatsAppWebhookValidator />
-          <WhatsAppQueuePanel />
-          <WhatsAppReminderSettings />
         </TabsContent>
 
         <TabsContent value="system" className="mt-4 space-y-4">
