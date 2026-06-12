@@ -95,7 +95,7 @@ export function useDashboardData() {
       // Low stock (separate query since we need JS filter for column comparison)
       const lowStockRes = await supabase
         .from('products')
-        .select('id, name, stock_quantity, minimum_stock, category')
+        .select('id, name, stock_quantity, minimum_stock, product_categories(name)')
         .eq('active', true)
         .gt('minimum_stock', 0)
         .order('name')

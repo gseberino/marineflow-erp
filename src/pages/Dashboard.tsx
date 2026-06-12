@@ -334,7 +334,7 @@ export default function Dashboard() {
                   <div key={p.id} className="flex items-center justify-between rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2">
                     <div>
                       <p className="text-xs font-medium">{p.name}</p>
-                      <p className="text-xs text-muted-foreground">{p.category || 'Sem categoria'}</p>
+                      <p className="text-xs text-muted-foreground">{(p as any).product_categories?.name || 'Sem categoria'}</p>
                     </div>
                     <div className="text-right">
                       <p className="text-xs font-medium text-destructive">{p.stock_quantity ?? 0} / {p.minimum_stock}</p>

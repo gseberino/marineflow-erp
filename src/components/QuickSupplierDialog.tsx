@@ -35,9 +35,9 @@ export function QuickSupplierDialog({ open, onOpenChange, initialName = '', onCr
     }
     try {
       const created = await create.mutateAsync({
-        supplier_name: name.trim(),
-        contact_phone: phone.trim() || null,
-        contact_email: email.trim() || null,
+        name: name.trim(),
+        phone: phone.trim() || null,
+        email: email.trim() || null,
         active: true,
       });
       toast.success('Fornecedor cadastrado. Complete o cadastro em Fornecedores.');

@@ -18,6 +18,7 @@ const SO_DETAIL_SELECT = `
   vessels(name, manufacturer, model, current_dock_position),
   marinas(name, latitude, longitude),
   service_order_parts(*, products(*)),
+  service_order_services(*, services(name)),
   service_order_technicians(*, app_users(*)),
   time_entries(*, app_users(*)),
   payment_condition_presets(*)

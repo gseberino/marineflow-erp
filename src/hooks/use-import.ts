@@ -158,7 +158,7 @@ export function useImportRows() {
         const validProductRows = newRows.filter(r => r.name);
         for (const chunk of chunks(validProductRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            product_name: r.name as string,
+            name: r.name as string,
             sku: (r.sku || null) as string | null,
             sale_price: (r.sale_price || 0) as number,
             cost_price: (r.cost_price || 0) as number,
@@ -211,7 +211,7 @@ export function useImportRows() {
         const validServiceRows = newRows.filter(r => r.name);
         for (const chunk of chunks(validServiceRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            service_name: r.name as string,
+            name: r.name as string,
             default_price: (r.default_price || 0) as number,
             billing_unit: 'visit' as string,
             currency: 'BRL' as string,
@@ -232,7 +232,7 @@ export function useImportRows() {
         const validClientRows = newRows.filter(r => r.name);
         for (const chunk of chunks(validClientRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            full_name_or_company_name: r.name,
+            name: r.name,
             type: r._type || 'company',
             cpf_cnpj: r.cnpj_cpf || null,
             email: r.email || null,
@@ -255,11 +255,11 @@ export function useImportRows() {
         const validSupplierRows = newRows.filter(r => r.name);
         for (const chunk of chunks(validSupplierRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            supplier_name: r.name,
+            name: r.name,
             trade_name: r.trade_name || null,
             cnpj_cpf: r.cnpj_cpf || null,
-            contact_email: r.email || null,
-            contact_phone: r.phone || null,
+            email: r.email || null,
+            phone: r.phone || null,
             address_line_1: r.address_line_1 || null,
             postal_code: r.postal_code || null,
             city: r.city || null,
@@ -283,7 +283,7 @@ export function useImportRows() {
 
         for (const chunk of chunks(clientRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            full_name_or_company_name: r.name,
+            name: r.name,
             type: r._type || 'company',
             cpf_cnpj: r.cnpj_cpf || null,
             email: r.email || null,
@@ -302,11 +302,11 @@ export function useImportRows() {
 
         for (const chunk of chunks(supplierRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            supplier_name: r.name,
+            name: r.name,
             trade_name: r.trade_name || null,
             cnpj_cpf: r.cnpj_cpf || null,
-            contact_email: r.email || null,
-            contact_phone: r.phone || null,
+            email: r.email || null,
+            phone: r.phone || null,
             address_line_1: r.address_line_1 || null,
             postal_code: r.postal_code || null,
             city: r.city || null,

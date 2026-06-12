@@ -54,10 +54,12 @@ export default function ProductList() {
   const filtered = useMemo(() => {
     const { search, active, category } = filters as { search: string; active: string[]; category: string[] };
     const list = (products ?? []).filter(p => {
+      const pName = (p as any).name || '';
+      const pCategory = (p as any).product_categories?.name || '';
       if (search && !(
-        p.name.toLowerCase().includes(search.toLowerCase()) ||
+        pName.toLowerCase().includes(search.toLowerCase()) ||
         (p.sku ?? '').toLowerCase().includes(search.toLowerCase()) ||
-        (p.category ?? '').toLowerCase().includes(search.toLowerCase())
+        pCategory.toLowerCase().includes(search.toLowerCase())
       )) return false;
       if (active.length) {
         const isActive = (p as any).active;

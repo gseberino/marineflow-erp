@@ -30,7 +30,7 @@ interface Props {
 
 const empty: TablesInsert<'vessels'> = {
   client_id: '',
-  boat_name: '',
+  name: '',
   manufacturer: '',
   model: '',
   year: undefined,
@@ -67,7 +67,7 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
     if (vessel) {
       setForm({
         client_id: vessel.client_id,
-        boat_name: (vessel as any).boat_name ?? (vessel as any).name ?? '',
+        name: vessel.name ?? '',
         manufacturer: vessel.manufacturer ?? '',
         model: vessel.model ?? '',
         year: vessel.year ?? undefined,
@@ -112,7 +112,7 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
         const result = await create.mutateAsync(payload);
         toast.success(t.vessels.createSuccess);
         if (onCreated && result) {
-          onCreated({ id: result.id, name: (result as any).boat_name ?? (result as any).name ?? '', marina_id: result.marina_id });
+          onCreated({ id: result.id, name: result.name, marina_id: result.marina_id });
         }
       }
       onOpenChange(false);
@@ -156,7 +156,7 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
             </div>
             <div className="col-span-2 sm:col-span-1">
               <Label>Nome / Placa / ID *</Label>
-              <Input required value={form.boat_name ?? ''} onChange={e => set('boat_name', e.target.value)} />
+              <Input required value={form.name ?? ''} onChange={e => set('name', e.target.value)} />
             </div>
             <div className="col-span-2">
               <Label>{t.vessels.selectClient} *</Label>

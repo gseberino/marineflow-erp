@@ -160,9 +160,14 @@ export function useWhatsAppConversations() {
       if (phones.length === 0) return [];
 
       // Enriquecer com clients e leads
+      // whatsapp_leads has a "name" column (renamed from display_name).
+      // linked_client_id references clients.id for manually confirmed links.
       const [{ data: clients }, { data: leads }] = await Promise.all([
         supabase.from('clients').select('id, name, phone, whatsapp').eq('active', true),
-        supabase.from('whatsapp_leads').select('phone_normalized, display_name, status, unread_count, assigned_to').in('phone_normalized', phones),
+        supabase
+          .from('whatsapp_leads')
+          .select('phone_normalized, name, status, unread_count, assigned_to, linked_client_id')
+          .in('phone_normalized', phones),
       ]);
 
       const norm = (s: string | null | undefined) => (s || '').replace(/\D/g, '');
@@ -175,19 +180,36 @@ export function useWhatsAppConversations() {
       }
       const leadByPhone = new Map<string, any>();
       for (const l of leads || []) leadByPhone.set(l.phone_normalized, l);
+      const clientById = new Map<string, any>();
+      for (const c of clients || []) clientById.set(c.id, c);
 
-      return Array.from(map.values()).map((conv) => {
-        const client = clientByPhone.get(conv.phone);
-        const lead = leadByPhone.get(conv.phone);
-        return {
-          ...conv,
-          client_name: client?.name || null,
-          client_id: client?.id || conv.client_id,
-          lead_status: lead?.status || null,
-          unread_count: lead?.unread_count || 0,
-          name: client?.name || lead?.display_name || null,
-        };
-      });
+      return Array.from(map.values())
+        .map((conv) => {
+          const lead = leadByPhone.get(conv.phone);
+
+          // Confirmed client: from message FK (set by webhook) or from lead's confirmed link
+          const clientFromMsg = conv.client_id ? clientById.get(conv.client_id) : null;
+          const clientFromLead = lead?.linked_client_id ? clientById.get(lead.linked_client_id) : null;
+          const effectiveClient = clientFromMsg || clientFromLead;
+
+          // Suggested client: phone matches a client but no confirmed FK link yet
+          const clientFromPhone = clientByPhone.get(conv.phone);
+          const suggestedClient =
+            !clientFromMsg && !clientFromLead && clientFromPhone
+              ? { id: clientFromPhone.id, name: clientFromPhone.name }
+              : null;
+
+          return {
+            ...conv,
+            client_name: effectiveClient?.name || null,
+            client_id: conv.client_id || clientFromMsg?.id || null,
+            lead_status: lead?.status || null,
+            unread_count: lead?.unread_count || 0,
+            name: effectiveClient?.name || lead?.name || null,
+            suggested_client: suggestedClient,
+          };
+        })
+        .sort((a, b) => new Date(b.last_at).getTime() - new Date(a.last_at).getTime());
     },
     refetchInterval: 30000, // Fallback — Realtime (useWhatsAppInboxRealtime) cuida das atualizações frequentes
   });
@@ -243,5 +265,71 @@ export function useMarkConversationRead() {
         .eq('phone_normalized', cleaned);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['wa-conversations'] }),
+  });
+}
+
+// ---------- Criar lead manualmente a partir do Inbox ----------
+export function useCreateWhatsAppLead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ phone, displayName }: { phone: string; displayName?: string | null }) => {
+      const { error } = await supabase
+        .from('whatsapp_leads')
+        .insert({
+          phone_normalized: phone,
+          name: displayName || null,
+          status: 'pending',
+        });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success('Lead criado. Acesse a aba Leads para gerenciar.');
+      qc.invalidateQueries({ queryKey: ['wa-conversations'] });
+      qc.invalidateQueries({ queryKey: ['whatsapp-leads'] });
+    },
+    onError: (e: any) => toast.error(e?.message || 'Falha ao criar lead.'),
+  });
+}
+
+// ---------- Vincular conversa a cliente existente (sem lead prévio) ----------
+export function useLinkConversationToClient() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      phone,
+      clientId,
+      clientName,
+    }: {
+      phone: string;
+      clientId: string;
+      clientName?: string | null;
+    }) => {
+      // Create or update lead record with confirmed link
+      const { error: upsertErr } = await supabase
+        .from('whatsapp_leads')
+        .upsert(
+          {
+            phone_normalized: phone,
+            name: clientName || null,
+            status: 'linked',
+            linked_client_id: clientId,
+          },
+          { onConflict: 'phone_normalized' },
+        );
+      if (upsertErr) throw upsertErr;
+
+      // Backfill client_id on all previous messages for this phone
+      await supabase
+        .from('whatsapp_messages')
+        .update({ client_id: clientId })
+        .eq('phone_normalized', phone)
+        .is('client_id', null);
+    },
+    onSuccess: () => {
+      toast.success('Conversa vinculada ao cliente.');
+      qc.invalidateQueries({ queryKey: ['wa-conversations'] });
+      qc.invalidateQueries({ queryKey: ['whatsapp-leads'] });
+    },
+    onError: (e: any) => toast.error(e?.message || 'Falha ao vincular conversa.'),
   });
 }
