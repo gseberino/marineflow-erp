@@ -71,6 +71,8 @@ export function usePDFData(serviceOrderId: string | undefined) {
           ferry_cost: (so as any).ferry_cost || 0,
           travel_type: (so as any).travel_type || 'comercial',
           discount_amount: so.discount_amount || 0,
+          discount_services_pct: (so as any).discount_services_pct ?? 0,
+          discount_parts_pct: (so as any).discount_parts_pct ?? 0,
           tax_amount: so.tax_amount || 0,
           operational_cost_total: so.operational_cost_total || 0,
           extra_notes: so.extra_notes ?? undefined,

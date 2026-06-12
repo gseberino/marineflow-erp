@@ -70,6 +70,8 @@ export type PDFData = {
     ferry_cost?: number;
     travel_type?: string;
     discount_amount: number;
+    discount_services_pct?: number;
+    discount_parts_pct?: number;
     tax_amount: number;
     operational_cost_total?: number;
     extra_notes?: string;
@@ -473,7 +475,7 @@ function buildPaymentSection(so: PDFData['serviceOrder']): string {
     const discountRatio = subtotal > 0 ? grandTotal / subtotal : 1;
 
     const computedAmounts: number[] = installments.map((inst: any) => {
-      if (typeof inst.amount === 'number' && !isNaN(inst.amount)) return inst.amount;
+      if (typeof inst.amount === 'number' && !isNaN(inst.amount)) return Math.round(inst.amount * discountRatio * 100) / 100;
       if (typeof inst.percent === 'number' && !isNaN(inst.percent)) {
         return Math.round(grandTotal * (inst.percent / 100) * 100) / 100;
       }
@@ -645,7 +647,22 @@ function buildOrderHTML(data: PDFData, options: PDFOptions): string {
     data.parts.length > 0 ? `<tr><td>Subtotal Peças</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.parts_cost_total)}</td></tr>` : '',
     options.showTravelCost && data.serviceOrder.travel_cost_total > 0 ? `<tr><td>Deslocamento / Logística</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.travel_cost_total)}</td></tr>` : '',
     (data.serviceOrder.operational_cost_total ?? 0) > 0 ? `<tr><td>Outras Despesas</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.operational_cost_total!)}</td></tr>` : '',
-    options.showDiscount && data.serviceOrder.discount_amount > 0 ? `<tr><td style="color:#dc2626;">Desconto Especial</td><td style="text-align:right;color:#dc2626;">− ${fmtCurrency(data.serviceOrder.discount_amount)}</td></tr>` : '',
+    (() => {
+      if (!options.showDiscount || data.serviceOrder.discount_amount <= 0) return '';
+      const sPct = data.serviceOrder.discount_services_pct ?? 0;
+      const pPct = data.serviceOrder.discount_parts_pct ?? 0;
+      const hasBreakdown = (sPct > 0 || pPct > 0) && (sPct + pPct > 0);
+      if (hasBreakdown) {
+        const dSvc = Math.round(data.serviceOrder.labor_cost_total * sPct / 100 * 100) / 100;
+        const dPts = Math.round(data.serviceOrder.parts_cost_total * pPct / 100 * 100) / 100;
+        return [
+          dSvc > 0 ? `<tr><td style="color:#dc2626;padding-left:16px;">↳ Desc. Serviços (${sPct}%)</td><td style="text-align:right;color:#dc2626;">− ${fmtCurrency(dSvc)}</td></tr>` : '',
+          dPts > 0 ? `<tr><td style="color:#dc2626;padding-left:16px;">↳ Desc. Peças (${pPct}%)</td><td style="text-align:right;color:#dc2626;">− ${fmtCurrency(dPts)}</td></tr>` : '',
+          `<tr><td style="color:#dc2626;font-weight:600;">Total Desconto</td><td style="text-align:right;color:#dc2626;font-weight:600;">− ${fmtCurrency(data.serviceOrder.discount_amount)}</td></tr>`,
+        ].filter(Boolean).join('');
+      }
+      return `<tr><td style="color:#dc2626;">Desconto Especial</td><td style="text-align:right;color:#dc2626;">− ${fmtCurrency(data.serviceOrder.discount_amount)}</td></tr>`;
+    })(),
   ].filter(Boolean).join('');
 
   const body = `
@@ -821,7 +838,22 @@ function buildInvoiceHTML(data: PDFData, options: PDFOptions): string {
     data.services.length > 0 ? `<tr><td>Serviços Executados</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.labor_cost_total)}</td></tr>` : '',
     data.parts.length > 0 ? `<tr><td>Materiais e Peças</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.parts_cost_total)}</td></tr>` : '',
     options.showTravelCost && data.serviceOrder.travel_cost_total > 0 ? `<tr><td>Custos de Deslocamento</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.travel_cost_total)}</td></tr>` : '',
-    options.showDiscount && data.serviceOrder.discount_amount > 0 ? `<tr><td style="color:#dc2626;">Desconto Especial</td><td style="text-align:right;color:#dc2626;">− ${fmtCurrency(data.serviceOrder.discount_amount)}</td></tr>` : '',
+    (() => {
+      if (!options.showDiscount || data.serviceOrder.discount_amount <= 0) return '';
+      const sPct = data.serviceOrder.discount_services_pct ?? 0;
+      const pPct = data.serviceOrder.discount_parts_pct ?? 0;
+      const hasBreakdown = sPct > 0 || pPct > 0;
+      if (hasBreakdown) {
+        const dSvc = Math.round(data.serviceOrder.labor_cost_total * sPct / 100 * 100) / 100;
+        const dPts = Math.round(data.serviceOrder.parts_cost_total * pPct / 100 * 100) / 100;
+        return [
+          dSvc > 0 ? `<tr><td style="color:#dc2626;padding-left:16px;">↳ Desc. Serviços (${sPct}%)</td><td style="text-align:right;color:#dc2626;">− ${fmtCurrency(dSvc)}</td></tr>` : '',
+          dPts > 0 ? `<tr><td style="color:#dc2626;padding-left:16px;">↳ Desc. Peças (${pPct}%)</td><td style="text-align:right;color:#dc2626;">− ${fmtCurrency(dPts)}</td></tr>` : '',
+          `<tr><td style="color:#dc2626;font-weight:600;">Total Desconto</td><td style="text-align:right;color:#dc2626;font-weight:600;">− ${fmtCurrency(data.serviceOrder.discount_amount)}</td></tr>`,
+        ].filter(Boolean).join('');
+      }
+      return `<tr><td style="color:#dc2626;">Desconto Especial</td><td style="text-align:right;color:#dc2626;">− ${fmtCurrency(data.serviceOrder.discount_amount)}</td></tr>`;
+    })(),
   ].filter(Boolean).join('');
 
   const bank = data.bank || {};

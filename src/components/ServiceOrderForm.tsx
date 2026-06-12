@@ -696,8 +696,6 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     extra_notes: '',
     internal_notes: '',
     customer_visible_report: '',
-    hourly_rate: 150,
-    estimated_hours: 0,
     travel_distance_km: 0,
     travel_cost_per_km: 3.5,
     technician_count_for_travel: 1,
@@ -720,6 +718,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [manualTravel, setManualTravel] = useState(false);
   const [selectedTechnicians, setSelectedTechnicians] = useState<string[]>([]);
   const [extraFieldsOpen, setExtraFieldsOpen] = useState(false);
+  const [discountServicesPct, setDiscountServicesPct] = useState(0);
+  const [discountPartsPct, setDiscountPartsPct] = useState(0);
   const { data: vesselContacts } = useVesselContacts(form.vessel_id || undefined);
 
   // Part inline-card state (matches the services pattern)
@@ -931,8 +931,6 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         extra_notes: d.extra_notes || '',
         internal_notes: d.internal_notes || '',
         customer_visible_report: d.customer_visible_report || '',
-        hourly_rate: d.hourly_rate || 150,
-        estimated_hours: d.estimated_hours || 0,
         travel_distance_km: d.travel_distance_km || 0,
         travel_cost_per_km: d.travel_cost_per_km || 3.5,
         technician_count_for_travel: d.technician_count_for_travel || 1,
@@ -954,6 +952,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       if (d.service_order_technicians) {
         setSelectedTechnicians(d.service_order_technicians.map((t: any) => t.user_id));
       }
+      setDiscountServicesPct(Number(d.discount_services_pct) || 0);
+      setDiscountPartsPct(Number(d.discount_parts_pct) || 0);
       // Open extra fields if any has content
       if (d.initial_findings || d.diagnosis || d.solution_applied || d.internal_notes || d.customer_visible_report || d.extra_notes) {
         setExtraFieldsOpen(true);
@@ -1055,6 +1055,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         // Always persist the computed grand_total so the PDF and receivables
         // always reflect the current discount/tax/travel values.
         grand_total: Math.round(grandTotal * 100) / 100,
+        discount_services_pct: discountServicesPct,
+        discount_parts_pct: discountPartsPct,
       };
 
       if (isNew) {
@@ -3216,10 +3218,60 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               <MoneyInput className="w-28 h-7 text-right text-sm" value={form.subcontract_cost_total}
                 onValueChange={(v) => set('subcontract_cost_total', v)} />
             </div>
-            <div className="flex justify-between text-sm items-center">
-              <span className="text-muted-foreground">{t.serviceOrders.discount}</span>
-              <MoneyInput className="w-28 h-7 text-right text-sm" value={form.discount_amount}
-                onValueChange={(v) => set('discount_amount', v)} disabled={isLocked} />
+            {/* Per-category discount breakdown */}
+            <div className="space-y-1 rounded-md border border-dashed p-2 bg-muted/20">
+              <p className="text-xs font-medium text-muted-foreground mb-1">{t.serviceOrders.discount}</p>
+              <div className="flex justify-between text-xs items-center">
+                <span className="text-muted-foreground">↳ Serviços (%)</span>
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    type="number" min="0" max="100" step="0.5"
+                    className="w-16 h-6 text-right text-xs px-1"
+                    value={discountServicesPct || ''}
+                    placeholder="0"
+                    disabled={isLocked}
+                    onChange={(e) => {
+                      const pct = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
+                      setDiscountServicesPct(pct);
+                      const total = Math.round((laborCost * pct / 100 + partsCost * discountPartsPct / 100) * 100) / 100;
+                      set('discount_amount', total);
+                    }}
+                  />
+                  <span className="text-xs text-muted-foreground w-20 text-right">
+                    = {formatCurrency(laborCost * discountServicesPct / 100)}
+                  </span>
+                </div>
+              </div>
+              <div className="flex justify-between text-xs items-center">
+                <span className="text-muted-foreground">↳ Peças (%)</span>
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    type="number" min="0" max="100" step="0.5"
+                    className="w-16 h-6 text-right text-xs px-1"
+                    value={discountPartsPct || ''}
+                    placeholder="0"
+                    disabled={isLocked}
+                    onChange={(e) => {
+                      const pct = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
+                      setDiscountPartsPct(pct);
+                      const total = Math.round((laborCost * discountServicesPct / 100 + partsCost * pct / 100) * 100) / 100;
+                      set('discount_amount', total);
+                    }}
+                  />
+                  <span className="text-xs text-muted-foreground w-20 text-right">
+                    = {formatCurrency(partsCost * discountPartsPct / 100)}
+                  </span>
+                </div>
+              </div>
+              <div className="flex justify-between text-sm items-center pt-0.5 border-t border-dashed mt-1">
+                <span className="text-muted-foreground text-xs font-medium">Total desconto</span>
+                <MoneyInput className="w-28 h-7 text-right text-sm" value={form.discount_amount}
+                  onValueChange={(v) => {
+                    set('discount_amount', v);
+                    if (!v) { setDiscountServicesPct(0); setDiscountPartsPct(0); }
+                  }}
+                  disabled={isLocked} />
+              </div>
             </div>
             <div className="flex justify-between text-sm items-center">
               <span className="text-muted-foreground">{t.serviceOrders.tax}</span>

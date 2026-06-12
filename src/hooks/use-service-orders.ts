@@ -58,18 +58,18 @@ export function useServiceOrder(id: string | undefined) {
 }
 
 async function generateSONumber(): Promise<string> {
-  const year = new Date().getFullYear();
   const { data } = await supabase
     .from('service_orders')
-    .select('service_order_number')
-    .order('created_at', { ascending: false })
-    .limit(1);
-  let seq = 1;
-  if (data?.[0]?.service_order_number) {
-    const match = data[0].service_order_number.match(/(\d+)$/);
-    if (match) seq = parseInt(match[1], 10) + 1;
+    .select('service_order_number');
+  let maxSeq = 0;
+  for (const row of data || []) {
+    const match = row.service_order_number?.match(/(\d+)$/);
+    if (match) {
+      const n = parseInt(match[1], 10);
+      if (n > maxSeq) maxSeq = n;
+    }
   }
-  return `SO-${year}-${String(seq).padStart(5, '0')}`;
+  return `OS-${String(maxSeq + 1).padStart(5, '0')}`;
 }
 
 export function useCreateServiceOrder() {

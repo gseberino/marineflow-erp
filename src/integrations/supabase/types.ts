@@ -1,4 +1,4 @@
-﻿export type Json =
+export type Json =
   | string
   | number
   | boolean
@@ -4010,6 +4010,8 @@ export type Database = {
           customer_visible_report: string | null
           diagnosis: string | null
           discount_amount: number | null
+          discount_parts_pct: number
+          discount_services_pct: number
           estimated_hours: number | null
           extra_notes: string | null
           ferry_cost: number | null
@@ -4080,6 +4082,8 @@ export type Database = {
           customer_visible_report?: string | null
           diagnosis?: string | null
           discount_amount?: number | null
+          discount_parts_pct?: number
+          discount_services_pct?: number
           estimated_hours?: number | null
           extra_notes?: string | null
           ferry_cost?: number | null
@@ -4150,6 +4154,8 @@ export type Database = {
           customer_visible_report?: string | null
           diagnosis?: string | null
           discount_amount?: number | null
+          discount_parts_pct?: number
+          discount_services_pct?: number
           estimated_hours?: number | null
           extra_notes?: string | null
           ferry_cost?: number | null
@@ -5359,4 +5365,3 @@ export const Constants = {
     Enums: {},
   },
 } as const
-
