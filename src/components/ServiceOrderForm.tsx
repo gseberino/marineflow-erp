@@ -1037,6 +1037,17 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const cardFeeAmount = cardGross - grandTotal;
   const installmentValue = selectedInstallments > 0 ? cardGross / selectedInstallments : cardGross;
 
+  // Parts profit (edit-mode only, never in PDF)
+  const partsRevenue = (parts || []).reduce((sum: number, p: any) => sum + (p.line_total_sale || 0), 0);
+  const partsCostItems = (parts || []).reduce((sum: number, p: any) => sum + (p.line_total_cost || 0), 0);
+  const partsProfit = partsRevenue - partsCostItems;
+  const partsMarginPct = partsRevenue > 0 ? (partsProfit / partsRevenue) * 100 : 0;
+
+  // Section subtotals
+  const servicesItemCount = (soServices || []).length;
+  const billableHours = orderData?.labor_hours_total || 0;
+  const partsItemCount = (parts || []).length;
+
   const handleSave = async () => {
     if (!form.client_id || !form.vessel_id || !form.problem_description) {
       toast.error('Preencha cliente, embarcação e descrição do problema');
@@ -1832,18 +1843,6 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 <Copy className="h-4 w-4" />
                 Duplicar
               </Button>
-              {/* Popup section buttons */}
-              <div className="flex gap-1.5 border-l pl-2 ml-1">
-                <Button variant="outline" size="sm" className="gap-1 text-xs" onClick={() => setShowTravelDialog(true)}>
-                  <MapPin className="h-3.5 w-3.5" /> Deslocamento
-                </Button>
-                <Button variant="outline" size="sm" className="gap-1 text-xs" onClick={() => setShowExpensesDialog(true)}>
-                  <Receipt className="h-3.5 w-3.5" /> Despesas
-                </Button>
-                <Button variant="outline" size="sm" className="gap-1 text-xs" onClick={() => setShowTimeDialog(true)}>
-                  <Clock className="h-3.5 w-3.5" /> Horas
-                </Button>
-              </div>
             </>
           )}
           {!isNew && !isLocked && currentStatus !== 'cancelled' && (
@@ -2136,31 +2135,38 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           </div>
           <Textarea value={form.problem_description} onChange={(e) => set('problem_description', e.target.value)} rows={3} disabled={isLocked} />
         </div>
-        <div className="space-y-2">
-          <Label className="flex items-center gap-2 text-sm font-medium">
-            Observações Adicionais para Impressão
-            <span className="text-xs text-muted-foreground font-normal">
-              (aparece no PDF deste documento)
-            </span>
-          </Label>
-          <Textarea
-            value={form.extra_notes || ''}
-            onChange={e => set('extra_notes', e.target.value)}
-            placeholder="Informações específicas para este cliente, condições especiais, garantias, prazos..."
-            rows={2}
-            disabled={isLocked}
-          />
-        </div>
+        <Collapsible>
+          <CollapsibleTrigger asChild>
+            <button type="button" className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors w-full text-left">
+              <ChevronDown className="h-3.5 w-3.5 transition-transform [[data-state=open]>&]:rotate-180" />
+              Observações para impressão (PDF)
+            </button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="pt-2">
+            <Textarea
+              value={form.extra_notes || ''}
+              onChange={e => set('extra_notes', e.target.value)}
+              placeholder="Informações específicas para este cliente, condições especiais, garantias, prazos..."
+              rows={2}
+              disabled={isLocked}
+            />
+          </CollapsibleContent>
+        </Collapsible>
 
         {/* Photos (Only if editing existing OS) */}
         {orderData?.id && (
-          <div className="pt-4 border-t mt-4">
-            <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
-              <Camera className="h-4 w-4" />
-              Fotos da OS
-            </h2>
-            <ServiceOrderPhotos serviceOrderId={orderData.id} />
-          </div>
+          <Collapsible>
+            <CollapsibleTrigger asChild>
+              <button type="button" className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors w-full text-left">
+                <ChevronDown className="h-3.5 w-3.5 transition-transform [[data-state=open]>&]:rotate-180" />
+                <Camera className="h-3.5 w-3.5" />
+                Fotos da OS
+              </button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="pt-3">
+              <ServiceOrderPhotos serviceOrderId={orderData.id} />
+            </CollapsibleContent>
+          </Collapsible>
         )}
       </section>
 
@@ -2397,6 +2403,14 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             </div>
           );
         })()}
+
+        {/* Services subtotal bar */}
+        {servicesItemCount > 0 && !isNew && (
+          <div className="px-5 py-3 border-t bg-muted/30 flex items-center justify-between text-sm flex-wrap gap-2">
+            <span className="text-muted-foreground">{servicesItemCount} {servicesItemCount === 1 ? 'serviço' : 'serviços'}{billableHours > 0 ? ` · ${billableHours.toFixed(1)}h faturáveis` : ''}</span>
+            <span className="font-semibold">{formatCurrency(laborCost)}</span>
+          </div>
+        )}
       </section>
 
       {/* New Service Dialog */}
@@ -2812,6 +2826,22 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             </div>
           );
         })()}
+
+        {/* Parts subtotal + profit bar (edit-mode only) */}
+        {partsItemCount > 0 && !isNew && (
+          <div className="px-5 py-3 border-t bg-muted/30 flex items-center justify-between text-sm flex-wrap gap-2">
+            <div className="flex items-center gap-4 flex-wrap">
+              <span className="text-muted-foreground">{partsItemCount} {partsItemCount === 1 ? 'peça' : 'peças'}</span>
+              {partsProfit !== 0 && (
+                <span className={partsProfit >= 0 ? 'text-emerald-600 text-xs' : 'text-red-600 text-xs'}>
+                  Lucro peças: {partsProfit >= 0 ? '+' : ''}{formatCurrency(partsProfit)}
+                  {partsRevenue > 0 && ` (${partsMarginPct.toFixed(1)}%)`}
+                </span>
+              )}
+            </div>
+            <span className="font-semibold">{formatCurrency(partsRevenue)}</span>
+          </div>
+        )}
       </section>
 
       {!isNew && (
@@ -3160,9 +3190,10 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       )}
 
       {/* H - Financial Mini-Summary */}
-      <div className="rounded-xl border bg-card p-4 shadow-sm">
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-6 text-sm flex-wrap">
+      <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
+        {/* Row 1: line items */}
+        <div className="px-4 pt-4 pb-2 flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-5 text-sm flex-wrap">
             {laborCost > 0 && (
               <span className="text-muted-foreground">
                 Serviços: <span className="font-semibold text-foreground">{formatCurrency(laborCost)}</span>
@@ -3173,22 +3204,61 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 Peças: <span className="font-semibold text-foreground">{formatCurrency(partsCost)}</span>
               </span>
             )}
+            {(form.travel_cost_total || 0) > 0 && (
+              <span className="text-muted-foreground">
+                Desl.: <span className="font-semibold text-foreground">{formatCurrency(form.travel_cost_total)}</span>
+              </span>
+            )}
             {(form.discount_amount || 0) > 0 && (
               <span className="text-red-600 text-xs">
                 Desconto: −{formatCurrency(form.discount_amount || 0)}
               </span>
             )}
-            <span className="font-bold text-base text-accent">
-              Total: {formatCurrency(grandTotal)}
-            </span>
           </div>
+          <span className="font-bold text-lg text-accent">
+            {formatCurrency(grandTotal)}
+          </span>
+        </div>
+
+        {/* Row 2: composition % + parts profit (edit-mode only) */}
+        {!isNew && (subtotal > 0 || partsRevenue > 0) && (
+          <div className="px-4 py-1.5 border-t bg-muted/20 flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
+            {laborCost > 0 && subtotal > 0 && (
+              <span>Serviços: {((laborCost / subtotal) * 100).toFixed(0)}%</span>
+            )}
+            {partsCost > 0 && subtotal > 0 && (
+              <span>Peças: {((partsCost / subtotal) * 100).toFixed(0)}%</span>
+            )}
+            {partsRevenue > 0 && (
+              <span className={`ml-auto font-medium ${partsProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                Lucro peças: {partsProfit >= 0 ? '+' : ''}{formatCurrency(partsProfit)} ({partsMarginPct.toFixed(1)}%)
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Row 3: action buttons */}
+        <div className="px-4 py-2 border-t flex items-center gap-2 flex-wrap">
+          {!isNew && (
+            <>
+              <Button variant="ghost" size="sm" className="gap-1 text-xs h-7" onClick={() => setShowTravelDialog(true)}>
+                <MapPin className="h-3 w-3" /> Deslocamento
+              </Button>
+              <Button variant="ghost" size="sm" className="gap-1 text-xs h-7" onClick={() => setShowExpensesDialog(true)}>
+                <Receipt className="h-3 w-3" /> Despesas
+              </Button>
+              <Button variant="ghost" size="sm" className="gap-1 text-xs h-7" onClick={() => setShowTimeDialog(true)}>
+                <Clock className="h-3 w-3" /> Horas
+              </Button>
+            </>
+          )}
           <Button
             variant="outline"
             size="sm"
-            className="gap-2 shrink-0"
+            className="gap-1.5 text-xs h-7 ml-auto"
             onClick={() => setShowFinancialDialog(true)}
           >
-            <Calculator className="h-4 w-4" />
+            <Calculator className="h-3.5 w-3.5" />
             Composição Financeira
           </Button>
         </div>
