@@ -69,7 +69,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle, Pencil, Paperclip, X, FileImage, ExternalLink, Package, Copy, Camera } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle, Pencil, Paperclip, X, FileImage, ExternalLink, Package, Copy, Camera, MapPin, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { MoneyInput } from '@/components/MoneyInput';
@@ -720,6 +720,10 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [extraFieldsOpen, setExtraFieldsOpen] = useState(false);
   const [discountServicesPct, setDiscountServicesPct] = useState(0);
   const [discountPartsPct, setDiscountPartsPct] = useState(0);
+  const [showTravelDialog, setShowTravelDialog] = useState(false);
+  const [showExpensesDialog, setShowExpensesDialog] = useState(false);
+  const [showTimeDialog, setShowTimeDialog] = useState(false);
+  const [showFinancialDialog, setShowFinancialDialog] = useState(false);
   const { data: vesselContacts } = useVesselContacts(form.vessel_id || undefined);
 
   // Part inline-card state (matches the services pattern)
@@ -1828,6 +1832,18 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 <Copy className="h-4 w-4" />
                 Duplicar
               </Button>
+              {/* Popup section buttons */}
+              <div className="flex gap-1.5 border-l pl-2 ml-1">
+                <Button variant="outline" size="sm" className="gap-1 text-xs" onClick={() => setShowTravelDialog(true)}>
+                  <MapPin className="h-3.5 w-3.5" /> Deslocamento
+                </Button>
+                <Button variant="outline" size="sm" className="gap-1 text-xs" onClick={() => setShowExpensesDialog(true)}>
+                  <Receipt className="h-3.5 w-3.5" /> Despesas
+                </Button>
+                <Button variant="outline" size="sm" className="gap-1 text-xs" onClick={() => setShowTimeDialog(true)}>
+                  <Clock className="h-3.5 w-3.5" /> Horas
+                </Button>
+              </div>
             </>
           )}
           {!isNew && !isLocked && currentStatus !== 'cancelled' && (
@@ -2136,79 +2152,6 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           />
         </div>
 
-        <Collapsible open={extraFieldsOpen} onOpenChange={setExtraFieldsOpen}>
-          <CollapsibleTrigger asChild>
-            <Button variant="ghost" size="sm" className="gap-2 text-muted-foreground hover:text-foreground">
-              <ChevronDown className={`h-4 w-4 transition-transform ${extraFieldsOpen ? 'rotate-180' : ''}`} />
-              Campos adicionais (diagnóstico, laudo...)
-            </Button>
-          </CollapsibleTrigger>
-          <CollapsibleContent className="space-y-4 pt-3">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <Label>{t.serviceOrders.technicianNotes}</Label>
-                  <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs text-primary hover:text-primary hover:bg-primary/10"
-                    onClick={async () => set('technician_notes', await optimizeText(form.technician_notes))} disabled={isOptimizing || !form.technician_notes || isLocked}>
-                    <Sparkles className="h-3 w-3 mr-1" /> IA
-                  </Button>
-                </div>
-                <Textarea value={form.technician_notes} onChange={(e) => set('technician_notes', e.target.value)} rows={2} disabled={isLocked} />
-              </div>
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <Label>{t.serviceOrders.initialFindings}</Label>
-                  <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs text-primary hover:text-primary hover:bg-primary/10"
-                    onClick={async () => set('initial_findings', await optimizeText(form.initial_findings))} disabled={isOptimizing || !form.initial_findings || isLocked}>
-                    <Sparkles className="h-3 w-3 mr-1" /> IA
-                  </Button>
-                </div>
-                <Textarea value={form.initial_findings} onChange={(e) => set('initial_findings', e.target.value)} rows={2} disabled={isLocked} />
-              </div>
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <Label>{t.serviceOrders.diagnosis}</Label>
-                  <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs text-primary hover:text-primary hover:bg-primary/10"
-                    onClick={async () => set('diagnosis', await optimizeText(form.diagnosis))} disabled={isOptimizing || !form.diagnosis || isLocked}>
-                    <Sparkles className="h-3 w-3 mr-1" /> IA
-                  </Button>
-                </div>
-                <Textarea value={form.diagnosis} onChange={(e) => set('diagnosis', e.target.value)} rows={2} disabled={isLocked} />
-              </div>
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <Label>{t.serviceOrders.solutionApplied}</Label>
-                  <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs text-primary hover:text-primary hover:bg-primary/10"
-                    onClick={async () => set('solution_applied', await optimizeText(form.solution_applied))} disabled={isOptimizing || !form.solution_applied || isLocked}>
-                    <Sparkles className="h-3 w-3 mr-1" /> IA
-                  </Button>
-                </div>
-                <Textarea value={form.solution_applied} onChange={(e) => set('solution_applied', e.target.value)} rows={2} disabled={isLocked} />
-              </div>
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <Label>{t.serviceOrders.internalNotes}</Label>
-                  <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs text-primary hover:text-primary hover:bg-primary/10"
-                    onClick={async () => set('internal_notes', await optimizeText(form.internal_notes))} disabled={isOptimizing || !form.internal_notes || isLocked}>
-                    <Sparkles className="h-3 w-3 mr-1" /> IA
-                  </Button>
-                </div>
-                <Textarea value={form.internal_notes} onChange={(e) => set('internal_notes', e.target.value)} rows={2} disabled={isLocked} />
-              </div>
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <Label>{t.serviceOrders.customerReport}</Label>
-                  <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs text-primary hover:text-primary hover:bg-primary/10"
-                    onClick={async () => set('customer_visible_report', await optimizeText(form.customer_visible_report))} disabled={isOptimizing || !form.customer_visible_report || isLocked}>
-                    <Sparkles className="h-3 w-3 mr-1" /> IA
-                  </Button>
-                </div>
-                <Textarea value={form.customer_visible_report} onChange={(e) => set('customer_visible_report', e.target.value)} rows={2} disabled={isLocked} />
-              </div>
-            </div>
-          </CollapsibleContent>
-        </Collapsible>
-
         {/* Photos (Only if editing existing OS) */}
         {orderData?.id && (
           <div className="pt-4 border-t mt-4">
@@ -2459,174 +2402,182 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       {/* New Service Dialog */}
       <ServiceFormDialog open={showNewServiceDialog} onOpenChange={setShowNewServiceDialog} />
 
-      {/* Travel Section */}
       {!isNew && (
-        <section className="rounded-xl border bg-card p-5 shadow-sm space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="font-semibold text-sm">{t.serviceOrders.travel}</h2>
-            {marina?.latitude && (
-              <Button variant="outline" size="sm" onClick={runDisplacement} className="gap-1">
-                <RefreshCw className="h-3 w-3" />
-                {t.serviceOrders.recalculate}
-              </Button>
-            )}
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
-            <div>
-              <Label>Distância total (km ida+volta)</Label>
-              <Input type="number" min={0} step="0.1"
-                value={form.travel_distance_km}
-                onChange={(e) => {
-                  const km = parseFloat(e.target.value) || 0;
-                  set('travel_distance_km', km);
-                  if (!manualTravel) {
-                    set('travel_cost_total', calculateTravelCost({
-                      distance_km: km,
-                      travel_hours: form.travel_hours,
-                      technician_count: form.technician_count_for_travel,
-                      ferry_cost: form.ferry_cost,
-                      travel_type: form.travel_type,
-                    }));
-                  }
-                }}
-              />
-            </div>
-            <div>
-              <Label>Tempo de deslocamento (horas)</Label>
-              <Input type="number" min={0} step="0.5"
-                value={form.travel_hours}
-                onChange={(e) => {
-                  const hours = parseFloat(e.target.value) || 0;
-                  set('travel_hours', hours);
-                  if (!manualTravel) {
-                    set('travel_cost_total', calculateTravelCost({
-                      distance_km: form.travel_distance_km,
-                      travel_hours: hours,
-                      technician_count: form.technician_count_for_travel,
-                      ferry_cost: form.ferry_cost,
-                      travel_type: form.travel_type,
-                    }));
-                  }
-                }}
-              />
-            </div>
-            <div>
-              <Label>Técnicos no deslocamento</Label>
-              <Select
-                value={String(form.technician_count_for_travel)}
-                onValueChange={(v) => {
-                  const count = parseInt(v) || 1;
-                  set('technician_count_for_travel', count);
-                  if (!manualTravel) {
-                    set('travel_cost_total', calculateTravelCost({
-                      distance_km: form.travel_distance_km,
-                      travel_hours: form.travel_hours,
-                      technician_count: count,
-                      ferry_cost: form.ferry_cost,
-                      travel_type: form.travel_type,
-                    }));
-                  }
-                }}
-              >
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="1">1 técnico — R$ 90,00/h</SelectItem>
-                  <SelectItem value="2">2 técnicos — R$ 170,00/h</SelectItem>
-                  <SelectItem value="3">3 técnicos — R$ 250,00/h</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Tipo de atendimento</Label>
-              <Select
-                value={form.travel_type}
-                onValueChange={(v: any) => {
-                  set('travel_type', v);
-                  if (!manualTravel) {
-                    set('travel_cost_total', calculateTravelCost({
-                      distance_km: form.travel_distance_km,
-                      travel_hours: form.travel_hours,
-                      technician_count: form.technician_count_for_travel,
-                      ferry_cost: form.ferry_cost,
-                      travel_type: v,
-                    }));
-                  }
-                }}
-              >
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="comercial">Comercial (sem acréscimo)</SelectItem>
-                  <SelectItem value="urgencia">Urgência fora do horário (+50%)</SelectItem>
-                  <SelectItem value="fds_feriado">Final de semana / Feriado (+30%)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+        <Dialog open={showTravelDialog} onOpenChange={setShowTravelDialog}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <MapPin className="h-4 w-4" /> Deslocamento
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="font-semibold text-sm">{t.serviceOrders.travel}</h2>
+                {marina?.latitude && (
+                  <Button variant="outline" size="sm" onClick={runDisplacement} className="gap-1">
+                    <RefreshCw className="h-3 w-3" />
+                    {t.serviceOrders.recalculate}
+                  </Button>
+                )}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                <div>
+                  <Label>Distância total (km ida+volta)</Label>
+                  <Input type="number" min={0} step="0.1"
+                    value={form.travel_distance_km}
+                    onChange={(e) => {
+                      const km = parseFloat(e.target.value) || 0;
+                      set('travel_distance_km', km);
+                      if (!manualTravel) {
+                        set('travel_cost_total', calculateTravelCost({
+                          distance_km: km,
+                          travel_hours: form.travel_hours,
+                          technician_count: form.technician_count_for_travel,
+                          ferry_cost: form.ferry_cost,
+                          travel_type: form.travel_type,
+                        }));
+                      }
+                    }}
+                  />
+                </div>
+                <div>
+                  <Label>Tempo de deslocamento (horas)</Label>
+                  <Input type="number" min={0} step="0.5"
+                    value={form.travel_hours}
+                    onChange={(e) => {
+                      const hours = parseFloat(e.target.value) || 0;
+                      set('travel_hours', hours);
+                      if (!manualTravel) {
+                        set('travel_cost_total', calculateTravelCost({
+                          distance_km: form.travel_distance_km,
+                          travel_hours: hours,
+                          technician_count: form.technician_count_for_travel,
+                          ferry_cost: form.ferry_cost,
+                          travel_type: form.travel_type,
+                        }));
+                      }
+                    }}
+                  />
+                </div>
+                <div>
+                  <Label>Técnicos no deslocamento</Label>
+                  <Select
+                    value={String(form.technician_count_for_travel)}
+                    onValueChange={(v) => {
+                      const count = parseInt(v) || 1;
+                      set('technician_count_for_travel', count);
+                      if (!manualTravel) {
+                        set('travel_cost_total', calculateTravelCost({
+                          distance_km: form.travel_distance_km,
+                          travel_hours: form.travel_hours,
+                          technician_count: count,
+                          ferry_cost: form.ferry_cost,
+                          travel_type: form.travel_type,
+                        }));
+                      }
+                    }}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="1">1 técnico — R$ 90,00/h</SelectItem>
+                      <SelectItem value="2">2 técnicos — R$ 170,00/h</SelectItem>
+                      <SelectItem value="3">3 técnicos — R$ 250,00/h</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Tipo de atendimento</Label>
+                  <Select
+                    value={form.travel_type}
+                    onValueChange={(v: any) => {
+                      set('travel_type', v);
+                      if (!manualTravel) {
+                        set('travel_cost_total', calculateTravelCost({
+                          distance_km: form.travel_distance_km,
+                          travel_hours: form.travel_hours,
+                          technician_count: form.technician_count_for_travel,
+                          ferry_cost: form.ferry_cost,
+                          travel_type: v,
+                        }));
+                      }
+                    }}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="comercial">Comercial (sem acréscimo)</SelectItem>
+                      <SelectItem value="urgencia">Urgência fora do horário (+50%)</SelectItem>
+                      <SelectItem value="fds_feriado">Final de semana / Feriado (+30%)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
 
-          {/* Travessia de balsa */}
-          <div className="mt-3 space-y-2">
-            <div>
-              <Label>Valor da travessia de balsa / ferry (R$)</Label>
-              <MoneyInput
-                value={form.ferry_cost}
-                onValueChange={(v) => {
-                  set('ferry_cost', v);
-                  if (!manualTravel) {
-                    set('travel_cost_total', calculateTravelCost({
-                      distance_km: form.travel_distance_km,
-                      travel_hours: form.travel_hours,
-                      technician_count: form.technician_count_for_travel,
-                      ferry_cost: v,
-                      travel_type: form.travel_type,
-                    }));
-                  }
-                }}
-              />
-            </div>
-          </div>
+              {/* Travessia de balsa */}
+              <div className="mt-3 space-y-2">
+                <div>
+                  <Label>Valor da travessia de balsa / ferry (R$)</Label>
+                  <MoneyInput
+                    value={form.ferry_cost}
+                    onValueChange={(v) => {
+                      set('ferry_cost', v);
+                      if (!manualTravel) {
+                        set('travel_cost_total', calculateTravelCost({
+                          distance_km: form.travel_distance_km,
+                          travel_hours: form.travel_hours,
+                          technician_count: form.technician_count_for_travel,
+                          ferry_cost: v,
+                          travel_type: form.travel_type,
+                        }));
+                      }
+                    }}
+                  />
+                </div>
+              </div>
 
-          {/* Total calculado */}
-          <div className="mt-4 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Label>Total deslocamento</Label>
-              <label className="flex items-center gap-1 text-xs text-muted-foreground">
-                <input type="checkbox" checked={manualTravel}
-                  onChange={(e) => setManualTravel(e.target.checked)} />
-                Ajuste manual
-              </label>
-            </div>
-            {manualTravel ? (
-              <MoneyInput
-                value={form.travel_cost_total}
-                onValueChange={(v) => set('travel_cost_total', v)}
-              />
-            ) : (
-              <span className="text-lg font-semibold">
-                {formatCurrency(form.travel_cost_total)}
-              </span>
-            )}
-          </div>
+              {/* Total calculado */}
+              <div className="mt-4 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Label>Total deslocamento</Label>
+                  <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <input type="checkbox" checked={manualTravel}
+                      onChange={(e) => setManualTravel(e.target.checked)} />
+                    Ajuste manual
+                  </label>
+                </div>
+                {manualTravel ? (
+                  <MoneyInput
+                    value={form.travel_cost_total}
+                    onValueChange={(v) => set('travel_cost_total', v)}
+                  />
+                ) : (
+                  <span className="text-lg font-semibold">
+                    {formatCurrency(form.travel_cost_total)}
+                  </span>
+                )}
+              </div>
 
-          {/* Breakdown do cálculo */}
-          {!manualTravel && form.travel_cost_total > 0 && (
-            <div className="mt-2 text-xs text-muted-foreground space-y-0.5">
-              <div>• Km: {form.travel_distance_km} km × R$ 1,10 = {formatCurrency(form.travel_distance_km * 1.10)}</div>
-              {form.travel_hours > 0 && (
-                <div>• Horas: {form.travel_hours}h × {formatCurrency(
-                  form.technician_count_for_travel === 1 ? 90 :
-                  form.technician_count_for_travel === 2 ? 170 : 250
-                )}/h = {formatCurrency(form.travel_hours * (
-                  form.technician_count_for_travel === 1 ? 90 :
-                  form.technician_count_for_travel === 2 ? 170 : 250
-                ))}</div>
+              {/* Breakdown do cálculo */}
+              {!manualTravel && form.travel_cost_total > 0 && (
+                <div className="mt-2 text-xs text-muted-foreground space-y-0.5">
+                  <div>• Km: {form.travel_distance_km} km × R$ 1,10 = {formatCurrency(form.travel_distance_km * 1.10)}</div>
+                  {form.travel_hours > 0 && (
+                    <div>• Horas: {form.travel_hours}h × {formatCurrency(
+                      form.technician_count_for_travel === 1 ? 90 :
+                      form.technician_count_for_travel === 2 ? 170 : 250
+                    )}/h = {formatCurrency(form.travel_hours * (
+                      form.technician_count_for_travel === 1 ? 90 :
+                      form.technician_count_for_travel === 2 ? 170 : 250
+                    ))}</div>
+                  )}
+                  {form.ferry_cost > 0 && <div>• Balsa: {formatCurrency(form.ferry_cost)}</div>}
+                  {form.travel_type !== 'comercial' && (
+                    <div>• Acréscimo {form.travel_type === 'urgencia' ? '50% (urgência)' : '30% (FDS/feriado)'}</div>
+                  )}
+                </div>
               )}
-              {form.ferry_cost > 0 && <div>• Balsa: {formatCurrency(form.ferry_cost)}</div>}
-              {form.travel_type !== 'comercial' && (
-                <div>• Acréscimo {form.travel_type === 'urgencia' ? '50% (urgência)' : '30% (FDS/feriado)'}</div>
-              )}
             </div>
-          )}
-        </section>
+          </DialogContent>
+        </Dialog>
       )}
 
       {/* F - Parts — always visible (with always-on entry row) */}
@@ -2863,662 +2814,798 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         })()}
       </section>
 
-      {/* Expenses section (edit only) */}
       {!isNew && (
-        <section className="rounded-xl border bg-card shadow-sm overflow-hidden">
-          <div className="p-5 border-b flex items-center justify-between">
-            <h2 className="font-semibold text-sm">{t.serviceOrders.operationalExpenses}</h2>
-            <Button variant="outline" size="sm" className="gap-1" onClick={() => setShowExpForm(!showExpForm)}>
-              <Plus className="h-3 w-3" /> {t.serviceOrders.addExpense}
-            </Button>
-          </div>
-          {showExpForm && (
-            <div className="p-4 border-b bg-muted/30 space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <Label>{t.products.category}</Label>
-                  <Select value={expForm.category} onValueChange={(v) => setExpForm({ ...expForm, category: v })}>
-                    <SelectTrigger><SelectValue placeholder={t.products.category} /></SelectTrigger>
-                    <SelectContent>
-                      {OPERATIONAL_EXPENSE_CATEGORIES.map((c) => (
-                        <SelectItem key={c} value={c}>{c}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label>{t.serviceOrders.expenseDate}</Label>
-                  <Input type="date" value={expForm.expense_date} onChange={(e) => setExpForm({ ...expForm, expense_date: e.target.value })} />
-                </div>
-                <div>
-                  <Label>{t.common.amount}</Label>
-                  <MoneyInput value={expForm.amount}
-                    onValueChange={(v) => setExpForm({ ...expForm, amount: v })} />
-                </div>
+        <Dialog open={showExpensesDialog} onOpenChange={setShowExpensesDialog}>
+          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Receipt className="h-4 w-4" /> Despesas Operacionais
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-0">
+              <div className="flex items-center justify-between pb-3">
+                <h2 className="font-semibold text-sm">{t.serviceOrders.operationalExpenses}</h2>
+                <Button variant="outline" size="sm" className="gap-1" onClick={() => setShowExpForm(!showExpForm)}>
+                  <Plus className="h-3 w-3" /> {t.serviceOrders.addExpense}
+                </Button>
               </div>
-              <div>
-                <Label>{t.common.description}</Label>
-                <Input value={expForm.description} onChange={(e) => setExpForm({ ...expForm, description: e.target.value })} />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <Label>{t.serviceOrders.paidBy}</Label>
-                  <Select value={expForm.paid_by} onValueChange={(v: 'company' | 'technician') => setExpForm({ ...expForm, paid_by: v })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="company">{t.serviceOrders.paidByCompany}</SelectItem>
-                      <SelectItem value="technician">{t.serviceOrders.paidByTechnician}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                {expForm.paid_by === 'technician' && (
-                  <div>
-                    <Label>{t.serviceOrders.technicians}</Label>
-                    <Select value={expForm.technician_user_id} onValueChange={(v) => setExpForm({ ...expForm, technician_user_id: v })}>
-                      <SelectTrigger><SelectValue placeholder={t.serviceOrders.technicians} /></SelectTrigger>
-                      <SelectContent>
-                        {appUsers?.map((u) => (
-                          <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-warning mt-1">{t.serviceOrders.pendingReimbursement}</p>
-                  </div>
-                )}
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <Label>Comprovante</Label>
-                  <input
-                    ref={receiptInputRef}
-                    type="file"
-                    accept="image/*,application/pdf"
-                    capture="environment"
-                    className="hidden"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) handleUploadReceipt(f);
-                    }}
-                  />
-                  {expForm.receipt_url ? (
-                    <div className="flex items-center gap-2 mt-1 p-2 rounded-md border bg-background">
-                      {/\.(png|jpe?g|gif|webp|svg)$/i.test(expForm.receipt_url) ? (
-                        <img
-                          src={expForm.receipt_url}
-                          alt="Comprovante"
-                          className="h-[60px] w-[60px] object-cover rounded border"
-                        />
-                      ) : (
-                        <div className="h-[60px] w-[60px] flex items-center justify-center rounded border bg-muted">
-                          <FileText className="h-6 w-6 text-muted-foreground" />
-                        </div>
-                      )}
-                      <a
-                        href={expForm.receipt_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-primary hover:underline truncate flex-1"
-                      >
-                        Ver comprovante
-                      </a>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={handleRemoveReceipt}
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </Button>
+              {showExpForm && (
+                <div className="p-4 border rounded-lg bg-muted/30 space-y-3 mb-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <Label>{t.products.category}</Label>
+                      <Select value={expForm.category} onValueChange={(v) => setExpForm({ ...expForm, category: v })}>
+                        <SelectTrigger><SelectValue placeholder={t.products.category} /></SelectTrigger>
+                        <SelectContent>
+                          {OPERATIONAL_EXPENSE_CATEGORIES.map((c) => (
+                            <SelectItem key={c} value={c}>{c}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
-                  ) : (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="w-full gap-2 mt-1"
-                      onClick={() => receiptInputRef.current?.click()}
-                      disabled={uploadingReceipt}
-                    >
-                      <Paperclip className="h-3.5 w-3.5" />
-                      {uploadingReceipt ? 'Enviando...' : '📎 Anexar comprovante'}
-                    </Button>
-                  )}
-                </div>
-                <div>
-                  <Label>{t.common.notes}</Label>
-                  <Input value={expForm.notes} onChange={(e) => setExpForm({ ...expForm, notes: e.target.value })} />
-                </div>
-              </div>
-              <div>
-                <Label>Fornecedor</Label>
-                <EntityCombobox
-                  value={expForm.supplier_id}
-                  onChange={(v) => setExpForm({ ...expForm, supplier_id: v })}
-                  options={(suppliers || []).filter((s) => s.active).map((s) => ({
-                    value: s.id,
-                    label: s.name,
-                    description: s.cnpj_cpf || undefined,
-                  }))}
-                  placeholder="—"
-                  onCreate={(typed) => {
-                    setQuickSupplierName(typed);
-                    setQuickSupplierOpen(true);
-                  }}
-                  createLabel="+ Cadastrar novo fornecedor"
-                />
-              </div>
-              {!editingExpenseId && (
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="checkbox" checked={expForm.also_create_payable}
-                    onChange={(e) => setExpForm({ ...expForm, also_create_payable: e.target.checked })} />
-                  {t.serviceOrders.alsoCreatePayable}
-                </label>
-              )}
-              <div className="flex gap-2">
-                <Button size="sm" onClick={handleAddExpense} disabled={addExpense.isPending || updateExpense.isPending}>
-                  {editingExpenseId ? 'Atualizar' : t.common.save}
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => { resetExpForm(); setShowExpForm(false); }}>
-                  {t.common.cancel}
-                </Button>
-              </div>
-            </div>
-          )}
-          {(!soExpenses || soExpenses.length === 0) ? (
-            <p className="text-sm text-muted-foreground p-5">{t.serviceOrders.noExpensesYet}</p>
-          ) : (
-            <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/50">
-                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.common.date}</th>
-                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.products.category}</th>
-                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.common.description}</th>
-                  <th className="px-4 py-2 text-left font-medium text-muted-foreground hidden sm:table-cell">Fornecedor</th>
-                  <th className="px-4 py-2 text-left font-medium text-muted-foreground hidden sm:table-cell">{t.serviceOrders.paidBy}</th>
-                  <th className="px-4 py-2 text-center font-medium text-muted-foreground hidden md:table-cell">Comprovante</th>
-                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">{t.common.amount}</th>
-                  <th className="px-4 py-2 w-20"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {soExpenses.map((exp: any) => (
-                  <tr key={exp.id} className="border-b last:border-0">
-                    <td className="px-4 py-3 text-muted-foreground">{formatDate(exp.expense_date)}</td>
-                    <td className="px-4 py-3"><StatusBadge className="bg-secondary text-secondary-foreground">{exp.category}</StatusBadge></td>
-                    <td className="px-4 py-3 font-medium">{exp.description}</td>
-                     <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">
-                       {exp.suppliers?.name || '—'}
-                     </td>
-                     <td className="px-4 py-3 hidden sm:table-cell">
-                       {exp.paid_by === 'technician' ? (
-                         <span className="text-warning">{exp.app_users?.full_name || t.serviceOrders.paidByTechnician}
-                           {!exp.reimbursed && <StatusBadge className="bg-warning/15 text-warning ml-1">{t.serviceOrders.pendingReimbursement}</StatusBadge>}
-                           {exp.reimbursed && <StatusBadge className="bg-success/15 text-success ml-1">{t.serviceOrders.reimbursed}</StatusBadge>}
-                         </span>
-                       ) : t.serviceOrders.paidByCompany}
-                     </td>
-                     <td className="px-4 py-3 text-center hidden md:table-cell">
-                      {exp.receipt_url ? (
-                        /\.(png|jpe?g|gif|webp|svg)$/i.test(exp.receipt_url) ? (
-                          <a href={exp.receipt_url} target="_blank" rel="noopener noreferrer" className="inline-block">
-                            <img src={exp.receipt_url} alt="Comprovante" className="h-8 w-8 object-cover rounded border inline-block" />
+                    <div>
+                      <Label>{t.serviceOrders.expenseDate}</Label>
+                      <Input type="date" value={expForm.expense_date} onChange={(e) => setExpForm({ ...expForm, expense_date: e.target.value })} />
+                    </div>
+                    <div>
+                      <Label>{t.common.amount}</Label>
+                      <MoneyInput value={expForm.amount}
+                        onValueChange={(v) => setExpForm({ ...expForm, amount: v })} />
+                    </div>
+                  </div>
+                  <div>
+                    <Label>{t.common.description}</Label>
+                    <Input value={expForm.description} onChange={(e) => setExpForm({ ...expForm, description: e.target.value })} />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <Label>{t.serviceOrders.paidBy}</Label>
+                      <Select value={expForm.paid_by} onValueChange={(v: 'company' | 'technician') => setExpForm({ ...expForm, paid_by: v })}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="company">{t.serviceOrders.paidByCompany}</SelectItem>
+                          <SelectItem value="technician">{t.serviceOrders.paidByTechnician}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {expForm.paid_by === 'technician' && (
+                      <div>
+                        <Label>{t.serviceOrders.technicians}</Label>
+                        <Select value={expForm.technician_user_id} onValueChange={(v) => setExpForm({ ...expForm, technician_user_id: v })}>
+                          <SelectTrigger><SelectValue placeholder={t.serviceOrders.technicians} /></SelectTrigger>
+                          <SelectContent>
+                            {appUsers?.map((u) => (
+                              <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-warning mt-1">{t.serviceOrders.pendingReimbursement}</p>
+                      </div>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <Label>Comprovante</Label>
+                      <input
+                        ref={receiptInputRef}
+                        type="file"
+                        accept="image/*,application/pdf"
+                        capture="environment"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) handleUploadReceipt(f);
+                        }}
+                      />
+                      {expForm.receipt_url ? (
+                        <div className="flex items-center gap-2 mt-1 p-2 rounded-md border bg-background">
+                          {/\.(png|jpe?g|gif|webp|svg)$/i.test(expForm.receipt_url) ? (
+                            <img
+                              src={expForm.receipt_url}
+                              alt="Comprovante"
+                              className="h-[60px] w-[60px] object-cover rounded border"
+                            />
+                          ) : (
+                            <div className="h-[60px] w-[60px] flex items-center justify-center rounded border bg-muted">
+                              <FileText className="h-6 w-6 text-muted-foreground" />
+                            </div>
+                          )}
+                          <a
+                            href={expForm.receipt_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-primary hover:underline truncate flex-1"
+                          >
+                            Ver comprovante
                           </a>
-                        ) : (
-                          <a href={exp.receipt_url} target="_blank" rel="noopener noreferrer" className="text-primary inline-flex items-center gap-1 hover:underline">
-                            <FileImage className="h-4 w-4" />
-                            <ExternalLink className="h-3 w-3" />
-                          </a>
-                        )
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={handleRemoveReceipt}
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
                       ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right font-semibold">{formatCurrency(Number(exp.amount))}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-1">
-                        <Button variant="ghost" size="icon" className="h-7 w-7"
-                          onClick={() => handleEditExpense(exp)}>
-                          <Pencil className="h-3.5 w-3.5" />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="w-full gap-2 mt-1"
+                          onClick={() => receiptInputRef.current?.click()}
+                          disabled={uploadingReceipt}
+                        >
+                          <Paperclip className="h-3.5 w-3.5" />
+                          {uploadingReceipt ? 'Enviando...' : '📎 Anexar comprovante'}
                         </Button>
+                      )}
+                    </div>
+                    <div>
+                      <Label>{t.common.notes}</Label>
+                      <Input value={expForm.notes} onChange={(e) => setExpForm({ ...expForm, notes: e.target.value })} />
+                    </div>
+                  </div>
+                  <div>
+                    <Label>Fornecedor</Label>
+                    <EntityCombobox
+                      value={expForm.supplier_id}
+                      onChange={(v) => setExpForm({ ...expForm, supplier_id: v })}
+                      options={(suppliers || []).filter((s) => s.active).map((s) => ({
+                        value: s.id,
+                        label: s.name,
+                        description: s.cnpj_cpf || undefined,
+                      }))}
+                      placeholder="—"
+                      onCreate={(typed) => {
+                        setQuickSupplierName(typed);
+                        setQuickSupplierOpen(true);
+                      }}
+                      createLabel="+ Cadastrar novo fornecedor"
+                    />
+                  </div>
+                  {!editingExpenseId && (
+                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                      <input type="checkbox" checked={expForm.also_create_payable}
+                        onChange={(e) => setExpForm({ ...expForm, also_create_payable: e.target.checked })} />
+                      {t.serviceOrders.alsoCreatePayable}
+                    </label>
+                  )}
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={handleAddExpense} disabled={addExpense.isPending || updateExpense.isPending}>
+                      {editingExpenseId ? 'Atualizar' : t.common.save}
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => { resetExpForm(); setShowExpForm(false); }}>
+                      {t.common.cancel}
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {(!soExpenses || soExpenses.length === 0) ? (
+                <p className="text-sm text-muted-foreground p-5">{t.serviceOrders.noExpensesYet}</p>
+              ) : (
+                <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/50">
+                      <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.common.date}</th>
+                      <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.products.category}</th>
+                      <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.common.description}</th>
+                      <th className="px-4 py-2 text-left font-medium text-muted-foreground hidden sm:table-cell">Fornecedor</th>
+                      <th className="px-4 py-2 text-left font-medium text-muted-foreground hidden sm:table-cell">{t.serviceOrders.paidBy}</th>
+                      <th className="px-4 py-2 text-center font-medium text-muted-foreground hidden md:table-cell">Comprovante</th>
+                      <th className="px-4 py-2 text-right font-medium text-muted-foreground">{t.common.amount}</th>
+                      <th className="px-4 py-2 w-20"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {soExpenses.map((exp: any) => (
+                      <tr key={exp.id} className="border-b last:border-0">
+                        <td className="px-4 py-3 text-muted-foreground">{formatDate(exp.expense_date)}</td>
+                        <td className="px-4 py-3"><StatusBadge className="bg-secondary text-secondary-foreground">{exp.category}</StatusBadge></td>
+                        <td className="px-4 py-3 font-medium">{exp.description}</td>
+                        <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">
+                          {exp.suppliers?.name || '—'}
+                        </td>
+                        <td className="px-4 py-3 hidden sm:table-cell">
+                          {exp.paid_by === 'technician' ? (
+                            <span className="text-warning">{exp.app_users?.full_name || t.serviceOrders.paidByTechnician}
+                              {!exp.reimbursed && <StatusBadge className="bg-warning/15 text-warning ml-1">{t.serviceOrders.pendingReimbursement}</StatusBadge>}
+                              {exp.reimbursed && <StatusBadge className="bg-success/15 text-success ml-1">{t.serviceOrders.reimbursed}</StatusBadge>}
+                            </span>
+                          ) : t.serviceOrders.paidByCompany}
+                        </td>
+                        <td className="px-4 py-3 text-center hidden md:table-cell">
+                          {exp.receipt_url ? (
+                            /\.(png|jpe?g|gif|webp|svg)$/i.test(exp.receipt_url) ? (
+                              <a href={exp.receipt_url} target="_blank" rel="noopener noreferrer" className="inline-block">
+                                <img src={exp.receipt_url} alt="Comprovante" className="h-8 w-8 object-cover rounded border inline-block" />
+                              </a>
+                            ) : (
+                              <a href={exp.receipt_url} target="_blank" rel="noopener noreferrer" className="text-primary inline-flex items-center gap-1 hover:underline">
+                                <FileImage className="h-4 w-4" />
+                                <ExternalLink className="h-3 w-3" />
+                              </a>
+                            )
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right font-semibold">{formatCurrency(Number(exp.amount))}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-end gap-1">
+                            <Button variant="ghost" size="icon" className="h-7 w-7"
+                              onClick={() => handleEditExpense(exp)}>
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
+                              onClick={() => removeExpense.mutate({ id: exp.id, service_order_id: orderId! })}>
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {!isNew && (
+        <Dialog open={showTimeDialog} onOpenChange={setShowTimeDialog}>
+          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Clock className="h-4 w-4" /> Controle de Horas
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-0">
+              <div className="flex items-center justify-between pb-3">
+                <div>
+                  <h2 className="font-semibold text-sm">{t.services.timeSection}</h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">{t.services.timeNote}</p>
+                </div>
+                <Button variant="outline" size="sm" className="gap-1" onClick={() => setShowTimeForm(!showTimeForm)}>
+                  <Plus className="h-3 w-3" /> {t.serviceOrders.addTimeEntry}
+                </Button>
+              </div>
+              {showTimeForm && (
+                <div className="p-4 border rounded-lg bg-muted/30 space-y-3 mb-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <Label>{t.serviceOrders.technicians}</Label>
+                      <Select value={timeForm.technician_user_id}
+                        onValueChange={(v) => setTimeForm({ ...timeForm, technician_user_id: v })}>
+                        <SelectTrigger><SelectValue placeholder="Selecionar técnico" /></SelectTrigger>
+                        <SelectContent>
+                          {appUsers?.map((u) => (
+                            <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>{t.serviceOrders.scheduledStart}</Label>
+                      <Input type="datetime-local" value={timeForm.started_at}
+                        onChange={(e) => setTimeForm({ ...timeForm, started_at: e.target.value })} />
+                    </div>
+                    <div>
+                      <Label>{t.serviceOrders.scheduledEnd}</Label>
+                      <Input type="datetime-local" value={timeForm.ended_at}
+                        onChange={(e) => setTimeForm({ ...timeForm, ended_at: e.target.value })} />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <Label>Duração (min)</Label>
+                      <Input type="number" value={timeForm.duration_minutes}
+                        onChange={(e) => setTimeForm({ ...timeForm, duration_minutes: parseInt(e.target.value) || 0 })} />
+                    </div>
+                    <div className="flex items-end gap-2">
+                      <label className="flex items-center gap-1.5 text-sm">
+                        <Switch checked={timeForm.billable}
+                          onCheckedChange={(v) => setTimeForm({ ...timeForm, billable: v })} />
+                        {t.serviceOrders.billable}
+                      </label>
+                    </div>
+                    <div>
+                      <Label>{t.common.notes}</Label>
+                      <Input value={timeForm.notes}
+                        onChange={(e) => setTimeForm({ ...timeForm, notes: e.target.value })} />
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={handleAddTime} disabled={addTime.isPending}>{t.common.save}</Button>
+                    <Button size="sm" variant="outline" onClick={() => setShowTimeForm(false)}>{t.common.cancel}</Button>
+                  </div>
+                </div>
+              )}
+              {(!timeEntries || timeEntries.length === 0) ? (
+                <p className="text-sm text-muted-foreground p-5">{t.serviceOrders.noTimeEntries}</p>
+              ) : (
+                <div className="divide-y">
+                  {timeEntries.map((te: any) => (
+                    <div key={te.id} className="flex items-start justify-between p-4">
+                      <div>
+                        <p className="text-sm font-medium">{te.app_users?.full_name}</p>
+                        {te.notes && <p className="text-xs text-muted-foreground">{te.notes}</p>}
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {formatDateTime(te.started_at)} → {te.ended_at ? formatDateTime(te.ended_at) : '...'}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          <p className="text-sm font-semibold">{((te.duration_minutes || 0) / 60).toFixed(1)}h</p>
+                          <StatusBadge className={te.billable ? 'bg-success/15 text-success' : 'bg-muted text-muted-foreground'}>
+                            {te.billable ? t.serviceOrders.billable : t.serviceOrders.nonBillable}
+                          </StatusBadge>
+                        </div>
                         <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
-                          onClick={() => removeExpense.mutate({ id: exp.id, service_order_id: orderId! })}>
+                          onClick={() => removeTime.mutate({ id: te.id, service_order_id: orderId! })}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* G - Time Entries (edit only) — internal control */}
-      {!isNew && (
-        <section className="rounded-xl border bg-card shadow-sm overflow-hidden">
-          <div className="p-5 border-b flex items-center justify-between">
-            <div>
-              <h2 className="font-semibold text-sm">{t.services.timeSection}</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">{t.services.timeNote}</p>
-            </div>
-            <Button variant="outline" size="sm" className="gap-1" onClick={() => setShowTimeForm(!showTimeForm)}>
-              <Plus className="h-3 w-3" /> {t.serviceOrders.addTimeEntry}
-            </Button>
-          </div>
-          {showTimeForm && (
-            <div className="p-4 border-b bg-muted/30 space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <Label>{t.serviceOrders.technicians}</Label>
-                  <Select value={timeForm.technician_user_id}
-                    onValueChange={(v) => setTimeForm({ ...timeForm, technician_user_id: v })}>
-                    <SelectTrigger><SelectValue placeholder="Selecionar técnico" /></SelectTrigger>
-                    <SelectContent>
-                      {appUsers?.map((u) => (
-                        <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label>{t.serviceOrders.scheduledStart}</Label>
-                  <Input type="datetime-local" value={timeForm.started_at}
-                    onChange={(e) => setTimeForm({ ...timeForm, started_at: e.target.value })} />
-                </div>
-                <div>
-                  <Label>{t.serviceOrders.scheduledEnd}</Label>
-                  <Input type="datetime-local" value={timeForm.ended_at}
-                    onChange={(e) => setTimeForm({ ...timeForm, ended_at: e.target.value })} />
-                </div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <Label>Duração (min)</Label>
-                  <Input type="number" value={timeForm.duration_minutes}
-                    onChange={(e) => setTimeForm({ ...timeForm, duration_minutes: parseInt(e.target.value) || 0 })} />
-                </div>
-                <div className="flex items-end gap-2">
-                  <label className="flex items-center gap-1.5 text-sm">
-                    <Switch checked={timeForm.billable}
-                      onCheckedChange={(v) => setTimeForm({ ...timeForm, billable: v })} />
-                    {t.serviceOrders.billable}
-                  </label>
-                </div>
-                <div>
-                  <Label>{t.common.notes}</Label>
-                  <Input value={timeForm.notes}
-                    onChange={(e) => setTimeForm({ ...timeForm, notes: e.target.value })} />
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <Button size="sm" onClick={handleAddTime} disabled={addTime.isPending}>{t.common.save}</Button>
-                <Button size="sm" variant="outline" onClick={() => setShowTimeForm(false)}>{t.common.cancel}</Button>
-              </div>
-            </div>
-          )}
-          {(!timeEntries || timeEntries.length === 0) ? (
-            <p className="text-sm text-muted-foreground p-5">{t.serviceOrders.noTimeEntries}</p>
-          ) : (
-            <div className="divide-y">
-              {timeEntries.map((te: any) => (
-                <div key={te.id} className="flex items-start justify-between p-4">
-                  <div>
-                    <p className="text-sm font-medium">{te.app_users?.full_name}</p>
-                    {te.notes && <p className="text-xs text-muted-foreground">{te.notes}</p>}
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {formatDateTime(te.started_at)} → {te.ended_at ? formatDateTime(te.ended_at) : '...'}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="text-right">
-                      <p className="text-sm font-semibold">{((te.duration_minutes || 0) / 60).toFixed(1)}h</p>
-                      <StatusBadge className={te.billable ? 'bg-success/15 text-success' : 'bg-muted text-muted-foreground'}>
-                        {te.billable ? t.serviceOrders.billable : t.serviceOrders.nonBillable}
-                      </StatusBadge>
                     </div>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
-                      onClick={() => removeTime.mutate({ id: te.id, service_order_id: orderId! })}>
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
-          )}
-        </section>
+          </DialogContent>
+        </Dialog>
       )}
 
-      {/* H - Financial Summary */}
-      <section className="rounded-xl border bg-card p-5 shadow-sm space-y-4">
-        <h2 className="font-semibold text-sm">{t.serviceOrders.costBreakdown}</h2>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="space-y-2">
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">{t.serviceOrders.labor}</span>
-              <span>{formatCurrency(laborCost)}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">{t.serviceOrders.parts}</span>
-              <span>{formatCurrency(partsCost)}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">{t.serviceOrders.operationalCost}</span>
-              <span>{formatCurrency(operationalCost)}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">{t.serviceOrders.travel}</span>
-              <span>{formatCurrency(form.travel_cost_total)}</span>
-            </div>
-            <div className="flex justify-between text-sm items-center">
-              <span className="text-muted-foreground">{t.serviceOrders.subcontract}</span>
-              <MoneyInput className="w-28 h-7 text-right text-sm" value={form.subcontract_cost_total}
-                onValueChange={(v) => set('subcontract_cost_total', v)} />
-            </div>
-            {/* Per-category discount breakdown */}
-            <div className="space-y-1 rounded-md border border-dashed p-2 bg-muted/20">
-              <p className="text-xs font-medium text-muted-foreground mb-1">{t.serviceOrders.discount}</p>
-              <div className="flex justify-between text-xs items-center">
-                <span className="text-muted-foreground">↳ Serviços (%)</span>
-                <div className="flex items-center gap-1.5">
-                  <Input
-                    type="number" min="0" max="100" step="0.5"
-                    className="w-16 h-6 text-right text-xs px-1"
-                    value={discountServicesPct || ''}
-                    placeholder="0"
-                    disabled={isLocked}
-                    onChange={(e) => {
-                      const pct = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
-                      setDiscountServicesPct(pct);
-                      const total = Math.round((laborCost * pct / 100 + partsCost * discountPartsPct / 100) * 100) / 100;
-                      set('discount_amount', total);
-                    }}
-                  />
-                  <span className="text-xs text-muted-foreground w-20 text-right">
-                    = {formatCurrency(laborCost * discountServicesPct / 100)}
-                  </span>
-                </div>
-              </div>
-              <div className="flex justify-between text-xs items-center">
-                <span className="text-muted-foreground">↳ Peças (%)</span>
-                <div className="flex items-center gap-1.5">
-                  <Input
-                    type="number" min="0" max="100" step="0.5"
-                    className="w-16 h-6 text-right text-xs px-1"
-                    value={discountPartsPct || ''}
-                    placeholder="0"
-                    disabled={isLocked}
-                    onChange={(e) => {
-                      const pct = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
-                      setDiscountPartsPct(pct);
-                      const total = Math.round((laborCost * discountServicesPct / 100 + partsCost * pct / 100) * 100) / 100;
-                      set('discount_amount', total);
-                    }}
-                  />
-                  <span className="text-xs text-muted-foreground w-20 text-right">
-                    = {formatCurrency(partsCost * discountPartsPct / 100)}
-                  </span>
-                </div>
-              </div>
-              <div className="flex justify-between text-sm items-center pt-0.5 border-t border-dashed mt-1">
-                <span className="text-muted-foreground text-xs font-medium">Total desconto</span>
-                <MoneyInput className="w-28 h-7 text-right text-sm" value={form.discount_amount}
-                  onValueChange={(v) => {
-                    set('discount_amount', v);
-                    if (!v) { setDiscountServicesPct(0); setDiscountPartsPct(0); }
-                  }}
-                  disabled={isLocked} />
-              </div>
-            </div>
-            <div className="flex justify-between text-sm items-center">
-              <span className="text-muted-foreground">{t.serviceOrders.tax}</span>
-              <MoneyInput className="w-28 h-7 text-right text-sm" value={form.tax_amount}
-                onValueChange={(v) => set('tax_amount', v)} disabled={isLocked} />
-            </div>
-
-            {/* Commission */}
-            <div className="space-y-2 pt-2 border-t border-dashed">
-              <div className="flex justify-between text-sm items-center">
-                <span className="text-muted-foreground">{(t.serviceOrders as any).commissionedPerson || 'Comissionado'}</span>
-                <Select
-                  value={form.commissioned_user_id || 'none'}
-                  onValueChange={(v) => {
-                    const user = commissionableUsers?.find(u => u.id === v);
-                    setForm(f => ({
-                      ...f,
-                      commissioned_user_id: v === 'none' ? '' : v,
-                      commissioned_person: user?.full_name || '',
-                    }));
-                  }}
-                  disabled={isLocked}
-                >
-                  <SelectTrigger className="w-52 h-7 text-sm">
-                    <SelectValue placeholder="Selecionar" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">—</SelectItem>
-                    {(commissionableUsers || []).map(u => (
-                      <SelectItem key={u.id} value={u.id}>
-                        {u.full_name} ({USER_ROLES.find(r => r.value === u.role)?.label || u.role})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex justify-between text-sm items-center">
-                <span className="text-muted-foreground">{(t.serviceOrders as any).commissionAmount || 'Comissão'} (%)</span>
-                <div className="flex items-center gap-2">
-                  <Input type="number" step="0.01" className="w-20 h-7 text-right text-sm" value={form.commission_rate}
-                    onChange={(e) => {
-                      const rate = parseFloat(e.target.value) || 0;
-                      const amount = Math.round(grandTotal * rate / 100 * 100) / 100;
-                      setForm(f => ({ ...f, commission_rate: rate, commission_amount: amount }));
-                    }}
-                    disabled={isLocked} />
-                  {(form.commission_rate || 0) > 0 && (
-                    <span className="text-xs text-muted-foreground whitespace-nowrap">
-                      = {formatCurrency(grandTotal * (form.commission_rate || 0) / 100)}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Payment conditions */}
-            <div className="space-y-2 pt-2 border-t border-dashed">
-              <div className="flex items-center justify-between">
-                <Label className="text-sm">Condições de Pagamento</Label>
-                <span className="text-xs text-muted-foreground">(aparece no PDF)</span>
-              </div>
-              <div className="flex gap-2 items-center">
-                <Select
-                  key={presetKey}
-                  onValueChange={(v) => {
-                    const preset = (paymentPresets || []).find((p: any) => p.label === v);
-                    set('payment_conditions', v);
-                    set('payment_condition_preset_id', preset?.id || '');
-                    setPresetKey((k) => k + 1);
-                  }}
-                  disabled={isLocked}
-                >
-                  <SelectTrigger className="w-44 h-8 text-sm">
-                    <SelectValue placeholder="Pré-definidas..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(paymentPresets || []).map((p: any) => (
-                      <SelectItem key={p.id} value={p.label}>
-                        {p.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Input
-                  value={form.payment_conditions || ''}
-                  onChange={(e) => set('payment_conditions', e.target.value)}
-                  placeholder="Ou descreva livremente..."
-                  disabled={isLocked}
-                  className="flex-1 h-8 text-sm"
-                />
-              </div>
-
-              {orderId && grandTotal > 0 && form.payment_conditions &&
-                (form.status === 'completed' || form.status === 'invoiced' || !!form.signed_at) && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleGenerateCollections}
-                  disabled={generatingCollections}
-                  className="gap-2 text-green-700 border-green-300 hover:bg-green-50"
-                >
-                  <CreditCard className="h-4 w-4" />
-                  {generatingCollections ? 'Gerando...' : 'Gerar Cobranças'}
-                </Button>
-              )}
-
-              {orderId && osCollections && osCollections.length > 0 && (
-                <div className="rounded-lg border bg-muted/20 p-3 mt-2">
-                  <div className="flex items-center gap-2 mb-2">
-                    <CreditCard className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm font-medium">
-                      Cobranças Geradas ({osCollections.length})
-                    </span>
-                  </div>
-                  <div className="space-y-1">
-                    {osCollections.map((c) => (
-                      <div
-                        key={c.id}
-                        className="grid grid-cols-[1fr_auto_auto_auto] gap-2 items-center text-xs px-2 py-1.5 rounded bg-background border"
-                      >
-                        <span className="truncate">{c.description || 'Cobrança'}</span>
-                        <span className="font-medium">
-                          R$ {Number(c.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                        </span>
-                        <span className="text-muted-foreground">
-                          {new Date(c.due_date).toLocaleDateString('pt-BR')}
-                        </span>
-                        <span className="capitalize text-muted-foreground">{c.status}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+      {/* H - Financial Mini-Summary */}
+      <div className="rounded-xl border bg-card p-4 shadow-sm">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-6 text-sm flex-wrap">
+            {laborCost > 0 && (
+              <span className="text-muted-foreground">
+                Serviços: <span className="font-semibold text-foreground">{formatCurrency(laborCost)}</span>
+              </span>
             )}
-            </div>
-            <div className="flex justify-between pt-3 border-t-2">
-              <span className="font-bold text-lg">{t.serviceOrders.grandTotal}</span>
-              <span className="font-bold text-lg text-accent">{formatCurrency(grandTotal)}</span>
-            </div>
-            {(form.commission_amount || 0) > 0 && (
-              <>
-                <div className="flex justify-between text-sm text-muted-foreground">
-                  <span>{(t.serviceOrders as any).commissionAmount || 'Comissão'} ({form.commission_rate}%)</span>
-                  <span>− {formatCurrency(form.commission_amount || 0)}</span>
-                </div>
-                <div className="flex justify-between text-sm font-medium">
-                  <span>{(t.serviceOrders as any).netTotal || 'Total líquido'}</span>
-                  <span>{formatCurrency(grandTotal - (form.commission_amount || 0))}</span>
-                </div>
-              </>
+            {partsCost > 0 && (
+              <span className="text-muted-foreground">
+                Peças: <span className="font-semibold text-foreground">{formatCurrency(partsCost)}</span>
+              </span>
             )}
+            {(form.discount_amount || 0) > 0 && (
+              <span className="text-red-600 text-xs">
+                Desconto: −{formatCurrency(form.discount_amount || 0)}
+              </span>
+            )}
+            <span className="font-bold text-base text-accent">
+              Total: {formatCurrency(grandTotal)}
+            </span>
           </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2 shrink-0"
+            onClick={() => setShowFinancialDialog(true)}
+          >
+            <Calculator className="h-4 w-4" />
+            Composição Financeira
+          </Button>
+        </div>
+      </div>
 
-          {/* Payment info */}
-          <div className="space-y-3">
-            <div className="rounded-lg border p-3 bg-muted/30">
-              <div className="flex items-center gap-2 mb-1">
-                <Calculator className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm font-medium">{t.serviceOrders.paymentMethodPix}</span>
-              </div>
-              <p className="text-sm font-semibold">{formatCurrency(grandTotal)}</p>
-            </div>
-            <div className="rounded-lg border p-3 bg-muted/30 space-y-3">
-              <div className="flex items-center gap-2">
-                <CreditCard className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm font-medium">{t.serviceOrders.paymentMethodCard}</span>
-              </div>
-              {/* Installment selector */}
-              <div className="flex gap-1.5">
-                {[1, 2, 3, 4, 5, 6].map((n) => (
-                  <button key={n} type="button"
-                    className={`px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${
-                      selectedInstallments === n
-                        ? 'bg-primary text-primary-foreground border-primary'
-                        : 'bg-background text-foreground border-border hover:bg-muted'
-                    }`}
-                    onClick={() => setSelectedInstallments(n)}>
-                    {n}x
-                  </button>
-                ))}
-              </div>
-              <div className="space-y-1 text-sm">
-                <div className="flex justify-between">
-                  <span className="font-medium">{t.serviceOrders.cardGrossAmount}:</span>
-                  <span className="font-bold">{formatCurrency(cardGross)}</span>
-                </div>
-                {selectedInstallments > 1 && (
-                  <div className="flex justify-between text-muted-foreground">
-                    <span>{t.serviceOrders.cardInstallmentValue}:</span>
-                    <span>{selectedInstallments}x {formatCurrency(installmentValue)}</span>
-                  </div>
-                )}
-                <div className="flex justify-between text-muted-foreground">
-                  <span>{t.serviceOrders.cardFeeAmount} ({Number(feePercent).toFixed(2)}%):</span>
-                  <span>{formatCurrency(cardFeeAmount)}</span>
-                </div>
-                <div className="flex justify-between text-success pt-1 border-t">
-                  <span className="font-medium">{t.serviceOrders.cardNetAmount}:</span>
-                  <span className="font-semibold">{formatCurrency(grandTotal)}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-          </div>
-          {selectedPreset && installmentRows.length > 0 && grandTotal > 0 && (
-            <div className="mt-4 pt-4 border-t space-y-2">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Condições — {selectedPreset.label}
-              </p>
-              <div className="space-y-1">
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>Serviços</span>
+      {/* Financial Dialog */}
+      <Dialog open={showFinancialDialog} onOpenChange={setShowFinancialDialog}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Calculator className="h-4 w-4" /> Composição Financeira
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">{t.serviceOrders.labor}</span>
                   <span>{formatCurrency(laborCost)}</span>
                 </div>
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>Peças / Produtos</span>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">{t.serviceOrders.parts}</span>
                   <span>{formatCurrency(partsCost)}</span>
                 </div>
-                {expensesTotal > 0 && (
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>Despesas e Deslocamento</span>
-                    <span>{formatCurrency(expensesTotal)}</span>
-                  </div>
-                )}
-                <div className="border-t my-1" />
-                {installmentRows.map((row, i) => {
-                  const amount = calcInstallmentAmount(row);
-                  const daysLabel = row.tipo === 'entrega'
-                    ? 'na entrega'
-                    : row.tipo === 'prazo' || row.days_after_approval > 0
-                    ? `em ${row.days_after_approval} dias`
-                    : 'na aprovação';
-                  return (
-                    <div key={i} className="flex justify-between text-sm">
-                      <span className="font-medium">
-                        {row.label || `Parcela ${i + 1}`}
-                        <span className="ml-1 text-xs text-muted-foreground">
-                          ({daysLabel})
-                        </span>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">{t.serviceOrders.operationalCost}</span>
+                  <span>{formatCurrency(operationalCost)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">{t.serviceOrders.travel}</span>
+                  <span>{formatCurrency(form.travel_cost_total)}</span>
+                </div>
+                <div className="flex justify-between text-sm items-center">
+                  <span className="text-muted-foreground">{t.serviceOrders.subcontract}</span>
+                  <MoneyInput className="w-28 h-7 text-right text-sm" value={form.subcontract_cost_total}
+                    onValueChange={(v) => set('subcontract_cost_total', v)} />
+                </div>
+                {/* Per-category discount breakdown */}
+                <div className="space-y-1 rounded-md border border-dashed p-2 bg-muted/20">
+                  <p className="text-xs font-medium text-muted-foreground mb-1">{t.serviceOrders.discount}</p>
+                  <div className="flex justify-between text-xs items-center">
+                    <span className="text-muted-foreground">↳ Serviços (%)</span>
+                    <div className="flex items-center gap-1.5">
+                      <Input
+                        type="number" min="0" max="100" step="0.5"
+                        className="w-16 h-6 text-right text-xs px-1"
+                        value={discountServicesPct || ''}
+                        placeholder="0"
+                        disabled={isLocked}
+                        onChange={(e) => {
+                          const pct = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
+                          setDiscountServicesPct(pct);
+                          const total = Math.round((laborCost * pct / 100 + partsCost * discountPartsPct / 100) * 100) / 100;
+                          set('discount_amount', total);
+                        }}
+                      />
+                      <span className="text-xs text-muted-foreground w-20 text-right">
+                        = {formatCurrency(laborCost * discountServicesPct / 100)}
                       </span>
-                      <span className="font-semibold">{formatCurrency(amount)}</span>
                     </div>
-                  );
-                })}
+                  </div>
+                  <div className="flex justify-between text-xs items-center">
+                    <span className="text-muted-foreground">↳ Peças (%)</span>
+                    <div className="flex items-center gap-1.5">
+                      <Input
+                        type="number" min="0" max="100" step="0.5"
+                        className="w-16 h-6 text-right text-xs px-1"
+                        value={discountPartsPct || ''}
+                        placeholder="0"
+                        disabled={isLocked}
+                        onChange={(e) => {
+                          const pct = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
+                          setDiscountPartsPct(pct);
+                          const total = Math.round((laborCost * discountServicesPct / 100 + partsCost * pct / 100) * 100) / 100;
+                          set('discount_amount', total);
+                        }}
+                      />
+                      <span className="text-xs text-muted-foreground w-20 text-right">
+                        = {formatCurrency(partsCost * discountPartsPct / 100)}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex justify-between text-sm items-center pt-0.5 border-t border-dashed mt-1">
+                    <span className="text-muted-foreground text-xs font-medium">Total desconto</span>
+                    <MoneyInput className="w-28 h-7 text-right text-sm" value={form.discount_amount}
+                      onValueChange={(v) => {
+                        set('discount_amount', v);
+                        if (!v) { setDiscountServicesPct(0); setDiscountPartsPct(0); }
+                      }}
+                      disabled={isLocked} />
+                  </div>
+                </div>
+                <div className="flex justify-between text-sm items-center">
+                  <span className="text-muted-foreground">{t.serviceOrders.tax}</span>
+                  <MoneyInput className="w-28 h-7 text-right text-sm" value={form.tax_amount}
+                    onValueChange={(v) => set('tax_amount', v)} disabled={isLocked} />
+                </div>
+
+                {/* Commission */}
+                <div className="space-y-2 pt-2 border-t border-dashed">
+                  <div className="flex justify-between text-sm items-center">
+                    <span className="text-muted-foreground">{(t.serviceOrders as any).commissionedPerson || 'Comissionado'}</span>
+                    <Select
+                      value={form.commissioned_user_id || 'none'}
+                      onValueChange={(v) => {
+                        const user = commissionableUsers?.find(u => u.id === v);
+                        setForm(f => ({
+                          ...f,
+                          commissioned_user_id: v === 'none' ? '' : v,
+                          commissioned_person: user?.full_name || '',
+                        }));
+                      }}
+                      disabled={isLocked}
+                    >
+                      <SelectTrigger className="w-52 h-7 text-sm">
+                        <SelectValue placeholder="Selecionar" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">—</SelectItem>
+                        {(commissionableUsers || []).map(u => (
+                          <SelectItem key={u.id} value={u.id}>
+                            {u.full_name} ({USER_ROLES.find(r => r.value === u.role)?.label || u.role})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex justify-between text-sm items-center">
+                    <span className="text-muted-foreground">{(t.serviceOrders as any).commissionAmount || 'Comissão'} (%)</span>
+                    <div className="flex items-center gap-2">
+                      <Input type="number" step="0.01" className="w-20 h-7 text-right text-sm" value={form.commission_rate}
+                        onChange={(e) => {
+                          const rate = parseFloat(e.target.value) || 0;
+                          const amount = Math.round(grandTotal * rate / 100 * 100) / 100;
+                          setForm(f => ({ ...f, commission_rate: rate, commission_amount: amount }));
+                        }}
+                        disabled={isLocked} />
+                      {(form.commission_rate || 0) > 0 && (
+                        <span className="text-xs text-muted-foreground whitespace-nowrap">
+                          = {formatCurrency(grandTotal * (form.commission_rate || 0) / 100)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Payment conditions */}
+                <div className="space-y-2 pt-2 border-t border-dashed">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm">Condições de Pagamento</Label>
+                    <span className="text-xs text-muted-foreground">(aparece no PDF)</span>
+                  </div>
+                  <div className="flex gap-2 items-center">
+                    <Select
+                      key={presetKey}
+                      onValueChange={(v) => {
+                        const preset = (paymentPresets || []).find((p: any) => p.label === v);
+                        set('payment_conditions', v);
+                        set('payment_condition_preset_id', preset?.id || '');
+                        setPresetKey((k) => k + 1);
+                      }}
+                      disabled={isLocked}
+                    >
+                      <SelectTrigger className="w-44 h-8 text-sm">
+                        <SelectValue placeholder="Pré-definidas..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(paymentPresets || []).map((p: any) => (
+                          <SelectItem key={p.id} value={p.label}>
+                            {p.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      value={form.payment_conditions || ''}
+                      onChange={(e) => set('payment_conditions', e.target.value)}
+                      placeholder="Ou descreva livremente..."
+                      disabled={isLocked}
+                      className="flex-1 h-8 text-sm"
+                    />
+                  </div>
+
+                  {orderId && grandTotal > 0 && form.payment_conditions &&
+                    (form.status === 'completed' || form.status === 'invoiced' || !!form.signed_at) && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleGenerateCollections}
+                      disabled={generatingCollections}
+                      className="gap-2 text-green-700 border-green-300 hover:bg-green-50"
+                    >
+                      <CreditCard className="h-4 w-4" />
+                      {generatingCollections ? 'Gerando...' : 'Gerar Cobranças'}
+                    </Button>
+                  )}
+
+                  {orderId && osCollections && osCollections.length > 0 && (
+                    <div className="rounded-lg border bg-muted/20 p-3 mt-2">
+                      <div className="flex items-center gap-2 mb-2">
+                        <CreditCard className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm font-medium">
+                          Cobranças Geradas ({osCollections.length})
+                        </span>
+                      </div>
+                      <div className="space-y-1">
+                        {osCollections.map((c) => (
+                          <div
+                            key={c.id}
+                            className="grid grid-cols-[1fr_auto_auto_auto] gap-2 items-center text-xs px-2 py-1.5 rounded bg-background border"
+                          >
+                            <span className="truncate">{c.description || 'Cobrança'}</span>
+                            <span className="font-medium">
+                              R$ {Number(c.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </span>
+                            <span className="text-muted-foreground">
+                              {new Date(c.due_date).toLocaleDateString('pt-BR')}
+                            </span>
+                            <span className="capitalize text-muted-foreground">{c.status}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="flex justify-between pt-3 border-t-2">
+                  <span className="font-bold text-lg">{t.serviceOrders.grandTotal}</span>
+                  <span className="font-bold text-lg text-accent">{formatCurrency(grandTotal)}</span>
+                </div>
+                {(form.commission_amount || 0) > 0 && (
+                  <>
+                    <div className="flex justify-between text-sm text-muted-foreground">
+                      <span>{(t.serviceOrders as any).commissionAmount || 'Comissão'} ({form.commission_rate}%)</span>
+                      <span>− {formatCurrency(form.commission_amount || 0)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm font-medium">
+                      <span>{(t.serviceOrders as any).netTotal || 'Total líquido'}</span>
+                      <span>{formatCurrency(grandTotal - (form.commission_amount || 0))}</span>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Payment info */}
+              <div className="space-y-3">
+                <div className="rounded-lg border p-3 bg-muted/30">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Calculator className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm font-medium">{t.serviceOrders.paymentMethodPix}</span>
+                  </div>
+                  <p className="text-sm font-semibold">{formatCurrency(grandTotal)}</p>
+                </div>
+                <div className="rounded-lg border p-3 bg-muted/30 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <CreditCard className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm font-medium">{t.serviceOrders.paymentMethodCard}</span>
+                  </div>
+                  {/* Installment selector */}
+                  <div className="flex gap-1.5">
+                    {[1, 2, 3, 4, 5, 6].map((n) => (
+                      <button key={n} type="button"
+                        className={`px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${
+                          selectedInstallments === n
+                            ? 'bg-primary text-primary-foreground border-primary'
+                            : 'bg-background text-foreground border-border hover:bg-muted'
+                        }`}
+                        onClick={() => setSelectedInstallments(n)}>
+                        {n}x
+                      </button>
+                    ))}
+                  </div>
+                  <div className="space-y-1 text-sm">
+                    <div className="flex justify-between">
+                      <span className="font-medium">{t.serviceOrders.cardGrossAmount}:</span>
+                      <span className="font-bold">{formatCurrency(cardGross)}</span>
+                    </div>
+                    {selectedInstallments > 1 && (
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>{t.serviceOrders.cardInstallmentValue}:</span>
+                        <span>{selectedInstallments}x {formatCurrency(installmentValue)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>{t.serviceOrders.cardFeeAmount} ({Number(feePercent).toFixed(2)}%):</span>
+                      <span>{formatCurrency(cardFeeAmount)}</span>
+                    </div>
+                    <div className="flex justify-between text-success pt-1 border-t">
+                      <span className="font-medium">{t.serviceOrders.cardNetAmount}:</span>
+                      <span className="font-semibold">{formatCurrency(grandTotal)}</span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
-          )}
-        </section>
+            {selectedPreset && installmentRows.length > 0 && grandTotal > 0 && (
+              <div className="mt-4 pt-4 border-t space-y-2">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  Condições — {selectedPreset.label}
+                </p>
+                <div className="space-y-1">
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>Serviços</span>
+                    <span>{formatCurrency(laborCost)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>Peças / Produtos</span>
+                    <span>{formatCurrency(partsCost)}</span>
+                  </div>
+                  {expensesTotal > 0 && (
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>Despesas e Deslocamento</span>
+                      <span>{formatCurrency(expensesTotal)}</span>
+                    </div>
+                  )}
+                  <div className="border-t my-1" />
+                  {installmentRows.map((row, i) => {
+                    const amount = calcInstallmentAmount(row);
+                    const daysLabel = row.tipo === 'entrega'
+                      ? 'na entrega'
+                      : row.tipo === 'prazo' || row.days_after_approval > 0
+                      ? `em ${row.days_after_approval} dias`
+                      : 'na aprovação';
+                    return (
+                      <div key={i} className="flex justify-between text-sm">
+                        <span className="font-medium">
+                          {row.label || `Parcela ${i + 1}`}
+                          <span className="ml-1 text-xs text-muted-foreground">
+                            ({daysLabel})
+                          </span>
+                        </span>
+                        <span className="font-semibold">{formatCurrency(amount)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Notes & Technical Reports */}
+      <section className="rounded-xl border bg-card p-5 shadow-sm space-y-4">
+        <h2 className="font-semibold text-sm">Observações e Laudos Técnicos</h2>
+        <Collapsible open={extraFieldsOpen} onOpenChange={setExtraFieldsOpen}>
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" size="sm" className="gap-2 text-muted-foreground hover:text-foreground">
+              <ChevronDown className={`h-4 w-4 transition-transform ${extraFieldsOpen ? 'rotate-180' : ''}`} />
+              Campos adicionais (diagnóstico, laudo...)
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="space-y-4 pt-3">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <Label>{t.serviceOrders.technicianNotes}</Label>
+                  <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs text-primary hover:text-primary hover:bg-primary/10"
+                    onClick={async () => set('technician_notes', await optimizeText(form.technician_notes))} disabled={isOptimizing || !form.technician_notes || isLocked}>
+                    <Sparkles className="h-3 w-3 mr-1" /> IA
+                  </Button>
+                </div>
+                <Textarea value={form.technician_notes} onChange={(e) => set('technician_notes', e.target.value)} rows={2} disabled={isLocked} />
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <Label>{t.serviceOrders.initialFindings}</Label>
+                  <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs text-primary hover:text-primary hover:bg-primary/10"
+                    onClick={async () => set('initial_findings', await optimizeText(form.initial_findings))} disabled={isOptimizing || !form.initial_findings || isLocked}>
+                    <Sparkles className="h-3 w-3 mr-1" /> IA
+                  </Button>
+                </div>
+                <Textarea value={form.initial_findings} onChange={(e) => set('initial_findings', e.target.value)} rows={2} disabled={isLocked} />
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <Label>{t.serviceOrders.diagnosis}</Label>
+                  <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs text-primary hover:text-primary hover:bg-primary/10"
+                    onClick={async () => set('diagnosis', await optimizeText(form.diagnosis))} disabled={isOptimizing || !form.diagnosis || isLocked}>
+                    <Sparkles className="h-3 w-3 mr-1" /> IA
+                  </Button>
+                </div>
+                <Textarea value={form.diagnosis} onChange={(e) => set('diagnosis', e.target.value)} rows={2} disabled={isLocked} />
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <Label>{t.serviceOrders.solutionApplied}</Label>
+                  <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs text-primary hover:text-primary hover:bg-primary/10"
+                    onClick={async () => set('solution_applied', await optimizeText(form.solution_applied))} disabled={isOptimizing || !form.solution_applied || isLocked}>
+                    <Sparkles className="h-3 w-3 mr-1" /> IA
+                  </Button>
+                </div>
+                <Textarea value={form.solution_applied} onChange={(e) => set('solution_applied', e.target.value)} rows={2} disabled={isLocked} />
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <Label>{t.serviceOrders.internalNotes}</Label>
+                  <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs text-primary hover:text-primary hover:bg-primary/10"
+                    onClick={async () => set('internal_notes', await optimizeText(form.internal_notes))} disabled={isOptimizing || !form.internal_notes || isLocked}>
+                    <Sparkles className="h-3 w-3 mr-1" /> IA
+                  </Button>
+                </div>
+                <Textarea value={form.internal_notes} onChange={(e) => set('internal_notes', e.target.value)} rows={2} disabled={isLocked} />
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <Label>{t.serviceOrders.customerReport}</Label>
+                  <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs text-primary hover:text-primary hover:bg-primary/10"
+                    onClick={async () => set('customer_visible_report', await optimizeText(form.customer_visible_report))} disabled={isOptimizing || !form.customer_visible_report || isLocked}>
+                    <Sparkles className="h-3 w-3 mr-1" /> IA
+                  </Button>
+                </div>
+                <Textarea value={form.customer_visible_report} onChange={(e) => set('customer_visible_report', e.target.value)} rows={2} disabled={isLocked} />
+              </div>
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+      </section>
 
       {/* Signatures */}
       {!isNew && orderId && (
