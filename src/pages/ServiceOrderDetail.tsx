@@ -33,6 +33,7 @@ export default function ServiceOrderDetail() {
   const isNew = !id || id === 'new';
 
   const { data: order, isLoading, error } = useServiceOrder(isNew ? undefined : id);
+  const [copied, setCopied] = useState(false);
 
   if (!isNew && !isLoading && !order && !error) {
     return (
@@ -63,7 +64,6 @@ export default function ServiceOrderDetail() {
     );
   }
 
-  const [copied, setCopied] = useState(false);
   const handleCopyLink = () => {
     if (!order?.share_token) return;
     const url = `${window.location.origin}/view/${order.share_token}`;
