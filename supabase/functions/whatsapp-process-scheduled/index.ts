@@ -118,23 +118,29 @@ Deno.serve(async (req) => {
           payload.link_title = job.link_title || "";
           payload.link_description = job.link_description || "";
         } else {
-          // document mode: requer URL pré-existente — agendamento de PDF não regenera
-          // (geração de PDF acontece no client). Para agendamentos de documento, exigimos
-          // que o usuário tenha um PDF estático armazenado (futuro). Por ora, fallback para link.
-          let shareToken: string | null = null;
-          if (job.service_order_id) {
-            const { data: so } = await admin
-              .from("service_orders")
-              .select("share_token")
-              .eq("id", job.service_order_id)
-              .maybeSingle();
-            shareToken = so?.share_token || null;
+          // document mode: usa URL pré-gerada armazenada no agendamento (document_url).
+          // Fallback para link quando document_url não existe (agendamentos legados).
+          if (job.document_url) {
+            payload.kind = "document";
+            payload.document_url = job.document_url;
+            payload.document_filename = job.pdf_filename || "documento.pdf";
+            payload.document_caption = job.caption || job.message;
+          } else {
+            let shareToken: string | null = null;
+            if (job.service_order_id) {
+              const { data: so } = await admin
+                .from("service_orders")
+                .select("share_token")
+                .eq("id", job.service_order_id)
+                .maybeSingle();
+              shareToken = so?.share_token || null;
+            }
+            if (!shareToken) throw new Error("share_token indisponível e document_url não configurado");
+            payload.kind = "link";
+            payload.link_url = `${baseUrl}/view/${shareToken}`;
+            payload.link_title = job.link_title || "";
+            payload.link_description = job.link_description || "";
           }
-          if (!shareToken) throw new Error("share_token indisponível");
-          payload.kind = "link";
-          payload.link_url = `${baseUrl}/view/${shareToken}`;
-          payload.link_title = job.link_title || "";
-          payload.link_description = job.link_description || "";
         }
 
         const res = await fetch(sendUrl, {

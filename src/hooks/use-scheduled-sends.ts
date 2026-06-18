@@ -43,6 +43,7 @@ export interface CreateScheduledSendInput {
   link_title?: string;
   link_description?: string;
   pdf_filename?: string;
+  document_url?: string;
   caption?: string;
   include_link_in_caption?: boolean;
   scheduled_at: string; // ISO

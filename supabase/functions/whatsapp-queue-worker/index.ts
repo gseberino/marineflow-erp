@@ -43,20 +43,17 @@ Deno.serve(async (req) => {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    // Validate provider credentials early — provider-aware (Z-API or Evolution).
+    // Validate provider credentials based on configured provider.
     const activeProvider = Deno.env.get("WHATSAPP_PROVIDER") ?? "zapi";
-    if (activeProvider === "evolution") {
-      if (
-        !Deno.env.get("EVOLUTION_API_URL") ||
-        !Deno.env.get("EVOLUTION_API_KEY") ||
-        !Deno.env.get("EVOLUTION_INSTANCE")
-      ) {
-        return jr({ error: "Evolution API não configurada" }, 500);
-      }
-    } else {
+    if (activeProvider === "zapi") {
       const instanceId = Deno.env.get("ZAPI_INSTANCE_ID");
       const token = Deno.env.get("ZAPI_TOKEN");
-      if (!instanceId || !token) return jr({ error: "Z-API não configurado" }, 500);
+      if (!instanceId || !token) return jr({ error: "WhatsApp provider não configurado (ZAPI_INSTANCE_ID / ZAPI_TOKEN ausentes)" }, 500);
+    } else if (activeProvider === "evolution") {
+      const evoUrl = Deno.env.get("EVOLUTION_API_URL");
+      const evoKey = Deno.env.get("EVOLUTION_API_KEY");
+      const evoInst = Deno.env.get("EVOLUTION_INSTANCE");
+      if (!evoUrl || !evoKey || !evoInst) return jr({ error: "WhatsApp provider não configurado (EVOLUTION_API_URL / EVOLUTION_API_KEY / EVOLUTION_INSTANCE ausentes)" }, 500);
     }
 
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE, {

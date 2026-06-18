@@ -28,7 +28,7 @@ export interface RetryConfig {
   maxAttempts: number;
 }
 
-async function uploadPdfBlob(blob: Blob, filename: string): Promise<string> {
+export async function uploadPdfBlob(blob: Blob, filename: string): Promise<string> {
   const path = `${new Date().getFullYear()}/${crypto.randomUUID()}-${filename}`;
   const { error } = await supabase.storage
     .from('documents')

@@ -19,7 +19,8 @@ import { ModeSelector, type SendMode } from '@/components/zapi/ModeSelector';
 import { RetrySettings } from '@/components/zapi/RetrySettings';
 import { MessageEditor } from '@/components/zapi/MessageEditor';
 import { ScheduleSettings, defaultScheduleConfig, type ScheduleConfig } from '@/components/zapi/ScheduleSettings';
-import { useZApiSend } from '@/hooks/use-zapi-send';
+import { useZApiSend, uploadPdfBlob } from '@/hooks/use-zapi-send';
+import { generatePDFBlob, DEFAULT_PDF_OPTIONS } from '@/lib/pdf-generator';
 import { useCreateScheduledSend } from '@/hooks/use-scheduled-sends';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -283,6 +284,16 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
         return;
       }
       try {
+        // Para mode=document, pré-gera e faz upload do PDF agora para
+        // que o worker possa enviá-lo no horário sem precisar do browser.
+        let documentUrl: string | undefined;
+        if (mode === 'document' && pdfData) {
+          const blob = await generatePDFBlob(
+            { ...pdfData, documentType } as any,
+            DEFAULT_PDF_OPTIONS,
+          );
+          documentUrl = await uploadPdfBlob(blob, filename);
+        }
         await createScheduled.mutateAsync({
           target_kind: target.kind,
           service_order_id:
@@ -296,6 +307,7 @@ export function SendViaZAPIDialog({ open, onOpenChange, target }: Props) {
           link_title,
           link_description,
           pdf_filename: filename,
+          document_url: documentUrl,
           caption,
           include_link_in_caption: includeLinkInCaption,
           scheduled_at: scheduledIso,

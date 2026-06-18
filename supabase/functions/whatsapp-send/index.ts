@@ -152,7 +152,7 @@ Deno.serve(async (req) => {
       action: "whatsapp_send_api",
       changed_by: callerIdentity,
       new_value: {
-        provider: "z-api",
+        provider: activeProvider,
         kind: body.kind,
         context: body.context || null,
         phone: phoneClean,

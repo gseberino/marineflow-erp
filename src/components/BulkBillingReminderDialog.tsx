@@ -241,7 +241,7 @@ export function BulkBillingReminderDialog({
           client_id: r.client_id,
           phone: r.phone_normalized,
           message: renderForReceivable(r),
-          send_mode: 'link',
+          send_mode: 'text',
           context: 'billing',
           scheduled_at: scheduledIso,
           recurrence_type: schedule.recurrenceType,
