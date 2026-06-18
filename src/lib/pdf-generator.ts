@@ -135,6 +135,19 @@ export type PDFData = {
 export function generatePDF(data: PDFData, options: PDFOptions): void {
   const html = buildHTMLDocument(data, options);
 
+  // Primary: open in a dedicated window so the OS always prints/saves from the
+  // right context. The iframe approach causes iPadOS to save the main ERP page
+  // instead of the generated PDF when the user taps "Save" in the share sheet.
+  const win = window.open('', '_blank');
+  if (win) {
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 500);
+    return;
+  }
+
+  // Fallback (popup blocked): invisible iframe approach
   const iframe = document.createElement('iframe');
   iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;';
   document.body.appendChild(iframe);
@@ -142,12 +155,6 @@ export function generatePDF(data: PDFData, options: PDFOptions): void {
   const doc = iframe.contentDocument || iframe.contentWindow?.document;
   if (!doc) {
     document.body.removeChild(iframe);
-    const win = window.open('', '_blank');
-    if (win) {
-      win.document.write(html);
-      win.document.close();
-      setTimeout(() => win.print(), 500);
-    }
     return;
   }
 
@@ -234,6 +241,61 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
     return blob;
   } finally {
     if (document.body.contains(container)) document.body.removeChild(container);
+  }
+}
+
+/** Remove acentos, troca espaços por hífen e tira caracteres inválidos para nome de arquivo. */
+function slugifyForFilename(value: string): string {
+  return (value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // remove acentos
+    .replace(/[^a-zA-Z0-9]+/g, '-')  // qualquer não-alfanumérico vira hífen
+    .replace(/^-+|-+$/g, '')          // remove hífens das pontas
+    .slice(0, 60);
+}
+
+const DOC_TYPE_FILENAME_LABEL: Record<PDFDocumentType, string> = {
+  quote: 'Orcamento',
+  service_order: 'OrdemServico',
+  invoice: 'Fatura',
+  receipt: 'Recibo',
+};
+
+/**
+ * Monta o nome do arquivo PDF a partir do tipo de documento, número da OS,
+ * cliente e embarcação/motorhome. Ex.: "OrdemServico_OS-00123_Joao-Silva_Lancha-Azul.pdf"
+ */
+export function buildPDFFilename(data: PDFData): string {
+  const parts: string[] = [DOC_TYPE_FILENAME_LABEL[data.documentType] || 'Documento'];
+  const soNumber = data.serviceOrder?.service_order_number;
+  if (soNumber) parts.push(slugifyForFilename(String(soNumber)));
+  const clientName = slugifyForFilename(data.client?.name || '');
+  if (clientName) parts.push(clientName);
+  const vesselName = slugifyForFilename(data.vessel?.name || '');
+  if (vesselName) parts.push(vesselName);
+  return `${parts.filter(Boolean).join('_')}.pdf`;
+}
+
+/**
+ * Gera o PDF e dispara o download direto do arquivo, com nome adequado
+ * (tipo do documento + número da OS + cliente + embarcação). Funciona
+ * de forma idêntica em desktop, celular e tablet — não depende do diálogo
+ * de impressão do navegador.
+ */
+export async function downloadPDF(data: PDFData, options: PDFOptions): Promise<void> {
+  const blob = await generatePDFBlob(data, options);
+  const filename = buildPDFFilename(data);
+  const url = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } finally {
+    // Libera a memória do object URL após o download iniciar
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 }
 

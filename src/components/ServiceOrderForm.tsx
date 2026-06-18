@@ -44,7 +44,7 @@ import { useUpdateServiceOrderPart } from '@/hooks/use-service-order-parts';
 import { PriceCalculatorDialog } from '@/components/PriceCalculatorDialog';
 import { supabase } from '@/integrations/supabase/client';
 import { usePDFData } from '@/hooks/use-pdf';
-import { generatePDF, DEFAULT_PDF_OPTIONS } from '@/lib/pdf-generator';
+import { generatePDF, downloadPDF, DEFAULT_PDF_OPTIONS } from '@/lib/pdf-generator';
 import type { PDFOptions } from '@/lib/pdf-generator';
 import { PDFOptionsDialog } from '@/components/PDFOptionsDialog';
 import { OPERATIONAL_EXPENSE_CATEGORIES } from '@/lib/expense-categories';
@@ -3724,10 +3724,23 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         onOpenChange={v => { if (!v) setPdfDialogType(null); }}
         documentType={pdfDialogType || 'quote'}
         hasProductImages={pdfData?.parts?.some((p: any) => !!p.image_url) ?? false}
-        onGenerate={(options, validity, dueDate) => {
+        onGenerate={async (action, options, validity, dueDate) => {
           if (!pdfData || !pdfDialogType) return;
-          generatePDF({ ...pdfData, documentType: pdfDialogType }, { ...options, validity, dueDate });
-          setPdfDialogType(null);
+          const payload = { ...pdfData, documentType: pdfDialogType };
+          const opts = { ...options, validity, dueDate };
+          if (action === 'download') {
+            try {
+              await downloadPDF(payload, opts);
+              toast.success('PDF baixado com sucesso');
+              setPdfDialogType(null);
+            } catch (e: any) {
+              console.error('PDF download failed:', e);
+              toast.error('Erro ao gerar o PDF para download');
+            }
+          } else {
+            generatePDF(payload, opts);
+            setPdfDialogType(null);
+          }
         }}
       />
 

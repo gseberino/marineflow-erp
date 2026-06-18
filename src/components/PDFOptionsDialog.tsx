@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Download, Printer, Loader2 } from 'lucide-react';
 import type { PDFOptions, PDFDocumentType } from '@/lib/pdf-generator';
 import { DEFAULT_PDF_OPTIONS } from '@/lib/pdf-generator';
 
@@ -15,17 +15,20 @@ export type ValidityConfig = {
   date?: string;
 };
 
+export type PDFAction = 'print' | 'download';
+
 interface Props {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   documentType: PDFDocumentType;
-  onGenerate: (options: PDFOptions, validity?: ValidityConfig, dueDate?: string) => void;
+  onGenerate: (action: PDFAction, options: PDFOptions, validity?: ValidityConfig, dueDate?: string) => void | Promise<void>;
   hasProductImages?: boolean;
 }
 
 export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate, hasProductImages }: Props) {
   const { t } = useI18n();
   const [options, setOptions] = useState<PDFOptions>({ ...DEFAULT_PDF_OPTIONS });
+  const [downloading, setDownloading] = useState(false);
   const [validityMode, setValidityMode] = useState<'days' | 'date'>('days');
   const [validityDays, setValidityDays] = useState(15);
   const [validityDate, setValidityDate] = useState('');
@@ -38,6 +41,7 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
   useEffect(() => {
     if (open) {
       setOptions({ ...DEFAULT_PDF_OPTIONS });
+      setDownloading(false);
       setValidityMode('days');
       setValidityDays(15);
       setValidityDate('');
@@ -87,8 +91,25 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
     return items;
   })();
 
+  const triggerAction = async (action: PDFAction) => {
+    const validity = documentType === 'quote'
+      ? { mode: validityMode, days: validityDays, date: validityDate }
+      : undefined;
+    const due = documentType === 'invoice' ? dueDate : undefined;
+    if (action === 'download') {
+      setDownloading(true);
+      try {
+        await onGenerate('download', options, validity, due);
+      } finally {
+        setDownloading(false);
+      }
+    } else {
+      onGenerate('print', options, validity, due);
+    }
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(v) => { if (!downloading) onOpenChange(v); }}>
       <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{titleMap[documentType]}</DialogTitle>
@@ -180,21 +201,27 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
           <p className="text-xs text-muted-foreground">{t.pdf.pdfHint}</p>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+        <DialogFooter className="flex-col sm:flex-row gap-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={downloading}>
             {t.common.cancel}
           </Button>
           <Button
-            onClick={() => onGenerate(
-              options,
-              documentType === 'quote'
-                ? { mode: validityMode, days: validityDays, date: validityDate }
-                : undefined,
-              documentType === 'invoice' ? dueDate : undefined,
-            )}
+            variant="outline"
+            disabled={downloading}
+            onClick={() => triggerAction('print')}
+          >
+            <Printer className="h-4 w-4 mr-1.5" />
+            {t.pdf.print}
+          </Button>
+          <Button
+            disabled={downloading}
+            onClick={() => triggerAction('download')}
             className="bg-accent text-accent-foreground hover:bg-accent/90"
           >
-            {t.pdf.generate}
+            {downloading
+              ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+              : <Download className="h-4 w-4 mr-1.5" />}
+            {downloading ? t.pdf.generating : t.pdf.download}
           </Button>
         </DialogFooter>
       </DialogContent>
