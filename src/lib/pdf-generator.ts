@@ -135,6 +135,19 @@ export type PDFData = {
 export function generatePDF(data: PDFData, options: PDFOptions): void {
   const html = buildHTMLDocument(data, options);
 
+  // Primary: open in a dedicated window so the OS always prints/saves from the
+  // right context. The iframe approach causes iPadOS to save the main ERP page
+  // instead of the generated PDF when the user taps "Save" in the share sheet.
+  const win = window.open('', '_blank');
+  if (win) {
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 500);
+    return;
+  }
+
+  // Fallback (popup blocked): invisible iframe approach
   const iframe = document.createElement('iframe');
   iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;';
   document.body.appendChild(iframe);
@@ -142,12 +155,6 @@ export function generatePDF(data: PDFData, options: PDFOptions): void {
   const doc = iframe.contentDocument || iframe.contentWindow?.document;
   if (!doc) {
     document.body.removeChild(iframe);
-    const win = window.open('', '_blank');
-    if (win) {
-      win.document.write(html);
-      win.document.close();
-      setTimeout(() => win.print(), 500);
-    }
     return;
   }
 
