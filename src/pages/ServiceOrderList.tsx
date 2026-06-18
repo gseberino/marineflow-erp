@@ -8,7 +8,7 @@ import { statusConfig, priorityConfig } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Plus, ClipboardList, MoreHorizontal, FileText, Printer, MessageCircle, Send, CheckCircle2, XCircle, History, Copy, Download, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Plus, ClipboardList, MoreHorizontal, FileText, Printer, MessageCircle, Send, CheckCircle2, XCircle, History, Copy, Download, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Loader2 } from 'lucide-react';
 import { exportToCSV } from '@/lib/export';
 import { supabase } from '@/integrations/supabase/client';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -19,8 +19,9 @@ import { PDFOptionsDialog } from '@/components/PDFOptionsDialog';
 import { WhatsAppSendHistoryDialog } from '@/components/WhatsAppSendHistoryDialog';
 import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/SendViaZAPIDialog';
 import { useWhatsAppSendStatusMap } from '@/hooks/use-whatsapp-send-log';
-import { usePDFData } from '@/hooks/use-pdf';
-import { generatePDF, type PDFOptions } from '@/lib/pdf-generator';
+import { usePDFData, fetchPDFData } from '@/hooks/use-pdf';
+import { generatePDF, downloadPDF, DEFAULT_PDF_OPTIONS, type PDFOptions } from '@/lib/pdf-generator';
+import type { PDFAction } from '@/components/PDFOptionsDialog';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { toast } from 'sonner';
@@ -77,14 +78,89 @@ export default function ServiceOrderList() {
   const [historyTarget, setHistoryTarget] = useState<{ id: string; number: string } | null>(null);
   const [zapiTarget, setZapiTarget] = useState<SendViaWhatsAppTarget | null>(null);
   const { data: pdfData } = usePDFData(pdfTarget?.id);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDownloading, setBulkDownloading] = useState(false);
 
   const orderIds = (orders || []).map((o: any) => o.id);
   const { data: sendStatusMap } = useWhatsAppSendStatusMap(orderIds);
 
-  const handleGeneratePDF = (options: PDFOptions, validity?: any) => {
+  const handleGeneratePDF = (action: PDFAction, options: PDFOptions, validity?: any, dueDate?: string) => {
     if (!pdfData || !pdfTarget) return;
-    generatePDF({ ...pdfData, documentType: pdfTarget.type }, { ...options, validity });
-    setPdfTarget(null);
+    if (action === 'download') {
+      downloadPDF({ ...pdfData, documentType: pdfTarget.type }, { ...options, validity, dueDate })
+        .then(() => toast.success('PDF baixado com sucesso'))
+        .catch((e: any) => { console.error(e); toast.error('Erro ao gerar o PDF'); });
+      setPdfTarget(null);
+    } else {
+      generatePDF({ ...pdfData, documentType: pdfTarget.type }, { ...options, validity });
+      setPdfTarget(null);
+    }
+  };
+
+  const handleDirectDownload = async (soId: string, type: 'quote' | 'service_order') => {
+    try {
+      const data = await fetchPDFData(soId);
+      if (!data) throw new Error('Dados não encontrados');
+      await downloadPDF({ ...data, documentType: type }, DEFAULT_PDF_OPTIONS);
+      toast.success('PDF baixado com sucesso');
+    } catch (e: any) {
+      console.error('PDF download failed:', e);
+      toast.error('Erro ao gerar o PDF');
+    }
+  };
+
+  const handleBulkDownload = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setBulkDownloading(true);
+    let success = 0;
+    let failed = 0;
+    for (let i = 0; i < ids.length; i++) {
+      try {
+        const data = await fetchPDFData(ids[i]);
+        if (!data) throw new Error('Dados não encontrados');
+        await downloadPDF({ ...data, documentType: 'service_order' }, DEFAULT_PDF_OPTIONS);
+        success++;
+        if (i < ids.length - 1) await new Promise(r => setTimeout(r, 800));
+      } catch (e: any) {
+        console.error('Bulk PDF failed for', ids[i], e);
+        failed++;
+      }
+    }
+    setBulkDownloading(false);
+    setSelectedIds(new Set());
+    if (failed === 0) {
+      toast.success(`${success} PDF${success > 1 ? 's' : ''} baixado${success > 1 ? 's' : ''} com sucesso`);
+    } else {
+      toast.error(`${failed} falhou. ${success} baixado${success > 1 ? 's' : ''} com sucesso.`);
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = (pageItems: any[]) => {
+    const pageIds = pageItems.map((so: any) => so.id);
+    const allSelected = pageIds.every((id: string) => selectedIds.has(id));
+    if (allSelected) {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        pageIds.forEach((id: string) => next.delete(id));
+        return next;
+      });
+    } else {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        pageIds.forEach((id: string) => next.add(id));
+        return next;
+      });
+    }
   };
 
   const handleSendWhatsApp = (so: any) => {
@@ -298,10 +374,43 @@ export default function ServiceOrderList() {
         </div>
       ) : (
         <>
+          {selectedIds.size > 0 && (
+            <div className="flex items-center gap-3 px-4 py-2 rounded-lg bg-accent/10 border border-accent/20">
+              <span className="text-sm font-medium">{selectedIds.size} OS selecionada{selectedIds.size > 1 ? 's' : ''}</span>
+              <Button
+                size="sm"
+                variant="default"
+                className="gap-2 bg-accent text-accent-foreground hover:bg-accent/90"
+                disabled={bulkDownloading}
+                onClick={handleBulkDownload}
+              >
+                {bulkDownloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                {bulkDownloading ? 'Baixando...' : `Baixar ${selectedIds.size} PDF${selectedIds.size > 1 ? 's' : ''}`}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setSelectedIds(new Set())}
+                disabled={bulkDownloading}
+              >
+                Cancelar seleção
+              </Button>
+            </div>
+          )}
           <div className="rounded-xl border bg-card shadow-sm overflow-x-auto scrollbar-thin">
             <table className="w-full text-sm min-w-[1000px]">
               <thead>
                 <tr className="border-b bg-muted/50">
+                  <th className="px-4 py-3 w-10">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 cursor-pointer"
+                      checked={paginated.length > 0 && paginated.every((so: any) => selectedIds.has(so.id))}
+                      ref={(el) => { if (el) el.indeterminate = paginated.some((so: any) => selectedIds.has(so.id)) && !paginated.every((so: any) => selectedIds.has(so.id)); }}
+                      onChange={() => toggleSelectAll(paginated)}
+                      aria-label="Selecionar todos"
+                    />
+                  </th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">
                     <button onClick={() => handleSort('service_order_number')} className="flex items-center hover:text-foreground transition-colors">
                       {t.serviceOrders.orderNumber}<SortIcon col="service_order_number" />
@@ -348,6 +457,16 @@ export default function ServiceOrderList() {
                   const pc = priorityConfig[so.priority as keyof typeof priorityConfig];
                   return (
                     <tr key={so.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                      <td className="px-4 py-3 w-10">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 cursor-pointer"
+                          checked={selectedIds.has(so.id)}
+                          onChange={() => toggleSelect(so.id)}
+                          onClick={e => e.stopPropagation()}
+                          aria-label={`Selecionar ${so.service_order_number}`}
+                        />
+                      </td>
                       <td className="px-4 py-3">
                         <Link to={`/service-orders/${so.id}`} className="font-medium text-accent hover:underline">{so.service_order_number}</Link>
                       </td>
@@ -443,6 +562,21 @@ export default function ServiceOrderList() {
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
+                              onClick={() => handleDirectDownload(so.id, 'quote')}
+                              className="gap-2"
+                            >
+                              <Download className="h-4 w-4" />
+                              Baixar Orçamento
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => handleDirectDownload(so.id, 'service_order')}
+                              className="gap-2"
+                            >
+                              <Download className="h-4 w-4" />
+                              Baixar OS
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
                               onClick={() => handleSendWhatsApp(so)}
                               disabled={!so.share_token}
                               className="gap-2"
@@ -480,7 +614,7 @@ export default function ServiceOrderList() {
                   );
                 })}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={10} className="px-4 py-12 text-center text-muted-foreground">{t.common.noResults}</td></tr>
+                  <tr><td colSpan={11} className="px-4 py-12 text-center text-muted-foreground">{t.common.noResults}</td></tr>
                 )}
               </tbody>
             </table>

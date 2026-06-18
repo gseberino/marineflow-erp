@@ -187,14 +187,15 @@ export function generatePDF(data: PDFData, options: PDFOptions): void {
 export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promise<Blob> {
   const html = buildHTMLDocument(data, options);
 
-  // Container off-screen com largura A4 para captura fiel.
-  // IMPORTANTE: usar `position:absolute` (NÃO `fixed`) e mantê-lo no fluxo de layout.
-  // Com `position:fixed;left:-99999px` o html2canvas calcula altura zero em Chromium
-  // recente, gerando PDF totalmente em branco.
+  // html2canvas requires the element to be on-screen to capture correctly —
+  // elements at left:-10000px render blank. We position at origin and hide from
+  // the user with a white fixed overlay instead.
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:#fff;z-index:99999;pointer-events:none;';
+  document.body.appendChild(overlay);
+
   const container = document.createElement('div');
-  container.style.cssText =
-    'position:absolute;left:-10000px;top:0;width:794px;background:#ffffff;' +
-    'z-index:-1;visibility:visible;';
+  container.style.cssText = 'position:absolute;left:0;top:0;width:794px;background:#ffffff;pointer-events:none;';
   container.innerHTML = html;
   document.body.appendChild(container);
 
@@ -219,12 +220,8 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
           scale: 2,
           useCORS: true,
           backgroundColor: '#ffffff',
-          // Força altura/largura reais — evita captura zerada em containers off-screen
           windowWidth: 794,
           width: 794,
-          height: container.scrollHeight,
-          scrollX: 0,
-          scrollY: 0,
         },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
         pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
@@ -241,6 +238,7 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
     return blob;
   } finally {
     if (document.body.contains(container)) document.body.removeChild(container);
+    if (document.body.contains(overlay)) document.body.removeChild(overlay);
   }
 }
 
