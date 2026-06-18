@@ -69,7 +69,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle, Pencil, Paperclip, X, FileImage, ExternalLink, Package, Copy, Camera, MapPin, Clock } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle, Pencil, Paperclip, X, FileImage, ExternalLink, Package, Copy, Camera, MapPin, Clock, Download, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { MoneyInput } from '@/components/MoneyInput';
@@ -650,6 +650,20 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     setPdfDialogType(type);
   };
 
+  const handleDirectDownload = async (type: 'quote' | 'service_order' | 'invoice') => {
+    if (!pdfData || !orderId) return;
+    setDownloadingType(type);
+    try {
+      await downloadPDF({ ...pdfData, documentType: type }, DEFAULT_PDF_OPTIONS);
+      toast.success('PDF baixado com sucesso');
+    } catch (e: any) {
+      console.error('PDF download failed:', e);
+      toast.error('Erro ao gerar o PDF para download');
+    } finally {
+      setDownloadingType(null);
+    }
+  };
+
   const createSO = useCreateServiceOrder();
   const updateSO = useUpdateServiceOrder();
   const updateStatus = useUpdateServiceOrderStatus();
@@ -844,6 +858,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const { data: zapiHistory } = useWhatsAppSendHistory(orderId || null);
   const lastZapiSend = zapiHistory?.[0];
   const [pdfDialogType, setPdfDialogType] = useState<'quote' | 'service_order' | 'invoice' | null>(null);
+  const [downloadingType, setDownloadingType] = useState<'quote' | 'service_order' | 'invoice' | null>(null);
   const [waPreview, setWaPreview] = useState<{ phone: string; message: string; url: string; clientName: string } | null>(null);
   const [waEditMessage, setWaEditMessage] = useState('');
   const [waEditPhone, setWaEditPhone] = useState('');
@@ -1736,15 +1751,50 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 <FileText className="h-4 w-4" />
                 {t.pdf.quote}
               </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleDirectDownload('quote')}
+                disabled={!pdfData || downloadingType === 'quote'}
+                title="Baixar Orçamento em PDF"
+                className="gap-1"
+              >
+                {downloadingType === 'quote' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                Baixar
+              </Button>
               <Button variant="outline" size="sm" onClick={() => openPdfDialog('service_order')} className="gap-1">
                 <Printer className="h-4 w-4" />
                 OS
               </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleDirectDownload('service_order')}
+                disabled={!pdfData || downloadingType === 'service_order'}
+                title="Baixar OS em PDF"
+                className="gap-1"
+              >
+                {downloadingType === 'service_order' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                Baixar
+              </Button>
               {(currentStatus === 'completed' || currentStatus === 'invoiced') && (
-                <Button variant="outline" size="sm" onClick={() => openPdfDialog('invoice')} className="gap-1">
-                  <Receipt className="h-4 w-4" />
-                  Fatura
-                </Button>
+                <>
+                  <Button variant="outline" size="sm" onClick={() => openPdfDialog('invoice')} className="gap-1">
+                    <Receipt className="h-4 w-4" />
+                    Fatura
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleDirectDownload('invoice')}
+                    disabled={!pdfData || downloadingType === 'invoice'}
+                    title="Baixar Fatura em PDF"
+                    className="gap-1"
+                  >
+                    {downloadingType === 'invoice' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                    Baixar
+                  </Button>
+                </>
               )}
               {orderData?.share_token && (
                 <Button

@@ -187,14 +187,15 @@ export function generatePDF(data: PDFData, options: PDFOptions): void {
 export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promise<Blob> {
   const html = buildHTMLDocument(data, options);
 
-  // Container off-screen com largura A4 para captura fiel.
-  // IMPORTANTE: usar `position:absolute` (NÃO `fixed`) e mantê-lo no fluxo de layout.
-  // Com `position:fixed;left:-99999px` o html2canvas calcula altura zero em Chromium
-  // recente, gerando PDF totalmente em branco.
+  // html2canvas requires the element to be on-screen to capture correctly —
+  // elements at left:-10000px render blank. We position at origin and hide from
+  // the user with a white fixed overlay instead.
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:#fff;z-index:99999;pointer-events:none;';
+  document.body.appendChild(overlay);
+
   const container = document.createElement('div');
-  container.style.cssText =
-    'position:absolute;left:-10000px;top:0;width:794px;background:#ffffff;' +
-    'z-index:-1;visibility:visible;';
+  container.style.cssText = 'position:absolute;left:0;top:0;width:794px;background:#ffffff;pointer-events:none;';
   container.innerHTML = html;
   document.body.appendChild(container);
 
@@ -219,12 +220,8 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
           scale: 2,
           useCORS: true,
           backgroundColor: '#ffffff',
-          // Força altura/largura reais — evita captura zerada em containers off-screen
           windowWidth: 794,
           width: 794,
-          height: container.scrollHeight,
-          scrollX: 0,
-          scrollY: 0,
         },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
         pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
@@ -241,6 +238,62 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
     return blob;
   } finally {
     if (document.body.contains(container)) document.body.removeChild(container);
+    if (document.body.contains(overlay)) document.body.removeChild(overlay);
+  }
+}
+
+/** Remove acentos, troca espaços por hífen e tira caracteres inválidos para nome de arquivo. */
+function slugifyForFilename(value: string): string {
+  return (value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // remove acentos
+    .replace(/[^a-zA-Z0-9]+/g, '-')  // qualquer não-alfanumérico vira hífen
+    .replace(/^-+|-+$/g, '')          // remove hífens das pontas
+    .slice(0, 60);
+}
+
+const DOC_TYPE_FILENAME_LABEL: Record<PDFDocumentType, string> = {
+  quote: 'Orcamento',
+  service_order: 'OrdemServico',
+  invoice: 'Fatura',
+  receipt: 'Recibo',
+};
+
+/**
+ * Monta o nome do arquivo PDF a partir do tipo de documento, número da OS,
+ * cliente e embarcação/motorhome. Ex.: "OrdemServico_OS-00123_Joao-Silva_Lancha-Azul.pdf"
+ */
+export function buildPDFFilename(data: PDFData): string {
+  const parts: string[] = [DOC_TYPE_FILENAME_LABEL[data.documentType] || 'Documento'];
+  const soNumber = data.serviceOrder?.service_order_number;
+  if (soNumber) parts.push(slugifyForFilename(String(soNumber)));
+  const clientName = slugifyForFilename(data.client?.name || '');
+  if (clientName) parts.push(clientName);
+  const vesselName = slugifyForFilename(data.vessel?.name || '');
+  if (vesselName) parts.push(vesselName);
+  return `${parts.filter(Boolean).join('_')}.pdf`;
+}
+
+/**
+ * Gera o PDF e dispara o download direto do arquivo, com nome adequado
+ * (tipo do documento + número da OS + cliente + embarcação). Funciona
+ * de forma idêntica em desktop, celular e tablet — não depende do diálogo
+ * de impressão do navegador.
+ */
+export async function downloadPDF(data: PDFData, options: PDFOptions): Promise<void> {
+  const blob = await generatePDFBlob(data, options);
+  const filename = buildPDFFilename(data);
+  const url = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } finally {
+    // Libera a memória do object URL após o download iniciar
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 }
 
