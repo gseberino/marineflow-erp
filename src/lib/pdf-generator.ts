@@ -187,26 +187,45 @@ export function generatePDF(data: PDFData, options: PDFOptions): void {
 export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promise<Blob> {
   const html = buildHTMLDocument(data, options);
 
-  // html2canvas requires the element to be on-screen to capture correctly —
-  // elements at left:-10000px render blank. We position at origin and hide from
-  // the user with a white fixed overlay instead.
+  // DOMParser correctly separates <head> styles from <body> content.
+  // Setting a full HTML document via innerHTML puts <title> text on-screen and
+  // may not apply <style> / @import rules properly inside a div context.
+  const parser = new DOMParser();
+  const parsed = parser.parseFromString(html, 'text/html');
+
+  // Collect all <style> blocks from the parsed document and inject them into
+  // the real document head so CSS variables, @import and font-face rules resolve.
+  const styleTag = document.createElement('style');
+  styleTag.id = '__pdf_gen_style__';
+  parsed.querySelectorAll('style').forEach((s) => {
+    styleTag.textContent = (styleTag.textContent || '') + '\n' + (s.textContent || '');
+  });
+  document.head.appendChild(styleTag);
+
+  // White overlay hides the off-screen rendering container from the user.
+  // It sits ABOVE the container (z-index 9998 > 9997) so the user never sees it.
   const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed;inset:0;background:#fff;z-index:99999;pointer-events:none;';
+  overlay.style.cssText = 'position:fixed;inset:0;background:#fff;z-index:9998;pointer-events:none;';
   document.body.appendChild(overlay);
 
+  // position:fixed keeps the container at (0,0) in the viewport regardless of
+  // how far the page is scrolled — critical for html2canvas to find the element.
   const container = document.createElement('div');
-  container.style.cssText = 'position:absolute;left:0;top:0;width:794px;background:#ffffff;pointer-events:none;';
-  container.innerHTML = html;
+  container.style.cssText = 'position:fixed;left:0;top:0;width:794px;background:#ffffff;pointer-events:none;z-index:9997;';
+  container.innerHTML = parsed.body.innerHTML;
   document.body.appendChild(container);
 
-  // Aguarda o browser calcular layout + carregar fontes antes da captura
-  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  // Two rAF ticks: first lets the browser measure layout, second lets it paint.
+  await new Promise<void>((r) => requestAnimationFrame(() => r()));
+  await new Promise<void>((r) => requestAnimationFrame(() => r()));
   if ((document as any).fonts?.ready) {
     try { await (document as any).fonts.ready; } catch { /* ignore */ }
   }
 
+  // scrollHeight after layout gives the true content height for html2canvas.
+  const captureHeight = container.scrollHeight || 1122;
+
   try {
-    // Import dinâmico para não pesar o bundle inicial
     const html2pdfModule: any = await import('html2pdf.js');
     const html2pdf = html2pdfModule.default || html2pdfModule;
 
@@ -222,23 +241,27 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
           backgroundColor: '#ffffff',
           windowWidth: 794,
           width: 794,
+          height: captureHeight,
+          // scrollX/scrollY tell html2canvas to measure element positions as if
+          // the page is at origin — without this, captured rect is offset by the
+          // current scroll position and the content appears blank/clipped.
+          scrollX: 0,
+          scrollY: 0,
         },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
         pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
       })
       .outputPdf('blob');
 
-    // Sanity check — blob suspeito (<2KB) costuma significar página em branco
     if (blob.size < 2000) {
-      console.warn('[generatePDFBlob] PDF suspeito de estar vazio:', {
-        size: blob.size,
-        scrollHeight: container.scrollHeight,
-      });
+      console.warn('[generatePDFBlob] PDF suspeito de estar vazio:', { size: blob.size, captureHeight });
     }
     return blob;
   } finally {
     if (document.body.contains(container)) document.body.removeChild(container);
     if (document.body.contains(overlay)) document.body.removeChild(overlay);
+    const s = document.getElementById('__pdf_gen_style__');
+    if (s) s.remove();
   }
 }
 
