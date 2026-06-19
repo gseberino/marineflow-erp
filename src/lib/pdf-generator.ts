@@ -215,6 +215,13 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
   container.innerHTML = parsed.body.innerHTML;
   document.body.appendChild(container);
 
+  // Hide body scrollbar so it doesn't reduce the right side of the virtual viewport.
+  // The body's vertical scrollbar (~17px) consumes space from windowWidth, causing
+  // html2canvas to clip the right edge of our 794px container and produce an
+  // asymmetric right margin in the captured image.
+  const prevOverflow = document.body.style.overflow;
+  document.body.style.overflow = 'hidden';
+
   // Two rAF ticks: first lets the browser measure layout, second lets it paint.
   await new Promise<void>((r) => requestAnimationFrame(() => r()));
   await new Promise<void>((r) => requestAnimationFrame(() => r()));
@@ -258,6 +265,7 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
     }
     return blob;
   } finally {
+    document.body.style.overflow = prevOverflow;
     if (document.body.contains(container)) document.body.removeChild(container);
     if (document.body.contains(overlay)) document.body.removeChild(overlay);
     const s = document.getElementById('__pdf_gen_style__');
