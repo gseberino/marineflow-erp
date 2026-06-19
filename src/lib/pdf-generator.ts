@@ -187,17 +187,22 @@ export function generatePDF(data: PDFData, options: PDFOptions): void {
 export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promise<Blob> {
   const html = buildHTMLDocument(data, options);
 
-  // html2canvas requires the element to be on-screen to capture correctly —
-  // elements at left:-10000px render blank. We position at origin and hide from
-  // the user with a white fixed overlay instead.
-  const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed;inset:0;background:#fff;z-index:99999;pointer-events:none;';
-  document.body.appendChild(overlay);
-
+  // html2canvas precisa do elemento renderizado on-screen para capturar certo —
+  // a `left:-10000px` ele rende em branco. Usamos um wrapper `fixed` na origem,
+  // atrás do conteúdo do app (z-index:-1), com o container em FLUXO NORMAL dentro
+  // dele (não `absolute`). O container absoluto não contribui para a altura do
+  // documento, fazendo o html2canvas calcular altura 0 (PDF em branco) e medir a
+  // largura errada (conteúdo encostado à esquerda → margem direita gigante).
+  const A4_WIDTH_PX = 794; // 210mm @ 96dpi
+  const wrapper = document.createElement('div');
+  wrapper.style.cssText =
+    `position:fixed;top:0;left:0;width:${A4_WIDTH_PX}px;z-index:-1;` +
+    'pointer-events:none;background:#ffffff;';
   const container = document.createElement('div');
-  container.style.cssText = 'position:absolute;left:0;top:0;width:794px;background:#ffffff;pointer-events:none;';
+  container.style.cssText = `width:${A4_WIDTH_PX}px;background:#ffffff;`;
   container.innerHTML = html;
-  document.body.appendChild(container);
+  wrapper.appendChild(container);
+  document.body.appendChild(wrapper);
 
   // Aguarda o browser calcular layout + carregar fontes antes da captura
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -210,6 +215,11 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
     const html2pdfModule: any = await import('html2pdf.js');
     const html2pdf = html2pdfModule.default || html2pdfModule;
 
+    // Altura real do conteúdo após layout. Forçar width E height (mais windowWidth/
+    // windowHeight e scroll/x-y em 0) garante que o html2canvas capture o conteúdo
+    // de largura cheia a partir da origem — sem clipping à direita nem vazio lateral.
+    const captureHeight = container.scrollHeight;
+
     const blob: Blob = await html2pdf()
       .from(container)
       .set({
@@ -220,8 +230,14 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
           scale: 2,
           useCORS: true,
           backgroundColor: '#ffffff',
-          windowWidth: 794,
-          width: 794,
+          width: A4_WIDTH_PX,
+          height: captureHeight,
+          windowWidth: A4_WIDTH_PX,
+          windowHeight: captureHeight,
+          scrollX: 0,
+          scrollY: 0,
+          x: 0,
+          y: 0,
         },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
         pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
@@ -237,8 +253,7 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
     }
     return blob;
   } finally {
-    if (document.body.contains(container)) document.body.removeChild(container);
-    if (document.body.contains(overlay)) document.body.removeChild(overlay);
+    if (document.body.contains(wrapper)) document.body.removeChild(wrapper);
   }
 }
 
