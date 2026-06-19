@@ -187,54 +187,51 @@ export function generatePDF(data: PDFData, options: PDFOptions): void {
 export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promise<Blob> {
   const html = buildHTMLDocument(data, options);
 
-  // DOMParser correctly separates <head> styles from <body> content.
-  // Setting a full HTML document via innerHTML puts <title> text on-screen and
-  // may not apply <style> / @import rules properly inside a div context.
-  const parser = new DOMParser();
-  const parsed = parser.parseFromString(html, 'text/html');
-
-  // Collect all <style> blocks from the parsed document and inject them into
-  // the real document head so CSS variables, @import and font-face rules resolve.
-  const styleTag = document.createElement('style');
-  styleTag.id = '__pdf_gen_style__';
-  parsed.querySelectorAll('style').forEach((s) => {
-    styleTag.textContent = (styleTag.textContent || '') + '\n' + (s.textContent || '');
-  });
-  document.head.appendChild(styleTag);
-
-  // White overlay hides the off-screen rendering container from the user.
-  // It sits ABOVE the container (z-index 9998 > 9997) so the user never sees it.
-  const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed;inset:0;background:#fff;z-index:9998;pointer-events:none;';
-  document.body.appendChild(overlay);
-
-  // position:fixed keeps the container at (0,0) in the viewport regardless of
-  // how far the page is scrolled — critical for html2canvas to find the element.
+  // html2canvas precisa do elemento renderizado on-screen para capturar certo —
+  // a `left:-10000px` ele rende em branco. Usamos um wrapper `fixed` na origem,
+  // atrás do conteúdo do app (z-index:-1), com o container em FLUXO NORMAL dentro
+  // dele (NÃO `absolute`/`fixed`). Um container fora do fluxo não contribui para a
+  // altura do documento, fazendo o html2canvas calcular altura 0 (PDF em branco) e
+  // medir a largura errada (conteúdo encostado à esquerda → margem direita gigante).
+  const A4_WIDTH_PX = 794; // 210mm @ 96dpi
+  const wrapper = document.createElement('div');
+  wrapper.style.cssText =
+    `position:fixed;top:0;left:0;width:${A4_WIDTH_PX}px;z-index:-1;` +
+    'pointer-events:none;background:#ffffff;';
   const container = document.createElement('div');
-  container.style.cssText = 'position:fixed;left:0;top:0;width:794px;background:#ffffff;pointer-events:none;z-index:9997;';
-  container.innerHTML = parsed.body.innerHTML;
-  document.body.appendChild(container);
+  container.style.cssText = `width:${A4_WIDTH_PX}px;background:#ffffff;`;
+  container.innerHTML = html;
+  // Neutraliza a centralização do `.container` (max-width + margin:0 auto), feita
+  // para a tela. Durante a captura o clone do html2canvas pode ficar mais largo
+  // que 794px, fazendo o `.container` se centralizar (~35px à esquerda) e o lado
+  // direito ser cortado — exatamente a margem assimétrica. Forçamos largura cheia.
+  const fix = document.createElement('style');
+  fix.textContent = '.container{max-width:none !important;margin:0 !important;width:100% !important;}';
+  container.insertBefore(fix, container.firstChild);
+  wrapper.appendChild(container);
+  document.body.appendChild(wrapper);
 
-  // Hide body scrollbar so it doesn't reduce the right side of the virtual viewport.
-  // The body's vertical scrollbar (~17px) consumes space from windowWidth, causing
-  // html2canvas to clip the right edge of our 794px container and produce an
-  // asymmetric right margin in the captured image.
-  const prevOverflow = document.body.style.overflow;
+  // Esconde a barra de rolagem do body durante a captura. Senão a scrollbar
+  // vertical (~15px) consome largura do viewport virtual do html2canvas e desloca
+  // o conteúdo, gerando margem assimétrica. Restaurada no finally.
+  const prevBodyOverflow = document.body.style.overflow;
   document.body.style.overflow = 'hidden';
 
-  // Two rAF ticks: first lets the browser measure layout, second lets it paint.
-  await new Promise<void>((r) => requestAnimationFrame(() => r()));
-  await new Promise<void>((r) => requestAnimationFrame(() => r()));
+  // Aguarda o browser calcular layout + carregar fontes antes da captura
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   if ((document as any).fonts?.ready) {
     try { await (document as any).fonts.ready; } catch { /* ignore */ }
   }
 
-  // scrollHeight after layout gives the true content height for html2canvas.
-  const captureHeight = container.scrollHeight || 1122;
-
   try {
+    // Import dinâmico para não pesar o bundle inicial
     const html2pdfModule: any = await import('html2pdf.js');
     const html2pdf = html2pdfModule.default || html2pdfModule;
+
+    // Altura real do conteúdo após layout. Forçar width E height (mais windowWidth/
+    // windowHeight e scroll/x-y em 0) garante que o html2canvas capture o conteúdo
+    // de largura cheia a partir da origem — sem clipping à direita nem vazio lateral.
+    const captureHeight = container.scrollHeight;
 
     const blob: Blob = await html2pdf()
       .from(container)
@@ -246,30 +243,31 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
           scale: 2,
           useCORS: true,
           backgroundColor: '#ffffff',
-          windowWidth: 794,
-          width: 794,
+          width: A4_WIDTH_PX,
           height: captureHeight,
-          // scrollX/scrollY tell html2canvas to measure element positions as if
-          // the page is at origin — without this, captured rect is offset by the
-          // current scroll position and the content appears blank/clipped.
+          windowWidth: A4_WIDTH_PX,
+          windowHeight: captureHeight,
           scrollX: 0,
           scrollY: 0,
+          x: 0,
+          y: 0,
         },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
         pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
       })
       .outputPdf('blob');
 
+    // Sanity check — blob suspeito (<2KB) costuma significar página em branco
     if (blob.size < 2000) {
-      console.warn('[generatePDFBlob] PDF suspeito de estar vazio:', { size: blob.size, captureHeight });
+      console.warn('[generatePDFBlob] PDF suspeito de estar vazio:', {
+        size: blob.size,
+        scrollHeight: container.scrollHeight,
+      });
     }
     return blob;
   } finally {
-    document.body.style.overflow = prevOverflow;
-    if (document.body.contains(container)) document.body.removeChild(container);
-    if (document.body.contains(overlay)) document.body.removeChild(overlay);
-    const s = document.getElementById('__pdf_gen_style__');
-    if (s) s.remove();
+    document.body.style.overflow = prevBodyOverflow;
+    if (document.body.contains(wrapper)) document.body.removeChild(wrapper);
   }
 }
 
