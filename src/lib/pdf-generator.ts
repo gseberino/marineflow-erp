@@ -201,12 +201,14 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
   const container = document.createElement('div');
   container.style.cssText = `width:${A4_WIDTH_PX}px;background:#ffffff;`;
   container.innerHTML = html;
-  // Neutraliza a centralização do `.container` (max-width + margin:0 auto), feita
-  // para a tela. Durante a captura o clone do html2canvas pode ficar mais largo
-  // que 794px, fazendo o `.container` se centralizar (~35px à esquerda) e o lado
-  // direito ser cortado — exatamente a margem assimétrica. Forçamos largura cheia.
+  // Override para a captura, replicando a geometria do caminho de impressão
+  // (@media print: `.container { padding: 0 }` + `@page { margin: 12mm }`):
+  //  - max-width/margin:auto removidos: senão o clone do html2canvas, mais largo
+  //    que 794px, centraliza o `.container` (~35px à esq) e corta a direita.
+  //  - padding:0: a margem do PDF vem só dos 12mm do html2pdf (abaixo), evitando
+  //    margem dupla (10mm + 40px de padding ≈ 20mm, grossa demais).
   const fix = document.createElement('style');
-  fix.textContent = '.container{max-width:none !important;margin:0 !important;width:100% !important;}';
+  fix.textContent = '.container{max-width:none !important;margin:0 !important;width:100% !important;padding:0 !important;}';
   container.insertBefore(fix, container.firstChild);
   wrapper.appendChild(container);
   document.body.appendChild(wrapper);
@@ -236,7 +238,9 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
     const blob: Blob = await html2pdf()
       .from(container)
       .set({
-        margin: [10, 10, 10, 10],
+        // 12mm em todos os lados = mesma margem do caminho de impressão
+        // (@page { margin: 12mm }), o espaçamento padrão do navegador.
+        margin: [12, 12, 12, 12],
         filename: 'documento.pdf',
         image: { type: 'jpeg', quality: 0.92 },
         html2canvas: {
