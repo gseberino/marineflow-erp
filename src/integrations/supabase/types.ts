@@ -1,4 +1,4 @@
-export type Json =
+﻿export type Json =
   | string
   | number
   | boolean
@@ -418,7 +418,7 @@ export type Database = {
           cpf_cnpj: string | null
           created_at: string
           email: string | null
-          full_name_or_company_name: string
+          name: string
           id: string
           notes: string | null
           phone: string | null
@@ -437,7 +437,7 @@ export type Database = {
           cpf_cnpj?: string | null
           created_at?: string
           email?: string | null
-          full_name_or_company_name: string
+          name: string
           id?: string
           notes?: string | null
           phone?: string | null
@@ -456,7 +456,7 @@ export type Database = {
           cpf_cnpj?: string | null
           created_at?: string
           email?: string | null
-          full_name_or_company_name?: string
+          name?: string
           id?: string
           notes?: string | null
           phone?: string | null
@@ -809,7 +809,7 @@ export type Database = {
           boat_length_feet: number | null
           boat_manufacturer: string | null
           boat_model: string | null
-          boat_name: string | null
+          name: string | null
           boat_year: number | null
           city: string | null
           country: string | null
@@ -817,9 +817,9 @@ export type Database = {
           created_at: string
           created_by: string
           email: string | null
-          full_name_or_company_name: string
+          name: string
           id: string
-          marina_name: string | null
+          name: string | null
           notes: string | null
           phone: string | null
           postal_code: string | null
@@ -836,7 +836,7 @@ export type Database = {
           boat_length_feet?: number | null
           boat_manufacturer?: string | null
           boat_model?: string | null
-          boat_name?: string | null
+          name?: string | null
           boat_year?: number | null
           city?: string | null
           country?: string | null
@@ -844,9 +844,9 @@ export type Database = {
           created_at?: string
           created_by: string
           email?: string | null
-          full_name_or_company_name: string
+          name: string
           id?: string
-          marina_name?: string | null
+          name?: string | null
           notes?: string | null
           phone?: string | null
           postal_code?: string | null
@@ -863,7 +863,7 @@ export type Database = {
           boat_length_feet?: number | null
           boat_manufacturer?: string | null
           boat_model?: string | null
-          boat_name?: string | null
+          name?: string | null
           boat_year?: number | null
           city?: string | null
           country?: string | null
@@ -871,9 +871,9 @@ export type Database = {
           created_at?: string
           created_by?: string
           email?: string | null
-          full_name_or_company_name?: string
+          name?: string
           id?: string
-          marina_name?: string | null
+          name?: string | null
           notes?: string | null
           phone?: string | null
           postal_code?: string | null
@@ -971,7 +971,7 @@ export type Database = {
           notes: string | null
           quantity: number
           service_id: string | null
-          service_name_snapshot: string
+          name_snapshot: string
           unit_price_snapshot: number
           updated_at: string
           warranty_days: number | null
@@ -986,7 +986,7 @@ export type Database = {
           notes?: string | null
           quantity?: number
           service_id?: string | null
-          service_name_snapshot: string
+          name_snapshot: string
           unit_price_snapshot?: number
           updated_at?: string
           warranty_days?: number | null
@@ -1001,7 +1001,7 @@ export type Database = {
           notes?: string | null
           quantity?: number
           service_id?: string | null
-          service_name_snapshot?: string
+          name_snapshot?: string
           unit_price_snapshot?: number
           updated_at?: string
           warranty_days?: number | null
@@ -1527,7 +1527,7 @@ export type Database = {
           id: string
           latitude: number | null
           longitude: number | null
-          marina_name: string
+          name: string
           postal_code: string | null
           state: string | null
           updated_at: string
@@ -1546,7 +1546,7 @@ export type Database = {
           id?: string
           latitude?: number | null
           longitude?: number | null
-          marina_name: string
+          name: string
           postal_code?: string | null
           state?: string | null
           updated_at?: string
@@ -1565,7 +1565,7 @@ export type Database = {
           id?: string
           latitude?: number | null
           longitude?: number | null
-          marina_name?: string
+          name?: string
           postal_code?: string | null
           state?: string | null
           updated_at?: string
@@ -2665,7 +2665,7 @@ export type Database = {
           notes: string | null
           quantity: number
           service_id: string | null
-          service_name_snapshot: string
+          name_snapshot: string
           service_order_id: string
           started_at: string | null
           technician_user_id: string | null
@@ -2686,7 +2686,7 @@ export type Database = {
           notes?: string | null
           quantity?: number
           service_id?: string | null
-          service_name_snapshot: string
+          name_snapshot: string
           service_order_id: string
           started_at?: string | null
           technician_user_id?: string | null
@@ -2707,7 +2707,7 @@ export type Database = {
           notes?: string | null
           quantity?: number
           service_id?: string | null
-          service_name_snapshot?: string
+          name_snapshot?: string
           service_order_id?: string
           started_at?: string | null
           technician_user_id?: string | null
@@ -3130,7 +3130,7 @@ export type Database = {
           default_warranty_days: number | null
           description: string | null
           id: string
-          service_name: string
+          name: string
           updated_at: string | null
         }
         Insert: {
@@ -3143,7 +3143,7 @@ export type Database = {
           default_warranty_days?: number | null
           description?: string | null
           id?: string
-          service_name: string
+          name: string
           updated_at?: string | null
         }
         Update: {
@@ -3389,11 +3389,11 @@ export type Database = {
           asset_type: string | null
           battery_bank_summary: string | null
           beam_feet: number | null
-          boat_name: string
+          name: string
           client_id: string
           created_at: string
           current_dock_position: string | null
-          current_marina_name_snapshot: string | null
+          current_name_snapshot: string | null
           draft_feet: number | null
           electrical_system_notes: string | null
           engine_brand: string | null
@@ -3418,11 +3418,11 @@ export type Database = {
           asset_type?: string | null
           battery_bank_summary?: string | null
           beam_feet?: number | null
-          boat_name: string
+          name: string
           client_id: string
           created_at?: string
           current_dock_position?: string | null
-          current_marina_name_snapshot?: string | null
+          current_name_snapshot?: string | null
           draft_feet?: number | null
           electrical_system_notes?: string | null
           engine_brand?: string | null
@@ -3447,11 +3447,11 @@ export type Database = {
           asset_type?: string | null
           battery_bank_summary?: string | null
           beam_feet?: number | null
-          boat_name?: string
+          name?: string
           client_id?: string
           created_at?: string
           current_dock_position?: string | null
-          current_marina_name_snapshot?: string | null
+          current_name_snapshot?: string | null
           draft_feet?: number | null
           electrical_system_notes?: string | null
           engine_brand?: string | null

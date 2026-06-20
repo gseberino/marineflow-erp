@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+﻿import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ServiceTimer } from '@/components/ServiceTimer';
@@ -162,7 +162,7 @@ function ServiceCardFormComponent({
       if (!nameQuery) return false;
       if (s.id === draft.service_id) return false;
       return (
-        (s.name || s.service_name || '').toLowerCase().includes(nameQuery) ||
+        (s.name || s.name || '').toLowerCase().includes(nameQuery) ||
         (s.description || '').toLowerCase().includes(nameQuery)
       );
     })
@@ -193,7 +193,7 @@ function ServiceCardFormComponent({
                   onClick={() => {
                     onUpdate({
                       service_id: s.id,
-                      name_snapshot: s.name || s.service_name,
+                      name_snapshot: s.name || s.name,
                       description_snapshot: s.description || '',
                       billing_unit_snapshot: s.billing_unit || 'hour',
                       unit_price: Number(s.default_price) || 0,
@@ -202,7 +202,7 @@ function ServiceCardFormComponent({
                     setShowSuggestions(false);
                   }}
                 >
-                  <div className="font-medium">{s.name || s.service_name}</div>
+                  <div className="font-medium">{s.name || s.name}</div>
                   <div className="text-xs text-muted-foreground">
                     {BILLING_UNIT_LABELS[s.billing_unit] || s.billing_unit} —{' '}
                     {formatCurrency(s.default_price || 0)}
@@ -1325,7 +1325,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     const { data, error } = await supabase
       .from('services')
       .insert({
-        service_name: draft.name_snapshot,
+        name: draft.name_snapshot,
         default_price: draft.unit_price,
         billing_unit: draft.billing_unit_snapshot,
         active: true,
@@ -1737,7 +1737,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                     const url = `${window.location.origin}/view/${orderData.share_token}`;
                     const phoneRaw = (orderData?.clients as any)?.whatsapp || (orderData?.clients as any)?.phone || '';
                     const phone = normalizePhoneE164(phoneRaw);
-                    const clientName = (orderData?.clients as any)?.full_name_or_company_name || '';
+                    const clientName = (orderData?.clients as any)?.name || '';
                     const msg = `Olá${clientName ? ' ' + clientName : ''}, segue o link da Ordem de Serviço ${orderData.service_order_number}: ${url}`;
                     setWaEditPhone(phone);
                     setWaEditMessage(msg);
@@ -1791,7 +1791,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                         serviceOrderNumber: orderData.service_order_number,
                         shareToken: orderData.share_token,
                         clientId: (orderData?.clients as any)?.id || (orderData as any)?.client_id || null,
-                        clientName: (orderData?.clients as any)?.full_name_or_company_name || null,
+                        clientName: (orderData?.clients as any)?.name || null,
                         clientPhone: (orderData?.clients as any)?.whatsapp || (orderData?.clients as any)?.phone || null,
                         documentType: 'service_order',
                       })}
@@ -1805,7 +1805,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                         serviceOrderNumber: orderData.service_order_number,
                         shareToken: orderData.share_token,
                         clientId: (orderData?.clients as any)?.id || (orderData as any)?.client_id || null,
-                        clientName: (orderData?.clients as any)?.full_name_or_company_name || null,
+                        clientName: (orderData?.clients as any)?.name || null,
                         clientPhone: (orderData?.clients as any)?.whatsapp || (orderData?.clients as any)?.phone || null,
                         documentType: 'quote',
                       })}

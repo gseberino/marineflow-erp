@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -50,9 +50,9 @@ export default function ExternalSellerLeadsPage() {
         .insert([{
           created_by: user.id,
           type: 'individual',
-          full_name_or_company_name: vars.name,
+          name: vars.name,
           phone: vars.phone,
-          boat_name: vars.vessel
+          name: vars.vessel
         } as any])
         .select()
         .single();
@@ -72,7 +72,7 @@ export default function ExternalSellerLeadsPage() {
   });
 
   const filteredLeads = leads?.filter(l => 
-    l.full_name_or_company_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    l.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     l.phone?.includes(searchTerm) ||
     l.boat_name?.toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -164,7 +164,7 @@ export default function ExternalSellerLeadsPage() {
                 <div className="flex justify-between items-start">
                   <div className="space-y-1">
                     <h3 className="font-bold text-lg group-hover:text-primary transition-colors">
-                      {lead.full_name_or_company_name}
+                      {lead.name}
                     </h3>
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <Phone className="h-3.5 w-3.5" />

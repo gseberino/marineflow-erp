@@ -1,4 +1,4 @@
-// Core domain types for the nautical ERP
+﻿// Core domain types for the nautical ERP
 
 export type ClientType = 'individual' | 'company';
 
@@ -45,7 +45,7 @@ export interface Vessel {
   inverter_charger_summary?: string;
   navigation_electronics_summary?: string;
   electrical_system_notes?: string;
-  current_marina_name_snapshot?: string;
+  current_name_snapshot?: string;
   current_dock_position?: string;
   active: boolean;
   created_at: string;

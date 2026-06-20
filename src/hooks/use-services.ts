@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+﻿import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
@@ -9,7 +9,7 @@ export function useServices() {
       const { data, error } = await supabase
         .from('services')
         .select('*, name:service_name, price:default_price')
-        .order('service_name', { ascending: true });
+        .order('name', { ascending: true });
       if (error) throw error;
       return data;
     },
@@ -24,7 +24,7 @@ export function useCreateService() {
       const { name, ...rest } = values;
       const payload = {
         ...rest,
-        service_name: name || values.service_name,
+        name: name || values.name,
       };
       const { data, error } = await supabase
         .from('services')
@@ -47,7 +47,7 @@ export function useUpdateService() {
       const { name, ...rest } = values;
       const payload = {
         ...rest,
-        service_name: name || values.service_name,
+        name: name || values.name,
       };
       const { data, error } = await supabase
         .from('services')

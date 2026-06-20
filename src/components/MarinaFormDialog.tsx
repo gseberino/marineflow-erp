@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { useI18n } from '@/i18n';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -49,7 +49,7 @@ export function MarinaFormDialog({ open, onOpenChange, marina, onSaved }: Props)
   useEffect(() => {
     if (marina) {
       setForm({
-        name: marina.marina_name,
+        name: marina.name,
         contact_name: marina.contact_name ?? '',
         phone: marina.contact_phone ?? '',
         email: marina.contact_email ?? '',
@@ -79,7 +79,7 @@ export function MarinaFormDialog({ open, onOpenChange, marina, onSaved }: Props)
     try {
       const fullAddress = [form.address_line_1, form.address_number, form.address_complement].filter(Boolean).join(', ');
       const payload: TablesInsert<'marinas'> = {
-        marina_name: form.name,
+        name: form.name,
         contact_name: form.contact_name || null,
         contact_phone: form.phone || null,
         contact_email: form.email || null,

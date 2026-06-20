@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+﻿import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
@@ -8,7 +8,7 @@ export function useWhatsAppLeads(status?: string) {
     queryFn: async () => {
       let q = supabase
         .from('whatsapp_leads')
-        .select('*, linked_client:clients(id, full_name_or_company_name)')
+        .select('*, linked_client:clients(id, name)')
         .order('last_message_at', { ascending: false })
         .limit(200);
       if (status && status !== 'all') q = q.eq('status', status);
@@ -83,7 +83,7 @@ export function useConvertLeadToClient() {
       const { data: client, error: cerr } = await supabase
         .from('clients')
         .insert({
-          full_name_or_company_name: fullName || lead.display_name || `Lead ${lead.phone_normalized}`,
+          name: fullName || lead.display_name || `Lead ${lead.phone_normalized}`,
           type,
           whatsapp: lead.phone_normalized,
           phone: lead.phone_normalized,

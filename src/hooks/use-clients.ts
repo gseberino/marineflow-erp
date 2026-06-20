@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+﻿import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import type { Tables, TablesInsert, TablesUpdate } from '@/integrations/supabase/types';
 
@@ -10,8 +10,8 @@ export function useClients() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('clients')
-        .select('*, name:full_name_or_company_name')
-        .order('full_name_or_company_name', { ascending: true });
+        .select('*, name:name')
+        .order('name', { ascending: true });
       if (error) throw error;
       return data as Client[];
     },

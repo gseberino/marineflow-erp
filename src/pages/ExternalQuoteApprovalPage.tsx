@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -106,7 +106,7 @@ export default function ExternalQuoteApprovalPage() {
                       <Phone className="h-4 w-4 text-muted-foreground" />
                       {quote.client?.phone || quote.lead?.phone || '—'}
                     </div>
-                    {(quote.vessel?.boat_name || quote.lead?.boat_name) && (
+                    {(quote.vessel?.name || quote.lead?.boat_name) && (
                       <div className="flex items-center gap-2">
                         <Anchor className="h-4 w-4 text-muted-foreground" />
                         {getExternalQuoteVesselName(quote)}

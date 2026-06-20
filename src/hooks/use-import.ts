@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+﻿import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 
 export type ConflictItem = {
@@ -61,7 +61,7 @@ export function useCheckConflicts() {
         }
       } else if (entityType === 'services') {
         const names = rows.map(r => r.name).filter(Boolean) as string[];
-        const existing = await batchIn<any>('services', 'service_name', names, 'id,name:service_name');
+        const existing = await batchIn<any>('services', 'name', names, 'id,name:service_name');
         const nameMap = new Map(existing.map(s => [s.name, s]));
         for (const row of rows) {
           const found = row.name ? nameMap.get(row.name) : null;
@@ -211,7 +211,7 @@ export function useImportRows() {
         const validServiceRows = newRows.filter(r => r.name);
         for (const chunk of chunks(validServiceRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            service_name: r.name as string,
+            name: r.name as string,
             default_price: (r.default_price || 0) as number,
             billing_unit: 'visit' as string,
             currency: 'BRL' as string,
@@ -232,7 +232,7 @@ export function useImportRows() {
         const validClientRows = newRows.filter(r => r.name);
         for (const chunk of chunks(validClientRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            full_name_or_company_name: r.name,
+            name: r.name,
             type: r._type || 'company',
             cpf_cnpj: r.cnpj_cpf || null,
             email: r.email || null,
@@ -283,7 +283,7 @@ export function useImportRows() {
 
         for (const chunk of chunks(clientRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            full_name_or_company_name: r.name,
+            name: r.name,
             type: r._type || 'company',
             cpf_cnpj: r.cnpj_cpf || null,
             email: r.email || null,

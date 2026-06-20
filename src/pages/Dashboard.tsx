@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+﻿import { useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/hooks/use-auth';
 import { useDashboardData } from '@/hooks/use-dashboard';
@@ -259,7 +259,7 @@ export default function Dashboard() {
                     </span>
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {so.clients?.full_name_or_company_name} · {so.vessels?.boat_name}
+                    {so.clients?.name} · {so.vessels?.name}
                   </p>
                   {so.scheduled_start_at && (
                     <p className="text-xs text-muted-foreground">
@@ -304,8 +304,8 @@ export default function Dashboard() {
                       className="border-b hover:bg-muted/30 transition-colors cursor-pointer"
                     >
                       <td className="px-4 py-2.5 font-medium text-accent">{so.service_order_number}</td>
-                      <td className="px-4 py-2.5 text-muted-foreground">{so.clients?.full_name_or_company_name || '—'}</td>
-                      <td className="px-4 py-2.5 text-muted-foreground hidden md:table-cell">{so.vessels?.boat_name || '—'}</td>
+                      <td className="px-4 py-2.5 text-muted-foreground">{so.clients?.name || '—'}</td>
+                      <td className="px-4 py-2.5 text-muted-foreground hidden md:table-cell">{so.vessels?.name || '—'}</td>
                       <td className="px-4 py-2.5">
                         <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${statusConfig[so.status as keyof typeof statusConfig]?.className || 'bg-muted text-muted-foreground'}`}>
                           {statusLabels[so.status] || so.status}

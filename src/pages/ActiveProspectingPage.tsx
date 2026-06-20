@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { PageHeader } from '@/components/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -31,7 +31,7 @@ export default function ActiveProspectingPage() {
 
       const { data: quotes } = await supabase
         .from('service_orders')
-        .select('*, clients(name:full_name_or_company_name, phone, whatsapp)')
+        .select('*, clients(name:name, phone, whatsapp)')
         .eq('status', 'draft')
         .lte('created_at', twoDaysAgo.toISOString())
         .order('created_at', { ascending: false })
@@ -46,7 +46,7 @@ export default function ActiveProspectingPage() {
       // Usando uma query simples para pegar OS antigas e agrupar (simplificado para demonstração)
       const { data: oldOs } = await supabase
         .from('service_orders')
-        .select('*, clients(name:full_name_or_company_name, phone, whatsapp), vessels(name:boat_name, engine_type)')
+        .select('*, clients(name:name, phone, whatsapp), vessels(name:name, engine_type)')
         .eq('status', 'completed')
         .lte('created_at', sixMonthsAgo.toISOString())
         .order('created_at', { ascending: false })

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { PageHeader } from '@/components/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -180,7 +180,7 @@ export default function ExternalQuoteDetailPage() {
                   <p className="text-xs text-muted-foreground">{quote.client?.phone || quote.lead?.phone || '—'}</p>
                 </div>
               </div>
-              {(quote.vessel?.boat_name || quote.lead?.boat_name) && (
+              {(quote.vessel?.name || quote.lead?.boat_name) && (
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-blue-100 rounded-full">
                     <Anchor className="h-4 w-4 text-blue-600" />

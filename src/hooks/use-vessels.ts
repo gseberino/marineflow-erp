@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+﻿import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import type { Tables, TablesInsert, TablesUpdate } from '@/integrations/supabase/types';
 
@@ -10,8 +10,8 @@ export function useVessels() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('vessels')
-        .select('*, name:boat_name, clients(full_name_or_company_name, name:full_name_or_company_name), marinas(marina_name, name:marina_name)')
-        .order('boat_name', { ascending: true });
+        .select('*, name:name, clients(name, name:name), marinas(name, name:name)')
+        .order('name', { ascending: true });
       if (error) throw error;
       return data;
     },
@@ -26,7 +26,7 @@ export function useVessel(id: string | undefined) {
       if (!id) throw new Error('No id');
       const { data, error } = await supabase
         .from('vessels')
-        .select('*, name:boat_name, clients(full_name_or_company_name, name:full_name_or_company_name), marinas(marina_name, name:marina_name)')
+        .select('*, name:name, clients(name, name:name), marinas(name, name:name)')
         .eq('id', id)
         .maybeSingle();
       if (error) throw error;
@@ -44,9 +44,9 @@ export function useVesselsForClient(clientId: string | undefined) {
       if (!clientId) return [];
       const { data, error } = await supabase
         .from('vessels')
-        .select('*, name:boat_name, marinas(marina_name, name:marina_name)')
+        .select('*, name:name, marinas(name, name:name)')
         .eq('client_id', clientId)
-        .order('boat_name');
+        .order('name');
       if (error) throw error;
       return data;
     },

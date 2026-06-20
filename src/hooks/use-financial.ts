@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+﻿import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import type { BankTransaction } from '@/lib/bank-parser';
 import { writeAuditLog } from '@/hooks/use-audit-log';
@@ -10,7 +10,7 @@ export function useReceivables() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('receivables')
-        .select('*, clients(id,full_name_or_company_name,name:full_name_or_company_name,whatsapp,phone), service_orders(id,service_order_number,share_token)')
+        .select('*, clients(id,name,name:name,whatsapp,phone), service_orders(id,service_order_number,share_token)')
         .order('due_date', { ascending: true });
       if (error) throw error;
       return data;

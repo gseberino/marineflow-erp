@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+﻿import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import type { Database } from '@/integrations/supabase/types';
@@ -28,22 +28,22 @@ export type ExternalQuote = Database['public']['Tables']['external_quotes']['Row
 
 export function getExternalQuotePartyName(quote: Pick<ExternalQuote, 'client' | 'lead'>) {
   return (
-    quote.client?.full_name_or_company_name ||
-    quote.lead?.full_name_or_company_name ||
+    quote.client?.name ||
+    quote.lead?.name ||
     'Cliente/lead nao informado'
   );
 }
 
 export function getExternalQuoteVesselName(quote: Pick<ExternalQuote, 'vessel' | 'lead'>) {
-  return quote.vessel?.boat_name || quote.lead?.boat_name || 'Embarcacao nao informada';
+  return quote.vessel?.name || quote.lead?.boat_name || 'Embarcacao nao informada';
 }
 
 export function getExternalQuotePartName(part: Database['public']['Tables']['external_quote_parts']['Row']) {
-  return part.product_name_snapshot || 'Produto sem nome';
+  return part.name_snapshot || 'Produto sem nome';
 }
 
 export function getExternalQuoteServiceName(service: Database['public']['Tables']['external_quote_services']['Row']) {
-  return service.service_name_snapshot || 'Servico sem nome';
+  return service.name_snapshot || 'Servico sem nome';
 }
 
 export function useExternalQuotes(filters?: { status?: string; created_by?: string }) {
@@ -55,9 +55,9 @@ export function useExternalQuotes(filters?: { status?: string; created_by?: stri
         .select(`
           *,
           seller:app_users(id, full_name),
-          client:clients(id, full_name_or_company_name, phone),
-          lead:external_quote_leads(id, full_name_or_company_name, phone, boat_name, boat_model),
-          vessel:vessels(id, boat_name, model),
+          client:clients(id, name, phone),
+          lead:external_quote_leads(id, name, phone, boat_name, boat_model),
+          vessel:vessels(id, name, model),
           parts:external_quote_parts(id),
           services:external_quote_services(id)
         `)

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useI18n } from '@/i18n';
 import { useVessel } from '@/hooks/use-vessels';
@@ -62,7 +62,7 @@ export default function VesselDetail() {
       <div className="flex items-center gap-3">
         <Link to="/vessels" className="rounded-lg p-1.5 hover:bg-muted transition-colors"><ArrowLeft className="h-5 w-5" /></Link>
         <div className="flex-1">
-          <h1 className="text-2xl font-bold flex items-center gap-2"><Ship className="h-6 w-6 text-accent" />{vessel.boat_name}</h1>
+          <h1 className="text-2xl font-bold flex items-center gap-2"><Ship className="h-6 w-6 text-accent" />{vessel.name}</h1>
           <p className="text-sm text-muted-foreground">
             {vessel.manufacturer} {vessel.model} {vessel.year ? `(${vessel.year})` : ''} • {vessel.length_feet ? `${vessel.length_feet} ft` : ''} • {t.vessels.owner}: {clientName}
           </p>

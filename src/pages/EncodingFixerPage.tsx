@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,7 +19,7 @@ const TABLES: Record<TableKey, { label: string; fields: string[]; labelField: st
   vessels: {
     label: "Embarcações",
     labelField: "name",
-    fields: ["name", "manufacturer", "model", "current_marina_name_snapshot"],
+    fields: ["name", "manufacturer", "model", "current_name_snapshot"],
   },
   whatsapp_leads: {
     label: "Leads WhatsApp",

@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+﻿import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
@@ -204,7 +204,7 @@ export function useWhatsAppConversations() {
       // whatsapp_leads does NOT have a "name" column — only display_name.
       // linked_client_id references clients.id for manually confirmed links.
       const [{ data: clients }, { data: leads }] = await Promise.all([
-        supabase.from('clients').select('id, full_name_or_company_name, phone, whatsapp').eq('active', true),
+        supabase.from('clients').select('id, name, phone, whatsapp').eq('active', true),
         supabase
           .from('whatsapp_leads')
           .select('phone_normalized, display_name, status, unread_count, assigned_to, linked_client_id')
@@ -240,17 +240,17 @@ export function useWhatsAppConversations() {
           const clientFromPhone = clientByPhone.get(conv.phone);
           const suggestedClient =
             !clientFromMsg && !clientFromLead && clientFromPhone
-              ? { id: clientFromPhone.id, name: clientFromPhone.full_name_or_company_name }
+              ? { id: clientFromPhone.id, name: clientFromPhone.name }
               : null;
 
           return {
             ...conv,
-            client_name: effectiveClient?.full_name_or_company_name || null,
+            client_name: effectiveClient?.name || null,
             client_id: conv.client_id || clientFromMsg?.id || null,
             lead_status: lead?.status || null,
             unread_count: lead?.unread_count || 0,
             // Best available display name (confirmed links only, not suggestions)
-            name: effectiveClient?.full_name_or_company_name || lead?.display_name || null,
+            name: effectiveClient?.name || lead?.display_name || null,
             // Unconfirmed client match found by phone normalization
             suggested_client: suggestedClient,
           };

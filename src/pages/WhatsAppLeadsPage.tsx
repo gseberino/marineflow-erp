@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
+﻿import { useState, useMemo, useEffect, useRef } from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -466,7 +466,7 @@ function LeadsView() {
                     <p className="mt-3 text-sm text-muted-foreground line-clamp-2 italic">"{lead.first_message}"</p>
                   )}
                   {lead.linked_client && (
-                    <p className="mt-2 text-xs text-blue-700">→ {lead.linked_client.full_name_or_company_name}</p>
+                    <p className="mt-2 text-xs text-blue-700">→ {lead.linked_client.name}</p>
                   )}
                   <div className="mt-3 flex flex-wrap gap-2">
                     <Button size="sm" variant="outline" onClick={() => setSelected(lead)}>Ver mensagens</Button>

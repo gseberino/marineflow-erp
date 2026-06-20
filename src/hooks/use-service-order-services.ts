@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+﻿import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { recalcTotals } from '@/hooks/use-service-orders';
 
@@ -20,7 +20,7 @@ export function useUpdateServiceOrderService() {
       const { id, service_order_id, name_snapshot, ...rest } = values;
       const patch: Record<string, any> = { 
         ...rest,
-        service_name_snapshot: name_snapshot || (rest as any).service_name_snapshot
+        name_snapshot: name_snapshot || (rest as any).name_snapshot
       };
       if (typeof rest.quantity === 'number' && typeof rest.unit_price_snapshot === 'number') {
         patch.line_total = Math.round(rest.quantity * rest.unit_price_snapshot * 100) / 100;

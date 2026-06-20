@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+﻿import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import type { PDFData } from '@/lib/pdf-generator';
 
@@ -15,7 +15,7 @@ export function usePDFData(serviceOrderId: string | undefined) {
             clients(*),
             vessels(*),
             marinas(*),
-            service_order_services(*, name_snapshot:service_name_snapshot, services(name:service_name)),
+            service_order_services(*, name_snapshot:name_snapshot, services(name)),
             service_order_parts(*, products(name:product_name, sku, image_url)),
             service_order_expenses(category, description, amount, paid_by),
             payment_condition_presets(label, installments)
@@ -80,7 +80,7 @@ export function usePDFData(serviceOrderId: string | undefined) {
           subcontract_cost_total: (so as any).subcontract_cost_total || 0,
         },
         client: {
-          name: (so.clients as any)?.full_name_or_company_name || '—',
+          name: (so.clients as any)?.name || '—',
           cpf_cnpj: (so.clients as any)?.cpf_cnpj ?? undefined,
           phone: (so.clients as any)?.phone ?? undefined,
           email: (so.clients as any)?.email ?? undefined,
@@ -91,14 +91,14 @@ export function usePDFData(serviceOrderId: string | undefined) {
           ].filter(Boolean).join(', ') || undefined,
         },
         vessel: so.vessels ? {
-          name: (so.vessels as any).boat_name,
+          name: (so.vessels as any).name,
           manufacturer: (so.vessels as any).manufacturer ?? undefined,
           model: (so.vessels as any).model ?? undefined,
           year: (so.vessels as any).year ?? undefined,
           registration: (so.vessels as any).hull_id_or_registration ?? undefined,
         } : undefined,
         marina: so.marinas ? {
-          name: (so.marinas as any).marina_name || '—',
+          name: (so.marinas as any).name || '—',
           city: (so.marinas as any).city ?? undefined,
         } : undefined,
         services: ((so as any).service_order_services || []).map((s: any) => ({

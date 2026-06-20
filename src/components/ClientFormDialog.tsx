@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { useI18n } from '@/i18n';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -63,7 +63,7 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
     if (client) {
       setForm({
         type: client.type,
-        name: client.full_name_or_company_name,
+        name: client.name,
         cpf_cnpj: client.cpf_cnpj ?? '',
         phone: client.phone ?? '',
         whatsapp: client.whatsapp ?? '',
@@ -93,7 +93,7 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
       const fullAddress = [form.address_line_1, form.address_number, form.address_complement].filter(Boolean).join(', ');
       const payload: TablesInsert<'clients'> = {
         type: form.type,
-        full_name_or_company_name: form.name,
+        name: form.name,
         cpf_cnpj: form.cpf_cnpj || null,
         phone: form.phone || null,
         whatsapp: form.whatsapp || null,
@@ -115,7 +115,7 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
         const result = await create.mutateAsync(payload);
         toast.success(t.clients.createSuccess);
         if (onCreated && result) {
-          onCreated({ id: result.id, name: result.full_name_or_company_name });
+          onCreated({ id: result.id, name: result.name });
         }
       }
       onOpenChange(false);

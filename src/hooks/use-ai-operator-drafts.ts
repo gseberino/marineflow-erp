@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+﻿import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
 export type AIOperatorDraftListItem = {
@@ -60,7 +60,7 @@ export function useAIOperatorDrafts() {
       const { data: drafts, error } = await supabase
         .from("ai_operator_drafts")
         .select(
-          "id, session_id, kind, status, title, summary, interpreted_intent, interpreted_category, estimated_total, pending_questions, next_steps, hypotheses, created_at, updated_at, client_id, vessel_id, clients(full_name_or_company_name), vessels(boat_name)"
+          "id, session_id, kind, status, title, summary, interpreted_intent, interpreted_category, estimated_total, pending_questions, next_steps, hypotheses, created_at, updated_at, client_id, vessel_id, clients(name), vessels(name)"
         )
         .order("updated_at", { ascending: false });
       if (error) throw error;
@@ -94,8 +94,8 @@ export function useAIOperatorDrafts() {
         updated_at: draft.updated_at,
         client_id: draft.client_id,
         vessel_id: draft.vessel_id,
-        client_name: draft.clients?.full_name_or_company_name ?? null,
-        vessel_name: draft.vessels?.boat_name ?? null,
+        client_name: draft.clients?.name ?? null,
+        vessel_name: draft.vessels?.name ?? null,
         item_count: itemCountMap.get(draft.id) || 0,
       })) as AIOperatorDraftListItem[];
     },
@@ -111,7 +111,7 @@ export function useAIOperatorDraftDetail(draftId: string | undefined) {
       const { data: draft, error } = await supabase
         .from("ai_operator_drafts")
         .select(
-          "id, session_id, kind, status, title, summary, interpreted_intent, interpreted_category, estimated_total, pending_questions, next_steps, hypotheses, created_at, updated_at, client_id, vessel_id, clients(full_name_or_company_name), vessels(boat_name)"
+          "id, session_id, kind, status, title, summary, interpreted_intent, interpreted_category, estimated_total, pending_questions, next_steps, hypotheses, created_at, updated_at, client_id, vessel_id, clients(name), vessels(name)"
         )
         .eq("id", draftId)
         .maybeSingle();
@@ -168,8 +168,8 @@ export function useAIOperatorDraftDetail(draftId: string | undefined) {
           updated_at: draft.updated_at,
           client_id: draft.client_id,
           vessel_id: draft.vessel_id,
-          client_name: draft.clients?.full_name_or_company_name ?? null,
-          vessel_name: draft.vessels?.boat_name ?? null,
+          client_name: draft.clients?.name ?? null,
+          vessel_name: draft.vessels?.name ?? null,
           item_count: (items || []).length,
         },
         items: (items || []) as AIOperatorDraftItem[],

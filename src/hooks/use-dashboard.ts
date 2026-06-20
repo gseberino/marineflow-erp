@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+﻿import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 
 export function useDashboardData() {
@@ -58,7 +58,7 @@ export function useDashboardData() {
           .lt('due_date', today),
 
         supabase.from('service_orders')
-          .select('id, service_order_number, status, grand_total, scheduled_start_at, clients(full_name_or_company_name), vessels(boat_name)')
+          .select('id, service_order_number, status, grand_total, scheduled_start_at, clients(name), vessels(name)')
           .not('status', 'in', '("completed","invoiced","cancelled")')
           .order('created_at', { ascending: false })
           .limit(8),
@@ -73,7 +73,7 @@ export function useDashboardData() {
           .gte('updated_at', firstOfMonth),
 
         supabase.from('service_orders')
-          .select('id, service_order_number, scheduled_start_at, clients(full_name_or_company_name), vessels(boat_name), status')
+          .select('id, service_order_number, scheduled_start_at, clients(name), vessels(name), status')
           .in('status', ['scheduled', 'open'])
           .gte('scheduled_start_at', today)
           .lte('scheduled_start_at', in7days)
