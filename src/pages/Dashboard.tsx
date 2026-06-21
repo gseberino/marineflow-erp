@@ -26,7 +26,7 @@ export default function Dashboard() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('products')
-        .select('id, product_name, stock_quantity, minimum_stock, unit')
+        .select('id, name, stock_quantity, minimum_stock, unit')
         .eq('active', true)
         .gt('minimum_stock', 0)
         .filter('stock_quantity', 'lte', 'minimum_stock')
@@ -139,7 +139,7 @@ export default function Dashboard() {
           <div className="space-y-1">
             {lowStockProducts.map(p => (
               <div key={p.id} className="flex justify-between text-xs text-red-700">
-                <span className="truncate max-w-[180px]">{(p as any).product_name}</span>
+                <span className="truncate max-w-[180px]">{(p as any).name}</span>
                 <span className="font-medium flex-shrink-0">
                   {p.stock_quantity} / {p.minimum_stock} {p.unit}
                 </span>
@@ -333,7 +333,7 @@ export default function Dashboard() {
                 {lowStock.map((p: any) => (
                   <div key={p.id} className="flex items-center justify-between rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2">
                     <div>
-                      <p className="text-xs font-medium">{(p as any).product_name}</p>
+                      <p className="text-xs font-medium">{(p as any).name}</p>
                       <p className="text-xs text-muted-foreground">{(p as any).product_categories?.name || 'Sem categoria'}</p>
                     </div>
                     <div className="text-right">

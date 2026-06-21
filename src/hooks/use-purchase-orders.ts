@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+﻿import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
@@ -44,7 +44,7 @@ const PO_DETAIL_SELECT = `
   *,
   suppliers(name, contact_name, email, phone),
   service_orders(service_order_number),
-  purchase_order_items(*, products(name:product_name, sku))
+  purchase_order_items(*, products(name, sku))
 `;
 
 async function generatePONumber(): Promise<string> {

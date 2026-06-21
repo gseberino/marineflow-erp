@@ -61,7 +61,7 @@ function classifyToolResult(events: any[], proposalAction: string): ToolClassifi
   const failedCount = typeof r.failed_count === 'number' ? r.failed_count : null;
   if (created !== null && failedCount !== null) {
     const detail = Array.isArray(r.failed) && r.failed.length
-      ? r.failed.map((f: any) => `• ${f.name || f.product_name || f.service_name || `item ${f.index}`}: ${f.error}`).join('\n')
+      ? r.failed.map((f: any) => `• ${f.name || f.name || f.service_name || `item ${f.index}`}: ${f.error}`).join('\n')
       : '';
     if (created === 0 && failedCount > 0) {
       const baseMsg = `Nenhum item foi inserido.${detail ? '\n' + detail : ''}`;

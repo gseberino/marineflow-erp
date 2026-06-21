@@ -44,8 +44,8 @@ export function useCheckConflicts() {
         const skus = rows.map(r => r.sku).filter(Boolean) as string[];
         const names = rows.map(r => r.name).filter(Boolean) as string[];
         const [bySku, byName] = await Promise.all([
-          batchIn<any>('products', 'sku', skus, 'id,sku,name:product_name'),
-          batchIn<any>('products', 'product_name', names, 'id,sku,name:product_name'),
+          batchIn<any>('products', 'sku', skus, 'id,sku,name'),
+          batchIn<any>('products', 'name', names, 'id,sku,name'),
         ]);
         const skuMap = new Map(bySku.map(p => [p.sku, p]));
         const nameMap = new Map(byName.map(p => [p.name, p]));
@@ -61,7 +61,7 @@ export function useCheckConflicts() {
         }
       } else if (entityType === 'services') {
         const names = rows.map(r => r.name).filter(Boolean) as string[];
-        const existing = await batchIn<any>('services', 'name', names, 'id,name:service_name');
+        const existing = await batchIn<any>('services', 'name', names, 'id,name');
         const nameMap = new Map(existing.map(s => [s.name, s]));
         for (const row of rows) {
           const found = row.name ? nameMap.get(row.name) : null;
@@ -158,7 +158,7 @@ export function useImportRows() {
         const validProductRows = newRows.filter(r => r.name);
         for (const chunk of chunks(validProductRows, 50)) {
           const rows = chunk.map((r: any) => ({
-            product_name: r.name as string,
+            name: r.name as string,
             sku: (r.sku || null) as string | null,
             sale_price: (r.sale_price || 0) as number,
             cost_price: (r.cost_price || 0) as number,

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+﻿import { useState, useEffect, useMemo } from 'react';
 import { useI18n } from '@/i18n';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -31,7 +31,7 @@ interface Props {
 }
 
 const empty: TablesInsert<'products'> = {
-  product_name: '',
+  name: '',
   sku: '',
   category: '',
   brand: '',
@@ -103,7 +103,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
     if (product) {
       const p = product as any;
       setForm({
-        product_name: p.product_name ?? (p as any).name,
+        name: p.name ?? (p as any).name,
         sku: p.sku ?? '',
         category: p.category ?? '',
         brand: p.brand ?? '',
@@ -329,7 +329,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2">
               <Label>{t.products.productName} *</Label>
-              <Input required value={form.product_name ?? ''} onChange={e => set('product_name', e.target.value)} />
+              <Input required value={form.name ?? ''} onChange={e => set('name', e.target.value)} />
             </div>
 
             {/* Foto do produto */}
@@ -340,7 +340,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
                   <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-md border bg-muted">
                     <img
                       src={(form as any).image_url}
-                      alt={form.product_name || 'Produto'}
+                      alt={form.name || 'Produto'}
                       className="h-full w-full object-cover"
                     />
                     <button

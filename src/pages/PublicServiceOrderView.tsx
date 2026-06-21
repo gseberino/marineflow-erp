@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -89,7 +89,7 @@ export default function PublicServiceOrderView() {
             : Promise.resolve({ data: null, error: null }),
           supabase
             .from('service_order_parts')
-            .select('*, products(name:product_name, sku)')
+            .select('*, products(name, sku)')
             .eq('service_order_id', order.id),
           supabase
             .from('service_order_services')

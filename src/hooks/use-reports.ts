@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+﻿import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 
 function daysAgo(days: number): string {
@@ -171,7 +171,7 @@ export function usePartsUsageReport(periodDays: number) {
 
       const { data, error } = await supabase
         .from('service_order_parts')
-        .select('product_id, quantity, line_total_sale, unit_sale_snapshot, created_at, products(name:product_name)')
+        .select('product_id, quantity, line_total_sale, unit_sale_snapshot, created_at, products(name)')
         .gte('created_at', since);
       if (error) throw error;
 

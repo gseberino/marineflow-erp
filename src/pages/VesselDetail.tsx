@@ -25,7 +25,7 @@ export default function VesselDetail() {
       if (!id) return [];
       const { data, error } = await supabase
         .from('service_orders')
-        .select('*, service_order_parts(id, products(product_name), quantity, warranty_days), service_order_services(id, name_snapshot, quantity, warranty_days)')
+        .select('*, service_order_parts(id, products(name), quantity, warranty_days), service_order_services(id, name_snapshot, quantity, warranty_days)')
         .eq('vessel_id', id)
         .order('created_at', { ascending: false });
       if (error) throw error;
@@ -218,7 +218,7 @@ export default function VesselDetail() {
                           {o.service_order_parts.map((p: any) => (
                             <li key={p.id} className="text-xs text-muted-foreground flex justify-between items-start">
                               <div className="min-w-0 pr-2">
-                                <span className="block truncate">• {p.products?.product_name || 'Produto sem nome'}</span>
+                                <span className="block truncate">• {p.products?.name || 'Produto sem nome'}</span>
                                 {p.warranty_days > 0 && (
                                   <span className="text-[9px] text-accent font-semibold flex items-center gap-0.5">
                                     <Anchor className="h-2 w-2" /> Garantia: {p.warranty_days} dias

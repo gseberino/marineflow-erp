@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+﻿import { useMemo, useState } from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import { useI18n } from '@/i18n';
 import { useProducts, type Product } from '@/hooks/use-products';
@@ -31,7 +31,7 @@ export default function ProductList() {
     active: [] as string[],   // 'active' | 'inactive'
     category: [] as string[],
   });
-  const [sortKey, setSortKey] = useState('product_name');
+  const [sortKey, setSortKey] = useState('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const { t, formatCurrency } = useI18n();
   const { data: products, isLoading, error } = useProducts();
@@ -54,7 +54,7 @@ export default function ProductList() {
   const filtered = useMemo(() => {
     const { search, active, category } = filters as { search: string; active: string[]; category: string[] };
     const list = (products ?? []).filter(p => {
-      const pName = (p as any).product_name || '';
+      const pName = (p as any).name || '';
       const pCategory = (p as any).product_categories?.name || '';
       if (search && !(
         pName.toLowerCase().includes(search.toLowerCase()) ||
@@ -164,8 +164,8 @@ export default function ProductList() {
             <table className="w-full text-sm min-w-[800px]">
               <thead><tr className="border-b bg-muted/50">
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                  <button onClick={() => handleSort('product_name')} className="flex items-center hover:text-foreground transition-colors">
-                    {t.serviceOrders.product}<SortIcon col="product_name" />
+                  <button onClick={() => handleSort('name')} className="flex items-center hover:text-foreground transition-colors">
+                    {t.serviceOrders.product}<SortIcon col="name" />
                   </button>
                 </th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">
@@ -205,7 +205,7 @@ export default function ProductList() {
                           {(p as any).image_url ? (
                             <img
                               src={(p as any).image_url}
-                              alt={(p as any).product_name}
+                              alt={(p as any).name}
                               className="h-10 w-10 rounded object-cover border bg-muted shrink-0"
                               loading="lazy"
                             />
@@ -216,7 +216,7 @@ export default function ProductList() {
                           )}
                           <div className="min-w-0">
                             <p className="font-medium truncate">
-                              {(p as any).product_name}
+                              {(p as any).name}
                               {(p as any).fiscal_complete === false && (
                                 <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">
                                   Incompleto

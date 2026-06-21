@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+﻿import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import type { Tables, TablesInsert, TablesUpdate } from '@/integrations/supabase/types';
 
@@ -10,8 +10,8 @@ export function useProducts() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('products')
-        .select('*, name:product_name, product_categories(name)')
-        .order('product_name', { ascending: true });
+        .select('*, name, product_categories(name)')
+        .order('name', { ascending: true });
       if (error) throw error;
       return data as Product[];
     },
@@ -49,7 +49,7 @@ export function usePriceSuggestions() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('price_update_suggestions')
-        .select('*, products(product_name, sku, cost_price)')
+        .select('*, products(name, sku, cost_price)')
         .eq('status', 'pending')
         .order('created_at', { ascending: false });
       if (error) throw error;

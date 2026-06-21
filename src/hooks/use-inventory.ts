@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+﻿import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 
@@ -83,7 +83,7 @@ export function useInventoryMovements(filters: MovementFilters = {}) {
     queryFn: async () => {
       let q = supabase
         .from('inventory_movements')
-        .select('*, products(name:product_name, sku, unit)')
+        .select('*, products(name, sku, unit)')
         .order('created_at', { ascending: false })
         .limit(filters.limit || 200);
 

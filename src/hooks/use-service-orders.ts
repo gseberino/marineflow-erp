@@ -17,7 +17,7 @@ const SO_DETAIL_SELECT = `
   clients(name, phone, whatsapp, email),
   vessels(name, manufacturer, model, current_dock_position),
   marinas(name, latitude, longitude),
-  service_order_parts(*, products(*, name:product_name)),
+  service_order_parts(*, products(*, name)),
   service_order_services(*, name_snapshot:name_snapshot, services(name)),
   service_order_technicians(*, app_users(*)),
   time_entries(*, app_users(*)),
@@ -271,7 +271,7 @@ export function useServiceOrderParts(serviceOrderId: string | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('service_order_parts')
-        .select('*, products(*, name:product_name)')
+        .select('*, products(*, name)')
         .eq('service_order_id', serviceOrderId!)
         .order('created_at', { ascending: true });
       if (error) throw error;

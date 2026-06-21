@@ -2016,7 +2016,7 @@ export type Database = {
           notes: string | null
           pis_rate: number | null
           product_category_id: string | null
-          product_name: string
+          name: string
           profit_margin: number | null
           sale_currency: string | null
           sale_price: number | null
@@ -2053,7 +2053,7 @@ export type Database = {
           notes?: string | null
           pis_rate?: number | null
           product_category_id?: string | null
-          product_name: string
+          name: string
           profit_margin?: number | null
           sale_currency?: string | null
           sale_price?: number | null
@@ -2090,7 +2090,6 @@ export type Database = {
           notes?: string | null
           pis_rate?: number | null
           product_category_id?: string | null
-          product_name?: string
           profit_margin?: number | null
           sale_currency?: string | null
           sale_price?: number | null
