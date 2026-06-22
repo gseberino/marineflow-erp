@@ -3,6 +3,11 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { cancelServiceOrderCascade, reopenServiceOrder, updateReceivableFromSO } from '@/lib/cascade-updates';
+import {
+  createServiceOrder as createServiceOrderCore,
+  generateServiceOrderNumber,
+  type DbClientLike,
+} from '../../supabase/functions/_shared/erp/service-orders';
 
 const SO_SELECT = `
   *,
@@ -57,34 +62,22 @@ export function useServiceOrder(id: string | undefined) {
   });
 }
 
+// Delega para a camada de serviço compartilhada (caminho único de numeração).
 async function generateSONumber(): Promise<string> {
-  const { data } = await supabase
-    .from('service_orders')
-    .select('service_order_number');
-  let maxSeq = 0;
-  for (const row of data || []) {
-    const match = row.service_order_number?.match(/(\d+)$/);
-    if (match) {
-      const n = parseInt(match[1], 10);
-      if (n > maxSeq) maxSeq = n;
-    }
-  }
-  return `OS-${String(maxSeq + 1).padStart(5, '0')}`;
+  return generateServiceOrderNumber(supabase as unknown as DbClientLike);
 }
 
 export function useCreateServiceOrder() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (values: Record<string, any>) => {
-      const soNumber = await generateSONumber();
-      const payload = { ...values, service_order_number: soNumber };
-      const { data, error } = await supabase
-        .from('service_orders')
-        .insert(payload as any)
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
+      // Caminho único: mesma lógica usada por AI no app e AI autônomo (edge).
+      const res = await createServiceOrderCore(
+        supabase as unknown as DbClientLike,
+        values,
+      );
+      if (!res.ok) throw new Error(res.error);
+      return res.data;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['service-orders'] });
