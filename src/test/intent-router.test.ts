@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { routeIntent } from "../../supabase/functions/ai-operator-core/intent-router.ts";
+import { routeIntent } from "../../supabase/functions/ai-operator-gateway/intent-router.ts";
 
 describe("intent-router — back-office (resolve sem LLM)", () => {
   it("criar orçamento para cliente", () => {

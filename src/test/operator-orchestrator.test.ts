@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   handleOperatorTurn,
   type OperatorDeps,
-} from "../../supabase/functions/ai-operator-core/orchestrator.ts";
+} from "../../supabase/functions/ai-operator-gateway/orchestrator.ts";
 import {
   DEFAULT_POLICY_CONFIG,
   type OutboundAction,
