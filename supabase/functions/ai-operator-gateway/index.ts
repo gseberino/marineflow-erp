@@ -11,6 +11,7 @@ import {
   DEFAULT_POLICY_CONFIG,
   type PolicyConfig,
 } from "../_shared/outbound-policy/index.ts";
+import { buildLLMConfig, createLLMProvider } from "../_shared/llm/index.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -71,6 +72,14 @@ Deno.serve(async (req) => {
     );
     const policy = buildPolicyConfig(sm);
 
+    // LLM como fallback (só chamado em intenção "unknown"). Chave vem de secret
+    // (Deno.env); provider/modelo de app_settings. Ausência de chave = sem LLM.
+    const llmConfig = buildLLMConfig(sm, (k) => Deno.env.get(k));
+    const llm = llmConfig
+      ? (text: string) =>
+          createLLMProvider(llmConfig).complete([{ role: "user", content: text }])
+      : undefined;
+
     const body = await req.json().catch(() => null);
     if (!body || typeof body.text !== "string") {
       return jr({ error: "Campo 'text' é obrigatório." }, 400);
@@ -85,7 +94,7 @@ Deno.serve(async (req) => {
           ? { ...body.outboundContext, now: new Date(body.outboundContext.now ?? Date.now()) }
           : undefined,
       },
-      { policy /* llm: não conectado nesta fatia */ },
+      { policy, llm },
     );
 
     return jr({ ok: true, result });
