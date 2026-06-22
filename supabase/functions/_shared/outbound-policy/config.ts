@@ -12,6 +12,14 @@ export const DEFAULT_POLICY_CONFIG: PolicyConfig = {
   // teria acontecido. Liga-se de verdade só depois de validar as decisões.
   shadowMode: true,
 
+  // Gestor de aprovações: contato único de WhatsApp que recebe confirmações,
+  // lembretes e avisos. Definido pelo usuário em app_settings (não hardcoded).
+  approvalManager: { whatsapp: null },
+
+  // Conservador de partida: TODO envio ao cliente (orçamento incluído) é
+  // confirmado pelo gestor no WhatsApp antes de sair. Afrouxa por tipo depois.
+  clientSendsRequireManagerConfirmation: true,
+
   // Cliente conhecido: auto-envio de orçamento/link abaixo de R$ 1.500.
   autoSendMaxValue: 1500,
   // Lead novo/desconhecido: muito mais rígido.

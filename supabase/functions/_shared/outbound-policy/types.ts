@@ -67,9 +67,27 @@ export interface BusinessHours {
   days: number[];
 }
 
+export interface ApprovalManager {
+  /**
+   * Contato único de WhatsApp (o gestor de aprovações) que recebe TODOS os
+   * pedidos de confirmação, lembretes e avisos. Normalmente o dono do negócio.
+   * Formato E.164 sem símbolos (ex: "5547999990000"). null = não configurado.
+   */
+  whatsapp: string | null;
+}
+
 export interface PolicyConfig {
   /** Quando true, o chamador NÃO executa nada — só registra a decisão. */
   shadowMode: boolean;
+  /** Contato do gestor de aprovações (para onde vão confirmações/avisos). */
+  approvalManager: ApprovalManager;
+  /**
+   * Quando true, QUALQUER envio ao cliente exige confirmação do gestor antes
+   * de sair (orçamento incluído) — independente de valor. É o modo conservador
+   * de partida: o AI prepara tudo, mas você confirma no WhatsApp. Pode ser
+   * afrouxado por tipo conforme a confiança cresce (graduação de autonomia).
+   */
+  clientSendsRequireManagerConfirmation: boolean;
   /** Auto-envio permitido abaixo deste valor (cliente conhecido). */
   autoSendMaxValue: number;
   /** Limite mais rígido para lead novo/desconhecido. */
@@ -98,6 +116,7 @@ export type ReasonCode =
   | "outside_business_hours"
   | "frequency_gap_violation"
   | "new_or_unknown_relationship"
+  | "requires_manager_confirmation"
   | "passed_all_rules";
 
 export interface PolicyReason {
@@ -105,6 +124,13 @@ export interface PolicyReason {
   /** Severidade que esta razão impõe à decisão. */
   level: Decision;
   message: string;
+}
+
+export interface ApprovalRoute {
+  /** Para onde o pedido de aprovação/confirmação deve ser enviado. */
+  kind: "manager_whatsapp" | "in_app";
+  /** Número do gestor quando kind=manager_whatsapp; null se não configurado. */
+  to: string | null;
 }
 
 export interface PolicyDecision {
@@ -116,4 +142,10 @@ export interface PolicyDecision {
    * (modo sombra — para ganhar confiança antes de ativar de verdade)
    */
   shadow: boolean;
+  /**
+   * Quando decision === "needs_approval", indica para onde mandar o pedido de
+   * confirmação. Vai para o WhatsApp do gestor se configurado; senão, in-app.
+   * undefined quando não há aprovação a rotear (auto_send/blocked).
+   */
+  approvalRoute?: ApprovalRoute;
 }

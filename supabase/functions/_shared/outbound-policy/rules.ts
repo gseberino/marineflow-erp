@@ -92,6 +92,17 @@ export function evaluateOutbound(
     });
   }
 
+  // ---- CONFIRMAÇÃO DO GESTOR (envios ao cliente) ----
+  // Modo conservador: todo envio ao cliente é confirmado pelo gestor antes de
+  // sair. O AI prepara; você confirma no WhatsApp.
+  if (cfg.clientSendsRequireManagerConfirmation) {
+    reasons.push({
+      code: "requires_manager_confirmation",
+      level: "needs_approval",
+      message: "Envio ao cliente exige confirmação do gestor.",
+    });
+  }
+
   // ---- SEMPRE HUMANO (dinheiro/legal) ----
   if (cfg.alwaysHumanTypes.includes(action.type)) {
     reasons.push({
@@ -172,9 +183,21 @@ export function evaluateOutbound(
     });
   }
 
+  const decision = mostRestrictive(reasons);
+
+  // Quando precisa de aprovação, roteia o pedido para o gestor (WhatsApp) se
+  // configurado; caso contrário, cai no card in-app.
+  let approvalRoute: PolicyDecision["approvalRoute"];
+  if (decision === "needs_approval") {
+    approvalRoute = cfg.approvalManager.whatsapp
+      ? { kind: "manager_whatsapp", to: cfg.approvalManager.whatsapp }
+      : { kind: "in_app", to: null };
+  }
+
   return {
-    decision: mostRestrictive(reasons),
+    decision,
     reasons,
     shadow: cfg.shadowMode,
+    approvalRoute,
   };
 }

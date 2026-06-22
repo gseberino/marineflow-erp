@@ -11,6 +11,10 @@ import {
 function cfg(over: Partial<PolicyConfig> = {}): PolicyConfig {
   return {
     shadowMode: false,
+    approvalManager: { whatsapp: null },
+    // desligado no baseline para validar os caminhos de auto_send;
+    // ligado nos testes dedicados ao Canal do Gestor.
+    clientSendsRequireManagerConfirmation: false,
     autoSendMaxValue: 1500,
     newLeadAutoSendMaxValue: 0,
     businessHours: { startHour: 0, endHour: 24, days: [0, 1, 2, 3, 4, 5, 6] },
@@ -187,6 +191,49 @@ describe("outbound policy — julgamento (needs_approval)", () => {
     );
     expect(d.decision).toBe("needs_approval");
     expect(d.reasons.map((r) => r.code)).toContain("frequency_gap_violation");
+  });
+});
+
+describe("outbound policy — canal do gestor de aprovações", () => {
+  it("com confirmação do gestor ligada, orçamento de cliente conhecido → needs_approval", () => {
+    const d = evaluateOutbound(
+      action(),
+      ctx(),
+      cfg({ clientSendsRequireManagerConfirmation: true }),
+    );
+    expect(d.decision).toBe("needs_approval");
+    expect(d.reasons.map((r) => r.code)).toContain("requires_manager_confirmation");
+  });
+
+  it("rota de aprovação vai para o WhatsApp do gestor quando configurado", () => {
+    const d = evaluateOutbound(
+      action(),
+      ctx(),
+      cfg({
+        clientSendsRequireManagerConfirmation: true,
+        approvalManager: { whatsapp: "5547999991111" },
+      }),
+    );
+    expect(d.decision).toBe("needs_approval");
+    expect(d.approvalRoute).toEqual({
+      kind: "manager_whatsapp",
+      to: "5547999991111",
+    });
+  });
+
+  it("sem gestor configurado, aprovação cai no card in-app", () => {
+    const d = evaluateOutbound(
+      action(),
+      ctx(),
+      cfg({ clientSendsRequireManagerConfirmation: true }),
+    );
+    expect(d.approvalRoute).toEqual({ kind: "in_app", to: null });
+  });
+
+  it("auto_send não tem rota de aprovação", () => {
+    const d = evaluateOutbound(action(), ctx(), cfg());
+    expect(d.decision).toBe("auto_send");
+    expect(d.approvalRoute).toBeUndefined();
   });
 });
 
