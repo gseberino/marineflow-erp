@@ -69,7 +69,7 @@ export default function WhatsAppLogsPage() {
     direction: [] as string[],
     messageType: [] as string[],
     deliveryStatus: [] as string[],
-  });
+  }, 'whatsapp_logs');
   const [selected, setSelected] = useState<WaMessage | null>(null);
   const [reprocessing, setReprocessing] = useState(false);
 

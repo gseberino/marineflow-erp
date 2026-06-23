@@ -30,7 +30,7 @@ export default function ProductList() {
     search: '',
     active: [] as string[],   // 'active' | 'inactive'
     category: [] as string[],
-  });
+  }, 'products');
   const [sortKey, setSortKey] = useState('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const { t, formatCurrency } = useI18n();

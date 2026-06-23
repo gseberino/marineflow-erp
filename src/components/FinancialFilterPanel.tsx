@@ -271,7 +271,7 @@ export function FinancialFilterPanel({ type, filters, onChange }: Props) {
                           <button className="text-left flex-1 font-medium" onClick={() => { onChange(sf.filter_config as any); }}>
                             {sf.name}
                           </button>
-                          <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => deleteSaved.mutate(sf.id)}>
+                          <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => deleteSaved.mutate({ id: sf.id, filterType: type, isDefault: (sf as any).is_default ?? false })}>
                             <Trash2 className="h-3 w-3 text-destructive" />
                           </Button>
                         </div>

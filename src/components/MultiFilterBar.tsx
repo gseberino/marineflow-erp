@@ -67,6 +67,7 @@ interface MultiFilterBarProps {
   search?: string;
   onSearchChange?: (v: string) => void;
   searchPlaceholder?: string;
+  /** Filter type for saved presets (enables FilterPresets + contextual date suggestions) */
   presetType?: string;
 }
 
@@ -340,11 +341,14 @@ export function MultiFilterBar({
           filterType={presetType}
           currentConfig={{ ...filters, search: search ?? '' }}
           hasActiveFilters={activeCount > 0 || !!search}
+          dateFields={(() => {
+            const dr = groups.find(g => g.type === 'daterange') as { type: 'daterange'; fromField: string; toField: string } | undefined;
+            return dr ? { from: dr.fromField, to: dr.toField } : undefined;
+          })()}
           onApply={(config: any) => {
             if (config.search !== undefined && onSearchChange) {
               onSearchChange(config.search);
             }
-            // Apply other filters by calling onSetField
             Object.keys(config).forEach(key => {
               if (key !== 'search') {
                 onSetField(key, config[key]);

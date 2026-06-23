@@ -12,11 +12,16 @@ import { exportToCSV, MARINAS_COLUMNS } from '@/lib/export-utils';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import type { Marina } from '@/hooks/use-marinas';
+import { FilterPresets } from '@/components/FilterPresets';
+import { getDefaultFilterCache } from '@/hooks/use-saved-filters';
 
 type SortDir = 'asc' | 'desc';
 
 export default function MarinaList() {
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => {
+    const c = getDefaultFilterCache('marinas');
+    return (c?.search as string) ?? '';
+  });
   const [formOpen, setFormOpen] = useState(false);
   const [editMarina, setEditMarina] = useState<Marina | null>(null);
   const [page, setPage] = useState(1);
@@ -78,13 +83,24 @@ export default function MarinaList() {
           <Plus className="h-4 w-4" /> {t.marinas.newMarina}
         </Button>
       </PageHeader>
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          placeholder={t.marinas.searchPlaceholder}
-          value={search}
-          onChange={e => { setSearch(e.target.value); setPage(1); }}
-          className="pl-9"
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder={t.marinas.searchPlaceholder}
+            value={search}
+            onChange={e => { setSearch(e.target.value); setPage(1); }}
+            className="pl-9"
+          />
+        </div>
+        <FilterPresets
+          filterType="marinas"
+          currentConfig={{ search }}
+          hasActiveFilters={!!search}
+          onApply={(c: any) => {
+            setSearch(c.search ?? '');
+            setPage(1);
+          }}
         />
       </div>
 

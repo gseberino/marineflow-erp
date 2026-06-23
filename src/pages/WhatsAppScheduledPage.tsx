@@ -241,7 +241,7 @@ export default function WhatsAppScheduledPage() {
   const { filters, toggle, setField, clearAll, activeCount } = useMultiFilter({
     status: [] as string[],
     search: '',
-  });
+  }, 'whatsapp_scheduled');
   const [editingJob, setEditingJob] = useState<ScheduledSend | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);

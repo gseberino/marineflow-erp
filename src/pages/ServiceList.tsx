@@ -11,6 +11,8 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Plus, Search, Wrench, Pencil, Upload, Download, Table2, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { FilterPresets } from '@/components/FilterPresets';
+import { getDefaultFilterCache } from '@/hooks/use-saved-filters';
 
 type SortDir = 'asc' | 'desc';
 const PAGE_SIZE = 20;
@@ -18,7 +20,10 @@ const PAGE_SIZE = 20;
 export default function ServiceList() {
   const { t, formatCurrency } = useI18n();
   const { data: services, isLoading, error } = useServices();
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => {
+    const c = getDefaultFilterCache('services');
+    return (c?.search as string) ?? '';
+  });
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editData, setEditData] = useState<any>(null);
   const [importOpen, setImportOpen] = useState(false);
@@ -84,10 +89,21 @@ export default function ServiceList() {
         </div>
       </PageHeader>
 
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input placeholder={t.services.searchPlaceholder} value={search}
-          onChange={(e) => { setSearch(e.target.value); setPage(1); }} className="pl-9" />
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input placeholder={t.services.searchPlaceholder} value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(1); }} className="pl-9" />
+        </div>
+        <FilterPresets
+          filterType="services"
+          currentConfig={{ search }}
+          hasActiveFilters={!!search}
+          onApply={(c: any) => {
+            setSearch(c.search ?? '');
+            setPage(1);
+          }}
+        />
       </div>
 
       {error ? (
