@@ -11,14 +11,21 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { VesselFormDialog } from '@/components/VesselFormDialog';
 import { FilterPresets } from '@/components/FilterPresets';
+import { getDefaultFilterCache } from '@/hooks/use-saved-filters';
 
 type SortDir = 'asc' | 'desc';
 const PAGE_SIZE = 20;
 
 export default function VesselList() {
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => {
+    const c = getDefaultFilterCache('vessels');
+    return (c?.search as string) ?? '';
+  });
   const [formOpen, setFormOpen] = useState(false);
-  const [typeFilter, setTypeFilter] = useState('all');
+  const [typeFilter, setTypeFilter] = useState(() => {
+    const c = getDefaultFilterCache('vessels');
+    return (c?.typeFilter as string) ?? 'all';
+  });
   const [page, setPage] = useState(1);
   const [sortKey, setSortKey] = useState('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');

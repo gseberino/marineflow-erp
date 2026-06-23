@@ -27,7 +27,6 @@ import { writeAuditLog } from '@/hooks/use-audit-log';
 import { toast } from 'sonner';
 import { recordWhatsAppEvent } from '@/lib/diagnostics';
 import { useQueryClient } from '@tanstack/react-query';
-import { FilterPresets } from '@/components/FilterPresets';
 import { useTechnicians } from '@/hooks/use-agenda';
 
 type SortDir = 'asc' | 'desc';
@@ -43,7 +42,7 @@ export default function ServiceOrderList() {
     technician: [] as string[],
     dateFrom: '',
     dateTo: '',
-  });
+  }, 'service_orders');
   const [sortKey, setSortKey] = useState('created_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const { t, formatCurrency, formatDate } = useI18n();

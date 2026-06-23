@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo } from 'react';
+import { getDefaultFilterCache, type SavedFilterType } from '@/hooks/use-saved-filters';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -10,8 +11,17 @@ export type MultiFilterState = Record<string, string[] | string>;
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
-export function useMultiFilter<T extends MultiFilterState>(initialState: T) {
-  const [filters, setFilters] = useState<T>(initialState);
+export function useMultiFilter<T extends MultiFilterState>(
+  initialState: T,
+  filterType?: SavedFilterType,
+) {
+  const [filters, setFilters] = useState<T>(() => {
+    if (!filterType) return initialState;
+    const cached = getDefaultFilterCache(filterType);
+    if (!cached) return initialState;
+    // Merge cached default with initialState so all keys exist
+    return { ...initialState, ...cached };
+  });
 
   /** Toggle a value inside a string[] field */
   const toggle = useCallback((field: ArrayField<T>, value: string) => {
@@ -37,7 +47,7 @@ export function useMultiFilter<T extends MultiFilterState>(initialState: T) {
     }));
   }, [initialState]);
 
-  /** Reset ALL fields to initial state + reset page  */
+  /** Reset ALL fields to initial state */
   const clearAll = useCallback(() => {
     setFilters(initialState);
   }, [initialState]);

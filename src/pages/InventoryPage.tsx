@@ -81,7 +81,7 @@ export default function InventoryPage() {
   const [page, setPage] = useState(1);
 
   // ── Multi-filters (overview tab) ──
-  const { filters: invFilters, toggle: invToggle, setField: invSetField, clearAll: invClearAll, activeCount: invActiveCount } = useMultiFilter({ search: '', category: [] as string[] });
+  const { filters: invFilters, toggle: invToggle, setField: invSetField, clearAll: invClearAll, activeCount: invActiveCount } = useMultiFilter({ search: '', category: [] as string[] }, 'inventory');
   // ── Movement type multi-filter ──
   const [movTypeFilter, setMovTypeFilter] = useState<string[]>([]);
   const MOV_PAGE_SIZE = 30;

@@ -14,11 +14,15 @@ import { exportToCSV, CLIENTS_COLUMNS } from '@/lib/export-utils';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import { FilterPresets } from '@/components/FilterPresets';
+import { getDefaultFilterCache } from '@/hooks/use-saved-filters';
 
 type SortDir = 'asc' | 'desc';
 
 export default function ClientList() {
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => {
+    const c = getDefaultFilterCache('clients');
+    return (c?.search as string) ?? '';
+  });
   const [formOpen, setFormOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [page, setPage] = useState(1);

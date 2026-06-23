@@ -29,6 +29,7 @@ import { toast } from 'sonner';
 import { useI18n } from '@/i18n';
 import { statusConfig } from '@/lib/constants';
 import { FilterPresets } from '@/components/FilterPresets';
+import { getDefaultFilterCache } from '@/hooks/use-saved-filters';
 
 type ViewMode = 'week' | 'month';
 
@@ -77,7 +78,10 @@ const TASK_PRIORITY_CLASSES: Record<string, string> = {
 
 export default function AgendaPage() {
   const navigate = useNavigate();
-  const [view, setView] = useState<ViewMode>('week');
+  const [view, setView] = useState<ViewMode>(() => {
+    const c = getDefaultFilterCache('agenda');
+    return (c?.view as ViewMode) ?? 'week';
+  });
   const [cursor, setCursor] = useState(() => new Date());
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
 
@@ -85,7 +89,10 @@ export default function AgendaPage() {
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<ExistingTask | null>(null);
   const [prefill, setPrefill] = useState<{ technicianId?: string; date?: string }>({});
-  const [techFilter, setTechFilter] = useState<string>('all');
+  const [techFilter, setTechFilter] = useState<string>(() => {
+    const c = getDefaultFilterCache('agenda');
+    return (c?.techFilter as string) ?? 'all';
+  });
 
   const range = useMemo(() => {
     if (view === 'week') {
