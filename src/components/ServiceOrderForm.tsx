@@ -901,6 +901,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   // Recebível selecionado para abrir o PaymentDialog
   const [paymentDialogReceivable, setPaymentDialogReceivable] = useState<any>(null);
   const createReceivable = useCreateReceivable();
+  // Onda 3: Modo de visão — 'internal' mostra custo/margem/comissão; 'client' esconde
+  const [clientView, setClientView] = useState(false);
 
   useEffect(() => {
     const targets: Array<{ el: HTMLElement | null; setter: (v: boolean) => void }> = [
@@ -3480,6 +3482,23 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
 
       {/* H - Financial Mini-Summary */}
       <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
+        {/* Toggle de visão Interno/Cliente */}
+        {!isNew && (
+          <div className="px-4 pt-2 flex items-center justify-end">
+            <div className="inline-flex items-center rounded-full border bg-muted/40 p-0.5 text-[11px]">
+              <button type="button"
+                onClick={() => setClientView(false)}
+                className={`px-2.5 py-0.5 rounded-full transition-colors ${!clientView ? 'bg-background shadow-sm font-medium text-foreground' : 'text-muted-foreground'}`}>
+                Interno
+              </button>
+              <button type="button"
+                onClick={() => setClientView(true)}
+                className={`px-2.5 py-0.5 rounded-full transition-colors ${clientView ? 'bg-background shadow-sm font-medium text-foreground' : 'text-muted-foreground'}`}>
+                Cliente
+              </button>
+            </div>
+          </div>
+        )}
         {/* Row 1: line items */}
         <div className="px-4 pt-4 pb-2 flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-5 text-sm flex-wrap">
@@ -3524,8 +3543,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           </div>
         </div>
 
-        {/* Row 2: composition % + parts profit (edit-mode only) */}
-        {!isNew && (subtotal > 0 || partsRevenue > 0) && (
+        {/* Row 2: composition % + parts profit (edit-mode only, escondido na visão Cliente) */}
+        {!isNew && !clientView && (subtotal > 0 || partsRevenue > 0) && (
           <div className="px-4 py-1.5 border-t bg-muted/20 flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
             {laborCost > 0 && subtotal > 0 && (
               <span>Serviços: {((laborCost / subtotal) * 100).toFixed(0)}%</span>
@@ -4109,7 +4128,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               </div>
             </div>
 
-            {/* ── SECTION 6: COMISSÃO (collapsible) ── */}
+            {/* ── SECTION 6: COMISSÃO (collapsible, oculto na visão Cliente) ── */}
+            {!clientView && (
             <div className="rounded-lg border bg-muted/20 overflow-hidden">
               <button type="button"
                 className="w-full flex items-center justify-between px-3 py-2.5 text-sm text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
@@ -4160,6 +4180,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 </div>
               )}
             </div>
+            )}{/* end !clientView commission */}
 
           </div>{/* end scrollable body */}
 
