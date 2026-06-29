@@ -9,6 +9,7 @@ import { useMarinas } from '@/hooks/use-marinas';
 import { useProducts } from '@/hooks/use-products';
 import { useServices } from '@/hooks/use-services';
 import { useCardFees } from '@/hooks/use-card-fees';
+import { useAppSettings } from '@/hooks/use-app-settings';
 import { useSOLinkedPOs, useUpdatePurchaseOrder } from '@/hooks/use-purchase-orders';
 import {
   useCreateServiceOrder,
@@ -646,6 +647,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const { data: commissionableUsers } = useCommissionableUsers();
   const { data: services } = useServices();
   const { data: cardFees } = useCardFees();
+  const { data: appSettings } = useAppSettings();
+  const issRatePct = Number(appSettings?.iss_rate_pct ?? 5) || 0;
   const { data: paymentPresets } = usePaymentConditionPresets();
   const { data: pdfData } = usePDFData(isNew ? undefined : orderId);
   const queryClient = useQueryClient();
@@ -3823,13 +3826,87 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                         }
                       }} disabled={isLocked} />
                   </div>
+
+                  {/* Atalhos rápidos de desconto */}
+                  {!isLocked && (laborCost + partsCost) > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                      {[5, 10, 15].map(p => {
+                        // Aplica p% igualmente sobre serviços e peças
+                        const applyPct = () => {
+                          setDiscountServicesPct(p);
+                          setDiscountPartsPct(p);
+                          set('discount_amount', Math.round((laborCost * p / 100 + partsCost * p / 100) * 100) / 100);
+                        };
+                        return (
+                          <button key={p} type="button" onClick={applyPct}
+                            className="text-[11px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:border-destructive/50 hover:text-destructive transition-colors">
+                            −{p}%
+                          </button>
+                        );
+                      })}
+                      {/* Arredondar total para baixo (centena/milhar mais próximo abaixo) */}
+                      {grandTotal > 0 && (
+                        <button type="button"
+                          onClick={() => {
+                            const step = grandTotal >= 1000 ? 100 : 10;
+                            const target = Math.floor(grandTotal / step) * step;
+                            const extraDiscount = Math.round((grandTotal - target) * 100) / 100;
+                            if (extraDiscount > 0) {
+                              const newDiscount = Math.round(((form.discount_amount || 0) + extraDiscount) * 100) / 100;
+                              set('discount_amount', newDiscount);
+                              const base = laborCost + partsCost;
+                              if (base > 0) {
+                                setDiscountServicesPct(Math.min(100, Math.round((newDiscount * (laborCost / base) / laborCost) * 1000) / 10));
+                                setDiscountPartsPct(Math.min(100, Math.round((newDiscount * (partsCost / base) / partsCost) * 1000) / 10));
+                              }
+                            }
+                          }}
+                          className="text-[11px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:border-primary/50 hover:text-primary transition-colors">
+                          ⌄ Arredondar {formatCurrency(grandTotal >= 1000 ? Math.floor(grandTotal / 100) * 100 : Math.floor(grandTotal / 10) * 10)}
+                        </button>
+                      )}
+                      {(form.discount_amount || 0) > 0 && (
+                        <button type="button"
+                          onClick={() => { set('discount_amount', 0); setDiscountServicesPct(0); setDiscountPartsPct(0); }}
+                          className="text-[11px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted transition-colors ml-auto">
+                          Limpar
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
 
-                {/* Tax */}
-                <div className="flex items-center justify-between pt-2 border-t border-dashed">
-                  <Label className="text-sm">{t.serviceOrders.tax}</Label>
-                  <MoneyInput className="w-28 h-7 text-right text-sm" value={form.tax_amount}
-                    onValueChange={v => set('tax_amount', v)} disabled={isLocked} />
+                {/* Tax + ISS quick-apply */}
+                <div className="space-y-1.5 pt-2 border-t border-dashed">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm">{t.serviceOrders.tax}</Label>
+                    <MoneyInput className="w-28 h-7 text-right text-sm" value={form.tax_amount}
+                      onValueChange={v => set('tax_amount', v)} disabled={isLocked} />
+                  </div>
+                  {!isLocked && issRatePct > 0 && (
+                    <div className="flex items-center gap-2 justify-end">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          // ISS incide sobre a base (subtotal - desconto)
+                          const base = Math.max(0, subtotal - (form.discount_amount || 0));
+                          set('tax_amount', Math.round(base * issRatePct) / 100);
+                        }}
+                        className="text-[11px] px-2 py-0.5 rounded border border-blue-300 text-blue-700 hover:bg-blue-50 transition-colors"
+                      >
+                        Aplicar ISS {issRatePct}%
+                      </button>
+                      {form.tax_amount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => set('tax_amount', 0)}
+                          className="text-[11px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted transition-colors"
+                        >
+                          Zerar
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Margin warning */}

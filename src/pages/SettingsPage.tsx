@@ -1333,6 +1333,7 @@ function QuoteSettingsSection() {
     quote_deposit_percentage: 30,
     default_payment_method:   'pix',
     default_card_fee_percent: 0,
+    iss_rate_pct:             5,
     quote_validity_days:      15,
     quote_expiry_days:        30,
     quote_followup_days:      7,
@@ -1350,6 +1351,7 @@ function QuoteSettingsSection() {
           quote_deposit_percentage: Number(m.quote_deposit_percentage) || 30,
           default_payment_method:   m.default_payment_method   || 'pix',
           default_card_fee_percent: Number(m.default_card_fee_percent) || 0,
+          iss_rate_pct:             m.iss_rate_pct !== undefined && m.iss_rate_pct !== '' ? Number(m.iss_rate_pct) : 5,
           quote_validity_days:      Number(m.quote_validity_days)      || 15,
           quote_expiry_days:        Number(m.quote_expiry_days)        || 30,
           quote_followup_days:      Number(m.quote_followup_days)      || 7,
@@ -1421,6 +1423,16 @@ function QuoteSettingsSection() {
           <Input type="number" min="0" max="10" step="0.1" value={cfg.default_card_fee_percent}
             onChange={e => set('default_card_fee_percent', Number(e.target.value))} />
           <p className="text-xs text-muted-foreground">Pré-preenchida ao selecionar cartão de crédito</p>
+        </div>
+
+        {/* ISS rate */}
+        <div className="space-y-1.5">
+          <Label>Alíquota de ISS (%)</Label>
+          <Input type="number" min="0" max="100" step="0.01" value={cfg.iss_rate_pct}
+            onChange={e => set('iss_rate_pct', Number(e.target.value))} />
+          <p className="text-xs text-muted-foreground">
+            Usada no botão "Aplicar ISS" da composição financeira. Confirme a alíquota correta do seu anexo (Simples Nacional) com seu contador.
+          </p>
         </div>
 
         {/* Expiry days */}
