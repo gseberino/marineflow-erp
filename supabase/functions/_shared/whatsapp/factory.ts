@@ -13,7 +13,7 @@ import type { WhatsAppProvider } from "./types.ts";
  * explicitly. Callers that read only from env can omit it.
  */
 export function createWhatsAppProvider(zapiConfig?: Partial<ZapiConfig>): WhatsAppProvider {
-  const providerType = Deno.env.get("WHATSAPP_PROVIDER") ?? "zapi";
+  const providerType = Deno.env.get("WHATSAPP_PROVIDER") ?? "evolution";
 
   if (providerType === "evolution") {
     const apiUrl = Deno.env.get("EVOLUTION_API_URL") ?? "";

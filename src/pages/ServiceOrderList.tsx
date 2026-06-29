@@ -1,14 +1,13 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { PageHeader } from '@/components/PageHeader';
-import { StatusBadge } from '@/components/StatusBadge';
+import { StatusQuickChange } from '@/components/StatusQuickChange';
 import { useI18n } from '@/i18n';
 import { useServiceOrders, useDuplicateServiceOrder } from '@/hooks/use-service-orders';
-import { statusConfig, priorityConfig } from '@/lib/constants';
+import { statusConfig, priorityConfig, paymentStatusConfig } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Plus, ClipboardList, MoreHorizontal, FileText, Printer, MessageCircle, Send, CheckCircle2, XCircle, History, Copy, Download, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Loader2 } from 'lucide-react';
+import { Plus, ClipboardList, MoreHorizontal, FileText, Printer, MessageCircle, Send, CheckCircle2, XCircle, History, Copy, Download, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Loader2, Wrench } from 'lucide-react';
 import { exportToCSV } from '@/lib/export';
 import { supabase } from '@/integrations/supabase/client';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -17,7 +16,8 @@ import { useMultiFilter } from '@/hooks/use-multi-filter';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { PDFOptionsDialog } from '@/components/PDFOptionsDialog';
 import { WhatsAppSendHistoryDialog } from '@/components/WhatsAppSendHistoryDialog';
-import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/SendViaZAPIDialog';
+import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/SendViaWhatsAppDialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useWhatsAppSendStatusMap } from '@/hooks/use-whatsapp-send-log';
 import { usePDFData, fetchPDFData } from '@/hooks/use-pdf';
 import { generatePDF, downloadPDF, DEFAULT_PDF_OPTIONS, type PDFOptions } from '@/lib/pdf-generator';
@@ -27,7 +27,6 @@ import { writeAuditLog } from '@/hooks/use-audit-log';
 import { toast } from 'sonner';
 import { recordWhatsAppEvent } from '@/lib/diagnostics';
 import { useQueryClient } from '@tanstack/react-query';
-import { FilterPresets } from '@/components/FilterPresets';
 import { useTechnicians } from '@/hooks/use-agenda';
 
 type SortDir = 'asc' | 'desc';
@@ -64,22 +63,42 @@ export default function ServiceOrderList() {
   const navigate = useNavigate();
   const duplicate = useDuplicateServiceOrder();
 
-  const handleDuplicate = async (soId: string) => {
+  // Duplicate mode dialog (only shown when duplicating from OS tab)
+  const [duplicateDialogId, setDuplicateDialogId] = useState<string | null>(null);
+
+  const handleDuplicate = (soId: string) => {
+    // OS list: always ask whether to duplicate as quote or as new OS
+    setDuplicateDialogId(soId);
+  };
+
+  const executeDuplicate = async (soId: string, mode: 'quote' | 'order') => {
+    setDuplicateDialogId(null);
     try {
-      const newSO = await duplicate.mutateAsync(soId);
-      toast.success('OS duplicada com sucesso!');
+      const newSO = await duplicate.mutateAsync({ sourceId: soId, mode });
+      toast.success(mode === 'quote' ? 'Duplicado como Orçamento!' : 'Duplicado como nova OS!');
       navigate(`/service-orders/${(newSO as any).id}`);
     } catch (e: any) {
-      toast.error(e?.message || 'Erro ao duplicar OS');
+      toast.error(e?.message || 'Erro ao duplicar');
     }
   };
 
   const [pdfTarget, setPdfTarget] = useState<{ id: string; type: 'quote' | 'service_order' } | null>(null);
   const [historyTarget, setHistoryTarget] = useState<{ id: string; number: string } | null>(null);
-  const [zapiTarget, setZapiTarget] = useState<SendViaWhatsAppTarget | null>(null);
+  const [whatsAppTarget, setWhatsAppTarget] = useState<SendViaWhatsAppTarget | null>(null);
   const { data: pdfData } = usePDFData(pdfTarget?.id);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDownloading, setBulkDownloading] = useState(false);
+  // Counts concurrent PDF generations to safely restore body overflow when all finish
+  const pdfGenCountRef = useRef(0);
+
+  useEffect(() => {
+    return () => {
+      // Garantia: se o componente desmontar durante bulk download, restaura overflow
+      if (pdfGenCountRef.current > 0) {
+        document.body.style.overflow = '';
+      }
+    };
+  }, []);
 
   const orderIds = (orders || []).map((o: any) => o.id);
   const { data: sendStatusMap } = useWhatsAppSendStatusMap(orderIds);
@@ -113,6 +132,7 @@ export default function ServiceOrderList() {
     const ids = Array.from(selectedIds);
     if (ids.length === 0) return;
     setBulkDownloading(true);
+    pdfGenCountRef.current = ids.length;
     let success = 0;
     let failed = 0;
     for (let i = 0; i < ids.length; i++) {
@@ -125,6 +145,12 @@ export default function ServiceOrderList() {
       } catch (e: any) {
         console.error('Bulk PDF failed for', ids[i], e);
         failed++;
+      } finally {
+        pdfGenCountRef.current = Math.max(0, pdfGenCountRef.current - 1);
+        // Restaura overflow se todos os PDFs terminaram
+        if (pdfGenCountRef.current === 0) {
+          document.body.style.overflow = '';
+        }
       }
     }
     setBulkDownloading(false);
@@ -212,8 +238,8 @@ export default function ServiceOrderList() {
     }
   };
 
-  const openZapiDialog = (so: any, documentType: 'service_order' | 'quote') => {
-    setZapiTarget({
+  const openWhatsAppDialog = (so: any, documentType: 'service_order' | 'quote') => {
+    setWhatsAppTarget({
       kind: 'service_order',
       serviceOrderId: so.id,
       serviceOrderNumber: so.service_order_number,
@@ -248,6 +274,8 @@ export default function ServiceOrderList() {
       search: string; status: string[]; priority: string[]; technician: string[]; dateFrom: string; dateTo: string;
     };
     const list = (orders || []).filter((so: any) => {
+      // OS page shows only non-draft records
+      if (so.status === 'draft') return false;
       const clientName = so.clients?.name || '';
       const vesselName = so.vessels?.name || '';
       if (search && !(
@@ -282,6 +310,9 @@ export default function ServiceOrderList() {
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
+  const quoteCount = (orders || []).filter((o: any) => o.status === 'draft').length;
+  const orderCount = (orders || []).filter((o: any) => o.status !== 'draft').length;
+
   return (
     <div className="space-y-4 animate-fade-in">
       <PageHeader title={t.serviceOrders.title} description={t.serviceOrders.description}>
@@ -291,6 +322,27 @@ export default function ServiceOrderList() {
           </Button>
         </Link>
       </PageHeader>
+
+      {/* Tab navigation — links between the two list pages */}
+      <div className="flex gap-1 border-b">
+        <Link
+          to="/quotes"
+          className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <FileText className="h-4 w-4" />
+          Orçamentos
+          <span className="rounded-full px-1.5 py-0.5 text-xs font-bold bg-muted text-muted-foreground">
+            {quoteCount}
+          </span>
+        </Link>
+        <span className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 border-blue-500 text-blue-700">
+          <Wrench className="h-4 w-4" />
+          Ordens de Serviço
+          <span className="rounded-full px-1.5 py-0.5 text-xs font-bold bg-blue-100 text-blue-700">
+            {orderCount}
+          </span>
+        </span>
+      </div>
 
       <MultiFilterBar
         search={filters.search as string}
@@ -304,13 +356,15 @@ export default function ServiceOrderList() {
         presetType="service_orders"
         groups={[
           {
-            type: 'multi',
+            type: 'multi' as const,
             field: 'status',
             label: 'Status',
-            options: Object.keys(statusConfig).map(key => ({
-              value: key,
-              label: (t.status as Record<string, string>)[key] ?? key,
-            })),
+            options: Object.keys(statusConfig)
+              .filter(key => key !== 'draft')
+              .map(key => ({
+                value: key,
+                label: (t.status as Record<string, string>)[key] ?? key,
+              })),
           },
           {
             type: 'multi',
@@ -447,6 +501,7 @@ export default function ServiceOrderList() {
                       {t.common.total}<SortIcon col="grand_total" />
                     </button>
                   </th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">Pgto</th>
                   <th className="px-4 py-3 text-center font-medium text-muted-foreground hidden md:table-cell">WhatsApp</th>
                   <th className="px-4 py-3 w-10"></th>
                 </tr>
@@ -475,7 +530,7 @@ export default function ServiceOrderList() {
                       </td>
                       <td className="px-4 py-3 hidden md:table-cell text-muted-foreground">{so.vessels?.name || '—'}</td>
                       <td className="px-4 py-3">
-                        {sc && <StatusBadge className={sc.className}>{(t.status as Record<string, string>)[so.status]}</StatusBadge>}
+                        <StatusQuickChange orderId={so.id} currentStatus={so.status} />
                       </td>
                       <td className="px-4 py-3 hidden md:table-cell">
                         {pc && <span className={pc.className}>{(t.priority as Record<string, string>)[so.priority]}</span>}
@@ -487,6 +542,15 @@ export default function ServiceOrderList() {
                         {so.scheduled_start_at ? formatDate(so.scheduled_start_at) : '—'}
                       </td>
                       <td className="px-4 py-3 text-right font-semibold">{formatCurrency(so.grand_total || 0)}</td>
+                      <td className="px-4 py-3 hidden lg:table-cell">
+                        {so.payment_status && paymentStatusConfig[so.payment_status] ? (
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${paymentStatusConfig[so.payment_status].className}`}>
+                            {paymentStatusConfig[so.payment_status].label}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 hidden md:table-cell text-center">
                         {(() => {
                           const entry = sendStatusMap?.get(so.id);
@@ -543,7 +607,7 @@ export default function ServiceOrderList() {
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => handleDuplicate(so.id)} className="gap-2">
                               <Copy className="h-4 w-4" />
-                              Duplicar OS
+                              Duplicar
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
@@ -585,7 +649,7 @@ export default function ServiceOrderList() {
                               Enviar via wa.me (link)
                             </DropdownMenuItem>
                             <DropdownMenuItem
-                              onClick={() => openZapiDialog(so, 'service_order')}
+                              onClick={() => openWhatsAppDialog(so, 'service_order')}
                               disabled={!so.share_token}
                               className="gap-2"
                             >
@@ -593,7 +657,7 @@ export default function ServiceOrderList() {
                               Enviar OS via WhatsApp…
                             </DropdownMenuItem>
                             <DropdownMenuItem
-                              onClick={() => openZapiDialog(so, 'quote')}
+                              onClick={() => openWhatsAppDialog(so, 'quote')}
                               disabled={!so.share_token}
                               className="gap-2"
                             >
@@ -623,7 +687,7 @@ export default function ServiceOrderList() {
           {totalPages > 1 && (
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">
-                {filtered.length} ordens · Página {page} de {totalPages}
+                {filtered.length} ordens de serviço · Página {page} de {totalPages}
               </span>
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
@@ -654,10 +718,49 @@ export default function ServiceOrderList() {
       />
 
       <SendViaWhatsAppDialog
-        open={!!zapiTarget}
-        onOpenChange={v => { if (!v) setZapiTarget(null); }}
-        target={zapiTarget}
+        open={!!whatsAppTarget}
+        onOpenChange={v => { if (!v) setWhatsAppTarget(null); }}
+        target={whatsAppTarget}
       />
+
+      {/* Duplicate mode dialog — shown only when duplicating from the OS tab */}
+      <Dialog open={!!duplicateDialogId} onOpenChange={v => { if (!v) setDuplicateDialogId(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Como deseja duplicar?</DialogTitle>
+            <DialogDescription>
+              Escolha se a cópia será um novo Orçamento (para ajustar e enviar ao cliente)
+              ou uma nova Ordem de Serviço já aberta.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => duplicateDialogId && executeDuplicate(duplicateDialogId, 'quote')}
+              disabled={duplicate.isPending}
+              className="flex flex-col items-center gap-2 rounded-xl border-2 border-border p-4 hover:border-primary hover:bg-primary/5 transition-colors text-sm font-medium"
+            >
+              <FileText className="h-7 w-7 text-amber-500" />
+              Orçamento
+              <span className="text-xs font-normal text-muted-foreground text-center">
+                Rascunho editável, pode mudar o cliente
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => duplicateDialogId && executeDuplicate(duplicateDialogId, 'order')}
+              disabled={duplicate.isPending}
+              className="flex flex-col items-center gap-2 rounded-xl border-2 border-border p-4 hover:border-primary hover:bg-primary/5 transition-colors text-sm font-medium"
+            >
+              <Wrench className="h-7 w-7 text-blue-500" />
+              Nova OS
+              <span className="text-xs font-normal text-muted-foreground text-center">
+                Já entra como OS aberta, sem etapa de orçamento
+              </span>
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

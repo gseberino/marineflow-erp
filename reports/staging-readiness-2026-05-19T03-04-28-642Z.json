@@ -1,0 +1,37 @@
+{
+  "mode": "validate-staging-schema",
+  "generatedAt": "2026-05-19T03:04:28.641Z",
+  "status": "blocked_by_rls_or_permissions",
+  "envFileStatus": "loaded",
+  "envFilePath": "C:\\temp\\.env.staging.local",
+  "source": "VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY",
+  "sameProjectGuess": "unknown",
+  "tableChecks": [
+    {
+      "table": "clients",
+      "status": "blocked/read not available",
+      "error": "row-level security policy blocked select"
+    },
+    {
+      "table": "suppliers",
+      "status": "blocked/read not available",
+      "error": "row-level security policy blocked select"
+    },
+    {
+      "table": "service_orders",
+      "status": "blocked/read not available",
+      "error": "row-level security policy blocked select"
+    },
+    {
+      "table": "products",
+      "status": "blocked/read not available",
+      "error": "row-level security policy blocked select"
+    },
+    {
+      "table": "services",
+      "status": "blocked/read not available",
+      "error": "row-level security policy blocked select"
+    }
+  ],
+  "recommendation": "RLS or permissions blocked all probe tables; verify staging access or use a controlled server-side validation path."
+}

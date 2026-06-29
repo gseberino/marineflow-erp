@@ -11,3 +11,9 @@ verify_jwt = false
 
 [functions.whatsapp-queue-worker]
 verify_jwt = false
+
+[functions.whatsapp-status-worker]
+verify_jwt = false
+
+[functions.quote-reminders]
+verify_jwt = false

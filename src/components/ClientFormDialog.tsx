@@ -159,7 +159,7 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
         <Tabs defaultValue="data" className="w-full">
           <TabsList className="grid grid-cols-2 w-full">
             <TabsTrigger value="data">Dados do cliente</TabsTrigger>
-            <TabsTrigger value="zapi" disabled={!isEdit}>
+            <TabsTrigger value="whatsapp" disabled={!isEdit}>
               WhatsApp
             </TabsTrigger>
           </TabsList>
@@ -243,7 +243,7 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
         </form>
           </TabsContent>
 
-          <TabsContent value="zapi">
+          <TabsContent value="whatsapp">
             {isEdit && client ? (
               <ZapiSettingsTab clientId={client.id} />
             ) : (

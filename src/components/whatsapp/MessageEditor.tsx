@@ -42,7 +42,7 @@ export function MessageEditor({
       )}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <Label htmlFor="msg-zapi">{mode === 'document' ? 'Legenda do PDF' : 'Mensagem'}</Label>
+          <Label htmlFor="msg-whatsapp">{mode === 'document' ? 'Legenda do PDF' : 'Mensagem'}</Label>
           {usingClientDefault && (
             <span className="text-xs text-muted-foreground">
               ✓ Usando mensagem padrão do cliente
@@ -50,7 +50,7 @@ export function MessageEditor({
           )}
         </div>
         <Textarea
-          id="msg-zapi"
+          id="msg-whatsapp"
           rows={4}
           value={message}
           onChange={(e) => onMessageChange(e.target.value)}

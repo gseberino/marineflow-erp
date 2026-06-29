@@ -15,11 +15,11 @@ import {
   pickClientSetting,
   type ClientWhatsAppContext,
 } from '@/hooks/use-client-whatsapp-settings';
-import { ModeSelector, type SendMode } from '@/components/zapi/ModeSelector';
-import { RetrySettings } from '@/components/zapi/RetrySettings';
-import { MessageEditor } from '@/components/zapi/MessageEditor';
-import { ScheduleSettings, defaultScheduleConfig, type ScheduleConfig } from '@/components/zapi/ScheduleSettings';
-import { useWhatsAppSend } from '@/hooks/use-zapi-send';
+import { ModeSelector, type SendMode } from '@/components/whatsapp/ModeSelector';
+import { RetrySettings } from '@/components/whatsapp/RetrySettings';
+import { MessageEditor } from '@/components/whatsapp/MessageEditor';
+import { ScheduleSettings, defaultScheduleConfig, type ScheduleConfig } from '@/components/whatsapp/ScheduleSettings';
+import { useWhatsAppSend } from '@/hooks/use-whatsapp-send';
 import { useCreateScheduledSend } from '@/hooks/use-scheduled-sends';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -82,7 +82,6 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
     try { localStorage.setItem('wa.maxAttempts', String(maxAttempts)); } catch {}
   }, [maxAttempts]);
 
-  // Modelos de Vendas Embutidos
   const salesTemplates = useMemo(() => {
     if (target?.kind !== 'service_order') return [];
     const name = target.clientName?.split(' ')[0] || 'Cliente';
@@ -121,7 +120,7 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
       : 'billing';
 
   const { data: dbTemplates } = useWhatsAppTemplates(templateCategory);
-  
+
   const templates = useMemo(() => {
     const list = [...(dbTemplates || [])];
     if (target?.kind === 'service_order') {
@@ -134,7 +133,7 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
     target?.kind === 'service_order'
       ? (target.documentType === 'quote' ? 'quote' : 'service_order')
       : 'billing';
-  
+
   const { data: clientSettings } = useClientWhatsAppSettings(
     open ? (target?.clientId ?? null) : null,
   );
@@ -184,7 +183,7 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
     setIncludeLinkInCaption(false);
     setTemplateId('');
     setSchedule(defaultScheduleConfig());
-    
+
     if (clientSetting?.message_body) {
       setMessage(applyTemplateVariables(clientSetting.message_body, templateVars));
       return;
@@ -203,18 +202,18 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
     setIsGenerating(true);
     try {
       const clientName = target.clientName?.split(' ')[0] || 'Cliente';
-      const prompt = target.documentType === 'quote' 
+      const prompt = target.documentType === 'quote'
         ? `Crie uma mensagem curta de WhatsApp muito persuasiva e educada para ${clientName}. Ele tem um orçamento (${target.serviceOrderNumber}) pendente. O objetivo é fechar a venda agora. Ofereça de forma sutil uma facilidade ou prioridade na agenda. Use gatilhos mentais. Não pareça desesperado.`
         : `Crie uma mensagem de follow-up profissional para ${clientName} sobre a OS ${target.serviceOrderNumber}. Seja prestativo e foque na excelência do serviço.`;
 
       const { data, error } = await supabase.functions.invoke('ai-agent', {
-        body: { 
+        body: {
           messages: [{ role: 'user', content: prompt }],
           is_sales_copy: true,
           context: { route: '/crm', target: target.serviceOrderNumber }
         }
       });
-      
+
       if (error) throw error;
       const aiText = data?.message?.content || data?.reply || "";
       if (aiText) setMessage(aiText.replace(/[*#]/g, ''));
@@ -275,7 +274,6 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
       ? `${message}\n\nLink online: ${publicUrl}`
       : message;
 
-    // Caminho 1: Agendado
     if (schedule.enabled) {
       const scheduledIso = new Date(schedule.scheduledAt).toISOString();
       if (new Date(scheduledIso).getTime() <= Date.now()) {
@@ -317,7 +315,6 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
       return;
     }
 
-    // Caminho 2: Envio imediato
     const ok = await send(
       {
         phone,
@@ -374,9 +371,9 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
             <div className="flex justify-between items-center">
               <Label>Mensagem</Label>
               {target?.kind === 'service_order' && (
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
+                <Button
+                  variant="ghost"
+                  size="sm"
                   className="h-7 text-xs gap-1.5 text-primary hover:text-primary hover:bg-primary/10"
                   onClick={handleGenerateAI}
                   disabled={isGenerating || sending}

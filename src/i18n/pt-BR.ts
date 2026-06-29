@@ -223,6 +223,15 @@ export const ptBR: TranslationKeys = {
     cancelled: 'Cancelada',
   },
 
+  quoteStatus: {
+    draft:             'Em elaboração',
+    sent:              'Enviado',
+    awaiting_approval: 'Aguard. aprovação',
+    approved:          'Aprovado',
+    awaiting_deposit:  'Aguard. sinal',
+    rejected:          'Reprovado',
+  },
+
   priority: {
     low: 'Baixa',
     normal: 'Normal',

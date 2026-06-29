@@ -92,7 +92,7 @@ Deno.serve(async (req) => {
           const msgId = String(key?.id ?? evoRes.id ?? evoRes.messageId ?? "");
           await supabase.from("whatsapp_status_scheduled").update({
             status: "sent",
-            zapi_message_id: msgId || null,
+            wa_message_id: msgId || null,
             error_message: null,
           }).eq("id", item.id);
           results.push({ id: item.id, success: true });

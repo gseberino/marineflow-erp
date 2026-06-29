@@ -46,7 +46,9 @@ export function WhatsAppSendHistoryDialog({ serviceOrderId, serviceOrderNumber, 
                 const nv: any = e.new_value || {};
                 const phone = nv?.phone;
                 const httpStatus = nv?.http_status;
-                const zapiErr = nv?.provider_result?.error || nv?.zapi_response?.error;
+                const waErr = nv?.provider_result?.ok === false
+                  ? (nv?.provider_result?.error || nv?.zapi_response?.error)
+                  : (nv?.zapi_response?.error);
                 return (
                   <li key={e.id} className="rounded-lg border bg-card p-3 text-sm space-y-2">
                     <div className="flex items-center justify-between gap-2">
@@ -78,7 +80,7 @@ export function WhatsAppSendHistoryDialog({ serviceOrderId, serviceOrderNumber, 
                     )}
                     {!e.success && (
                       <div className="text-xs text-destructive">
-                        <span className="font-medium">Motivo:</span> {zapiErr || e.reason || `HTTP ${httpStatus}`}
+                        <span className="font-medium">Motivo:</span> {waErr || e.reason || `HTTP ${httpStatus}`}
                       </div>
                     )}
                   </li>

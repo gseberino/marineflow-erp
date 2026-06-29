@@ -178,7 +178,7 @@ Deno.serve(async (req) => {
           await admin
             .from("whatsapp_messages")
             .update({ delivery_status: status })
-            .eq("zapi_message_id", String(msgId));
+            .eq("wa_message_id", String(msgId));
         }
       }
       return jr({ ok: true, type: "status" });
@@ -202,7 +202,7 @@ Deno.serve(async (req) => {
       const { data: dup } = await admin
         .from("whatsapp_messages")
         .select("id")
-        .eq("zapi_message_id", event.messageId)
+        .eq("wa_message_id", event.messageId)
         .maybeSingle();
       if (dup) return jr({ ok: true, dedup: true });
     }
@@ -260,7 +260,7 @@ Deno.serve(async (req) => {
         media_url: event.mediaUrl,
         client_id: clientId,
         lead_id: leadId,
-        zapi_message_id: event.messageId || null,
+        wa_message_id: event.messageId || null,
         delivery_status: event.fromMe ? "sent" : "received",
         raw_payload: pAny,
       })

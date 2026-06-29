@@ -79,6 +79,10 @@ export type PDFData = {
     payment_condition_label?: string | null;
     payment_condition_installments?: any[] | number | null;
     subcontract_cost_total?: number;
+    financial_notes?: string;
+    payment_method_preferred?: string;
+    quote_validity_days?: number;
+    deposit_paid?: number;
   };
   client: {
     name: string;
@@ -840,9 +844,16 @@ ${!isQuote && data.serviceOrder.technical_notes ? `
 
 ${buildPaymentSection(data.serviceOrder)}
 
+${data.serviceOrder.financial_notes ? `
+<div class="card" style="border-left:4px solid var(--border);margin-top:8px;">
+  <div class="section-title">Observações Financeiras</div>
+  <div style="font-size:10px;line-height:1.6;color:var(--text-main);">${esc(data.serviceOrder.financial_notes)}</div>
+</div>
+` : ''}
+
 ${options.showBankDetails !== false && data.bank && (data.bank.bank_name || data.bank.pix_key) ? `
 <div class="card" style="margin-top:20px; background:rgba(212, 175, 55, 0.03); border:1px solid rgba(212, 175, 55, 0.2);">
-  <div class="section-title">Informações para Pagamento / Transferência</div>
+  <div class="section-title">Informações para Pagamento${data.serviceOrder.payment_method_preferred ? ` — ${PAYMENT_METHOD_LABELS[data.serviceOrder.payment_method_preferred] || data.serviceOrder.payment_method_preferred}` : ''}</div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;font-size:10px;">
     <div>
       <strong style="color:var(--primary);display:block;margin-bottom:4px;">DADOS BANCÁRIOS</strong>
@@ -1002,9 +1013,33 @@ ${companyHeaderHTML(data.company, 'Fatura de Serviço', docNumber)}
   </div>
 </div>
 
+${buildPaymentSection(data.serviceOrder)}
+
+${data.serviceOrder.deposit_paid && data.serviceOrder.deposit_paid > 0 ? `
+<div class="card" style="border-left:4px solid #16a34a;background:#f0fdf4;">
+  <div style="display:flex;justify-content:space-between;align-items:center;">
+    <div>
+      <div class="section-title" style="color:#16a34a;">Sinal Recebido</div>
+      <div style="font-size:10px;color:#166534;">Pagamento antecipado registrado</div>
+    </div>
+    <div style="text-align:right;">
+      <div style="font-size:14px;font-weight:800;color:#16a34a;">− ${fmtCurrency(data.serviceOrder.deposit_paid)}</div>
+      <div style="font-size:11px;font-weight:700;color:var(--primary);">Saldo: ${fmtCurrency(data.serviceOrder.grand_total - data.serviceOrder.deposit_paid)}</div>
+    </div>
+  </div>
+</div>
+` : ''}
+
+${data.serviceOrder.financial_notes ? `
+<div class="card" style="border-left:4px solid var(--border);">
+  <div class="section-title">Observações Financeiras</div>
+  <div style="font-size:10px;line-height:1.6;color:var(--text-main);">${esc(data.serviceOrder.financial_notes)}</div>
+</div>
+` : ''}
+
 ${options.showBankDetails !== false && hasBank ? `
 <div class="card">
-  <div class="section-title">Instruções para Pagamento</div>
+  <div class="section-title">Instruções para Pagamento${data.serviceOrder.payment_method_preferred ? ` — ${PAYMENT_METHOD_LABELS[data.serviceOrder.payment_method_preferred] || data.serviceOrder.payment_method_preferred}` : ''}</div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:10px;line-height:1.6;">
     <div>
       <strong>Dados Bancários:</strong><br/>

@@ -8,7 +8,7 @@ export function usePDFData(serviceOrderId: string | undefined) {
     queryFn: async () => {
       if (!serviceOrderId) return null;
 
-      const [soRes, settingsRes] = await Promise.all([
+      const [soRes, settingsRes, depositRes] = await Promise.all([
         supabase.from('service_orders')
           .select(`
             *,
@@ -24,10 +24,16 @@ export function usePDFData(serviceOrderId: string | undefined) {
           .single(),
         supabase.from('app_settings')
           .select('key, value'),
+        supabase.from('receivables')
+          .select('paid_amount')
+          .eq('service_order_id', serviceOrderId)
+          .eq('is_deposit', true)
+          .eq('status', 'paid'),
       ]);
 
       if (soRes.error) throw soRes.error;
       const so = soRes.data;
+      const depositPaid = (depositRes.data || []).reduce((sum, r) => sum + (r.paid_amount || 0), 0);
       const settingsMap: Record<string, string> = {};
       for (const row of (settingsRes.data || []) as Array<{ key: string; value: string }>) {
         if (row.key) settingsMap[row.key] = String(row.value || '');
@@ -80,6 +86,10 @@ export function usePDFData(serviceOrderId: string | undefined) {
           payment_condition_label: (so as any).payment_condition_presets?.label ?? null,
           payment_condition_installments: (so as any).payment_condition_presets?.installments ?? null,
           subcontract_cost_total: (so as any).subcontract_cost_total || 0,
+          financial_notes: (so as any).financial_notes ?? undefined,
+          payment_method_preferred: (so as any).payment_method_preferred ?? undefined,
+          quote_validity_days: (so as any).quote_validity_days ?? undefined,
+          deposit_paid: depositPaid > 0 ? depositPaid : undefined,
         },
         client: {
           name: (so.clients as any)?.name || '—',
@@ -146,7 +156,8 @@ export function usePDFData(serviceOrderId: string | undefined) {
 /** Standalone async fetcher — same logic as usePDFData but imperative (no React hook). */
 export async function fetchPDFData(serviceOrderId: string): Promise<PDFData | null> {
   try {
-    const [soRes, settingsRes] = await Promise.all([
+    // Mirrors the 3-query structure of usePDFData to guarantee identical PDF output.
+    const [soRes, settingsRes, depositRes] = await Promise.all([
       supabase.from('service_orders')
         .select(`
           *,
@@ -162,10 +173,17 @@ export async function fetchPDFData(serviceOrderId: string): Promise<PDFData | nu
         .single(),
       supabase.from('app_settings')
         .select('key, value'),
+      // Busca sinal pago para exibir no card "Sinal Recebido" da fatura
+      supabase.from('receivables')
+        .select('paid_amount')
+        .eq('service_order_id', serviceOrderId)
+        .eq('is_deposit', true)
+        .eq('status', 'paid'),
     ]);
 
     if (soRes.error) throw soRes.error;
     const so = soRes.data;
+    const depositPaid = (depositRes.data || []).reduce((sum, r) => sum + (r.paid_amount || 0), 0);
     const settingsMap: Record<string, string> = {};
     for (const row of (settingsRes.data || []) as Array<{ key: string; value: string }>) {
       if (row.key) settingsMap[row.key] = String(row.value || '');
@@ -218,6 +236,10 @@ export async function fetchPDFData(serviceOrderId: string): Promise<PDFData | nu
         payment_condition_label: (so as any).payment_condition_presets?.label ?? null,
         payment_condition_installments: (so as any).payment_condition_presets?.installments ?? null,
         subcontract_cost_total: (so as any).subcontract_cost_total || 0,
+        financial_notes: (so as any).financial_notes ?? undefined,
+        payment_method_preferred: (so as any).payment_method_preferred ?? undefined,
+        quote_validity_days: (so as any).quote_validity_days ?? undefined,
+        deposit_paid: depositPaid > 0 ? depositPaid : undefined,
       },
       client: {
         name: (so.clients as any)?.name || '—',

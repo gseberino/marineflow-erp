@@ -4756,7 +4756,7 @@ export type Database = {
           raw_payload: Json | null
           sent_by: string | null
           service_order_id: string | null
-          zapi_message_id: string | null
+          wa_message_id: string | null
         }
         Insert: {
           body?: string | null
@@ -4774,7 +4774,7 @@ export type Database = {
           raw_payload?: Json | null
           sent_by?: string | null
           service_order_id?: string | null
-          zapi_message_id?: string | null
+          wa_message_id?: string | null
         }
         Update: {
           body?: string | null
@@ -4792,7 +4792,7 @@ export type Database = {
           raw_payload?: Json | null
           sent_by?: string | null
           service_order_id?: string | null
-          zapi_message_id?: string | null
+          wa_message_id?: string | null
         }
         Relationships: [
           {
@@ -5025,7 +5025,7 @@ export type Database = {
           source_ref_id: string | null
           status: string
           updated_at: string
-          zapi_message_id: string | null
+          wa_message_id: string | null
         }
         Insert: {
           attempts?: number
@@ -5043,7 +5043,7 @@ export type Database = {
           source_ref_id?: string | null
           status?: string
           updated_at?: string
-          zapi_message_id?: string | null
+          wa_message_id?: string | null
         }
         Update: {
           attempts?: number
@@ -5061,7 +5061,7 @@ export type Database = {
           source_ref_id?: string | null
           status?: string
           updated_at?: string
-          zapi_message_id?: string | null
+          wa_message_id?: string | null
         }
         Relationships: []
       }
@@ -5079,7 +5079,7 @@ export type Database = {
           status: string
           text_content: string | null
           updated_at: string
-          zapi_message_id: string | null
+          wa_message_id: string | null
         }
         Insert: {
           background_color?: string | null
@@ -5094,7 +5094,7 @@ export type Database = {
           status?: string
           text_content?: string | null
           updated_at?: string
-          zapi_message_id?: string | null
+          wa_message_id?: string | null
         }
         Update: {
           background_color?: string | null
@@ -5109,7 +5109,7 @@ export type Database = {
           status?: string
           text_content?: string | null
           updated_at?: string
-          zapi_message_id?: string | null
+          wa_message_id?: string | null
         }
         Relationships: [
           {

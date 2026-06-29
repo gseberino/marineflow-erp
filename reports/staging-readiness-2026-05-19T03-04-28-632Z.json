@@ -1,0 +1,38 @@
+{
+  "mode": "check-staging",
+  "generatedAt": "2026-05-19T03:04:28.631Z",
+  "status": "not_configured",
+  "envFileStatus": "not-provided",
+  "envFilePath": null,
+  "missingEnvVars": [
+    "VITE_SUPABASE_URL",
+    "SUPABASE_URL",
+    "VITE_SUPABASE_PUBLISHABLE_KEY",
+    "SUPABASE_ANON_KEY",
+    "SUPABASE_PUBLISHABLE_KEY"
+  ],
+  "sameProjectGuess": "unknown",
+  "tableChecks": [
+    {
+      "table": "clients",
+      "status": "not_checked"
+    },
+    {
+      "table": "suppliers",
+      "status": "not_checked"
+    },
+    {
+      "table": "service_orders",
+      "status": "not_checked"
+    },
+    {
+      "table": "products",
+      "status": "not_checked"
+    },
+    {
+      "table": "services",
+      "status": "not_checked"
+    }
+  ],
+  "recommendation": "The staging env is not configured yet. Fill .env.staging.local before retrying."
+}

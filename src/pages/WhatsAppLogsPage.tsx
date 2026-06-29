@@ -29,7 +29,7 @@ type WaMessage = {
   is_broadcast: boolean | null;
   client_id: string | null;
   lead_id: string | null;
-  zapi_message_id: string | null;
+  wa_message_id: string | null;
   raw_payload: any;
   occurred_at: string;
   created_at: string;
@@ -277,7 +277,7 @@ export default function WhatsAppLogsPage() {
               <div className="space-y-3 text-sm">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div><div className="text-xs text-muted-foreground">ID</div><div className="font-mono text-xs break-all">{selected.id}</div></div>
-                  <div><div className="text-xs text-muted-foreground">Provider ID</div><div className="font-mono text-xs break-all">{selected.zapi_message_id || '—'}</div></div>
+                  <div><div className="text-xs text-muted-foreground">Provider ID</div><div className="font-mono text-xs break-all">{selected.wa_message_id || '—'}</div></div>
                   <div><div className="text-xs text-muted-foreground">Data</div><div>{format(new Date(selected.occurred_at), 'dd/MM/yyyy HH:mm:ss')}</div></div>
                   <div><div className="text-xs text-muted-foreground">Telefone</div><div className="font-mono">{selected.phone_normalized}</div></div>
                   <div><div className="text-xs text-muted-foreground">Direção</div><Badge>{selected.direction}</Badge></div>

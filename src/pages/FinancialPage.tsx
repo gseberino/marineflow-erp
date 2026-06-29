@@ -17,6 +17,7 @@ import { PayableFormDialog } from '@/components/PayableFormDialog';
 import { BankReconciliation } from '@/components/BankReconciliation';
 import { ReimbursementsPanel } from '@/components/ReimbursementsPanel';
 import { DREPanel } from '@/components/DREPanel';
+import { AgingReportPanel } from '@/components/AgingReportPanel';
 import { FinancialFilterPanel, applyFilters, defaultFilters, type FinancialFilters } from '@/components/FinancialFilterPanel';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -27,7 +28,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { generatePDF, DEFAULT_PDF_OPTIONS, type PDFData } from '@/lib/pdf-generator';
 import { toast } from 'sonner';
 import { BulkBillingReminderDialog } from '@/components/BulkBillingReminderDialog';
-import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/SendViaZAPIDialog';
+import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/SendViaWhatsAppDialog';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { Send } from 'lucide-react';
 
@@ -117,7 +118,7 @@ export default function FinancialPage() {
   const [paymentTarget, setPaymentTarget] = useState<{ receivable?: any; payable?: any } | null>(null);
   const [showNewReceivable, setShowNewReceivable] = useState(false);
   const [showNewPayable, setShowNewPayable] = useState(false);
-  const [zapiTarget, setZapiTarget] = useState<SendViaWhatsAppTarget | null>(null);
+  const [whatsAppTarget, setWhatsAppTarget] = useState<SendViaWhatsAppTarget | null>(null);
   const [recFilters, setRecFilters] = useState<FinancialFilters>({ ...defaultFilters });
   const [payFilters, setPayFilters] = useState<FinancialFilters>({ ...defaultFilters });
   const [paySubTab, setPaySubTab] = useState<'list' | 'reimbursements'>('list');
@@ -415,6 +416,7 @@ export default function FinancialPage() {
           <TabsTrigger value="receivables">{t.financial.tabReceivables}</TabsTrigger>
           <TabsTrigger value="payables">{t.financial.tabPayables}</TabsTrigger>
           <TabsTrigger value="reconciliation">{t.financial.tabReconciliation}</TabsTrigger>
+          <TabsTrigger value="aging">Aging</TabsTrigger>
         </TabsList>
 
         {/* === OVERVIEW === */}
@@ -599,7 +601,7 @@ export default function FinancialPage() {
                                   amount: Number(r.balance_amount ?? r.amount) || null,
                                   dueDate: r.due_date || null,
                                 };
-                                setZapiTarget(target);
+                                setWhatsAppTarget(target);
                                 void writeAuditLog({
                                   table_name: 'receivables',
                                   record_id: r.id,
@@ -754,6 +756,9 @@ export default function FinancialPage() {
         <TabsContent value="reconciliation" className="mt-4">
           <BankReconciliation />
         </TabsContent>
+        <TabsContent value="aging" className="mt-4">
+          <AgingReportPanel />
+        </TabsContent>
       </Tabs>
 
       {paymentTarget && (
@@ -767,9 +772,9 @@ export default function FinancialPage() {
       <ReceivableFormDialog open={showNewReceivable} onOpenChange={setShowNewReceivable} />
       <PayableFormDialog open={showNewPayable} onOpenChange={setShowNewPayable} />
       <SendViaWhatsAppDialog
-        open={!!zapiTarget}
-        onOpenChange={v => { if (!v) setZapiTarget(null); }}
-        target={zapiTarget}
+        open={!!whatsAppTarget}
+        onOpenChange={v => { if (!v) setWhatsAppTarget(null); }}
+        target={whatsAppTarget}
       />
     </div>
   );

@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
       phone_normalized: cleanPhone,
       message_type: "text",
       body: text,
-      zapi_message_id: result.providerMessageId || null,
+      wa_message_id: result.providerMessageId || null,
       delivery_status: "sent",
       sent_by: userId,
     });

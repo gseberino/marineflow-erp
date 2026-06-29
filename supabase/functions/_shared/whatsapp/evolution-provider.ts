@@ -46,9 +46,15 @@ export class EvolutionProvider implements WhatsAppProvider {
         const msgId = String(key?.["id"] ?? body["id"] ?? body["messageId"] ?? "");
         return { ok: true, providerMessageId: msgId };
       }
+      // Evolution nests the real detail in body.response.message
+      const nested = (body["response"] as Record<string, unknown> | undefined);
+      const detail = nested?.["message"] ?? nested?.["error"];
+      const errMsg = detail
+        ? `${body["error"] ?? `HTTP ${res.status}`}: ${detail}`
+        : String(body["error"] ?? body["message"] ?? `HTTP ${res.status}`);
       return {
         ok: false,
-        error: String(body["error"] ?? body["message"] ?? `HTTP ${res.status}`),
+        error: errMsg,
         retryable: res.status >= 500,
       };
     } catch (err) {

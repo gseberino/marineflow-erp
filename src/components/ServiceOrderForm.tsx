@@ -9,6 +9,7 @@ import { useMarinas } from '@/hooks/use-marinas';
 import { useProducts } from '@/hooks/use-products';
 import { useServices } from '@/hooks/use-services';
 import { useCardFees } from '@/hooks/use-card-fees';
+import { useSOLinkedPOs, useUpdatePurchaseOrder } from '@/hooks/use-purchase-orders';
 import {
   useCreateServiceOrder,
   useUpdateServiceOrder,
@@ -30,6 +31,7 @@ import {
 import { useAppUsers, useCommissionableUsers, USER_ROLES } from '@/hooks/use-app-users';
 import { usePaymentConditionPresets } from '@/hooks/use-payment-conditions';
 import { useCollectionsByOS } from '@/hooks/use-collections';
+import { useReceivablesByServiceOrder, usePaymentsByServiceOrder } from '@/hooks/use-financial';
 import { useVesselContacts, VESSEL_CONTACT_ROLES } from '@/hooks/use-vessel-contacts';
 import { ClientCombobox } from '@/components/ClientCombobox';
 import { VesselSelect } from '@/components/VesselSelect';
@@ -47,6 +49,9 @@ import { usePDFData } from '@/hooks/use-pdf';
 import { generatePDF, downloadPDF, DEFAULT_PDF_OPTIONS } from '@/lib/pdf-generator';
 import type { PDFOptions } from '@/lib/pdf-generator';
 import { PDFOptionsDialog } from '@/components/PDFOptionsDialog';
+import { RegisterDepositDialog } from '@/components/RegisterDepositDialog';
+import { StockAlertDialog } from '@/components/StockAlertDialog';
+import { ReceivePODialog } from '@/components/ReceivePODialog';
 import { OPERATIONAL_EXPENSE_CATEGORIES } from '@/lib/expense-categories';
 import { calculateDisplacement, calculateTravelCost } from '@/lib/displacement';
 import { statusConfig, priorityConfig } from '@/lib/constants';
@@ -55,7 +60,7 @@ import { ServiceFormDialog } from '@/components/ServiceFormDialog';
 import { ServiceOrderSignatures } from '@/components/ServiceOrderSignatures';
 import { ServiceOrderPhotos } from '@/components/ServiceOrderPhotos';
 import { WhatsAppSendHistoryDialog } from '@/components/WhatsAppSendHistoryDialog';
-import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/SendViaZAPIDialog';
+import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/SendViaWhatsAppDialog';
 import { useWhatsAppSendHistory } from '@/hooks/use-whatsapp-send-log';
 import { CheckCircle2, XCircle, History as HistoryIcon, Send, Sparkles } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -69,7 +74,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle, Pencil, Paperclip, X, FileImage, ExternalLink, Package, Copy, Camera, MapPin, Clock, Download, Loader2 } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle, Pencil, Paperclip, X, FileImage, ExternalLink, Package, Copy, Camera, MapPin, Clock, Download, Loader2, DollarSign, Tag, Percent, Hash, PackagePlus } from 'lucide-react';
 import { toast } from 'sonner';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { MoneyInput } from '@/components/MoneyInput';
@@ -674,6 +679,10 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const { data: parts } = useServiceOrderParts(orderId);
   const addPart = useAddServiceOrderPart();
   const removePart = useRemoveServiceOrderPart();
+  const { data: linkedPOs } = useSOLinkedPOs(orderId);
+  const updatePO = useUpdatePurchaseOrder();
+  const [stockAlert, setStockAlert] = useState<{ cardKey: string; productId: string; productName: string; needed: number; available: number; unitCost: number; unitSale: number; notes?: string; suppliers: { id: string; name: string }[]; leadTimeDays?: number; } | null>(null);
+  const [receivePOTarget, setReceivePOTarget] = useState<any>(null);
 
   const { data: soServices } = useServiceOrderServices(orderId);
   const addService = useAddServiceOrderService();
@@ -726,6 +735,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     commissioned_user_id: '',
     payment_conditions: '',
     payment_condition_preset_id: '',
+    financial_notes: '',
+    payment_method_preferred: '',
+    quote_validity_days: 15,
     signed_at: '' as string,
   });
 
@@ -738,6 +750,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [showExpensesDialog, setShowExpensesDialog] = useState(false);
   const [showTimeDialog, setShowTimeDialog] = useState(false);
   const [showFinancialDialog, setShowFinancialDialog] = useState(false);
+  const [depositDialogOpen, setDepositDialogOpen] = useState(false);
+  const [showCommission, setShowCommission] = useState(false);
+  const [depositFromFinancial, setDepositFromFinancial] = useState(false);
   const { data: vesselContacts } = useVesselContacts(form.vessel_id || undefined);
 
   // Part inline-card state (matches the services pattern)
@@ -854,9 +869,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [cancelReason, setCancelReason] = useState('');
   const [reopenReason, setReopenReason] = useState('');
   const [showZapiHistory, setShowZapiHistory] = useState(false);
-  const [zapiTarget, setZapiTarget] = useState<SendViaWhatsAppTarget | null>(null);
-  const { data: zapiHistory } = useWhatsAppSendHistory(orderId || null);
-  const lastZapiSend = zapiHistory?.[0];
+  const [whatsAppTarget, setWhatsAppTarget] = useState<SendViaWhatsAppTarget | null>(null);
+  const { data: waHistory } = useWhatsAppSendHistory(orderId || null);
+  const lastWaSend = waHistory?.[0];
   const [pdfDialogType, setPdfDialogType] = useState<'quote' | 'service_order' | 'invoice' | null>(null);
   const [downloadingType, setDownloadingType] = useState<'quote' | 'service_order' | 'invoice' | null>(null);
   const [waPreview, setWaPreview] = useState<{ phone: string; message: string; url: string; clientName: string } | null>(null);
@@ -871,6 +886,11 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [topVisible, setTopVisible] = useState(true);
   const [bottomVisible, setBottomVisible] = useState(false);
   const { data: osCollections } = useCollectionsByOS(orderId);
+  // M1: recebíveis desta OS para resumo financeiro
+  const { data: soReceivables } = useReceivablesByServiceOrder(orderId);
+  // M2: histórico de pagamentos desta OS
+  const { data: soPayments } = usePaymentsByServiceOrder(orderId);
+  const [showPaymentHistory, setShowPaymentHistory] = useState(false);
 
   useEffect(() => {
     const targets: Array<{ el: HTMLElement | null; setter: (v: boolean) => void }> = [
@@ -966,6 +986,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         commissioned_user_id: d.commissioned_user_id || '',
         payment_conditions: d.payment_conditions || '',
         payment_condition_preset_id: d.payment_condition_preset_id || '',
+        financial_notes: d.financial_notes || '',
+        payment_method_preferred: d.payment_method_preferred || '',
+        quote_validity_days: d.quote_validity_days ?? 15,
         signed_at: d.signed_at || '',
       });
       if (d.service_order_technicians) {
@@ -1045,6 +1068,10 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     return Math.round(gross * discountRatio * 100) / 100;
   };
 
+  // Sinal (deposit) row from preset — first installment with tipo='aprovacao' or days=0
+  const signalRow = installmentRows.find(r => r.tipo === 'aprovacao' || r.days_after_approval === 0);
+  const signalAmount = signalRow ? calcInstallmentAmount(signalRow) : null;
+
   // Card fee calculation
   const selectedFee = cardFees?.find((f) => f.installments === selectedInstallments);
   const feePercent = selectedFee?.fee_percent || 0;
@@ -1062,6 +1089,13 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const servicesItemCount = (soServices || []).length;
   const billableHours = orderData?.labor_hours_total || 0;
   const partsItemCount = (parts || []).length;
+
+  // M1: Totais financeiros da OS a partir dos recebíveis reais
+  const soTotalCharged = (soReceivables || []).reduce((s, r) => s + Number((r as any).amount || 0), 0);
+  const soTotalPaid    = (soReceivables || []).reduce((s, r) => s + Number((r as any).paid_amount || 0), 0);
+  const soBalance      = (soReceivables || []).reduce((s, r) => s + Number((r as any).balance_amount || 0), 0);
+  const soPayStatus = soBalance <= 0 && soTotalCharged > 0 ? 'paid'
+    : soTotalPaid > 0 ? 'partially_paid' : 'unpaid';
 
   const handleSave = async () => {
     if (!form.client_id || !form.vessel_id || !form.problem_description) {
@@ -1087,6 +1121,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         grand_total: Math.round(grandTotal * 100) / 100,
         discount_services_pct: discountServicesPct,
         discount_parts_pct: discountPartsPct,
+        financial_notes: form.financial_notes || null,
+        payment_method_preferred: form.payment_method_preferred || null,
+        quote_validity_days: form.quote_validity_days || 15,
       };
 
       if (isNew) {
@@ -1175,6 +1212,44 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         }
         toast.success('Ordem de serviço atualizada');
 
+        // Audit log for financial field changes
+        if (orderData) {
+          const financialFields = ['discount_amount', 'tax_amount', 'grand_total', 'commission_rate', 'commission_amount'] as const;
+          const changed: Record<string, { before: any; after: any }> = {};
+          for (const f of financialFields) {
+            const before = (orderData as any)[f];
+            const after = (payload as any)[f] ?? (form as any)[f];
+            if (before !== undefined && after !== undefined && Number(before) !== Number(after)) {
+              changed[f] = { before, after };
+            }
+          }
+          if (Object.keys(changed).length > 0) {
+            writeAuditLog({
+              table_name: 'service_orders',
+              record_id: orderId!,
+              action: 'update' as any,
+              new_value: { financial_changes: changed },
+              reason: 'Campos financeiros alterados manualmente',
+            }).catch(() => {});
+          }
+        }
+
+        // M4: Auto-gerar cobranças quando OS é concluída com preset de parcelamento
+        if (form.status === 'completed' && form.payment_condition_preset_id) {
+          const { generateCollectionsFromOS } = await import('@/lib/generate-collections');
+          generateCollectionsFromOS({
+            serviceOrderId: orderId!,
+            approvalDate: new Date().toISOString().slice(0, 10),
+            trigger: 'status_change',
+          })
+            .then((res) => {
+              if (res.created > 0) {
+                toast.success(`${res.created} cobrança(s) parcelada(s) gerada(s) automaticamente.`);
+              }
+            })
+            .catch((err) => console.error('auto-generate-collections (completed) failed', err));
+        }
+
         // Auto-trigger collection generation when status becomes 'invoiced'
         if (form.status === 'invoiced') {
           const { generateCollectionsFromOS } = await import('@/lib/generate-collections');
@@ -1201,6 +1276,22 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     try {
       await updateStatus.mutateAsync({ id: orderId, status: newStatus });
       toast.success(`Status alterado para ${(t.status as Record<string, string>)[newStatus]}`);
+
+      // Deposit alert: when completing/invoicing, check if a deposit was already paid
+      if (newStatus === 'completed' || newStatus === 'invoiced') {
+        const { data: deposits } = await (await import('@/integrations/supabase/client')).supabase
+          .from('receivables')
+          .select('paid_amount')
+          .eq('service_order_id', orderId)
+          .eq('is_deposit', true)
+          .eq('status', 'paid');
+
+        const totalDeposit = (deposits || []).reduce((sum, r) => sum + (r.paid_amount || 0), 0);
+        if (totalDeposit > 0) {
+          const fmt = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalDeposit);
+          toast.info(`Sinal de ${fmt} já foi recebido. Lembre-se de descontar no valor da cobrança final.`, { duration: 8000 });
+        }
+      }
     } catch (e: any) {
       toast.error(e.message || 'Erro ao alterar status');
     }
@@ -1209,11 +1300,14 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const handleDuplicate = async () => {
     if (!orderId) return;
     try {
-      const newSO = await duplicate.mutateAsync(orderId);
-      toast.success('OS duplicada com sucesso!');
+      // In the form context, replicate the same type as the source:
+      // draft → quote (ORÇ), anything else → order (OS)
+      const mode = orderData?.status === 'draft' ? 'quote' : 'order';
+      const newSO = await duplicate.mutateAsync({ sourceId: orderId, mode });
+      toast.success(mode === 'quote' ? 'Orçamento duplicado!' : 'OS duplicada com sucesso!');
       navigate(`/service-orders/${(newSO as any).id}`);
     } catch (e: any) {
-      toast.error(e?.message || 'Erro ao duplicar OS');
+      toast.error(e?.message || 'Erro ao duplicar');
     }
   };
 
@@ -1283,6 +1377,39 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     }
     try {
       const productId = await ensureProductInCatalog(draft);
+
+      // Stock check: only for actual OS (non-draft). During the quote phase
+      // the OS doesn't exist yet, so creating a PO at this point makes no sense —
+      // the PO flow is triggered later at the moment of conversion (StockConfirmationDialog).
+      if (!isNew && orderId && draft.quantity > 0 && orderData?.status !== 'draft') {
+        const { data: prodData } = await supabase
+          .from('products')
+          .select('stock_quantity, minimum_stock, product_suppliers(supplier_id, suppliers(id, name)), product_suppliers!inner(lead_time_days)')
+          .eq('id', productId)
+          .maybeSingle();
+        const available = prodData?.stock_quantity ?? 0;
+        if (available < draft.quantity) {
+          const suppliers = ((prodData as any)?.product_suppliers ?? [])
+            .map((ps: any) => ps.suppliers)
+            .filter(Boolean)
+            .map((s: any) => ({ id: s.id, name: s.name }));
+          const leadTimeDays = (prodData as any)?.product_suppliers?.[0]?.lead_time_days ?? undefined;
+          setStockAlert({
+            cardKey: cardKey,
+            productId,
+            productName: draft.name,
+            needed: draft.quantity,
+            available: Math.max(0, available),
+            unitCost: draft.unit_cost,
+            unitSale: draft.unit_sale,
+            notes: draft.notes,
+            suppliers,
+            leadTimeDays,
+          });
+          return; // pause — user chooses action in dialog
+        }
+      }
+
       if (isNew) {
         setDraftParts((prev) => [
           ...prev,
@@ -1684,6 +1811,42 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         </div>
       )}
 
+      {/* Deposit pending banner */}
+      {!isNew && (orderData as any)?.quote_status === 'awaiting_deposit' && form.status === 'draft' && (
+        <div className="flex items-center justify-between rounded-lg border border-orange-200 bg-orange-50 p-4">
+          <div className="flex items-center gap-2">
+            <DollarSign className="h-5 w-5 text-orange-600 shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-orange-800">Aguardando pagamento do sinal</p>
+              <p className="text-xs text-orange-600 mt-0.5">O orçamento será convertido em OS automaticamente após o registro.</p>
+            </div>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-orange-300 text-orange-700 hover:bg-orange-100 gap-1 shrink-0"
+            onClick={() => setDepositDialogOpen(true)}
+          >
+            <DollarSign className="h-4 w-4" /> Registrar sinal
+          </Button>
+        </div>
+      )}
+
+      {/* Deposit dialog */}
+      {!isNew && orderId && (
+        <RegisterDepositDialog
+          open={depositDialogOpen}
+          onOpenChange={v => { setDepositDialogOpen(v); if (!v) setDepositFromFinancial(false); }}
+          serviceOrderId={orderId}
+          serviceOrderNumber={orderData?.service_order_number || ''}
+          grandTotal={grandTotal}
+          laborCost={laborCost}
+          partsCost={partsCost}
+          presetServicesPct={depositFromFinancial && signalRow ? signalRow.services_pct : undefined}
+          presetPartsPct={depositFromFinancial && signalRow ? signalRow.parts_pct : undefined}
+        />
+      )}
+
       {/* Header */}
       <div className="flex items-center gap-3 flex-wrap">
         <Button variant="ghost" size="icon" onClick={() => navigate('/service-orders')}>
@@ -1701,7 +1864,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               <span className={priorityConfig[form.priority]?.className || ''}>
                 {(t.priority as Record<string, string>)[form.priority]}
               </span>
-              {lastZapiSend && (
+              {lastWaSend && (
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -1711,13 +1874,13 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                         className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs hover:bg-muted transition-colors"
                         aria-label="Ver histórico de envios WhatsApp"
                       >
-                        {lastZapiSend.success ? (
+                        {lastWaSend.success ? (
                           <CheckCircle2 className="h-3.5 w-3.5 text-success" />
                         ) : (
                           <XCircle className="h-3.5 w-3.5 text-destructive" />
                         )}
-                        <span className={lastZapiSend.success ? 'text-success' : 'text-destructive'}>
-                          WhatsApp: {lastZapiSend.success ? 'enviado' : 'falhou'}
+                        <span className={lastWaSend.success ? 'text-success' : 'text-destructive'}>
+                          WhatsApp: {lastWaSend.success ? 'enviado' : 'falhou'}
                         </span>
                         <HistoryIcon className="h-3 w-3 text-muted-foreground" />
                       </button>
@@ -1725,14 +1888,14 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                     <TooltipContent side="bottom" className="max-w-xs">
                       <div className="text-xs space-y-1">
                         <div className="font-medium">
-                          Último envio: {new Date(lastZapiSend.changed_at).toLocaleString('pt-BR')}
+                          Último envio: {new Date(lastWaSend.changed_at).toLocaleString('pt-BR')}
                         </div>
-                        {!lastZapiSend.success && (
+                        {!lastWaSend.success && (
                           <div className="text-destructive">
-                            {(lastZapiSend.new_value as any)?.provider_result?.error
-                              || (lastZapiSend.new_value as any)?.zapi_response?.error
-                              || lastZapiSend.reason
-                              || `HTTP ${(lastZapiSend.new_value as any)?.http_status ?? '?'}`}
+                            {(lastWaSend.new_value as any)?.provider_result?.error
+                              || (lastWaSend.new_value as any)?.zapi_response?.error
+                              || lastWaSend.reason
+                              || `HTTP ${(lastWaSend.new_value as any)?.http_status ?? '?'}`}
                           </div>
                         )}
                         <div className="text-muted-foreground italic">Clique para ver histórico completo</div>
@@ -1853,7 +2016,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
                     <DropdownMenuItem
-                      onClick={() => setZapiTarget({
+                      onClick={() => setWhatsAppTarget({
                         kind: 'service_order',
                         serviceOrderId: orderData.id,
                         serviceOrderNumber: orderData.service_order_number,
@@ -1867,7 +2030,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                       <Printer className="h-4 w-4 mr-2" /> Enviar OS
                     </DropdownMenuItem>
                     <DropdownMenuItem
-                      onClick={() => setZapiTarget({
+                      onClick={() => setWhatsAppTarget({
                         kind: 'service_order',
                         serviceOrderId: orderData.id,
                         serviceOrderNumber: orderData.service_order_number,
@@ -3239,6 +3402,72 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         </Dialog>
       )}
 
+      {/* G - Linked Purchase Orders */}
+      {!isNew && orderId && linkedPOs && linkedPOs.length > 0 && (
+        <section className="rounded-xl border bg-card shadow-sm overflow-hidden">
+          <div className="p-4 border-b flex items-center justify-between">
+            <h2 className="font-semibold text-sm flex items-center gap-2">
+              <Package className="h-4 w-4 text-muted-foreground" />
+              Compras vinculadas ({linkedPOs.length})
+            </h2>
+          </div>
+          <div className="divide-y">
+            {linkedPOs.map(po => {
+              const totalItems = (po.purchase_order_items ?? []).length;
+              const isReceived = po.status === 'received';
+              const isCancelled = po.status === 'cancelled';
+              const statusColors: Record<string, string> = {
+                draft: 'bg-muted text-muted-foreground',
+                sent: 'bg-blue-100 text-blue-700',
+                partial: 'bg-amber-100 text-amber-700',
+                received: 'bg-green-100 text-green-700',
+                cancelled: 'bg-red-100 text-red-600 line-through',
+              };
+              const statusLabels: Record<string, string> = {
+                draft: 'Rascunho', sent: 'Enviada', partial: 'Parcial', received: 'Recebida', cancelled: 'Cancelada',
+              };
+              const estimatedDate = po.expected_date
+                ? new Date(po.expected_date + 'T12:00:00').toLocaleDateString('pt-BR')
+                : null;
+              return (
+                <div key={po.id} className="px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+                  <div className="space-y-0.5 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-sm">{po.po_number}</span>
+                      <span className={"inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium " + (statusColors[po.status] || 'bg-muted text-muted-foreground')}>
+                        {statusLabels[po.status] ?? po.status}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {po.suppliers?.name ?? 'Fornecedor não definido'}
+                      {totalItems > 0 && " · " + totalItems + (totalItems === 1 ? ' item' : ' itens')}
+                      {estimatedDate && !isReceived && " · Previsão: " + estimatedDate}
+                      {po.total_amount > 0 && " · " + formatCurrency(po.total_amount)}
+                    </p>
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    {!isReceived && !isCancelled && (
+                      <Button size="sm" variant="outline"
+                        className="h-7 text-xs gap-1 text-green-700 border-green-300 hover:bg-green-50"
+                        onClick={() => setReceivePOTarget(po)}>
+                        <PackagePlus className="h-3.5 w-3.5" /> Registrar recebimento
+                      </Button>
+                    )}
+                    {po.status === 'draft' && (
+                      <Button size="sm" variant="ghost"
+                        className="h-7 text-xs gap-1 text-blue-700"
+                        onClick={() => updatePO.mutateAsync({ id: po.id, status: 'sent' })}>
+                        Marcar como enviada
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       {/* H - Financial Mini-Summary */}
       <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
         {/* Row 1: line items */}
@@ -3265,9 +3494,24 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               </span>
             )}
           </div>
-          <span className="font-bold text-lg text-accent">
-            {formatCurrency(grandTotal)}
-          </span>
+          <div className="flex flex-col items-end">
+            <span className="font-bold text-lg text-accent">
+              {formatCurrency(grandTotal)}
+            </span>
+            {/* M6: Valor orçado vs realizado — exibe variação quando há diferença */}
+            {(orderData as any)?.original_quote_amount > 0 &&
+              Math.abs(grandTotal - (orderData as any).original_quote_amount) > 0.01 && (
+              <span className="text-[10px] text-muted-foreground">
+                orçado {formatCurrency((orderData as any).original_quote_amount)}{' '}
+                <span className={grandTotal > (orderData as any).original_quote_amount
+                  ? 'text-destructive font-medium'
+                  : 'text-emerald-600 font-medium'}>
+                  {grandTotal > (orderData as any).original_quote_amount ? '+' : ''}
+                  {formatCurrency(grandTotal - (orderData as any).original_quote_amount)}
+                </span>
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Row 2: composition % + parts profit (edit-mode only) */}
@@ -3283,6 +3527,65 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               <span className={`ml-auto font-medium ${partsProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                 Lucro peças: {partsProfit >= 0 ? '+' : ''}{formatCurrency(partsProfit)} ({partsMarginPct.toFixed(1)}%)
               </span>
+            )}
+          </div>
+        )}
+
+        {/* M1: Resumo de recebíveis reais — só exibe se existem recebíveis */}
+        {!isNew && (soReceivables || []).length > 0 && (
+          <div className="px-4 py-2 border-t bg-blue-50/40 dark:bg-blue-950/20 flex items-center gap-4 flex-wrap text-xs">
+            <span className="text-muted-foreground">
+              Cobrado: <span className="font-semibold text-foreground">{formatCurrency(soTotalCharged)}</span>
+            </span>
+            <span className="text-muted-foreground">
+              Recebido: <span className="font-semibold text-emerald-600">{formatCurrency(soTotalPaid)}</span>
+            </span>
+            {soBalance > 0.01 && (
+              <span className="text-muted-foreground">
+                Em aberto: <span className="font-semibold text-destructive">{formatCurrency(soBalance)}</span>
+              </span>
+            )}
+            <span className={`ml-auto inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+              soPayStatus === 'paid'           ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40'
+              : soPayStatus === 'partially_paid' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40'
+              : 'bg-muted text-muted-foreground'
+            }`}>
+              {soPayStatus === 'paid' ? 'Quitado' : soPayStatus === 'partially_paid' ? 'Parcial' : 'Pendente'}
+            </span>
+          </div>
+        )}
+
+        {/* M2: Histórico de pagamentos — colapsável */}
+        {!isNew && (soPayments || []).length > 0 && (
+          <div className="border-t">
+            <button
+              type="button"
+              className="w-full flex items-center justify-between px-4 py-2 text-xs text-muted-foreground hover:bg-muted/30 transition-colors"
+              onClick={() => setShowPaymentHistory(v => !v)}
+            >
+              <span className="flex items-center gap-1.5">
+                <Receipt className="h-3.5 w-3.5" />
+                Histórico de pagamentos ({soPayments.length})
+              </span>
+              <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showPaymentHistory ? 'rotate-180' : ''}`} />
+            </button>
+            {showPaymentHistory && (
+              <div className="px-4 pb-3 space-y-0.5">
+                {(soPayments || []).map((p: any) => (
+                  <div key={p.id} className="grid grid-cols-[80px_1fr_auto] gap-2 items-center text-xs py-1.5 border-b border-dashed last:border-0">
+                    <span className="text-muted-foreground tabular-nums">
+                      {new Date(p.payment_date + 'T12:00:00').toLocaleDateString('pt-BR')}
+                    </span>
+                    <span className="text-muted-foreground truncate capitalize">
+                      {(p.payment_method || '—').replace(/_/g, ' ')}
+                      {p.installments > 1 ? ` ${p.installments}x` : ''}
+                    </span>
+                    <span className="font-semibold text-emerald-600 tabular-nums">
+                      {formatCurrency(Number(p.net_amount || p.amount))}
+                    </span>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         )}
@@ -3310,345 +3613,428 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           >
             <Calculator className="h-3.5 w-3.5" />
             Composição Financeira
+            {/* M5: dot indicator quando financial_notes está preenchido */}
+            {form.financial_notes?.trim() && (
+              <span className="h-2 w-2 rounded-full bg-amber-400 ml-0.5 animate-pulse" title="Observações financeiras preenchidas" />
+            )}
           </Button>
         </div>
       </div>
 
-      {/* Financial Dialog */}
+      {/* Financial Dialog — reorganized */}
       <Dialog open={showFinancialDialog} onOpenChange={setShowFinancialDialog}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
+        <DialogContent className="max-w-2xl max-h-[92vh] flex flex-col p-0 gap-0">
+          {/* Sticky header */}
+          <div className="px-6 pt-5 pb-3 border-b">
+            <DialogTitle className="flex items-center gap-2 text-base">
               <Calculator className="h-4 w-4" /> Composição Financeira
             </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 pt-2">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">{t.serviceOrders.labor}</span>
-                  <span>{formatCurrency(laborCost)}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">{t.serviceOrders.parts}</span>
-                  <span>{formatCurrency(partsCost)}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">{t.serviceOrders.operationalCost}</span>
-                  <span>{formatCurrency(operationalCost)}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">{t.serviceOrders.travel}</span>
-                  <span>{formatCurrency(form.travel_cost_total)}</span>
-                </div>
-                <div className="flex justify-between text-sm items-center">
+          </div>
+
+          {/* Scrollable body */}
+          <div className="overflow-y-auto flex-1 px-6 py-4 space-y-5">
+
+            {/* ── SECTION 1: CUSTOS ── */}
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                <Receipt className="h-3.5 w-3.5" /> Custos
+              </p>
+              <div className="rounded-lg border bg-muted/20 divide-y text-sm">
+                {[
+                  { label: t.serviceOrders.labor,           value: laborCost },
+                  { label: t.serviceOrders.parts,           value: partsCost },
+                  { label: t.serviceOrders.operationalCost, value: operationalCost },
+                  { label: t.serviceOrders.travel,          value: form.travel_cost_total },
+                ].map(({ label, value }) => (
+                  <div key={label} className="flex justify-between px-3 py-1.5">
+                    <span className="text-muted-foreground">{label}</span>
+                    <span className={value > 0 ? 'font-medium' : 'text-muted-foreground/50'}>{formatCurrency(value || 0)}</span>
+                  </div>
+                ))}
+                <div className="flex justify-between px-3 py-1.5 items-center">
                   <span className="text-muted-foreground">{t.serviceOrders.subcontract}</span>
                   <MoneyInput className="w-28 h-7 text-right text-sm" value={form.subcontract_cost_total}
-                    onValueChange={(v) => set('subcontract_cost_total', v)} />
+                    onValueChange={(v) => set('subcontract_cost_total', v)} disabled={isLocked} />
                 </div>
-                {/* Per-category discount breakdown */}
-                <div className="space-y-1 rounded-md border border-dashed p-2 bg-muted/20">
-                  <p className="text-xs font-medium text-muted-foreground mb-1">{t.serviceOrders.discount}</p>
-                  <div className="flex justify-between text-xs items-center">
-                    <span className="text-muted-foreground">↳ Serviços (%)</span>
-                    <div className="flex items-center gap-1.5">
-                      <Input
-                        type="number" min="0" max="100" step="0.5"
-                        className="w-16 h-6 text-right text-xs px-1"
-                        value={discountServicesPct || ''}
-                        placeholder="0"
-                        disabled={isLocked}
-                        onChange={(e) => {
-                          const pct = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
-                          setDiscountServicesPct(pct);
-                          const total = Math.round((laborCost * pct / 100 + partsCost * discountPartsPct / 100) * 100) / 100;
-                          set('discount_amount', total);
-                        }}
-                      />
-                      <span className="text-xs text-muted-foreground w-20 text-right">
-                        = {formatCurrency(laborCost * discountServicesPct / 100)}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex justify-between text-xs items-center">
-                    <span className="text-muted-foreground">↳ Peças (%)</span>
-                    <div className="flex items-center gap-1.5">
-                      <Input
-                        type="number" min="0" max="100" step="0.5"
-                        className="w-16 h-6 text-right text-xs px-1"
-                        value={discountPartsPct || ''}
-                        placeholder="0"
-                        disabled={isLocked}
-                        onChange={(e) => {
-                          const pct = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
-                          setDiscountPartsPct(pct);
-                          const total = Math.round((laborCost * discountServicesPct / 100 + partsCost * pct / 100) * 100) / 100;
-                          set('discount_amount', total);
-                        }}
-                      />
-                      <span className="text-xs text-muted-foreground w-20 text-right">
-                        = {formatCurrency(partsCost * discountPartsPct / 100)}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex justify-between text-sm items-center pt-0.5 border-t border-dashed mt-1">
-                    <span className="text-muted-foreground text-xs font-medium">Total desconto</span>
-                    <MoneyInput className="w-28 h-7 text-right text-sm" value={form.discount_amount}
-                      onValueChange={(v) => {
-                        set('discount_amount', v);
-                        if (!v) { setDiscountServicesPct(0); setDiscountPartsPct(0); }
-                      }}
-                      disabled={isLocked} />
-                  </div>
-                </div>
-                <div className="flex justify-between text-sm items-center">
-                  <span className="text-muted-foreground">{t.serviceOrders.tax}</span>
-                  <MoneyInput className="w-28 h-7 text-right text-sm" value={form.tax_amount}
-                    onValueChange={(v) => set('tax_amount', v)} disabled={isLocked} />
-                </div>
-
-                {/* Commission */}
-                <div className="space-y-2 pt-2 border-t border-dashed">
-                  <div className="flex justify-between text-sm items-center">
-                    <span className="text-muted-foreground">{(t.serviceOrders as any).commissionedPerson || 'Comissionado'}</span>
-                    <Select
-                      value={form.commissioned_user_id || 'none'}
-                      onValueChange={(v) => {
-                        const user = commissionableUsers?.find(u => u.id === v);
-                        setForm(f => ({
-                          ...f,
-                          commissioned_user_id: v === 'none' ? '' : v,
-                          commissioned_person: user?.full_name || '',
-                        }));
-                      }}
-                      disabled={isLocked}
-                    >
-                      <SelectTrigger className="w-52 h-7 text-sm">
-                        <SelectValue placeholder="Selecionar" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">—</SelectItem>
-                        {(commissionableUsers || []).map(u => (
-                          <SelectItem key={u.id} value={u.id}>
-                            {u.full_name} ({USER_ROLES.find(r => r.value === u.role)?.label || u.role})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex justify-between text-sm items-center">
-                    <span className="text-muted-foreground">{(t.serviceOrders as any).commissionAmount || 'Comissão'} (%)</span>
-                    <div className="flex items-center gap-2">
-                      <Input type="number" step="0.01" className="w-20 h-7 text-right text-sm" value={form.commission_rate}
-                        onChange={(e) => {
-                          const rate = parseFloat(e.target.value) || 0;
-                          const amount = Math.round(grandTotal * rate / 100 * 100) / 100;
-                          setForm(f => ({ ...f, commission_rate: rate, commission_amount: amount }));
-                        }}
-                        disabled={isLocked} />
-                      {(form.commission_rate || 0) > 0 && (
-                        <span className="text-xs text-muted-foreground whitespace-nowrap">
-                          = {formatCurrency(grandTotal * (form.commission_rate || 0) / 100)}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Payment conditions */}
-                <div className="space-y-2 pt-2 border-t border-dashed">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-sm">Condições de Pagamento</Label>
-                    <span className="text-xs text-muted-foreground">(aparece no PDF)</span>
-                  </div>
-                  <div className="flex gap-2 items-center">
-                    <Select
-                      key={presetKey}
-                      onValueChange={(v) => {
-                        const preset = (paymentPresets || []).find((p: any) => p.label === v);
-                        set('payment_conditions', v);
-                        set('payment_condition_preset_id', preset?.id || '');
-                        setPresetKey((k) => k + 1);
-                      }}
-                      disabled={isLocked}
-                    >
-                      <SelectTrigger className="w-44 h-8 text-sm">
-                        <SelectValue placeholder="Pré-definidas..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(paymentPresets || []).map((p: any) => (
-                          <SelectItem key={p.id} value={p.label}>
-                            {p.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Input
-                      value={form.payment_conditions || ''}
-                      onChange={(e) => set('payment_conditions', e.target.value)}
-                      placeholder="Ou descreva livremente..."
-                      disabled={isLocked}
-                      className="flex-1 h-8 text-sm"
-                    />
-                  </div>
-
-                  {orderId && grandTotal > 0 && form.payment_conditions &&
-                    (form.status === 'completed' || form.status === 'invoiced' || !!form.signed_at) && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleGenerateCollections}
-                      disabled={generatingCollections}
-                      className="gap-2 text-green-700 border-green-300 hover:bg-green-50"
-                    >
-                      <CreditCard className="h-4 w-4" />
-                      {generatingCollections ? 'Gerando...' : 'Gerar Cobranças'}
-                    </Button>
-                  )}
-
-                  {orderId && osCollections && osCollections.length > 0 && (
-                    <div className="rounded-lg border bg-muted/20 p-3 mt-2">
-                      <div className="flex items-center gap-2 mb-2">
-                        <CreditCard className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-sm font-medium">
-                          Cobranças Geradas ({osCollections.length})
-                        </span>
-                      </div>
-                      <div className="space-y-1">
-                        {osCollections.map((c) => (
-                          <div
-                            key={c.id}
-                            className="grid grid-cols-[1fr_auto_auto_auto] gap-2 items-center text-xs px-2 py-1.5 rounded bg-background border"
-                          >
-                            <span className="truncate">{c.description || 'Cobrança'}</span>
-                            <span className="font-medium">
-                              R$ {Number(c.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                            </span>
-                            <span className="text-muted-foreground">
-                              {new Date(c.due_date).toLocaleDateString('pt-BR')}
-                            </span>
-                            <span className="capitalize text-muted-foreground">{c.status}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-                <div className="flex justify-between pt-3 border-t-2">
-                  <span className="font-bold text-lg">{t.serviceOrders.grandTotal}</span>
-                  <span className="font-bold text-lg text-accent">{formatCurrency(grandTotal)}</span>
-                </div>
-                {(form.commission_amount || 0) > 0 && (
-                  <>
-                    <div className="flex justify-between text-sm text-muted-foreground">
-                      <span>{(t.serviceOrders as any).commissionAmount || 'Comissão'} ({form.commission_rate}%)</span>
-                      <span>− {formatCurrency(form.commission_amount || 0)}</span>
-                    </div>
-                    <div className="flex justify-between text-sm font-medium">
-                      <span>{(t.serviceOrders as any).netTotal || 'Total líquido'}</span>
-                      <span>{formatCurrency(grandTotal - (form.commission_amount || 0))}</span>
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {/* Payment info */}
-              <div className="space-y-3">
-                <div className="rounded-lg border p-3 bg-muted/30">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Calculator className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm font-medium">{t.serviceOrders.paymentMethodPix}</span>
-                  </div>
-                  <p className="text-sm font-semibold">{formatCurrency(grandTotal)}</p>
-                </div>
-                <div className="rounded-lg border p-3 bg-muted/30 space-y-3">
-                  <div className="flex items-center gap-2">
-                    <CreditCard className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm font-medium">{t.serviceOrders.paymentMethodCard}</span>
-                  </div>
-                  {/* Installment selector */}
-                  <div className="flex gap-1.5">
-                    {[1, 2, 3, 4, 5, 6].map((n) => (
-                      <button key={n} type="button"
-                        className={`px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${
-                          selectedInstallments === n
-                            ? 'bg-primary text-primary-foreground border-primary'
-                            : 'bg-background text-foreground border-border hover:bg-muted'
-                        }`}
-                        onClick={() => setSelectedInstallments(n)}>
-                        {n}x
-                      </button>
-                    ))}
-                  </div>
-                  <div className="space-y-1 text-sm">
-                    <div className="flex justify-between">
-                      <span className="font-medium">{t.serviceOrders.cardGrossAmount}:</span>
-                      <span className="font-bold">{formatCurrency(cardGross)}</span>
-                    </div>
-                    {selectedInstallments > 1 && (
-                      <div className="flex justify-between text-muted-foreground">
-                        <span>{t.serviceOrders.cardInstallmentValue}:</span>
-                        <span>{selectedInstallments}x {formatCurrency(installmentValue)}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between text-muted-foreground">
-                      <span>{t.serviceOrders.cardFeeAmount} ({Number(feePercent).toFixed(2)}%):</span>
-                      <span>{formatCurrency(cardFeeAmount)}</span>
-                    </div>
-                    <div className="flex justify-between text-success pt-1 border-t">
-                      <span className="font-medium">{t.serviceOrders.cardNetAmount}:</span>
-                      <span className="font-semibold">{formatCurrency(grandTotal)}</span>
-                    </div>
-                  </div>
+                <div className="flex justify-between px-3 py-2 bg-muted/40 rounded-b-lg font-medium">
+                  <span>Subtotal</span>
+                  <span>{formatCurrency(subtotal)}</span>
                 </div>
               </div>
             </div>
-            {selectedPreset && installmentRows.length > 0 && grandTotal > 0 && (
-              <div className="mt-4 pt-4 border-t space-y-2">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Condições — {selectedPreset.label}
-                </p>
-                <div className="space-y-1">
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>Serviços</span>
-                    <span>{formatCurrency(laborCost)}</span>
-                  </div>
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>Peças / Produtos</span>
-                    <span>{formatCurrency(partsCost)}</span>
-                  </div>
-                  {expensesTotal > 0 && (
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>Despesas e Deslocamento</span>
-                      <span>{formatCurrency(expensesTotal)}</span>
+
+            {/* ── SECTION 2: AJUSTES ── */}
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                <Tag className="h-3.5 w-3.5" /> Ajustes
+              </p>
+              <div className="rounded-lg border bg-muted/20 p-3 space-y-3 text-sm">
+                {/* Discount */}
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground font-medium">Desconto</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">↳ Serviços (%)</Label>
+                      <div className="flex items-center gap-1.5">
+                        <Input type="number" min="0" max="100" step="0.5"
+                          className="w-16 h-7 text-right text-xs" value={discountServicesPct || ''}
+                          placeholder="0" disabled={isLocked}
+                          onChange={e => {
+                            const pct = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
+                            setDiscountServicesPct(pct);
+                            set('discount_amount', Math.round((laborCost * pct / 100 + partsCost * discountPartsPct / 100) * 100) / 100);
+                          }} />
+                        <span className="text-xs text-muted-foreground">{formatCurrency(laborCost * discountServicesPct / 100)}</span>
+                      </div>
                     </div>
-                  )}
-                  <div className="border-t my-1" />
-                  {installmentRows.map((row, i) => {
-                    const amount = calcInstallmentAmount(row);
-                    const daysLabel = row.tipo === 'entrega'
-                      ? 'na entrega'
-                      : row.tipo === 'prazo' || row.days_after_approval > 0
-                      ? `em ${row.days_after_approval} dias`
-                      : 'na aprovação';
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">↳ Peças (%)</Label>
+                      <div className="flex items-center gap-1.5">
+                        <Input type="number" min="0" max="100" step="0.5"
+                          className="w-16 h-7 text-right text-xs" value={discountPartsPct || ''}
+                          placeholder="0" disabled={isLocked}
+                          onChange={e => {
+                            const pct = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
+                            setDiscountPartsPct(pct);
+                            set('discount_amount', Math.round((laborCost * discountServicesPct / 100 + partsCost * pct / 100) * 100) / 100);
+                          }} />
+                        <span className="text-xs text-muted-foreground">{formatCurrency(partsCost * discountPartsPct / 100)}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between pt-1 border-t border-dashed">
+                    <Label className="text-xs font-medium text-destructive">Total desconto</Label>
+                    <MoneyInput className="w-28 h-7 text-right text-sm text-destructive font-medium"
+                      value={form.discount_amount}
+                      onValueChange={v => {
+                        set('discount_amount', v);
+                        if (!v) { setDiscountServicesPct(0); setDiscountPartsPct(0); }
+                        else {
+                          const base = laborCost + partsCost;
+                          if (base > 0) {
+                            setDiscountServicesPct(Math.min(100, Math.round((v * (laborCost / base) / laborCost) * 1000) / 10));
+                            setDiscountPartsPct(Math.min(100, Math.round((v * (partsCost / base) / partsCost) * 1000) / 10));
+                          }
+                        }
+                      }} disabled={isLocked} />
+                  </div>
+                </div>
+
+                {/* Tax */}
+                <div className="flex items-center justify-between pt-2 border-t border-dashed">
+                  <Label className="text-sm">{t.serviceOrders.tax}</Label>
+                  <MoneyInput className="w-28 h-7 text-right text-sm" value={form.tax_amount}
+                    onValueChange={v => set('tax_amount', v)} disabled={isLocked} />
+                </div>
+
+                {/* Margin warning */}
+                {grandTotal > 0 && subtotal > 0 && (grandTotal / subtotal) < 0.85 && (
+                  <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                    Desconto alto — margem reduzida a {(((grandTotal - subtotal) / subtotal) * 100).toFixed(1)}%
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ── SECTION 3: CONDIÇÕES DE RECEBIMENTO ── */}
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                <CreditCard className="h-3.5 w-3.5" /> Condições de Recebimento
+              </p>
+              <div className="rounded-lg border bg-muted/20 p-3 space-y-3">
+                <div className="flex gap-2 items-center">
+                  <Select key={presetKey} onValueChange={v => {
+                    const preset = (paymentPresets || []).find((p: any) => p.label === v);
+                    set('payment_conditions', v);
+                    set('payment_condition_preset_id', preset?.id || '');
+                    setPresetKey(k => k + 1);
+                  }} disabled={isLocked}>
+                    <SelectTrigger className="w-44 h-8 text-sm">
+                      <SelectValue placeholder="Pré-definidas..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(paymentPresets || []).map((p: any) => (
+                        <SelectItem key={p.id} value={p.label}>{p.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input value={form.payment_conditions || ''} onChange={e => set('payment_conditions', e.target.value)}
+                    placeholder="Ou descreva livremente..." disabled={isLocked} className="flex-1 h-8 text-sm" />
+                </div>
+
+                {/* Installment preview */}
+                {selectedPreset && installmentRows.length > 0 && grandTotal > 0 && (
+                  <div className="rounded-md bg-background border divide-y text-sm">
+                    {installmentRows.map((row, i) => {
+                      const amount = calcInstallmentAmount(row);
+                      const isSignal = row.tipo === 'aprovacao' || row.days_after_approval === 0;
+                      const daysLabel = row.tipo === 'entrega' ? 'na entrega'
+                        : row.tipo === 'prazo' || row.days_after_approval > 0 ? `em ${row.days_after_approval} dias`
+                        : 'na aprovação';
+                      return (
+                        <div key={i} className={`flex justify-between items-center px-3 py-2 ${isSignal ? 'bg-orange-50' : ''}`}>
+                          <div>
+                            <span className="font-medium">{row.label || `Parcela ${i + 1}`}</span>
+                            <span className="ml-1.5 text-xs text-muted-foreground">({daysLabel})</span>
+                            {isSignal && <span className="ml-1.5 text-xs font-medium text-orange-600">● sinal</span>}
+                          </div>
+                          <span className="font-semibold">{formatCurrency(amount)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Sinal button */}
+                {!isNew && orderId && signalAmount !== null && (orderData as any)?.quote_status === 'awaiting_deposit' && (
+                  <Button
+                    type="button"
+                    className="w-full gap-2 bg-orange-500 hover:bg-orange-600 text-white"
+                    onClick={() => { setShowFinancialDialog(false); setDepositFromFinancial(true); setDepositDialogOpen(true); }}
+                  >
+                    <DollarSign className="h-4 w-4" />
+                    Registrar sinal — {formatCurrency(signalAmount)}
+                  </Button>
+                )}
+
+                {/* Generate collections button */}
+                {orderId && grandTotal > 0 && form.payment_conditions &&
+                  (form.status === 'completed' || form.status === 'invoiced' || !!form.signed_at) && (
+                  <Button variant="outline" size="sm" onClick={handleGenerateCollections}
+                    disabled={generatingCollections}
+                    className="gap-2 text-green-700 border-green-300 hover:bg-green-50 w-full">
+                    <CreditCard className="h-4 w-4" />
+                    {generatingCollections ? 'Gerando...' : 'Gerar Cobranças'}
+                  </Button>
+                )}
+
+                {orderId && osCollections && osCollections.length > 0 && (
+                  <div className="rounded-lg border bg-muted/20 p-3 space-y-1">
+                    <p className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
+                      <CreditCard className="h-3.5 w-3.5" /> Cobranças Geradas ({osCollections.length})
+                    </p>
+                    {osCollections.map(c => (
+                      <div key={c.id} className="grid grid-cols-[1fr_auto_auto] gap-2 items-center text-xs px-2 py-1.5 rounded bg-background border">
+                        <span className="truncate">{c.description || 'Cobrança'}</span>
+                        <span className="font-medium">{formatCurrency(Number(c.amount))}</span>
+                        <span className="text-muted-foreground">{new Date(c.due_date).toLocaleDateString('pt-BR')}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ── SECTION 4: SIMULADOR DE RECEBIMENTO ── */}
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                <Calculator className="h-3.5 w-3.5" /> Simulador de Recebimento
+              </p>
+              <div className="rounded-lg border bg-muted/20 p-3 space-y-3">
+                {/* PIX */}
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-muted-foreground font-medium">PIX / Transferência</span>
+                  <span className="font-bold text-lg">{formatCurrency(grandTotal)}</span>
+                </div>
+                <div className="border-t border-dashed pt-3 space-y-2">
+                  <p className="text-xs text-muted-foreground font-medium flex items-center gap-1.5">
+                    <CreditCard className="h-3.5 w-3.5" /> Cartão de Crédito
+                  </p>
+                  <div className="grid grid-cols-3 gap-1.5 text-xs">
+                    {[1,2,3,4,5,6].map(n => {
+                      const fee = cardFees?.find((f: any) => f.installments === n);
+                      const feePct = fee?.fee_percent || 0;
+                      const gross = feePct > 0 ? grandTotal / (1 - Number(feePct) / 100) : grandTotal;
+                      const perInstall = gross / n;
+                      const isSelected = selectedInstallments === n;
+                      return (
+                        <button key={n} type="button"
+                          onClick={() => setSelectedInstallments(n)}
+                          className={`rounded border p-1.5 text-left transition-colors ${isSelected ? 'bg-primary text-primary-foreground border-primary' : 'bg-background hover:bg-muted'}`}>
+                          <div className="font-semibold">{n}x {formatCurrency(perInstall)}</div>
+                          {feePct > 0 && (
+                            <div className={`text-[10px] ${isSelected ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
+                              taxa {Number(feePct).toFixed(1)}%
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {selectedInstallments > 0 && (() => {
+                    const fee = cardFees?.find((f: any) => f.installments === selectedInstallments);
+                    const feePct = fee?.fee_percent || 0;
+                    const gross = feePct > 0 ? grandTotal / (1 - Number(feePct) / 100) : grandTotal;
                     return (
-                      <div key={i} className="flex justify-between text-sm">
-                        <span className="font-medium">
-                          {row.label || `Parcela ${i + 1}`}
-                          <span className="ml-1 text-xs text-muted-foreground">
-                            ({daysLabel})
-                          </span>
-                        </span>
-                        <span className="font-semibold">{formatCurrency(amount)}</span>
+                      <div className="rounded bg-muted/40 px-3 py-2 text-xs space-y-1">
+                        <div className="flex justify-between"><span className="text-muted-foreground">Valor a cobrar:</span><span className="font-semibold">{formatCurrency(gross)}</span></div>
+                        {feePct > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Taxa ({Number(feePct).toFixed(2)}%):</span><span className="text-destructive">−{formatCurrency(gross - grandTotal)}</span></div>}
+                        <div className="flex justify-between border-t pt-1 text-success font-medium"><span>Você recebe líquido:</span><span>{formatCurrency(grandTotal)}</span></div>
                       </div>
                     );
-                  })}
+                  })()}
                 </div>
               </div>
-            )}
+            </div>
+
+            {/* ── SECTION 5: DETALHES DO PDF ── */}
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                <FileText className="h-3.5 w-3.5" /> Detalhes do PDF
+              </p>
+              <div className="rounded-lg border bg-muted/20 p-3 space-y-3 text-sm">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Forma de pagamento preferida</Label>
+                    <Select value={form.payment_method_preferred || 'none'} onValueChange={v => set('payment_method_preferred', v === 'none' ? '' : v)} disabled={isLocked}>
+                      <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Padrão (todas)" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Padrão (todas as opções)</SelectItem>
+                        {[{v:'pix',l:'PIX'},{v:'bank_transfer',l:'Transferência'},{v:'cash',l:'Dinheiro'},{v:'debit_card',l:'Débito'},{v:'credit_card',l:'Crédito'},{v:'boleto',l:'Boleto'}].map(m => (
+                          <SelectItem key={m.v} value={m.v}>{m.l}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Validade do orçamento (dias)</Label>
+                    <Input type="number" min="1" className="h-8 text-sm"
+                      value={form.quote_validity_days || 15}
+                      onChange={e => set('quote_validity_days', parseInt(e.target.value) || 15)}
+                      disabled={isLocked} />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs flex items-center gap-1.5">
+                    Observações financeiras
+                    <span className="text-muted-foreground">(aparece no PDF)</span>
+                    {/* M5: badge quando preenchido */}
+                    {form.financial_notes?.trim() && (
+                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-700 border border-amber-200">
+                        <AlertTriangle className="h-2.5 w-2.5" />
+                        preenchido
+                      </span>
+                    )}
+                  </Label>
+                  <Textarea value={form.financial_notes || ''} onChange={e => set('financial_notes', e.target.value)}
+                    rows={2} className="resize-none text-sm" placeholder="Condições especiais, avisos de pagamento..."
+                    disabled={isLocked} />
+                </div>
+              </div>
+            </div>
+
+            {/* ── SECTION 6: COMISSÃO (collapsible) ── */}
+            <div className="rounded-lg border bg-muted/20 overflow-hidden">
+              <button type="button"
+                className="w-full flex items-center justify-between px-3 py-2.5 text-sm text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+                onClick={() => setShowCommission(v => !v)}>
+                <span className="flex items-center gap-1.5 font-medium text-xs uppercase tracking-wide">
+                  <Receipt className="h-3.5 w-3.5" /> Comissão (uso interno)
+                </span>
+                <ChevronDown className={`h-4 w-4 transition-transform ${showCommission ? 'rotate-180' : ''}`} />
+              </button>
+              {showCommission && (
+                <div className="px-3 pb-3 pt-1 space-y-3 border-t text-sm">
+                  <div className="flex justify-between items-center">
+                    <Label className="text-sm text-muted-foreground">{(t.serviceOrders as any).commissionedPerson || 'Comissionado'}</Label>
+                    <Select value={form.commissioned_user_id || 'none'} onValueChange={v => {
+                      const user = commissionableUsers?.find(u => u.id === v);
+                      setForm(f => ({ ...f, commissioned_user_id: v === 'none' ? '' : v, commissioned_person: user?.full_name || '' }));
+                    }} disabled={isLocked}>
+                      <SelectTrigger className="w-48 h-8 text-sm"><SelectValue placeholder="Selecionar" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">—</SelectItem>
+                        {(commissionableUsers || []).map(u => (
+                          <SelectItem key={u.id} value={u.id}>{u.full_name} ({USER_ROLES.find(r => r.value === u.role)?.label || u.role})</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <Label className="text-sm text-muted-foreground">Comissão (%)</Label>
+                    <div className="flex items-center gap-2">
+                      <Input type="number" step="0.01" className="w-20 h-8 text-right text-sm"
+                        value={form.commission_rate}
+                        onChange={e => {
+                          const rate = parseFloat(e.target.value) || 0;
+                          setForm(f => ({ ...f, commission_rate: rate, commission_amount: Math.round(grandTotal * rate / 100 * 100) / 100 }));
+                        }} disabled={isLocked} />
+                      {(form.commission_rate || 0) > 0 && (
+                        <span className="text-xs text-muted-foreground">= {formatCurrency(grandTotal * (form.commission_rate || 0) / 100)}</span>
+                      )}
+                    </div>
+                  </div>
+                  {(form.commission_amount || 0) > 0 && (
+                    <div className="rounded bg-muted/40 px-3 py-2 text-xs space-y-1">
+                      <div className="flex justify-between"><span>Total bruto:</span><span>{formatCurrency(grandTotal)}</span></div>
+                      <div className="flex justify-between text-muted-foreground"><span>Comissão ({form.commission_rate}%):</span><span>−{formatCurrency(form.commission_amount || 0)}</span></div>
+                      <div className="flex justify-between font-semibold border-t pt-1"><span>Líquido empresa:</span><span>{formatCurrency(grandTotal - (form.commission_amount || 0))}</span></div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+          </div>{/* end scrollable body */}
+
+          {/* ── STICKY FOOTER: TOTAL ── */}
+          <div className="border-t px-6 py-3 flex items-center justify-between bg-card rounded-b-lg">
+            <div className="text-sm">
+              {(form.discount_amount || 0) > 0 && (
+                <span className="text-muted-foreground text-xs">
+                  Subtotal {formatCurrency(subtotal)} · Desc. −{formatCurrency(form.discount_amount || 0)}
+                  {(form.tax_amount || 0) > 0 ? ` · Taxa +${formatCurrency(form.tax_amount || 0)}` : ''}
+                </span>
+              )}
+            </div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-sm text-muted-foreground">{t.serviceOrders.grandTotal}</span>
+              <span className="text-2xl font-bold text-accent">{formatCurrency(grandTotal)}</span>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Stock Alert Dialog — shown when part has insufficient stock */}
+      {stockAlert && orderId && (
+        <StockAlertDialog
+          open={!!stockAlert}
+          onOpenChange={v => { if (!v) setStockAlert(null); }}
+          serviceOrderId={orderId}
+          productId={stockAlert.productId}
+          productName={stockAlert.productName}
+          needed={stockAlert.needed}
+          available={stockAlert.available}
+          unitCost={stockAlert.unitCost}
+          suppliers={stockAlert.suppliers}
+          leadTimeDays={stockAlert.leadTimeDays}
+          onAddAnyway={async () => {
+            if (!orderId) return;
+            await addPart.mutateAsync({
+              service_order_id: orderId,
+              product_id: stockAlert.productId,
+              quantity: stockAlert.needed,
+              unit_cost_snapshot: stockAlert.unitCost,
+              unit_sale_snapshot: stockAlert.unitSale,
+              notes: stockAlert.notes,
+            });
+            setOpenNewPartCards(prev => prev.filter(k => k !== stockAlert.cardKey));
+            setEditingPart(prev => { const n = { ...prev }; delete n[stockAlert.cardKey]; return n; });
+            setStockAlert(null);
+            toast.success('Peça adicionada (estoque negativo)');
+          }}
+        />
+      )}
+
+      {/* Receive PO Dialog */}
+      {receivePOTarget && (
+        <ReceivePODialog
+          open={!!receivePOTarget}
+          onOpenChange={v => { if (!v) setReceivePOTarget(null); }}
+          po={receivePOTarget}
+        />
+      )}
 
       {/* Notes & Technical Reports */}
       <section className="rounded-xl border bg-card p-5 shadow-sm space-y-4">
@@ -3773,6 +4159,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         open={!!pdfDialogType && !!pdfData}
         onOpenChange={v => { if (!v) setPdfDialogType(null); }}
         documentType={pdfDialogType || 'quote'}
+        initialValidityDays={form.quote_validity_days || 15}
         hasProductImages={pdfData?.parts?.some((p: any) => !!p.image_url) ?? false}
         onGenerate={async (action, options, validity, dueDate) => {
           if (!pdfData || !pdfDialogType) return;
@@ -3901,9 +4288,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       />
 
       <SendViaWhatsAppDialog
-        open={!!zapiTarget}
-        onOpenChange={v => { if (!v) setZapiTarget(null); }}
-        target={zapiTarget}
+        open={!!whatsAppTarget}
+        onOpenChange={v => { if (!v) setWhatsAppTarget(null); }}
+        target={whatsAppTarget}
       />
 
       <QuickProductDialog

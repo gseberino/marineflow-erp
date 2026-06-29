@@ -1,5 +1,15 @@
 import { type ServiceOrderStatus, type ServiceOrderPriority, type ServiceType } from '@/types/domain';
 
+export const quoteStatusConfig: Record<string, { label: string; className: string; description?: string }> = {
+  draft:             { label: 'Em elaboração',       className: 'bg-muted text-muted-foreground border border-border' },
+  sent:              { label: 'Enviado',              className: 'bg-blue-100 text-blue-700 border border-blue-200' },
+  awaiting_approval: { label: 'Aguardando aprovação', className: 'bg-amber-100 text-amber-700 border border-amber-200' },
+  approved:          { label: 'Aprovado',             className: 'bg-success/15 text-success border border-success/30' },
+  awaiting_deposit:  { label: 'Aguardando sinal',     className: 'bg-orange-100 text-orange-700 border border-orange-200',
+                       description: 'Conversão automática em OS ao registrar pagamento do sinal no financeiro' },
+  rejected:          { label: 'Reprovado',            className: 'bg-destructive/10 text-muted-foreground line-through border border-destructive/20' },
+};
+
 export const statusConfig: Record<ServiceOrderStatus, { label: string; className: string }> = {
   draft: { label: 'Draft', className: 'bg-muted text-muted-foreground' },
   scheduled: { label: 'Scheduled', className: 'bg-info/15 text-info border border-info/30' },

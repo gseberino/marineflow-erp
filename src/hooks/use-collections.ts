@@ -325,6 +325,15 @@ export function useMarkCollectionPaid() {
       confirmed_by: 'manual' | 'whatsapp';
       notes?: string;
     }) => {
+      // Busca receivable_id vinculado antes de atualizar.
+      // maybeSingle() em vez de single() — collection pode não existir (race condition),
+      // nesse caso não bloqueia o fluxo.
+      const { data: col } = await supabase
+        .from('collections')
+        .select('receivable_id')
+        .eq('id', input.id)
+        .maybeSingle();
+
       const { error } = await supabase
         .from('collections')
         .update({
@@ -336,6 +345,26 @@ export function useMarkCollectionPaid() {
         } as never)
         .eq('id', input.id);
       if (error) throw error;
+
+      // Se a cobrança tem recebível vinculado, sincroniza o pagamento no financeiro.
+      // O trigger trg_sync_collection_from_receivable cuidará do caminho inverso
+      // (receivable pago → collection paga), mas aqui é collection → receivable.
+      if (col?.receivable_id) {
+        // Normaliza p_payment_date para DATE (YYYY-MM-DD) — o RPC espera DATE, não TIMESTAMP.
+        const paymentDateOnly = input.payment_date.split('T')[0];
+        await supabase.rpc('register_payment_and_update_balance', {
+          p_receivable_id:    col.receivable_id,
+          p_payable_id:       null,
+          p_amount:           input.paid_amount,
+          p_payment_date:     paymentDateOnly,
+          p_payment_method:   input.paid_method,
+          p_installments:     1,
+          p_card_fee_percent: 0,
+          p_net_amount:       input.paid_amount,
+          p_notes:            input.notes || `Confirmado via cobrança`,
+        });
+      }
+
       await supabase.from('collection_contacts').insert({
         collection_id: input.id,
         contact_type: 'paid',
@@ -347,6 +376,9 @@ export function useMarkCollectionPaid() {
       qc.invalidateQueries({ queryKey: ['collections'] });
       qc.invalidateQueries({ queryKey: ['collection', vars.id] });
       qc.invalidateQueries({ queryKey: ['collection-contacts', vars.id] });
+      // Invalida recebíveis e OS para refletir a sincronização
+      qc.invalidateQueries({ queryKey: ['receivables'] });
+      qc.invalidateQueries({ queryKey: ['service-orders'] });
       toast.success('Cobrança marcada como paga');
     },
     onError: (e: any) => toast.error(e.message || 'Erro ao confirmar pagamento'),

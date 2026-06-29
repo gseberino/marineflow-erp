@@ -1,6 +1,6 @@
 // Edge Function: scheduling-automations
 // Cron job que envia lembretes de agendamento via WhatsApp.
-// REGRA DE SEGURANÇA: Se zapi_test_mode = "true" no app_settings,
+// REGRA DE SEGURANÇA: Se wa_test_mode = "true" no app_settings,
 // TODOS os envios são redirecionados para o número de teste.
 // Isso garante que NENHUM cliente receba mensagens durante testes.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
@@ -8,12 +8,24 @@ import { createWhatsAppProvider } from "../_shared/whatsapp/factory.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
 };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  // Verifica segredo de cron
+  const cronSecret = Deno.env.get("CRON_SECRET");
+  if (cronSecret) {
+    const incoming = req.headers.get("x-cron-secret");
+    if (incoming !== cronSecret) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+  }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -28,7 +40,7 @@ Deno.serve(async (req) => {
     const { data: settings } = await supabase
       .from("app_settings")
       .select("key, value")
-      .in("key", ["zapi_test_mode", "zapi_test_number"]);
+      .in("key", ["wa_test_mode", "wa_test_number", "zapi_test_mode", "zapi_test_number"]);
     const settingsMap = Object.fromEntries((settings || []).map((s: any) => [s.key, s.value]));
 
     // ========================================================
@@ -36,8 +48,8 @@ Deno.serve(async (req) => {
     // Se testMode = true, NENHUMA mensagem vai para clientes reais.
     // Todas são redirecionadas para testNumber.
     // ========================================================
-    const testMode = settingsMap["zapi_test_mode"] === "true";
-    const testNumber = (settingsMap["zapi_test_number"] || "").replace(/\D/g, "");
+    const testMode = (settingsMap["wa_test_mode"] ?? settingsMap["zapi_test_mode"]) === "true";
+    const testNumber = ((settingsMap["wa_test_number"] ?? settingsMap["zapi_test_number"]) || "").replace(/\D/g, "");
 
     // Validação crítica: se modo de teste ativo mas sem número, bloqueia envios
     if (testMode && !testNumber) {

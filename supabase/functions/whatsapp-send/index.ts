@@ -79,8 +79,8 @@ Deno.serve(async (req) => {
     if (!parsed.success) return jr({ error: parsed.error.flatten().fieldErrors }, 400);
     const body = parsed.data;
 
-    const testMode = settingsMap["zapi_test_mode"] === "true";
-    const testNumber = settingsMap["zapi_test_number"]?.replace(/\D/g, "");
+    const testMode = (settingsMap["wa_test_mode"] ?? settingsMap["zapi_test_mode"]) === "true";
+    const testNumber = settingsMap["wa_test_number"] ?? settingsMap["zapi_test_number"]?.replace(/\D/g, "");
 
     let phoneClean = normalizePhoneNumber(body.phone);
 
@@ -159,6 +159,21 @@ Deno.serve(async (req) => {
         { error: !sendResult.ok ? sendResult.error : "send failed" },
         502,
       );
+    }
+
+    // Auto-advance quote_status to 'sent' when a quote document is sent via WhatsApp
+    if (body.context === "quote" && body.service_order_id) {
+      try {
+        await supabaseAdmin
+          .from("service_orders")
+          .update({ quote_status: "sent" } as any)
+          .eq("id", body.service_order_id)
+          .in("quote_status" as any, ["draft", "awaiting_approval"])
+          .is("converted_to_os_at" as any, null);
+      } catch (_e) {
+        // Non-blocking — send already succeeded
+        console.warn("quote_status update skipped:", _e);
+      }
     }
 
     return jr({

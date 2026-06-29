@@ -111,7 +111,7 @@ Deno.serve(async (req) => {
           await admin.from("whatsapp_send_queue").update({
             status: "sent",
             sent_at: new Date().toISOString(),
-            zapi_message_id: result.providerMessageId || null,
+            wa_message_id: result.providerMessageId || null,
             attempts: (item.attempts || 0) + 1,
           }).eq("id", item.id);
           results.push({ id: item.id, ok: true });

@@ -48,7 +48,6 @@ const PO_DETAIL_SELECT = `
 `;
 
 async function generatePONumber(): Promise<string> {
-  const year = new Date().getFullYear();
   const { data } = await supabase
     .from('purchase_orders')
     .select('po_number')
@@ -56,10 +55,11 @@ async function generatePONumber(): Promise<string> {
     .limit(1);
   let seq = 1;
   if (data?.[0]?.po_number) {
+    // Handles both legacy 'PO-2026-0001' and new 'OC-00001' formats
     const match = data[0].po_number.match(/(\d+)$/);
     if (match) seq = parseInt(match[1], 10) + 1;
   }
-  return `PO-${year}-${String(seq).padStart(4, '0')}`;
+  return `OC-${String(seq).padStart(5, '0')}`;
 }
 
 // ── Queries ────────────────────────────────────────────────────────────────────
@@ -194,6 +194,128 @@ export function useRemovePOItem() {
     },
     onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['purchase-orders', v.poId] }),
     onError: (e: any) => toast.error(e.message),
+  });
+}
+
+// ── receive_po() — atomic: stock in + payable + status ────────────────────────
+
+export function useReceivePO() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      poId,
+      items,
+      dueDays = 30,
+    }: {
+      poId: string;
+      items: { po_item_id: string; received_qty: number }[];
+      dueDays?: number;
+    }) => {
+      const { data, error } = await supabase.rpc('receive_po', {
+        p_po_id:    poId,
+        p_items:    items,
+        p_due_days: dueDays,
+      });
+      if (error) throw error;
+      return data as { status: string; payable_id: string | null; all_received: boolean };
+    },
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ['purchase-orders'] });
+      qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: ['payables'] });
+      qc.invalidateQueries({ queryKey: ['service-orders'] });
+      if (result?.all_received) {
+        toast.success('Recebimento registrado. Estoque atualizado e conta a pagar gerada.');
+      } else {
+        toast.success('Recebimento parcial registrado.');
+      }
+    },
+    onError: (e: any) => toast.error(e.message || 'Erro ao registrar recebimento'),
+  });
+}
+
+// ── Create PO directly from a service order (sob encomenda) ───────────────────
+
+export function useCreatePOFromOS() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (params: {
+      serviceOrderId: string;
+      productId: string;
+      productName: string;
+      quantity: number;
+      unitCost: number;
+      supplierId?: string;
+      expectedDate?: string;
+      notes?: string;
+    }) => {
+      const poNumber = await generatePONumber();
+
+      // Create PO linked to OS
+      const { data: po, error: poErr } = await supabase
+        .from('purchase_orders')
+        .insert({
+          po_number:        poNumber,
+          service_order_id: params.serviceOrderId,
+          supplier_id:      params.supplierId ?? null,
+          expected_date:    params.expectedDate ?? null,
+          notes:            params.notes ?? null,
+          status:           'draft',
+        })
+        .select()
+        .single();
+      if (poErr) throw poErr;
+
+      // Add item
+      const { error: itemErr } = await supabase
+        .from('purchase_order_items')
+        .insert({
+          purchase_order_id: po.id,
+          product_id:        params.productId,
+          description:       params.productName,
+          quantity:          params.quantity,
+          unit_cost:         params.unitCost,
+        });
+      if (itemErr) throw itemErr;
+
+      // Move OS to awaiting_parts if not already there
+      await supabase
+        .from('service_orders')
+        .update({ status: 'awaiting_parts' })
+        .eq('id', params.serviceOrderId)
+        .in('status', ['open', 'in_progress', 'approved', 'scheduled']);
+
+      return po;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['purchase-orders'] });
+      qc.invalidateQueries({ queryKey: ['service-orders'] });
+      toast.success('Ordem de compra criada. OS movida para "Aguardando Peças".');
+    },
+    onError: (e: any) => toast.error(e.message || 'Erro ao criar PO'),
+  });
+}
+
+// ── Query POs linked to a specific service order ───────────────────────────────
+
+export function useSOLinkedPOs(serviceOrderId: string | undefined) {
+  return useQuery({
+    queryKey: ['purchase-orders', 'by-so', serviceOrderId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('purchase_orders')
+        .select(`
+          *,
+          suppliers(name),
+          purchase_order_items(*, products(name, sku))
+        `)
+        .eq('service_order_id', serviceOrderId!)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as unknown as PurchaseOrder[];
+    },
+    enabled: !!serviceOrderId,
+    staleTime: 30_000,
   });
 }
 

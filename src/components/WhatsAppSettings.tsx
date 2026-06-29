@@ -8,32 +8,33 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AlertTriangle, CheckCircle2, FlaskConical, MessageSquare, Send, ServerCog } from 'lucide-react';
-import { useWhatsAppSend } from '@/hooks/use-zapi-send';
+import { useWhatsAppSend } from '@/hooks/use-whatsapp-send';
 
-const SAFE_SETTING_KEYS = ['zapi_test_mode', 'zapi_test_number'] as const;
+const SETTING_KEYS = ['wa_test_mode', 'wa_test_number'] as const;
 
-type SafeWhatsAppSettings = {
-  zapi_test_mode: string;
-  zapi_test_number: string;
+type WhatsAppOperationalSettings = {
+  wa_test_mode: string;
+  wa_test_number: string;
 };
 
 export function WhatsAppConnectionSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [settings, setSettings] = useState<SafeWhatsAppSettings>({
-    zapi_test_mode: 'false',
-    zapi_test_number: '',
+  const [settings, setSettings] = useState<WhatsAppOperationalSettings>({
+    wa_test_mode: 'false',
+    wa_test_number: '',
   });
 
-  const { send, sending: zapiSending } = useWhatsAppSend();
-  const testModeActive = settings.zapi_test_mode === 'true';
+  const { send, sending: waSending } = useWhatsAppSend();
+  const testModeActive = settings.wa_test_mode === 'true';
 
   useEffect(() => {
     async function loadSettings() {
+      // Load new keys; also check legacy zapi_* keys as fallback (migration period)
       const { data, error } = await supabase
         .from('app_settings')
         .select('key, value')
-        .in('key', [...SAFE_SETTING_KEYS]);
+        .in('key', [...SETTING_KEYS, 'zapi_test_mode', 'zapi_test_number']);
 
       if (error) {
         toast.error('Erro ao carregar controles do WhatsApp');
@@ -41,12 +42,14 @@ export function WhatsAppConnectionSettings() {
         return;
       }
 
-      const map: SafeWhatsAppSettings = { zapi_test_mode: 'false', zapi_test_number: '' };
-      data?.forEach((setting) => {
-        if (setting.key === 'zapi_test_mode' || setting.key === 'zapi_test_number') {
-          map[setting.key] = setting.value || '';
-        }
-      });
+      const map: WhatsAppOperationalSettings = { wa_test_mode: 'false', wa_test_number: '' };
+      const raw: Record<string, string> = {};
+      data?.forEach((s) => { raw[s.key] = s.value || ''; });
+
+      // Prefer new keys; fall back to legacy if new keys not yet migrated
+      map.wa_test_mode = raw['wa_test_mode'] ?? raw['zapi_test_mode'] ?? 'false';
+      map.wa_test_number = raw['wa_test_number'] ?? raw['zapi_test_number'] ?? '';
+
       setSettings(map);
       setLoading(false);
     }
@@ -55,14 +58,14 @@ export function WhatsAppConnectionSettings() {
   }, []);
 
   const handleSave = async () => {
-    if (testModeActive && !settings.zapi_test_number.trim()) {
+    if (testModeActive && !settings.wa_test_number.trim()) {
       toast.error('Informe o número de redirecionamento antes de ativar o Modo de Teste.');
       return;
     }
 
     setSaving(true);
     try {
-      const entries = SAFE_SETTING_KEYS.map((key) => ({
+      const entries = SETTING_KEYS.map((key) => ({
         key,
         value: String(settings[key]),
       }));
@@ -78,7 +81,7 @@ export function WhatsAppConnectionSettings() {
   };
 
   const handleSendTest = async () => {
-    const targetPhone = settings.zapi_test_number.trim();
+    const targetPhone = settings.wa_test_number.trim();
     if (!targetPhone) {
       toast.error('Informe o número de teste primeiro');
       return;
@@ -132,7 +135,7 @@ export function WhatsAppConnectionSettings() {
               <strong>Nenhum cliente deve receber mensagens enquanto este modo estiver ativo.</strong> Os envios
               passam a ser redirecionados para o número de teste configurado.
               <code className="bg-amber-100 px-2 py-0.5 rounded font-mono font-bold text-sm">
-                +{settings.zapi_test_number || '(número não definido)'}
+                +{settings.wa_test_number || '(número não definido)'}
               </code>
               <br />
               <span className="text-xs mt-1 block">
@@ -166,28 +169,28 @@ export function WhatsAppConnectionSettings() {
             </div>
             <Switch
               checked={testModeActive}
-              onCheckedChange={(value) => setSettings((previous) => ({ ...previous, zapi_test_mode: String(value) }))}
+              onCheckedChange={(value) => setSettings((prev) => ({ ...prev, wa_test_mode: String(value) }))}
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="zapi_test_number" className={testModeActive ? 'text-amber-700 font-semibold' : ''}>
+            <Label htmlFor="wa_test_number" className={testModeActive ? 'text-amber-700 font-semibold' : ''}>
               <MessageSquare className="h-3 w-3 inline mr-1" />
               Número de redirecionamento
               {testModeActive && <span className="ml-1 text-red-500">*</span>}
             </Label>
             <Input
-              id="zapi_test_number"
-              value={settings.zapi_test_number}
-              onChange={(event) => setSettings((previous) => ({ ...previous, zapi_test_number: event.target.value }))}
+              id="wa_test_number"
+              value={settings.wa_test_number}
+              onChange={(e) => setSettings((prev) => ({ ...prev, wa_test_number: e.target.value }))}
               placeholder="55DDDNXXXXXXXX"
               className={testModeActive ? 'border-amber-400 bg-amber-50 ring-2 ring-amber-200' : ''}
             />
             <p className="text-[10px] text-muted-foreground">
               Formato: DDI + DDD + número sem espaços.
-              {settings.zapi_test_number && (
+              {settings.wa_test_number && (
                 <span className="ml-1 font-medium text-amber-700">
-                  Configurado: <strong>+{settings.zapi_test_number.replace(/\D/g, '')}</strong>
+                  Configurado: <strong>+{settings.wa_test_number.replace(/\D/g, '')}</strong>
                 </span>
               )}
             </p>
@@ -198,12 +201,12 @@ export function WhatsAppConnectionSettings() {
           <Button
             variant="outline"
             onClick={handleSendTest}
-            disabled={zapiSending || saving || !settings.zapi_test_number}
+            disabled={waSending || saving || !settings.wa_test_number}
             className="gap-2 border-amber-300 text-amber-700 hover:bg-amber-50"
-            title={!settings.zapi_test_number ? 'Defina o número de teste primeiro' : ''}
+            title={!settings.wa_test_number ? 'Defina o número de teste primeiro' : ''}
           >
             <Send className="h-4 w-4" />
-            {zapiSending ? 'Enviando...' : 'Enviar mensagem de teste'}
+            {waSending ? 'Enviando...' : 'Enviar mensagem de teste'}
           </Button>
 
           <Button onClick={handleSave} disabled={saving} className="gap-2">

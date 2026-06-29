@@ -96,51 +96,25 @@ export function useRegisterPayment() {
       payment_method: string; installments?: number;
       card_fee_percent?: number; net_amount?: number; notes?: string;
     }) => {
-      // Try the secure atomic RPC first to avoid race conditions
+      // Usa exclusivamente a RPC atômica — o fallback manual foi removido pois
+      // bypassava a verificação de role adicionada em register_payment_and_update_balance.
+      // O RPC está deployado desde 20260508 e protegido desde 20260629.
       const { data: rpcData, error: rpcErr } = await supabase.rpc('register_payment_and_update_balance', {
-        p_receivable_id: input.receivable_id || null,
-        p_payable_id: input.payable_id || null,
-        p_amount: input.amount,
-        p_payment_date: input.payment_date,
-        p_payment_method: input.payment_method,
-        p_installments: input.installments || 1,
+        p_receivable_id:    input.receivable_id || null,
+        p_payable_id:       input.payable_id || null,
+        p_amount:           input.amount,
+        p_payment_date:     input.payment_date.split('T')[0], // garante formato DATE
+        p_payment_method:   input.payment_method,
+        p_installments:     input.installments || 1,
         p_card_fee_percent: input.card_fee_percent || 0,
-        p_net_amount: input.net_amount || input.amount,
-        p_notes: input.notes || null
+        p_net_amount:       input.net_amount || input.amount,
+        p_notes:            input.notes || null,
       });
 
-      let paymentId;
+      if (rpcErr) throw rpcErr;
+      if (!(rpcData as any)?.payment_id) throw new Error('RPC não retornou payment_id');
 
-      if (!rpcErr && (rpcData as any)?.payment_id) {
-        paymentId = (rpcData as any).payment_id;
-      } else {
-        // Fallback to old behavior if RPC is not deployed yet
-        console.warn('RPC not found or failed, using fallback.', rpcErr);
-        const { data: payment, error: pErr } = await supabase
-          .from('payments').insert({ ...input, status: 'confirmed' }).select().single();
-        if (pErr) throw pErr;
-        
-        paymentId = payment.id;
-
-        // Recalc parent
-        const table = input.receivable_id ? 'receivables' : 'payables';
-        const parentId = input.receivable_id || input.payable_id!;
-        const fk = input.receivable_id ? 'receivable_id' : 'payable_id';
-
-        const { data: payments } = await supabase
-          .from('payments').select('amount').eq(fk, parentId).eq('status', 'confirmed');
-        const totalPaid = (payments || []).reduce((s, p) => s + Number(p.amount), 0);
-
-        const { data: parent } = await supabase
-          .from(table).select('amount').eq('id', parentId).single();
-        const originalAmount = Number(parent?.amount || 0);
-        const balance = Math.max(0, originalAmount - totalPaid);
-        const status = totalPaid >= originalAmount ? 'paid' : totalPaid > 0 ? 'partially_paid' : 'pending';
-
-        await supabase.from(table).update({
-          paid_amount: totalPaid, balance_amount: balance, status,
-        }).eq('id', parentId);
-      }
+      const paymentId = (rpcData as any).payment_id;
 
       await writeAuditLog({
         table_name: 'payments',
@@ -156,6 +130,8 @@ export function useRegisterPayment() {
       qc.invalidateQueries({ queryKey: ['payables'] });
       qc.invalidateQueries({ queryKey: ['payments'] });
       qc.invalidateQueries({ queryKey: ['financial-summary'] });
+      // Invalida service-orders para refletir o payment_status atualizado pelo trigger
+      qc.invalidateQueries({ queryKey: ['service-orders'] });
     },
   });
 }
@@ -172,6 +148,8 @@ export function useCancelPayment() {
       qc.invalidateQueries({ queryKey: ['payables'] });
       qc.invalidateQueries({ queryKey: ['bank-transactions'] });
       qc.invalidateQueries({ queryKey: ['financial-summary'] });
+      // Invalida service-orders para refletir o payment_status revertido pelo trigger
+      qc.invalidateQueries({ queryKey: ['service-orders'] });
     },
   });
 }
@@ -339,5 +317,128 @@ export function useDismissBankTransaction() {
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['bank-transactions'] }),
+  });
+}
+
+// ─── Aging Report ──────────────────────────────────────────────────────────────
+
+export interface AgingBucket {
+  client_id: string;
+  client_name: string;
+  current: number;    // vence hoje ou no futuro / até 30 dias em atraso
+  days_31_60: number;
+  days_61_90: number;
+  over_90: number;
+  total: number;
+}
+
+export interface AgingReportData {
+  buckets: AgingBucket[];
+  totals: { current: number; days_31_60: number; days_61_90: number; over_90: number; total: number };
+  generated_at: string;
+}
+
+export function useAgingReport() {
+  return useQuery({
+    queryKey: ['aging-report'],
+    queryFn: async (): Promise<AgingReportData> => {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const { data, error } = await supabase
+        .from('receivables')
+        .select('id, amount, balance_amount, due_date, status, client_id, clients!receivables_client_id_fkey(id, name)')
+        .in('status', ['pending', 'partially_paid', 'overdue'])
+        .gt('balance_amount', 0);
+      if (error) throw error;
+
+      const map = new Map<string, AgingBucket>();
+      for (const r of data || []) {
+        const client = (r as any).clients;
+        if (!client) continue;
+        const clientId = client.id as string;
+        if (!map.has(clientId)) {
+          map.set(clientId, {
+            client_id: clientId,
+            client_name: client.name as string,
+            current: 0, days_31_60: 0, days_61_90: 0, over_90: 0, total: 0,
+          });
+        }
+        const bucket = map.get(clientId)!;
+        const balance = Number(r.balance_amount || 0);
+        const due = new Date(r.due_date);
+        due.setHours(0, 0, 0, 0);
+        const diffDays = Math.round((today.getTime() - due.getTime()) / 86_400_000);
+
+        bucket.total += balance;
+        if (diffDays <= 30)       bucket.current    += balance;
+        else if (diffDays <= 60)  bucket.days_31_60 += balance;
+        else if (diffDays <= 90)  bucket.days_61_90 += balance;
+        else                      bucket.over_90    += balance;
+      }
+
+      const buckets = Array.from(map.values()).sort((a, b) => b.over_90 - a.over_90);
+      const totals = buckets.reduce(
+        (acc, b) => ({
+          current:    acc.current    + b.current,
+          days_31_60: acc.days_31_60 + b.days_31_60,
+          days_61_90: acc.days_61_90 + b.days_61_90,
+          over_90:    acc.over_90    + b.over_90,
+          total:      acc.total      + b.total,
+        }),
+        { current: 0, days_31_60: 0, days_61_90: 0, over_90: 0, total: 0 },
+      );
+
+      return { buckets, totals, generated_at: new Date().toISOString() };
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+// ─── Hooks por OS ─────────────────────────────────────────────────────────────
+
+/** Todos os recebíveis não-cancelados de uma OS específica. */
+export function useReceivablesByServiceOrder(serviceOrderId?: string) {
+  return useQuery({
+    queryKey: ['receivables', 'by-so', serviceOrderId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('receivables')
+        .select('id, amount, paid_amount, balance_amount, status, due_date, description, is_deposit')
+        .eq('service_order_id', serviceOrderId!)
+        .neq('status', 'cancelled')
+        .order('due_date', { ascending: true });
+      if (error) throw error;
+      return data ?? [];
+    },
+    enabled: !!serviceOrderId,
+  });
+}
+
+/** Histórico de pagamentos confirmados de uma OS (via seus recebíveis). */
+export function usePaymentsByServiceOrder(serviceOrderId?: string) {
+  return useQuery({
+    queryKey: ['payments', 'by-so', serviceOrderId],
+    queryFn: async () => {
+      // Busca IDs dos recebíveis da OS
+      const { data: recs, error: recErr } = await supabase
+        .from('receivables')
+        .select('id')
+        .eq('service_order_id', serviceOrderId!)
+        .neq('status', 'cancelled');
+      if (recErr) throw recErr;
+      if (!recs || recs.length === 0) return [];
+
+      const recIds = recs.map((r) => r.id);
+      const { data: payments, error: payErr } = await supabase
+        .from('payments')
+        .select('id, payment_date, amount, payment_method, installments, net_amount, notes, status')
+        .in('receivable_id', recIds)
+        .eq('status', 'confirmed')
+        .order('payment_date', { ascending: false });
+      if (payErr) throw payErr;
+      return payments ?? [];
+    },
+    enabled: !!serviceOrderId,
   });
 }

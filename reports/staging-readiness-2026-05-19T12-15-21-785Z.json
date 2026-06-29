@@ -1,0 +1,37 @@
+{
+  "mode": "check-staging",
+  "generatedAt": "2026-05-19T12:15:21.784Z",
+  "status": "possibly_not_empty",
+  "envFileStatus": "loaded",
+  "envFilePath": "C:\\temp\\.env.staging.local",
+  "source": "VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY",
+  "sameProjectGuess": "unknown",
+  "tableChecks": [
+    {
+      "table": "clients",
+      "status": "readable",
+      "count": 12
+    },
+    {
+      "table": "suppliers",
+      "status": "readable",
+      "count": 0
+    },
+    {
+      "table": "service_orders",
+      "status": "readable",
+      "count": 0
+    },
+    {
+      "table": "products",
+      "status": "readable",
+      "count": 0
+    },
+    {
+      "table": "services",
+      "status": "readable",
+      "count": 0
+    }
+  ],
+  "recommendation": "The staging destination appears populated; validate schema in a clean staging project before any import."
+}

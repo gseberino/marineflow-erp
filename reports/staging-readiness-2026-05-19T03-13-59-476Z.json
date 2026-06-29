@@ -1,0 +1,37 @@
+{
+  "mode": "validate-staging-schema",
+  "generatedAt": "2026-05-19T03:13:59.474Z",
+  "status": "ready_for_schema_validation",
+  "envFileStatus": "loaded",
+  "envFilePath": "C:\\temp\\.env.staging.local",
+  "source": "VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY",
+  "sameProjectGuess": "unknown",
+  "tableChecks": [
+    {
+      "table": "clients",
+      "status": "readable",
+      "count": 0
+    },
+    {
+      "table": "suppliers",
+      "status": "readable",
+      "count": 0
+    },
+    {
+      "table": "service_orders",
+      "status": "readable",
+      "count": 0
+    },
+    {
+      "table": "products",
+      "status": "readable",
+      "count": 0
+    },
+    {
+      "table": "services",
+      "status": "readable",
+      "count": 0
+    }
+  ],
+  "recommendation": "The staging destination is readable and appears empty enough for schema validation."
+}

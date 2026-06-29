@@ -23,14 +23,28 @@ interface Props {
   documentType: PDFDocumentType;
   onGenerate: (action: PDFAction, options: PDFOptions, validity?: ValidityConfig, dueDate?: string) => void | Promise<void>;
   hasProductImages?: boolean;
+  initialValidityDays?: number;
 }
 
-export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate, hasProductImages }: Props) {
+const PREFS_KEY = (docType: PDFDocumentType) => `pdf.prefs.${docType}`;
+
+function loadPrefs(docType: PDFDocumentType): Partial<PDFOptions> {
+  try {
+    const raw = localStorage.getItem(PREFS_KEY(docType));
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+}
+
+function savePrefs(docType: PDFDocumentType, opts: PDFOptions) {
+  try { localStorage.setItem(PREFS_KEY(docType), JSON.stringify(opts)); } catch {}
+}
+
+export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate, hasProductImages, initialValidityDays }: Props) {
   const { t } = useI18n();
   const [options, setOptions] = useState<PDFOptions>({ ...DEFAULT_PDF_OPTIONS });
   const [downloading, setDownloading] = useState(false);
   const [validityMode, setValidityMode] = useState<'days' | 'date'>('days');
-  const [validityDays, setValidityDays] = useState(15);
+  const [validityDays, setValidityDays] = useState(initialValidityDays ?? 15);
   const [validityDate, setValidityDate] = useState('');
   const [dueDate, setDueDate] = useState(() => {
     const d = new Date();
@@ -40,16 +54,18 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
 
   useEffect(() => {
     if (open) {
-      setOptions({ ...DEFAULT_PDF_OPTIONS });
+      // Restore saved preferences for this document type
+      const saved = loadPrefs(documentType);
+      setOptions({ ...DEFAULT_PDF_OPTIONS, ...saved });
       setDownloading(false);
       setValidityMode('days');
-      setValidityDays(15);
+      setValidityDays(initialValidityDays ?? 15);
       setValidityDate('');
       const d = new Date();
       d.setDate(d.getDate() + 15);
       setDueDate(d.toISOString().split('T')[0]);
     }
-  }, [open]);
+  }, [open, documentType]);
 
   const titleMap: Record<PDFDocumentType, string> = {
     quote: `${t.pdf.generate} — ${t.pdf.quote}`,
@@ -96,6 +112,8 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
       ? { mode: validityMode, days: validityDays, date: validityDate }
       : undefined;
     const due = documentType === 'invoice' ? dueDate : undefined;
+    // Persist options for next time
+    savePrefs(documentType, options);
     if (action === 'download') {
       setDownloading(true);
       try {

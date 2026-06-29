@@ -28,8 +28,27 @@ export interface RetryConfig {
   maxAttempts: number;
 }
 
+function sanitizeStorageKey(filename: string): string {
+  // Supabase Storage (S3) rejects accented characters in object keys.
+  // Map common Portuguese/Latin accented chars to ASCII equivalents,
+  // then replace any remaining non-safe chars with underscores.
+  const accentMap: Record<string, string> = {
+    'ç': 'c', 'Ç': 'C', 'ç': 'c', 'Ç': 'C',
+    'ã': 'a', 'Ã': 'A', 'â': 'a', 'Â': 'A',
+    'á': 'a', 'Á': 'A', 'à': 'a', 'À': 'A',
+    'é': 'e', 'É': 'E', 'ê': 'e', 'Ê': 'E',
+    'í': 'i', 'Í': 'I', 'ó': 'o', 'Ó': 'O',
+    'ô': 'o', 'Ô': 'O', 'õ': 'o', 'Õ': 'O',
+    'ú': 'u', 'Ú': 'U', 'ü': 'u', 'Ü': 'U',
+  };
+  return filename
+    .replace(/[^a-zA-Z0-9._-]/g, (c) => accentMap[c] ?? '_');
+}
+
+
 async function uploadPdfBlob(blob: Blob, filename: string): Promise<string> {
-  const path = `${new Date().getFullYear()}/${crypto.randomUUID()}-${filename}`;
+  const safeFilename = sanitizeStorageKey(filename);
+  const path = `${new Date().getFullYear()}/${crypto.randomUUID()}-${safeFilename}`;
   const { error } = await supabase.storage
     .from('documents')
     .upload(path, blob, { contentType: 'application/pdf', upsert: false });
@@ -43,7 +62,7 @@ export function useWhatsAppSend() {
   const [attemptInfo, setAttemptInfo] = useState('');
   const queryClient = useQueryClient();
 
-  async function attemptSend(payload: ZApiSendPayload, attempt: number): Promise<void> {
+  async function attemptSend(payload: WhatsAppSendPayload, attempt: number): Promise<void> {
     const phoneClean = payload.phone.replace(/\D/g, '');
     const invokeBody: Record<string, unknown> = {
       phone: phoneClean,
@@ -79,7 +98,7 @@ export function useWhatsAppSend() {
     if ((data as any)?.error) throw new Error((data as any).error);
   }
 
-  async function send(payload: ZApiSendPayload, retry: RetryConfig): Promise<boolean> {
+  async function send(payload: WhatsAppSendPayload, retry: RetryConfig): Promise<boolean> {
     if (!payload.phone || payload.phone.replace(/\D/g, '').length < 10) {
       toast.error('Telefone inválido. Inclua DDI+DDD.');
       return false;

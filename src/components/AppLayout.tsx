@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Users, Ship, Anchor, Package, ClipboardList,
   DollarSign, BarChart3, Settings, ChevronLeft, ChevronRight, Menu,
   Warehouse, Building2, Wrench, History, LogOut, CalendarDays, MessageCircle, CreditCard,
-  Database, ChevronDown, Rocket, ShoppingCart, FileDown, Target, CheckCircle2, Bell, CalendarClock, Truck, Camera
+  Database, ChevronDown, Rocket, ShoppingCart, FileDown, Target, CheckCircle2, Bell, CalendarClock, Truck, Camera, FileText
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -131,6 +131,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
       items: [
         { label: 'CRM & Funil', icon: Target, path: '/crm' },
         { label: 'Ordens de Serviço', icon: ClipboardList, path: '/service-orders' },
+        { label: 'Orçamentos', icon: FileText, path: '/quotes' },
         { label: 'Ordens de Compra', icon: Truck, path: '/purchase-orders', roles: ['admin', 'financial'] },
         { label: 'Agenda', icon: CalendarDays, path: '/agenda' },
         { label: 'Motor de Vendas', icon: Rocket, path: '/prospecting', roles: ['admin'] },

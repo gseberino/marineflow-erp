@@ -22,7 +22,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCreateScheduledSend } from '@/hooks/use-scheduled-sends';
 import {
   ScheduleSettings, defaultScheduleConfig, type ScheduleConfig,
-} from '@/components/zapi/ScheduleSettings';
+} from '@/components/whatsapp/ScheduleSettings';
 
 interface Props {
   open: boolean;
@@ -41,8 +41,8 @@ interface RowProgress {
   error?: string;
 }
 
-const THROTTLE_KEY = 'zapi.bulk.throttleMs';
-const MAX_ATTEMPTS_KEY = 'zapi.bulk.maxAttempts';
+const THROTTLE_KEY = 'wa.bulk.throttleMs';
+const MAX_ATTEMPTS_KEY = 'wa.bulk.maxAttempts';
 
 export function BulkBillingReminderDialog({
   open,

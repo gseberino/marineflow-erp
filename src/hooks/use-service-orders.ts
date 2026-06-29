@@ -57,26 +57,29 @@ export function useServiceOrder(id: string | undefined) {
   });
 }
 
-async function generateSONumber(): Promise<string> {
-  const { data } = await supabase
-    .from('service_orders')
-    .select('service_order_number');
-  let maxSeq = 0;
-  for (const row of data || []) {
-    const match = row.service_order_number?.match(/(\d+)$/);
-    if (match) {
-      const n = parseInt(match[1], 10);
-      if (n > maxSeq) maxSeq = n;
-    }
-  }
-  return `OS-${String(maxSeq + 1).padStart(5, '0')}`;
+/**
+ * Unified document number generator backed by a PostgreSQL sequence.
+ * nextval('document_number_seq') is atomic — safe under concurrent inserts.
+ * Prefix: 'ORÇ' for quotes (drafts), 'OS' for orders.
+ */
+async function nextDocumentNumber(prefix: 'ORÇ' | 'OS'): Promise<string> {
+  const { data, error } = await supabase.rpc('next_document_number');
+  if (error) throw new Error(`Erro ao gerar número de documento: ${error.message}`);
+  return `${prefix}-${String(data as number).padStart(5, '0')}`;
 }
+
+// Convenience aliases kept for call-site readability
+const generateQuoteNumber = () => nextDocumentNumber('ORÇ');
+const generateSONumber = () => nextDocumentNumber('OS');
 
 export function useCreateServiceOrder() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (values: Record<string, any>) => {
-      const soNumber = await generateSONumber();
+      // New records always start as orçamentos (ORÇ-XXXXX).
+      // They get an OS-XXXXX number at the moment they graduate from draft
+      // via useUpdateServiceOrderStatus (first transition out of 'draft').
+      const soNumber = await generateQuoteNumber();
       const payload = { ...values, service_order_number: soNumber };
       const { data, error } = await supabase
         .from('service_orders')
@@ -162,6 +165,29 @@ export function useUpdateServiceOrderStatus() {
       }
 
       const updates: Record<string, any> = { status };
+
+      // On first transition out of draft: mark conversion + swap prefix ORÇ→OS
+      if (status !== 'draft') {
+        const { data: current } = await supabase
+          .from('service_orders')
+          .select('status, converted_to_os_at, service_order_number, grand_total, original_quote_amount')
+          .eq('id', id)
+          .single();
+        if (current?.status === 'draft' && !current?.converted_to_os_at) {
+          updates.converted_to_os_at = new Date().toISOString();
+          // Preserva o grand_total do orçamento aprovado para comparação futura (valor orçado vs realizado)
+          if (!current?.original_quote_amount && current?.grand_total) {
+            updates.original_quote_amount = current.grand_total;
+          }
+          // Keep the same sequence number — only swap the prefix.
+          // ORÇ-00042 → OS-00042 (unified sequence: quote and OS share the counter).
+          const currentNum = current.service_order_number ?? '';
+          updates.service_order_number = currentNum.startsWith('ORÇ-')
+            ? currentNum.replace('ORÇ-', 'OS-')
+            : currentNum; // already has OS- prefix (legacy records)
+        }
+      }
+
       if (status === 'in_progress') {
         const { data: current } = await supabase
           .from('service_orders')
@@ -496,19 +522,67 @@ export function useRemoveTimeEntry() {
 }
 
 
-// Status transitions
+// Status transitions — OS lifecycle (forward / normal flow)
 export const STATUS_TRANSITIONS: Record<string, string[]> = {
-  draft: ['scheduled', 'open', 'cancelled'],
-  scheduled: ['open', 'cancelled'],
-  open: ['in_progress', 'awaiting_parts', 'awaiting_client', 'cancelled'],
-  in_progress: ['awaiting_parts', 'awaiting_client', 'completed', 'cancelled'],
-  awaiting_parts: ['in_progress', 'cancelled'],
-  awaiting_client: ['in_progress', 'completed', 'cancelled'],
-  approved: ['in_progress', 'completed', 'cancelled'],
-  completed: ['invoiced'],
-  invoiced: [],
-  cancelled: [],
+  draft:            ['approved', 'scheduled', 'open', 'cancelled'],
+  scheduled:        ['open', 'in_progress', 'cancelled'],
+  open:             ['in_progress', 'awaiting_parts', 'awaiting_client', 'cancelled'],
+  in_progress:      ['awaiting_parts', 'awaiting_client', 'completed', 'cancelled'],
+  awaiting_parts:   ['in_progress', 'cancelled'],
+  awaiting_client:  ['in_progress', 'completed', 'cancelled'],
+  approved:         ['scheduled', 'in_progress', 'completed', 'cancelled'],
+  completed:        ['invoiced'],
+  invoiced:         [],
+  cancelled:        [],
 };
+
+// Backward corrections — shown in a separate "Corrigir" section.
+// Only includes states that make sense to roll back to (not cancelled/invoiced).
+export const STATUS_BACKWARD_TRANSITIONS: Record<string, string[]> = {
+  scheduled:        ['draft'],
+  open:             ['draft', 'scheduled'],
+  in_progress:      ['open'],
+  awaiting_parts:   ['open'],
+  awaiting_client:  ['open'],
+  approved:         ['draft'],
+  completed:        ['in_progress', 'awaiting_parts', 'awaiting_client'],
+};
+
+// Quote status transitions — orçamento lifecycle (while converted_to_os_at IS NULL)
+export const QUOTE_STATUS_TRANSITIONS: Record<string, string[]> = {
+  draft:             ['sent', 'awaiting_approval', 'rejected'],
+  sent:              ['awaiting_approval', 'rejected'],
+  awaiting_approval: ['approved', 'rejected'],
+  approved:          ['awaiting_deposit', 'rejected'],
+  awaiting_deposit:  ['rejected'],
+  rejected:          ['draft'],
+};
+
+export function useUpdateQuoteStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, quoteStatus }: { id: string; quoteStatus: string }) => {
+      const { data, error } = await supabase
+        .from('service_orders')
+        .update({ quote_status: quoteStatus } as any)
+        .eq('id', id)
+        .select()
+        .single();
+      if (error) throw error;
+      await writeAuditLog({
+        table_name: 'service_orders',
+        record_id: id,
+        action: 'update',
+        new_value: { quote_status: quoteStatus },
+      });
+      return data;
+    },
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ['service-orders'] });
+      qc.invalidateQueries({ queryKey: ['service-orders', vars.id] });
+    },
+  });
+}
 
 // Service order services (labor lines)
 export function useServiceOrderServices(serviceOrderId: string | undefined) {
@@ -580,8 +654,16 @@ export function useRemoveServiceOrderService() {
 export function useDuplicateServiceOrder() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (sourceId: string) => {
-      // 1. Fetch the source SO with all related data
+    mutationFn: async ({
+      sourceId,
+      mode = 'quote',
+    }: {
+      sourceId: string;
+      /** 'quote' → cria como Orçamento (status draft, aparece na aba Orçamentos)
+       *  'order' → cria como OS aberta (status open, aparece na aba OS) */
+      mode?: 'quote' | 'order';
+    }) => {
+      // 1. Fetch source with all sub-items
       const { data: source, error: soErr } = await supabase
         .from('service_orders')
         .select(`
@@ -594,7 +676,7 @@ export function useDuplicateServiceOrder() {
         .single();
       if (soErr) throw soErr;
 
-      // 2. Strip sensitive/derived fields and related arrays
+      // 2. Strip runtime/financial/signature fields — copy only composition
       const {
         id, created_at, updated_at, service_order_number,
         scheduled_start_at, scheduled_end_at,
@@ -610,18 +692,25 @@ export function useDuplicateServiceOrder() {
         operational_cost_total, travel_cost_total,
         subcontract_cost_total, labor_hours_total,
         commissioned_user_id, commission_amount,
+        converted_to_os_at,
+        quote_status,
         service_order_parts, service_order_services, service_order_expenses,
         ...copyFields
       } = source as any;
 
-      const newNumber = await generateSONumber();
+      const newNumber = mode === 'order'
+        ? await generateSONumber()
+        : await generateQuoteNumber();
 
       const { data: newSO, error: createErr } = await supabase
         .from('service_orders')
         .insert({
           ...copyFields,
           service_order_number: newNumber,
-          status: 'draft',
+          // 'quote' = fica na aba Orçamentos; 'order' = fica na aba OS
+          status: mode === 'order' ? 'open' : 'draft',
+          quote_status: mode === 'quote' ? 'draft' : null,
+          converted_to_os_at: null,
           priority: source.priority || 'normal',
           discount_amount: source.discount_amount || 0,
           tax_amount: source.tax_amount || 0,
@@ -632,7 +721,7 @@ export function useDuplicateServiceOrder() {
 
       const newId = (newSO as any).id;
 
-      // 3. Copy services (uses snapshot column names per schema)
+      // 3. Copy services
       if (source.service_order_services?.length > 0) {
         const svcs = source.service_order_services.map((s: any) => ({
           service_order_id: newId,
@@ -648,7 +737,8 @@ export function useDuplicateServiceOrder() {
         await supabase.from('service_order_services').insert(svcs);
       }
 
-      // 4. Copy parts
+      // 4. Copy parts — NOTE: never deduct stock on a duplicate.
+      // Stock is only affected when an OS is actually executed (via StockConfirmationDialog).
       if (source.service_order_parts?.length > 0) {
         const parts = source.service_order_parts.map((p: any) => ({
           service_order_id: newId,
@@ -662,47 +752,9 @@ export function useDuplicateServiceOrder() {
           notes: p.notes,
         }));
         await supabase.from('service_order_parts').insert(parts);
-
-        // We already inserted parts, now handle stock deductions in batch
-        const productUpdates = [];
-        const movementInserts = [];
-
-        for (const p of source.service_order_parts) {
-          const { data: prod } = await supabase
-            .from('products')
-            .select('stock_quantity')
-            .eq('id', p.product_id)
-            .single();
-
-          if (prod) {
-            productUpdates.push({
-              id: p.product_id,
-              stock_quantity: (prod.stock_quantity || 0) - p.quantity
-            });
-            
-            movementInserts.push({
-              product_id: p.product_id,
-              movement_type: 'service_order_usage',
-              quantity_delta: -p.quantity,
-              reference_type: 'service_order',
-              reference_id: newId,
-              unit_cost_snapshot: p.unit_cost_snapshot,
-            });
-          }
-        }
-
-        // Apply updates one by one (since bulk update on varied IDs is tricky without upsert)
-        for (const update of productUpdates) {
-          await supabase.from('products').update({ stock_quantity: update.stock_quantity }).eq('id', update.id);
-        }
-        
-        // Insert movements in a single batch
-        if (movementInserts.length > 0) {
-          await supabase.from('inventory_movements').insert(movementInserts);
-        }
       }
 
-      // 5. Copy expenses (without receipts and without linked payable)
+      // 5. Copy expenses (no receipts, no payables)
       if (source.service_order_expenses?.length > 0) {
         const exps = source.service_order_expenses.map((e: any) => ({
           service_order_id: newId,

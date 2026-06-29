@@ -5,6 +5,7 @@ import { useMarinas } from '@/hooks/use-marinas';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Plus, Search, MapPin, Phone, Mail, Ship, Edit, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Download } from 'lucide-react';
+import { FilterPresets } from '@/components/FilterPresets';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { MarinaFormDialog } from '@/components/MarinaFormDialog';
@@ -78,13 +79,24 @@ export default function MarinaList() {
           <Plus className="h-4 w-4" /> {t.marinas.newMarina}
         </Button>
       </PageHeader>
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          placeholder={t.marinas.searchPlaceholder}
-          value={search}
-          onChange={e => { setSearch(e.target.value); setPage(1); }}
-          className="pl-9"
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder={t.marinas.searchPlaceholder}
+            value={search}
+            onChange={e => { setSearch(e.target.value); setPage(1); }}
+            className="pl-9"
+          />
+        </div>
+        <FilterPresets
+          filterType="marinas"
+          currentConfig={{ search }}
+          hasActiveFilters={!!search}
+          onApply={(c: any) => {
+            setSearch(c.search ?? '');
+            setPage(1);
+          }}
         />
       </div>
 

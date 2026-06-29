@@ -3,10 +3,11 @@ import { useSearchParams } from 'react-router-dom';
 import { PageHeader } from '@/components/PageHeader';
 import { useI18n, type Locale } from '@/i18n';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { MapPin, DollarSign, Users, Globe, Banknote, CreditCard, FileText, Tag, Receipt, Package, Mail, Pencil } from 'lucide-react';
+import { MapPin, DollarSign, Users, Globe, Banknote, CreditCard, FileText, Tag, Receipt, Package, Mail, Pencil, Loader2 } from 'lucide-react';
 import { LogoCropDialog } from '@/components/LogoCropDialog';
 import { AppUserEditDialog } from '@/components/AppUserEditDialog';
 import { MasterDataPanel } from '@/components/MasterDataManagement';
@@ -262,6 +263,7 @@ export default function SettingsPage() {
         <TabsContent value="financial" className="mt-4 space-y-6">
           {currencyContent}
           {cardFeesContent}
+          <QuoteSettingsSection />
           <PaymentConditionsTab />
           <FiscalTab />
           <div>
@@ -1312,6 +1314,138 @@ function UsersTab() {
         onOpenChange={(o) => { if (!o) setEditingUser(null); }}
         isCurrentUserAdmin={isCurrentUserAdmin}
       />
+    </div>
+  );
+}
+
+const PAYMENT_METHOD_OPTIONS = [
+  { value: 'pix',           label: 'PIX' },
+  { value: 'cash',          label: 'Dinheiro' },
+  { value: 'bank_transfer', label: 'Transferência Bancária' },
+  { value: 'debit_card',    label: 'Cartão de Débito' },
+  { value: 'credit_card',   label: 'Cartão de Crédito' },
+  { value: 'boleto',        label: 'Boleto' },
+  { value: 'check',         label: 'Cheque' },
+];
+
+function QuoteSettingsSection() {
+  const [cfg, setCfg] = useState({
+    quote_deposit_percentage: 30,
+    default_payment_method:   'pix',
+    default_card_fee_percent: 0,
+    quote_validity_days:      15,
+    quote_expiry_days:        30,
+    quote_followup_days:      7,
+  });
+  const [loading, setLoading]   = useState(true);
+  const [saving,  setSaving]    = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from('app_settings').select('key, value');
+      if (data) {
+        const m: Record<string, string> = {};
+        for (const r of data) if (r.key) m[r.key] = String(r.value || '');
+        setCfg({
+          quote_deposit_percentage: Number(m.quote_deposit_percentage) || 30,
+          default_payment_method:   m.default_payment_method   || 'pix',
+          default_card_fee_percent: Number(m.default_card_fee_percent) || 0,
+          quote_validity_days:      Number(m.quote_validity_days)      || 15,
+          quote_expiry_days:        Number(m.quote_expiry_days)        || 30,
+          quote_followup_days:      Number(m.quote_followup_days)      || 7,
+        });
+      }
+      setLoading(false);
+    })();
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const entries = Object.entries(cfg).map(([k, v]) => ({ key: k, value: String(v) }));
+      for (const e of entries) {
+        await supabase.from('app_settings').upsert(e, { onConflict: 'key' });
+      }
+      toast.success('Configurações de orçamento salvas');
+    } catch (e: any) {
+      toast.error(e.message || 'Erro ao salvar');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const set = (k: keyof typeof cfg, v: any) => setCfg(prev => ({ ...prev, [k]: v }));
+
+  if (loading) return <p className="text-sm text-muted-foreground">Carregando...</p>;
+
+  return (
+    <div className="rounded-xl border bg-card p-6 space-y-5">
+      <h3 className="text-sm font-semibold flex items-center gap-2">
+        <FileText className="h-4 w-4" /> Configurações de Orçamento
+      </h3>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {/* Deposit % */}
+        <div className="space-y-1.5">
+          <Label>Percentual do sinal (%)</Label>
+          <Input type="number" min="0" max="100" value={cfg.quote_deposit_percentage}
+            onChange={e => set('quote_deposit_percentage', Number(e.target.value))} />
+          <p className="text-xs text-muted-foreground">Valor sugerido ao registrar o pagamento do sinal</p>
+        </div>
+
+        {/* Validity days */}
+        <div className="space-y-1.5">
+          <Label>Validade padrão do orçamento (dias)</Label>
+          <Input type="number" min="1" value={cfg.quote_validity_days}
+            onChange={e => set('quote_validity_days', Number(e.target.value))} />
+          <p className="text-xs text-muted-foreground">Pré-preenche a validade ao gerar o PDF</p>
+        </div>
+
+        {/* Default payment method */}
+        <div className="space-y-1.5">
+          <Label>Meio de pagamento padrão</Label>
+          <Select value={cfg.default_payment_method} onValueChange={v => set('default_payment_method', v)}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {PAYMENT_METHOD_OPTIONS.map(m => (
+                <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">Pré-selecionado no dialog de registro de sinal</p>
+        </div>
+
+        {/* Card fee */}
+        <div className="space-y-1.5">
+          <Label>Taxa padrão de cartão de crédito (%)</Label>
+          <Input type="number" min="0" max="10" step="0.1" value={cfg.default_card_fee_percent}
+            onChange={e => set('default_card_fee_percent', Number(e.target.value))} />
+          <p className="text-xs text-muted-foreground">Pré-preenchida ao selecionar cartão de crédito</p>
+        </div>
+
+        {/* Expiry days */}
+        <div className="space-y-1.5">
+          <Label>Dias para expiração automática</Label>
+          <Input type="number" min="1" value={cfg.quote_expiry_days}
+            onChange={e => set('quote_expiry_days', Number(e.target.value))} />
+          <p className="text-xs text-muted-foreground">Orçamentos sem resposta são marcados como Reprovados após esse prazo</p>
+        </div>
+
+        {/* Follow-up days */}
+        <div className="space-y-1.5">
+          <Label>Dias para lembrete de follow-up</Label>
+          <Input type="number" min="1" value={cfg.quote_followup_days}
+            onChange={e => set('quote_followup_days', Number(e.target.value))} />
+          <p className="text-xs text-muted-foreground">WhatsApp de follow-up automático enviado após esse prazo sem resposta</p>
+        </div>
+      </div>
+
+      <div className="flex justify-end">
+        <Button onClick={handleSave} disabled={saving} size="sm">
+          {saving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+          Salvar configurações de orçamento
+        </Button>
+      </div>
     </div>
   );
 }

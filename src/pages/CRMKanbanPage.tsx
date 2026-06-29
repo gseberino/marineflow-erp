@@ -10,13 +10,14 @@ import { Input } from '@/components/ui/input';
 import { useNavigate } from 'react-router-dom';
 import { useI18n } from '@/i18n';
 import { Skeleton } from '@/components/ui/skeleton';
-import { SendViaWhatsAppDialog } from '@/components/SendViaZAPIDialog';
+import { SendViaWhatsAppDialog } from '@/components/SendViaWhatsAppDialog';
 
 const COLUMNS = [
-  { id: 'draft', title: 'Oportunidade / Rascunho', color: 'bg-amber-100/50 border-amber-200' },
-  { id: 'approved', title: 'Aprovado / Negociação', color: 'bg-blue-100/50 border-blue-200' },
-  { id: 'scheduled', title: 'Agendado', color: 'bg-purple-100/50 border-purple-200' },
-  { id: 'in_progress', title: 'Em Execução', color: 'bg-orange-100/50 border-orange-200' },
+  { id: 'draft',       title: 'Orçamentos',   color: 'bg-amber-100/50  border-amber-200',  isQuote: true  },
+  { id: 'approved',    title: 'Aprovado',      color: 'bg-blue-100/50   border-blue-200',   isQuote: false },
+  { id: 'scheduled',   title: 'Agendado',      color: 'bg-purple-100/50 border-purple-200', isQuote: false },
+  { id: 'in_progress', title: 'Em Execução',   color: 'bg-orange-100/50 border-orange-200', isQuote: false },
+  { id: 'completed',   title: 'Concluído',     color: 'bg-emerald-100/50 border-emerald-200', isQuote: false },
 ];
 
 export default function CRMKanbanPage() {
@@ -25,7 +26,7 @@ export default function CRMKanbanPage() {
   const { data: orders, isLoading } = useServiceOrders();
   const updateStatus = useUpdateServiceOrderStatus();
 
-  const [zapiTarget, setZapiTarget] = useState<any>(null);
+  const [whatsAppTarget, setWhatsAppTarget] = useState<any>(null);
   const [search, setSearch] = useState('');
 
   if (isLoading) return <div className="p-6 space-y-4"><Skeleton className="h-10 w-64" /><Skeleton className="h-[600px] w-full" /></div>;
@@ -82,14 +83,20 @@ export default function CRMKanbanPage() {
                     <Card key={order.id} className="shadow-sm hover:shadow-md transition-shadow cursor-default group">
                       <CardContent className="p-3">
                         <div className="flex justify-between items-start mb-2">
-                          <span className="text-xs font-medium text-muted-foreground">OS #{order.service_order_number}</span>
+                          <div className="flex items-center gap-1.5">
+                            {col.isQuote
+                              ? <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-700 border border-amber-200">ORC</span>
+                              : <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold bg-blue-100 text-blue-700 border border-blue-200">OS</span>
+                            }
+                            <span className="text-xs font-medium text-muted-foreground">#{order.service_order_number}</span>
+                          </div>
                           <span className="text-xs font-semibold">{formatCurrency(order.grand_total || 0)}</span>
                         </div>
                         <h4 className="font-bold text-sm leading-tight mb-1">{(order as any).clients?.name}</h4>
                         <p className="text-xs text-muted-foreground truncate mb-3">{(order as any).vessels?.name || 'Sem unidade'}</p>
                         
                         <div className="flex items-center gap-2 mb-3">
-                          <Button size="icon" variant="ghost" className="h-7 w-7 text-green-600 hover:text-green-700 hover:bg-green-50" onClick={() => setZapiTarget({
+                          <Button size="icon" variant="ghost" className="h-7 w-7 text-green-600 hover:text-green-700 hover:bg-green-50" onClick={() => setWhatsAppTarget({
                             kind: 'service_order',
                             serviceOrderId: order.id,
                             serviceOrderNumber: order.service_order_number,
@@ -113,10 +120,11 @@ export default function CRMKanbanPage() {
                         </div>
 
                         <div className="pt-2 border-t flex justify-end">
-                          {col.id === 'draft' && <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={() => moveOrder(order.id, 'approved')}>Aprovar <ArrowRight className="h-3 w-3 ml-1"/></Button>}
-                          {col.id === 'approved' && <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={() => moveOrder(order.id, 'scheduled')}>Agendar <ArrowRight className="h-3 w-3 ml-1"/></Button>}
-                          {col.id === 'scheduled' && <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={() => moveOrder(order.id, 'in_progress')}>Iniciar <ArrowRight className="h-3 w-3 ml-1"/></Button>}
+                          {col.id === 'draft'       && <Button size="sm" variant="ghost" className="h-6 text-xs px-2 text-blue-700 hover:text-blue-800 hover:bg-blue-50" onClick={() => moveOrder(order.id, 'approved')}>Converter em OS <ArrowRight className="h-3 w-3 ml-1"/></Button>}
+                          {col.id === 'approved'    && <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={() => moveOrder(order.id, 'scheduled')}>Agendar <ArrowRight className="h-3 w-3 ml-1"/></Button>}
+                          {col.id === 'scheduled'   && <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={() => moveOrder(order.id, 'in_progress')}>Iniciar <ArrowRight className="h-3 w-3 ml-1"/></Button>}
                           {col.id === 'in_progress' && <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={() => moveOrder(order.id, 'completed')}>Concluir <ArrowRight className="h-3 w-3 ml-1"/></Button>}
+                          {col.id === 'completed'   && <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={() => moveOrder(order.id, 'invoiced')}>Faturar <ArrowRight className="h-3 w-3 ml-1"/></Button>}
                         </div>
                       </CardContent>
                     </Card>
@@ -133,11 +141,11 @@ export default function CRMKanbanPage() {
         </div>
       </div>
 
-      {zapiTarget && (
+      {whatsAppTarget && (
         <SendViaWhatsAppDialog
-          open={!!zapiTarget}
-          onOpenChange={(op) => !op && setZapiTarget(null)}
-          target={zapiTarget}
+          open={!!whatsAppTarget}
+          onOpenChange={(op) => !op && setWhatsAppTarget(null)}
+          target={whatsAppTarget}
         />
       )}
     </div>

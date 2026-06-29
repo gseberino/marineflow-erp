@@ -227,6 +227,15 @@ export const en = {
     cancelled: 'Cancelled',
   },
 
+  quoteStatus: {
+    draft:             'In Progress',
+    sent:              'Sent',
+    awaiting_approval: 'Awaiting Approval',
+    approved:          'Approved',
+    awaiting_deposit:  'Awaiting Deposit',
+    rejected:          'Rejected',
+  },
+
   // Priorities
   priority: {
     low: 'Low',

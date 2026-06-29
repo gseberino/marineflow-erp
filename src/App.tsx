@@ -42,6 +42,7 @@ import ProspectingPage from "./pages/ProspectingPage";
 import ImportFiscalXML from "./pages/ImportFiscalXML";
 import CommissionsPage from "./pages/CommissionsPage";
 import SmartPurchasePage from "./pages/SmartPurchasePage";
+import QuoteList from "./pages/QuoteList";
 import NotFound from "./pages/NotFound";
 import EncodingFixerPage from "./pages/EncodingFixerPage";
 import CRMKanbanPage from "./pages/CRMKanbanPage";
@@ -80,6 +81,7 @@ const App = () => (
                         } />
                         <Route path="/crm" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><CRMKanbanPage /></ProtectedRoute>} />
                         <Route path="/service-orders" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><ServiceOrderList /></ProtectedRoute>} />
+                        <Route path="/quotes" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><QuoteList /></ProtectedRoute>} />
                         <Route path="/purchase-orders" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><PurchaseOrdersPage /></ProtectedRoute>} />
                         <Route path="/service-orders/new" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><ServiceOrderDetail /></ProtectedRoute>} />
                         <Route path="/service-orders/:id" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><ServiceOrderDetail /></ProtectedRoute>} />

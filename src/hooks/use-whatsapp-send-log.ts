@@ -34,9 +34,10 @@ export function useWhatsAppSendStatusMap(serviceOrderIds: string[]) {
       for (const row of data || []) {
         if (!map.has(row.record_id)) {
           const nv: any = row.new_value || {};
-          const httpStatus = nv?.http_status;
-          const providerErr = nv?.provider_result?.error || nv?.zapi_response?.error;
-          const success = httpStatus >= 200 && httpStatus < 300 && !providerErr;
+          const providerResult = nv?.provider_result;
+          const success = providerResult != null
+            ? providerResult.ok === true
+            : (nv?.http_status >= 200 && nv?.http_status < 300 && !nv?.zapi_response?.error);
           map.set(row.record_id, { ...row, success } as WhatsAppSendLogEntry);
         }
       }
@@ -64,9 +65,10 @@ export function useWhatsAppSendHistory(serviceOrderId: string | null) {
       if (error) throw error;
       return (data || []).map((row): WhatsAppSendLogEntry => {
         const nv: any = row.new_value || {};
-        const httpStatus = nv?.http_status;
-        const zapiErr = nv?.zapi_response?.error;
-        const success = httpStatus >= 200 && httpStatus < 300 && !zapiErr;
+        const providerResult = nv?.provider_result;
+        const success = providerResult != null
+          ? providerResult.ok === true
+          : (nv?.http_status >= 200 && nv?.http_status < 300 && !nv?.zapi_response?.error);
         return { ...row, success } as WhatsAppSendLogEntry;
       });
     },
