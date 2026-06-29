@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -51,6 +51,8 @@ export function PaymentDialog({ open, onOpenChange, receivable, payable }: Payme
   const [notes, setNotes] = useState('');
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState('');
+  // Guard contra double-submit: previne dois cliques rápidos antes do isPending ser true
+  const submittingRef = useRef(false);
 
   if (!record) return null;
 
@@ -66,6 +68,8 @@ export function PaymentDialog({ open, onOpenChange, receivable, payable }: Payme
   const feeAmount = grossAmount - amount;
 
   const handleQuickPay = async () => {
+    if (submittingRef.current || registerPayment.isPending) return;
+    submittingRef.current = true;
     try {
       await registerPayment.mutateAsync({
         receivable_id: isReceivable ? parentId : undefined,
@@ -80,11 +84,14 @@ export function PaymentDialog({ open, onOpenChange, receivable, payable }: Payme
       toast.success(t.financial.markAsPaid);
       onOpenChange(false);
     } catch { toast.error('Erro ao registrar pagamento'); }
+    finally { submittingRef.current = false; }
   };
 
   const handleDetailedPay = async () => {
     if (amount <= 0) { toast.error('Valor deve ser maior que zero'); return; }
     if (amount > balance + 0.005) { toast.error('Valor não pode exceder o saldo em aberto'); return; }
+    if (submittingRef.current || registerPayment.isPending) return;
+    submittingRef.current = true;
     try {
       await registerPayment.mutateAsync({
         receivable_id: isReceivable ? parentId : undefined,
@@ -100,6 +107,7 @@ export function PaymentDialog({ open, onOpenChange, receivable, payable }: Payme
       toast.success(t.financial.registerPayment);
       onOpenChange(false);
     } catch { toast.error('Erro ao registrar pagamento'); }
+    finally { submittingRef.current = false; }
   };
 
   const methods = t.financial.methods as Record<string, string>;
@@ -229,7 +237,18 @@ export function PaymentDialog({ open, onOpenChange, receivable, payable }: Payme
             <div className="space-y-3 border-t pt-3">
               <div className="grid grid-cols-2 gap-3">
                 <div><Label>{t.financial.paymentDate}</Label><Input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} /></div>
-                <div><Label>{t.common.amount}</Label><Input type="number" step="0.01" value={amount} onChange={e => setAmount(parseFloat(e.target.value) || 0)} /></div>
+                <div>
+                  <Label>{t.common.amount}</Label>
+                  <Input
+                    type="number" step="0.01" min={0.01} max={balance}
+                    value={amount}
+                    onChange={e => setAmount(parseFloat(e.target.value) || 0)}
+                    className={amount > balance + 0.005 ? 'border-destructive focus-visible:ring-destructive' : ''}
+                  />
+                  {amount > balance + 0.005 && (
+                    <p className="text-xs text-destructive mt-1">Valor excede o saldo em aberto ({t.common.amount}: {balance.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })})</p>
+                  )}
+                </div>
               </div>
               {amount > 0 && (
                 <p className="text-sm">

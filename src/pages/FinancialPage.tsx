@@ -118,6 +118,12 @@ export default function FinancialPage() {
   const [paymentTarget, setPaymentTarget] = useState<{ receivable?: any; payable?: any } | null>(null);
   const [showNewReceivable, setShowNewReceivable] = useState(false);
   const [showNewPayable, setShowNewPayable] = useState(false);
+  // Modo edição de recebíveis/pagáveis
+  const [editingReceivable, setEditingReceivable] = useState<any>(null);
+  const [editingPayable, setEditingPayable] = useState<any>(null);
+  // Filtro rápido por OS (client-side, sobre o resultado já filtrado)
+  const [recOsSearch, setRecOsSearch] = useState('');
+  const [payOsSearch, setPayOsSearch] = useState('');
   const [whatsAppTarget, setWhatsAppTarget] = useState<SendViaWhatsAppTarget | null>(null);
   const [recFilters, setRecFilters] = useState<FinancialFilters>({ ...defaultFilters });
   const [payFilters, setPayFilters] = useState<FinancialFilters>({ ...defaultFilters });
@@ -183,8 +189,10 @@ export default function FinancialPage() {
     else setter({ key, dir: key === 'due_date' ? 'asc' : 'desc' });
   };
 
-  const filteredReceivables = sortList(applyFilters(receivables || [], recFilters, 'receivable'), recSort);
-  const filteredPayables = sortList(applyFilters(payables || [], payFilters, 'payable'), paySort);
+  const filteredReceivables = sortList(applyFilters(receivables || [], recFilters, 'receivable'), recSort)
+    .filter(r => !recOsSearch || (r as any).service_orders?.service_order_number?.toLowerCase().includes(recOsSearch.toLowerCase()));
+  const filteredPayables = sortList(applyFilters(payables || [], payFilters, 'payable'), paySort)
+    .filter(p => !payOsSearch || (p as any).service_orders?.service_order_number?.toLowerCase().includes(payOsSearch.toLowerCase()));
 
   const today = new Date();
   const in30 = new Date(today.getTime() + 30 * 86400000);
@@ -338,11 +346,18 @@ export default function FinancialPage() {
           </StatusBadge>
         </td>
         <td className="px-4 py-3 text-right">
-          {p.status !== 'paid' && (
-            <Button size="sm" variant="outline" onClick={() => setPaymentTarget({ payable: p })}>
-              {t.financial.registerPayment}
-            </Button>
-          )}
+          <div className="flex justify-end gap-1">
+            {p.status !== 'paid' && (
+              <Button size="sm" variant="outline" onClick={() => setPaymentTarget({ payable: p })}>
+                {t.financial.registerPayment}
+              </Button>
+            )}
+            {p.status !== 'paid' && p.status !== 'cancelled' && (
+              <Button size="sm" variant="ghost" title="Editar pagável" onClick={() => setEditingPayable(p)}>
+                ✏
+              </Button>
+            )}
+          </div>
         </td>
       </tr>
     );
@@ -547,6 +562,19 @@ export default function FinancialPage() {
             </div>
           </div>
           <FinancialFilterPanel type="receivable" filters={recFilters} onChange={setRecFilters} />
+          {/* Filtro rápido por OS */}
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              placeholder="Filtrar por número da OS (ex: OS-00042)"
+              value={recOsSearch}
+              onChange={e => setRecOsSearch(e.target.value)}
+              className="h-8 w-64 rounded-md border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+            {recOsSearch && (
+              <button type="button" onClick={() => setRecOsSearch('')} className="text-xs text-muted-foreground hover:text-foreground">✕ Limpar</button>
+            )}
+          </div>
 
           {loadingRec ? <Skeleton className="h-64 rounded-xl" /> : (
             <div className="rounded-xl border bg-card shadow-sm overflow-x-auto scrollbar-thin">
@@ -556,6 +584,7 @@ export default function FinancialPage() {
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">{t.serviceOrders.client}</th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t.common.description}</th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">OS</th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden xl:table-cell">Origem</th>
                   <SortTh col="amount" sort={recSort} onSort={k => toggleSort(recSort, k, setRecSort)} className="text-right">{t.common.amount}</SortTh>
                   <SortTh col="balance_amount" sort={recSort} onSort={k => toggleSort(recSort, k, setRecSort)} className="text-right hidden md:table-cell">{t.common.balance}</SortTh>
                   <SortTh col="status" sort={recSort} onSort={k => toggleSort(recSort, k, setRecSort)} className="text-left">{t.common.status}</SortTh>
@@ -572,6 +601,11 @@ export default function FinancialPage() {
                         <td className="px-4 py-3 hidden md:table-cell">{(r as any).clients?.name}</td>
                         <td className="px-4 py-3 font-medium max-w-[180px] truncate">{r.description}</td>
                         <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">{(r as any).service_orders?.service_order_number || '—'}</td>
+                        <td className="px-4 py-3 hidden xl:table-cell">
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${(r as any).service_order_id ? 'bg-blue-100 text-blue-700' : 'bg-muted text-muted-foreground'}`}>
+                            {(r as any).service_order_id ? 'Automático' : 'Manual'}
+                          </span>
+                        </td>
                         <td className="px-4 py-3 text-right font-medium">{formatCurrency(Number(r.amount))}</td>
                         <td className="px-4 py-3 text-right hidden md:table-cell font-semibold">{formatCurrency(Number(r.balance_amount))}</td>
                         <td className="px-4 py-3"><StatusBadge className={getStatusBadgeClass(r.status || 'pending', r.due_date)}>{getDisplayStatus(r.status || 'pending', r.due_date, t)}</StatusBadge></td>
@@ -626,6 +660,11 @@ export default function FinancialPage() {
                                 {t.financial.registerPayment}
                               </Button>
                             )}
+                            {r.status !== 'paid' && r.status !== 'cancelled' && (
+                              <Button size="sm" variant="ghost" title="Editar recebível" onClick={() => setEditingReceivable(r)}>
+                                ✏
+                              </Button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -677,6 +716,18 @@ export default function FinancialPage() {
           ) : (
           <>
           <FinancialFilterPanel type="payable" filters={payFilters} onChange={setPayFilters} />
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              placeholder="Filtrar por número da OS"
+              value={payOsSearch}
+              onChange={e => setPayOsSearch(e.target.value)}
+              className="h-8 w-56 rounded-md border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+            {payOsSearch && (
+              <button type="button" onClick={() => setPayOsSearch('')} className="text-xs text-muted-foreground hover:text-foreground">✕ Limpar</button>
+            )}
+          </div>
           <div className="flex flex-wrap gap-1 items-center">
             <span className="text-sm text-muted-foreground">{t.financial.groupBy}:</span>
             {([
@@ -770,7 +821,17 @@ export default function FinancialPage() {
         />
       )}
       <ReceivableFormDialog open={showNewReceivable} onOpenChange={setShowNewReceivable} />
+      <ReceivableFormDialog
+        open={!!editingReceivable}
+        onOpenChange={v => { if (!v) setEditingReceivable(null); }}
+        initialData={editingReceivable}
+      />
       <PayableFormDialog open={showNewPayable} onOpenChange={setShowNewPayable} />
+      <PayableFormDialog
+        open={!!editingPayable}
+        onOpenChange={v => { if (!v) setEditingPayable(null); }}
+        initialData={editingPayable}
+      />
       <SendViaWhatsAppDialog
         open={!!whatsAppTarget}
         onOpenChange={v => { if (!v) setWhatsAppTarget(null); }}

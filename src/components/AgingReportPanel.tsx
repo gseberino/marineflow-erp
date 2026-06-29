@@ -1,6 +1,8 @@
 import { useAgingReport } from '@/hooks/use-financial';
 import { Skeleton } from '@/components/ui/skeleton';
-import { AlertTriangle, CheckCircle2, Clock, TrendingUp } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { AlertTriangle, CheckCircle2, Clock, TrendingUp, CalendarClock, Download } from 'lucide-react';
+import { exportToCSV } from '@/lib/export';
 
 const fmt = (v: number) =>
   v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -8,7 +10,7 @@ const fmt = (v: number) =>
 const pct = (part: number, total: number) =>
   total === 0 ? '0%' : `${Math.round((part / total) * 100)}%`;
 
-interface BucketProps {
+interface BucketCardProps {
   label: string;
   days: string;
   amount: number;
@@ -17,7 +19,7 @@ interface BucketProps {
   icon: React.ReactNode;
 }
 
-function BucketCard({ label, days, amount, total, colorClass, icon }: BucketProps) {
+function BucketCard({ label, days, amount, total, colorClass, icon }: BucketCardProps) {
   return (
     <div className={`rounded-lg border p-4 space-y-1 ${colorClass}`}>
       <div className="flex items-center justify-between">
@@ -36,8 +38,8 @@ export function AgingReportPanel() {
   if (isLoading) {
     return (
       <div className="space-y-4">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-24 rounded-lg" />)}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          {[1, 2, 3, 4, 5].map(i => <Skeleton key={i} className="h-24 rounded-lg" />)}
         </div>
         <Skeleton className="h-48 rounded-lg" />
       </div>
@@ -56,17 +58,66 @@ export function AgingReportPanel() {
 
   const { totals, buckets } = data;
 
+  const handleExport = () => {
+    exportToCSV(
+      buckets.map(b => ({
+        cliente: b.client_name,
+        a_vencer: b.future,
+        atraso_1_30d: b.days_1_30,
+        atraso_31_60d: b.days_31_60,
+        atraso_61_90d: b.days_61_90,
+        atraso_mais_90d: b.over_90,
+        total: b.total,
+      })),
+      'aging_report',
+      [
+        { key: 'cliente', label: 'Cliente' },
+        { key: 'a_vencer', label: 'A Vencer', format: (v: any) => fmt(Number(v)) },
+        { key: 'atraso_1_30d', label: '1–30d Atraso', format: (v: any) => fmt(Number(v)) },
+        { key: 'atraso_31_60d', label: '31–60d Atraso', format: (v: any) => fmt(Number(v)) },
+        { key: 'atraso_61_90d', label: '61–90d Atraso', format: (v: any) => fmt(Number(v)) },
+        { key: 'atraso_mais_90d', label: '+90d Atraso', format: (v: any) => fmt(Number(v)) },
+        { key: 'total', label: 'Total', format: (v: any) => fmt(Number(v)) },
+      ],
+    );
+  };
+
   return (
     <div className="space-y-6">
-      {/* Totais por faixa */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      {/* Header com export */}
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-xs text-muted-foreground">
+            Total em aberto: <span className="font-semibold text-foreground">{fmt(totals.total)}</span>
+            {totals.over_90 > 0 && (
+              <span className="ml-3 text-destructive font-medium">
+                ⚠ {fmt(totals.over_90)} com +90 dias em atraso
+              </span>
+            )}
+          </p>
+        </div>
+        <Button variant="outline" size="sm" onClick={handleExport} className="gap-1.5 text-xs">
+          <Download className="h-3.5 w-3.5" /> Exportar CSV
+        </Button>
+      </div>
+
+      {/* 5 Buckets */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <BucketCard
-          label="Corrente / até 30d"
-          days="0–30 dias"
-          amount={totals.current}
+          label="A Vencer"
+          days="Due date futuro"
+          amount={totals.future}
           total={totals.total}
-          colorClass="border-border"
-          icon={<Clock className="h-4 w-4 text-muted-foreground" />}
+          colorClass="border-blue-200 bg-blue-50/40 dark:bg-blue-950/20"
+          icon={<CalendarClock className="h-4 w-4 text-blue-500" />}
+        />
+        <BucketCard
+          label="1–30 dias"
+          days="1–30 dias em atraso"
+          amount={totals.days_1_30}
+          total={totals.total}
+          colorClass="border-yellow-200 bg-yellow-50/40 dark:bg-yellow-950/20"
+          icon={<Clock className="h-4 w-4 text-yellow-500" />}
         />
         <BucketCard
           label="31–60 dias"
@@ -94,17 +145,14 @@ export function AgingReportPanel() {
         />
       </div>
 
-      <p className="text-xs text-muted-foreground text-right">
-        Total em aberto: <span className="font-semibold">{fmt(totals.total)}</span>
-      </p>
-
       {/* Tabela por cliente */}
       <div className="rounded-xl border bg-card shadow-sm overflow-x-auto">
-        <table className="w-full text-sm min-w-[600px]">
+        <table className="w-full text-sm min-w-[700px]">
           <thead>
             <tr className="border-b bg-muted/50">
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Cliente</th>
-              <th className="px-4 py-3 text-right font-medium text-muted-foreground">Corrente</th>
+              <th className="px-4 py-3 text-right font-medium text-blue-600">A Vencer</th>
+              <th className="px-4 py-3 text-right font-medium text-yellow-600">1–30d</th>
               <th className="px-4 py-3 text-right font-medium text-amber-600">31–60d</th>
               <th className="px-4 py-3 text-right font-medium text-orange-600">61–90d</th>
               <th className="px-4 py-3 text-right font-medium text-destructive">+90d</th>
@@ -114,24 +162,21 @@ export function AgingReportPanel() {
           <tbody>
             {buckets.map(b => (
               <tr key={b.client_id} className="border-b last:border-0 hover:bg-muted/20">
-                <td className="px-4 py-2.5 font-medium truncate max-w-[200px]">{b.client_name}</td>
+                <td className="px-4 py-2.5 font-medium truncate max-w-[180px]">{b.client_name}</td>
                 <td className="px-4 py-2.5 text-right tabular-nums">
-                  {b.current > 0 ? fmt(b.current) : <span className="text-muted-foreground">—</span>}
+                  {b.future > 0 ? <span className="text-blue-600">{fmt(b.future)}</span> : <span className="text-muted-foreground">—</span>}
                 </td>
                 <td className="px-4 py-2.5 text-right tabular-nums">
-                  {b.days_31_60 > 0
-                    ? <span className="text-amber-700 font-medium">{fmt(b.days_31_60)}</span>
-                    : <span className="text-muted-foreground">—</span>}
+                  {b.days_1_30 > 0 ? <span className="text-yellow-700 font-medium">{fmt(b.days_1_30)}</span> : <span className="text-muted-foreground">—</span>}
                 </td>
                 <td className="px-4 py-2.5 text-right tabular-nums">
-                  {b.days_61_90 > 0
-                    ? <span className="text-orange-700 font-medium">{fmt(b.days_61_90)}</span>
-                    : <span className="text-muted-foreground">—</span>}
+                  {b.days_31_60 > 0 ? <span className="text-amber-700 font-medium">{fmt(b.days_31_60)}</span> : <span className="text-muted-foreground">—</span>}
                 </td>
                 <td className="px-4 py-2.5 text-right tabular-nums">
-                  {b.over_90 > 0
-                    ? <span className="text-destructive font-bold">{fmt(b.over_90)}</span>
-                    : <span className="text-muted-foreground">—</span>}
+                  {b.days_61_90 > 0 ? <span className="text-orange-700 font-medium">{fmt(b.days_61_90)}</span> : <span className="text-muted-foreground">—</span>}
+                </td>
+                <td className="px-4 py-2.5 text-right tabular-nums">
+                  {b.over_90 > 0 ? <span className="text-destructive font-bold">{fmt(b.over_90)}</span> : <span className="text-muted-foreground">—</span>}
                 </td>
                 <td className="px-4 py-2.5 text-right font-semibold tabular-nums">{fmt(b.total)}</td>
               </tr>
@@ -140,7 +185,8 @@ export function AgingReportPanel() {
           <tfoot>
             <tr className="border-t bg-muted/30">
               <td className="px-4 py-2.5 font-semibold text-xs uppercase tracking-wide text-muted-foreground">Total</td>
-              <td className="px-4 py-2.5 text-right font-semibold tabular-nums">{fmt(totals.current)}</td>
+              <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-blue-600">{fmt(totals.future)}</td>
+              <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-yellow-700">{fmt(totals.days_1_30)}</td>
               <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-amber-700">{fmt(totals.days_31_60)}</td>
               <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-orange-700">{fmt(totals.days_61_90)}</td>
               <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-destructive">{fmt(totals.over_90)}</td>

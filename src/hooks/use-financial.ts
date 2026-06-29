@@ -325,7 +325,8 @@ export function useDismissBankTransaction() {
 export interface AgingBucket {
   client_id: string;
   client_name: string;
-  current: number;    // vence hoje ou no futuro / até 30 dias em atraso
+  future: number;     // A vencer (due_date > hoje)
+  days_1_30: number;  // 1–30 dias em atraso
   days_31_60: number;
   days_61_90: number;
   over_90: number;
@@ -334,7 +335,7 @@ export interface AgingBucket {
 
 export interface AgingReportData {
   buckets: AgingBucket[];
-  totals: { current: number; days_31_60: number; days_61_90: number; over_90: number; total: number };
+  totals: { future: number; days_1_30: number; days_31_60: number; days_61_90: number; over_90: number; total: number };
   generated_at: string;
 }
 
@@ -361,17 +362,18 @@ export function useAgingReport() {
           map.set(clientId, {
             client_id: clientId,
             client_name: client.name as string,
-            current: 0, days_31_60: 0, days_61_90: 0, over_90: 0, total: 0,
+            future: 0, days_1_30: 0, days_31_60: 0, days_61_90: 0, over_90: 0, total: 0,
           });
         }
         const bucket = map.get(clientId)!;
         const balance = Number(r.balance_amount || 0);
-        const due = new Date(r.due_date);
-        due.setHours(0, 0, 0, 0);
+        // Normaliza due_date para meia-noite local, evitando drift de timezone
+        const due = new Date(r.due_date + 'T00:00:00');
         const diffDays = Math.round((today.getTime() - due.getTime()) / 86_400_000);
 
         bucket.total += balance;
-        if (diffDays <= 30)       bucket.current    += balance;
+        if (diffDays < 0)         bucket.future     += balance;  // A vencer
+        else if (diffDays <= 30)  bucket.days_1_30  += balance;  // 1–30d em atraso
         else if (diffDays <= 60)  bucket.days_31_60 += balance;
         else if (diffDays <= 90)  bucket.days_61_90 += balance;
         else                      bucket.over_90    += balance;
@@ -380,13 +382,14 @@ export function useAgingReport() {
       const buckets = Array.from(map.values()).sort((a, b) => b.over_90 - a.over_90);
       const totals = buckets.reduce(
         (acc, b) => ({
-          current:    acc.current    + b.current,
+          future:     acc.future     + b.future,
+          days_1_30:  acc.days_1_30  + b.days_1_30,
           days_31_60: acc.days_31_60 + b.days_31_60,
           days_61_90: acc.days_61_90 + b.days_61_90,
           over_90:    acc.over_90    + b.over_90,
           total:      acc.total      + b.total,
         }),
-        { current: 0, days_31_60: 0, days_61_90: 0, over_90: 0, total: 0 },
+        { future: 0, days_1_30: 0, days_31_60: 0, days_61_90: 0, over_90: 0, total: 0 },
       );
 
       return { buckets, totals, generated_at: new Date().toISOString() };
@@ -440,5 +443,59 @@ export function usePaymentsByServiceOrder(serviceOrderId?: string) {
       return payments ?? [];
     },
     enabled: !!serviceOrderId,
+  });
+}
+
+// ─── Update hooks ─────────────────────────────────────────────────────────────
+
+export function useUpdateReceivable() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...patch }: {
+      id: string;
+      description?: string;
+      due_date?: string;
+      amount?: number;
+      notes?: string;
+      cost_center_id?: string;
+    }) => {
+      const { data, error } = await supabase
+        .from('receivables')
+        .update(patch)
+        .eq('id', id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['receivables'] });
+      qc.invalidateQueries({ queryKey: ['receivables', 'by-so'] });
+    },
+  });
+}
+
+export function useUpdatePayable() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...patch }: {
+      id: string;
+      description?: string;
+      due_date?: string;
+      amount?: number;
+      expense_category?: string;
+      cost_center_id?: string;
+      notes?: string;
+    }) => {
+      const { data, error } = await supabase
+        .from('payables')
+        .update(patch)
+        .eq('id', id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['payables'] }),
   });
 }

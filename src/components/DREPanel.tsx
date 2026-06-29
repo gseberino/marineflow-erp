@@ -1,4 +1,7 @@
 import { useState, useMemo } from 'react';
+import { Button } from '@/components/ui/button';
+import { Download } from 'lucide-react';
+import { exportToCSV } from '@/lib/export';
 import { useReceivables, usePayables, usePayments } from '@/hooks/use-financial';
 import { useCostCenters } from '@/hooks/use-cost-centers';
 import { useI18n } from '@/i18n';
@@ -93,18 +96,45 @@ export function DREPanel() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center gap-3 flex-wrap">
         <h3 className="text-lg font-bold">Demonstrativo de Resultados (DRE)</h3>
-        <Select value={String(year)} onValueChange={v => setYear(Number(v))}>
-          <SelectTrigger className="w-[120px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {[year - 1, year, year + 1].map(y => (
-              <SelectItem key={y} value={String(y)}>{y}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline" size="sm"
+            className="gap-1.5 text-xs"
+            onClick={() => {
+              const rows = [
+                { conta: 'Receitas Operacionais', ...Object.fromEntries(dreData.map(d => [d.label, d['Receitas Operacionais'] || 0])), total: yearTotal['Receitas Operacionais'] || 0 },
+                { conta: '(-) Deduções e Impostos', ...Object.fromEntries(dreData.map(d => [d.label, d['Deduções e Impostos'] || 0])), total: yearTotal['Deduções e Impostos'] || 0 },
+                { conta: '= Receita Líquida', ...Object.fromEntries(dreData.map(d => [d.label, d.netRevenue || 0])), total: yearTotal.netRevenue || 0 },
+                { conta: '(-) Custos Variáveis', ...Object.fromEntries(dreData.map(d => [d.label, d['Custos Variáveis (CPV/CSV)'] || 0])), total: yearTotal['Custos Variáveis (CPV/CSV)'] || 0 },
+                { conta: '= Lucro Bruto', ...Object.fromEntries(dreData.map(d => [d.label, d.grossProfit || 0])), total: yearTotal.grossProfit || 0 },
+                { conta: '(-) Desp. Operacionais', ...Object.fromEntries(dreData.map(d => [d.label, d['Despesas Operacionais Fixas'] || 0])), total: yearTotal['Despesas Operacionais Fixas'] || 0 },
+                { conta: '= Lucro Operacional', ...Object.fromEntries(dreData.map(d => [d.label, d.operatingProfit || 0])), total: yearTotal.operatingProfit || 0 },
+                { conta: '(-) Resultado Financeiro', ...Object.fromEntries(dreData.map(d => [d.label, d['Resultado Financeiro'] || 0])), total: yearTotal['Resultado Financeiro'] || 0 },
+                { conta: '= Lucro Líquido', ...Object.fromEntries(dreData.map(d => [d.label, d.netIncome || 0])), total: yearTotal.netIncome || 0 },
+              ];
+              const cols = [
+                { key: 'conta', label: 'Conta' },
+                ...dreData.map(d => ({ key: d.label, label: d.label, format: (v: any) => Number(v || 0).toFixed(2).replace('.', ',') })),
+                { key: 'total', label: `Total ${year}`, format: (v: any) => Number(v || 0).toFixed(2).replace('.', ',') },
+              ];
+              exportToCSV(rows, `dre_${year}`, cols);
+            }}
+          >
+            <Download className="h-3.5 w-3.5" /> Exportar CSV
+          </Button>
+          <Select value={String(year)} onValueChange={v => setYear(Number(v))}>
+            <SelectTrigger className="w-[120px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {[year - 1, year, year + 1].map(y => (
+                <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
