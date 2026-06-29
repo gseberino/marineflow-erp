@@ -15,28 +15,53 @@ function haversine(lat1: number, lon1: number, lat2: number, lon2: number): numb
   return R * c;
 }
 
+export interface TravelRates {
+  km_rate: number;
+  hourly: Record<number, number>; // por número de técnicos
+  urgency_mult: number;
+  weekend_mult: number;
+}
+
+export const DEFAULT_TRAVEL_RATES: TravelRates = {
+  km_rate: 1.10,
+  hourly: { 1: 90.00, 2: 170.00, 3: 250.00 },
+  urgency_mult: 1.5,
+  weekend_mult: 1.3,
+};
+
+/** Constrói TravelRates a partir do mapa de app_settings (com fallback para defaults). */
+export function travelRatesFromSettings(s?: Record<string, string>): TravelRates {
+  if (!s) return DEFAULT_TRAVEL_RATES;
+  const num = (k: string, d: number) => {
+    const v = Number(s[k]);
+    return Number.isFinite(v) && v > 0 ? v : d;
+  };
+  return {
+    km_rate: num('travel_km_rate', DEFAULT_TRAVEL_RATES.km_rate),
+    hourly: {
+      1: num('travel_hourly_1', DEFAULT_TRAVEL_RATES.hourly[1]),
+      2: num('travel_hourly_2', DEFAULT_TRAVEL_RATES.hourly[2]),
+      3: num('travel_hourly_3', DEFAULT_TRAVEL_RATES.hourly[3]),
+    },
+    urgency_mult: num('travel_urgency_mult', DEFAULT_TRAVEL_RATES.urgency_mult),
+    weekend_mult: num('travel_weekend_mult', DEFAULT_TRAVEL_RATES.weekend_mult),
+  };
+}
+
 export function calculateTravelCost(params: {
   distance_km: number;
   travel_hours: number;
   technician_count: number;
   ferry_cost: number;
   travel_type: 'comercial' | 'urgencia' | 'fds_feriado';
-}): number {
+}, rates: TravelRates = DEFAULT_TRAVEL_RATES): number {
   const { distance_km, travel_hours, technician_count, ferry_cost, travel_type } = params;
-  const KM_RATE = 1.10; // R$/km (ida + volta já incluídos no distance_km)
-  const HOURLY_RATES: Record<number, number> = {
-    1: 90.00,
-    2: 170.00,
-    3: 250.00,
-  };
-  const hourlyRate = HOURLY_RATES[technician_count] || 90.00;
-  const MULTIPLIERS: Record<string, number> = {
-    comercial: 1.0,
-    urgencia: 1.5,
-    fds_feriado: 1.3,
-  };
-  const multiplier = MULTIPLIERS[travel_type] || 1.0;
-  const base = (distance_km * KM_RATE) + (travel_hours * hourlyRate) + (ferry_cost || 0);
+  const hourlyRate = rates.hourly[technician_count] || rates.hourly[1];
+  const multiplier =
+    travel_type === 'urgencia' ? rates.urgency_mult
+    : travel_type === 'fds_feriado' ? rates.weekend_mult
+    : 1.0;
+  const base = (distance_km * rates.km_rate) + (travel_hours * hourlyRate) + (ferry_cost || 0);
   return Math.round(base * multiplier * 100) / 100;
 }
 

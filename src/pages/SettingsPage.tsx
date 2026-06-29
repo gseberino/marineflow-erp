@@ -314,6 +314,12 @@ function CompanyTab() {
     base_longitude: '-48.6728',
     cost_per_km: '3.50',
     default_hourly_rate: '150',
+    travel_km_rate: '1.10',
+    travel_hourly_1: '90',
+    travel_hourly_2: '170',
+    travel_hourly_3: '250',
+    travel_urgency_mult: '1.5',
+    travel_weekend_mult: '1.3',
     bank_name: '',
     bank_agency: '',
     bank_account: '',
@@ -348,6 +354,12 @@ function CompanyTab() {
           base_longitude: map.base_longitude || '-48.6728',
           cost_per_km: map.cost_per_km || '3.50',
           default_hourly_rate: map.default_hourly_rate || '150',
+          travel_km_rate: map.travel_km_rate || '1.10',
+          travel_hourly_1: map.travel_hourly_1 || '90',
+          travel_hourly_2: map.travel_hourly_2 || '170',
+          travel_hourly_3: map.travel_hourly_3 || '250',
+          travel_urgency_mult: map.travel_urgency_mult || '1.5',
+          travel_weekend_mult: map.travel_weekend_mult || '1.3',
           bank_name: map.bank_name || '',
           bank_agency: map.bank_agency || '',
           bank_account: map.bank_account || '',
@@ -613,14 +625,37 @@ function CompanyTab() {
               placeholder="-48.6728" className="mt-1" />
           </div>
           <div>
-            <label className="text-xs font-medium text-muted-foreground">Custo por km (R$)</label>
-            <Input type="number" step="0.01" value={form.cost_per_km}
-              onChange={e => set('cost_per_km', e.target.value)} className="mt-1" />
+            <label className="text-xs font-medium text-muted-foreground">Custo por km (R$) — deslocamento</label>
+            <Input type="number" step="0.01" value={form.travel_km_rate}
+              onChange={e => set('travel_km_rate', e.target.value)} className="mt-1" />
+            <p className="text-[10px] text-muted-foreground mt-0.5">Multiplica a distância (ida+volta) no cálculo da OS</p>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">R$/h — 1 téc.</label>
+              <Input type="number" step="0.01" value={form.travel_hourly_1}
+                onChange={e => set('travel_hourly_1', e.target.value)} className="mt-1" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">R$/h — 2 téc.</label>
+              <Input type="number" step="0.01" value={form.travel_hourly_2}
+                onChange={e => set('travel_hourly_2', e.target.value)} className="mt-1" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">R$/h — 3 téc.</label>
+              <Input type="number" step="0.01" value={form.travel_hourly_3}
+                onChange={e => set('travel_hourly_3', e.target.value)} className="mt-1" />
+            </div>
           </div>
           <div>
-            <label className="text-xs font-medium text-muted-foreground">Taxa horária padrão (R$)</label>
-            <Input type="number" step="0.01" value={form.default_hourly_rate}
-              onChange={e => set('default_hourly_rate', e.target.value)} className="mt-1" />
+            <label className="text-xs font-medium text-muted-foreground">Multiplicador urgência (ex: 1.5 = +50%)</label>
+            <Input type="number" step="0.05" value={form.travel_urgency_mult}
+              onChange={e => set('travel_urgency_mult', e.target.value)} className="mt-1" />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Multiplicador fim de semana/feriado (ex: 1.3 = +30%)</label>
+            <Input type="number" step="0.05" value={form.travel_weekend_mult}
+              onChange={e => set('travel_weekend_mult', e.target.value)} className="mt-1" />
           </div>
         </div>
       </div>

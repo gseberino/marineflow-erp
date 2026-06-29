@@ -55,7 +55,7 @@ import { RegisterDepositDialog } from '@/components/RegisterDepositDialog';
 import { StockAlertDialog } from '@/components/StockAlertDialog';
 import { ReceivePODialog } from '@/components/ReceivePODialog';
 import { OPERATIONAL_EXPENSE_CATEGORIES } from '@/lib/expense-categories';
-import { calculateDisplacement, calculateTravelCost } from '@/lib/displacement';
+import { calculateDisplacement, calculateTravelCost, travelRatesFromSettings } from '@/lib/displacement';
 import { statusConfig, priorityConfig } from '@/lib/constants';
 import { StatusBadge } from '@/components/StatusBadge';
 import { ServiceFormDialog } from '@/components/ServiceFormDialog';
@@ -649,6 +649,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const { data: cardFees } = useCardFees();
   const { data: appSettings } = useAppSettings();
   const issRatePct = Number(appSettings?.iss_rate_pct ?? 5) || 0;
+  const travelRates = travelRatesFromSettings(appSettings);
+  // Wrapper que injeta as tarifas configuráveis em todas as chamadas de cálculo de deslocamento
+  const calcTravelCost = (p: Parameters<typeof calculateTravelCost>[0]) => calculateTravelCost(p, travelRates);
   const { data: paymentPresets } = usePaymentConditionPresets();
   const { data: pdfData } = usePDFData(isNew ? undefined : orderId);
   const queryClient = useQueryClient();
@@ -2663,7 +2666,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                       const km = parseFloat(e.target.value) || 0;
                       set('travel_distance_km', km);
                       if (!manualTravel) {
-                        set('travel_cost_total', calculateTravelCost({
+                        set('travel_cost_total', calcTravelCost({
                           distance_km: km,
                           travel_hours: form.travel_hours,
                           technician_count: form.technician_count_for_travel,
@@ -2682,7 +2685,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                       const hours = parseFloat(e.target.value) || 0;
                       set('travel_hours', hours);
                       if (!manualTravel) {
-                        set('travel_cost_total', calculateTravelCost({
+                        set('travel_cost_total', calcTravelCost({
                           distance_km: form.travel_distance_km,
                           travel_hours: hours,
                           technician_count: form.technician_count_for_travel,
@@ -2701,7 +2704,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                       const count = parseInt(v) || 1;
                       set('technician_count_for_travel', count);
                       if (!manualTravel) {
-                        set('travel_cost_total', calculateTravelCost({
+                        set('travel_cost_total', calcTravelCost({
                           distance_km: form.travel_distance_km,
                           travel_hours: form.travel_hours,
                           technician_count: count,
@@ -2713,9 +2716,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   >
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="1">1 técnico — R$ 90,00/h</SelectItem>
-                      <SelectItem value="2">2 técnicos — R$ 170,00/h</SelectItem>
-                      <SelectItem value="3">3 técnicos — R$ 250,00/h</SelectItem>
+                      <SelectItem value="1">1 técnico — {formatCurrency(travelRates.hourly[1])}/h</SelectItem>
+                      <SelectItem value="2">2 técnicos — {formatCurrency(travelRates.hourly[2])}/h</SelectItem>
+                      <SelectItem value="3">3 técnicos — {formatCurrency(travelRates.hourly[3])}/h</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -2726,7 +2729,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                     onValueChange={(v: any) => {
                       set('travel_type', v);
                       if (!manualTravel) {
-                        set('travel_cost_total', calculateTravelCost({
+                        set('travel_cost_total', calcTravelCost({
                           distance_km: form.travel_distance_km,
                           travel_hours: form.travel_hours,
                           technician_count: form.technician_count_for_travel,
@@ -2755,7 +2758,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                     onValueChange={(v) => {
                       set('ferry_cost', v);
                       if (!manualTravel) {
-                        set('travel_cost_total', calculateTravelCost({
+                        set('travel_cost_total', calcTravelCost({
                           distance_km: form.travel_distance_km,
                           travel_hours: form.travel_hours,
                           technician_count: form.technician_count_for_travel,
