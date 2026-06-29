@@ -31,7 +31,8 @@ import {
 import { useAppUsers, useCommissionableUsers, USER_ROLES } from '@/hooks/use-app-users';
 import { usePaymentConditionPresets } from '@/hooks/use-payment-conditions';
 import { useCollectionsByOS } from '@/hooks/use-collections';
-import { useReceivablesByServiceOrder, usePaymentsByServiceOrder } from '@/hooks/use-financial';
+import { useReceivablesByServiceOrder, usePaymentsByServiceOrder, useCreateReceivable } from '@/hooks/use-financial';
+import { PaymentDialog } from '@/components/PaymentDialog';
 import { useVesselContacts, VESSEL_CONTACT_ROLES } from '@/hooks/use-vessel-contacts';
 import { ClientCombobox } from '@/components/ClientCombobox';
 import { VesselSelect } from '@/components/VesselSelect';
@@ -886,11 +887,14 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [topVisible, setTopVisible] = useState(true);
   const [bottomVisible, setBottomVisible] = useState(false);
   const { data: osCollections } = useCollectionsByOS(orderId);
-  // M1: recebíveis desta OS para resumo financeiro
+  // M1: recebíveis desta OS para resumo financeiro e ações de pagamento
   const { data: soReceivables } = useReceivablesByServiceOrder(orderId);
   // M2: histórico de pagamentos desta OS
   const { data: soPayments } = usePaymentsByServiceOrder(orderId);
   const [showPaymentHistory, setShowPaymentHistory] = useState(false);
+  // Recebível selecionado para abrir o PaymentDialog
+  const [paymentDialogReceivable, setPaymentDialogReceivable] = useState<any>(null);
+  const createReceivable = useCreateReceivable();
 
   useEffect(() => {
     const targets: Array<{ el: HTMLElement | null; setter: (v: boolean) => void }> = [
@@ -3531,31 +3535,132 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           </div>
         )}
 
-        {/* M1: Resumo de recebíveis reais — só exibe se existem recebíveis */}
-        {!isNew && (soReceivables || []).length > 0 && (
-          <div className="px-4 py-2 border-t bg-blue-50/40 dark:bg-blue-950/20 flex items-center gap-4 flex-wrap text-xs">
-            <span className="text-muted-foreground">
-              Cobrado: <span className="font-semibold text-foreground">{formatCurrency(soTotalCharged)}</span>
-            </span>
-            <span className="text-muted-foreground">
-              Recebido: <span className="font-semibold text-emerald-600">{formatCurrency(soTotalPaid)}</span>
-            </span>
-            {soBalance > 0.01 && (
-              <span className="text-muted-foreground">
-                Em aberto: <span className="font-semibold text-destructive">{formatCurrency(soBalance)}</span>
-              </span>
+        {/* M1: Gestão financeira integrada — sempre visível em OS salva */}
+        {!isNew && (
+          <div className="border-t">
+            {/* Cabeçalho com totais e badge de status */}
+            <div className="px-4 py-2 bg-blue-50/40 dark:bg-blue-950/20 flex items-center gap-3 flex-wrap text-xs">
+              {(soReceivables || []).length > 0 ? (
+                <>
+                  <span className="text-muted-foreground">
+                    Cobrado: <span className="font-semibold text-foreground">{formatCurrency(soTotalCharged)}</span>
+                  </span>
+                  <span className="text-muted-foreground">
+                    Recebido: <span className="font-semibold text-emerald-600">{formatCurrency(soTotalPaid)}</span>
+                  </span>
+                  {soBalance > 0.01 && (
+                    <span className="text-muted-foreground">
+                      Em aberto: <span className="font-semibold text-destructive">{formatCurrency(soBalance)}</span>
+                    </span>
+                  )}
+                  <span className={`ml-auto inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                    soPayStatus === 'paid'            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40'
+                    : soPayStatus === 'partially_paid' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40'
+                    : 'bg-muted text-muted-foreground'
+                  }`}>
+                    {soPayStatus === 'paid' ? 'Quitado' : soPayStatus === 'partially_paid' ? 'Parcial' : 'Não faturado'}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="text-muted-foreground">
+                    Valor a cobrar: <span className="font-semibold text-foreground">{formatCurrency(grandTotal)}</span>
+                  </span>
+                  <span className="ml-auto inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-muted text-muted-foreground">
+                    Sem lançamentos
+                  </span>
+                </>
+              )}
+            </div>
+
+            {/* Lista de recebíveis com ações */}
+            {(soReceivables || []).length > 0 && (
+              <div className="divide-y divide-dashed">
+                {(soReceivables || []).map((rec: any) => {
+                  const isPaid = rec.status === 'paid';
+                  const isPartial = rec.status === 'partially_paid';
+                  const bal = Number(rec.balance_amount || 0);
+                  return (
+                    <div key={rec.id} className="px-4 py-2 flex items-center gap-3 text-xs hover:bg-muted/20 transition-colors">
+                      {/* Descrição + vencimento */}
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium truncate text-foreground">{rec.description || 'Recebível'}</p>
+                        {rec.due_date && (
+                          <p className="text-muted-foreground text-[10px]">
+                            Vence: {new Date(rec.due_date + 'T12:00:00').toLocaleDateString('pt-BR')}
+                          </p>
+                        )}
+                      </div>
+                      {/* Valores */}
+                      <div className="text-right shrink-0">
+                        <p className="font-semibold">{formatCurrency(Number(rec.amount))}</p>
+                        {isPartial && (
+                          <p className="text-[10px] text-amber-600">Saldo: {formatCurrency(bal)}</p>
+                        )}
+                      </div>
+                      {/* Badge status */}
+                      <span className={`shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                        isPaid    ? 'bg-emerald-100 text-emerald-700'
+                        : isPartial ? 'bg-amber-100 text-amber-700'
+                        : 'bg-muted text-muted-foreground'
+                      }`}>
+                        {isPaid ? 'Pago' : isPartial ? 'Parcial' : 'Pendente'}
+                      </span>
+                      {/* Botão registrar pagamento */}
+                      {!isPaid && bal > 0 && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs px-2 shrink-0 gap-1 border-primary/40 text-primary hover:bg-primary/5"
+                          onClick={() => setPaymentDialogReceivable(rec)}
+                        >
+                          <DollarSign className="h-3 w-3" />
+                          {isPartial ? 'Complementar' : 'Registrar pgto.'}
+                        </Button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             )}
-            <span className={`ml-auto inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-              soPayStatus === 'paid'           ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40'
-              : soPayStatus === 'partially_paid' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40'
-              : 'bg-muted text-muted-foreground'
-            }`}>
-              {soPayStatus === 'paid' ? 'Quitado' : soPayStatus === 'partially_paid' ? 'Parcial' : 'Pendente'}
-            </span>
+
+            {/* Botão criar recebível manual (quando não há nenhum ainda e OS não é nova) */}
+            {(soReceivables || []).length === 0 && grandTotal > 0 && (
+              <div className="px-4 py-2 flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">Nenhum lançamento financeiro ainda</span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs px-2 gap-1 border-primary/40 text-primary hover:bg-primary/5"
+                  disabled={createReceivable.isPending}
+                  onClick={async () => {
+                    if (!orderId || !orderData?.client_id) return;
+                    try {
+                      const rec = await createReceivable.mutateAsync({
+                        client_id: orderData.client_id,
+                        service_order_id: orderId,
+                        description: `${orderData?.service_order_number || 'OS'} — saldo final`,
+                        issue_date: new Date().toISOString().split('T')[0],
+                        due_date: new Date().toISOString().split('T')[0],
+                        amount: grandTotal,
+                      });
+                      setPaymentDialogReceivable(rec);
+                    } catch (e: any) {
+                      toast.error(e?.message || 'Erro ao criar recebível');
+                    }
+                  }}
+                >
+                  <DollarSign className="h-3 w-3" />
+                  Lançar recebível
+                </Button>
+              </div>
+            )}
           </div>
         )}
 
-        {/* M2: Histórico de pagamentos — colapsável */}
+        {/* M2: Histórico de pagamentos — colapsável, só aparece quando há pagamentos */}
         {!isNew && (soPayments || []).length > 0 && (
           <div className="border-t">
             <button
@@ -4291,6 +4396,13 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         open={!!whatsAppTarget}
         onOpenChange={v => { if (!v) setWhatsAppTarget(null); }}
         target={whatsAppTarget}
+      />
+
+      {/* M1: PaymentDialog integrado na OS — abre ao clicar "Registrar pagamento" */}
+      <PaymentDialog
+        open={!!paymentDialogReceivable}
+        onOpenChange={v => { if (!v) setPaymentDialogReceivable(null); }}
+        receivable={paymentDialogReceivable}
       />
 
       <QuickProductDialog
