@@ -85,14 +85,15 @@ const TOOLS = [
     type: "function",
     function: {
       name: "list_service_orders",
-      description: "Lista ordens de serviço com filtros opcionais.",
+      description: "Lista orçamentos ou ordens de serviço. IMPORTANTE: orçamentos têm status='draft' (número ORÇ-XXXXX). OS têm outros status (número OS-XXXXX). Use is_quote=true para listar apenas orçamentos, is_quote=false para listar apenas OS, ou omita para listar tudo.",
       parameters: {
         type: "object",
         properties: {
-          status: { type: "string" },
+          is_quote: { type: "boolean", description: "true=apenas orçamentos (draft), false=apenas OS (non-draft), omitir=todos" },
+          status: { type: "string", description: "Filtro por status específico (ex: 'approved', 'in_progress'). Ignorado se is_quote for fornecido." },
           client_id: { type: "string" },
           vessel_id: { type: "string" },
-          limit: { type: "number" },
+          limit: { type: "number", description: "Máximo de registros (padrão 20)" },
         },
       },
     },
@@ -323,17 +324,22 @@ const TOOLS = [
     type: "function",
     function: {
       name: "create_service_order",
-      description: "Cria uma nova OS (use status='draft' para orçamento).",
+      description: "Cria um novo orçamento (status='draft', número ORÇ-XXXXX) ou OS (outro status, número OS-XXXXX). SEMPRE pesquise o cliente e o ativo/embarcação antes de criar. Se não houver ativo cadastrado, use create_vessel primeiro (suporta Camper, Motorhome, Lancha, etc.).",
       parameters: {
         type: "object",
         properties: {
-          client_id: { type: "string" },
-          vessel_id: { type: "string" },
-          status: { type: "string" },
-          problem_description: { type: "string" },
-          scheduled_start_at: { type: "string" },
+          client_id: { type: "string", description: "UUID do cliente (obrigatório)" },
+          vessel_id: { type: "string", description: "UUID do ativo/embarcação (obrigatório — use search_vessels ou create_vessel antes)" },
+          status: { type: "string", description: "Status inicial. Use 'draft' para orçamento. Padrão: draft." },
+          problem_description: { type: "string", description: "Descrição do problema ou escopo do serviço" },
+          extra_notes: { type: "string", description: "Observações visíveis ao cliente no PDF (condições, ressalvas, validade)" },
+          internal_notes: { type: "string", description: "Notas internas (não aparecem no PDF do cliente)" },
+          scheduled_start_at: { type: "string", description: "Data/hora de início agendada (ISO)" },
+          quote_validity_days: { type: "number", description: "Validade do orçamento em dias (padrão 30)" },
+          payment_conditions: { type: "string", description: "Condições de pagamento (ex: '50% na aprovação, 50% na entrega')" },
           items: {
             type: "array",
+            description: "Produtos do catálogo a adicionar (opcional — prefira add_service_to_order e add_material_to_order após criar)",
             items: {
               type: "object",
               properties: {
@@ -352,15 +358,17 @@ const TOOLS = [
     type: "function",
     function: {
       name: "update_service_order_status",
-      description: "Altera o status de uma OS.",
+      description: "Altera o status de uma OS/orçamento. IMPORTANTE: ao aprovar um orçamento (draft → outro status), o sistema automaticamente renomeia o número de ORÇ-XXXXX para OS-XXXXX.",
       parameters: {
         type: "object",
         properties: {
-          id: { type: "string" },
+          id: { type: "string", description: "UUID da OS/orçamento" },
           status: {
             type: "string",
-            enum: ["draft", "approved", "scheduled", "in_progress", "completed", "cancelled", "invoiced"],
+            enum: ["draft", "open", "pending", "approved", "scheduled", "in_progress", "waiting_parts", "waiting_approval", "completed", "cancelled", "invoiced", "reopened"],
+            description: "Novo status. 'draft'=Rascunho/Orçamento, 'open'=Aberto, 'pending'=Pendente, 'approved'=Aprovado, 'scheduled'=Agendado, 'in_progress'=Em andamento, 'waiting_parts'=Aguardando peças, 'waiting_approval'=Aguardando aprovação, 'completed'=Concluído, 'cancelled'=Cancelado, 'invoiced'=Faturado, 'reopened'=Reaberto",
           },
+          cancellation_reason: { type: "string", description: "Motivo do cancelamento (quando status=cancelled)" },
         },
         required: ["id", "status"],
       },
@@ -399,6 +407,38 @@ const TOOLS = [
           notes: { type: "string" },
         },
         required: ["service_order_id", "service_name", "unit_price"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "add_material_to_order",
+      description: "Adiciona um item de material/insumo livre a uma OS sem necessitar de produto cadastrado no catálogo. Use quando o usuário descreve materiais estimados (ex: 'R$ 4.500 em materiais elétricos') sem produto específico. O item fica registrado como serviço do tipo 'material'.",
+      parameters: {
+        type: "object",
+        properties: {
+          service_order_id: { type: "string", description: "UUID da OS/orçamento" },
+          name: { type: "string", description: "Nome/descrição do conjunto de materiais (ex: 'Materiais e Insumos de Instalação')" },
+          unit_price: { type: "number", description: "Valor total ou unitário em R$" },
+          quantity: { type: "number", description: "Quantidade (padrão 1 para valor total)" },
+          notes: { type: "string", description: "Detalhamento dos itens incluídos" },
+        },
+        required: ["service_order_id", "name", "unit_price"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_os_receivables",
+      description: "Lista os recebíveis e pagamentos de uma OS. Use para responder perguntas sobre o status financeiro de uma OS: quanto foi cobrado, quanto foi pago, saldo em aberto.",
+      parameters: {
+        type: "object",
+        properties: {
+          service_order_id: { type: "string", description: "UUID da OS" },
+        },
+        required: ["service_order_id"],
       },
     },
   },
@@ -543,7 +583,7 @@ const TOOLS = [
     function: {
       name: "send_service_order_link",
       description:
-        "Envia o link público de uma OS/orçamento por WhatsApp. Use sempre que o usuário pedir 'enviar orçamento', 'mandar OS', 'enviar para o cliente' etc. O campo service_order_id aceita TANTO o UUID (campo 'id' do list_service_orders) QUANTO o número da OS (campo 'numero', ex: 'OS-2026-152542'). Prefira sempre o UUID.",
+        "Envia o link público de uma OS/orçamento por WhatsApp. Use sempre que o usuário pedir 'enviar orçamento', 'mandar OS', 'enviar para o cliente' etc. O campo service_order_id aceita TANTO o UUID (campo 'id' do list_service_orders) QUANTO o número do documento (ex: 'ORÇ-00001' para orçamentos, 'OS-00042' para OS, ou o formato antigo 'OS-2026-XXXXX'). Prefira sempre o UUID.",
       parameters: {
         type: "object",
         properties: {
@@ -713,30 +753,50 @@ async function executeTool(
     case "list_service_orders": {
       let query = sb
         .from("service_orders")
-        .select("id, service_order_number, status, grand_total, scheduled_start_at, created_at, clients(full_name_or_company_name), vessels(boat_name)")
+        .select("id, service_order_number, status, grand_total, payment_status, scheduled_start_at, created_at, clients(full_name_or_company_name), vessels(boat_name)")
         .order("created_at", { ascending: false })
         .limit(Math.min(Number(args.limit) || 20, 50));
-      if (args.status) {
+
+      // Filtro is_quote: true=apenas orçamentos (draft), false=apenas OS (non-draft)
+      if (args.is_quote === true) {
+        query = query.eq("status", "draft");
+      } else if (args.is_quote === false) {
+        query = query.neq("status", "draft");
+      } else if (args.status) {
         const STATUS_PT_EN: Record<string, string> = {
-          "rascunho": "draft", "pendente": "pending", "aprovado": "approved",
+          "rascunho": "draft", "orçamento": "draft", "orcamento": "draft",
+          "aberto": "open", "pendente": "pending", "aprovado": "approved",
           "agendado": "scheduled", "em andamento": "in_progress", "em execução": "in_progress",
           "concluído": "completed", "concluido": "completed",
           "cancelado": "cancelled", "faturado": "invoiced",
-          "aguardando peças": "waiting_parts", "aguardando aprovação": "waiting_approval", "reaberto": "reopened",
+          "aguardando peças": "waiting_parts", "aguardando aprovação": "waiting_approval",
+          "reaberto": "reopened",
         };
         const mappedStatus = STATUS_PT_EN[args.status.toLowerCase()] ?? args.status;
         query = query.eq("status", mappedStatus);
       }
+
       if (args.client_id) query = query.eq("client_id", args.client_id);
       if (args.vessel_id) query = query.eq("vessel_id", args.vessel_id);
       const { data, error } = await query;
       if (error) throw error;
+
+      const STATUS_LABELS: Record<string, string> = {
+        draft: "Orçamento", open: "Aberto", pending: "Pendente", approved: "Aprovado",
+        scheduled: "Agendado", in_progress: "Em andamento", waiting_parts: "Aguardando peças",
+        waiting_approval: "Aguardando aprovação", completed: "Concluído",
+        cancelled: "Cancelado", invoiced: "Faturado", reopened: "Reaberto",
+      };
+
       const mapped = (data || []).map((so: any) => ({
         id: so.id,
         numero: so.service_order_number,
-        status: so.status,
+        tipo: so.status === "draft" ? "Orçamento" : "OS",
+        status: STATUS_LABELS[so.status] || so.status,
+        status_raw: so.status,
+        status_pagamento: so.payment_status || null,
         cliente: so.clients?.full_name_or_company_name || "—",
-        embarcacao: so.vessels?.boat_name || "—",
+        ativo: so.vessels?.boat_name || "—",
         valor_total: so.grand_total || 0,
         agendado_para: so.scheduled_start_at || null,
         criado_em: so.created_at,
@@ -990,21 +1050,19 @@ async function executeTool(
     }
 
     case "create_service_order": {
-      // Gera número sequencial da OS no formato SO-YYYY-NNNNN
-      const year = new Date().getFullYear();
-      const { data: lastSO } = await sb
-        .from("service_orders")
-        .select("service_order_number")
-        .like("service_order_number", `SO-${year}-%`)
-        .order("service_order_number", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      let seq = 1;
-      if (lastSO?.service_order_number) {
-        const match = lastSO.service_order_number.match(/(\d+)$/);
-        if (match) seq = parseInt(match[1], 10) + 1;
+      // Usa a sequência unificada document_number_seq via RPC next_document_number
+      // Orçamentos (draft) recebem prefixo ORÇ-XXXXX; OS recebem OS-XXXXX
+      const isQuote = !args.status || args.status === "draft";
+      const prefix = isQuote ? "ORÇ" : "OS";
+      let num: string;
+      try {
+        const { data: seqVal, error: seqErr } = await admin.rpc("next_document_number");
+        if (seqErr || seqVal === null) throw new Error(seqErr?.message || "seq null");
+        num = `${prefix}-${String(seqVal as number).padStart(5, "0")}`;
+      } catch {
+        // Fallback seguro: timestamp-based se a RPC falhar
+        num = `${prefix}-${Date.now().toString().slice(-5)}`;
       }
-      const num = `SO-${year}-${String(seq).padStart(5, "0")}`;
       const { items, ...rest } = args;
       const { data, error } = await sb
         .from("service_orders")
@@ -1045,9 +1103,30 @@ async function executeTool(
     }
 
     case "update_service_order_status": {
+      // Quando transicionando de draft → non-draft, renomeia ORÇ-XXXXX → OS-XXXXX
+      const { data: current } = await sb
+        .from("service_orders")
+        .select("status, service_order_number")
+        .eq("id", args.id)
+        .maybeSingle();
+
+      const updatePayload: Record<string, any> = { status: args.status };
+      if (args.cancellation_reason) updatePayload.cancellation_reason = args.cancellation_reason;
+
+      if (current?.status === "draft" && args.status !== "draft") {
+        // Gera novo número OS-XXXXX
+        try {
+          const { data: seqVal } = await admin.rpc("next_document_number");
+          if (seqVal !== null) {
+            updatePayload.service_order_number = `OS-${String(seqVal as number).padStart(5, "0")}`;
+            updatePayload.converted_to_os_at = new Date().toISOString();
+          }
+        } catch { /* mantém número atual se RPC falhar */ }
+      }
+
       const { data, error } = await sb
         .from("service_orders")
-        .update({ status: args.status })
+        .update(updatePayload)
         .eq("id", args.id)
         .select()
         .single();
@@ -1374,6 +1453,82 @@ async function executeTool(
       return { ok: true, cancelled_id: args.scheduled_id };
     }
 
+    case "add_material_to_order": {
+      // Insere material livre (sem product_id do catálogo) como linha de serviço tipo 'unit'
+      const qty = Number(args.quantity) || 1;
+      const price = Number(args.unit_price) || 0;
+      const { data, error } = await sb
+        .from("service_order_services")
+        .insert({
+          service_order_id: args.service_order_id,
+          service_id: null,
+          service_name_snapshot: args.name,
+          billing_unit_snapshot: "unit",
+          quantity: qty,
+          unit_price_snapshot: price,
+          line_total: qty * price,
+          notes: args.notes || null,
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      await sb.rpc("recalc_so_totals", { so_id: args.service_order_id }).catch(() => null);
+      return { ok: true, material_item: data };
+    }
+
+    case "get_os_receivables": {
+      const soId = args.service_order_id;
+      // Busca recebíveis ativos (não cancelados)
+      const { data: recs, error: recErr } = await sb
+        .from("receivables")
+        .select("id, description, amount, due_date, status, payment_method, is_deposit")
+        .eq("service_order_id", soId)
+        .neq("status", "cancelled")
+        .order("due_date", { ascending: true });
+      if (recErr) throw recErr;
+
+      // Busca pagamentos confirmados via join
+      const recIds = (recs || []).map((r: any) => r.id);
+      let payments: any[] = [];
+      if (recIds.length > 0) {
+        const { data: pays } = await sb
+          .from("payments")
+          .select("id, receivable_id, amount, payment_date, payment_method, notes")
+          .in("receivable_id", recIds)
+          .eq("status", "confirmed")
+          .order("payment_date", { ascending: false });
+        payments = pays || [];
+      }
+
+      // Totais resumidos
+      const totalCharged = (recs || []).reduce((s: number, r: any) => s + Number(r.amount), 0);
+      const totalPaid = payments.reduce((s: number, p: any) => s + Number(p.amount), 0);
+
+      const statusMap: Record<string, string> = {
+        pending: "Pendente", partial: "Parcialmente pago", paid: "Pago", overdue: "Vencido", cancelled: "Cancelado"
+      };
+
+      return {
+        total_cobrado: totalCharged,
+        total_pago: totalPaid,
+        saldo_aberto: totalCharged - totalPaid,
+        recebíveis: (recs || []).map((r: any) => ({
+          id: r.id,
+          descricao: r.description,
+          valor: r.amount,
+          vencimento: r.due_date,
+          status: statusMap[r.status] || r.status,
+          is_sinal: r.is_deposit,
+        })),
+        pagamentos: payments.map((p: any) => ({
+          valor: p.amount,
+          data: p.payment_date,
+          forma: p.payment_method,
+          obs: p.notes,
+        })),
+      };
+    }
+
     default:
       return { error: `Tool desconhecida: ${name}` };
   }
@@ -1513,105 +1668,151 @@ REGRAS:
 - Seja caloroso!
 `;
     } else {
-      systemPrompt = `Hoje é ${dateStr}, ${timeStr} (horário de Brasília).\n\nVocê é o assistente do MarineFlow ERP marítimo. Responda em português, formate em markdown.
+      systemPrompt = `Hoje é ${dateStr}, ${timeStr} (horário de Brasília).
 
-⚠️⚠️⚠️ REGRA ABSOLUTA NÚMERO 1 — INVIOLÁVEL:
-Após qualquer tool de busca (search_clients, search_vessels, list_service_orders, search_products) retornar MAIS DE UM resultado, você TEM PROIBIÇÃO TOTAL de escrever texto com os resultados. A ÚNICA ação permitida é chamar 'present_options' imediatamente, com os UUIDs reais no campo value. ZERO EXCEÇÕES. Se você escrever uma lista em texto, a função do sistema falhará e o usuário não conseguirá interagir. SEMPRE chame present_options. NUNCA escreva lista.
+Você é o assistente do MarineFlow ERP. Responda em português, formate em markdown.
 
-REGRAS CRÍTICAS — COMPORTAMENTO PRÓ-ATIVO:
-- Antes de QUALQUER ação de gravação (criar, atualizar) ou envio de WhatsApp, você DEVE chamar 'propose_action' primeiro.
-- Só chame a tool real (create_*, update_*, send_*) APÓS o usuário confirmar.
-- Tools de leitura (search_*, list_*, get_*) podem ser chamadas livremente — use-as ANTES de qualquer pergunta.
-- NUNCA peça ao usuário para fornecer IDs — descubra você mesmo via search_*.
-- NUNCA crie uma nova OS se o usuário não pediu explicitamente uma nova OS.
+════════════════════════════════════════
+⚠️ REGRA ABSOLUTA — INVIOLÁVEL:
+Após qualquer busca retornar MAIS DE UM resultado, você TEM PROIBIÇÃO TOTAL de escrever texto com os resultados. A ÚNICA ação permitida é chamar 'present_options' imediatamente com os UUIDs reais. ZERO EXCEÇÕES.
+════════════════════════════════════════
 
-FLUXO DE DESAMBIGUAÇÃO — OBRIGATÓRIO:
-1. Busque SEMPRE antes de perguntar qualquer coisa.
-2. Encontrou 1 resultado → use diretamente, informe o usuário qual usou.
-3. Encontrou 2 a 5 resultados → chame 'present_options' com todos + IDs REAIS no campo value.
-4. Encontrou 6 ou mais resultados → chame 'present_options' com os 5 PRIMEIROS (mais relevantes) + última opção obrigatória: {label:"🔍 Refinar busca — digitar mais detalhes",value:"__refine__"}. Informe o total encontrado na pergunta: "Encontrei 12 clientes chamados João. Escolha ou refine a busca:"
-5. Encontrou 0 → informe e use 'present_options' com opção de criar novo.
-6. Usuário escolheu __refine__ → peça mais detalhes específicos (sobrenome, telefone, CNPJ, cidade).
-7. Qualquer pergunta sim/não → 'present_options' com [{label:"Sim",value:"sim"},{label:"Não",value:"nao"}].
-8. Qualquer lista de escolha → 'present_options'. NUNCA texto corrido com opções.
+REGRAS CRÍTICAS:
+- Antes de QUALQUER escrita (criar, atualizar) ou envio de WhatsApp → chame 'propose_action' primeiro.
+- Só execute a tool real APÓS o usuário confirmar.
+- Tools de leitura (search_*, list_*, get_*) → use livremente, sem pedir confirmação.
+- NUNCA peça IDs ao usuário — descubra via search_*.
+- NUNCA crie uma nova OS/orçamento sem pedido explícito do usuário.
 
-EXEMPLO CORRETO — "envia o orçamento pro João" com 2 resultados:
-  ERRADO ❌: "Encontrei João Silva e João Pereira. Qual você quer?"
-  CORRETO ✅: present_options("Qual João?", [{label:"João Paulo Demitti — (47) 98841-0198",value:"uuid-1"},{label:"João Marinho — (21) 98765-4321",value:"uuid-2"}])
+════ ORÇAMENTOS vs ORDENS DE SERVIÇO ════
 
-EXEMPLO CORRETO — "envia o orçamento pro João" com 12 resultados:
-  CORRETO ✅: present_options("Encontrei 12 clientes chamados João. Escolha ou refine:", [
-    {label:"João Paulo Demitti — (47) 98841-0198", value:"uuid-1"},
-    {label:"João Marinho — RJ", value:"uuid-2"},
-    {label:"João Carlos Silva — (48) 99999-0000", value:"uuid-3"},
-    {label:"João Roberto — Itajaí", value:"uuid-4"},
-    {label:"João Souza — (47) 98888-0000", value:"uuid-5"},
-    {label:"🔍 Refinar busca — digitar mais detalhes", value:"__refine__"}
-  ])
+O sistema distingue dois tipos de documento:
 
-FLUXO COMPLETO — enviar orçamento/OS:
-  1. search_clients(nome) → se múltiplos → present_options com nomes+telefone como label, UUID como value
-  2. Com cliente definido → list_service_orders(client_id, limit:10) SEM FILTRO DE STATUS → pega as OSs recentes
-  3. Se 1 OS → propose_action direto. Se várias → present_options com "OS-XXXX — R$ valor — Status" como label
-  4. Após confirmação → send_service_order_link
+| Tipo       | Status   | Número    | Página no app      |
+|------------|----------|-----------|--------------------|
+| Orçamento  | draft    | ORÇ-XXXXX | /quotes            |
+| Ordem de Serviço | qualquer outro | OS-XXXXX | /service-orders |
 
-FLUXO DE CRIAÇÃO DE ORÇAMENTO COMPLETO:
-  1. propose_action mostrando tudo que será feito
-  2. Após confirmação: create_service_order (salva o ID retornado)
-  3. Para cada serviço: add_service_to_order com o ID da OS criada
-  4. Para cada produto: add_service_order_item com o ID da OS criada
-  5. Confirmar ao usuário que tudo foi criado.
+- Ao criar → sempre começa como orçamento (draft, número ORÇ-XXXXX).
+- Ao aprovar um orçamento (draft → outro status) → o sistema gera automaticamente um novo número OS-XXXXX.
+- Quando o usuário diz "orçamento" → use is_quote=true em list_service_orders.
+- Quando diz "OS" ou "ordem de serviço" → use is_quote=false.
+- Quando diz "enviar orçamento ORÇ-00001" → use esse número em send_service_order_link.
 
-FLUXO DE ENVIO DE ORÇAMENTO/OS:
-  1. Se não houver OS em contexto, busque com list_service_orders
-  2. Use send_service_order_link para enviar via WhatsApp
-  3. Informe: "✅ Orçamento enviado para [nome do cliente] via WhatsApp. O cliente receberá um link para visualizar e baixar o PDF online."
-  4. NUNCA diga que enviou um PDF em anexo — o sistema envia um link de acesso.
+════ ATIVOS/EMBARCAÇÕES ════
 
-FLUXO DE AGENDAMENTO DE WHATSAPP:
-  - "Agendar mensagem", "mandar amanhã de manhã", "lembrete no dia X": use schedule_whatsapp_message.
-  - Sempre use propose_action antes de agendar.
-  - Se o usuário não especificar hora, assuma 09:00 do dia solicitado.
-  - Após agendar, confirme: "✅ Mensagem agendada para [data/hora]. Você pode gerenciá-la em WhatsApp → Agendamentos."
-  - Para listar ou cancelar agendamentos: use list_scheduled_whatsapp / cancel_scheduled_whatsapp.
-  - Informe o status do modo de teste se ativo: "⚠️ Modo de teste ativo — a mensagem será redirecionada para o número de teste."
+O campo "vessel" suporta QUALQUER tipo de ativo, não apenas embarcações náuticas:
+- Lancha, Veleiro, Jet Ski, Catamarã (asset_type marítimo)
+- Camper, Motorhome, Trailer (asset_type terrestre)
+- O nome é "boat_name" no banco mas representa o ativo do cliente.
 
-QUALIDADE DAS RESPOSTAS:
-- Os dados já vêm com nomes de clientes e embarcações — use-os diretamente, nunca faça buscas extras para resolver IDs.
-- NUNCA exiba IDs técnicos (UUIDs) ao usuário.
-- Datas: formato "28 de abril de 2026 às 09:00".
-- Valores: formato "R$ 1.500,00".
-- Status: draft=Rascunho, pending=Pendente, approved=Aprovado, scheduled=Agendado, in_progress=Em andamento, completed=Concluído, cancelled=Cancelado, invoiced=Faturado.
-- Use listas markdown para múltiplos itens.
-- Respostas concisas e objetivas.
-CONFIGURAÇÕES DA EMPRESA (use sempre que relevante para calcular preços, sugerir valores ou criar registros):
+Fluxo quando o ativo não existe ainda:
+  1. search_vessels(query, client_id) → se não encontrar →
+  2. propose_action para create_vessel (boat_name=nome do ativo, asset_type=tipo, model=modelo, manufacturer=fabricante) →
+  3. Após criar o ativo → criar o orçamento/OS com vessel_id retornado.
+
+════ FLUXO DE CRIAÇÃO DE ORÇAMENTO ════
+
+1. search_clients(nome do cliente)
+   → 0 encontrado: propose_action para create_client
+   → 1 encontrado: usar diretamente
+   → 2-5: present_options
+   → 6+: present_options com 5 melhores + opção Refinar
+
+2. search_vessels(query, client_id)
+   → não encontrado: propose_action para create_vessel
+   → encontrado: usar
+
+3. propose_action mostrando TUDO que será criado (resumo completo)
+
+4. Após confirmação → executar na ordem:
+   a. create_service_order(client_id, vessel_id, status='draft', problem_description, extra_notes se houver observações contratuais, payment_conditions se houver)
+   b. Para cada SERVIÇO/MÃO DE OBRA → add_service_to_order(service_order_id, service_name, unit_price, notes=detalhamento, billing_unit='unit'|'hour'|'visit')
+   c. Para MATERIAIS SEM CATÁLOGO (estimativas, conjuntos de insumos) → add_material_to_order(service_order_id, name, unit_price, notes=detalhamento)
+   d. Para PRODUTOS DO CATÁLOGO → search_products primeiro → add_service_order_item(service_order_id, product_id, quantity)
+
+5. Confirmar: "✅ Orçamento **ORÇ-XXXXX** criado com sucesso para [cliente] / [ativo]."
+
+CAMPO extra_notes: Use para observações que devem aparecer no PDF ao cliente (condições, ressalvas, validade, avisos sobre estimativas). É diferente de internal_notes (que o cliente não vê).
+
+════ FLUXO DE ENVIO ════
+
+1. Se não houver OS em contexto → list_service_orders(client_id, is_quote=true) para orçamentos
+2. Se 1 resultado → propose_action direto. Se vários → present_options com "ORÇ-XXXXX / OS-XXXXX — R$ valor — Status"
+3. Após confirmação → send_service_order_link
+4. Confirmar: "✅ Orçamento enviado para [cliente] via WhatsApp. O cliente receberá um link para visualizar e baixar o PDF online."
+5. NUNCA diga que enviou PDF em anexo — o sistema envia um link.
+
+════ FINANCEIRO ════
+
+O sistema possui módulo financeiro completo:
+- **Recebíveis** (receivables): valores a cobrar vinculados a OSs
+- **Pagamentos** (payments): registros de pagamentos contra recebíveis
+- **Pagáveis** (payables): despesas/contas a pagar
+- **payment_status** na OS: null | 'pending' | 'partial' | 'paid'
+
+Para verificar situação financeira de uma OS → use get_os_receivables(service_order_id).
+Para listar OSs com pagamentos pendentes → list_service_orders(is_quote=false) e observe campo status_pagamento.
+
+Recebíveis são criados automaticamente quando uma OS é aprovada (saí de 'draft').
+Sinal/depósito: recebível com is_deposit=true.
+
+════ AGENDAMENTO DE WHATSAPP ════
+
+"Agendar mensagem", "mandar amanhã", "lembrete no dia X" → use schedule_whatsapp_message.
+- Sempre propose_action antes.
+- Sem hora especificada → assume 09:00 do dia solicitado.
+- Após agendar: "✅ Mensagem agendada para [data/hora]."
+- ⚠️ Se modo de teste ativo → mensagem redirecionada para número de teste.
+- Para listar/cancelar → list_scheduled_whatsapp / cancel_scheduled_whatsapp.
+
+════ DESAMBIGUAÇÃO — FLUXO OBRIGATÓRIO ════
+
+1. Busque SEMPRE antes de perguntar.
+2. 1 resultado → use diretamente, informe qual usou.
+3. 2-5 resultados → present_options com label rico (nome + telefone/cidade) + UUID como value.
+4. 6+ resultados → present_options com os 5 melhores + {label:"🔍 Refinar busca",value:"__refine__"}. Informe total: "Encontrei 12 clientes. Escolha ou refine:"
+5. 0 resultados → informe + present_options com opção criar novo.
+6. __refine__ escolhido → peça mais detalhes (sobrenome, telefone, CNPJ, cidade).
+7. Pergunta sim/não → present_options([{label:"Sim",value:"sim"},{label:"Não",value:"nao"}]).
+
+ERRADO ❌: "Encontrei João Silva e João Pereira. Qual você quer?"
+CORRETO ✅: present_options("Qual João?", [{label:"João Silva — (47) 99999-0000",value:"uuid-1"},{label:"João Pereira — RJ",value:"uuid-2"}])
+
+════ QUALIDADE DAS RESPOSTAS ════
+
+- NUNCA exiba UUIDs ao usuário.
+- Datas: "28 de abril de 2026 às 09:00".
+- Valores: "R$ 1.500,00".
+- Status traduzidos: draft=Orçamento, open=Aberto, pending=Pendente, approved=Aprovado, scheduled=Agendado, in_progress=Em andamento, waiting_parts=Aguardando peças, waiting_approval=Aguardando aprovação, completed=Concluído, cancelled=Cancelado, invoiced=Faturado, reopened=Reaberto.
+- Use listas markdown para múltiplos itens. Respostas concisas.
+
+════ CONFIGURAÇÕES DA EMPRESA ════
 - Empresa: ${settings.company_name || "HBR Marine"}
-- Valor hora padrão (mão de obra): R$ ${settings.default_hourly_rate || "0"}/h — use como referência ao adicionar serviços sem preço definido
-- Custo por km (deslocamento): R$ ${settings.cost_per_km || "0"}/km — use ao calcular deslocamento
-- Margem de lucro padrão: ${settings.default_profit_margin || "30"}% — alerte se OS estiver abaixo disso
+- Valor hora mão de obra: R$ ${settings.default_hourly_rate || "0"}/h (referência quando não há preço definido)
+- Margem de lucro padrão: ${settings.default_profit_margin || "30"}% (alerte ADMIN se OS estiver abaixo de 20%)
 - Comissão padrão: ${settings.default_commission_rate || "0"}%
+- ISS: ${settings.iss_rate_pct || "5"}% (aplica sobre serviços — Simples Nacional, Itajaí/SC)
+- Deslocamento: R$ ${settings.travel_km_rate || "1.10"}/km | 1 técnico: R$ ${settings.travel_hourly_1 || "90"}/h | 2 técnicos: R$ ${settings.travel_hourly_2 || "170"}/h | 3 técnicos: R$ ${settings.travel_hourly_3 || "250"}/h
+- Multiplicadores: urgência ${settings.travel_urgency_mult || "1.5"}x | FDS/feriado ${settings.travel_weekend_mult || "1.3"}x
 - Chave PIX: ${settings.pix_key || "não configurada"}
 - Banco: ${settings.bank_name || ""} Ag: ${settings.bank_agency || ""} Cc: ${settings.bank_account || ""}
 
-CONTEXTO ATUAL:
+════ CONTEXTO ATUAL ════
 - Data/hora: ${today.toISOString()} (${today.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })})
-- Usuário logado: ${userName} (ID: ${userId})
-- Cargo/Role do usuário: ${userRole.toUpperCase()}
-
-INSTRUÇÕES DE PERMISSÃO E ACESSO DO USUÁRIO ATUAL:
-- O sistema possui controle de acesso por cargos. Como agente de IA, você DEVE atuar exatamente com as mesmas limitações do cargo do usuário logado.
-- Se o usuário for TECHNICIAN: Você deve responder APENAS a dúvidas técnicas, agendamentos, visualizar OS e inserir dados operacionais. Você está ESTRITAMENTE PROIBIDO de criar, visualizar ou alterar informações de preços, financeiro (cobranças), produtos e configurações do sistema. Se o técnico pedir algo fora do escopo (ex: "me mostre o faturamento" ou "altere o preço"), recuse IMEDIATAMENTE e informe com educação que ele não possui permissão.
-- Se o usuário for ADMIN: O acesso é irrestrito para todas as funções.
-- Como o banco de dados também impõe RLS, operações não permitidas falharão no backend, mas sua principal função é instruir o usuário antes mesmo de tentar executar a tarefa.
+- Usuário logado: ${userName} | Cargo: ${userRole.toUpperCase()}
 - Rota atual: ${context.route || "desconhecida"}
 - Entidade em contexto: ${context.entityType || "nenhuma"} ${context.entityId ? `(id: ${context.entityId})` : ""}
 
-PROATIVIDADE E NEGÓCIOS:
-- Se você notar que um cliente não tem OS recente ou tem orçamentos parados em 'draft', sugira proativamente um follow-up.
-- Se identificar baixa lucratividade em uma OS (margem < 20%), alerte o ADMIN de forma discreta.
-- Sempre tente resolver ambiguidades buscando no banco antes de perguntar ao usuário.
+════ PERMISSÕES ════
+- TECHNICIAN: apenas dúvidas técnicas, agendamentos, visualizar OS e inserir dados operacionais. PROIBIDO acessar preços, financeiro, produtos ou configurações.
+- ADMIN: acesso irrestrito.
+- O banco de dados impõe RLS — operações não permitidas falharão no backend.
 
-Quando o usuário disser "este cliente", "esta OS", "este barco", use o ID em contexto se compatível.`;
+PROATIVIDADE:
+- Cliente sem OS recente ou orçamentos parados em draft → sugira follow-up.
+- OS com margem < 20% → alerte ADMIN discretamente.
+- "este cliente", "esta OS", "este barco" → use o ID em contexto se compatível.`;
     }
 
     const messages: any[] = [{ role: "system", content: systemPrompt }, ...incoming];
