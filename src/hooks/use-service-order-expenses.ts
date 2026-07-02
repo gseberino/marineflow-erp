@@ -1,30 +1,42 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { computeCardFeeAmount } from '@/hooks/use-service-orders';
 
 async function recalcExpenseTotals(soId: string) {
   const { data: expenses } = await supabase
     .from('service_order_expenses')
-    .select('amount')
+    .select('amount, billable_to_client')
     .eq('service_order_id', soId);
-  const opCost = (expenses || []).reduce((s, e) => s + Number(e.amount), 0);
+  // Só despesas faturáveis entram no custo repassado ao cliente (Onda 1D).
+  // Despesas internas continuam salvas na tabela para controle de margem/reembolso.
+  const opCost = (expenses || [])
+    .filter((e) => e.billable_to_client !== false)
+    .reduce((s, e) => s + Number(e.amount), 0);
 
   const { data: so } = await supabase
     .from('service_orders')
-    .select('labor_cost_total, parts_cost_total, travel_cost_total, subcontract_cost_total, discount_amount, tax_amount')
+    .select('labor_cost_total, parts_cost_total, travel_cost_total, is_travel_billable, subcontract_cost_total, discount_amount, tax_amount, card_fee_passthrough_enabled, card_installments')
     .eq('id', soId)
     .single();
 
-  const grand =
+  const travelCost = so?.is_travel_billable !== false ? (so?.travel_cost_total || 0) : 0;
+
+  const base =
     (so?.labor_cost_total || 0) +
     (so?.parts_cost_total || 0) +
-    (so?.travel_cost_total || 0) +
+    travelCost +
     opCost +
     (so?.subcontract_cost_total || 0) -
     (so?.discount_amount || 0) +
     (so?.tax_amount || 0);
 
+  // Onda 1C: repasse da taxa de cartão ao cliente, aplicado por cima do valor já ajustado.
+  const cardFeeAmount = await computeCardFeeAmount(base, so?.card_fee_passthrough_enabled, so?.card_installments);
+  const grand = base + cardFeeAmount;
+
   await supabase.from('service_orders').update({
     operational_cost_total: Math.round(opCost * 100) / 100,
+    card_fee_amount: cardFeeAmount,
     grand_total: Math.round(grand * 100) / 100,
   }).eq('id', soId);
 }
@@ -62,6 +74,7 @@ export function useAddServiceOrderExpense() {
       supplier_id?: string;
       notes?: string;
       also_create_payable?: boolean;
+      billable_to_client?: boolean;
     }) => {
       const { also_create_payable, ...insertData } = expense;
 
@@ -126,6 +139,7 @@ export function useUpdateServiceOrderExpense() {
       receipt_storage_path?: string | null;
       supplier_id?: string | null;
       notes?: string | null;
+      billable_to_client?: boolean;
     }) => {
       const { data, error } = await supabase
         .from('service_order_expenses')

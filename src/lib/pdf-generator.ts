@@ -6,6 +6,7 @@ export type PDFOptions = {
   showTravelCost: boolean;
   showDiscount: boolean;
   showTax: boolean;
+  showCardFee: boolean;
   showCommission: boolean;
   showTerms: boolean;
   showSignature: boolean;
@@ -25,6 +26,7 @@ export const DEFAULT_PDF_OPTIONS: PDFOptions = {
   showTravelCost: true,
   showDiscount: true,
   showTax: true,
+  showCardFee: true,
   showCommission: false,
   showTerms: true,
   showSignature: true,
@@ -74,6 +76,8 @@ export type PDFData = {
     discount_parts_pct?: number;
     tax_amount: number;
     operational_cost_total?: number;
+    card_fee_amount?: number;
+    card_installments?: number;
     extra_notes?: string;
     payment_conditions?: string;
     payment_condition_label?: string | null;
@@ -760,6 +764,9 @@ function buildOrderHTML(data: PDFData, options: PDFOptions): string {
       }
       return `<tr><td style="color:#dc2626;">Desconto Especial</td><td style="text-align:right;color:#dc2626;">− ${fmtCurrency(data.serviceOrder.discount_amount)}</td></tr>`;
     })(),
+    options.showCardFee && (data.serviceOrder.card_fee_amount ?? 0) > 0
+      ? `<tr><td>Taxa de cartão${data.serviceOrder.card_installments ? ` (${data.serviceOrder.card_installments}x)` : ''}</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.card_fee_amount!)}</td></tr>`
+      : '',
   ].filter(Boolean).join('');
 
   const body = `
@@ -958,6 +965,9 @@ function buildInvoiceHTML(data: PDFData, options: PDFOptions): string {
       }
       return `<tr><td style="color:#dc2626;">Desconto Especial</td><td style="text-align:right;color:#dc2626;">− ${fmtCurrency(data.serviceOrder.discount_amount)}</td></tr>`;
     })(),
+    options.showCardFee && (data.serviceOrder.card_fee_amount ?? 0) > 0
+      ? `<tr><td>Taxa de cartão${data.serviceOrder.card_installments ? ` (${data.serviceOrder.card_installments}x)` : ''}</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.card_fee_amount!)}</td></tr>`
+      : '',
   ].filter(Boolean).join('');
 
   const bank = data.bank || {};

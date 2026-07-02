@@ -307,6 +307,24 @@ export function useServiceOrderParts(serviceOrderId: string | undefined) {
   });
 }
 
+// Onda 1C: calcula o valor da taxa de cartão a repassar ao cliente (gross-up),
+// dado o valor já com desconto/imposto aplicados (base) e o número de parcelas escolhido.
+export async function computeCardFeeAmount(
+  base: number,
+  cardFeePassthroughEnabled: boolean | null | undefined,
+  cardInstallments: number | null | undefined
+): Promise<number> {
+  if (!cardFeePassthroughEnabled || !cardInstallments) return 0;
+  const { data: feeRow } = await supabase
+    .from('card_installment_fees')
+    .select('fee_percent')
+    .eq('installments', cardInstallments)
+    .maybeSingle();
+  const feePct = Number(feeRow?.fee_percent || 0);
+  if (feePct <= 0 || feePct >= 100) return 0;
+  return Math.round((base * feePct / (100 - feePct)) * 100) / 100;
+}
+
 export async function recalcTotals(soId: string) {
   const { data: parts } = await supabase
     .from('service_order_parts')
@@ -326,7 +344,7 @@ export async function recalcTotals(soId: string) {
     .eq('service_order_id', soId);
   const { data: so } = await supabase
     .from('service_orders')
-    .select('travel_cost_total, subcontract_cost_total, discount_amount, tax_amount, operational_cost_total')
+    .select('travel_cost_total, is_travel_billable, subcontract_cost_total, discount_amount, tax_amount, operational_cost_total, card_fee_passthrough_enabled, card_installments')
     .eq('id', soId)
     .single();
 
@@ -335,19 +353,27 @@ export async function recalcTotals(soId: string) {
     .reduce((s, e) => s + (e.duration_minutes || 0), 0);
   const laborHours = Math.round((billableMinutes / 60) * 100) / 100;
 
-  const grand =
+  // Onda 1D: deslocamento só entra no total do cliente se marcado como faturável.
+  const travelCost = so?.is_travel_billable !== false ? (so?.travel_cost_total || 0) : 0;
+
+  const base =
     laborCost +
     partsCost +
-    (so?.travel_cost_total || 0) +
+    travelCost +
     (so?.operational_cost_total || 0) +
     (so?.subcontract_cost_total || 0) -
     (so?.discount_amount || 0) +
     (so?.tax_amount || 0);
 
+  // Onda 1C: repasse da taxa de cartão ao cliente, aplicado por cima do valor já ajustado.
+  const cardFeeAmount = await computeCardFeeAmount(base, so?.card_fee_passthrough_enabled, so?.card_installments);
+  const grand = base + cardFeeAmount;
+
   await supabase.from('service_orders').update({
     parts_cost_total: partsCost,
     labor_hours_total: laborHours,
     labor_cost_total: Math.round(laborCost * 100) / 100,
+    card_fee_amount: cardFeeAmount,
     grand_total: Math.round(grand * 100) / 100,
   }).eq('id', soId);
 }
@@ -362,9 +388,12 @@ export function useAddServiceOrderPart() {
       unit_cost_snapshot: number;
       unit_sale_snapshot: number;
       notes?: string;
+      discount_pct?: number;
     }) => {
+      // Onda 2: desconto por linha aplicado apenas ao preço de venda (não ao custo).
+      const discountPct = values.discount_pct || 0;
       const line_total_cost = values.quantity * values.unit_cost_snapshot;
-      const line_total_sale = values.quantity * values.unit_sale_snapshot;
+      const line_total_sale = Math.round(values.quantity * values.unit_sale_snapshot * (1 - discountPct / 100) * 100) / 100;
       const { error } = await supabase.from('service_order_parts').insert({
         ...values,
         line_total_cost,
@@ -614,8 +643,11 @@ export function useAddServiceOrderService() {
       unit_price_snapshot: number;
       notes?: string;
       technician_user_id?: string | null;
+      discount_pct?: number;
     }) => {
-      const line_total = Math.round(values.quantity * values.unit_price_snapshot * 100) / 100;
+      // Onda 2: desconto por linha.
+      const discountPct = values.discount_pct || 0;
+      const line_total = Math.round(values.quantity * values.unit_price_snapshot * (1 - discountPct / 100) * 100) / 100;
       const { data, error } = await supabase.from('service_order_services').insert({
         ...values,
         line_total,

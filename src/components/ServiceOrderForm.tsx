@@ -28,6 +28,7 @@ import {
   useCancelServiceOrder,
   useReopenServiceOrder,
   useDuplicateServiceOrder,
+  recalcTotals,
 } from '@/hooks/use-service-orders';
 import { useAppUsers, useCommissionableUsers, USER_ROLES } from '@/hooks/use-app-users';
 import { usePaymentConditionPresets } from '@/hooks/use-payment-conditions';
@@ -41,6 +42,7 @@ import { EntityCombobox, type EntityOption } from '@/components/EntityCombobox';
 import { QuickProductDialog } from '@/components/QuickProductDialog';
 import { MarinaFormDialog } from '@/components/MarinaFormDialog';
 import { QuickSupplierDialog } from '@/components/QuickSupplierDialog';
+import { ServiceOrderFinancialSummary, type FinancialWaterfallLine } from '@/components/ServiceOrderFinancialSummary';
 import { useSuppliers } from '@/hooks/use-suppliers';
 import { useServiceOrderExpenses, useAddServiceOrderExpense, useUpdateServiceOrderExpense, useRemoveServiceOrderExpense } from '@/hooks/use-service-order-expenses';
 import { useUpdateServiceOrderService } from '@/hooks/use-service-order-services';
@@ -68,6 +70,7 @@ import { CheckCircle2, XCircle, History as HistoryIcon, Send, Sparkles } from 'l
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -120,6 +123,7 @@ type SvcCardState = {
   technician_user_id: string;
   warranty_days?: number;
   warranty_months?: number;
+  discount_pct?: number;
 };
 
 type PartCardState = {
@@ -134,7 +138,146 @@ type PartCardState = {
   warranty_days?: number;
   warranty_months?: number;
   serial_number?: string;
+  discount_pct?: number;
 };
+
+type DiscountFieldState = { pct: number; discountAmount: number; finalValue: number };
+
+function computeDiscountState(raw: number, pct: number): DiscountFieldState {
+  const clamped = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
+  const discountAmount = Math.round((raw * clamped) / 100 * 100) / 100;
+  const finalValue = Math.round((raw - discountAmount) * 100) / 100;
+  return { pct: clamped, discountAmount, finalValue };
+}
+
+/**
+ * Mantém os 3 campos de desconto (%, R$ e valor final) consistentes entre si.
+ * Editar R$ ou valor final nunca faz o campo reexibir a si mesmo através de um
+ * arredondamento com perda via % — só o % (que é inerentemente sem precisão
+ * exata para valores como R$200/R$2400) é derivado com arredondamento; R$ e
+ * valor final se derivam um do outro por subtração exata. Isso evita a
+ * disputa entre o `value` externo e o `display` interno do MoneyInput.
+ * Os setters retornam o `pct` recém-calculado para quem precisar persistir
+ * (ex: onUpdate) de forma síncrona.
+ */
+function useDiscountFields(raw: number, initialPct: number) {
+  const [state, setState] = useState<DiscountFieldState>(() => computeDiscountState(raw, initialPct || 0));
+
+  useEffect(() => {
+    setState((s) => {
+      const discountAmount = Math.round((raw * s.pct) / 100 * 100) / 100;
+      return { pct: s.pct, discountAmount, finalValue: Math.round((raw - discountAmount) * 100) / 100 };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [raw]);
+
+  const setFromPct = (newPct: number): number => {
+    const next = computeDiscountState(raw, newPct);
+    setState(next);
+    return next.pct;
+  };
+
+  const setFromAmount = (v: number): number => {
+    const discountAmount = Math.max(0, Math.min(raw, Number.isFinite(v) ? v : 0));
+    const finalValue = Math.round((raw - discountAmount) * 100) / 100;
+    const pct = raw > 0 ? Math.round((discountAmount / raw) * 10000) / 100 : 0;
+    setState({ pct, discountAmount, finalValue });
+    return pct;
+  };
+
+  const setFromFinal = (v: number): number => {
+    const finalValue = Math.max(0, Math.min(raw, Number.isFinite(v) ? v : 0));
+    const discountAmount = Math.round((raw - finalValue) * 100) / 100;
+    const pct = raw > 0 ? Math.round((discountAmount / raw) * 10000) / 100 : 0;
+    setState({ pct, discountAmount, finalValue });
+    return pct;
+  };
+
+  const reset = (newPct: number) => setState(computeDiscountState(raw, newPct || 0));
+
+  return { ...state, setFromPct, setFromAmount, setFromFinal, reset };
+}
+
+interface QuickDiscountPopoverProps {
+  quantity: number;
+  unitPrice: number;
+  discountPct: number;
+  formatCurrency: (n: number) => string;
+  onApply: (pct: number) => void | Promise<void>;
+}
+
+/**
+ * Atalho de desconto na linha colapsada da lista (sem abrir o card de edição
+ * inteiro). Componente próprio (não uma função inline) para poder usar estado
+ * local — os 3 campos (%, R$, valor final) ficam sincronizados entre si, e só
+ * são persistidos quando o usuário clica em "Aplicar".
+ */
+function QuickDiscountPopover({ quantity, unitPrice, discountPct, formatCurrency, onApply }: QuickDiscountPopoverProps) {
+  const [open, setOpen] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const raw = quantity * unitPrice;
+  const { pct, discountAmount, finalValue, setFromPct, setFromAmount, setFromFinal, reset } = useDiscountFields(raw, discountPct || 0);
+
+  const handleApply = async (nextPct: number) => {
+    setApplying(true);
+    try {
+      await onApply(nextPct);
+      setOpen(false);
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  return (
+    <Popover open={open} onOpenChange={(v) => { setOpen(v); if (v) reset(discountPct || 0); }}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className={`h-8 w-8 ${(discountPct || 0) > 0 ? 'text-destructive' : 'text-muted-foreground'}`}
+          title="Aplicar desconto neste item"
+        >
+          <Percent className="h-3.5 w-3.5" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-64 space-y-3" align="end">
+        <p className="text-xs font-medium text-muted-foreground">Desconto neste item</p>
+        <div className="space-y-1">
+          <Label className="text-xs">Desconto (%)</Label>
+          <Input type="number" min={0} max={100} step="0.01"
+            value={pct}
+            onChange={(e) => setFromPct(parseFloat(e.target.value))} />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Desconto (R$)</Label>
+          <MoneyInput
+            value={discountAmount}
+            onValueChange={setFromAmount}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Valor final</Label>
+          <MoneyInput
+            value={finalValue}
+            onValueChange={setFromFinal}
+          />
+          <p className="text-[11px] text-muted-foreground">Preço cheio: {formatCurrency(raw)}</p>
+        </div>
+        <div className="flex gap-2 pt-1">
+          <Button type="button" size="sm" disabled={applying} onClick={() => handleApply(pct)}>
+            {applying ? 'Aplicando...' : 'Aplicar'}
+          </Button>
+          {(discountPct || 0) > 0 && (
+            <Button type="button" size="sm" variant="outline" disabled={applying} onClick={() => { reset(0); handleApply(0); }}>
+              Remover
+            </Button>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 interface ServiceCardFormProps {
   cardKey: string;
@@ -159,6 +302,8 @@ function ServiceCardFormComponent({
   confirmDisabled,
 }: ServiceCardFormProps) {
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const svcRaw = draft ? draft.quantity * draft.unit_price : 0;
+  const { pct: discountPct, finalValue: total, setFromPct: setSvcPct, setFromFinal: setSvcFinal } = useDiscountFields(svcRaw, draft?.discount_pct || 0);
   if (!draft) return null;
   const technicians = (appUsers || []).filter(
     (u: any) => u.role === 'technician' || u.role === 'admin'
@@ -175,7 +320,6 @@ function ServiceCardFormComponent({
       );
     })
     .slice(0, 6);
-  const total = draft.quantity * draft.unit_price;
   return (
     <div className="p-4 space-y-3 bg-muted/20">
       <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
@@ -257,7 +401,7 @@ function ServiceCardFormComponent({
         </div>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
-        <div className="md:col-span-6">
+        <div className="md:col-span-5">
           <Label>Técnico responsável</Label>
           <Select
             value={draft.technician_user_id || 'none'}
@@ -278,9 +422,24 @@ function ServiceCardFormComponent({
             </SelectContent>
           </Select>
         </div>
-        <div className="md:col-span-6">
-          <Label>Total</Label>
-          <Input readOnly value={formatCurrency(total)} className="bg-muted" />
+        <div className="md:col-span-2">
+          <Label>Desconto (%)</Label>
+          <Input
+            type="number"
+            min={0}
+            max={100}
+            step="0.01"
+            value={discountPct}
+            onChange={(e) => onUpdate({ discount_pct: setSvcPct(parseFloat(e.target.value)) })}
+          />
+        </div>
+        <div className="md:col-span-5">
+          <Label>Valor final{discountPct > 0 ? ` (−${discountPct}%)` : ''}</Label>
+          <MoneyInput
+            value={total}
+            onValueChange={(v) => onUpdate({ discount_pct: setSvcFinal(v) })}
+          />
+          <p className="text-[11px] text-muted-foreground mt-0.5">Digite o valor já arredondado — o desconto (%) é calculado sozinho.</p>
         </div>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -360,6 +519,8 @@ function PartCardFormComponent({
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const partRaw = draft ? draft.quantity * draft.unit_sale : 0;
+  const { pct: discountPct, finalValue: total, setFromPct: setPartPct, setFromFinal: setPartFinal } = useDiscountFields(partRaw, draft?.discount_pct || 0);
   if (!draft) return null;
   const nameQuery = draft.name.toLowerCase();
   const suggestions = (products || [])
@@ -374,7 +535,6 @@ function PartCardFormComponent({
       );
     })
     .slice(0, 6);
-  const total = draft.quantity * draft.unit_sale;
   const unitOptions = Array.from(new Set([...PART_UNITS, draft.unit].filter(Boolean)));
 
   const handlePickFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -548,26 +708,40 @@ function PartCardFormComponent({
           </Select>
         </div>
         <div className="md:col-span-2">
-          <Label>Total</Label>
-          <Input readOnly value={formatCurrency(total)} className="bg-muted" />
+          <Label>Valor final{discountPct > 0 ? ` (−${discountPct}%)` : ''}</Label>
+          <MoneyInput
+            value={total}
+            onValueChange={(v) => onUpdate({ discount_pct: setPartFinal(v) })}
+          />
         </div>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
-        <div className="md:col-span-4">
+        <div className="md:col-span-3">
           <Label>Preço de custo</Label>
           <MoneyInput
             value={draft.unit_cost}
             onValueChange={(v) => onUpdate({ unit_cost: v })}
           />
         </div>
-        <div className="md:col-span-4">
+        <div className="md:col-span-3">
           <Label>Preço de venda</Label>
           <MoneyInput
             value={draft.unit_sale}
             onValueChange={(v) => onUpdate({ unit_sale: v })}
           />
         </div>
-        <div className="md:col-span-4 flex items-end">
+        <div className="md:col-span-3">
+          <Label>Desconto (%)</Label>
+          <Input
+            type="number"
+            min={0}
+            max={100}
+            step="0.01"
+            value={discountPct}
+            onChange={(e) => onUpdate({ discount_pct: setPartPct(parseFloat(e.target.value)) })}
+          />
+        </div>
+        <div className="md:col-span-3 flex items-end">
           <Button
             type="button"
             variant="outline"
@@ -733,6 +907,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     travel_hours: 0,
     ferry_cost: 0,
     travel_type: 'comercial' as 'comercial' | 'urgencia' | 'fds_feriado',
+    is_travel_billable: true,
     discount_amount: 0,
     tax_amount: 0,
     subcontract_cost_total: 0,
@@ -745,6 +920,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     financial_notes: '',
     payment_method_preferred: '',
     quote_validity_days: 15,
+    card_installments: 1,
+    card_fee_passthrough_enabled: false,
     signed_at: '' as string,
   });
 
@@ -756,7 +933,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [showTravelDialog, setShowTravelDialog] = useState(false);
   const [showExpensesDialog, setShowExpensesDialog] = useState(false);
   const [showTimeDialog, setShowTimeDialog] = useState(false);
-  const [showFinancialDialog, setShowFinancialDialog] = useState(false);
+  // Onda 4: agora controla a expansão da seção Financeiro inline (não mais um modal) — começa expandida.
+  const [showFinancialDialog, setShowFinancialDialog] = useState(true);
   const [depositDialogOpen, setDepositDialogOpen] = useState(false);
   const [showCommission, setShowCommission] = useState(false);
   const [depositFromFinancial, setDepositFromFinancial] = useState(false);
@@ -834,6 +1012,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     unit_sale: number;
     warranty_months?: number;
     serial_number?: string;
+    discount_pct?: number;
   };
   type DraftService = {
     tempId: string;
@@ -845,6 +1024,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     unit_price_snapshot: number;
     notes?: string;
     warranty_months?: number;
+    discount_pct?: number;
   };
   const [draftParts, setDraftParts] = useState<DraftPart[]>([]);
   const [draftServices, setDraftServices] = useState<DraftService[]>([]);
@@ -863,6 +1043,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     technician_user_id: '', receipt_url: '', receipt_storage_path: '', notes: '',
     also_create_payable: false,
     supplier_id: '',
+    billable_to_client: true,
   });
   const [showExpForm, setShowExpForm] = useState(false);
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
@@ -989,6 +1170,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         travel_hours: d.travel_hours || 0,
         ferry_cost: d.ferry_cost || 0,
         travel_type: (d.travel_type as any) || 'comercial',
+        is_travel_billable: (d as any).is_travel_billable !== false,
         discount_amount: d.discount_amount || 0,
         tax_amount: d.tax_amount || 0,
         subcontract_cost_total: d.subcontract_cost_total || 0,
@@ -1001,8 +1183,11 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         financial_notes: d.financial_notes || '',
         payment_method_preferred: d.payment_method_preferred || '',
         quote_validity_days: d.quote_validity_days ?? 15,
+        card_installments: (d as any).card_installments || 1,
+        card_fee_passthrough_enabled: (d as any).card_fee_passthrough_enabled || false,
         signed_at: d.signed_at || '',
       });
+      if ((d as any).card_installments) setSelectedInstallments((d as any).card_installments);
       if (d.service_order_technicians) {
         setSelectedTechnicians(d.service_order_technicians.map((t: any) => t.user_id));
       }
@@ -1050,8 +1235,10 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const laborCost = orderData?.labor_cost_total || 0;
   const partsCost = orderData?.parts_cost_total || 0;
   const operationalCost = orderData?.operational_cost_total || 0;
+  // Onda 1D: deslocamento só entra no valor cobrado do cliente se marcado como faturável.
+  const billableTravelCost = form.is_travel_billable !== false ? (form.travel_cost_total || 0) : 0;
   const expensesTotal = operationalCost
-    + (form.travel_cost_total || 0)
+    + billableTravelCost
     + (form.subcontract_cost_total || 0);
   const selectedPreset = (paymentPresets || []).find(
     (p: any) =>
@@ -1068,10 +1255,21 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         tipo: r.tipo as 'aprovacao' | 'entrega' | 'prazo' | undefined,
       }))
     : [];
-  const subtotal = laborCost + partsCost + operationalCost + (form.travel_cost_total || 0) + (form.subcontract_cost_total || 0);
-  const grandTotal = subtotal - (form.discount_amount || 0) + (form.tax_amount || 0);
+  const subtotal = laborCost + partsCost + operationalCost + billableTravelCost + (form.subcontract_cost_total || 0);
+  // "base" = valor já com desconto/imposto, antes de qualquer taxa de cartão repassada.
+  const base = subtotal - (form.discount_amount || 0) + (form.tax_amount || 0);
+
+  // Onda 1C: repasse da taxa de cartão ao cliente — soma por cima do "base" só quando habilitado,
+  // usando o número de parcelas persistido (form.card_installments), não o do simulador abaixo.
+  const passthroughFee = cardFees?.find((f) => f.installments === form.card_installments);
+  const passthroughFeePercent = passthroughFee?.fee_percent || 0;
+  const passthroughCardFeeAmount = (form.card_fee_passthrough_enabled && passthroughFeePercent > 0)
+    ? Math.round((base * Number(passthroughFeePercent) / (100 - Number(passthroughFeePercent))) * 100) / 100
+    : 0;
+  const grandTotal = base + passthroughCardFeeAmount;
+
   // Apply the discount ratio proportionally to each installment row
-  const discountRatio = subtotal > 0 ? grandTotal / subtotal : 1;
+  const discountRatio = subtotal > 0 ? base / subtotal : 1;
   const calcInstallmentAmount = (row: typeof installmentRows[0]) => {
     const gross =
       (laborCost * row.services_pct / 100)
@@ -1084,12 +1282,21 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const signalRow = installmentRows.find(r => r.tipo === 'aprovacao' || r.days_after_approval === 0);
   const signalAmount = signalRow ? calcInstallmentAmount(signalRow) : null;
 
-  // Card fee calculation
+  // Simulador de Recebimento — preview livre de qualquer parcelamento, independente do que
+  // está de fato marcado para repasse (form.card_installments/card_fee_passthrough_enabled).
   const selectedFee = cardFees?.find((f) => f.installments === selectedInstallments);
   const feePercent = selectedFee?.fee_percent || 0;
-  const cardGross = feePercent > 0 ? grandTotal / (1 - Number(feePercent) / 100) : grandTotal;
-  const cardFeeAmount = cardGross - grandTotal;
+  const cardGross = feePercent > 0 ? base / (1 - Number(feePercent) / 100) : base;
+  const cardFeeAmount = cardGross - base;
   const installmentValue = selectedInstallments > 0 ? cardGross / selectedInstallments : cardGross;
+
+  // Desconto aplicado por item (serviço/peça) — separado do desconto de categoria
+  // (form.discount_amount). Mão de obra/Peças acima já são exibidos líquidos de
+  // desconto por item; esta linha só existe para tornar esse desconto visível.
+  const itemDiscountTotal = Math.round((
+    (soServices || []).reduce((s: number, x: any) => s + (x.quantity * x.unit_price_snapshot - x.line_total), 0) +
+    (parts || []).reduce((s: number, x: any) => s + (x.quantity * x.unit_sale_snapshot - x.line_total_sale), 0)
+  ) * 100) / 100;
 
   // Parts profit (edit-mode only, never in PDF)
   const partsRevenue = (parts || []).reduce((sum: number, p: any) => sum + (p.line_total_sale || 0), 0);
@@ -1129,8 +1336,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         payment_conditions: form.payment_conditions || null,
         payment_condition_preset_id: uuidOrNull(form.payment_condition_preset_id),
         // Always persist the computed grand_total so the PDF and receivables
-        // always reflect the current discount/tax/travel values.
+        // always reflect the current discount/tax/travel/card fee values.
         grand_total: Math.round(grandTotal * 100) / 100,
+        card_fee_amount: passthroughCardFeeAmount,
         discount_services_pct: discountServicesPct,
         discount_parts_pct: discountPartsPct,
         financial_notes: form.financial_notes || null,
@@ -1169,6 +1377,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               quantity: dp.quantity,
               unit_cost_snapshot: dp.unit_cost,
               unit_sale_snapshot: dp.unit_sale,
+              discount_pct: (dp as any).discount_pct || 0,
             });
           } catch (err) {
             console.error('Failed to persist draft part', err);
@@ -1186,6 +1395,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               unit_price_snapshot: ds.unit_price_snapshot,
               notes: ds.notes || undefined,
               technician_user_id: (ds as any).technician_user_id || null,
+              discount_pct: (ds as any).discount_pct || 0,
             });
           } catch (err) {
             console.error('Failed to persist draft service', err);
@@ -1283,6 +1493,51 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     }
   };
 
+  // Onda 2 — aplica um desconto % em lote a todas as linhas de serviço e/ou peça
+  // existentes na OS, escrevendo discount_pct diretamente em cada linha (que já
+  // recalcula seu line_total). Atualiza todas as linhas primeiro e só então chama
+  // recalcTotals uma única vez, evitando corrida de múltiplos recalcs em paralelo.
+  const applyBulkLineDiscount = async (target: 'services' | 'parts' | 'both', pct: number) => {
+    setDiscountServicesPct(target === 'services' || target === 'both' ? pct : discountServicesPct);
+    setDiscountPartsPct(target === 'parts' || target === 'both' ? pct : discountPartsPct);
+
+    // Linhas ainda não salvas (OS nova) — só ajusta o estado local.
+    if (target === 'services' || target === 'both') {
+      setDraftServices((prev) => prev.map((s) => ({ ...s, discount_pct: pct })));
+    }
+    if (target === 'parts' || target === 'both') {
+      setDraftParts((prev) => prev.map((p) => ({ ...p, discount_pct: pct })));
+    }
+
+    if (!orderId) return; // OS ainda não existe — nada para persistir no banco
+
+    try {
+      if ((target === 'services' || target === 'both') && soServices && soServices.length > 0) {
+        await Promise.all(soServices.map((s: any) => {
+          const line_total = Math.round(Number(s.quantity) * Number(s.unit_price_snapshot) * (1 - pct / 100) * 100) / 100;
+          return supabase.from('service_order_services')
+            .update({ discount_pct: pct, line_total } as any)
+            .eq('id', s.id);
+        }));
+      }
+      if ((target === 'parts' || target === 'both') && parts && parts.length > 0) {
+        await Promise.all(parts.map((p: any) => {
+          const line_total_sale = Math.round(Number(p.quantity) * Number(p.unit_sale_snapshot) * (1 - pct / 100) * 100) / 100;
+          return supabase.from('service_order_parts')
+            .update({ discount_pct: pct, line_total_sale } as any)
+            .eq('id', p.id);
+        }));
+      }
+      await recalcTotals(orderId);
+      queryClient.invalidateQueries({ queryKey: ['so-services', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['so-parts', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['service-orders', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['pdf-data'] });
+    } catch (e: any) {
+      toast.error(e?.message || 'Erro ao aplicar desconto em lote');
+    }
+  };
+
   const handleStatusChange = async (newStatus: string) => {
     if (!orderId) return;
     try {
@@ -1376,6 +1631,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         unit_cost: Number(row.unit_cost_snapshot) || 0,
         unit_sale: Number(row.unit_sale_snapshot) || 0,
         notes: row.notes || '',
+        discount_pct: Number(row.discount_pct) || 0,
       },
     }));
   };
@@ -1432,6 +1688,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             quantity: draft.quantity,
             unit_cost: draft.unit_cost,
             unit_sale: draft.unit_sale,
+            discount_pct: draft.discount_pct || 0,
           },
         ]);
         toast.success('Peça adicionada (será salva ao criar a OS)');
@@ -1444,6 +1701,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           unit_cost_snapshot: draft.unit_cost,
           unit_sale_snapshot: draft.unit_sale,
           notes: draft.notes || undefined,
+          discount_pct: draft.discount_pct || 0,
         });
         toast.success('Peça adicionada');
       }
@@ -1476,6 +1734,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         unit_cost_snapshot: draft.unit_cost,
         unit_sale_snapshot: draft.unit_sale,
         notes: draft.notes || null,
+        discount_pct: draft.discount_pct || 0,
       });
       setEditingPart((prev) => {
         const next = { ...prev };
@@ -1536,6 +1795,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             unit_price_snapshot: draft.unit_price,
             notes: draft.notes || undefined,
             warranty_months: draft.warranty_months || 0,
+            discount_pct: draft.discount_pct || 0,
             // technician_user_id is held client-side until OS is created
             ...(draft.technician_user_id ? { technician_user_id: draft.technician_user_id } : {}),
           } as any,
@@ -1554,6 +1814,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           notes: draft.notes || undefined,
           technician_user_id: draft.technician_user_id || null,
           warranty_months: draft.warranty_months || 0,
+          discount_pct: draft.discount_pct || 0,
         } as any);
         toast.success('Serviço adicionado');
       }
@@ -1591,6 +1852,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         unit_price_snapshot: draft.unit_price,
         notes: draft.notes || null,
         technician_user_id: draft.technician_user_id || null,
+        discount_pct: draft.discount_pct || 0,
       });
       setEditingSvc((prev) => {
         const next = { ...prev };
@@ -1632,8 +1894,54 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         unit_price: Number(row.unit_price_snapshot) || 0,
         notes: row.notes || '',
         technician_user_id: row.technician_user_id || '',
+        discount_pct: Number(row.discount_pct) || 0,
       },
     }));
+  };
+
+  // Atalho rápido de desconto na linha colapsada (sem abrir o card de edição inteiro).
+  // Usa mutateAsync + try/catch para garantir que qualquer falha apareça pro usuário
+  // (em vez de falhar silenciosamente, como aconteceu antes com o cache de schema desatualizado).
+  const applyQuickDiscountToService = async (row: any, pct: number) => {
+    if (!orderId) return;
+    try {
+      await updateSvcLine.mutateAsync({
+        id: row.id,
+        service_order_id: orderId,
+        service_id: row.service_id || null,
+        name_snapshot: row.name_snapshot,
+        description_snapshot: row.description_snapshot || null,
+        billing_unit_snapshot: row.billing_unit_snapshot,
+        quantity: row.quantity,
+        unit_price_snapshot: row.unit_price_snapshot,
+        notes: row.notes || null,
+        technician_user_id: row.technician_user_id || null,
+        discount_pct: pct,
+      });
+      toast.success(pct > 0 ? `Desconto de ${pct}% aplicado` : 'Desconto removido');
+    } catch (e: any) {
+      toast.error(e?.message || 'Erro ao aplicar desconto');
+    }
+  };
+
+  const applyQuickDiscountToPart = async (row: any, pct: number) => {
+    if (!orderId) return;
+    try {
+      await updatePartLine.mutateAsync({
+        id: row.id,
+        service_order_id: orderId,
+        product_id: row.product_id,
+        previous_quantity: Number(row.quantity) || 0,
+        quantity: row.quantity,
+        unit_cost_snapshot: row.unit_cost_snapshot,
+        unit_sale_snapshot: row.unit_sale_snapshot,
+        notes: row.notes || null,
+        discount_pct: pct,
+      });
+      toast.success(pct > 0 ? `Desconto de ${pct}% aplicado` : 'Desconto removido');
+    } catch (e: any) {
+      toast.error(e?.message || 'Erro ao aplicar desconto');
+    }
   };
 
 
@@ -1660,6 +1968,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       paid_by: 'company', technician_user_id: '', receipt_url: '', receipt_storage_path: '', notes: '',
       also_create_payable: false,
       supplier_id: '',
+      billable_to_client: true,
     });
     setEditingExpenseId(null);
   };
@@ -1678,6 +1987,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       notes: exp.notes || '',
       also_create_payable: false,
       supplier_id: exp.supplier_id || '',
+      billable_to_client: exp.billable_to_client !== false,
     });
     setEditingExpenseId(exp.id);
     setShowExpForm(true);
@@ -1742,6 +2052,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           receipt_storage_path: expForm.receipt_storage_path || null,
           supplier_id: expForm.supplier_id || null,
           notes: expForm.notes || null,
+          billable_to_client: expForm.billable_to_client,
         });
         toast.success('Despesa atualizada');
       } else {
@@ -1759,6 +2070,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           supplier_id: expForm.supplier_id || undefined,
           notes: expForm.notes || undefined,
           also_create_payable: expForm.also_create_payable,
+          billable_to_client: expForm.billable_to_client,
         });
         toast.success('Despesa adicionada');
       }
@@ -2425,8 +2737,10 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             unitPrice: number;
             total: number;
             isDraft?: boolean;
+            discountPct?: number;
             onExpand: () => void;
             onDelete: () => void;
+            onApplyDiscount?: (pct: number) => void;
             extra?: React.ReactNode;
           }) => (
             <div
@@ -2461,7 +2775,19 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               </div>
               <div className="w-28 text-right font-semibold">
                 {formatCurrency(opts.total)}
+                {(opts.discountPct || 0) > 0 && (
+                  <div className="text-[10px] font-normal text-destructive">−{opts.discountPct}%</div>
+                )}
               </div>
+              {opts.onApplyDiscount && (
+                <QuickDiscountPopover
+                  quantity={opts.quantity}
+                  unitPrice={opts.unitPrice}
+                  discountPct={opts.discountPct || 0}
+                  formatCurrency={formatCurrency}
+                  onApply={opts.onApplyDiscount}
+                />
+              )}
               {opts.extra}
               <Button
                 variant="ghost"
@@ -2537,6 +2863,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   quantity: s.quantity,
                   unitPrice: s.unit_price_snapshot,
                   total: s.line_total,
+                  discountPct: s.discount_pct,
+                  onApplyDiscount: (pct: number) => applyQuickDiscountToService(s, pct),
                   onExpand: () => startEditPersisted(s),
                   onDelete: () =>
                     removeService.mutate({ id: s.id, service_order_id: orderId! }),
@@ -2564,7 +2892,10 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   unit: d.billing_unit_snapshot,
                   quantity: d.quantity,
                   unitPrice: d.unit_price_snapshot,
-                  total: d.unit_price_snapshot * d.quantity,
+                  total: Math.round(d.unit_price_snapshot * d.quantity * (1 - (d.discount_pct || 0) / 100) * 100) / 100,
+                  discountPct: d.discount_pct,
+                  onApplyDiscount: (pct: number) =>
+                    setDraftServices((prev) => prev.map((x) => (x.tempId === d.tempId ? { ...x, discount_pct: pct } : x))),
                   isDraft: true,
                   onExpand: () => {
                     // Move draft into edit card and remove from drafts list
@@ -2580,6 +2911,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                         unit_price: d.unit_price_snapshot,
                         notes: d.notes || '',
                         technician_user_id: (d as any).technician_user_id || '',
+                        discount_pct: (d as any).discount_pct || 0,
                       },
                     }));
                     setOpenNewSvcCards((prev) => [...prev, key]);
@@ -2795,6 +3127,13 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 )}
               </div>
 
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" checked={form.is_travel_billable !== false}
+                  onChange={(e) => set('is_travel_billable', e.target.checked)} />
+                Repassar deslocamento ao cliente
+                <span className="text-xs text-muted-foreground">(desmarque para custo interno, não repassado no orçamento/OS)</span>
+              </label>
+
               {/* Breakdown do cálculo */}
               {!manualTravel && form.travel_cost_total > 0 && (
                 <div className="mt-2 text-xs text-muted-foreground space-y-0.5">
@@ -2847,8 +3186,10 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             isDraft?: boolean;
             image_url?: string | null;
             warranty_expires_at?: string | null;
+            discountPct?: number;
             onExpand: () => void;
             onDelete: () => void;
+            onApplyDiscount?: (pct: number) => void;
           }) => (
             <div
               key={opts.keyId}
@@ -2897,7 +3238,19 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               </div>
               <div className="w-28 text-right font-semibold">
                 {formatCurrency(opts.total)}
+                {(opts.discountPct || 0) > 0 && (
+                  <div className="text-[10px] font-normal text-destructive">−{opts.discountPct}%</div>
+                )}
               </div>
+              {opts.onApplyDiscount && (
+                <QuickDiscountPopover
+                  quantity={opts.quantity}
+                  unitPrice={opts.unitPrice}
+                  discountPct={opts.discountPct || 0}
+                  formatCurrency={formatCurrency}
+                  onApply={opts.onApplyDiscount}
+                />
+              )}
               <Button
                 variant="ghost"
                 size="icon"
@@ -2972,6 +3325,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   quantity: p.quantity,
                   unitPrice: p.unit_sale_snapshot,
                   total: p.line_total_sale,
+                  discountPct: p.discount_pct,
+                  onApplyDiscount: (pct: number) => applyQuickDiscountToPart(p, pct),
                   image_url: p.products?.image_url || null,
                   warranty_expires_at: p.warranty_expires_at || null,
                   onExpand: () => startEditPersistedPart(p),
@@ -2993,7 +3348,10 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   name: d.name,
                   quantity: d.quantity,
                   unitPrice: d.unit_sale,
-                  total: d.unit_sale * d.quantity,
+                  total: Math.round(d.unit_sale * d.quantity * (1 - (d.discount_pct || 0) / 100) * 100) / 100,
+                  discountPct: d.discount_pct,
+                  onApplyDiscount: (pct: number) =>
+                    setDraftParts((prev) => prev.map((x) => (x.tempId === d.tempId ? { ...x, discount_pct: pct } : x))),
                   isDraft: true,
                   image_url: (products?.find(pr => pr.id === d.product_id) as any)?.image_url || null,
                   onExpand: () => {
@@ -3009,6 +3367,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                         unit_cost: d.unit_cost,
                         unit_sale: d.unit_sale,
                         notes: '',
+                        discount_pct: d.discount_pct || 0,
                       },
                     }));
                     setOpenNewPartCards((prev) => [...prev, key]);
@@ -3227,6 +3586,12 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                       {t.serviceOrders.alsoCreatePayable}
                     </label>
                   )}
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input type="checkbox" checked={expForm.billable_to_client}
+                      onChange={(e) => setExpForm({ ...expForm, billable_to_client: e.target.checked })} />
+                    Faturável ao cliente
+                    <span className="text-xs text-muted-foreground">(desmarque para custo interno, não repassado no orçamento/OS)</span>
+                  </label>
                   <div className="flex gap-2">
                     <Button size="sm" onClick={handleAddExpense} disabled={addExpense.isPending || updateExpense.isPending}>
                       {editingExpenseId ? 'Atualizar' : t.common.save}
@@ -3259,7 +3624,12 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                       <tr key={exp.id} className="border-b last:border-0">
                         <td className="px-4 py-3 text-muted-foreground">{formatDate(exp.expense_date)}</td>
                         <td className="px-4 py-3"><StatusBadge className="bg-secondary text-secondary-foreground">{exp.category}</StatusBadge></td>
-                        <td className="px-4 py-3 font-medium">{exp.description}</td>
+                        <td className="px-4 py-3 font-medium">
+                          {exp.description}
+                          {exp.billable_to_client === false && (
+                            <StatusBadge className="bg-muted text-muted-foreground ml-1">Interno</StatusBadge>
+                          )}
+                        </td>
                         <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">
                           {exp.suppliers?.name || '—'}
                         </td>
@@ -3739,10 +4109,10 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             variant="outline"
             size="sm"
             className="gap-1.5 text-xs h-7 ml-auto"
-            onClick={() => setShowFinancialDialog(true)}
+            onClick={() => setShowFinancialDialog((v) => !v)}
           >
             <Calculator className="h-3.5 w-3.5" />
-            Composição Financeira
+            {showFinancialDialog ? 'Ocultar' : 'Ver'} Composição Financeira
             {/* M5: dot indicator quando financial_notes está preenchido */}
             {form.financial_notes?.trim() && (
               <span className="h-2 w-2 rounded-full bg-amber-400 ml-0.5 animate-pulse" title="Observações financeiras preenchidas" />
@@ -3751,18 +4121,22 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         </div>
       </div>
 
-      {/* Financial Dialog — reorganized */}
-      <Dialog open={showFinancialDialog} onOpenChange={setShowFinancialDialog}>
-        <DialogContent className="max-w-2xl max-h-[92vh] flex flex-col p-0 gap-0">
-          {/* Sticky header */}
-          <div className="px-6 pt-5 pb-3 border-b">
-            <DialogTitle className="flex items-center gap-2 text-base">
+      {/* Onda 4: seção Financeiro inline (não mais modal) — showFinancialDialog agora controla expandido/colapsado */}
+      <Collapsible open={showFinancialDialog} onOpenChange={setShowFinancialDialog} className="rounded-lg border bg-card mt-3">
+        <CollapsibleTrigger asChild>
+          <button type="button" className="w-full flex items-center justify-between px-6 py-3 border-b text-left">
+            <span className="flex items-center gap-2 text-base font-semibold">
               <Calculator className="h-4 w-4" /> Composição Financeira
-            </DialogTitle>
-          </div>
+            </span>
+            <span className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground hidden sm:inline">{formatCurrency(grandTotal)}</span>
+              <ChevronDown className={`h-4 w-4 transition-transform ${showFinancialDialog ? 'rotate-180' : ''}`} />
+            </span>
+          </button>
+        </CollapsibleTrigger>
 
-          {/* Scrollable body */}
-          <div className="overflow-y-auto flex-1 px-6 py-4 space-y-5">
+        <CollapsibleContent>
+          <div className="px-6 py-4 space-y-5">
 
             {/* ── SECTION 1: CUSTOS ── */}
             <div className="space-y-2">
@@ -3801,7 +4175,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               <div className="rounded-lg border bg-muted/20 p-3 space-y-3 text-sm">
                 {/* Discount */}
                 <div className="space-y-2">
-                  <p className="text-xs text-muted-foreground font-medium">Desconto</p>
+                  <p className="text-xs text-muted-foreground font-medium">Desconto por linha (%)</p>
+                  <p className="text-[11px] text-muted-foreground -mt-1">Aplica o desconto diretamente em cada linha de serviço/peça da OS.</p>
                   <div className="grid grid-cols-2 gap-2">
                     <div className="space-y-1">
                       <Label className="text-xs text-muted-foreground">↳ Serviços (%)</Label>
@@ -3811,10 +4186,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                           placeholder="0" disabled={isLocked}
                           onChange={e => {
                             const pct = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
-                            setDiscountServicesPct(pct);
-                            set('discount_amount', Math.round((laborCost * pct / 100 + partsCost * discountPartsPct / 100) * 100) / 100);
+                            applyBulkLineDiscount('services', pct);
                           }} />
-                        <span className="text-xs text-muted-foreground">{formatCurrency(laborCost * discountServicesPct / 100)}</span>
+                        <span className="text-xs text-muted-foreground">−{formatCurrency(laborCost * discountServicesPct / 100)}</span>
                       </div>
                     </div>
                     <div className="space-y-1">
@@ -3825,73 +4199,61 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                           placeholder="0" disabled={isLocked}
                           onChange={e => {
                             const pct = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
-                            setDiscountPartsPct(pct);
-                            set('discount_amount', Math.round((laborCost * discountServicesPct / 100 + partsCost * pct / 100) * 100) / 100);
+                            applyBulkLineDiscount('parts', pct);
                           }} />
-                        <span className="text-xs text-muted-foreground">{formatCurrency(partsCost * discountPartsPct / 100)}</span>
+                        <span className="text-xs text-muted-foreground">−{formatCurrency(partsCost * discountPartsPct / 100)}</span>
                       </div>
                     </div>
                   </div>
-                  <div className="flex items-center justify-between pt-1 border-t border-dashed">
-                    <Label className="text-xs font-medium text-destructive">Total desconto</Label>
-                    <MoneyInput className="w-28 h-7 text-right text-sm text-destructive font-medium"
-                      value={form.discount_amount}
-                      onValueChange={v => {
-                        set('discount_amount', v);
-                        if (!v) { setDiscountServicesPct(0); setDiscountPartsPct(0); }
-                        else {
-                          const base = laborCost + partsCost;
-                          if (base > 0) {
-                            setDiscountServicesPct(Math.min(100, Math.round((v * (laborCost / base) / laborCost) * 1000) / 10));
-                            setDiscountPartsPct(Math.min(100, Math.round((v * (partsCost / base) / partsCost) * 1000) / 10));
-                          }
-                        }
-                      }} disabled={isLocked} />
-                  </div>
 
-                  {/* Atalhos rápidos de desconto */}
+                  {/* Atalhos rápidos — aplicam o mesmo % em lote a todas as linhas de serviço e peça */}
                   {!isLocked && (laborCost + partsCost) > 0 && (
                     <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                      {[5, 10, 15].map(p => {
-                        // Aplica p% igualmente sobre serviços e peças
-                        const applyPct = () => {
-                          setDiscountServicesPct(p);
-                          setDiscountPartsPct(p);
-                          set('discount_amount', Math.round((laborCost * p / 100 + partsCost * p / 100) * 100) / 100);
-                        };
-                        return (
-                          <button key={p} type="button" onClick={applyPct}
-                            className="text-[11px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:border-destructive/50 hover:text-destructive transition-colors">
-                            −{p}%
-                          </button>
-                        );
-                      })}
-                      {/* Arredondar total para baixo (centena/milhar mais próximo abaixo) */}
-                      {grandTotal > 0 && (
+                      {[5, 10, 15].map(p => (
+                        <button key={p} type="button" onClick={() => applyBulkLineDiscount('both', p)}
+                          className="text-[11px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:border-destructive/50 hover:text-destructive transition-colors">
+                          −{p}% em todas as linhas
+                        </button>
+                      ))}
+                      {(discountServicesPct > 0 || discountPartsPct > 0) && (
                         <button type="button"
-                          onClick={() => {
-                            const step = grandTotal >= 1000 ? 100 : 10;
-                            const target = Math.floor(grandTotal / step) * step;
-                            const extraDiscount = Math.round((grandTotal - target) * 100) / 100;
-                            if (extraDiscount > 0) {
-                              const newDiscount = Math.round(((form.discount_amount || 0) + extraDiscount) * 100) / 100;
-                              set('discount_amount', newDiscount);
-                              const base = laborCost + partsCost;
-                              if (base > 0) {
-                                setDiscountServicesPct(Math.min(100, Math.round((newDiscount * (laborCost / base) / laborCost) * 1000) / 10));
-                                setDiscountPartsPct(Math.min(100, Math.round((newDiscount * (partsCost / base) / partsCost) * 1000) / 10));
-                              }
-                            }
-                          }}
-                          className="text-[11px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:border-primary/50 hover:text-primary transition-colors">
-                          ⌄ Arredondar {formatCurrency(grandTotal >= 1000 ? Math.floor(grandTotal / 100) * 100 : Math.floor(grandTotal / 10) * 10)}
+                          onClick={() => applyBulkLineDiscount('both', 0)}
+                          className="text-[11px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted transition-colors ml-auto">
+                          Limpar desconto por linha
                         </button>
                       )}
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between pt-2 border-t border-dashed">
+                    <div>
+                      <Label className="text-xs font-medium text-destructive">Desconto adicional (valor fixo)</Label>
+                      <p className="text-[11px] text-muted-foreground">Ajuste extra de fechamento, somado por cima do já descontado por linha.</p>
+                    </div>
+                    <MoneyInput className="w-28 h-7 text-right text-sm text-destructive font-medium"
+                      value={form.discount_amount}
+                      onValueChange={v => set('discount_amount', v)}
+                      disabled={isLocked} />
+                  </div>
+                  {grandTotal > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <button type="button"
+                        onClick={() => {
+                          const step = grandTotal >= 1000 ? 100 : 10;
+                          const target = Math.floor(grandTotal / step) * step;
+                          const extraDiscount = Math.round((grandTotal - target) * 100) / 100;
+                          if (extraDiscount > 0) {
+                            set('discount_amount', Math.round(((form.discount_amount || 0) + extraDiscount) * 100) / 100);
+                          }
+                        }}
+                        className="text-[11px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:border-primary/50 hover:text-primary transition-colors">
+                        ⌄ Arredondar {formatCurrency(grandTotal >= 1000 ? Math.floor(grandTotal / 100) * 100 : Math.floor(grandTotal / 10) * 10)}
+                      </button>
                       {(form.discount_amount || 0) > 0 && (
                         <button type="button"
-                          onClick={() => { set('discount_amount', 0); setDiscountServicesPct(0); setDiscountPartsPct(0); }}
-                          className="text-[11px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted transition-colors ml-auto">
-                          Limpar
+                          onClick={() => set('discount_amount', 0)}
+                          className="text-[11px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted transition-colors">
+                          Limpar valor fixo
                         </button>
                       )}
                     </div>
@@ -4049,12 +4411,12 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                     {[1,2,3,4,5,6].map(n => {
                       const fee = cardFees?.find((f: any) => f.installments === n);
                       const feePct = fee?.fee_percent || 0;
-                      const gross = feePct > 0 ? grandTotal / (1 - Number(feePct) / 100) : grandTotal;
+                      const gross = feePct > 0 ? base / (1 - Number(feePct) / 100) : base;
                       const perInstall = gross / n;
                       const isSelected = selectedInstallments === n;
                       return (
                         <button key={n} type="button"
-                          onClick={() => setSelectedInstallments(n)}
+                          onClick={() => { setSelectedInstallments(n); set('card_installments', n); }}
                           className={`rounded border p-1.5 text-left transition-colors ${isSelected ? 'bg-primary text-primary-foreground border-primary' : 'bg-background hover:bg-muted'}`}>
                           <div className="font-semibold">{n}x {formatCurrency(perInstall)}</div>
                           {feePct > 0 && (
@@ -4069,15 +4431,23 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   {selectedInstallments > 0 && (() => {
                     const fee = cardFees?.find((f: any) => f.installments === selectedInstallments);
                     const feePct = fee?.fee_percent || 0;
-                    const gross = feePct > 0 ? grandTotal / (1 - Number(feePct) / 100) : grandTotal;
+                    const gross = feePct > 0 ? base / (1 - Number(feePct) / 100) : base;
                     return (
                       <div className="rounded bg-muted/40 px-3 py-2 text-xs space-y-1">
                         <div className="flex justify-between"><span className="text-muted-foreground">Valor a cobrar:</span><span className="font-semibold">{formatCurrency(gross)}</span></div>
-                        {feePct > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Taxa ({Number(feePct).toFixed(2)}%):</span><span className="text-destructive">−{formatCurrency(gross - grandTotal)}</span></div>}
-                        <div className="flex justify-between border-t pt-1 text-success font-medium"><span>Você recebe líquido:</span><span>{formatCurrency(grandTotal)}</span></div>
+                        {feePct > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Taxa ({Number(feePct).toFixed(2)}%):</span><span className="text-destructive">−{formatCurrency(gross - base)}</span></div>}
+                        <div className="flex justify-between border-t pt-1 text-success font-medium"><span>Você recebe líquido:</span><span>{formatCurrency(base)}</span></div>
                       </div>
                     );
                   })()}
+                  <label className="flex items-center gap-2 text-sm cursor-pointer pt-2 border-t mt-2">
+                    <input type="checkbox" checked={form.card_fee_passthrough_enabled}
+                      onChange={(e) => set('card_fee_passthrough_enabled', e.target.checked)} />
+                    Repassar taxa de cartão ao cliente
+                    <span className="text-xs text-muted-foreground">
+                      ({selectedInstallments}x — soma {formatCurrency(cardFeeAmount)} ao total)
+                    </span>
+                  </label>
                 </div>
               </div>
             </div>
@@ -4184,8 +4554,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
 
           </div>{/* end scrollable body */}
 
-          {/* ── STICKY FOOTER: TOTAL ── */}
-          <div className="border-t px-6 py-3 flex items-center justify-between bg-card rounded-b-lg">
+          {/* ── RESUMO DO TOTAL (dentro da seção, complementar à barra fixa) ── */}
+          <div className="border-t px-6 py-3 flex items-center justify-between bg-muted/30 rounded-b-lg">
             <div className="text-sm">
               {(form.discount_amount || 0) > 0 && (
                 <span className="text-muted-foreground text-xs">
@@ -4199,8 +4569,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               <span className="text-2xl font-bold text-accent">{formatCurrency(grandTotal)}</span>
             </div>
           </div>
-        </DialogContent>
-      </Dialog>
+        </CollapsibleContent>
+      </Collapsible>
 
       {/* Stock Alert Dialog — shown when part has insufficient stock */}
       {stockAlert && orderId && (
@@ -4342,20 +4712,6 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             className="bg-accent text-accent-foreground hover:bg-accent/90 min-w-[180px]"
           >
             {t.common.save}
-          </Button>
-        </div>
-      )}
-
-      {/* Sticky floating Save — visível só quando topo E rodapé estão fora da tela */}
-      {!isLocked && !topVisible && !bottomVisible && (
-        <div className="sticky bottom-4 z-30 flex justify-end pointer-events-none">
-          <Button
-            onClick={handleSave}
-            disabled={createSO.isPending || updateSO.isPending}
-            size="lg"
-            className="pointer-events-auto bg-accent text-accent-foreground hover:bg-accent/90 shadow-lg shadow-accent/30 gap-2"
-          >
-            {createSO.isPending || updateSO.isPending ? 'Salvando...' : t.common.save}
           </Button>
         </div>
       )}
@@ -4544,6 +4900,28 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         onOpenChange={setQuickSupplierOpen}
         initialName={quickSupplierName}
         onCreated={(s) => setExpForm((prev) => ({ ...prev, supplier_id: s.id }))}
+      />
+
+      {/* Onda 4: resumo financeiro fixo (sticky) — mesmo waterfall exibido ao cliente */}
+      <ServiceOrderFinancialSummary
+        grandTotal={grandTotal}
+        balance={!isNew ? soBalance : null}
+        formatCurrency={formatCurrency}
+        onOpenFinancial={() => setShowFinancialDialog(true)}
+        onSave={handleSave}
+        saving={createSO.isPending || updateSO.isPending}
+        showSave={!isLocked && !topVisible && !bottomVisible}
+        waterfall={([
+          { label: t.serviceOrders.labor, value: laborCost },
+          { label: t.serviceOrders.parts, value: partsCost },
+          { label: t.serviceOrders.travel, value: billableTravelCost },
+          { label: t.serviceOrders.operationalCost, value: operationalCost },
+          { label: t.serviceOrders.subcontract, value: form.subcontract_cost_total || 0 },
+          { label: 'Desconto por item', value: itemDiscountTotal, negative: true },
+          { label: 'Desconto', value: form.discount_amount || 0, negative: true },
+          { label: 'Impostos', value: form.tax_amount || 0 },
+          { label: 'Taxa de cartão', value: passthroughCardFeeAmount },
+        ] as FinancialWaterfallLine[])}
       />
     </div>
   );

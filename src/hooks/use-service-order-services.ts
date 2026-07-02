@@ -16,11 +16,14 @@ export function useUpdateServiceOrderService() {
       unit_price_snapshot?: number;
       notes?: string | null;
       technician_user_id?: string | null;
+      discount_pct?: number;
     }) => {
       const { id, service_order_id, ...rest } = values;
       const patch: Record<string, any> = { ...rest };
       if (typeof rest.quantity === 'number' && typeof rest.unit_price_snapshot === 'number') {
-        patch.line_total = Math.round(rest.quantity * rest.unit_price_snapshot * 100) / 100;
+        // Onda 2: desconto por linha.
+        const discountPct = rest.discount_pct || 0;
+        patch.line_total = Math.round(rest.quantity * rest.unit_price_snapshot * (1 - discountPct / 100) * 100) / 100;
       }
       const { error } = await supabase
         .from('service_order_services')

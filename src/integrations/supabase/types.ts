@@ -3308,6 +3308,7 @@ export type Database = {
           expected_date: string | null
           id: string
           notes: string | null
+          payable_id: string | null
           po_number: string
           received_date: string | null
           service_order_id: string | null
@@ -3322,6 +3323,7 @@ export type Database = {
           expected_date?: string | null
           id?: string
           notes?: string | null
+          payable_id?: string | null
           po_number: string
           received_date?: string | null
           service_order_id?: string | null
@@ -3336,6 +3338,7 @@ export type Database = {
           expected_date?: string | null
           id?: string
           notes?: string | null
+          payable_id?: string | null
           po_number?: string
           received_date?: string | null
           service_order_id?: string | null
@@ -3345,6 +3348,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "purchase_orders_payable_id_fkey"
+            columns: ["payable_id"]
+            isOneToOne: false
+            referencedRelation: "payables"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "purchase_orders_service_order_id_fkey"
             columns: ["service_order_id"]
@@ -3419,10 +3429,12 @@ export type Database = {
           due_date: string
           id: string
           invoice_id: string | null
+          is_deposit: boolean | null
           issue_date: string
           notes: string | null
           paid_amount: number | null
           payment_method: string | null
+          reminder_sent_at: string | null
           service_order_id: string | null
           status: string | null
           sub_category: string | null
@@ -3440,10 +3452,12 @@ export type Database = {
           due_date: string
           id?: string
           invoice_id?: string | null
+          is_deposit?: boolean | null
           issue_date: string
           notes?: string | null
           paid_amount?: number | null
           payment_method?: string | null
+          reminder_sent_at?: string | null
           service_order_id?: string | null
           status?: string | null
           sub_category?: string | null
@@ -3461,10 +3475,12 @@ export type Database = {
           due_date?: string
           id?: string
           invoice_id?: string | null
+          is_deposit?: boolean | null
           issue_date?: string
           notes?: string | null
           paid_amount?: number | null
           payment_method?: string | null
+          reminder_sent_at?: string | null
           service_order_id?: string | null
           status?: string | null
           sub_category?: string | null
@@ -3514,6 +3530,7 @@ export type Database = {
           filter_config: Json
           filter_type: string
           id: string
+          is_default: boolean
           name: string
           user_id: string | null
         }
@@ -3522,6 +3539,7 @@ export type Database = {
           filter_config?: Json
           filter_type: string
           id?: string
+          is_default?: boolean
           name: string
           user_id?: string | null
         }
@@ -3530,6 +3548,7 @@ export type Database = {
           filter_config?: Json
           filter_type?: string
           id?: string
+          is_default?: boolean
           name?: string
           user_id?: string | null
         }
@@ -3538,6 +3557,7 @@ export type Database = {
       service_order_expenses: {
         Row: {
           amount: number
+          billable_to_client: boolean
           category: string
           created_at: string | null
           created_by: string | null
@@ -3560,6 +3580,7 @@ export type Database = {
         }
         Insert: {
           amount: number
+          billable_to_client?: boolean
           category: string
           created_at?: string | null
           created_by?: string | null
@@ -3582,6 +3603,7 @@ export type Database = {
         }
         Update: {
           amount?: number
+          billable_to_client?: boolean
           category?: string
           created_at?: string | null
           created_by?: string | null
@@ -3658,6 +3680,7 @@ export type Database = {
         Row: {
           created_at: string
           currency_snapshot: string | null
+          discount_pct: number
           id: string
           line_total_cost: number
           line_total_sale: number
@@ -3676,6 +3699,7 @@ export type Database = {
         Insert: {
           created_at?: string
           currency_snapshot?: string | null
+          discount_pct?: number
           id?: string
           line_total_cost: number
           line_total_sale: number
@@ -3694,6 +3718,7 @@ export type Database = {
         Update: {
           created_at?: string
           currency_snapshot?: string | null
+          discount_pct?: number
           id?: string
           line_total_cost?: number
           line_total_sale?: number
@@ -3793,6 +3818,7 @@ export type Database = {
           billing_unit_snapshot: string
           created_at: string | null
           description_snapshot: string | null
+          discount_pct: number
           elapsed_minutes: number | null
           finished_at: string | null
           id: string
@@ -3814,6 +3840,7 @@ export type Database = {
           billing_unit_snapshot?: string
           created_at?: string | null
           description_snapshot?: string | null
+          discount_pct?: number
           elapsed_minutes?: number | null
           finished_at?: string | null
           id?: string
@@ -3835,6 +3862,7 @@ export type Database = {
           billing_unit_snapshot?: string
           created_at?: string | null
           description_snapshot?: string | null
+          discount_pct?: number
           elapsed_minutes?: number | null
           finished_at?: string | null
           id?: string
@@ -3995,6 +4023,8 @@ export type Database = {
         Row: {
           cancellation_reason: string | null
           cancelled_at: string | null
+          card_fee_amount: number
+          card_fee_passthrough_enabled: boolean
           card_installments: number | null
           check_in_at: string | null
           check_out_at: string | null
@@ -4004,6 +4034,7 @@ export type Database = {
           commission_rate: number | null
           commissioned_person: string | null
           commissioned_user_id: string | null
+          converted_to_os_at: string | null
           created_at: string
           created_by: string | null
           currency: string | null
@@ -4015,24 +4046,29 @@ export type Database = {
           estimated_hours: number | null
           extra_notes: string | null
           ferry_cost: number | null
+          financial_notes: string | null
           grand_total: number | null
           hourly_rate: number | null
           id: string
           initial_findings: string | null
           internal_notes: string | null
           invoicing_status: string | null
+          is_travel_billable: boolean
           labor_cost_total: number | null
           labor_hours_total: number | null
           marina_id: string | null
           operational_cost_total: number | null
+          original_quote_amount: number | null
           parts_cost_total: number | null
           payment_condition_preset_id: string | null
           payment_conditions: string | null
           payment_method: string | null
+          payment_method_preferred: string | null
           payment_status: string | null
           photos: Json | null
           priority: string
           problem_description: string | null
+          quote_status: string | null
           quote_validity_date: string | null
           quote_validity_days: number | null
           reminder_sent_at: string | null
@@ -4067,6 +4103,8 @@ export type Database = {
         Insert: {
           cancellation_reason?: string | null
           cancelled_at?: string | null
+          card_fee_amount?: number
+          card_fee_passthrough_enabled?: boolean
           card_installments?: number | null
           check_in_at?: string | null
           check_out_at?: string | null
@@ -4076,6 +4114,7 @@ export type Database = {
           commission_rate?: number | null
           commissioned_person?: string | null
           commissioned_user_id?: string | null
+          converted_to_os_at?: string | null
           created_at?: string
           created_by?: string | null
           currency?: string | null
@@ -4087,24 +4126,29 @@ export type Database = {
           estimated_hours?: number | null
           extra_notes?: string | null
           ferry_cost?: number | null
+          financial_notes?: string | null
           grand_total?: number | null
           hourly_rate?: number | null
           id?: string
           initial_findings?: string | null
           internal_notes?: string | null
           invoicing_status?: string | null
+          is_travel_billable?: boolean
           labor_cost_total?: number | null
           labor_hours_total?: number | null
           marina_id?: string | null
           operational_cost_total?: number | null
+          original_quote_amount?: number | null
           parts_cost_total?: number | null
           payment_condition_preset_id?: string | null
           payment_conditions?: string | null
           payment_method?: string | null
+          payment_method_preferred?: string | null
           payment_status?: string | null
           photos?: Json | null
           priority?: string
           problem_description?: string | null
+          quote_status?: string | null
           quote_validity_date?: string | null
           quote_validity_days?: number | null
           reminder_sent_at?: string | null
@@ -4139,6 +4183,8 @@ export type Database = {
         Update: {
           cancellation_reason?: string | null
           cancelled_at?: string | null
+          card_fee_amount?: number
+          card_fee_passthrough_enabled?: boolean
           card_installments?: number | null
           check_in_at?: string | null
           check_out_at?: string | null
@@ -4148,6 +4194,7 @@ export type Database = {
           commission_rate?: number | null
           commissioned_person?: string | null
           commissioned_user_id?: string | null
+          converted_to_os_at?: string | null
           created_at?: string
           created_by?: string | null
           currency?: string | null
@@ -4159,24 +4206,29 @@ export type Database = {
           estimated_hours?: number | null
           extra_notes?: string | null
           ferry_cost?: number | null
+          financial_notes?: string | null
           grand_total?: number | null
           hourly_rate?: number | null
           id?: string
           initial_findings?: string | null
           internal_notes?: string | null
           invoicing_status?: string | null
+          is_travel_billable?: boolean
           labor_cost_total?: number | null
           labor_hours_total?: number | null
           marina_id?: string | null
           operational_cost_total?: number | null
+          original_quote_amount?: number | null
           parts_cost_total?: number | null
           payment_condition_preset_id?: string | null
           payment_conditions?: string | null
           payment_method?: string | null
+          payment_method_preferred?: string | null
           payment_status?: string | null
           photos?: Json | null
           priority?: string
           problem_description?: string | null
+          quote_status?: string | null
           quote_validity_date?: string | null
           quote_validity_days?: number | null
           reminder_sent_at?: string | null
@@ -4880,6 +4932,7 @@ export type Database = {
           created_at: string
           created_by: string | null
           document_type: string | null
+          document_url: string | null
           id: string
           include_link_in_caption: boolean
           last_error: string | null
@@ -4913,6 +4966,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           document_type?: string | null
+          document_url?: string | null
           id?: string
           include_link_in_caption?: boolean
           last_error?: string | null
@@ -4946,6 +5000,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           document_type?: string | null
+          document_url?: string | null
           id?: string
           include_link_in_caption?: boolean
           last_error?: string | null
@@ -5025,7 +5080,7 @@ export type Database = {
           source_ref_id: string | null
           status: string
           updated_at: string
-          wa_message_id: string | null
+          zapi_message_id: string | null
         }
         Insert: {
           attempts?: number
@@ -5043,7 +5098,7 @@ export type Database = {
           source_ref_id?: string | null
           status?: string
           updated_at?: string
-          wa_message_id?: string | null
+          zapi_message_id?: string | null
         }
         Update: {
           attempts?: number
@@ -5061,7 +5116,7 @@ export type Database = {
           source_ref_id?: string | null
           status?: string
           updated_at?: string
-          wa_message_id?: string | null
+          zapi_message_id?: string | null
         }
         Relationships: []
       }
@@ -5079,7 +5134,7 @@ export type Database = {
           status: string
           text_content: string | null
           updated_at: string
-          wa_message_id: string | null
+          zapi_message_id: string | null
         }
         Insert: {
           background_color?: string | null
@@ -5094,7 +5149,7 @@ export type Database = {
           status?: string
           text_content?: string | null
           updated_at?: string
-          wa_message_id?: string | null
+          zapi_message_id?: string | null
         }
         Update: {
           background_color?: string | null
@@ -5109,7 +5164,7 @@ export type Database = {
           status?: string
           text_content?: string | null
           updated_at?: string
-          wa_message_id?: string | null
+          zapi_message_id?: string | null
         }
         Relationships: [
           {
@@ -5215,7 +5270,23 @@ export type Database = {
       is_admin: { Args: { _user_id: string }; Returns: boolean }
       is_admin_or_financial: { Args: { _user_id: string }; Returns: boolean }
       is_external_seller: { Args: { _user_id: string }; Returns: boolean }
+      next_document_number: { Args: never; Returns: number }
       recalc_po_total: { Args: { p_po_id: string }; Returns: undefined }
+      receive_po: {
+        Args: { p_due_days?: number; p_items: Json; p_po_id: string }
+        Returns: Json
+      }
+      register_deposit_and_convert: {
+        Args: {
+          p_amount: number
+          p_card_fee_percent?: number
+          p_notes?: string
+          p_payment_date: string
+          p_payment_method: string
+          p_service_order_id: string
+        }
+        Returns: Json
+      }
       register_payment_and_update_balance: {
         Args: {
           p_amount: number

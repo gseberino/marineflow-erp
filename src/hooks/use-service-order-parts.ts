@@ -19,11 +19,14 @@ export function useUpdateServiceOrderPart() {
       unit_cost_snapshot: number;
       unit_sale_snapshot: number;
       notes?: string | null;
+      discount_pct?: number;
     }) => {
+      // Onda 2: desconto por linha aplicado apenas ao preço de venda (não ao custo).
+      const discountPct = values.discount_pct || 0;
       const line_total_cost =
         Math.round(values.quantity * values.unit_cost_snapshot * 100) / 100;
       const line_total_sale =
-        Math.round(values.quantity * values.unit_sale_snapshot * 100) / 100;
+        Math.round(values.quantity * values.unit_sale_snapshot * (1 - discountPct / 100) * 100) / 100;
 
       const { error } = await supabase
         .from('service_order_parts')
@@ -33,6 +36,7 @@ export function useUpdateServiceOrderPart() {
           unit_cost_snapshot: values.unit_cost_snapshot,
           unit_sale_snapshot: values.unit_sale_snapshot,
           notes: values.notes ?? null,
+          discount_pct: discountPct,
           line_total_cost,
           line_total_sale,
         } as any)

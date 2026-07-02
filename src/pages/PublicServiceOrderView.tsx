@@ -191,6 +191,7 @@ export default function PublicServiceOrderView() {
     travelCost: isOn(company.public_view_show_travel_cost),
     discount: isOn(company.public_view_show_discount),
     tax: isOn(company.public_view_show_tax),
+    cardFee: isOn(company.public_view_show_card_fee),
     terms: isOn(company.public_view_show_terms),
     bankDetails: isOn(company.public_view_show_bank_details),
     paymentInstructions: isOn(company.public_view_show_payment_instructions),
@@ -232,10 +233,12 @@ export default function PublicServiceOrderView() {
         grand_total: order.grand_total || 0,
         labor_cost_total: order.labor_cost_total || 0,
         parts_cost_total: order.parts_cost_total || 0,
-        travel_cost_total: order.travel_cost_total || 0,
+        travel_cost_total: (order as any).is_travel_billable !== false ? (order.travel_cost_total || 0) : 0,
         discount_amount: order.discount_amount || 0,
         tax_amount: order.tax_amount || 0,
         operational_cost_total: order.operational_cost_total || 0,
+        card_fee_amount: (order as any).card_fee_passthrough_enabled ? ((order as any).card_fee_amount || 0) : 0,
+        card_installments: (order as any).card_fee_passthrough_enabled ? ((order as any).card_installments || 0) : 0,
         extra_notes: order.extra_notes ?? undefined,
         payment_conditions: order.payment_conditions ?? undefined,
         payment_condition_label: data?.presetData?.label ?? null,
@@ -618,10 +621,18 @@ export default function PublicServiceOrderView() {
                 <span className="tabular-nums">{fmtCurrency(order.parts_cost_total)}</span>
               </div>
             )}
-            {show.travelCost && order.travel_cost_total > 0 && (
+            {show.travelCost && (order as any).is_travel_billable !== false && order.travel_cost_total > 0 && (
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Deslocamento</span>
                 <span className="tabular-nums">{fmtCurrency(order.travel_cost_total)}</span>
+              </div>
+            )}
+            {show.cardFee && (order as any).card_fee_passthrough_enabled && (order as any).card_fee_amount > 0 && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">
+                  Taxa de cartão{(order as any).card_installments ? ` (${(order as any).card_installments}x)` : ''}
+                </span>
+                <span className="tabular-nums">{fmtCurrency((order as any).card_fee_amount)}</span>
               </div>
             )}
             {order.operational_cost_total > 0 && (
