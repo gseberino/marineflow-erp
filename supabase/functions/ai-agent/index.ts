@@ -22,9 +22,34 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON = Deno.env.get("SUPABASE_ANON_KEY")!;
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY")!;
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai";
-const MODEL_FAST = "gemini-3-flash";
-const MODEL_SMART = "gemini-3-flash";
+const MODEL_FAST = "gemini-3.5-flash";
+const MODEL_SMART = "gemini-3.5-flash";
+const MODEL_FALLBACK = "gemini-2.5-flash";
 const MAX_ITERATIONS = 8;
+
+// Chama o Gemini com retry/backoff em 503 (sobrecarga temporária do Google) e,
+// se persistir, cai para um modelo mais estabelecido (MODEL_FALLBACK).
+async function callGeminiWithRetry(body: Record<string, unknown>): Promise<Response> {
+  const primaryModel = body.model as string;
+  const models = primaryModel === MODEL_FALLBACK ? [primaryModel] : [primaryModel, MODEL_FALLBACK];
+  let lastRes: Response | null = null;
+  for (const model of models) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const res = await fetch(`${GEMINI_BASE_URL}/chat/completions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${GEMINI_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ ...body, model }),
+      });
+      if (res.status !== 503) return res;
+      lastRes = res;
+      if (attempt < 2) await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+    }
+  }
+  return lastRes!;
+}
 
 // ---------------- TOOL DEFINITIONS ----------------
 const TOOLS = [
@@ -494,14 +519,14 @@ const TOOLS = [
       parameters: {
         type: "object",
         properties: {
-          full_name_or_company_name: { type: "string" },
+          name: { type: "string" },
           type: { type: "string", enum: ["individual", "company"] },
           phone: { type: "string" },
           whatsapp: { type: "string" },
           email: { type: "string" },
           cpf_cnpj: { type: "string" },
         },
-        required: ["full_name_or_company_name", "type"],
+        required: ["name", "type"],
       },
     },
   },
@@ -514,14 +539,14 @@ const TOOLS = [
         type: "object",
         properties: {
           client_id: { type: "string" },
-          boat_name: { type: "string", description: "Nome da embarcação ou identificação do motorhome" },
+          name: { type: "string", description: "Nome da embarcação ou identificação do motorhome" },
           manufacturer: { type: "string" },
           model: { type: "string" },
           year: { type: "number" },
           asset_type: { type: "string", description: "Exemplo: Lancha, Veleiro, Motorhome, Camper, Jet Ski" },
           marina_id: { type: "string" },
         },
-        required: ["client_id", "boat_name", "asset_type"],
+        required: ["client_id", "name", "asset_type"],
       },
     },
   },
@@ -533,13 +558,13 @@ const TOOLS = [
       parameters: {
         type: "object",
         properties: {
-          product_name: { type: "string" },
+          name: { type: "string" },
           sku: { type: "string" },
           sale_price: { type: "number" },
           cost_price: { type: "number" },
           unit: { type: "string" },
         },
-        required: ["product_name"],
+        required: ["name"],
       },
     },
   },
@@ -689,9 +714,9 @@ async function executeTool(
       const limit = Math.min(Number(args.limit) || 10, 25);
       const { data, error } = await sb
         .from("clients")
-        .select("id, full_name_or_company_name, type, phone, whatsapp, email, cpf_cnpj")
+        .select("id, name, type, phone, whatsapp, email, cpf_cnpj")
         .or(
-          `full_name_or_company_name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%,whatsapp.ilike.%${q}%,cpf_cnpj.ilike.%${q}%`
+          `name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%,whatsapp.ilike.%${q}%,cpf_cnpj.ilike.%${q}%`
         )
         .eq("active", true)
         .limit(limit);
@@ -703,9 +728,9 @@ async function executeTool(
       const q = String(args.query || "").trim();
       let query = sb
         .from("vessels")
-        .select("id, boat_name, manufacturer, model, year, client_id, marina_id")
+        .select("id, name, manufacturer, model, year, client_id, marina_id")
         .eq("active", true)
-        .or(`boat_name.ilike.%${q}%,model.ilike.%${q}%,manufacturer.ilike.%${q}%`)
+        .or(`name.ilike.%${q}%,model.ilike.%${q}%,manufacturer.ilike.%${q}%`)
         .limit(15);
       if (args.client_id) query = query.eq("client_id", args.client_id);
       const { data, error } = await query;
@@ -718,9 +743,9 @@ async function executeTool(
       const limit = Math.min(Number(args.limit) || 10, 25);
       const { data, error } = await sb
         .from("products")
-        .select("id, product_name, sku, brand, sale_price, stock_quantity, unit")
+        .select("id, name, sku, brand, sale_price, stock_quantity, unit")
         .eq("active", true)
-        .or(`product_name.ilike.%${q}%,sku.ilike.%${q}%,brand.ilike.%${q}%`)
+        .or(`name.ilike.%${q}%,sku.ilike.%${q}%,brand.ilike.%${q}%`)
         .limit(limit);
       if (error) throw error;
       return { results: data };
@@ -729,7 +754,7 @@ async function executeTool(
     case "list_agenda": {
       let query = sb
         .from("agenda_tasks")
-        .select("id, title, scheduled_start_at, scheduled_end_at, status, priority, location, clients(full_name_or_company_name), app_users(full_name)")
+        .select("id, title, scheduled_start_at, scheduled_end_at, status, priority, location, clients(name), app_users(full_name)")
         .gte("scheduled_start_at", args.date_from)
         .lte("scheduled_start_at", args.date_to)
         .order("scheduled_start_at", { ascending: true });
@@ -739,7 +764,7 @@ async function executeTool(
       const mapped = (data || []).map((t: any) => ({
         id: t.id,
         titulo: t.title,
-        cliente: t.clients?.full_name_or_company_name || "—",
+        cliente: t.clients?.name || "—",
         tecnico: t.app_users?.full_name || "—",
         inicio: t.scheduled_start_at,
         fim: t.scheduled_end_at,
@@ -753,7 +778,7 @@ async function executeTool(
     case "list_service_orders": {
       let query = sb
         .from("service_orders")
-        .select("id, service_order_number, status, grand_total, payment_status, scheduled_start_at, created_at, clients(full_name_or_company_name), vessels(boat_name)")
+        .select("id, service_order_number, status, grand_total, payment_status, scheduled_start_at, created_at, clients(name), vessels(name)")
         .order("created_at", { ascending: false })
         .limit(Math.min(Number(args.limit) || 20, 50));
 
@@ -795,8 +820,8 @@ async function executeTool(
         status: STATUS_LABELS[so.status] || so.status,
         status_raw: so.status,
         status_pagamento: so.payment_status || null,
-        cliente: so.clients?.full_name_or_company_name || "—",
-        ativo: so.vessels?.boat_name || "—",
+        cliente: so.clients?.name || "—",
+        ativo: so.vessels?.name || "—",
         valor_total: so.grand_total || 0,
         agendado_para: so.scheduled_start_at || null,
         criado_em: so.created_at,
@@ -807,33 +832,33 @@ async function executeTool(
     case "get_service_order": {
       const { data: so, error } = await sb
         .from("service_orders")
-        .select("*, clients(full_name_or_company_name), vessels(boat_name)")
+        .select("*, clients(name), vessels(name)")
         .eq("id", args.id)
         .maybeSingle();
       if (error) throw error;
       if (!so) return { error: "OS não encontrada" };
       const { data: parts } = await sb
         .from("service_order_parts")
-        .select("id, quantity, line_total_sale, products(product_name)")
+        .select("id, quantity, line_total_sale, products(name)")
         .eq("service_order_id", args.id);
       const { data: services } = await sb
         .from("service_order_services")
-        .select("id, service_name_snapshot, quantity, unit_price_snapshot, line_total")
+        .select("id, name_snapshot, quantity, unit_price_snapshot, line_total")
         .eq("service_order_id", args.id);
       
       return { 
         service_order: {
           ...so,
-          cliente: so.clients?.full_name_or_company_name || "—",
-          embarcacao: so.vessels?.boat_name || "—"
+          cliente: so.clients?.name || "—",
+          embarcacao: so.vessels?.name || "—"
         }, 
         parts: (parts || []).map((p: any) => ({
-          produto: p.products?.product_name || "Desconhecido",
+          produto: p.products?.name || "Desconhecido",
           quantidade: p.quantity,
           total: p.line_total_sale
         })), 
         services: (services || []).map((s: any) => ({
-          servico: s.service_name_snapshot,
+          servico: s.name_snapshot,
           quantidade: s.quantity,
           preco_unitario: s.unit_price_snapshot,
           total: s.line_total
@@ -844,7 +869,7 @@ async function executeTool(
     case "get_client_history": {
       const { data, error } = await sb
         .from("service_orders")
-        .select("id, service_order_number, status, scheduled_start_at, grand_total, created_at, vessels(boat_name)")
+        .select("id, service_order_number, status, scheduled_start_at, grand_total, created_at, vessels(name)")
         .eq("client_id", args.client_id)
         .order("created_at", { ascending: false })
         .limit(20);
@@ -852,7 +877,7 @@ async function executeTool(
       const mapped = (data || []).map((so: any) => ({
         numero: so.service_order_number,
         status: so.status,
-        embarcacao: so.vessels?.boat_name || "—",
+        embarcacao: so.vessels?.name || "—",
         valor_total: so.grand_total || 0,
         agendado_para: so.scheduled_start_at || null,
         criado_em: so.created_at,
@@ -878,9 +903,9 @@ async function executeTool(
       const limit = Math.min(Number(args.limit) || 10, 25);
       const { data, error } = await sb
         .from("services")
-        .select("id, service_name, description, billing_unit, default_price")
+        .select("id, name, description, billing_unit, default_price")
         .eq("active", true)
-        .or(`service_name.ilike.%${q}%,description.ilike.%${q}%`)
+        .or(`name.ilike.%${q}%,description.ilike.%${q}%`)
         .limit(limit);
       if (error) throw error;
       return { results: data };
@@ -901,11 +926,11 @@ async function executeTool(
       const q = String(args.query || "").trim();
       let query = sb
         .from("marinas")
-        .select("id, marina_name, city, state")
+        .select("id, name, city, state")
         .eq("active", true)
-        .order("marina_name")
+        .order("name")
         .limit(20);
-      if (q) query = query.ilike("marina_name", `%${q}%`);
+      if (q) query = query.ilike("name", `%${q}%`);
       const { data, error } = await query;
       if (error) throw error;
       return { results: data };
@@ -914,7 +939,7 @@ async function executeTool(
     case "get_vessel_history": {
       const { data, error } = await sb
         .from("service_orders")
-        .select("id, service_order_number, status, scheduled_start_at, grand_total, created_at, problem_description, clients(full_name_or_company_name)")
+        .select("id, service_order_number, status, scheduled_start_at, grand_total, created_at, problem_description, clients(name)")
         .eq("vessel_id", args.vessel_id)
         .order("created_at", { ascending: false })
         .limit(30);
@@ -922,7 +947,7 @@ async function executeTool(
       const mapped = (data || []).map((so: any) => ({
         numero: so.service_order_number,
         status: so.status,
-        cliente: so.clients?.full_name_or_company_name || "—",
+        cliente: so.clients?.name || "—",
         problema: so.problem_description || "—",
         valor_total: so.grand_total || 0,
         agendado_para: so.scheduled_start_at || null,
@@ -966,7 +991,7 @@ async function executeTool(
 
     case "get_technician_commissions": {
       let query = admin.from("commissions").select("*, service_orders(service_order_number)");
-      if (args.technician_id) query = query.eq("technician_user_id", args.technician_id);
+      if (args.technician_id) query = query.eq("user_id", args.technician_id);
       if (args.status) query = query.eq("status", args.status);
       const { data, error } = await query;
       if (error) throw error;
@@ -1162,7 +1187,7 @@ async function executeTool(
 
     case "add_service_to_order": {
       const { data: svc } = args.service_id
-        ? await sb.from("services").select("service_name, billing_unit, default_price").eq("id", args.service_id).maybeSingle()
+        ? await sb.from("services").select("name, billing_unit, default_price").eq("id", args.service_id).maybeSingle()
         : { data: null };
       const qty = Number(args.quantity) || 1;
       const defaultHourlyRate = Number(settings.default_hourly_rate) || 0;
@@ -1172,7 +1197,7 @@ async function executeTool(
         .insert({
           service_order_id: args.service_order_id,
           service_id: args.service_id || null,
-          service_name_snapshot: args.service_name || svc?.service_name || "",
+          name_snapshot: args.service_name || svc?.name || "",
           billing_unit_snapshot: args.billing_unit || svc?.billing_unit || "visit",
           quantity: qty,
           unit_price_snapshot: price,
@@ -1199,7 +1224,7 @@ async function executeTool(
       if (error) throw error;
       if (args.technician_user_id) {
         await sb.from("service_order_technicians")
-          .upsert({ service_order_id: args.service_order_id, technician_user_id: args.technician_user_id }, { onConflict: "service_order_id,technician_user_id" })
+          .upsert({ service_order_id: args.service_order_id, user_id: args.technician_user_id }, { onConflict: "service_order_id,user_id" })
           .catch(() => null);
       }
       return { ok: true, service_order: data };
@@ -1213,23 +1238,16 @@ async function executeTool(
         observation: "observação técnica",
       };
       const label = contextLabels[args.context] || args.context;
-      const optimizeRes = await fetch(`${GEMINI_BASE_URL}/chat/completions`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${GEMINI_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: MODEL_SMART,
-          messages: [
-            {
-              role: "system",
-              content: `Você é um especialista em comunicação técnica náutica. Reescreva o texto a seguir como ${label}, mantendo as informações originais mas tornando-o mais claro, profissional e preciso. Responda APENAS com o texto reescrito, sem explicações.`,
-            },
-            { role: "user", content: args.text },
-          ],
-          tool_choice: "none",
-        }),
+      const optimizeRes = await callGeminiWithRetry({
+        model: MODEL_SMART,
+        messages: [
+          {
+            role: "system",
+            content: `Você é um especialista em comunicação técnica náutica. Reescreva o texto a seguir como ${label}, mantendo as informações originais mas tornando-o mais claro, profissional e preciso. Responda APENAS com o texto reescrito, sem explicações.`,
+          },
+          { role: "user", content: args.text },
+        ],
+        tool_choice: "none",
       });
       const optimizeJson = await optimizeRes.json();
       const optimized = optimizeJson.choices?.[0]?.message?.content || args.text;
@@ -1302,11 +1320,11 @@ async function executeTool(
     case "send_collection_reminder": {
       const { data: col, error } = await sb
         .from("collections")
-        .select("id, amount, due_date, contact_whatsapp, contact_phone, contact_name, client_id, description")
+        .select("id, amount, due_date, contact_whatsapp, phone, contact_name, client_id, description")
         .eq("id", args.collection_id)
         .maybeSingle();
       if (error || !col) return { error: "Cobrança não encontrada" };
-      let phone = col.contact_whatsapp || col.contact_phone;
+      let phone = col.contact_whatsapp || col.phone;
       if (!phone) {
         const { data: c } = await sb
           .from("clients")
@@ -1347,7 +1365,7 @@ async function executeTool(
       if (!so.share_token) return { error: `A OS ${so.service_order_number} não possui link público ainda. Abra a OS no app, clique em "Compartilhar" para gerar o link, e tente novamente.` };
       const { data: c } = await admin
         .from("clients")
-        .select("whatsapp, phone, full_name_or_company_name")
+        .select("whatsapp, phone, name")
         .eq("id", so.client_id)
         .maybeSingle();
       const phone = c?.whatsapp || c?.phone;
@@ -1357,7 +1375,7 @@ async function executeTool(
       const link = `${origin}/view/${so.share_token}`;
       const msg =
         args.custom_message ||
-        `Olá${c?.full_name_or_company_name ? ` ${c.full_name_or_company_name}` : ""}, segue o link da OS ${so.service_order_number}: ${link}`;
+        `Olá${c?.name ? ` ${c.name}` : ""}, segue o link da OS ${so.service_order_number}: ${link}`;
       return await sendWhatsapp(phone, msg, jwt);
     }
 
@@ -1462,7 +1480,7 @@ async function executeTool(
         .insert({
           service_order_id: args.service_order_id,
           service_id: null,
-          service_name_snapshot: args.name,
+          name_snapshot: args.name,
           billing_unit_snapshot: "unit",
           quantity: qty,
           unit_price_snapshot: price,
@@ -1611,16 +1629,9 @@ Responda APENAS com o texto da mensagem pronta para envio, sem explicações ou 
 
       const salesMessages: any[] = [{ role: "system", content: salesPrompt }, ...incoming];
 
-      const aiRes = await fetch(`${GEMINI_BASE_URL}/chat/completions`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${GEMINI_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: MODEL_SMART,
-          messages: salesMessages,
-        }),
+      const aiRes = await callGeminiWithRetry({
+        model: MODEL_SMART,
+        messages: salesMessages,
       });
 
       if (aiRes.status === 429) {
@@ -1704,11 +1715,11 @@ O sistema distingue dois tipos de documento:
 O campo "vessel" suporta QUALQUER tipo de ativo, não apenas embarcações náuticas:
 - Lancha, Veleiro, Jet Ski, Catamarã (asset_type marítimo)
 - Camper, Motorhome, Trailer (asset_type terrestre)
-- O nome é "boat_name" no banco mas representa o ativo do cliente.
+- O campo "name" representa o nome/identificação do ativo do cliente (embarcação, motorhome, etc.).
 
 Fluxo quando o ativo não existe ainda:
   1. search_vessels(query, client_id) → se não encontrar →
-  2. propose_action para create_vessel (boat_name=nome do ativo, asset_type=tipo, model=modelo, manufacturer=fabricante) →
+  2. propose_action para create_vessel (name=nome do ativo, asset_type=tipo, model=modelo, manufacturer=fabricante) →
   3. Após criar o ativo → criar o orçamento/OS com vessel_id retornado.
 
 ════ FLUXO DE CRIAÇÃO DE ORÇAMENTO ════
@@ -1826,18 +1837,11 @@ PROATIVIDADE:
       // e escrevia listas em texto em vez de chamar a tool. Pro garante maior fidelidade.
       const modelToUse = MODEL_SMART;
 
-      const aiRes = await fetch(`${GEMINI_BASE_URL}/chat/completions`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${GEMINI_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: modelToUse,
-          messages,
-          tools: isSalesCopy ? undefined : TOOLS,
-          tool_choice: isSalesCopy ? undefined : "auto",
-        }),
+      const aiRes = await callGeminiWithRetry({
+        model: modelToUse,
+        messages,
+        tools: isSalesCopy ? undefined : TOOLS,
+        tool_choice: isSalesCopy ? undefined : "auto",
       });
 
       if (aiRes.status === 429) {
@@ -1916,7 +1920,7 @@ PROATIVIDADE:
               ? `Encontrei ${n} clientes para "${q}". Escolha ou refine:`
               : `Qual cliente chamado "${q}"?`,
             label: (c) => {
-              const parts = [c.full_name_or_company_name];
+              const parts = [c.name];
               const contact = c.whatsapp || c.phone || c.email || c.cpf_cnpj || c.city;
               if (contact) parts.push(contact);
               return parts.join(" — ");
@@ -1927,14 +1931,14 @@ PROATIVIDADE:
             question: (q, n) => n > 5
               ? `Encontrei ${n} embarcações para "${q}". Escolha ou refine:`
               : `Qual embarcação chamada "${q}"?`,
-            label: (v) => [v.boat_name, v.model, v.year].filter(Boolean).join(" · "),
+            label: (v) => [v.name, v.model, v.year].filter(Boolean).join(" · "),
             value: (v) => v.id,
           },
           search_products: {
             question: (q, n) => n > 5
               ? `Encontrei ${n} produtos para "${q}". Escolha ou refine:`
               : `Qual produto para "${q}"?`,
-            label: (p) => `${p.product_name}${p.sale_price ? ` — R$ ${Number(p.sale_price).toFixed(2)}` : ""}`,
+            label: (p) => `${p.name}${p.sale_price ? ` — R$ ${Number(p.sale_price).toFixed(2)}` : ""}`,
             value: (p) => p.id,
           },
           list_service_orders: {
