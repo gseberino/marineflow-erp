@@ -1,7 +1,9 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import type { AIContext } from '@/lib/ai-context';
+
+const SESSION_STORAGE_KEY = 'ai_session_id';
 
 export type ChatMessage =
   | { role: 'user'; content: string }
@@ -37,6 +39,45 @@ export function useAIAgent(context: AIContext) {
   const [activeProposal, setActiveProposal] = useState<{ idx: number; proposal: Proposal } | null>(null);
   const [activeOptions, setActiveOptions] = useState<{ idx: number; data: OptionsData } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(SESSION_STORAGE_KEY);
+    } catch {
+      return null;
+    }
+  });
+
+  // Carrega o histórico salvo (Fase 2) ao montar o widget, se já existir uma sessão.
+  useEffect(() => {
+    if (!sessionId) return;
+    let cancelled = false;
+    (async () => {
+      const { data, error: histError } = await supabase.functions.invoke('ai-agent', {
+        body: { type: 'load_history', session_id: sessionId },
+      });
+      if (cancelled || histError) return;
+      const loaded = (data as any)?.messages as ChatMessage[] | undefined;
+      if (!(data as any)?.session_id) {
+        // Sessão não encontrada/não é mais do usuário — começa do zero silenciosamente.
+        try { localStorage.removeItem(SESSION_STORAGE_KEY); } catch { /* ignore */ }
+        setSessionId(null);
+        return;
+      }
+      if (loaded && loaded.length > 0) {
+        setMessages(loaded);
+        setDisplay(
+          loaded
+            .filter((m): m is Extract<ChatMessage, { role: 'user' | 'assistant' }> => m.role === 'user' || m.role === 'assistant')
+            .filter((m) => m.content)
+            .map((m) => ({ kind: 'message' as const, role: m.role, content: m.content }))
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const invalidateAll = useCallback(() => {
     ['clients', 'vessels', 'products', 'service-orders', 'agenda', 'collections'].forEach((k) =>
@@ -54,7 +95,7 @@ export function useAIAgent(context: AIContext) {
       try {
         const limitedMsgs = msgs.length > 30 ? msgs.slice(msgs.length - 30) : msgs;
         const { data, error } = await supabase.functions.invoke('ai-agent', {
-          body: { messages: limitedMsgs, context },
+          body: { messages: limitedMsgs, context, session_id: sessionId },
         });
         if (error) {
           // Tenta extrair mensagem amigável do body da edge function (ex: créditos esgotados)
@@ -65,6 +106,14 @@ export function useAIAgent(context: AIContext) {
           throw error;
         }
         if ((data as any)?.error) throw new Error((data as any).error);
+
+        // Guarda o session_id retornado (Fase 2) para as próximas chamadas e para
+        // reabrir o widget mais tarde com o histórico ainda disponível.
+        const returnedSessionId = (data as any)?.session_id as string | undefined;
+        if (returnedSessionId && returnedSessionId !== sessionId) {
+          setSessionId(returnedSessionId);
+          try { localStorage.setItem(SESSION_STORAGE_KEY, returnedSessionId); } catch { /* ignore */ }
+        }
 
         // Atualiza histórico oficial — usa updated_messages se vier (caso de proposal)
         const updated = (data as any).updated_messages as ChatMessage[] | undefined;
@@ -108,7 +157,7 @@ export function useAIAgent(context: AIContext) {
         setLoading(false);
       }
     },
-    [context, invalidateAll]
+    [context, invalidateAll, sessionId]
   );
 
   const sendMessage = useCallback(
@@ -190,6 +239,8 @@ export function useAIAgent(context: AIContext) {
     setActiveProposal(null);
     setActiveOptions(null);
     setError(null);
+    setSessionId(null);
+    try { localStorage.removeItem(SESSION_STORAGE_KEY); } catch { /* ignore */ }
   }, []);
 
   return { display, loading, loadingMsg, error, activeProposal, activeOptions, sendMessage, confirmProposal, cancelProposal, selectOption, reset };
