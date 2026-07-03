@@ -9,7 +9,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { runAgentLoop } from "../_shared/ai/agent.ts";
 import { buildSystemBlocks } from "../_shared/ai/prompt.ts";
 import { callClaude, ClaudeApiError, type ClaudeContentBlock, type ClaudeMessage } from "../_shared/ai/anthropic.ts";
-import { MODEL_LITE } from "../_shared/ai/models.ts";
+import { MODEL_AGENT, MODEL_LITE } from "../_shared/ai/models.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -92,6 +92,54 @@ function fromAnthropicMessages(claudeMessages: ClaudeMessage[]): ChatMessage[] {
   return result;
 }
 
+// ---------------- Persistência (Fase 2) — supabase/migrations/20260703140000_ai_operator_tables.sql ----------------
+
+type MessageRow = {
+  role: "user" | "assistant" | "tool" | "system";
+  content: string | null;
+  tool_calls: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }> | null;
+  tool_call_id: string | null;
+};
+
+/** Linha de ai_operator_messages -> ChatMessage (OpenAI-shape), inverso de buildMessageRows. */
+function rowToChatMessage(row: MessageRow): ChatMessage {
+  if (row.role === "tool") return { role: "tool", tool_call_id: row.tool_call_id || "", content: row.content || "" };
+  if (row.role === "assistant") {
+    const toolCalls = Array.isArray(row.tool_calls) && row.tool_calls.length > 0 ? row.tool_calls : undefined;
+    return { role: "assistant", content: row.content || "", ...(toolCalls ? { tool_calls: toolCalls } : {}) };
+  }
+  return { role: "user", content: row.content || "" };
+}
+
+/**
+ * Monta as linhas novas de ai_operator_messages para um turno. `usageLog` tem uma
+ * entrada por chamada ao Claude nesse turno, na MESMA ordem em que agent.ts empilha as
+ * mensagens assistant — por isso o índice avança só quando encontra role:"assistant".
+ */
+function buildMessageRows(sessionId: string, newMessages: ChatMessage[], usageLog: Array<{ inputTokens: number; outputTokens: number; cacheReadInputTokens: number }>, model: string) {
+  let usageIdx = 0;
+  return newMessages.map((m) => {
+    if (m.role === "tool") {
+      return { session_id: sessionId, role: "tool", content: m.content, tool_call_id: m.tool_call_id, source: "web" };
+    }
+    if (m.role === "assistant") {
+      const usage = usageLog[usageIdx++];
+      return {
+        session_id: sessionId,
+        role: "assistant",
+        content: m.content || null,
+        tool_calls: m.tool_calls && m.tool_calls.length > 0 ? m.tool_calls : null,
+        source: "web",
+        tokens_in: usage?.inputTokens ?? null,
+        tokens_out: usage?.outputTokens ?? null,
+        cache_read_tokens: usage?.cacheReadInputTokens ?? null,
+        model,
+      };
+    }
+    return { session_id: sessionId, role: "user", content: m.content, source: "web" };
+  });
+}
+
 // Prompt do modo "sales copy" (usado por AIConsultantDashboard/ProspectingPage) — reaproveitado
 // quase literal do original. Chamada única a MODEL_LITE, sem tools, sem prompt caching (turno
 // isolado, sem ganho de cache).
@@ -153,6 +201,23 @@ Deno.serve(async (req) => {
     const incoming: ChatMessage[] = Array.isArray(body.messages) ? body.messages : [];
     const context = body.context || {};
     const isSalesCopy = body.is_sales_copy === true;
+    const requestedSessionId: string | undefined = typeof body.session_id === "string" ? body.session_id : undefined;
+
+    // ---------- Carregar histórico (Fase 2) — usado pelo widget ao reabrir, sem chamar o LLM ----------
+    if (body.type === "load_history") {
+      if (!requestedSessionId) return jr({ error: "session_id obrigatório" }, 400);
+      const { data: sess } = await admin.from("ai_operator_sessions").select("id, owner_user_id").eq("id", requestedSessionId).maybeSingle();
+      if (!sess || (sess.owner_user_id && sess.owner_user_id !== userId && userRole !== "admin")) {
+        return jr({ session_id: null, messages: [] });
+      }
+      const { data: rows } = await admin
+        .from("ai_operator_messages")
+        .select("role, content, tool_calls, tool_call_id")
+        .eq("session_id", requestedSessionId)
+        .order("created_at", { ascending: true })
+        .limit(30);
+      return jr({ session_id: requestedSessionId, messages: (rows || []).map(rowToChatMessage) });
+    }
 
     // ---------- MODO SALES COPY (sem tools, foco em copy persuasiva para WhatsApp) ----------
     if (isSalesCopy) {
@@ -177,23 +242,86 @@ Deno.serve(async (req) => {
 
     const appOrigin = req.headers.get("origin") || req.headers.get("referer")?.replace(/\/$/, "") || "";
 
+    // ---- Resolve a sessão (Fase 2): cria uma nova se ausente/inválida/de outro usuário ----
+    let sessionId = requestedSessionId;
+    let seedMessages: ChatMessage[] = [];
+    let alreadyPersistedCount = 0; // em "unidades nativas" Anthropic (após toAnthropicMessages)
+
+    if (sessionId) {
+      const { data: sess } = await admin.from("ai_operator_sessions").select("id, owner_user_id").eq("id", sessionId).maybeSingle();
+      if (!sess || (sess.owner_user_id && sess.owner_user_id !== userId && userRole !== "admin")) {
+        sessionId = undefined; // sessão inválida ou de outro usuário -> cria uma nova abaixo
+      }
+    }
+
+    if (!sessionId) {
+      const { data: newSession, error: sessErr } = await admin
+        .from("ai_operator_sessions")
+        .insert({ channel: "web", owner_user_id: userId, status: "open" })
+        .select("id")
+        .single();
+      if (sessErr || !newSession) return jr({ error: `Falha ao criar sessão: ${sessErr?.message || "erro desconhecido"}` }, 500);
+      sessionId = newSession.id;
+    } else {
+      const { data: rows } = await admin
+        .from("ai_operator_messages")
+        .select("role, content, tool_calls, tool_call_id")
+        .eq("session_id", sessionId)
+        .order("created_at", { ascending: true })
+        .limit(30);
+      seedMessages = (rows || []).map(rowToChatMessage);
+      alreadyPersistedCount = toAnthropicMessages(seedMessages).length;
+    }
+    // Neste ponto sessionId sempre está definido (criado ou validado acima).
+    const resolvedSessionId: string = sessionId!;
+
+    // Sessão já tinha histórico no banco -> banco é autoritativo, só a última mensagem
+    // de usuário do payload é o input novo deste turno. Sessão nova (ou sem linhas
+    // persistidas ainda) -> usa o array inteiro que o frontend mandou, como na Fase 1.
+    const newUserMsg = alreadyPersistedCount > 0 ? [...incoming].reverse().find((m) => m.role === "user") : undefined;
+    const historyMessages: ChatMessage[] = alreadyPersistedCount > 0 ? (newUserMsg ? [...seedMessages, newUserMsg] : seedMessages) : incoming;
+
+    // ---- Notas de memória ativas (Fase 2) — só as globais já verificadas ----
+    const { data: memoryRows } = await admin
+      .from("ai_operator_memory_notes")
+      .select("title, body")
+      .eq("scope", "global")
+      .eq("verification_status", "verified")
+      .order("created_at", { ascending: false })
+      .limit(10);
+    const memoryNotes = (memoryRows || []).map((r: any) => `${r.title}: ${r.body}`);
+
     const system = buildSystemBlocks(settings, {
       userName,
       userRole,
       route: context.route,
       entityType: context.entityType,
       entityId: context.entityId,
+      memoryNotes,
     });
 
     const result = await runAgentLoop({
       system,
-      messages: toAnthropicMessages(incoming),
+      messages: toAnthropicMessages(historyMessages),
       toolCtx: { sb, admin, userId, jwt, appOrigin, settings },
       channel: "panel",
     });
 
+    // ---- Persiste as mensagens novas deste turno (best-effort — não derruba a resposta) ----
+    try {
+      const newNativeSlice = result.messages.slice(alreadyPersistedCount);
+      const newRows = fromAnthropicMessages(newNativeSlice);
+      if (newRows.length > 0) {
+        const rowsToInsert = buildMessageRows(resolvedSessionId, newRows, result.usage, MODEL_AGENT);
+        await admin.from("ai_operator_messages").insert(rowsToInsert);
+      }
+      await admin.from("ai_operator_sessions").update({ last_activity_at: new Date().toISOString() }).eq("id", resolvedSessionId);
+    } catch (persistErr) {
+      console.error("[ai-agent] falha ao persistir mensagens/sessão:", persistErr);
+    }
+
     if (result.error) {
-      return jr({ error: result.error }, result.errorStatus ?? 500);
+      return jr({ error: result.error, session_id: resolvedSessionId }, result.errorStatus ?? 500);
     }
 
     if (result.options) {
@@ -202,6 +330,7 @@ Deno.serve(async (req) => {
         options: result.options,
         tool_events: result.toolEvents,
         updated_messages: fromAnthropicMessages(result.messages),
+        session_id: resolvedSessionId,
       });
     }
 
@@ -211,12 +340,13 @@ Deno.serve(async (req) => {
         proposal: result.proposal,
         tool_events: result.toolEvents,
         updated_messages: fromAnthropicMessages(result.messages),
+        session_id: resolvedSessionId,
       });
     }
 
     // Resposta final sem tool calls no último giro — igual ao comportamento original,
     // não inclui updated_messages (o frontend só acrescenta esta mensagem ao seu estado local).
-    return jr({ message: result.message, tool_events: result.toolEvents });
+    return jr({ message: result.message, tool_events: result.toolEvents, session_id: resolvedSessionId });
   } catch (e: any) {
     console.error("ai-agent error", e);
     return jr({ error: e?.message || "internal error" }, 500);

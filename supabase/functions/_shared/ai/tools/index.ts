@@ -9,6 +9,7 @@ import { reportTools } from "./reports.ts";
 import { purchasingTools } from "./purchasing.ts";
 import { whatsappTools } from "./whatsapp.ts";
 import { uiTools } from "./ui.ts";
+import { memoryTools } from "./memory.ts";
 
 export type { ToolDef, ToolCtx, RiskLevel, Role } from "./registry.ts";
 
@@ -25,6 +26,7 @@ export const allTools: ToolDef[] = [
   ...purchasingTools,
   ...whatsappTools,
   ...uiTools,
+  ...memoryTools,
 ].sort((a, b) => a.name.localeCompare(b.name));
 
 export const toolsByName: Record<string, ToolDef> = Object.fromEntries(allTools.map((t) => [t.name, t]));
