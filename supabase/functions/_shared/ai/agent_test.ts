@@ -1,12 +1,12 @@
-// Testes do núcleo do AI Operator (Anthropic). Segue o mesmo padrão de mock de
-// fetch usado em _shared/whatsapp/*_test.ts. Rodar com:
+// Testes do núcleo do AI Operator (Claude via OpenRouter). Segue o mesmo padrão de mock
+// de fetch usado em _shared/whatsapp/*_test.ts. Rodar com:
 //   deno test --allow-env supabase/functions/_shared/ai/agent_test.ts
 import { assertEquals, assertExists, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { callClaude } from "./anthropic.ts";
 import { runAgentLoop } from "./agent.ts";
 import type { ToolDef } from "./tools/registry.ts";
 
-Deno.env.set("ANTHROPIC_API_KEY", "test-key-not-real");
+Deno.env.set("OPENROUTER_API_KEY", "test-key-not-real");
 
 function mockFetchSequence(
   responses: Array<{ status: number; body: unknown; headers?: Record<string, string> }>,
@@ -35,16 +35,30 @@ function withFetch<T>(stub: typeof globalThis.fetch, fn: () => Promise<T>): Prom
   });
 }
 
-function claudeMsg(opts: { content: unknown[]; stop_reason: string }) {
+// Descreve a resposta do modelo no nosso vocabulário nativo (content blocks + stop_reason,
+// igual ao que a API da Anthropic devolveria) e monta o corpo no formato OpenAI-shape que o
+// OpenRouter realmente devolve (choices[].message + finish_reason) — é isso que o fetch
+// mockado retorna, exercitando a tradução feita dentro de callClaude.
+function claudeMsg(opts: { content: Array<{ type: string; text?: string; id?: string; name?: string; input?: unknown }>; stop_reason: string }) {
+  const textBlocks = opts.content.filter((b) => b.type === "text");
+  const toolUseBlocks = opts.content.filter((b) => b.type === "tool_use");
+  const finishReason =
+    opts.stop_reason === "max_tokens" ? "length" : opts.stop_reason === "tool_use" ? "tool_calls" : opts.stop_reason === "end_turn" ? "stop" : opts.stop_reason;
   return {
-    id: "msg_test",
-    type: "message",
-    role: "assistant",
-    model: "claude-sonnet-5",
-    content: opts.content,
-    stop_reason: opts.stop_reason,
-    stop_sequence: null,
-    usage: { input_tokens: 100, output_tokens: 20, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+    id: "gen_test",
+    choices: [
+      {
+        message: {
+          role: "assistant",
+          content: textBlocks.map((b) => b.text).join("") || null,
+          ...(toolUseBlocks.length
+            ? { tool_calls: toolUseBlocks.map((b) => ({ id: b.id, type: "function", function: { name: b.name, arguments: JSON.stringify(b.input) } })) }
+            : {}),
+        },
+        finish_reason: finishReason,
+      },
+    ],
+    usage: { prompt_tokens: 100, completion_tokens: 20, prompt_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 } },
   };
 }
 
@@ -172,7 +186,7 @@ Deno.test("callClaude: retry em 429 respeita retry-after e sucede na 2ª tentati
   ]);
   const result = await withFetch(fetchStub, () =>
     callClaude({
-      model: "claude-sonnet-5",
+      model: "anthropic/claude-sonnet-5",
       system: [{ type: "text", text: "sistema" }],
       messages: [{ role: "user", content: [{ type: "text", text: "oi" }] }],
     })

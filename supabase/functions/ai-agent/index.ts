@@ -121,7 +121,7 @@ Responda APENAS com o texto da mensagem pronta para envio, sem explicações ou 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
-    if (!Deno.env.get("ANTHROPIC_API_KEY")) return jr({ error: "ANTHROPIC_API_KEY não configurada no Supabase" }, 500);
+    if (!Deno.env.get("OPENROUTER_API_KEY")) return jr({ error: "OPENROUTER_API_KEY não configurada no Supabase" }, 500);
 
     const authHeader = req.headers.get("Authorization") || "";
     const jwt = authHeader.replace(/^Bearer\s+/i, "");
