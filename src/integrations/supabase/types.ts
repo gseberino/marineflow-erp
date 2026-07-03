@@ -859,39 +859,51 @@ export type Database = {
       ai_operator_messages: {
         Row: {
           attachments: Json | null
+          cache_read_tokens: number | null
           content: string | null
           created_at: string
           id: string
+          model: string | null
           role: string
           session_id: string
           source: string | null
           source_message_id: string | null
+          tokens_in: number | null
+          tokens_out: number | null
           tool_call_id: string | null
           tool_calls: Json | null
           tool_name: string | null
         }
         Insert: {
           attachments?: Json | null
+          cache_read_tokens?: number | null
           content?: string | null
           created_at?: string
           id?: string
+          model?: string | null
           role: string
           session_id: string
           source?: string | null
           source_message_id?: string | null
+          tokens_in?: number | null
+          tokens_out?: number | null
           tool_call_id?: string | null
           tool_calls?: Json | null
           tool_name?: string | null
         }
         Update: {
           attachments?: Json | null
+          cache_read_tokens?: number | null
           content?: string | null
           created_at?: string
           id?: string
+          model?: string | null
           role?: string
           session_id?: string
           source?: string | null
           source_message_id?: string | null
+          tokens_in?: number | null
+          tokens_out?: number | null
           tool_call_id?: string | null
           tool_calls?: Json | null
           tool_name?: string | null
@@ -3680,6 +3692,7 @@ export type Database = {
         Row: {
           created_at: string
           currency_snapshot: string | null
+          discount_amount: number
           discount_pct: number
           id: string
           line_total_cost: number
@@ -3699,6 +3712,7 @@ export type Database = {
         Insert: {
           created_at?: string
           currency_snapshot?: string | null
+          discount_amount?: number
           discount_pct?: number
           id?: string
           line_total_cost: number
@@ -3718,6 +3732,7 @@ export type Database = {
         Update: {
           created_at?: string
           currency_snapshot?: string | null
+          discount_amount?: number
           discount_pct?: number
           id?: string
           line_total_cost?: number
@@ -3818,6 +3833,7 @@ export type Database = {
           billing_unit_snapshot: string
           created_at: string | null
           description_snapshot: string | null
+          discount_amount: number
           discount_pct: number
           elapsed_minutes: number | null
           finished_at: string | null
@@ -3840,6 +3856,7 @@ export type Database = {
           billing_unit_snapshot?: string
           created_at?: string | null
           description_snapshot?: string | null
+          discount_amount?: number
           discount_pct?: number
           elapsed_minutes?: number | null
           finished_at?: string | null
@@ -3862,6 +3879,7 @@ export type Database = {
           billing_unit_snapshot?: string
           created_at?: string | null
           description_snapshot?: string | null
+          discount_amount?: number
           discount_pct?: number
           elapsed_minutes?: number | null
           finished_at?: string | null
