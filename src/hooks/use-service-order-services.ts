@@ -17,20 +17,40 @@ export function useUpdateServiceOrderService() {
       notes?: string | null;
       technician_user_id?: string | null;
       discount_pct?: number;
+      discount_amount?: number;
     }) => {
       const { id, service_order_id, ...rest } = values;
       const patch: Record<string, any> = { ...rest };
       if (typeof rest.quantity === 'number' && typeof rest.unit_price_snapshot === 'number') {
-        // Onda 2: desconto por linha.
-        const discountPct = rest.discount_pct || 0;
-        patch.line_total = Math.round(rest.quantity * rest.unit_price_snapshot * (1 - discountPct / 100) * 100) / 100;
+        // discount_amount (R$) é a fonte da verdade — subtração exata, sem
+        // passar pelo percentual (que perde centavos, numeric(5,2)).
+        const discountAmount = rest.discount_amount || 0;
+        patch.line_total = Math.round((rest.quantity * rest.unit_price_snapshot - discountAmount) * 100) / 100;
       }
+
+      // Snapshot dos campos alterados antes de gravar — necessário para
+      // reverter caso o novo total fique abaixo do que o cliente já pagou.
+      const { data: before } = await supabase
+        .from('service_order_services')
+        .select(Object.keys(patch).join(','))
+        .eq('id', id)
+        .single();
+
       const { error } = await supabase
         .from('service_order_services')
         .update(patch as any)
         .eq('id', id);
       if (error) throw error;
-      await recalcTotals(service_order_id);
+
+      try {
+        await recalcTotals(service_order_id);
+      } catch (e) {
+        if (before) {
+          await supabase.from('service_order_services').update(before as any).eq('id', id);
+        }
+        await recalcTotals(service_order_id).catch(() => {});
+        throw e;
+      }
     },
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ['so-services', vars.service_order_id] });

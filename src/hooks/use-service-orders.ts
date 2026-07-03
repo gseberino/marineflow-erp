@@ -99,10 +99,12 @@ export function useUpdateServiceOrder() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, ...values }: { id: string } & Record<string, any>) => {
-      // Get previous values for audit
+      // Snapshot completo (não só grand_total/status) para poder reverter
+      // exatamente os campos alterados, caso o novo total fique abaixo do
+      // que o cliente já pagou (ver recalcTotals/GrandTotalBelowPaidError).
       const { data: prev } = await supabase
         .from('service_orders')
-        .select('grand_total, status')
+        .select('*')
         .eq('id', id)
         .single();
 
@@ -114,23 +116,20 @@ export function useUpdateServiceOrder() {
         .single();
       if (error) throw error;
 
-      // Always recompute grand_total from the DB after saving.
-      // This ensures discount, tax, travel and all line items are reflected
-      // correctly in the stored value — used by PDFs, receivables, and reports.
-      await recalcTotals(id);
-
-      // Re-read the freshly computed grand_total for cascade logic
-      const { data: refreshed } = await supabase
-        .from('service_orders')
-        .select('grand_total')
-        .eq('id', id)
-        .single();
-
-      const newGrandTotal = Number(refreshed?.grand_total ?? data.grand_total);
-
-      // Cascade update receivable if grand_total changed
-      if (prev && newGrandTotal !== Number(prev.grand_total)) {
-        await updateReceivableFromSO(id, newGrandTotal);
+      // Always recompute grand_total from the DB after saving. This ensures
+      // discount, tax, travel and all line items are reflected correctly in
+      // the stored value — used by PDFs, receivables, and reports. A cascata
+      // para recebíveis já roda dentro de recalcTotals.
+      try {
+        await recalcTotals(id);
+      } catch (e) {
+        // Reverte só os campos que esta mutation alterou, restaurando o
+        // total anterior, e propaga o erro (toast.error no chamador).
+        const revertPatch: Record<string, any> = {};
+        for (const key of Object.keys(values)) revertPatch[key] = (prev as any)?.[key];
+        await supabase.from('service_orders').update(revertPatch).eq('id', id);
+        await recalcTotals(id).catch(() => {});
+        throw e;
       }
 
       await writeAuditLog({
@@ -368,13 +367,20 @@ export async function recalcTotals(soId: string) {
   // Onda 1C: repasse da taxa de cartão ao cliente, aplicado por cima do valor já ajustado.
   const cardFeeAmount = await computeCardFeeAmount(base, so?.card_fee_passthrough_enabled, so?.card_installments);
   const grand = base + cardFeeAmount;
+  const grandRounded = Math.round(grand * 100) / 100;
+
+  // Cascata para recebíveis ANTES de gravar o novo grand_total — se o total
+  // ficaria abaixo do que o cliente já pagou, updateReceivableFromSO lança
+  // GrandTotalBelowPaidError e nada é gravado aqui (o mutation chamador é
+  // responsável por reverter a alteração de linha que originou esta chamada).
+  await updateReceivableFromSO(soId, grandRounded);
 
   await supabase.from('service_orders').update({
     parts_cost_total: partsCost,
     labor_hours_total: laborHours,
     labor_cost_total: Math.round(laborCost * 100) / 100,
     card_fee_amount: cardFeeAmount,
-    grand_total: Math.round(grand * 100) / 100,
+    grand_total: grandRounded,
   }).eq('id', soId);
 }
 
@@ -389,11 +395,13 @@ export function useAddServiceOrderPart() {
       unit_sale_snapshot: number;
       notes?: string;
       discount_pct?: number;
+      discount_amount?: number;
     }) => {
-      // Onda 2: desconto por linha aplicado apenas ao preço de venda (não ao custo).
-      const discountPct = values.discount_pct || 0;
+      // discount_amount (R$) é a fonte da verdade, aplicado só ao preço de
+      // venda (não ao custo) — subtração exata, sem passar pelo percentual.
+      const discountAmount = values.discount_amount || 0;
       const line_total_cost = values.quantity * values.unit_cost_snapshot;
-      const line_total_sale = Math.round(values.quantity * values.unit_sale_snapshot * (1 - discountPct / 100) * 100) / 100;
+      const line_total_sale = Math.round((values.quantity * values.unit_sale_snapshot - discountAmount) * 100) / 100;
       const { error } = await supabase.from('service_order_parts').insert({
         ...values,
         line_total_cost,
@@ -420,10 +428,10 @@ export function useAddServiceOrderPart() {
         unit_cost_snapshot: values.unit_cost_snapshot,
       });
 
+      // Adicionar uma linha só aumenta o total (nunca reduz), então
+      // recalcTotals nunca bloqueia aqui — a cascata de recebíveis já
+      // roda dentro dele.
       await recalcTotals(values.service_order_id);
-      const { data: updatedSO } = await supabase
-        .from('service_orders').select('grand_total').eq('id', values.service_order_id).single();
-      await updateReceivableFromSO(values.service_order_id, updatedSO?.grand_total || 0);
     },
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ['so-parts', vars.service_order_id] });
@@ -445,6 +453,14 @@ export function useRemoveServiceOrderPart() {
       quantity: number;
       unit_cost_snapshot: number;
     }) => {
+      // Snapshot completo antes de deletar — necessário para readicionar a
+      // linha caso a remoção seja bloqueada (novo total abaixo do já pago).
+      const { data: fullRow } = await supabase
+        .from('service_order_parts')
+        .select('*')
+        .eq('id', part.id)
+        .single();
+
       const { error } = await supabase
         .from('service_order_parts')
         .delete()
@@ -456,9 +472,10 @@ export function useRemoveServiceOrderPart() {
         .select('stock_quantity')
         .eq('id', part.product_id)
         .single();
+      const stockBeforeReturn = prod?.stock_quantity || 0;
       await supabase
         .from('products')
-        .update({ stock_quantity: (prod?.stock_quantity || 0) + part.quantity })
+        .update({ stock_quantity: stockBeforeReturn + part.quantity })
         .eq('id', part.product_id);
 
       await supabase.from('inventory_movements').insert({
@@ -470,6 +487,19 @@ export function useRemoveServiceOrderPart() {
         unit_cost_snapshot: part.unit_cost_snapshot,
       });
 
+      try {
+        await recalcTotals(part.service_order_id);
+      } catch (e) {
+        // Reverte: readiciona a linha removida e desfaz o ajuste de estoque.
+        if (fullRow) {
+          const { id: _oldId, ...reinsertData } = fullRow as any;
+          await supabase.from('service_order_parts').insert(reinsertData);
+        }
+        await supabase.from('products').update({ stock_quantity: stockBeforeReturn }).eq('id', part.product_id);
+        await recalcTotals(part.service_order_id).catch(() => {});
+        throw e;
+      }
+
       await writeAuditLog({
         table_name: 'service_order_parts',
         record_id: part.id,
@@ -479,11 +509,6 @@ export function useRemoveServiceOrderPart() {
         triggered_by_table: 'service_orders',
         triggered_by_id: part.service_order_id,
       });
-
-      await recalcTotals(part.service_order_id);
-      const { data: updatedSO } = await supabase
-        .from('service_orders').select('grand_total').eq('id', part.service_order_id).single();
-      await updateReceivableFromSO(part.service_order_id, updatedSO?.grand_total || 0);
     },
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ['so-parts', vars.service_order_id] });
@@ -644,15 +669,19 @@ export function useAddServiceOrderService() {
       notes?: string;
       technician_user_id?: string | null;
       discount_pct?: number;
+      discount_amount?: number;
     }) => {
-      // Onda 2: desconto por linha.
-      const discountPct = values.discount_pct || 0;
-      const line_total = Math.round(values.quantity * values.unit_price_snapshot * (1 - discountPct / 100) * 100) / 100;
+      // discount_amount (R$) é a fonte da verdade — subtração exata, sem
+      // passar pelo percentual (que perde centavos, numeric(5,2)).
+      const discountAmount = values.discount_amount || 0;
+      const line_total = Math.round((values.quantity * values.unit_price_snapshot - discountAmount) * 100) / 100;
       const { data, error } = await supabase.from('service_order_services').insert({
         ...values,
         line_total,
       } as any).select('id').single();
       if (error) throw error;
+      // Adicionar uma linha só aumenta o total (nunca reduz), então
+      // recalcTotals nunca bloqueia aqui.
       await recalcTotals(values.service_order_id);
       return data;
     },
@@ -668,12 +697,30 @@ export function useRemoveServiceOrderService() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, service_order_id }: { id: string; service_order_id: string }) => {
+      // Snapshot completo antes de deletar — necessário para readicionar a
+      // linha caso a remoção seja bloqueada (novo total abaixo do já pago).
+      const { data: fullRow } = await supabase
+        .from('service_order_services')
+        .select('*')
+        .eq('id', id)
+        .single();
+
       const { error } = await supabase
         .from('service_order_services')
         .delete()
         .eq('id', id);
       if (error) throw error;
-      await recalcTotals(service_order_id);
+
+      try {
+        await recalcTotals(service_order_id);
+      } catch (e) {
+        if (fullRow) {
+          const { id: _oldId, ...reinsertData } = fullRow as any;
+          await supabase.from('service_order_services').insert(reinsertData);
+        }
+        await recalcTotals(service_order_id).catch(() => {});
+        throw e;
+      }
     },
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ['so-services', vars.service_order_id] });

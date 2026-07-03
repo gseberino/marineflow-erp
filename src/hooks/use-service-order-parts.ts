@@ -1,7 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { recalcTotals } from '@/hooks/use-service-orders';
-import { updateReceivableFromSO } from '@/lib/cascade-updates';
 
 /**
  * Update an existing service_order_parts row. Adjusts stock & inventory_movements
@@ -20,30 +19,45 @@ export function useUpdateServiceOrderPart() {
       unit_sale_snapshot: number;
       notes?: string | null;
       discount_pct?: number;
+      discount_amount?: number;
     }) => {
-      // Onda 2: desconto por linha aplicado apenas ao preço de venda (não ao custo).
+      // discount_amount (R$) é a fonte da verdade, aplicado só ao preço de
+      // venda (não ao custo) — subtração exata, sem passar pelo percentual.
       const discountPct = values.discount_pct || 0;
+      const discountAmount = values.discount_amount || 0;
       const line_total_cost =
         Math.round(values.quantity * values.unit_cost_snapshot * 100) / 100;
       const line_total_sale =
-        Math.round(values.quantity * values.unit_sale_snapshot * (1 - discountPct / 100) * 100) / 100;
+        Math.round((values.quantity * values.unit_sale_snapshot - discountAmount) * 100) / 100;
+
+      const patch = {
+        product_id: values.product_id,
+        quantity: values.quantity,
+        unit_cost_snapshot: values.unit_cost_snapshot,
+        unit_sale_snapshot: values.unit_sale_snapshot,
+        notes: values.notes ?? null,
+        discount_pct: discountPct,
+        discount_amount: discountAmount,
+        line_total_cost,
+        line_total_sale,
+      };
+
+      // Snapshot dos campos alterados antes de gravar — necessário para
+      // reverter caso o novo total fique abaixo do que o cliente já pagou.
+      const { data: before } = await supabase
+        .from('service_order_parts')
+        .select(Object.keys(patch).join(','))
+        .eq('id', values.id)
+        .single();
 
       const { error } = await supabase
         .from('service_order_parts')
-        .update({
-          product_id: values.product_id,
-          quantity: values.quantity,
-          unit_cost_snapshot: values.unit_cost_snapshot,
-          unit_sale_snapshot: values.unit_sale_snapshot,
-          notes: values.notes ?? null,
-          discount_pct: discountPct,
-          line_total_cost,
-          line_total_sale,
-        } as any)
+        .update(patch as any)
         .eq('id', values.id);
       if (error) throw error;
 
       const delta = values.quantity - values.previous_quantity;
+      let stockBeforeAdjustment: number | null = null;
       if (delta !== 0) {
         const { data: prod } = await supabase
           .from('products')
@@ -51,6 +65,7 @@ export function useUpdateServiceOrderPart() {
           .eq('id', values.product_id)
           .single();
         const currentStock = prod?.stock_quantity || 0;
+        stockBeforeAdjustment = currentStock;
         if (delta > 0 && currentStock < delta) {
           throw new Error(`Estoque insuficiente. Disponível: ${currentStock}, solicitado adicional: ${delta}`);
         }
@@ -70,10 +85,18 @@ export function useUpdateServiceOrderPart() {
         });
       }
 
-      await recalcTotals(values.service_order_id);
-      const { data: updatedSO } = await supabase
-        .from('service_orders').select('grand_total').eq('id', values.service_order_id).single();
-      await updateReceivableFromSO(values.service_order_id, updatedSO?.grand_total || 0);
+      try {
+        await recalcTotals(values.service_order_id);
+      } catch (e) {
+        if (before) {
+          await supabase.from('service_order_parts').update(before as any).eq('id', values.id);
+        }
+        if (stockBeforeAdjustment !== null) {
+          await supabase.from('products').update({ stock_quantity: stockBeforeAdjustment }).eq('id', values.product_id);
+        }
+        await recalcTotals(values.service_order_id).catch(() => {});
+        throw e;
+      }
     },
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ['so-parts', vars.service_order_id] });

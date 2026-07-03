@@ -124,6 +124,7 @@ type SvcCardState = {
   warranty_days?: number;
   warranty_months?: number;
   discount_pct?: number;
+  discount_amount?: number;
 };
 
 type PartCardState = {
@@ -139,61 +140,68 @@ type PartCardState = {
   warranty_months?: number;
   serial_number?: string;
   discount_pct?: number;
+  discount_amount?: number;
 };
 
 type DiscountFieldState = { pct: number; discountAmount: number; finalValue: number };
 
-function computeDiscountState(raw: number, pct: number): DiscountFieldState {
-  const clamped = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
-  const discountAmount = Math.round((raw * clamped) / 100 * 100) / 100;
-  const finalValue = Math.round((raw - discountAmount) * 100) / 100;
-  return { pct: clamped, discountAmount, finalValue };
+/**
+ * `discountAmount` (R$) é a fonte da verdade — o que de fato é persistido e
+ * usado para calcular `line_total`. `pct` é só um valor derivado para exibição
+ * no campo de percentual (arredondado a 2 casas, já que é inerentemente sem
+ * precisão exata para descontos como R$10,12 sobre R$1.000,00 = 1,012%).
+ */
+function computeDiscountState(raw: number, discountAmount: number): DiscountFieldState {
+  const amt = Math.max(0, Math.min(raw, Number.isFinite(discountAmount) ? discountAmount : 0));
+  const finalValue = Math.round((raw - amt) * 100) / 100;
+  const pct = raw > 0 ? Math.round((amt / raw) * 10000) / 100 : 0;
+  return { pct, discountAmount: amt, finalValue };
 }
 
 /**
  * Mantém os 3 campos de desconto (%, R$ e valor final) consistentes entre si.
- * Editar R$ ou valor final nunca faz o campo reexibir a si mesmo através de um
- * arredondamento com perda via % — só o % (que é inerentemente sem precisão
- * exata para valores como R$200/R$2400) é derivado com arredondamento; R$ e
- * valor final se derivam um do outro por subtração exata. Isso evita a
- * disputa entre o `value` externo e o `display` interno do MoneyInput.
+ * Editar R$ ou valor final nunca reintroduz o desconto arredondado a 2 casas
+ * de percentual — o valor exato digitado (ou a subtração exata raw−final) é
+ * que fica armazenado, evitando a perda de centavos e a disputa entre o
+ * `value` externo e o `display` interno do MoneyInput. Só o campo de %
+ * (editado diretamente) computa `discountAmount` a partir de um percentual —
+ * esse é o único modo onde arredondar a 2 casas é esperado/correto, porque
+ * o usuário escolheu % como unidade.
  * Os setters retornam o `pct` recém-calculado para quem precisar persistir
- * (ex: onUpdate) de forma síncrona.
+ * (ex: onUpdate) de forma síncrona — mas quem persiste deve gravar
+ * `discount_amount` (retornado via `discountAmount` no estado), não o `pct`.
  */
-function useDiscountFields(raw: number, initialPct: number) {
-  const [state, setState] = useState<DiscountFieldState>(() => computeDiscountState(raw, initialPct || 0));
+function useDiscountFields(raw: number, initialAmount: number) {
+  const [state, setState] = useState<DiscountFieldState>(() => computeDiscountState(raw, initialAmount || 0));
 
   useEffect(() => {
-    setState((s) => {
-      const discountAmount = Math.round((raw * s.pct) / 100 * 100) / 100;
-      return { pct: s.pct, discountAmount, finalValue: Math.round((raw - discountAmount) * 100) / 100 };
-    });
+    setState((s) => computeDiscountState(raw, s.discountAmount));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [raw]);
 
-  const setFromPct = (newPct: number): number => {
-    const next = computeDiscountState(raw, newPct);
+  const setFromPct = (newPct: number): { pct: number; discountAmount: number } => {
+    const clamped = Math.max(0, Math.min(100, Number.isFinite(newPct) ? newPct : 0));
+    const discountAmount = Math.round((raw * clamped) / 100 * 100) / 100;
+    const next = computeDiscountState(raw, discountAmount);
     setState(next);
-    return next.pct;
+    return { pct: clamped, discountAmount: next.discountAmount };
   };
 
-  const setFromAmount = (v: number): number => {
-    const discountAmount = Math.max(0, Math.min(raw, Number.isFinite(v) ? v : 0));
-    const finalValue = Math.round((raw - discountAmount) * 100) / 100;
-    const pct = raw > 0 ? Math.round((discountAmount / raw) * 10000) / 100 : 0;
-    setState({ pct, discountAmount, finalValue });
-    return pct;
+  const setFromAmount = (v: number): { pct: number; discountAmount: number } => {
+    const next = computeDiscountState(raw, v);
+    setState(next);
+    return { pct: next.pct, discountAmount: next.discountAmount };
   };
 
-  const setFromFinal = (v: number): number => {
+  const setFromFinal = (v: number): { pct: number; discountAmount: number } => {
     const finalValue = Math.max(0, Math.min(raw, Number.isFinite(v) ? v : 0));
     const discountAmount = Math.round((raw - finalValue) * 100) / 100;
-    const pct = raw > 0 ? Math.round((discountAmount / raw) * 10000) / 100 : 0;
-    setState({ pct, discountAmount, finalValue });
-    return pct;
+    const next = computeDiscountState(raw, discountAmount);
+    setState(next);
+    return { pct: next.pct, discountAmount: next.discountAmount };
   };
 
-  const reset = (newPct: number) => setState(computeDiscountState(raw, newPct || 0));
+  const reset = (newAmount: number) => setState(computeDiscountState(raw, newAmount || 0));
 
   return { ...state, setFromPct, setFromAmount, setFromFinal, reset };
 }
@@ -202,8 +210,9 @@ interface QuickDiscountPopoverProps {
   quantity: number;
   unitPrice: number;
   discountPct: number;
+  discountAmount: number;
   formatCurrency: (n: number) => string;
-  onApply: (pct: number) => void | Promise<void>;
+  onApply: (pct: number, discountAmount: number) => void | Promise<void>;
 }
 
 /**
@@ -212,16 +221,16 @@ interface QuickDiscountPopoverProps {
  * local — os 3 campos (%, R$, valor final) ficam sincronizados entre si, e só
  * são persistidos quando o usuário clica em "Aplicar".
  */
-function QuickDiscountPopover({ quantity, unitPrice, discountPct, formatCurrency, onApply }: QuickDiscountPopoverProps) {
+function QuickDiscountPopover({ quantity, unitPrice, discountPct, discountAmount: discountAmountProp, formatCurrency, onApply }: QuickDiscountPopoverProps) {
   const [open, setOpen] = useState(false);
   const [applying, setApplying] = useState(false);
   const raw = quantity * unitPrice;
-  const { pct, discountAmount, finalValue, setFromPct, setFromAmount, setFromFinal, reset } = useDiscountFields(raw, discountPct || 0);
+  const { pct, discountAmount, finalValue, setFromPct, setFromAmount, setFromFinal, reset } = useDiscountFields(raw, discountAmountProp || 0);
 
-  const handleApply = async (nextPct: number) => {
+  const handleApply = async (nextPct: number, nextAmount: number) => {
     setApplying(true);
     try {
-      await onApply(nextPct);
+      await onApply(nextPct, nextAmount);
       setOpen(false);
     } finally {
       setApplying(false);
@@ -229,7 +238,7 @@ function QuickDiscountPopover({ quantity, unitPrice, discountPct, formatCurrency
   };
 
   return (
-    <Popover open={open} onOpenChange={(v) => { setOpen(v); if (v) reset(discountPct || 0); }}>
+    <Popover open={open} onOpenChange={(v) => { setOpen(v); if (v) reset(discountAmountProp || 0); }}>
       <PopoverTrigger asChild>
         <Button
           type="button"
@@ -265,11 +274,11 @@ function QuickDiscountPopover({ quantity, unitPrice, discountPct, formatCurrency
           <p className="text-[11px] text-muted-foreground">Preço cheio: {formatCurrency(raw)}</p>
         </div>
         <div className="flex gap-2 pt-1">
-          <Button type="button" size="sm" disabled={applying} onClick={() => handleApply(pct)}>
+          <Button type="button" size="sm" disabled={applying} onClick={() => handleApply(pct, discountAmount)}>
             {applying ? 'Aplicando...' : 'Aplicar'}
           </Button>
           {(discountPct || 0) > 0 && (
-            <Button type="button" size="sm" variant="outline" disabled={applying} onClick={() => { reset(0); handleApply(0); }}>
+            <Button type="button" size="sm" variant="outline" disabled={applying} onClick={() => { reset(0); handleApply(0, 0); }}>
               Remover
             </Button>
           )}
@@ -303,7 +312,7 @@ function ServiceCardFormComponent({
 }: ServiceCardFormProps) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const svcRaw = draft ? draft.quantity * draft.unit_price : 0;
-  const { pct: discountPct, finalValue: total, setFromPct: setSvcPct, setFromFinal: setSvcFinal } = useDiscountFields(svcRaw, draft?.discount_pct || 0);
+  const { pct: discountPct, finalValue: total, setFromPct: setSvcPct, setFromFinal: setSvcFinal } = useDiscountFields(svcRaw, draft?.discount_amount || 0);
   if (!draft) return null;
   const technicians = (appUsers || []).filter(
     (u: any) => u.role === 'technician' || u.role === 'admin'
@@ -430,14 +439,14 @@ function ServiceCardFormComponent({
             max={100}
             step="0.01"
             value={discountPct}
-            onChange={(e) => onUpdate({ discount_pct: setSvcPct(parseFloat(e.target.value)) })}
+            onChange={(e) => { const r = setSvcPct(parseFloat(e.target.value)); onUpdate({ discount_pct: r.pct, discount_amount: r.discountAmount }); }}
           />
         </div>
         <div className="md:col-span-5">
           <Label>Valor final{discountPct > 0 ? ` (−${discountPct}%)` : ''}</Label>
           <MoneyInput
             value={total}
-            onValueChange={(v) => onUpdate({ discount_pct: setSvcFinal(v) })}
+            onValueChange={(v) => { const r = setSvcFinal(v); onUpdate({ discount_pct: r.pct, discount_amount: r.discountAmount }); }}
           />
           <p className="text-[11px] text-muted-foreground mt-0.5">Digite o valor já arredondado — o desconto (%) é calculado sozinho.</p>
         </div>
@@ -520,7 +529,7 @@ function PartCardFormComponent({
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const partRaw = draft ? draft.quantity * draft.unit_sale : 0;
-  const { pct: discountPct, finalValue: total, setFromPct: setPartPct, setFromFinal: setPartFinal } = useDiscountFields(partRaw, draft?.discount_pct || 0);
+  const { pct: discountPct, finalValue: total, setFromPct: setPartPct, setFromFinal: setPartFinal } = useDiscountFields(partRaw, draft?.discount_amount || 0);
   if (!draft) return null;
   const nameQuery = draft.name.toLowerCase();
   const suggestions = (products || [])
@@ -711,7 +720,7 @@ function PartCardFormComponent({
           <Label>Valor final{discountPct > 0 ? ` (−${discountPct}%)` : ''}</Label>
           <MoneyInput
             value={total}
-            onValueChange={(v) => onUpdate({ discount_pct: setPartFinal(v) })}
+            onValueChange={(v) => { const r = setPartFinal(v); onUpdate({ discount_pct: r.pct, discount_amount: r.discountAmount }); }}
           />
         </div>
       </div>
@@ -738,7 +747,7 @@ function PartCardFormComponent({
             max={100}
             step="0.01"
             value={discountPct}
-            onChange={(e) => onUpdate({ discount_pct: setPartPct(parseFloat(e.target.value)) })}
+            onChange={(e) => { const r = setPartPct(parseFloat(e.target.value)); onUpdate({ discount_pct: r.pct, discount_amount: r.discountAmount }); }}
           />
         </div>
         <div className="md:col-span-3 flex items-end">
@@ -1013,6 +1022,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     warranty_months?: number;
     serial_number?: string;
     discount_pct?: number;
+    discount_amount?: number;
   };
   type DraftService = {
     tempId: string;
@@ -1025,6 +1035,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     notes?: string;
     warranty_months?: number;
     discount_pct?: number;
+    discount_amount?: number;
   };
   const [draftParts, setDraftParts] = useState<DraftPart[]>([]);
   const [draftServices, setDraftServices] = useState<DraftService[]>([]);
@@ -1378,6 +1389,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               unit_cost_snapshot: dp.unit_cost,
               unit_sale_snapshot: dp.unit_sale,
               discount_pct: (dp as any).discount_pct || 0,
+              discount_amount: (dp as any).discount_amount || 0,
             });
           } catch (err) {
             console.error('Failed to persist draft part', err);
@@ -1396,6 +1408,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               notes: ds.notes || undefined,
               technician_user_id: (ds as any).technician_user_id || null,
               discount_pct: (ds as any).discount_pct || 0,
+              discount_amount: (ds as any).discount_amount || 0,
             });
           } catch (err) {
             console.error('Failed to persist draft service', err);
@@ -1503,32 +1516,62 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
 
     // Linhas ainda não salvas (OS nova) — só ajusta o estado local.
     if (target === 'services' || target === 'both') {
-      setDraftServices((prev) => prev.map((s) => ({ ...s, discount_pct: pct })));
+      setDraftServices((prev) => prev.map((s) => ({
+        ...s,
+        discount_pct: pct,
+        discount_amount: Math.round(s.quantity * s.unit_price_snapshot * pct / 100 * 100) / 100,
+      })));
     }
     if (target === 'parts' || target === 'both') {
-      setDraftParts((prev) => prev.map((p) => ({ ...p, discount_pct: pct })));
+      setDraftParts((prev) => prev.map((p) => ({
+        ...p,
+        discount_pct: pct,
+        discount_amount: Math.round(p.quantity * p.unit_sale * pct / 100 * 100) / 100,
+      })));
     }
 
     if (!orderId) return; // OS ainda não existe — nada para persistir no banco
 
+    // Snapshot dos campos alterados antes de gravar — necessário para
+    // reverter todas as linhas caso o novo total fique abaixo do já pago.
+    const svcBefore = (target === 'services' || target === 'both') && soServices
+      ? soServices.map((s: any) => ({ id: s.id, discount_pct: s.discount_pct, discount_amount: s.discount_amount, line_total: s.line_total }))
+      : [];
+    const partBefore = (target === 'parts' || target === 'both') && parts
+      ? parts.map((p: any) => ({ id: p.id, discount_pct: p.discount_pct, discount_amount: p.discount_amount, line_total_sale: p.line_total_sale }))
+      : [];
+
     try {
       if ((target === 'services' || target === 'both') && soServices && soServices.length > 0) {
         await Promise.all(soServices.map((s: any) => {
-          const line_total = Math.round(Number(s.quantity) * Number(s.unit_price_snapshot) * (1 - pct / 100) * 100) / 100;
+          const raw = Number(s.quantity) * Number(s.unit_price_snapshot);
+          const discount_amount = Math.round(raw * pct / 100 * 100) / 100;
+          const line_total = Math.round((raw - discount_amount) * 100) / 100;
           return supabase.from('service_order_services')
-            .update({ discount_pct: pct, line_total } as any)
+            .update({ discount_pct: pct, discount_amount, line_total } as any)
             .eq('id', s.id);
         }));
       }
       if ((target === 'parts' || target === 'both') && parts && parts.length > 0) {
         await Promise.all(parts.map((p: any) => {
-          const line_total_sale = Math.round(Number(p.quantity) * Number(p.unit_sale_snapshot) * (1 - pct / 100) * 100) / 100;
+          const raw = Number(p.quantity) * Number(p.unit_sale_snapshot);
+          const discount_amount = Math.round(raw * pct / 100 * 100) / 100;
+          const line_total_sale = Math.round((raw - discount_amount) * 100) / 100;
           return supabase.from('service_order_parts')
-            .update({ discount_pct: pct, line_total_sale } as any)
+            .update({ discount_pct: pct, discount_amount, line_total_sale } as any)
             .eq('id', p.id);
         }));
       }
-      await recalcTotals(orderId);
+      try {
+        await recalcTotals(orderId);
+      } catch (e) {
+        await Promise.all([
+          ...svcBefore.map((b) => supabase.from('service_order_services').update(b).eq('id', b.id)),
+          ...partBefore.map((b) => supabase.from('service_order_parts').update(b).eq('id', b.id)),
+        ]);
+        await recalcTotals(orderId).catch(() => {});
+        throw e;
+      }
       queryClient.invalidateQueries({ queryKey: ['so-services', orderId] });
       queryClient.invalidateQueries({ queryKey: ['so-parts', orderId] });
       queryClient.invalidateQueries({ queryKey: ['service-orders', orderId] });
@@ -1632,6 +1675,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         unit_sale: Number(row.unit_sale_snapshot) || 0,
         notes: row.notes || '',
         discount_pct: Number(row.discount_pct) || 0,
+        discount_amount: Number(row.discount_amount) || 0,
       },
     }));
   };
@@ -1689,6 +1733,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             unit_cost: draft.unit_cost,
             unit_sale: draft.unit_sale,
             discount_pct: draft.discount_pct || 0,
+            discount_amount: draft.discount_amount || 0,
           },
         ]);
         toast.success('Peça adicionada (será salva ao criar a OS)');
@@ -1702,6 +1747,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           unit_sale_snapshot: draft.unit_sale,
           notes: draft.notes || undefined,
           discount_pct: draft.discount_pct || 0,
+          discount_amount: draft.discount_amount || 0,
         });
         toast.success('Peça adicionada');
       }
@@ -1735,6 +1781,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         unit_sale_snapshot: draft.unit_sale,
         notes: draft.notes || null,
         discount_pct: draft.discount_pct || 0,
+        discount_amount: draft.discount_amount || 0,
       });
       setEditingPart((prev) => {
         const next = { ...prev };
@@ -1796,6 +1843,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             notes: draft.notes || undefined,
             warranty_months: draft.warranty_months || 0,
             discount_pct: draft.discount_pct || 0,
+            discount_amount: draft.discount_amount || 0,
             // technician_user_id is held client-side until OS is created
             ...(draft.technician_user_id ? { technician_user_id: draft.technician_user_id } : {}),
           } as any,
@@ -1815,6 +1863,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           technician_user_id: draft.technician_user_id || null,
           warranty_months: draft.warranty_months || 0,
           discount_pct: draft.discount_pct || 0,
+          discount_amount: draft.discount_amount || 0,
         } as any);
         toast.success('Serviço adicionado');
       }
@@ -1853,6 +1902,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         notes: draft.notes || null,
         technician_user_id: draft.technician_user_id || null,
         discount_pct: draft.discount_pct || 0,
+        discount_amount: draft.discount_amount || 0,
       });
       setEditingSvc((prev) => {
         const next = { ...prev };
@@ -1895,6 +1945,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         notes: row.notes || '',
         technician_user_id: row.technician_user_id || '',
         discount_pct: Number(row.discount_pct) || 0,
+        discount_amount: Number(row.discount_amount) || 0,
       },
     }));
   };
@@ -1902,7 +1953,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   // Atalho rápido de desconto na linha colapsada (sem abrir o card de edição inteiro).
   // Usa mutateAsync + try/catch para garantir que qualquer falha apareça pro usuário
   // (em vez de falhar silenciosamente, como aconteceu antes com o cache de schema desatualizado).
-  const applyQuickDiscountToService = async (row: any, pct: number) => {
+  const applyQuickDiscountToService = async (row: any, pct: number, discountAmount: number) => {
     if (!orderId) return;
     try {
       await updateSvcLine.mutateAsync({
@@ -1917,6 +1968,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         notes: row.notes || null,
         technician_user_id: row.technician_user_id || null,
         discount_pct: pct,
+        discount_amount: discountAmount,
       });
       toast.success(pct > 0 ? `Desconto de ${pct}% aplicado` : 'Desconto removido');
     } catch (e: any) {
@@ -1924,7 +1976,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     }
   };
 
-  const applyQuickDiscountToPart = async (row: any, pct: number) => {
+  const applyQuickDiscountToPart = async (row: any, pct: number, discountAmount: number) => {
     if (!orderId) return;
     try {
       await updatePartLine.mutateAsync({
@@ -1937,6 +1989,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         unit_sale_snapshot: row.unit_sale_snapshot,
         notes: row.notes || null,
         discount_pct: pct,
+        discount_amount: discountAmount,
       });
       toast.success(pct > 0 ? `Desconto de ${pct}% aplicado` : 'Desconto removido');
     } catch (e: any) {
@@ -2738,9 +2791,10 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             total: number;
             isDraft?: boolean;
             discountPct?: number;
+            discountAmount?: number;
             onExpand: () => void;
             onDelete: () => void;
-            onApplyDiscount?: (pct: number) => void;
+            onApplyDiscount?: (pct: number, discountAmount: number) => void;
             extra?: React.ReactNode;
           }) => (
             <div
@@ -2784,6 +2838,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   quantity={opts.quantity}
                   unitPrice={opts.unitPrice}
                   discountPct={opts.discountPct || 0}
+                  discountAmount={opts.discountAmount || 0}
                   formatCurrency={formatCurrency}
                   onApply={opts.onApplyDiscount}
                 />
@@ -2864,7 +2919,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   unitPrice: s.unit_price_snapshot,
                   total: s.line_total,
                   discountPct: s.discount_pct,
-                  onApplyDiscount: (pct: number) => applyQuickDiscountToService(s, pct),
+                  discountAmount: s.discount_amount,
+                  onApplyDiscount: (pct: number, discountAmount: number) => applyQuickDiscountToService(s, pct, discountAmount),
                   onExpand: () => startEditPersisted(s),
                   onDelete: () =>
                     removeService.mutate({ id: s.id, service_order_id: orderId! }),
@@ -2892,10 +2948,11 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   unit: d.billing_unit_snapshot,
                   quantity: d.quantity,
                   unitPrice: d.unit_price_snapshot,
-                  total: Math.round(d.unit_price_snapshot * d.quantity * (1 - (d.discount_pct || 0) / 100) * 100) / 100,
+                  total: Math.round((d.unit_price_snapshot * d.quantity - (d.discount_amount || 0)) * 100) / 100,
                   discountPct: d.discount_pct,
-                  onApplyDiscount: (pct: number) =>
-                    setDraftServices((prev) => prev.map((x) => (x.tempId === d.tempId ? { ...x, discount_pct: pct } : x))),
+                  discountAmount: d.discount_amount,
+                  onApplyDiscount: (pct: number, discountAmount: number) =>
+                    setDraftServices((prev) => prev.map((x) => (x.tempId === d.tempId ? { ...x, discount_pct: pct, discount_amount: discountAmount } : x))),
                   isDraft: true,
                   onExpand: () => {
                     // Move draft into edit card and remove from drafts list
@@ -2912,6 +2969,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                         notes: d.notes || '',
                         technician_user_id: (d as any).technician_user_id || '',
                         discount_pct: (d as any).discount_pct || 0,
+                        discount_amount: (d as any).discount_amount || 0,
                       },
                     }));
                     setOpenNewSvcCards((prev) => [...prev, key]);
@@ -3187,9 +3245,10 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             image_url?: string | null;
             warranty_expires_at?: string | null;
             discountPct?: number;
+            discountAmount?: number;
             onExpand: () => void;
             onDelete: () => void;
-            onApplyDiscount?: (pct: number) => void;
+            onApplyDiscount?: (pct: number, discountAmount: number) => void;
           }) => (
             <div
               key={opts.keyId}
@@ -3247,6 +3306,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   quantity={opts.quantity}
                   unitPrice={opts.unitPrice}
                   discountPct={opts.discountPct || 0}
+                  discountAmount={opts.discountAmount || 0}
                   formatCurrency={formatCurrency}
                   onApply={opts.onApplyDiscount}
                 />
@@ -3326,7 +3386,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   unitPrice: p.unit_sale_snapshot,
                   total: p.line_total_sale,
                   discountPct: p.discount_pct,
-                  onApplyDiscount: (pct: number) => applyQuickDiscountToPart(p, pct),
+                  discountAmount: p.discount_amount,
+                  onApplyDiscount: (pct: number, discountAmount: number) => applyQuickDiscountToPart(p, pct, discountAmount),
                   image_url: p.products?.image_url || null,
                   warranty_expires_at: p.warranty_expires_at || null,
                   onExpand: () => startEditPersistedPart(p),
@@ -3348,10 +3409,11 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   name: d.name,
                   quantity: d.quantity,
                   unitPrice: d.unit_sale,
-                  total: Math.round(d.unit_sale * d.quantity * (1 - (d.discount_pct || 0) / 100) * 100) / 100,
+                  total: Math.round((d.unit_sale * d.quantity - (d.discount_amount || 0)) * 100) / 100,
                   discountPct: d.discount_pct,
-                  onApplyDiscount: (pct: number) =>
-                    setDraftParts((prev) => prev.map((x) => (x.tempId === d.tempId ? { ...x, discount_pct: pct } : x))),
+                  discountAmount: d.discount_amount,
+                  onApplyDiscount: (pct: number, discountAmount: number) =>
+                    setDraftParts((prev) => prev.map((x) => (x.tempId === d.tempId ? { ...x, discount_pct: pct, discount_amount: discountAmount } : x))),
                   isDraft: true,
                   image_url: (products?.find(pr => pr.id === d.product_id) as any)?.image_url || null,
                   onExpand: () => {
@@ -3368,6 +3430,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                         unit_sale: d.unit_sale,
                         notes: '',
                         discount_pct: d.discount_pct || 0,
+                        discount_amount: d.discount_amount || 0,
                       },
                     }));
                     setOpenNewPartCards((prev) => [...prev, key]);
@@ -4309,47 +4372,59 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 <CreditCard className="h-3.5 w-3.5" /> Condições de Recebimento
               </p>
               <div className="rounded-lg border bg-muted/20 p-3 space-y-3">
-                <div className="flex gap-2 items-center">
-                  <Select key={presetKey} onValueChange={v => {
-                    const preset = (paymentPresets || []).find((p: any) => p.label === v);
-                    set('payment_conditions', v);
-                    set('payment_condition_preset_id', preset?.id || '');
-                    setPresetKey(k => k + 1);
-                  }} disabled={isLocked}>
-                    <SelectTrigger className="w-44 h-8 text-sm">
-                      <SelectValue placeholder="Pré-definidas..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(paymentPresets || []).map((p: any) => (
-                        <SelectItem key={p.id} value={p.label}>{p.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Input value={form.payment_conditions || ''} onChange={e => set('payment_conditions', e.target.value)}
-                    placeholder="Ou descreva livremente..." disabled={isLocked} className="flex-1 h-8 text-sm" />
-                </div>
+                {(orderData as any)?.converted_to_os_at ? (
+                  // Já convertida em OS: a condição de pagamento já foi decidida (e o sinal já
+                  // gerou um recebível real) — mostrar só um resumo somente-leitura em vez do
+                  // seletor/tabela de configuração, que não faz mais sentido reabrir aqui.
+                  <p className="text-sm">
+                    <span className="text-muted-foreground">Condição de pagamento: </span>
+                    <span className="font-medium">{form.payment_conditions || '—'}</span>
+                  </p>
+                ) : (
+                  <>
+                    <div className="flex gap-2 items-center">
+                      <Select key={presetKey} onValueChange={v => {
+                        const preset = (paymentPresets || []).find((p: any) => p.label === v);
+                        set('payment_conditions', v);
+                        set('payment_condition_preset_id', preset?.id || '');
+                        setPresetKey(k => k + 1);
+                      }} disabled={isLocked}>
+                        <SelectTrigger className="w-44 h-8 text-sm">
+                          <SelectValue placeholder="Pré-definidas..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(paymentPresets || []).map((p: any) => (
+                            <SelectItem key={p.id} value={p.label}>{p.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Input value={form.payment_conditions || ''} onChange={e => set('payment_conditions', e.target.value)}
+                        placeholder="Ou descreva livremente..." disabled={isLocked} className="flex-1 h-8 text-sm" />
+                    </div>
 
-                {/* Installment preview */}
-                {selectedPreset && installmentRows.length > 0 && grandTotal > 0 && (
-                  <div className="rounded-md bg-background border divide-y text-sm">
-                    {installmentRows.map((row, i) => {
-                      const amount = calcInstallmentAmount(row);
-                      const isSignal = row.tipo === 'aprovacao' || row.days_after_approval === 0;
-                      const daysLabel = row.tipo === 'entrega' ? 'na entrega'
-                        : row.tipo === 'prazo' || row.days_after_approval > 0 ? `em ${row.days_after_approval} dias`
-                        : 'na aprovação';
-                      return (
-                        <div key={i} className={`flex justify-between items-center px-3 py-2 ${isSignal ? 'bg-orange-50' : ''}`}>
-                          <div>
-                            <span className="font-medium">{row.label || `Parcela ${i + 1}`}</span>
-                            <span className="ml-1.5 text-xs text-muted-foreground">({daysLabel})</span>
-                            {isSignal && <span className="ml-1.5 text-xs font-medium text-orange-600">● sinal</span>}
-                          </div>
-                          <span className="font-semibold">{formatCurrency(amount)}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
+                    {/* Installment preview */}
+                    {selectedPreset && installmentRows.length > 0 && grandTotal > 0 && (
+                      <div className="rounded-md bg-background border divide-y text-sm">
+                        {installmentRows.map((row, i) => {
+                          const amount = calcInstallmentAmount(row);
+                          const isSignal = row.tipo === 'aprovacao' || row.days_after_approval === 0;
+                          const daysLabel = row.tipo === 'entrega' ? 'na entrega'
+                            : row.tipo === 'prazo' || row.days_after_approval > 0 ? `em ${row.days_after_approval} dias`
+                            : 'na aprovação';
+                          return (
+                            <div key={i} className={`flex justify-between items-center px-3 py-2 ${isSignal ? 'bg-orange-50' : ''}`}>
+                              <div>
+                                <span className="font-medium">{row.label || `Parcela ${i + 1}`}</span>
+                                <span className="ml-1.5 text-xs text-muted-foreground">({daysLabel})</span>
+                                {isSignal && <span className="ml-1.5 text-xs font-medium text-orange-600">● sinal</span>}
+                              </div>
+                              <span className="font-semibold">{formatCurrency(amount)}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
                 )}
 
                 {/* Sinal button */}

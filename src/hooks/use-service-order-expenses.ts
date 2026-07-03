@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { computeCardFeeAmount } from '@/hooks/use-service-orders';
+import { updateReceivableFromSO } from '@/lib/cascade-updates';
 
 async function recalcExpenseTotals(soId: string) {
   const { data: expenses } = await supabase
@@ -33,11 +34,16 @@ async function recalcExpenseTotals(soId: string) {
   // Onda 1C: repasse da taxa de cartão ao cliente, aplicado por cima do valor já ajustado.
   const cardFeeAmount = await computeCardFeeAmount(base, so?.card_fee_passthrough_enabled, so?.card_installments);
   const grand = base + cardFeeAmount;
+  const grandRounded = Math.round(grand * 100) / 100;
+
+  // Cascata para recebíveis ANTES de gravar o novo grand_total — ver
+  // recalcTotals (use-service-orders.ts) para a mesma lógica/motivo.
+  await updateReceivableFromSO(soId, grandRounded);
 
   await supabase.from('service_orders').update({
     operational_cost_total: Math.round(opCost * 100) / 100,
     card_fee_amount: cardFeeAmount,
-    grand_total: Math.round(grand * 100) / 100,
+    grand_total: grandRounded,
   }).eq('id', soId);
 }
 
@@ -141,6 +147,14 @@ export function useUpdateServiceOrderExpense() {
       notes?: string | null;
       billable_to_client?: boolean;
     }) => {
+      // Snapshot dos campos alterados antes de gravar — necessário para
+      // reverter caso o novo total fique abaixo do que o cliente já pagou.
+      const { data: before } = await supabase
+        .from('service_order_expenses')
+        .select(Object.keys(updates).join(','))
+        .eq('id', id)
+        .single();
+
       const { data, error } = await supabase
         .from('service_order_expenses')
         .update(updates)
@@ -148,7 +162,16 @@ export function useUpdateServiceOrderExpense() {
         .select()
         .single();
       if (error) throw error;
-      await recalcExpenseTotals(service_order_id);
+
+      try {
+        await recalcExpenseTotals(service_order_id);
+      } catch (e) {
+        if (before) {
+          await supabase.from('service_order_expenses').update(before as any).eq('id', id);
+        }
+        await recalcExpenseTotals(service_order_id).catch(() => {});
+        throw e;
+      }
       return data;
     },
     onSuccess: (_d, vars) => {
@@ -165,12 +188,30 @@ export function useRemoveServiceOrderExpense() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, service_order_id }: { id: string; service_order_id: string }) => {
+      // Snapshot completo antes de deletar — necessário para readicionar a
+      // despesa caso a remoção seja bloqueada (novo total abaixo do já pago).
+      const { data: fullRow } = await supabase
+        .from('service_order_expenses')
+        .select('*')
+        .eq('id', id)
+        .single();
+
       const { error } = await supabase
         .from('service_order_expenses')
         .delete()
         .eq('id', id);
       if (error) throw error;
-      await recalcExpenseTotals(service_order_id);
+
+      try {
+        await recalcExpenseTotals(service_order_id);
+      } catch (e) {
+        if (fullRow) {
+          const { id: _oldId, ...reinsertData } = fullRow as any;
+          await supabase.from('service_order_expenses').insert(reinsertData);
+        }
+        await recalcExpenseTotals(service_order_id).catch(() => {});
+        throw e;
+      }
     },
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ['so-expenses', vars.service_order_id] });

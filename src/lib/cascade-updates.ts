@@ -1,23 +1,56 @@
 import { supabase } from '@/integrations/supabase/client';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 
+/**
+ * Lançada quando uma mudança no total da OS faria o novo total ficar abaixo
+ * do que o cliente já pagou. O mutation que chamou recalcTotals/recalcExpenseTotals
+ * (que por sua vez chama updateReceivableFromSO) deve capturar esse erro e
+ * reverter a alteração que o originou — ver Fix C no plano de correção.
+ */
+export class GrandTotalBelowPaidError extends Error {}
+
 export async function updateReceivableFromSO(serviceOrderId: string, newTotal: number) {
   const { data: receivables } = await supabase
     .from('receivables')
     .select('*')
     .eq('service_order_id', serviceOrderId)
-    .not('status', 'eq', 'paid');
+    .not('status', 'eq', 'cancelled');
 
   if (!receivables || receivables.length === 0) return;
 
-  for (const rec of receivables) {
-    const prev = { ...rec };
+  // Nunca deixa o novo total ficar abaixo do que o cliente já pagou (em
+  // qualquer recebível, pago ou parcial) — bloqueia lançando erro antes de
+  // gravar qualquer coisa.
+  const totalPaid = receivables.reduce((s, r) => s + Number(r.paid_amount || 0), 0);
+  if (newTotal < totalPaid - 0.01) {
+    throw new GrandTotalBelowPaidError(
+      `O novo total (R$ ${newTotal.toFixed(2)}) ficaria abaixo do valor já pago pelo cliente (R$ ${totalPaid.toFixed(2)}). A alteração foi bloqueada — revise antes de continuar.`
+    );
+  }
+
+  // Recebíveis já quitados (status 'paid') nunca são redimensionados — só os
+  // pendentes/parciais são redistribuídos proporcionalmente pela participação
+  // que cada um tinha no total anterior.
+  const fullyPaid = receivables.filter((r) => r.status === 'paid');
+  const pending = receivables.filter((r) => r.status !== 'paid');
+  if (pending.length === 0) return;
+
+  const fullyPaidTotal = fullyPaid.reduce((s, r) => s + Number(r.amount || 0), 0);
+  const amountForPending = Math.max(0, newTotal - fullyPaidTotal);
+  const oldPendingTotal = pending.reduce((s, r) => s + Number(r.amount || 0), 0);
+
+  for (const rec of pending) {
+    const share = oldPendingTotal > 0 ? Number(rec.amount) / oldPendingTotal : 1 / pending.length;
     const paidAmount = Number(rec.paid_amount || 0);
-    const balance = Math.max(0, newTotal - paidAmount);
-    const status = paidAmount >= newTotal ? 'paid' : paidAmount > 0 ? 'partially_paid' : 'pending';
+    // Nunca deixa o novo valor de UM recebível específico ficar abaixo do que
+    // já foi pago nele (mesmo que a soma agregada esteja ok).
+    const newAmount = Math.max(paidAmount, Math.round(amountForPending * share * 100) / 100);
+    const balance = Math.max(0, newAmount - paidAmount);
+    const status = paidAmount >= newAmount ? 'paid' : paidAmount > 0 ? 'partially_paid' : 'pending';
+    const prev = { amount: rec.amount, balance_amount: rec.balance_amount, status: rec.status };
 
     await supabase.from('receivables').update({
-      amount: newTotal,
+      amount: newAmount,
       balance_amount: balance,
       status,
     }).eq('id', rec.id);
@@ -26,9 +59,9 @@ export async function updateReceivableFromSO(serviceOrderId: string, newTotal: n
       table_name: 'receivables',
       record_id: rec.id,
       action: 'cascade_update',
-      previous_value: { amount: prev.amount, balance_amount: prev.balance_amount, status: prev.status },
-      new_value: { amount: newTotal, balance_amount: balance, status },
-      reason: 'Atualização automática por alteração do total da OS',
+      previous_value: prev,
+      new_value: { amount: newAmount, balance_amount: balance, status },
+      reason: 'Atualização automática por alteração do total da OS (redistribuição proporcional)',
       triggered_by_table: 'service_orders',
       triggered_by_id: serviceOrderId,
     });
