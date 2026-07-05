@@ -10,6 +10,7 @@ import { runAgentLoop } from "../_shared/ai/agent.ts";
 import { buildSystemBlocks } from "../_shared/ai/prompt.ts";
 import { callClaude, ClaudeApiError, type ClaudeContentBlock, type ClaudeMessage } from "../_shared/ai/anthropic.ts";
 import { MODEL_AGENT, MODEL_LITE } from "../_shared/ai/models.ts";
+import { allTools, toolsByName, type Role } from "../_shared/ai/tools/index.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -219,6 +220,95 @@ Deno.serve(async (req) => {
       return jr({ session_id: requestedSessionId, messages: (rows || []).map(rowToChatMessage) });
     }
 
+    // ---------- Confirmação determinística de pendência (Fase 3) — SEM chamada de LLM ----------
+    if (body.type === "confirm_action") {
+      const pendingActionId: string | undefined = body.pending_action_id;
+      const decision: string | undefined = body.decision;
+      if (!pendingActionId || (decision !== "approve" && decision !== "reject")) {
+        return jr({ error: "pending_action_id e decision ('approve'|'reject') são obrigatórios" }, 400);
+      }
+
+      const { data: pending, error: pendingErr } = await admin
+        .from("ai_operator_pending_actions")
+        .select("*")
+        .eq("id", pendingActionId)
+        .maybeSingle();
+      if (pendingErr || !pending) return jr({ error: "Pendência não encontrada" }, 404);
+      if (pending.status !== "pending") {
+        return jr({ error: `Esta pendência já foi ${pending.status === "approved" || pending.status === "executed" ? "processada" : pending.status}.` }, 409);
+      }
+      const isOwner = pending.requested_by_user_id === userId;
+      if (!isOwner && userRole !== "admin") return jr({ error: "Sem permissão para decidir esta pendência." }, 403);
+
+      const appOriginConfirm = req.headers.get("origin") || req.headers.get("referer")?.replace(/\/$/, "") || "";
+
+      if (decision === "reject") {
+        await admin
+          .from("ai_operator_pending_actions")
+          .update({ status: "rejected", rejected_by_user_id: userId, rejected_at: new Date().toISOString() })
+          .eq("id", pendingActionId);
+        await admin.from("ai_operator_audit").insert({
+          session_id: pending.session_id,
+          pending_action_id: pendingActionId,
+          actor_user_id: userId,
+          actor_kind: "user",
+          event_type: `reject:${pending.action_name}`,
+          event_category: "security",
+          payload: { args: pending.payload },
+        });
+        const rejectMsg = `❌ Ação rejeitada: ${pending.title}.`;
+        if (pending.session_id) {
+          await admin.from("ai_operator_messages").insert({ session_id: pending.session_id, role: "assistant", content: rejectMsg, source: "web" });
+          await admin.from("ai_operator_sessions").update({ last_activity_at: new Date().toISOString() }).eq("id", pending.session_id);
+        }
+        return jr({ message: { role: "assistant", content: rejectMsg }, tool_events: [], session_id: pending.session_id });
+      }
+
+      // decision === "approve": executa o payload GRAVADO, sem passar pelo LLM de novo.
+      const toolDef = toolsByName[pending.action_name];
+      if (!toolDef) return jr({ error: `Tool desconhecida: ${pending.action_name}` }, 500);
+
+      let execResult: unknown;
+      try {
+        execResult = await toolDef.execute(pending.payload, { sb, admin, userId, userRole: userRole as Role, jwt, appOrigin: appOriginConfirm, settings });
+      } catch (e: any) {
+        execResult = { error: e?.message || "Falha na execução da tool" };
+      }
+
+      const executedAt = new Date().toISOString();
+      await admin
+        .from("ai_operator_pending_actions")
+        .update({ status: "executed", approved_by_user_id: userId, approved_at: executedAt, executed_at: executedAt, result: execResult })
+        .eq("id", pendingActionId);
+
+      await admin.from("ai_operator_audit").insert({
+        session_id: pending.session_id,
+        pending_action_id: pendingActionId,
+        actor_user_id: userId,
+        actor_kind: "user",
+        event_type: `approve_execute:${pending.action_name}`,
+        event_category: "data",
+        payload: { args: pending.payload, risk: pending.risk_level, result_summary: JSON.stringify(execResult ?? null).slice(0, 500) },
+      });
+
+      const execError = (execResult as any)?.error;
+      const execMsg = execError ? `⚠️ ${pending.title} — falhou: ${execError}` : `✅ ${pending.title} — executado.`;
+      // Continuidade: injeta uma mensagem assistant simples no histórico (não um tool_result
+      // sintético — o tool_result do momento da interceptação já foi persistido no turno
+      // original; inventar outro sem um tool_use pareado quebraria a reconstrução do
+      // histórico nativo da Anthropic no próximo turno).
+      if (pending.session_id) {
+        await admin.from("ai_operator_messages").insert({ session_id: pending.session_id, role: "assistant", content: execMsg, source: "web" });
+        await admin.from("ai_operator_sessions").update({ last_activity_at: executedAt }).eq("id", pending.session_id);
+      }
+
+      return jr({
+        message: { role: "assistant", content: execMsg },
+        tool_events: [{ name: pending.action_name, args: pending.payload, result: execResult }],
+        session_id: pending.session_id,
+      });
+    }
+
     // ---------- MODO SALES COPY (sem tools, foco em copy persuasiva para WhatsApp) ----------
     if (isSalesCopy) {
       try {
@@ -300,10 +390,17 @@ Deno.serve(async (req) => {
       memoryNotes,
     });
 
+    // Filtra a lista de tools pelo cargo ANTES do modelo ver — technician não recebe
+    // tools financeiras/compras/preço. Defesa em profundidade real fica em cada
+    // execute() (blockTechnician), necessária pro canal WhatsApp futuro.
+    const toolsForRole = allTools.filter((t) => !t.roles || t.roles.includes(userRole as Role));
+
     const result = await runAgentLoop({
       system,
       messages: toAnthropicMessages(historyMessages),
-      toolCtx: { sb, admin, userId, jwt, appOrigin, settings },
+      tools: toolsForRole,
+      toolCtx: { sb, admin, userId, userRole: userRole as Role, jwt, appOrigin, settings },
+      sessionId: resolvedSessionId,
       channel: "panel",
     });
 
