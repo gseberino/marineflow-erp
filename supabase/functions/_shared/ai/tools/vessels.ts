@@ -90,4 +90,26 @@ export const vesselTools: ToolDef[] = [
       return { ok: true, vessel: data };
     },
   },
+  {
+    name: "create_marina",
+    description: "Cadastra uma nova marina.",
+    input_schema: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        contact_name: { type: "string" },
+        phone: { type: "string" },
+        email: { type: "string" },
+        city: { type: "string" },
+        state: { type: "string" },
+      },
+      required: ["name"],
+    },
+    risk: "medium",
+    async execute(args, { sb }) {
+      const { data, error } = await sb.from("marinas").insert(args).select().single();
+      if (error) throw error;
+      return { ok: true, marina: data };
+    },
+  },
 ];

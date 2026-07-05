@@ -1,4 +1,16 @@
-import type { ToolDef } from "./registry.ts";
+import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
+
+// Espelha QUOTE_STATUS_TRANSITIONS de src/hooks/use-service-orders.ts — ciclo de vida
+// do orçamento (campo quote_status, separado do status geral da OS), válido enquanto
+// converted_to_os_at é nulo.
+const QUOTE_STATUS_TRANSITIONS: Record<string, string[]> = {
+  draft: ["sent", "awaiting_approval", "rejected"],
+  sent: ["awaiting_approval", "rejected"],
+  awaiting_approval: ["approved", "rejected"],
+  approved: ["awaiting_deposit", "rejected"],
+  awaiting_deposit: ["rejected"],
+  rejected: ["draft"],
+};
 
 const STATUS_PT_EN: Record<string, string> = {
   rascunho: "draft", orçamento: "draft", orcamento: "draft",
@@ -425,6 +437,128 @@ export const serviceOrderTools: ToolDef[] = [
       if (error) throw error;
       await sb.rpc("recalc_so_totals", { so_id: args.service_order_id || args.id }).catch(() => null);
       return { ok: true, service_order: data };
+    },
+  },
+  {
+    name: "update_quote_status",
+    description:
+      "Altera o status do CICLO DE ORÇAMENTO (campo quote_status, separado do status geral da OS): draft → sent → awaiting_approval → approved → awaiting_deposit, ou rejected a qualquer momento (exceto de rejected, que só volta pra draft). Use para mover um orçamento no funil de aprovação do cliente — não confundir com update_service_order_status.",
+    input_schema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "UUID do orçamento" },
+        quote_status: { type: "string", enum: ["draft", "sent", "awaiting_approval", "approved", "awaiting_deposit", "rejected"] },
+      },
+      required: ["id", "quote_status"],
+    },
+    risk: "medium",
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { sb } = ctx;
+      const { data: current } = await sb.from("service_orders").select("quote_status").eq("id", args.id).maybeSingle();
+      const currentStatus = current?.quote_status || "draft";
+      const allowed = QUOTE_STATUS_TRANSITIONS[currentStatus] || [];
+      if (!allowed.includes(args.quote_status)) {
+        return { error: `Transição inválida: ${currentStatus} → ${args.quote_status}. Permitidas a partir de ${currentStatus}: ${allowed.join(", ") || "nenhuma"}.` };
+      }
+      const { data, error } = await sb.from("service_orders").update({ quote_status: args.quote_status }).eq("id", args.id).select().single();
+      if (error) throw error;
+      return { ok: true, service_order: data };
+    },
+  },
+  {
+    name: "convert_external_quote_to_so",
+    description: "Converte um orçamento externo (lead) em Ordem de Serviço via RPC.",
+    input_schema: {
+      type: "object",
+      properties: { quote_id: { type: "string" } },
+      required: ["quote_id"],
+    },
+    risk: "medium",
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { admin } = ctx;
+      const { data, error } = await admin.rpc("convert_external_quote_to_so", { _quote_id: args.quote_id });
+      if (error) return { error: error.message };
+      return { ok: true, result: data };
+    },
+  },
+  {
+    name: "cancel_service_order",
+    description: "Cancela uma OS/orçamento (RPC atômica): restaura estoque de peças, cancela recebíveis e pagamentos vinculados.",
+    input_schema: {
+      type: "object",
+      properties: {
+        service_order_id: { type: "string" },
+        reason: { type: "string" },
+      },
+      required: ["service_order_id", "reason"],
+    },
+    risk: "high",
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { admin } = ctx;
+      const { data, error } = await admin.rpc("cancel_service_order_cascade", {
+        p_service_order_id: args.service_order_id,
+        p_reason: args.reason,
+      });
+      if (error) return { error: error.message };
+      if (!(data as any)?.success) return { error: "RPC não confirmou sucesso no cancelamento." };
+      return {
+        ok: true,
+        parts_restored: (data as any).parts_restored,
+        receivables_cancelled: (data as any).receivables_cancelled,
+        payments_cancelled: (data as any).payments_cancelled,
+      };
+    },
+  },
+  {
+    name: "reopen_service_order",
+    description: "Reabre uma OS Concluída ou Faturada: cancela pagamentos confirmados e zera recebíveis, voltando a OS para 'completed' para reajuste.",
+    input_schema: {
+      type: "object",
+      properties: {
+        service_order_id: { type: "string" },
+        reason: { type: "string" },
+      },
+      required: ["service_order_id", "reason"],
+    },
+    risk: "medium",
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { admin } = ctx;
+      const { data: so, error: soErr } = await admin.from("service_orders").select("status").eq("id", args.service_order_id).single();
+      if (soErr) return { error: soErr.message };
+      if (!so || !["invoiced", "completed"].includes(so.status)) {
+        return { error: "Só é possível reabrir OS com status Faturada ou Concluída." };
+      }
+
+      const { data: receivables } = await admin.from("receivables").select("*").eq("service_order_id", args.service_order_id);
+      for (const rec of receivables || []) {
+        const { data: payments } = await admin.from("payments").select("*").eq("receivable_id", rec.id).eq("status", "confirmed");
+        for (const payment of payments || []) {
+          await admin.from("payments").update({ status: "cancelled", cancelled_at: new Date().toISOString(), cancellation_reason: `${args.reason} (reabertura de OS)` }).eq("id", payment.id);
+          await admin.from("bank_transactions").update({ reconciled: false, reconciled_payment_id: null }).eq("reconciled_payment_id", payment.id);
+        }
+        await admin.from("receivables").update({ paid_amount: 0, balance_amount: rec.amount, status: "pending" }).eq("id", rec.id);
+      }
+
+      const { data: updated, error: updErr } = await admin
+        .from("service_orders")
+        .update({ status: "completed", reopened_at: new Date().toISOString(), reopen_reason: args.reason })
+        .eq("id", args.service_order_id)
+        .select()
+        .single();
+      if (updErr) return { error: updErr.message };
+      return { ok: true, service_order: updated };
     },
   },
 ];

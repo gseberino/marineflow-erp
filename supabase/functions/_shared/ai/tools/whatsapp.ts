@@ -37,7 +37,9 @@ export const whatsappTools: ToolDef[] = [
       },
       required: ["message"],
     },
-    risk: "medium",
+    // "pior caso" para o filtro por cargo — o risco real depende do destinatário.
+    risk: "high",
+    computeRisk: (args) => (args?.client_id ? "high" : "medium"),
     async execute(args, { sb, jwt }) {
       let phone = args.to_phone;
       if (!phone && args.client_id) {
@@ -56,7 +58,8 @@ export const whatsappTools: ToolDef[] = [
       properties: { collection_id: { type: "string" }, custom_message: { type: "string" } },
       required: ["collection_id"],
     },
-    risk: "medium",
+    // Sempre envia pro contato da cobrança — sempre cliente, nunca equipe.
+    risk: "high",
     async execute(args, { sb, admin, jwt }) {
       const { data: col, error } = await sb
         .from("collections")
@@ -93,7 +96,8 @@ export const whatsappTools: ToolDef[] = [
       },
       required: ["service_order_id"],
     },
-    risk: "medium",
+    // Sempre envia pro cliente dono da OS — sempre cliente, nunca equipe.
+    risk: "high",
     async execute(args, { admin, jwt, appOrigin, settings }) {
       const isUUID = UUID_RE.test(String(args.service_order_id || ""));
       let soQuery = admin.from("service_orders").select("id, service_order_number, share_token, client_id");
@@ -127,7 +131,9 @@ export const whatsappTools: ToolDef[] = [
       },
       required: ["message", "scheduled_at"],
     },
-    risk: "medium",
+    // "pior caso" para o filtro por cargo — client_id/service_order_id indicam cliente.
+    risk: "high",
+    computeRisk: (args) => (args?.client_id || args?.service_order_id ? "high" : "medium"),
     async execute(args, { sb, admin, userId }) {
       let phone = args.phone;
       const clientId = args.client_id || null;
