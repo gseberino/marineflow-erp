@@ -82,10 +82,46 @@ const presentOptionsTool: ToolDef = {
   },
 };
 
-const baseParams = {
-  system: [{ type: "text" as const, text: "Você é um assistente de teste." }],
-  toolCtx: { sb: {}, admin: {}, userId: "u1", jwt: "jwt", appOrigin: "", settings: {} },
-};
+// Fake mínimo do client service-role: suporta o insert+select+single usado ao gravar
+// uma pendência, e o insert "solto" (thenable, sem .select()) usado na auditoria.
+function makeFakeAdmin() {
+  const auditRows: any[] = [];
+  const pendingRows: any[] = [];
+  let seq = 0;
+  const admin = {
+    from(table: string) {
+      return {
+        insert(row: any) {
+          if (table === "ai_operator_audit") auditRows.push(row);
+          if (table === "ai_operator_pending_actions") pendingRows.push(row);
+          const id = `pending-${++seq}`;
+          return {
+            select: () => ({
+              single: async () => ({ data: { id, title: row.title, summary: row.summary, risk_level: row.risk_level }, error: null }),
+            }),
+            then: (resolve: (v: unknown) => void) => resolve({ data: null, error: null }),
+          };
+        },
+      };
+    },
+  };
+  return { admin, auditRows, pendingRows };
+}
+
+function makeBaseParams() {
+  const { admin, auditRows, pendingRows } = makeFakeAdmin();
+  return {
+    params: {
+      system: [{ type: "text" as const, text: "Você é um assistente de teste." }],
+      sessionId: "session-test-1",
+      toolCtx: { sb: {}, admin, userId: "u1", userRole: "admin" as const, jwt: "jwt", appOrigin: "", settings: {} },
+    },
+    auditRows,
+    pendingRows,
+  };
+}
+
+const { params: baseParams } = makeBaseParams();
 
 Deno.test("runAgentLoop: resposta só texto — encerra sem chamar tool", async () => {
   const { fetchStub, calls } = mockFetchSequence([
@@ -177,6 +213,79 @@ Deno.test("runAgentLoop: stop_reason max_tokens — retorna erro sem quebrar", a
   assertStringIncludes(result.error!, "truncada");
   assertEquals(result.message.content, "resposta parcial truncada");
   assertEquals(result.toolEvents.length, 0);
+});
+
+// ---------------- Fase 3: interceptação por risco + defesa em profundidade de role ----------------
+
+let mediumToolExecuted = false;
+const mediumRiskTool: ToolDef = {
+  name: "medium_risk_tool",
+  description: "Tool de teste com risco medium — nunca deveria executar sem aprovação.",
+  input_schema: { type: "object", properties: { amount: { type: "number" } } },
+  risk: "medium",
+  async execute(args) {
+    mediumToolExecuted = true;
+    return { ok: true, amount: args.amount };
+  },
+};
+
+const restrictedTool: ToolDef = {
+  name: "restricted_tool",
+  description: "Tool de teste restrita a não-technician.",
+  input_schema: { type: "object", properties: {} },
+  risk: "low",
+  roles: ["admin", "financial", "seller", "external_seller"],
+  async execute(_args, ctx) {
+    if (ctx.userRole === "technician") return { error: "Cargo não autorizado para esta ação." };
+    return { ok: true };
+  },
+};
+
+Deno.test("runAgentLoop: risco low executa direto, sem pendência", async () => {
+  const { params, pendingRows, auditRows } = makeBaseParams();
+  const { fetchStub } = mockFetchSequence([
+    { status: 200, body: claudeMsg({ content: [{ type: "tool_use", id: "toolu_low", name: "test_tool", input: { foo: "bar" } }], stop_reason: "tool_use" }) },
+    { status: 200, body: claudeMsg({ content: [{ type: "text", text: "feito" }], stop_reason: "end_turn" }) },
+  ]);
+  const result = await withFetch(fetchStub, () => runAgentLoop({ ...params, messages: [{ role: "user", content: [{ type: "text", text: "oi" }] }], tools: [testTool] }));
+  assertEquals(result.toolEvents[0].result, { echoed: "bar" });
+  assertEquals(pendingRows.length, 0);
+  assertEquals(auditRows.length, 1);
+  assertEquals(auditRows[0].event_type, "tool:test_tool");
+});
+
+Deno.test("runAgentLoop: risco medium/high intercepta — grava pending_action e NÃO executa a tool", async () => {
+  mediumToolExecuted = false;
+  const { params, pendingRows, auditRows } = makeBaseParams();
+  const { fetchStub } = mockFetchSequence([
+    { status: 200, body: claudeMsg({ content: [{ type: "tool_use", id: "toolu_med", name: "medium_risk_tool", input: { amount: 500 } }], stop_reason: "tool_use" }) },
+  ]);
+  const result = await withFetch(fetchStub, () =>
+    runAgentLoop({ ...params, messages: [{ role: "user", content: [{ type: "text", text: "crie uma conta de R$500" }] }], tools: [mediumRiskTool] })
+  );
+  assertEquals(mediumToolExecuted, false, "a tool real não deveria ter sido chamada");
+  assertExists(result.proposal);
+  assertEquals(result.proposal?.risk_level, "medium");
+  assertExists(result.proposal?.pending_action_id);
+  assertEquals(pendingRows.length, 1);
+  assertEquals(pendingRows[0].action_name, "medium_risk_tool");
+  assertEquals(pendingRows[0].payload, { amount: 500 });
+  assertEquals(pendingRows[0].status, "pending");
+  assertEquals(auditRows.length, 1);
+  assertEquals(auditRows[0].event_type, "pending_action:medium_risk_tool");
+  // tool_result sintético devolvido ao modelo não deve conter o resultado real da tool
+  const toolResultMsg = result.messages[result.messages.length - 1];
+  const content = JSON.parse((toolResultMsg.content[0] as any).content);
+  assertEquals(content.pending, true);
+  assertExists(content.pending_action_id);
+});
+
+Deno.test("registry: role bloqueia — tool restrita recusa userRole=technician mesmo sendo chamada", async () => {
+  const blockedResult = await restrictedTool.execute({}, { sb: {}, admin: {}, userId: "u2", userRole: "technician", jwt: "", appOrigin: "", settings: {} });
+  assertEquals(blockedResult, { error: "Cargo não autorizado para esta ação." });
+
+  const allowedResult = await restrictedTool.execute({}, { sb: {}, admin: {}, userId: "u3", userRole: "admin", jwt: "", appOrigin: "", settings: {} });
+  assertEquals(allowedResult, { ok: true });
 });
 
 Deno.test("callClaude: retry em 429 respeita retry-after e sucede na 2ª tentativa", async () => {

@@ -12,10 +12,10 @@ import { allTools, type ToolCtx, type ToolDef } from "./tools/index.ts";
 import { DEFAULT_MAX_TOKENS, MAX_ITERATIONS as DEFAULT_MAX_ITERATIONS, MODEL_AGENT } from "./models.ts";
 
 export interface Proposal {
-  action: string;
+  pending_action_id: string;
   title: string;
   summary_markdown: string;
-  payload: unknown;
+  risk_level: "medium" | "high";
 }
 
 export interface OptionItem {
@@ -52,9 +52,11 @@ export interface RunAgentLoopParams {
   messages: ClaudeMessage[];
   tools?: ToolDef[];
   toolCtx: ToolCtx;
+  /** Sessão (ai_operator_sessions) — usada pra registrar pending_actions e audit. */
+  sessionId: string;
   model?: string;
   maxIterations?: number;
-  /** Reservado para uso futuro (Fase 4) — o loop em si já é agnóstico de canal. */
+  /** Guardado no payload de auditoria — o loop em si é agnóstico de canal. */
   channel?: "panel" | "whatsapp" | "system";
 }
 
@@ -94,6 +96,44 @@ const AUTO_DISAMBIG: Record<string, AutoDisambigConfig> = {
     value: (so) => so.id,
   },
 };
+
+function humanizeToolName(name: string): string {
+  return name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function buildPendingSummary(toolDef: ToolDef, args: Record<string, unknown>): string {
+  const lines = [toolDef.description, "", "**Parâmetros:**"];
+  for (const [k, v] of Object.entries(args || {})) {
+    lines.push(`- ${k}: ${typeof v === "object" ? JSON.stringify(v) : String(v)}`);
+  }
+  return lines.join("\n");
+}
+
+function summarizeForAudit(result: unknown): string {
+  const text = JSON.stringify(result ?? null);
+  return text.length > 500 ? `${text.slice(0, 500)}…` : text;
+}
+
+/** Auditoria best-effort — nunca derruba o turno se falhar. */
+async function writeAudit(
+  toolCtx: ToolCtx,
+  sessionId: string,
+  channel: string | undefined,
+  entry: { eventType: string; risk: string; args: unknown; result: unknown }
+): Promise<void> {
+  try {
+    await toolCtx.admin.from("ai_operator_audit").insert({
+      session_id: sessionId,
+      actor_user_id: toolCtx.userId,
+      actor_kind: "ai_model",
+      event_type: entry.eventType,
+      event_category: "data",
+      payload: { channel: channel ?? "panel", risk: entry.risk, args: entry.args, result_summary: summarizeForAudit(entry.result) },
+    });
+  } catch (e) {
+    console.error("[agent] falha ao gravar auditoria:", e);
+  }
+}
 
 function textFromContent(content: ClaudeContentBlock[]): string {
   return content
@@ -191,14 +231,45 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
     for (const tc of toolUses) {
       const toolDef = toolsByName[tc.name];
       let toolResult: unknown;
+      let createdPendingProposal: Proposal | undefined;
+
+      const effectiveRisk = toolDef ? (toolDef.computeRisk ? toolDef.computeRisk(tc.input) : toolDef.risk) : "low";
+
       if (!toolDef) {
         toolResult = { error: `Tool desconhecida: ${tc.name}` };
+      } else if (effectiveRisk !== "low") {
+        // Interceptação por risco (Fase 3): não executa — grava a pendência e devolve
+        // um tool_result sintético. A tool real só roda via confirm_action, sem LLM.
+        const { data: pending, error: pendingErr } = await params.toolCtx.admin
+          .from("ai_operator_pending_actions")
+          .insert({
+            session_id: params.sessionId,
+            requested_by_user_id: params.toolCtx.userId,
+            action_name: tc.name,
+            risk_level: effectiveRisk,
+            title: humanizeToolName(tc.name),
+            summary: buildPendingSummary(toolDef, tc.input as Record<string, unknown>),
+            payload: tc.input,
+            status: "pending",
+            expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+          })
+          .select("id, title, summary, risk_level")
+          .single();
+
+        if (pendingErr || !pending) {
+          toolResult = { error: `Falha ao registrar pendência: ${pendingErr?.message || "erro desconhecido"}` };
+        } else {
+          toolResult = { pending: true, pending_action_id: pending.id, instruction: "Ação registrada para aprovação. Aguardando decisão do usuário — não repita a chamada." };
+          createdPendingProposal = { pending_action_id: pending.id, title: pending.title, summary_markdown: pending.summary, risk_level: pending.risk_level };
+        }
+        await writeAudit(params.toolCtx, params.sessionId, params.channel, { eventType: `pending_action:${tc.name}`, risk: effectiveRisk, args: tc.input, result: toolResult });
       } else {
         try {
           toolResult = await toolDef.execute(tc.input, params.toolCtx);
         } catch (e: any) {
           toolResult = { error: e?.message || "Falha na execução da tool" };
         }
+        await writeAudit(params.toolCtx, params.sessionId, params.channel, { eventType: `tool:${tc.name}`, risk: toolDef.risk, args: tc.input, result: toolResult });
       }
 
       toolEvents.push({ name: tc.name, args: tc.input, result: toolResult });
@@ -213,9 +284,8 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
           const options: OptionItem[] = top5.map((item) => ({ label: disambig.label(item).slice(0, 60), value: disambig.value(item) }));
           if (items.length > 5) options.push({ label: "🔍 Refinar busca — digitar mais detalhes", value: "__refine__" });
           shortCircuit = { options: { question: disambig.question(searchQuery, items.length), options } };
-        } else if (tc.name === "propose_action") {
-          const input = tc.input as any;
-          shortCircuit = { proposal: { action: input.action, title: input.title, summary_markdown: input.summary_markdown, payload: input.payload } };
+        } else if (createdPendingProposal) {
+          shortCircuit = { proposal: createdPendingProposal };
         } else if (tc.name === "present_options") {
           const input = tc.input as any;
           shortCircuit = { options: { question: input.question, options: input.options } };
