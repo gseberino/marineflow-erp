@@ -1,6 +1,10 @@
 // Meta-tools de UI (não tocam banco) + optimize_text (chamada de LLM sem tools).
 // Desvio pequeno da árvore de arquivos original do plano (não havia módulo dedicado
 // para elas) — agrupadas aqui por não pertencerem a nenhum domínio de negócio.
+//
+// propose_action existiu na Fase 1 mas foi removida na Fase 3: agent.ts agora
+// intercepta automaticamente qualquer tool com risk !== "low" (sem o modelo precisar
+// chamar uma meta-tool própria) e gera a pendência de aprovação sozinho.
 import type { ToolDef } from "./registry.ts";
 import { callClaude } from "../anthropic.ts";
 import { MODEL_LITE } from "../models.ts";
@@ -13,34 +17,6 @@ const CONTEXT_LABELS: Record<string, string> = {
 };
 
 export const uiTools: ToolDef[] = [
-  {
-    name: "propose_action",
-    description:
-      "Use antes de qualquer escrita ou envio de WhatsApp. Apresenta um resumo ao usuário e aguarda confirmação. Após receber 'Confirmado pelo usuário', chame a tool real correspondente.",
-    input_schema: {
-      type: "object",
-      properties: {
-        action: { type: "string", description: "Nome da action (ex: create_service_order)" },
-        title: { type: "string", description: "Título legível para o card de confirmação" },
-        summary_markdown: { type: "string", description: "Resumo detalhado em markdown" },
-        payload: { type: "object", description: "Payload exato que será passado à tool real" },
-      },
-      required: ["action", "title", "summary_markdown", "payload"],
-    },
-    risk: "low",
-    async execute(args) {
-      // Read-only: apenas devolve o resumo. O agent.ts intercepta esta tool e
-      // encerra o turno cedo — o frontend renderiza o card.
-      return {
-        proposed: true,
-        action: args.action,
-        title: args.title,
-        summary_markdown: args.summary_markdown,
-        payload: args.payload,
-        instruction: "Aguardando confirmação do usuário no chat antes de prosseguir.",
-      };
-    },
-  },
   {
     name: "present_options",
     description:
