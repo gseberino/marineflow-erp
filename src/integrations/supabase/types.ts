@@ -4056,6 +4056,7 @@ export type Database = {
           created_at: string
           created_by: string | null
           currency: string | null
+          custom_payment_installments: Json | null
           customer_visible_report: string | null
           diagnosis: string | null
           discount_amount: number | null
@@ -4136,6 +4137,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           currency?: string | null
+          custom_payment_installments?: Json | null
           customer_visible_report?: string | null
           diagnosis?: string | null
           discount_amount?: number | null
@@ -4216,6 +4218,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           currency?: string | null
+          custom_payment_installments?: Json | null
           customer_visible_report?: string | null
           diagnosis?: string | null
           discount_amount?: number | null

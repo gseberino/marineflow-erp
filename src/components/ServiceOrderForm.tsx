@@ -816,6 +816,121 @@ function PartCardFormComponent({
   );
 }
 
+type CustomInstallmentRow = {
+  label: string;
+  services_pct: number;
+  parts_pct: number;
+  expenses_pct: number;
+  days_after_approval: number;
+  tipo?: 'aprovacao' | 'entrega' | 'prazo';
+};
+
+interface CustomInstallmentEditorProps {
+  installments: CustomInstallmentRow[];
+  onChange: (rows: CustomInstallmentRow[]) => void;
+  laborCost: number;
+  partsCost: number;
+  expensesTotal: number;
+  discountRatio: number;
+  formatCurrency: (n: number) => string;
+  disabled?: boolean;
+}
+
+/**
+ * Editor de parcelas personalizado — usado quando nenhum preset pré-definido
+ * bate com o que foi acordado com o cliente. Cada linha guarda um único %
+ * (aplicado igualmente a services_pct/parts_pct/expenses_pct), o que
+ * matematicamente equivale a "X% do total" — evita pedir 3 campos por
+ * parcela, e reaproveita o mesmo shape de PaymentInstallment usado pelos
+ * presets, então toda a lógica downstream (calcInstallmentAmount, sinal,
+ * RegisterDepositDialog) funciona sem mudança nenhuma.
+ */
+function CustomInstallmentEditor({
+  installments, onChange, laborCost, partsCost, expensesTotal, discountRatio, formatCurrency, disabled,
+}: CustomInstallmentEditorProps) {
+  const totalPct = installments.reduce((s, r) => s + (r.services_pct || 0), 0);
+
+  const updateRow = (i: number, patch: Partial<CustomInstallmentRow>) => {
+    onChange(installments.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  };
+  const removeRow = (i: number) => {
+    onChange(installments.filter((_, idx) => idx !== i));
+  };
+  const addRow = () => {
+    onChange([...installments, { label: `Parcela ${installments.length + 1}`, services_pct: 0, parts_pct: 0, expenses_pct: 0, days_after_approval: 0, tipo: 'prazo' }]);
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="rounded-md bg-background border divide-y text-sm">
+        {installments.map((row, i) => {
+          const amount = Math.round((laborCost * row.services_pct / 100 + partsCost * row.parts_pct / 100 + expensesTotal * row.expenses_pct / 100) * discountRatio * 100) / 100;
+          return (
+            <div key={i} className="flex flex-wrap items-center gap-2 px-3 py-2">
+              <Input
+                value={row.label}
+                onChange={(e) => updateRow(i, { label: e.target.value })}
+                placeholder={`Parcela ${i + 1}`}
+                disabled={disabled}
+                className="h-7 text-xs flex-1 min-w-[100px]"
+              />
+              <Input
+                type="number" min={0} max={100} step="0.01"
+                value={row.services_pct}
+                onChange={(e) => {
+                  const pct = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
+                  updateRow(i, { services_pct: pct, parts_pct: pct, expenses_pct: pct });
+                }}
+                disabled={disabled}
+                className="h-7 text-xs w-16"
+                title="Percentual do total"
+              />
+              <span className="text-xs text-muted-foreground">%</span>
+              <Select
+                value={row.tipo === 'entrega' ? 'entrega' : row.days_after_approval > 0 ? 'prazo' : 'aprovacao'}
+                onValueChange={(v) => updateRow(i, {
+                  tipo: v as 'aprovacao' | 'entrega' | 'prazo',
+                  days_after_approval: v === 'prazo' ? (row.days_after_approval || 30) : 0,
+                })}
+                disabled={disabled}
+              >
+                <SelectTrigger className="h-7 text-xs w-28"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="aprovacao">Na aprovação</SelectItem>
+                  <SelectItem value="prazo">Após X dias</SelectItem>
+                  <SelectItem value="entrega">Na entrega</SelectItem>
+                </SelectContent>
+              </Select>
+              {row.tipo === 'prazo' && (
+                <Input
+                  type="number" min={1} step="1"
+                  value={row.days_after_approval}
+                  onChange={(e) => updateRow(i, { days_after_approval: parseInt(e.target.value) || 0 })}
+                  disabled={disabled}
+                  className="h-7 text-xs w-16"
+                  title="Dias após aprovação"
+                />
+              )}
+              <span className="font-semibold text-xs ml-auto">{formatCurrency(amount)}</span>
+              <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => removeRow(i)} disabled={disabled}>
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex items-center justify-between">
+        <Button type="button" variant="outline" size="sm" onClick={addRow} disabled={disabled}>
+          <Plus className="h-3.5 w-3.5 mr-1" /> Parcela
+        </Button>
+        {Math.abs(totalPct - 100) > 0.01 && (
+          <span className="text-xs text-amber-600">Soma dos % = {totalPct.toFixed(2)}% (não fecha 100%)</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const navigate = useNavigate();
   const { t, formatCurrency, formatDateTime, formatDate } = useI18n();
@@ -926,6 +1041,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     commissioned_user_id: '',
     payment_conditions: '',
     payment_condition_preset_id: '',
+    custom_payment_installments: null as any[] | null,
     financial_notes: '',
     payment_method_preferred: '',
     quote_validity_days: 15,
@@ -1191,6 +1307,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         commissioned_user_id: d.commissioned_user_id || '',
         payment_conditions: d.payment_conditions || '',
         payment_condition_preset_id: d.payment_condition_preset_id || '',
+        custom_payment_installments: (d as any).custom_payment_installments || null,
         financial_notes: d.financial_notes || '',
         payment_method_preferred: d.payment_method_preferred || '',
         quote_validity_days: d.quote_validity_days ?? 15,
@@ -1256,8 +1373,12 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       p.id === form.payment_condition_preset_id ||
       (p.label === form.payment_conditions && !form.payment_condition_preset_id)
   );
-  const installmentRows = Array.isArray(selectedPreset?.installments)
-    ? (selectedPreset.installments as any[]).map((r: any) => ({
+  const customInstallments = (form as any).custom_payment_installments;
+  const installmentSource = Array.isArray(selectedPreset?.installments)
+    ? selectedPreset!.installments
+    : (Array.isArray(customInstallments) ? customInstallments : null);
+  const installmentRows = Array.isArray(installmentSource)
+    ? (installmentSource as any[]).map((r: any) => ({
         label: r.label || '',
         services_pct: Number(r.services_pct ?? r.percent ?? 0),
         parts_pct: Number(r.parts_pct ?? r.percent ?? 0),
@@ -4384,15 +4505,28 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   <>
                     <div className="flex gap-2 items-center">
                       <Select key={presetKey} onValueChange={v => {
+                        if (v === '__custom__') {
+                          set('payment_condition_preset_id', '');
+                          set('payment_conditions', 'Personalizado');
+                          if (!Array.isArray(customInstallments) || customInstallments.length === 0) {
+                            set('custom_payment_installments', [
+                              { label: 'Parcela 1', services_pct: 100, parts_pct: 100, expenses_pct: 100, days_after_approval: 0, tipo: 'aprovacao' },
+                            ]);
+                          }
+                          setPresetKey(k => k + 1);
+                          return;
+                        }
                         const preset = (paymentPresets || []).find((p: any) => p.label === v);
                         set('payment_conditions', v);
                         set('payment_condition_preset_id', preset?.id || '');
+                        set('custom_payment_installments', null);
                         setPresetKey(k => k + 1);
                       }} disabled={isLocked}>
                         <SelectTrigger className="w-44 h-8 text-sm">
                           <SelectValue placeholder="Pré-definidas..." />
                         </SelectTrigger>
                         <SelectContent>
+                          <SelectItem value="__custom__">Personalizado</SelectItem>
                           {(paymentPresets || []).map((p: any) => (
                             <SelectItem key={p.id} value={p.label}>{p.label}</SelectItem>
                           ))}
@@ -4402,7 +4536,21 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                         placeholder="Ou descreva livremente..." disabled={isLocked} className="flex-1 h-8 text-sm" />
                     </div>
 
-                    {/* Installment preview */}
+                    {/* Editor de parcelas personalizado (sem preset selecionado) */}
+                    {!selectedPreset && Array.isArray(customInstallments) && (
+                      <CustomInstallmentEditor
+                        installments={installmentRows}
+                        onChange={(rows) => set('custom_payment_installments', rows)}
+                        laborCost={laborCost}
+                        partsCost={partsCost}
+                        expensesTotal={expensesTotal}
+                        discountRatio={discountRatio}
+                        formatCurrency={formatCurrency}
+                        disabled={isLocked}
+                      />
+                    )}
+
+                    {/* Installment preview (preset) */}
                     {selectedPreset && installmentRows.length > 0 && grandTotal > 0 && (
                       <div className="rounded-md bg-background border divide-y text-sm">
                         {installmentRows.map((row, i) => {
