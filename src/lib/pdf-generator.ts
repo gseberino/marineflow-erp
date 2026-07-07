@@ -88,6 +88,22 @@ export type PDFData = {
     quote_validity_days?: number;
     deposit_paid?: number;
   };
+  // Registro real de cobranças/pagamentos — distinto da "Programação de
+  // Pagamento" (que só mostra o plano acordado, preset ou texto livre).
+  receivables?: Array<{
+    id: string;
+    description: string;
+    amount: number;
+    balance_amount: number;
+    status: string;
+    is_deposit: boolean;
+  }>;
+  payments?: Array<{
+    receivable_id: string;
+    payment_date: string; // ISO
+    amount: number;
+    payment_method: string;
+  }>;
   client: {
     name: string;
     cpf_cnpj?: string;
@@ -630,7 +646,13 @@ function buildPaymentSection(so: PDFData['serviceOrder']): string {
         <span style="color:var(--text-muted);font-size:8px;">${esc(so.payment_condition_label || 'Condição Comercial')}</span>
       </div>
       ${installmentsHtml}
-      ${hasText ? (() => {
+      ${(hasText && !hasInstallments) ? (() => {
+        // Recálculo via regex do texto livre só roda quando NÃO há parcelas
+        // estruturadas (preset/personalizado) — senão duplica/conflita com
+        // a tabela de parcelas já renderizada acima. Selecionar um preset
+        // preenche payment_conditions com o label dele automaticamente
+        // (ServiceOrderForm.tsx), então hasText fica true mesmo sem o
+        // usuário ter digitado nada manualmente.
         // Tenta calcular parcelas a partir do texto livre
         // Detecta padrões como "50% mão de obra + 100% materiais"
         const servicesTotal = Number(so.labor_cost_total || 0);
@@ -668,6 +690,69 @@ function buildPaymentSection(so: PDFData['serviceOrder']): string {
 
         return `<div style="font-size:10px;color:var(--text-main);margin-top:8px;padding:8px;background:var(--bg-light);border-radius:4px;border:1px dashed var(--border);white-space:pre-wrap;">${esc(so.payment_conditions)}</div>${calcHtml}`;
       })() : ''}
+    </div>
+  `;
+}
+
+const RECEIVABLE_STATUS_LABELS: Record<string, string> = {
+  paid: 'Pago',
+  partially_paid: 'Parcial',
+  pending: 'Pendente',
+  overdue: 'Vencido',
+};
+
+/**
+ * Registro real de cobranças/pagamentos já efetuados — distinto de
+ * buildPaymentSection (que mostra só o plano acordado). Mostra o que
+ * realmente foi cobrado/pago/está em aberto, mesmo quando o pagamento real
+ * não seguiu exatamente a programação combinada.
+ */
+function buildPaymentHistorySection(so: PDFData['serviceOrder']): string {
+  const receivables = so.receivables || [];
+  if (receivables.length === 0) return '';
+
+  const payments = so.payments || [];
+  const totalCharged = receivables.reduce((s, r) => s + (r.amount || 0), 0);
+  const totalBalance = receivables.reduce((s, r) => s + (r.balance_amount || 0), 0);
+  const totalPaid = Math.max(0, totalCharged - totalBalance);
+
+  const rows = receivables.map((r) => {
+    const statusColor = r.status === 'paid' ? '#16a34a' : r.status === 'partially_paid' ? '#d97706' : 'var(--text-muted)';
+    const relatedPayments = payments.filter((p) => p.receivable_id === r.id);
+    const paymentsHtml = relatedPayments.map((p) => {
+      const methodLabel = PAYMENT_METHOD_LABELS[p.payment_method] || p.payment_method;
+      return `
+        <tr>
+          <td style="padding:2px 12px 2px 24px;font-size:9px;color:var(--text-muted);">↳ Pago em ${esc(fmtDate(p.payment_date))}${methodLabel ? ` — ${esc(methodLabel)}` : ''}</td>
+          <td style="text-align:right;padding:2px 12px;font-size:9px;color:var(--text-muted);">${fmtCurrency(p.amount)}</td>
+        </tr>
+      `;
+    }).join('');
+    return `
+      <tr>
+        <td style="font-weight:600;padding:6px 12px;">${esc(r.description)}</td>
+        <td style="text-align:right;padding:6px 12px;">
+          ${fmtCurrency(r.amount)}
+          <span style="font-size:8px;font-weight:600;margin-left:6px;color:${statusColor};">${esc(RECEIVABLE_STATUS_LABELS[r.status] || r.status)}</span>
+        </td>
+      </tr>
+      ${paymentsHtml}
+    `;
+  }).join('');
+
+  return `
+    <div class="card" style="margin-top:20px;border-left:4px solid var(--secondary); background:#fff;">
+      <div class="section-title">
+        <span>Pagamentos Registrados</span>
+      </div>
+      <table style="width:100%; border-collapse:collapse;">
+        <tbody>${rows}</tbody>
+      </table>
+      <div style="display:flex;justify-content:space-between;margin-top:8px;padding:8px 12px;background:var(--bg-light);border-radius:4px;font-size:10px;">
+        <span>Cobrado: <strong>${fmtCurrency(totalCharged)}</strong></span>
+        <span>Recebido: <strong style="color:#16a34a;">${fmtCurrency(totalPaid)}</strong></span>
+        ${totalBalance > 0.01 ? `<span>Saldo em aberto: <strong style="color:#dc2626;">${fmtCurrency(totalBalance)}</strong></span>` : ''}
+      </div>
     </div>
   `;
 }
@@ -850,6 +935,7 @@ ${!isQuote && data.serviceOrder.technical_notes ? `
 </div>
 
 ${buildPaymentSection(data.serviceOrder)}
+${buildPaymentHistorySection(data.serviceOrder)}
 
 ${data.serviceOrder.financial_notes ? `
 <div class="card" style="border-left:4px solid var(--border);margin-top:8px;">
@@ -1024,6 +1110,7 @@ ${companyHeaderHTML(data.company, 'Fatura de Serviço', docNumber)}
 </div>
 
 ${buildPaymentSection(data.serviceOrder)}
+${buildPaymentHistorySection(data.serviceOrder)}
 
 ${data.serviceOrder.deposit_paid && data.serviceOrder.deposit_paid > 0 ? `
 <div class="card" style="border-left:4px solid #16a34a;background:#f0fdf4;">

@@ -8,7 +8,7 @@ export function usePDFData(serviceOrderId: string | undefined) {
     queryFn: async () => {
       if (!serviceOrderId) return null;
 
-      const [soRes, settingsRes, depositRes] = await Promise.all([
+      const [soRes, settingsRes, receivablesRes] = await Promise.all([
         supabase.from('service_orders')
           .select(`
             *,
@@ -24,16 +24,32 @@ export function usePDFData(serviceOrderId: string | undefined) {
           .single(),
         supabase.from('app_settings')
           .select('key, value'),
+        // Todos os recebíveis não cancelados da OS — usado tanto para o
+        // card "Sinal Recebido" da fatura quanto para a seção de histórico
+        // de pagamentos real (distinta da programação de pagamento).
         supabase.from('receivables')
-          .select('paid_amount')
+          .select('id, description, amount, paid_amount, balance_amount, status, is_deposit')
           .eq('service_order_id', serviceOrderId)
-          .eq('is_deposit', true)
-          .eq('status', 'paid'),
+          .not('status', 'eq', 'cancelled')
+          .order('due_date', { ascending: true }),
       ]);
 
       if (soRes.error) throw soRes.error;
       const so = soRes.data;
-      const depositPaid = (depositRes.data || []).reduce((sum, r) => sum + (r.paid_amount || 0), 0);
+      const receivables = receivablesRes.data || [];
+      const depositPaid = receivables
+        .filter((r) => r.is_deposit && r.status === 'paid')
+        .reduce((sum, r) => sum + (r.paid_amount || 0), 0);
+
+      const receivableIds = receivables.map((r) => r.id);
+      const { data: paymentsData } = receivableIds.length > 0
+        ? await supabase.from('payments')
+            .select('receivable_id, payment_date, amount, payment_method')
+            .in('receivable_id', receivableIds)
+            .eq('status', 'confirmed')
+            .order('payment_date', { ascending: true })
+        : { data: [] as any[] };
+
       const settingsMap: Record<string, string> = {};
       for (const row of (settingsRes.data || []) as Array<{ key: string; value: string }>) {
         if (row.key) settingsMap[row.key] = String(row.value || '');
@@ -91,6 +107,20 @@ export function usePDFData(serviceOrderId: string | undefined) {
           quote_validity_days: (so as any).quote_validity_days ?? undefined,
           deposit_paid: depositPaid > 0 ? depositPaid : undefined,
         },
+        receivables: receivables.map((r) => ({
+          id: r.id,
+          description: r.description || 'Recebível',
+          amount: r.amount || 0,
+          balance_amount: r.balance_amount || 0,
+          status: r.status,
+          is_deposit: !!r.is_deposit,
+        })),
+        payments: (paymentsData || []).map((p) => ({
+          receivable_id: p.receivable_id,
+          payment_date: p.payment_date,
+          amount: p.amount || 0,
+          payment_method: p.payment_method || '',
+        })),
         client: {
           name: (so.clients as any)?.name || '—',
           cpf_cnpj: (so.clients as any)?.cpf_cnpj ?? undefined,
@@ -157,7 +187,7 @@ export function usePDFData(serviceOrderId: string | undefined) {
 export async function fetchPDFData(serviceOrderId: string): Promise<PDFData | null> {
   try {
     // Mirrors the 3-query structure of usePDFData to guarantee identical PDF output.
-    const [soRes, settingsRes, depositRes] = await Promise.all([
+    const [soRes, settingsRes, receivablesRes] = await Promise.all([
       supabase.from('service_orders')
         .select(`
           *,
@@ -173,17 +203,32 @@ export async function fetchPDFData(serviceOrderId: string): Promise<PDFData | nu
         .single(),
       supabase.from('app_settings')
         .select('key, value'),
-      // Busca sinal pago para exibir no card "Sinal Recebido" da fatura
+      // Todos os recebíveis não cancelados da OS — usado tanto para o card
+      // "Sinal Recebido" da fatura quanto para a seção de histórico de
+      // pagamentos real (distinta da programação de pagamento).
       supabase.from('receivables')
-        .select('paid_amount')
+        .select('id, description, amount, paid_amount, balance_amount, status, is_deposit')
         .eq('service_order_id', serviceOrderId)
-        .eq('is_deposit', true)
-        .eq('status', 'paid'),
+        .not('status', 'eq', 'cancelled')
+        .order('due_date', { ascending: true }),
     ]);
 
     if (soRes.error) throw soRes.error;
     const so = soRes.data;
-    const depositPaid = (depositRes.data || []).reduce((sum, r) => sum + (r.paid_amount || 0), 0);
+    const receivables = receivablesRes.data || [];
+    const depositPaid = receivables
+      .filter((r) => r.is_deposit && r.status === 'paid')
+      .reduce((sum, r) => sum + (r.paid_amount || 0), 0);
+
+    const receivableIds = receivables.map((r) => r.id);
+    const { data: paymentsData } = receivableIds.length > 0
+      ? await supabase.from('payments')
+          .select('receivable_id, payment_date, amount, payment_method')
+          .in('receivable_id', receivableIds)
+          .eq('status', 'confirmed')
+          .order('payment_date', { ascending: true })
+      : { data: [] as any[] };
+
     const settingsMap: Record<string, string> = {};
     for (const row of (settingsRes.data || []) as Array<{ key: string; value: string }>) {
       if (row.key) settingsMap[row.key] = String(row.value || '');
@@ -241,6 +286,20 @@ export async function fetchPDFData(serviceOrderId: string): Promise<PDFData | nu
         quote_validity_days: (so as any).quote_validity_days ?? undefined,
         deposit_paid: depositPaid > 0 ? depositPaid : undefined,
       },
+      receivables: receivables.map((r) => ({
+        id: r.id,
+        description: r.description || 'Recebível',
+        amount: r.amount || 0,
+        balance_amount: r.balance_amount || 0,
+        status: r.status,
+        is_deposit: !!r.is_deposit,
+      })),
+      payments: (paymentsData || []).map((p) => ({
+        receivable_id: p.receivable_id,
+        payment_date: p.payment_date,
+        amount: p.amount || 0,
+        payment_method: p.payment_method || '',
+      })),
       client: {
         name: (so.clients as any)?.name || '—',
         cpf_cnpj: (so.clients as any)?.cpf_cnpj ?? undefined,
