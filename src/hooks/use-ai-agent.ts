@@ -1,7 +1,9 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import type { AIContext } from '@/lib/ai-context';
+
+const SESSION_STORAGE_KEY = 'ai_session_id';
 
 export type ChatMessage =
   | { role: 'user'; content: string }
@@ -9,10 +11,10 @@ export type ChatMessage =
   | { role: 'tool'; tool_call_id: string; content: string };
 
 export type Proposal = {
-  action: string;
+  pending_action_id: string;
   title: string;
   summary_markdown: string;
-  payload: any;
+  risk_level: 'medium' | 'high';
 };
 
 export type OptionItem = { label: string; value: string };
@@ -37,6 +39,45 @@ export function useAIAgent(context: AIContext) {
   const [activeProposal, setActiveProposal] = useState<{ idx: number; proposal: Proposal } | null>(null);
   const [activeOptions, setActiveOptions] = useState<{ idx: number; data: OptionsData } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(SESSION_STORAGE_KEY);
+    } catch {
+      return null;
+    }
+  });
+
+  // Carrega o histórico salvo (Fase 2) ao montar o widget, se já existir uma sessão.
+  useEffect(() => {
+    if (!sessionId) return;
+    let cancelled = false;
+    (async () => {
+      const { data, error: histError } = await supabase.functions.invoke('ai-agent', {
+        body: { type: 'load_history', session_id: sessionId },
+      });
+      if (cancelled || histError) return;
+      const loaded = (data as any)?.messages as ChatMessage[] | undefined;
+      if (!(data as any)?.session_id) {
+        // Sessão não encontrada/não é mais do usuário — começa do zero silenciosamente.
+        try { localStorage.removeItem(SESSION_STORAGE_KEY); } catch { /* ignore */ }
+        setSessionId(null);
+        return;
+      }
+      if (loaded && loaded.length > 0) {
+        setMessages(loaded);
+        setDisplay(
+          loaded
+            .filter((m): m is Extract<ChatMessage, { role: 'user' | 'assistant' }> => m.role === 'user' || m.role === 'assistant')
+            .filter((m) => m.content)
+            .map((m) => ({ kind: 'message' as const, role: m.role, content: m.content }))
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const invalidateAll = useCallback(() => {
     ['clients', 'vessels', 'products', 'service-orders', 'agenda', 'collections'].forEach((k) =>
@@ -54,7 +95,7 @@ export function useAIAgent(context: AIContext) {
       try {
         const limitedMsgs = msgs.length > 30 ? msgs.slice(msgs.length - 30) : msgs;
         const { data, error } = await supabase.functions.invoke('ai-agent', {
-          body: { messages: limitedMsgs, context },
+          body: { messages: limitedMsgs, context, session_id: sessionId },
         });
         if (error) {
           // Tenta extrair mensagem amigável do body da edge function (ex: créditos esgotados)
@@ -65,6 +106,14 @@ export function useAIAgent(context: AIContext) {
           throw error;
         }
         if ((data as any)?.error) throw new Error((data as any).error);
+
+        // Guarda o session_id retornado (Fase 2) para as próximas chamadas e para
+        // reabrir o widget mais tarde com o histórico ainda disponível.
+        const returnedSessionId = (data as any)?.session_id as string | undefined;
+        if (returnedSessionId && returnedSessionId !== sessionId) {
+          setSessionId(returnedSessionId);
+          try { localStorage.setItem(SESSION_STORAGE_KEY, returnedSessionId); } catch { /* ignore */ }
+        }
 
         // Atualiza histórico oficial — usa updated_messages se vier (caso de proposal)
         const updated = (data as any).updated_messages as ChatMessage[] | undefined;
@@ -108,7 +157,7 @@ export function useAIAgent(context: AIContext) {
         setLoading(false);
       }
     },
-    [context, invalidateAll]
+    [context, invalidateAll, sessionId]
   );
 
   const sendMessage = useCallback(
@@ -121,41 +170,62 @@ export function useAIAgent(context: AIContext) {
     [messages, callAgent]
   );
 
+  // Fase 3: confirmação/rejeição é determinística — o servidor executa (ou não) a tool
+  // com o payload já gravado em ai_operator_pending_actions, SEM chamar o LLM de novo.
+  const callConfirmAction = useCallback(
+    async (pendingActionId: string, decision: 'approve' | 'reject') => {
+      setLoading(true);
+      setError(null);
+      try {
+        const { data, error } = await supabase.functions.invoke('ai-agent', {
+          body: { type: 'confirm_action', pending_action_id: pendingActionId, decision },
+        });
+        if (error) {
+          const rawBody = (error as any)?.context?.responseBody ?? '';
+          if (rawBody) {
+            try { throw new Error(JSON.parse(rawBody).error || rawBody); } catch (parseErr: any) { if (parseErr?.message !== rawBody) throw parseErr; throw new Error(rawBody); }
+          }
+          throw error;
+        }
+        if ((data as any)?.error) throw new Error((data as any).error);
+        const content = (data as any).message?.content || '';
+        if (content) setDisplay((d) => [...d, { kind: 'message', role: 'assistant', content }]);
+        if (decision === 'approve') invalidateAll(); // a tool real pode ter mudado dados
+      } catch (e: any) {
+        const msg = e?.message || 'Erro ao processar a decisão';
+        setError(msg);
+        setDisplay((d) => [...d, { kind: 'message', role: 'assistant', content: `❌ ${msg}` }]);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [invalidateAll]
+  );
+
   const confirmProposal = useCallback(async () => {
     if (!activeProposal) return;
     const proposalIdx = activeProposal.idx;
-    const proposalAction = activeProposal.proposal.action;
-    const proposalPayload = activeProposal.proposal.payload;
+    const pendingActionId = activeProposal.proposal.pending_action_id;
     setDisplay((d) =>
       d.map((it, i) => (i === proposalIdx && it.kind === 'proposal' ? { ...it, status: 'confirmed' } : it))
     );
-    // Envia payload explicitamente para o agente não precisar reconstruir da memória
-    const userMsg: ChatMessage = {
-      role: 'user',
-      content: `Confirmado pelo usuário. Execute a action "${proposalAction}" agora com este payload exato (use os IDs exatamente como estão): ${JSON.stringify(proposalPayload)}`,
-    };
-    const next = [...messages, userMsg];
     setActiveProposal(null);
-    await callAgent(next);
-    // Marca como executado após retorno
+    await callConfirmAction(pendingActionId, 'approve');
     setDisplay((d) =>
       d.map((it, i) => (i === proposalIdx && it.kind === 'proposal' ? { ...it, status: 'executed' as any } : it))
     );
-  }, [activeProposal, messages, callAgent]);
+  }, [activeProposal, callConfirmAction]);
 
   const cancelProposal = useCallback(async () => {
     if (!activeProposal) return;
+    const proposalIdx = activeProposal.idx;
+    const pendingActionId = activeProposal.proposal.pending_action_id;
     setDisplay((d) =>
-      d.map((it, i) => (i === activeProposal.idx && it.kind === 'proposal' ? { ...it, status: 'cancelled' } : it))
+      d.map((it, i) => (i === proposalIdx && it.kind === 'proposal' ? { ...it, status: 'cancelled' } : it))
     );
-    const userMsg: ChatMessage = {
-      role: 'user',
-      content: 'Cancelei a ação. Não execute. Aguarde nova instrução.',
-    };
-    const next = [...messages, userMsg];
     setActiveProposal(null);
-    await callAgent(next);
-  }, [activeProposal, messages, callAgent]);
+    await callConfirmAction(pendingActionId, 'reject');
+  }, [activeProposal, callConfirmAction]);
 
   const selectOption = useCallback(async (value: string, label: string) => {
     if (!activeOptions) return;
@@ -190,6 +260,8 @@ export function useAIAgent(context: AIContext) {
     setActiveProposal(null);
     setActiveOptions(null);
     setError(null);
+    setSessionId(null);
+    try { localStorage.removeItem(SESSION_STORAGE_KEY); } catch { /* ignore */ }
   }, []);
 
   return { display, loading, loadingMsg, error, activeProposal, activeOptions, sendMessage, confirmProposal, cancelProposal, selectOption, reset };
