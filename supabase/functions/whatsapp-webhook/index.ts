@@ -207,11 +207,61 @@ Deno.serve(async (req) => {
       if (dup) return jr({ ok: true, dedup: true });
     }
 
+    const phone = event.from;
+    const body = (event.text || (event.messageType !== "text" ? `[${event.messageType}]` : "[conteúdo vazio]")).slice(0, 4000);
+
+    // ---- AI Operator (Fase 4): número é de um funcionário habilitado? ----
+    // Checa ANTES de resolver cliente/lead — se for equipe interna com o canal
+    // habilitado, a mensagem nunca vira lead, e quem responde é a IA, não um humano
+    // pelo painel. Só se aplica a mensagens genuinamente recebidas (não fromMe).
+    if (!event.fromMe) {
+      const { data: aiUser } = await admin
+        .from("app_users")
+        .select("id")
+        .eq("phone_normalized", phone)
+        .eq("ai_whatsapp_enabled", true)
+        .eq("active", true)
+        .maybeSingle();
+
+      if (aiUser) {
+        const { data: msg } = await admin
+          .from("whatsapp_messages")
+          .insert({
+            direction: "inbound",
+            phone_normalized: phone,
+            message_type: event.messageType,
+            body,
+            media_url: event.mediaUrl,
+            wa_message_id: event.messageId || null,
+            delivery_status: "received",
+            raw_payload: pAny,
+          })
+          .select("id")
+          .single();
+
+        const dispatchToAgent = async () => {
+          try {
+            const res = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/ai-agent`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "x-internal-secret": Deno.env.get("AI_INTERNAL_SECRET") ?? "" },
+              body: JSON.stringify({ channel: "whatsapp", phone_normalized: phone, app_user_id: aiUser.id, text: body }),
+            });
+            if (!res.ok) console.error("[whatsapp-webhook] ai-agent respondeu", res.status, await res.text().catch(() => ""));
+          } catch (e) {
+            console.error("[whatsapp-webhook] falha ao disparar ai-agent:", e);
+          }
+        };
+        const waitUntil = (globalThis as any).EdgeRuntime?.waitUntil;
+        if (typeof waitUntil === "function") waitUntil(dispatchToAgent());
+        else dispatchToAgent().catch(() => null); // fire-and-forget sem waitUntil disponível
+
+        return jr({ ok: true, routed: "ai_operator", message_id: msg?.id });
+      }
+    }
+
     let clientId = null;
     let leadId = null;
     let isNewLead = false;
-
-    const phone = event.from;
 
     const { data: client } = await admin
       .from("clients")
@@ -247,8 +297,6 @@ Deno.serve(async (req) => {
         }
       }
     }
-
-    const body = (event.text || (event.messageType !== "text" ? `[${event.messageType}]` : "[conteúdo vazio]")).slice(0, 4000);
 
     const { data: msg, error: insErr } = await admin
       .from("whatsapp_messages")

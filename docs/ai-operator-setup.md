@@ -38,16 +38,66 @@ Depois de configurar o secret acima:
 supabase functions deploy ai-agent --project-ref okurngvcodmljjicopdp
 ```
 
-Nenhum outro secret novo é necessário nesta fase (`AI_INTERNAL_SECRET` e o secret de cron
-no Vault só entram nas Fases 4 e 5).
+O secret de cron no Vault só entra na Fase 5. `AI_INTERNAL_SECRET` já é necessário a
+partir da Fase 4 — ver seção própria abaixo.
 
 ## O que validar após o deploy
 
 1. Abrir o widget de IA no app e mandar uma pergunta simples (ex: "quantas OS abertas
    temos?") — deve responder normalmente.
 2. Pedir para criar um orçamento para um cliente já cadastrado — deve passar pelo fluxo de
-   busca → desambiguação (se houver mais de um resultado) → `propose_action` → confirmação.
+   busca → desambiguação (se houver mais de um resultado) → card de aprovação → confirmar.
 3. Nos logs da função (`supabase functions logs ai-agent`), confirmar que a partir da 2ª
    chamada dentro do mesmo turno aparece `cached_tokens` maior que zero na linha
    `[openrouter] model=... usage={...}` — isso confirma que o prompt caching está
    funcionando (cobrado a 0.25x pelo OpenRouter nos tokens lidos do cache).
+
+## Fase 4 — canal WhatsApp interno (equipe)
+
+**Ainda não deployado nem habilitado para ninguém** — os passos abaixo são pra quando o
+usuário decidir ativar.
+
+### Secret novo
+
+```bash
+supabase secrets set AI_INTERNAL_SECRET=$(openssl rand -hex 32) --project-ref okurngvcodmljjicopdp
+```
+
+Usado pelo `whatsapp-webhook` pra autenticar a chamada interna que ele faz pro `ai-agent`
+(não é um JWT de usuário — é um segredo compartilhado entre as duas functions).
+
+### Habilitar um funcionário
+
+Ainda não existe UI pra isso (fica pra Fase 6 — `AppUserEditDialog`/settings). Por
+enquanto, via SQL direto (Supabase Studio ou `execute_sql`):
+
+```sql
+update app_users
+set ai_whatsapp_enabled = true
+where id = '<uuid do funcionário>';
+```
+
+`phone_normalized` já deve estar preenchido pelo backfill da migration
+(`20260706120000_app_users_ai_whatsapp.sql`) — confirme com
+`select phone, phone_normalized from app_users where id = '<uuid>';` antes de habilitar.
+
+### Definir o PIN (ações de risco alto)
+
+Não existe UI ainda. Gerar o hash localmente com Deno e gravar via SQL:
+
+```bash
+deno eval 'import { hashPin } from "./supabase/functions/_shared/ai/whatsapp-pin.ts"; console.log(await hashPin("4321"))'
+```
+
+```sql
+update app_users set ai_whatsapp_pin_hash = '<hash gerado acima>' where id = '<uuid>';
+```
+
+### Riscos antes de deployar esta fase
+
+- `whatsapp-webhook` é uma function em produção que hoje recebe mensagens reais de
+  clientes/leads — a mudança foi cuidadosamente colocada ANTES da resolução de lead e só
+  ativa pra números com `ai_whatsapp_enabled=true` (nenhum ainda), mas vale testar com
+  `wa_test_mode` ativo e um número de teste antes de habilitar alguém de verdade.
+- Uma vez habilitado, mensagens daquele número passam a ser respondidas pela IA de
+  verdade — teste primeiro com o próprio número de quem for revisar.

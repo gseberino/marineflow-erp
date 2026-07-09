@@ -6,11 +6,21 @@
 // widget — que não muda nesta fase.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { runAgentLoop } from "../_shared/ai/agent.ts";
+import { runAgentLoop, type Proposal } from "../_shared/ai/agent.ts";
 import { buildSystemBlocks } from "../_shared/ai/prompt.ts";
 import { callClaude, ClaudeApiError, type ClaudeContentBlock, type ClaudeMessage } from "../_shared/ai/anthropic.ts";
 import { MODEL_AGENT, MODEL_LITE } from "../_shared/ai/models.ts";
 import { allTools, toolsByName, type Role } from "../_shared/ai/tools/index.ts";
+import {
+  checkWhatsAppRateLimit,
+  formatOptionsAsNumberedText,
+  parseConfirmationReply,
+  parseOptionReply,
+  queueWhatsAppReply,
+  resolveOptionAsUserText,
+  resolveOrCreateWhatsAppSession,
+} from "../_shared/ai/whatsapp-channel.ts";
+import { verifyPin } from "../_shared/ai/whatsapp-pin.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -117,11 +127,17 @@ function rowToChatMessage(row: MessageRow): ChatMessage {
  * entrada por chamada ao Claude nesse turno, na MESMA ordem em que agent.ts empilha as
  * mensagens assistant — por isso o índice avança só quando encontra role:"assistant".
  */
-function buildMessageRows(sessionId: string, newMessages: ChatMessage[], usageLog: Array<{ inputTokens: number; outputTokens: number; cacheReadInputTokens: number }>, model: string) {
+function buildMessageRows(
+  sessionId: string,
+  newMessages: ChatMessage[],
+  usageLog: Array<{ inputTokens: number; outputTokens: number; cacheReadInputTokens: number }>,
+  model: string,
+  source: "web" | "whatsapp" = "web",
+) {
   let usageIdx = 0;
   return newMessages.map((m) => {
     if (m.role === "tool") {
-      return { session_id: sessionId, role: "tool", content: m.content, tool_call_id: m.tool_call_id, source: "web" };
+      return { session_id: sessionId, role: "tool", content: m.content, tool_call_id: m.tool_call_id, source };
     }
     if (m.role === "assistant") {
       const usage = usageLog[usageIdx++];
@@ -130,14 +146,14 @@ function buildMessageRows(sessionId: string, newMessages: ChatMessage[], usageLo
         role: "assistant",
         content: m.content || null,
         tool_calls: m.tool_calls && m.tool_calls.length > 0 ? m.tool_calls : null,
-        source: "web",
+        source,
         tokens_in: usage?.inputTokens ?? null,
         tokens_out: usage?.outputTokens ?? null,
         cache_read_tokens: usage?.cacheReadInputTokens ?? null,
         model,
       };
     }
-    return { session_id: sessionId, role: "user", content: m.content, source: "web" };
+    return { session_id: sessionId, role: "user", content: m.content, source };
   });
 }
 
@@ -166,11 +182,271 @@ REGRAS:
 
 Responda APENAS com o texto da mensagem pronta para envio, sem explicações ou comentários adicionais.`;
 
+// ---------------- Canal WhatsApp interno (Fase 4) ----------------
+// Autenticado só por x-internal-secret (chamado pelo whatsapp-webhook, não por um
+// usuário logado) — não existe JWT de usuário aqui, então toolCtx.sb === toolCtx.admin
+// (service-role faz o papel de RLS pra este canal; a role do app_user já filtra as
+// tools e é revalidada em cada execute() restrito).
+
+/** Executa a decisão (aprovar/rejeitar) de uma pendência vinda de "sim"/"não" no WhatsApp. */
+async function resolveWhatsAppConfirmation(
+  admin: any,
+  metadata: Record<string, any>,
+  appUser: { id: string; role: string; full_name: string | null; ai_whatsapp_pin_hash: string | null },
+  toolCtx: { sb: any; admin: any; userId: string; userRole: Role; jwt: string; appOrigin: string; settings: Record<string, string> },
+  confirmation: { decision: "approve"; pin?: string } | { decision: "reject" },
+): Promise<{ message: string; metadata: Record<string, any> }> {
+  const pendingActionId = metadata.pending_confirm_action_id as string;
+  const { data: pending } = await admin.from("ai_operator_pending_actions").select("*").eq("id", pendingActionId).maybeSingle();
+  const clearedMetadata = { ...metadata, pending_confirm_action_id: null, pin_attempts: 0 };
+
+  if (!pending || pending.status !== "pending") {
+    return { message: "Essa pendência não existe mais ou já foi decidida.", metadata: clearedMetadata };
+  }
+
+  if (confirmation.decision === "reject") {
+    await admin
+      .from("ai_operator_pending_actions")
+      .update({ status: "rejected", rejected_by_user_id: appUser.id, rejected_at: new Date().toISOString() })
+      .eq("id", pendingActionId);
+    await admin.from("ai_operator_audit").insert({
+      session_id: pending.session_id,
+      pending_action_id: pendingActionId,
+      actor_user_id: appUser.id,
+      actor_kind: "user",
+      event_type: `reject:${pending.action_name}`,
+      event_category: "security",
+      payload: { channel: "whatsapp", args: pending.payload },
+    });
+    return { message: `❌ Ação rejeitada: ${pending.title}.`, metadata: clearedMetadata };
+  }
+
+  // approve — ações high exigem PIN (telefone sozinho é autenticação fraca)
+  if (pending.risk_level === "high") {
+    if (!confirmation.pin) {
+      return { message: "Ação de alto risco — para confirmar, responda: *sim <SEU PIN>*.", metadata };
+    }
+    const pinOk = await verifyPin(confirmation.pin, appUser.ai_whatsapp_pin_hash);
+    if (!pinOk) {
+      const attempts = (metadata.pin_attempts || 0) + 1;
+      if (attempts >= 3) {
+        await admin
+          .from("ai_operator_pending_actions")
+          .update({ status: "rejected", rejected_by_user_id: appUser.id, rejected_at: new Date().toISOString() })
+          .eq("id", pendingActionId);
+        await admin.from("ai_operator_audit").insert({
+          session_id: pending.session_id,
+          pending_action_id: pendingActionId,
+          actor_user_id: appUser.id,
+          actor_kind: "user",
+          event_type: `pin_failed_reject:${pending.action_name}`,
+          event_category: "security",
+          payload: { channel: "whatsapp", attempts },
+        });
+        await notifyAdminsPinFailure(admin, pending);
+        return { message: "❌ PIN incorreto 3 vezes — ação rejeitada por segurança.", metadata: clearedMetadata };
+      }
+      return { message: `PIN incorreto. Tente de novo: *sim <SEU PIN>* (tentativa ${attempts}/3).`, metadata: { ...metadata, pin_attempts: attempts } };
+    }
+  }
+
+  const toolDef = toolsByName[pending.action_name];
+  let execResult: unknown;
+  try {
+    execResult = toolDef ? await toolDef.execute(pending.payload, toolCtx) : { error: `Tool desconhecida: ${pending.action_name}` };
+  } catch (e: any) {
+    execResult = { error: e?.message || "Falha na execução da tool" };
+  }
+  const executedAt = new Date().toISOString();
+  await admin
+    .from("ai_operator_pending_actions")
+    .update({ status: "executed", approved_by_user_id: appUser.id, approved_at: executedAt, executed_at: executedAt, result: execResult })
+    .eq("id", pendingActionId);
+  await admin.from("ai_operator_audit").insert({
+    session_id: pending.session_id,
+    pending_action_id: pendingActionId,
+    actor_user_id: appUser.id,
+    actor_kind: "user",
+    event_type: `approve_execute:${pending.action_name}`,
+    event_category: "data",
+    payload: { channel: "whatsapp", args: pending.payload, risk: pending.risk_level, result_summary: JSON.stringify(execResult ?? null).slice(0, 500) },
+  });
+  const execError = (execResult as any)?.error;
+  const message = execError ? `⚠️ ${pending.title} — falhou: ${execError}` : `✅ ${pending.title} — executado.`;
+  return { message, metadata: clearedMetadata };
+}
+
+/** 3 tentativas de PIN erradas: avisa todo admin com telefone cadastrado. */
+async function notifyAdminsPinFailure(admin: any, pending: { title: string }): Promise<void> {
+  try {
+    const { data: admins } = await admin
+      .from("app_users")
+      .select("phone_normalized")
+      .eq("role", "admin")
+      .eq("active", true)
+      .not("phone_normalized", "is", null);
+    const alertMsg = `⚠️ Alerta de segurança: 3 tentativas de PIN incorretas ao tentar aprovar "${pending.title}" via WhatsApp. A ação foi rejeitada automaticamente.`;
+    for (const a of admins || []) {
+      if (a.phone_normalized) await queueWhatsAppReply(admin, a.phone_normalized, alertMsg);
+    }
+  } catch (e) {
+    console.error("[ai-agent][whatsapp] falha ao notificar admins:", e);
+  }
+}
+
+async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise<Response> {
+  const expectedSecret = Deno.env.get("AI_INTERNAL_SECRET");
+  if (!expectedSecret || internalSecret !== expectedSecret) return jr({ error: "Não autorizado" }, 401);
+
+  const admin = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+  const body = await req.json().catch(() => ({}));
+  const phoneNormalized: string | undefined = body.phone_normalized;
+  const appUserId: string | undefined = body.app_user_id;
+  const text = String(body.text || "").trim();
+  if (!phoneNormalized || !appUserId || !text) {
+    return jr({ error: "phone_normalized, app_user_id e text são obrigatórios" }, 400);
+  }
+
+  // Rate limit — custo $0, nem chega a resolver sessão/usuário.
+  const withinLimit = await checkWhatsAppRateLimit(admin, phoneNormalized);
+  if (!withinLimit) return jr({ ok: true, skipped: "rate_limited" });
+
+  const { data: appUser } = await admin
+    .from("app_users")
+    .select("id, role, full_name, ai_whatsapp_pin_hash")
+    .eq("id", appUserId)
+    .eq("ai_whatsapp_enabled", true)
+    .eq("active", true)
+    .maybeSingle();
+  if (!appUser) return jr({ error: "Usuário não autorizado para o canal WhatsApp" }, 403);
+
+  const sessionId = await resolveOrCreateWhatsAppSession(admin, phoneNormalized, appUserId);
+  const { data: sessionRow } = await admin.from("ai_operator_sessions").select("metadata").eq("id", sessionId).maybeSingle();
+  const metadata: Record<string, any> = (sessionRow?.metadata as any) || {};
+
+  const { data: settingsRows } = await admin.from("app_settings").select("key, value");
+  const settings: Record<string, string> = {};
+  (settingsRows || []).forEach((r: any) => {
+    if (r.key) settings[r.key] = String(r.value ?? "");
+  });
+
+  // Sem JWT de usuário neste canal — sb e admin são o mesmo client service-role.
+  const toolCtx = { sb: admin, admin, userId: appUserId, userRole: (appUser.role as Role) || "unknown", jwt: "", appOrigin: settings.app_public_url || "", settings };
+
+  // ---- Camada determinística (custo $0): confirmação de pendência ----
+  if (metadata.pending_confirm_action_id) {
+    const confirmation = parseConfirmationReply(text);
+    if (confirmation) {
+      const resolved = await resolveWhatsAppConfirmation(admin, metadata, appUser, toolCtx, confirmation);
+      await admin.from("ai_operator_sessions").update({ metadata: resolved.metadata, last_activity_at: new Date().toISOString() }).eq("id", sessionId);
+      await queueWhatsAppReply(admin, phoneNormalized, resolved.message);
+      return jr({ ok: true });
+    }
+    // Não pareceu confirmação — segue pro LLM (usuário pode ter mudado de assunto).
+  }
+
+  // ---- Camada determinística (custo $0): número de uma lista de opções pendente ----
+  let effectiveText = text;
+  const pendingOptions = metadata.pending_options as Array<{ label: string; value: string }> | undefined;
+  if (pendingOptions && pendingOptions.length > 0) {
+    const idx = parseOptionReply(text, pendingOptions.length);
+    if (idx !== null) {
+      effectiveText = resolveOptionAsUserText(pendingOptions[idx - 1]);
+      metadata.pending_options = null;
+    }
+  }
+
+  // ---- Turno normal do LLM ----
+  const { data: rows } = await admin
+    .from("ai_operator_messages")
+    .select("role, content, tool_calls, tool_call_id")
+    .eq("session_id", sessionId)
+    .order("created_at", { ascending: true })
+    .limit(30);
+  const seedMessages = (rows || []).map(rowToChatMessage);
+  const alreadyPersistedCount = toAnthropicMessages(seedMessages).length;
+  const historyMessages: ChatMessage[] = [...seedMessages, { role: "user", content: effectiveText }];
+
+  const { data: memoryRows } = await admin
+    .from("ai_operator_memory_notes")
+    .select("title, body")
+    .eq("scope", "global")
+    .eq("verification_status", "verified")
+    .order("created_at", { ascending: false })
+    .limit(10);
+  const memoryNotes = (memoryRows || []).map((r: any) => `${r.title}: ${r.body}`);
+
+  const system = buildSystemBlocks(settings, {
+    userName: appUser.full_name || "Usuário",
+    userRole: appUser.role || "unknown",
+    memoryNotes,
+    channel: "whatsapp",
+  });
+
+  const toolsForRole = allTools.filter((t) => !t.roles || t.roles.includes((appUser.role as Role) || ("unknown" as Role)));
+
+  const result = await runAgentLoop({
+    system,
+    messages: toAnthropicMessages(historyMessages),
+    tools: toolsForRole,
+    toolCtx,
+    sessionId,
+    channel: "whatsapp",
+  });
+
+  try {
+    const newNativeSlice = result.messages.slice(alreadyPersistedCount);
+    const newRows = fromAnthropicMessages(newNativeSlice);
+    if (newRows.length > 0) {
+      const rowsToInsert = buildMessageRows(sessionId, newRows, result.usage, MODEL_AGENT, "whatsapp");
+      await admin.from("ai_operator_messages").insert(rowsToInsert);
+    }
+  } catch (persistErr) {
+    console.error("[ai-agent][whatsapp] falha ao persistir mensagens:", persistErr);
+  }
+
+  let replyText: string;
+  const newMetadata: Record<string, any> = { ...metadata };
+
+  if (result.error) {
+    replyText = `⚠️ ${result.error}`;
+    newMetadata.pending_confirm_action_id = null;
+  } else if (result.options) {
+    replyText = formatOptionsAsNumberedText(result.options.question, result.options.options);
+    newMetadata.pending_options = result.options.options;
+    newMetadata.pending_confirm_action_id = null;
+  } else if (result.proposal) {
+    const proposal = result.proposal as Proposal;
+    const pinNote =
+      proposal.risk_level === "high"
+        ? "\n\nPara aprovar, responda: *sim <SEU PIN>*. Para rejeitar: *não*."
+        : "\n\nResponda *sim* para aprovar ou *não* para rejeitar.";
+    replyText = `⚠️ ${proposal.title}\n${proposal.summary_markdown}${pinNote}`;
+    newMetadata.pending_confirm_action_id = proposal.pending_action_id;
+    newMetadata.pin_attempts = 0;
+    newMetadata.pending_options = null;
+  } else {
+    replyText = result.message.content || "Ok.";
+    newMetadata.pending_confirm_action_id = null;
+  }
+
+  await admin.from("ai_operator_sessions").update({ metadata: newMetadata, last_activity_at: new Date().toISOString() }).eq("id", sessionId);
+  await queueWhatsAppReply(admin, phoneNormalized, replyText);
+
+  return jr({ ok: true, session_id: sessionId });
+}
+
 // ---------------- HANDLER ----------------
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
     if (!Deno.env.get("OPENROUTER_API_KEY")) return jr({ error: "OPENROUTER_API_KEY não configurada no Supabase" }, 500);
+
+    const internalSecret = req.headers.get("x-internal-secret");
+    if (internalSecret) return await handleWhatsAppTurn(req, internalSecret);
 
     const authHeader = req.headers.get("Authorization") || "";
     const jwt = authHeader.replace(/^Bearer\s+/i, "");

@@ -8,6 +8,8 @@ export interface PromptRuntimeCtx {
   entityId?: string;
   /** Notas de memória ativas (Fase 2) — vazio na Fase 1. */
   memoryNotes?: string[];
+  /** Fase 4: WhatsApp tem formatação diferente do painel. Padrão: "panel". */
+  channel?: "panel" | "whatsapp";
 }
 
 const STATUS_LABELS_TEXT =
@@ -167,6 +169,21 @@ function buildVolatileBlock(ctx: PromptRuntimeCtx): string {
 
   if (ctx.memoryNotes && ctx.memoryNotes.length > 0) {
     block += `\n\n════ NOTAS DE MEMÓRIA ════\n${ctx.memoryNotes.map((n) => `- ${n}`).join("\n")}`;
+  }
+
+  if (ctx.channel === "whatsapp") {
+    // Fica no bloco volátil (não no estável) de propósito: o bloco estável continua
+    // byte-idêntico entre canais, então o cache de prompt é compartilhado por
+    // painel e WhatsApp — só este adendo curto muda.
+    block += `\n\n════ CANAL: WHATSAPP ════
+- Esta conversa é por WhatsApp, não pelo painel. Nada de markdown pesado (sem
+  cabeçalhos, tabelas, negrito duplo) — só *negrito simples* e quebras de linha.
+  Respostas curtas: até ~10 linhas.
+- Quando chamar present_options, a lista aparece numerada (1, 2, 3...) — peça pro
+  usuário responder só com o número.
+- Confirmação de pendência: o usuário responde "sim"/"1" pra aprovar ou "não"/"2"
+  pra rejeitar. Isso é tratado antes de chegar até você — se você está respondendo,
+  é porque a mensagem não era uma confirmação pendente.`;
   }
 
   return block;
