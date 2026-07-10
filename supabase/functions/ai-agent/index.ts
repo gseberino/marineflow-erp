@@ -182,6 +182,47 @@ REGRAS:
 
 Responda APENAS com o texto da mensagem pronta para envio, sem explicações ou comentários adicionais.`;
 
+// Aprova e executa uma pendência respeitando a máquina de estados imposta pelo trigger
+// ai_op_protect_pending_action (pending -> approved -> executed|failed; a transição
+// direta pending -> executed é REJEITADA pelo trigger). O primeiro update é condicional
+// a status='pending' e serve de trava: se outra requisição já moveu a pendência (duplo
+// clique / corrida), o update não afeta linha nenhuma e abortamos sem re-executar a tool.
+async function approveAndExecutePendingAction(
+  admin: any,
+  toolCtx: { sb: any; admin: any; userId: string; userRole: Role; jwt: string; appOrigin: string; settings: Record<string, string> },
+  pending: { id: string; action_name: string; payload: unknown },
+  actorUserId: string,
+): Promise<{ locked: boolean; execError?: string; execResult: unknown }> {
+  const nowIso = new Date().toISOString();
+  // Passo 1 (trava): pending -> approved, só se ainda estiver pending.
+  const { data: locked } = await admin
+    .from("ai_operator_pending_actions")
+    .update({ status: "approved", approved_by_user_id: actorUserId, approved_at: nowIso })
+    .eq("id", pending.id)
+    .eq("status", "pending")
+    .select("id")
+    .maybeSingle();
+  if (!locked) return { locked: false, execResult: null };
+
+  // Passo 2: executa a tool com o payload gravado.
+  const toolDef = toolsByName[pending.action_name];
+  let execResult: unknown;
+  try {
+    execResult = toolDef ? await toolDef.execute(pending.payload, toolCtx) : { error: `Tool desconhecida: ${pending.action_name}` };
+  } catch (e: any) {
+    execResult = { error: e?.message || "Falha na execução da tool" };
+  }
+  const execError = (execResult as any)?.error as string | undefined;
+
+  // Passo 3: approved -> executed | failed.
+  await admin
+    .from("ai_operator_pending_actions")
+    .update({ status: execError ? "failed" : "executed", executed_at: new Date().toISOString(), result: execResult })
+    .eq("id", pending.id);
+
+  return { locked: true, execError, execResult };
+}
+
 // ---------------- Canal WhatsApp interno (Fase 4) ----------------
 // Autenticado só por x-internal-secret (chamado pelo whatsapp-webhook, não por um
 // usuário logado) — não existe JWT de usuário aqui, então toolCtx.sb === toolCtx.admin
@@ -250,18 +291,10 @@ async function resolveWhatsAppConfirmation(
     }
   }
 
-  const toolDef = toolsByName[pending.action_name];
-  let execResult: unknown;
-  try {
-    execResult = toolDef ? await toolDef.execute(pending.payload, toolCtx) : { error: `Tool desconhecida: ${pending.action_name}` };
-  } catch (e: any) {
-    execResult = { error: e?.message || "Falha na execução da tool" };
+  const { locked, execError, execResult } = await approveAndExecutePendingAction(admin, toolCtx, pending, appUser.id);
+  if (!locked) {
+    return { message: "Essa pendência já foi processada.", metadata: clearedMetadata };
   }
-  const executedAt = new Date().toISOString();
-  await admin
-    .from("ai_operator_pending_actions")
-    .update({ status: "executed", approved_by_user_id: appUser.id, approved_at: executedAt, executed_at: executedAt, result: execResult })
-    .eq("id", pendingActionId);
   await admin.from("ai_operator_audit").insert({
     session_id: pending.session_id,
     pending_action_id: pendingActionId,
@@ -271,7 +304,6 @@ async function resolveWhatsAppConfirmation(
     event_category: "data",
     payload: { channel: "whatsapp", args: pending.payload, risk: pending.risk_level, result_summary: JSON.stringify(execResult ?? null).slice(0, 500) },
   });
-  const execError = (execResult as any)?.error;
   const message = execError ? `⚠️ ${pending.title} — falhou: ${execError}` : `✅ ${pending.title} — executado.`;
   return { message, metadata: clearedMetadata };
 }
@@ -541,21 +573,15 @@ Deno.serve(async (req) => {
       }
 
       // decision === "approve": executa o payload GRAVADO, sem passar pelo LLM de novo.
-      const toolDef = toolsByName[pending.action_name];
-      if (!toolDef) return jr({ error: `Tool desconhecida: ${pending.action_name}` }, 500);
-
-      let execResult: unknown;
-      try {
-        execResult = await toolDef.execute(pending.payload, { sb, admin, userId, userRole: userRole as Role, jwt, appOrigin: appOriginConfirm, settings });
-      } catch (e: any) {
-        execResult = { error: e?.message || "Falha na execução da tool" };
-      }
-
-      const executedAt = new Date().toISOString();
-      await admin
-        .from("ai_operator_pending_actions")
-        .update({ status: "executed", approved_by_user_id: userId, approved_at: executedAt, executed_at: executedAt, result: execResult })
-        .eq("id", pendingActionId);
+      // Transição em dois passos (pending -> approved -> executed) com trava — o trigger
+      // ai_op_protect_pending_action rejeita pending -> executed direto.
+      const { locked, execError, execResult } = await approveAndExecutePendingAction(
+        admin,
+        { sb, admin, userId, userRole: userRole as Role, jwt, appOrigin: appOriginConfirm, settings },
+        pending,
+        userId,
+      );
+      if (!locked) return jr({ error: "Esta pendência já foi processada." }, 409);
 
       await admin.from("ai_operator_audit").insert({
         session_id: pending.session_id,
@@ -567,7 +593,7 @@ Deno.serve(async (req) => {
         payload: { args: pending.payload, risk: pending.risk_level, result_summary: JSON.stringify(execResult ?? null).slice(0, 500) },
       });
 
-      const execError = (execResult as any)?.error;
+      const executedAt = new Date().toISOString();
       const execMsg = execError ? `⚠️ ${pending.title} — falhou: ${execError}` : `✅ ${pending.title} — executado.`;
       // Continuidade: injeta uma mensagem assistant simples no histórico (não um tool_result
       // sintético — o tool_result do momento da interceptação já foi persistido no turno
