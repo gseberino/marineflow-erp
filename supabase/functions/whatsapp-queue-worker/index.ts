@@ -111,7 +111,11 @@ Deno.serve(async (req) => {
           await admin.from("whatsapp_send_queue").update({
             status: "sent",
             sent_at: new Date().toISOString(),
-            wa_message_id: result.providerMessageId || null,
+            // Coluna correta é zapi_message_id (não wa_message_id, que não existe na
+            // tabela) — com o nome errado o UPDATE inteiro falhava silenciosamente e a
+            // linha ficava presa em 'sending' apesar do envio ter dado certo. Bug latente
+            // até a fila ser ligada (Fase 4).
+            zapi_message_id: result.providerMessageId || null,
             attempts: (item.attempts || 0) + 1,
           }).eq("id", item.id);
           results.push({ id: item.id, ok: true });

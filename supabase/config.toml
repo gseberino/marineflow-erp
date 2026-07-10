@@ -17,3 +17,12 @@ verify_jwt = false
 
 [functions.quote-reminders]
 verify_jwt = false
+
+# ai-agent tem dois caminhos de entrada e faz a própria autenticação em ambos, então o
+# gateway não deve exigir JWT: (1) painel — valida o JWT do usuário manualmente via
+# sb.auth.getUser e retorna 401 se inválido/ausente; (2) canal WhatsApp (Fase 4) — a
+# chamada interna do whatsapp-webhook manda só x-internal-secret, sem Authorization, e é
+# validada contra AI_INTERNAL_SECRET. Com verify_jwt=true o gateway barrava a chamada
+# interna antes de chegar no código. Sem regressão no painel (a checagem manual continua).
+[functions.ai-agent]
+verify_jwt = false
