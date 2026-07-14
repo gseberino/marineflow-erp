@@ -30,6 +30,10 @@ export interface AppUser {
   emergency_contact_name?: string | null;
   emergency_contact_phone?: string | null;
   metadata?: any;
+  // Canal WhatsApp do AI Operator (Fase 4/6)
+  ai_whatsapp_enabled?: boolean;
+  phone_normalized?: string | null;
+  ai_whatsapp_pin_hash?: string | null;
 }
 
 export const USER_ROLES = [

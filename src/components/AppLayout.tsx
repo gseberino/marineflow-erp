@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Users, Ship, Anchor, Package, ClipboardList,
   DollarSign, BarChart3, Settings, ChevronLeft, ChevronRight, Menu,
   Warehouse, Building2, Wrench, History, LogOut, CalendarDays, MessageCircle, CreditCard,
-  Database, ChevronDown, Rocket, ShoppingCart, FileDown, Target, CheckCircle2, Bell, CalendarClock, Truck, Camera, FileText
+  Database, ChevronDown, Rocket, ShoppingCart, FileDown, Target, CheckCircle2, Bell, CalendarClock, Truck, Camera, FileText, Bot
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -23,6 +23,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Badge } from '@/components/ui/badge';
 import { NotificationBell } from '@/components/NotificationBell';
 import { WhatsAppBell } from '@/components/WhatsAppBell';
+import { PendingActionsBell } from '@/components/ai/PendingActionsBell';
 import { PWAInstallPrompt } from '@/components/PWAInstallPrompt';
 import { AIAgentWidget } from '@/components/ai/AIAgentWidget';
 import { OfflineIndicator } from '@/components/OfflineIndicator';
@@ -194,6 +195,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
       roles: ['admin'],
       items: [
         { label: 'Configurações', icon: Settings, path: '/settings' },
+        { label: 'Atividade da IA', icon: Bot, path: '/ai-activity' },
         { label: 'Log de Auditoria', icon: History, path: '/audit-log' },
       ],
     },
@@ -419,6 +421,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           <div className="flex-1" />
           <div className="flex items-center gap-3">
             <DiagnosticExportButton />
+            <PendingActionsBell />
             <WhatsAppBell />
             <NotificationBell />
             <div className="text-right hidden sm:block">

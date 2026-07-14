@@ -14,7 +14,8 @@ import { maskPhone, maskCEP, maskCPF, maskMoney, parseMoney, formatMoneyFromNumb
 import { useAddress } from '@/hooks/use-address';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { Loader2, User, Home, Shield, Briefcase, DollarSign, Key, Mail } from 'lucide-react';
+import { Loader2, User, Home, Shield, Briefcase, DollarSign, Key, Mail, Bot } from 'lucide-react';
+import { hashPin, normalizeWhatsappPhone, isUsableWhatsappPhone } from '@/lib/ai-whatsapp';
 
 interface Props {
   user: AppUser | null;
@@ -29,9 +30,13 @@ export function AppUserEditDialog({ user, open, onOpenChange, isCurrentUserAdmin
   const updateUser = useUpdateAppUser();
   const { fetchByCep, cepLoading } = useAddress();
   const [form, setForm] = useState<AppUser | null>(null);
+  // PIN nunca vive no `form` (evita reescrever hash sem querer). Só entra no payload
+  // quando o admin digita um novo, ou é zerado quando `clearPin` está ligado.
+  const [newPin, setNewPin] = useState('');
+  const [clearPin, setClearPin] = useState(false);
 
   useEffect(() => {
-    if (user) setForm({ ...user });
+    if (user) { setForm({ ...user }); setNewPin(''); setClearPin(false); }
   }, [user]);
 
   if (!form) return null;
@@ -59,13 +64,28 @@ export function AppUserEditDialog({ user, open, onOpenChange, isCurrentUserAdmin
       toast.error('Nome e email são obrigatórios');
       return;
     }
+    // Regras do canal WhatsApp da IA: precisa de telefone válido pra ser reconhecido.
+    const normalizedPhone = form.phone ? normalizeWhatsappPhone(form.phone) : '';
+    if (form.ai_whatsapp_enabled && !isUsableWhatsappPhone(normalizedPhone)) {
+      toast.error('Para habilitar o WhatsApp da IA, informe um celular válido (com DDD).');
+      return;
+    }
+    if (newPin && !/^\d{4,8}$/.test(newPin)) {
+      toast.error('O PIN deve ter de 4 a 8 dígitos numéricos.');
+      return;
+    }
     try {
-      
-      await updateUser.mutateAsync({
+      // phone_normalized sempre reflete o telefone atual (o webhook casa por ele).
+      const payload: Partial<AppUser> & { id: string } = {
         ...form,
-        id: user.id
-      });
-      
+        id: user.id,
+        phone_normalized: normalizedPhone || null,
+      };
+      if (newPin) payload.ai_whatsapp_pin_hash = await hashPin(newPin);
+      else if (clearPin) payload.ai_whatsapp_pin_hash = null;
+
+      await updateUser.mutateAsync(payload);
+
       
       // If we updated our own profile, refresh it
       if (currentUser?.id === user.id) {
@@ -99,7 +119,7 @@ export function AppUserEditDialog({ user, open, onOpenChange, isCurrentUserAdmin
         </DialogHeader>
 
         <Tabs defaultValue="basic" className="w-full">
-          <TabsList className="grid w-full grid-cols-3 sm:grid-cols-5 h-auto py-1">
+          <TabsList className={`grid w-full grid-cols-3 ${isCurrentUserAdmin ? 'sm:grid-cols-6' : 'sm:grid-cols-5'} h-auto py-1`}>
             <TabsTrigger value="basic" className="flex flex-col py-2 gap-1">
               <User className="h-4 w-4" />
               <span className="text-[10px]">Básico</span>
@@ -120,6 +140,12 @@ export function AppUserEditDialog({ user, open, onOpenChange, isCurrentUserAdmin
               <Shield className="h-4 w-4" />
               <span className="text-[10px]">Acesso</span>
             </TabsTrigger>
+            {isCurrentUserAdmin && (
+              <TabsTrigger value="ai" className="flex flex-col py-2 gap-1">
+                <Bot className="h-4 w-4" />
+                <span className="text-[10px]">IA/Zap</span>
+              </TabsTrigger>
+            )}
           </TabsList>
 
           <TabsContent value="basic" className="space-y-3 pt-4">
@@ -382,6 +408,85 @@ export function AppUserEditDialog({ user, open, onOpenChange, isCurrentUserAdmin
               </div>
             </div>
           </TabsContent>
+
+          {isCurrentUserAdmin && (
+            <TabsContent value="ai" className="space-y-4 pt-4">
+              <div className="rounded-lg border bg-primary/5 border-primary/10 p-4 space-y-1">
+                <div className="flex items-center gap-2 font-semibold text-sm">
+                  <Bot className="h-4 w-4 text-primary" />
+                  Funcionário IA no WhatsApp
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Com isto ligado, este colaborador comanda o ERP conversando com a IA pelo próprio
+                  WhatsApp. Mensagens dele deixam de virar lead e passam a ser respondidas pela IA.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <Switch
+                  checked={!!form.ai_whatsapp_enabled}
+                  onCheckedChange={(v) => set('ai_whatsapp_enabled', v)}
+                />
+                <Label>Habilitar comando por WhatsApp para este usuário</Label>
+              </div>
+
+              {(() => {
+                const normalized = form.phone ? normalizeWhatsappPhone(form.phone) : '';
+                const ok = isUsableWhatsappPhone(normalized);
+                return (
+                  <div className="rounded-lg border p-3 space-y-1 bg-muted/20">
+                    <p className="text-xs font-medium">Número reconhecido pela IA</p>
+                    {form.phone ? (
+                      <p className={`text-sm font-mono ${ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive'}`}>
+                        {normalized || '—'} {ok ? '✓' : '✗ inválido'}
+                      </p>
+                    ) : (
+                      <p className="text-sm text-destructive">Sem telefone — preencha o WhatsApp/Celular na aba “Básico”.</p>
+                    )}
+                    <p className="text-[10px] text-muted-foreground">
+                      É o telefone da aba “Básico”, normalizado (DDI 55 + DDD + 9 dígitos). Precisa ser o número que ele usa no WhatsApp.
+                    </p>
+                  </div>
+                );
+              })()}
+
+              <div className="rounded-lg border border-amber-100 bg-amber-50/50 p-4 space-y-3">
+                <div className="flex items-center gap-2 text-amber-800 font-semibold text-sm">
+                  <Key className="h-4 w-4" />
+                  PIN de aprovação (ações de alto risco)
+                </div>
+                <p className="text-xs text-amber-700">
+                  Exigido apenas para confirmar ações sensíveis pelo WhatsApp (registrar pagamento,
+                  enviar mensagem a cliente etc.), no formato <strong>“sim &lt;PIN&gt;”</strong>. Não é a senha de acesso ao sistema.
+                </p>
+                <p className="text-xs">
+                  Status atual:{' '}
+                  {form.ai_whatsapp_pin_hash && !clearPin
+                    ? <span className="font-medium text-emerald-600 dark:text-emerald-400">PIN configurado</span>
+                    : <span className="font-medium text-muted-foreground">sem PIN</span>}
+                </p>
+                <div className="grid grid-cols-2 gap-3 items-end">
+                  <div>
+                    <Label className="text-[11px]">Definir/alterar PIN (4–8 dígitos)</Label>
+                    <Input
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      value={newPin}
+                      onChange={(e) => { setNewPin(e.target.value.replace(/\D/g, '').slice(0, 8)); setClearPin(false); }}
+                      placeholder="deixe em branco para manter"
+                    />
+                  </div>
+                  {form.ai_whatsapp_pin_hash && (
+                    <div className="flex items-center gap-2 pb-2">
+                      <Switch checked={clearPin} onCheckedChange={(v) => { setClearPin(v); if (v) setNewPin(''); }} />
+                      <Label className="text-[11px]">Remover PIN</Label>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </TabsContent>
+          )}
         </Tabs>
 
         <DialogFooter>

@@ -53,6 +53,7 @@ import ExternalQuoteDetailPage from "./pages/ExternalQuoteDetailPage";
 import ExternalSellerLeadsPage from "./pages/ExternalSellerLeadsPage";
 import ExternalProductCatalogPage from "./pages/ExternalProductCatalogPage";
 import PurchaseOrdersPage from "./pages/PurchaseOrdersPage";
+import AIActivityPage from "./pages/AIActivityPage";
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -167,6 +168,11 @@ const App = () => (
                         <Route path="/audit-log" element={
                           <ProtectedRoute roles={['admin']} groupId="sistema">
                             <AuditLogPage />
+                          </ProtectedRoute>
+                        } />
+                        <Route path="/ai-activity" element={
+                          <ProtectedRoute roles={['admin']} groupId="sistema">
+                            <AIActivityPage />
                           </ProtectedRoute>
                         } />
                         <Route path="/inventory/import-xml" element={
