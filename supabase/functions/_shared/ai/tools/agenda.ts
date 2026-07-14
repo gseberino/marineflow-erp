@@ -71,7 +71,7 @@ export const agendaTools: ToolDef[] = [
       },
       required: ["title", "scheduled_start_at", "technician_user_id"],
     },
-    risk: "medium",
+    risk: "low",
     async execute(args, { sb, userId }) {
       const { data, error } = await sb.from("agenda_tasks").insert({ ...args, created_by: userId }).select().single();
       if (error) throw error;
@@ -93,7 +93,7 @@ export const agendaTools: ToolDef[] = [
       },
       required: ["id"],
     },
-    risk: "medium",
+    risk: "low",
     async execute(args, { sb }) {
       const { id, ...rest } = args;
       const { data, error } = await sb.from("agenda_tasks").update(rest).eq("id", id).select().single();

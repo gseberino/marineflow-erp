@@ -83,7 +83,7 @@ export const vesselTools: ToolDef[] = [
       },
       required: ["client_id", "name", "asset_type"],
     },
-    risk: "medium",
+    risk: "low",
     async execute(args, { sb }) {
       const { data, error } = await sb.from("vessels").insert(args).select().single();
       if (error) throw error;
@@ -105,7 +105,7 @@ export const vesselTools: ToolDef[] = [
       },
       required: ["name"],
     },
-    risk: "medium",
+    risk: "low",
     async execute(args, { sb }) {
       const { data, error } = await sb.from("marinas").insert(args).select().single();
       if (error) throw error;

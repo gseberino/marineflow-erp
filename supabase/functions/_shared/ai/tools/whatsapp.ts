@@ -226,7 +226,7 @@ export const whatsappTools: ToolDef[] = [
       properties: { scheduled_id: { type: "string", description: "UUID do agendamento a cancelar." } },
       required: ["scheduled_id"],
     },
-    risk: "medium",
+    risk: "low",
     async execute(args, { admin }) {
       const { error } = await admin.from("whatsapp_scheduled_sends").update({ status: "cancelled" }).eq("id", args.scheduled_id);
       if (error) return { error: error.message };

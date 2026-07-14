@@ -57,7 +57,7 @@ export const productTools: ToolDef[] = [
       },
       required: ["product_id", "new_quantity", "reason"],
     },
-    risk: "medium",
+    risk: "low",
     async execute(args, { admin }) {
       const { product_id, new_quantity, reason } = args;
       const { data: prod } = await admin.from("products").select("stock_quantity").eq("id", product_id).single();
@@ -90,7 +90,7 @@ export const productTools: ToolDef[] = [
       },
       required: ["name"],
     },
-    risk: "medium",
+    risk: "low",
     async execute(args, { sb }) {
       const { data, error } = await sb.from("products").insert(args).select().single();
       if (error) throw error;
@@ -126,7 +126,7 @@ export const productTools: ToolDef[] = [
       },
       required: ["product_id", "quantity"],
     },
-    risk: "medium",
+    risk: "low",
     roles: NON_TECHNICIAN_ROLES,
     async execute(args, ctx) {
       const blocked = blockTechnician(ctx);
@@ -162,7 +162,7 @@ export const productTools: ToolDef[] = [
       },
       required: ["name", "billing_unit"],
     },
-    risk: "medium",
+    risk: "low",
     roles: NON_TECHNICIAN_ROLES,
     async execute(args, ctx) {
       const blocked = blockTechnician(ctx);

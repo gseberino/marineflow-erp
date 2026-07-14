@@ -206,7 +206,7 @@ export const financialTools: ToolDef[] = [
       },
       required: ["client_id", "description", "issue_date", "due_date", "amount"],
     },
-    risk: "medium",
+    risk: "low",
     roles: NON_TECHNICIAN_ROLES,
     async execute(args, ctx) {
       const blocked = blockTechnician(ctx);
@@ -238,7 +238,7 @@ export const financialTools: ToolDef[] = [
       },
       required: ["description", "issue_date", "due_date", "amount"],
     },
-    risk: "medium",
+    risk: "low",
     roles: NON_TECHNICIAN_ROLES,
     async execute(args, ctx) {
       const blocked = blockTechnician(ctx);

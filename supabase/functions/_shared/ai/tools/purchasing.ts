@@ -40,7 +40,7 @@ export const purchasingTools: ToolDef[] = [
       },
       required: ["supplier_id"],
     },
-    risk: "medium",
+    risk: "low",
     async execute(args, { sb, userId }) {
       const { supplier_id, service_order_id, items, ...rest } = args;
       const { data: po, error } = await sb
@@ -88,7 +88,7 @@ export const purchasingTools: ToolDef[] = [
       },
       required: ["service_order_id", "product_id", "product_name", "quantity", "unit_cost"],
     },
-    risk: "medium",
+    risk: "low",
     roles: NON_TECHNICIAN_ROLES,
     async execute(args, ctx) {
       const blocked = blockTechnician(ctx);
@@ -177,7 +177,7 @@ export const purchasingTools: ToolDef[] = [
       },
       required: ["name"],
     },
-    risk: "medium",
+    risk: "low",
     roles: NON_TECHNICIAN_ROLES,
     async execute(args, ctx) {
       const blocked = blockTechnician(ctx);

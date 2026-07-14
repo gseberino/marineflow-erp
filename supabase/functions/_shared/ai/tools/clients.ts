@@ -38,7 +38,7 @@ export const clientTools: ToolDef[] = [
       },
       required: ["name", "type"],
     },
-    risk: "medium",
+    risk: "low",
     async execute(args, { sb }) {
       const { data, error } = await sb.from("clients").insert(args).select().single();
       if (error) throw error;

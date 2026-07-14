@@ -184,7 +184,7 @@ export const serviceOrderTools: ToolDef[] = [
       },
       required: ["client_id", "vessel_id"],
     },
-    risk: "medium",
+    risk: "low",
     async execute(args, { sb, admin, userId }) {
       const isQuote = !args.status || args.status === "draft";
       const prefix = isQuote ? "ORÇ" : "OS";
@@ -248,7 +248,7 @@ export const serviceOrderTools: ToolDef[] = [
       },
       required: ["id", "status"],
     },
-    risk: "medium",
+    risk: "low",
     async execute(args, { sb, admin }) {
       const { data: current } = await sb
         .from("service_orders")
@@ -286,7 +286,7 @@ export const serviceOrderTools: ToolDef[] = [
       },
       required: ["service_order_id", "product_id", "quantity"],
     },
-    risk: "medium",
+    risk: "low",
     async execute(args, { sb }) {
       const { data: prod } = await sb
         .from("products")
@@ -329,7 +329,7 @@ export const serviceOrderTools: ToolDef[] = [
       },
       required: ["service_order_id", "service_name", "unit_price"],
     },
-    risk: "medium",
+    risk: "low",
     async execute(args, { sb, settings }) {
       const { data: svc } = args.service_id
         ? await sb.from("services").select("name, billing_unit, default_price").eq("id", args.service_id).maybeSingle()
@@ -371,7 +371,7 @@ export const serviceOrderTools: ToolDef[] = [
       },
       required: ["service_order_id", "name", "unit_price"],
     },
-    risk: "medium",
+    risk: "low",
     async execute(args, { sb }) {
       const qty = Number(args.quantity) || 1;
       const price = Number(args.unit_price) || 0;
@@ -407,7 +407,7 @@ export const serviceOrderTools: ToolDef[] = [
       },
       required: ["service_order_id", "scheduled_start_at"],
     },
-    risk: "medium",
+    risk: "low",
     async execute(args, { sb }) {
       const update: any = { scheduled_start_at: args.scheduled_start_at };
       if (args.scheduled_end_at) update.scheduled_end_at = args.scheduled_end_at;
@@ -431,7 +431,7 @@ export const serviceOrderTools: ToolDef[] = [
       properties: { id: { type: "string" }, discount_amount: { type: "number" } },
       required: ["id", "discount_amount"],
     },
-    risk: "medium",
+    risk: "low",
     async execute(args, { sb }) {
       const { data, error } = await sb.from("service_orders").update({ discount_amount: args.discount_amount }).eq("id", args.id).select().single();
       if (error) throw error;
@@ -451,7 +451,7 @@ export const serviceOrderTools: ToolDef[] = [
       },
       required: ["id", "quote_status"],
     },
-    risk: "medium",
+    risk: "low",
     roles: NON_TECHNICIAN_ROLES,
     async execute(args, ctx) {
       const blocked = blockTechnician(ctx);
@@ -476,7 +476,7 @@ export const serviceOrderTools: ToolDef[] = [
       properties: { quote_id: { type: "string" } },
       required: ["quote_id"],
     },
-    risk: "medium",
+    risk: "low",
     roles: NON_TECHNICIAN_ROLES,
     async execute(args, ctx) {
       const blocked = blockTechnician(ctx);
@@ -529,6 +529,7 @@ export const serviceOrderTools: ToolDef[] = [
       },
       required: ["service_order_id", "reason"],
     },
+    // Destrutivo (cancela pagamentos confirmados) — mantém pendência de aprovação.
     risk: "medium",
     roles: NON_TECHNICIAN_ROLES,
     async execute(args, ctx) {
