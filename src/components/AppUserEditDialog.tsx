@@ -75,11 +75,13 @@ export function AppUserEditDialog({ user, open, onOpenChange, isCurrentUserAdmin
       return;
     }
     try {
-      // phone_normalized sempre reflete o telefone atual (o webhook casa por ele).
+      // phone_normalized é a CHAVE de roteamento da IA (o webhook casa o funcionário por ela) e
+      // tem índice ÚNICO. Só preenchemos quando o canal está habilitado — assim duas contas comuns
+      // com o mesmo telefone não colidem, e a unicidade recai só sobre quem comanda a IA.
       const payload: Partial<AppUser> & { id: string } = {
         ...form,
         id: user.id,
-        phone_normalized: normalizedPhone || null,
+        phone_normalized: form.ai_whatsapp_enabled ? (normalizedPhone || null) : null,
       };
       if (newPin) payload.ai_whatsapp_pin_hash = await hashPin(newPin);
       else if (clearPin) payload.ai_whatsapp_pin_hash = null;
@@ -94,9 +96,15 @@ export function AppUserEditDialog({ user, open, onOpenChange, isCurrentUserAdmin
 
       toast.success('Usuário atualizado com sucesso');
       onOpenChange(false);
-    } catch (error) {
+    } catch (error: any) {
       console.error('[AppUserEditDialog] Save error:', error);
-      toast.error('Erro ao atualizar usuário');
+      const code = error?.code;
+      const msg = String(error?.message || error?.details || '');
+      if (code === '23505' || msg.includes('ux_app_users_phone_normalized') || msg.toLowerCase().includes('duplicate key')) {
+        toast.error('Este WhatsApp já está vinculado a outro usuário. O mesmo número não pode comandar a IA em duas contas.');
+      } else {
+        toast.error(msg ? `Erro ao atualizar usuário: ${msg}` : 'Erro ao atualizar usuário');
+      }
     }
   };
 
