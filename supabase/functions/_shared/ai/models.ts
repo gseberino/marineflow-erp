@@ -7,4 +7,8 @@ export const MODEL_AGENT = "anthropic/claude-sonnet-5";
 export const MODEL_LITE = "anthropic/claude-haiku-4.5";
 
 export const MAX_ITERATIONS = 8;
-export const DEFAULT_MAX_TOKENS = 4096;
+// Teto de tokens de SAÍDA por turno do agente principal (painel + WhatsApp) — não é um
+// piso, o custo é pelos tokens realmente gerados. Compartilhado com os tokens de
+// "raciocínio" (reasoning.effort, ver agent.ts), que consomem parte deste orçamento antes
+// da resposta final começar — por isso 4096 truncava respostas com listas/várias etapas.
+export const DEFAULT_MAX_TOKENS = 8192;
