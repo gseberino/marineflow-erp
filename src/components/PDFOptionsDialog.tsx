@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { AlertTriangle, Download, Printer, Loader2 } from 'lucide-react';
 import type { PDFOptions, PDFDocumentType } from '@/lib/pdf-generator';
 import { DEFAULT_PDF_OPTIONS } from '@/lib/pdf-generator';
+import { useAppSetting, useAppSettings, useUpdateAppSetting } from '@/hooks/use-app-settings';
 
 export type ValidityConfig = {
   mode: 'days' | 'date';
@@ -27,24 +28,32 @@ interface Props {
 }
 
 const PREFS_KEY = (docType: PDFDocumentType) => `pdf.prefs.${docType}`;
+const BACKEND_KEY = (docType: PDFDocumentType) => `pdf_options_${docType}`;
 
-function loadPrefs(docType: PDFDocumentType): Partial<PDFOptions> {
+function loadLocalPrefs(docType: PDFDocumentType): Partial<PDFOptions> {
   try {
     const raw = localStorage.getItem(PREFS_KEY(docType));
     return raw ? JSON.parse(raw) : {};
   } catch { return {}; }
 }
 
-function savePrefs(docType: PDFDocumentType, opts: PDFOptions) {
+function saveLocalPrefs(docType: PDFDocumentType, opts: PDFOptions) {
   try { localStorage.setItem(PREFS_KEY(docType), JSON.stringify(opts)); } catch {}
 }
 
 export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate, hasProductImages, initialValidityDays }: Props) {
   const { t } = useI18n();
+  // Preferências ficam no backend (app_settings, uma chave por tipo de documento) para
+  // valerem em qualquer navegador/dispositivo — o localStorage é só um cache instantâneo
+  // pra não esperar a rede antes de abrir o diálogo.
+  const { data: appSettings } = useAppSettings();
+  const updateSetting = useUpdateAppSetting();
+  const defaultQuoteValidityDays = Number(useAppSetting('quote_validity_days', '15')) || 15;
+
   const [options, setOptions] = useState<PDFOptions>({ ...DEFAULT_PDF_OPTIONS });
   const [downloading, setDownloading] = useState(false);
   const [validityMode, setValidityMode] = useState<'days' | 'date'>('days');
-  const [validityDays, setValidityDays] = useState(initialValidityDays ?? 15);
+  const [validityDays, setValidityDays] = useState(initialValidityDays ?? defaultQuoteValidityDays);
   const [validityDate, setValidityDate] = useState('');
   const [dueDate, setDueDate] = useState(() => {
     const d = new Date();
@@ -54,17 +63,21 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
 
   useEffect(() => {
     if (open) {
-      // Restore saved preferences for this document type
-      const saved = loadPrefs(documentType);
+      // Preferência salva: backend (fonte da verdade) > cache local > padrão de fábrica.
+      let backendPrefs: Partial<PDFOptions> = {};
+      const raw = appSettings?.[BACKEND_KEY(documentType)];
+      if (raw) { try { backendPrefs = JSON.parse(raw); } catch { /* valor inválido, ignora */ } }
+      const saved = { ...loadLocalPrefs(documentType), ...backendPrefs };
       setOptions({ ...DEFAULT_PDF_OPTIONS, ...saved });
       setDownloading(false);
       setValidityMode('days');
-      setValidityDays(initialValidityDays ?? 15);
+      setValidityDays(initialValidityDays ?? defaultQuoteValidityDays);
       setValidityDate('');
       const d = new Date();
       d.setDate(d.getDate() + 15);
       setDueDate(d.toISOString().split('T')[0]);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, documentType]);
 
   const titleMap: Record<PDFDocumentType, string> = {
@@ -114,8 +127,10 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
       ? { mode: validityMode, days: validityDays, date: validityDate }
       : undefined;
     const due = documentType === 'invoice' ? dueDate : undefined;
-    // Persist options for next time
-    savePrefs(documentType, options);
+    // Persist options for next time — cache local instantâneo + backend (vale em qualquer
+    // dispositivo). O backend é fire-and-forget: não atrasa a geração do PDF.
+    saveLocalPrefs(documentType, options);
+    updateSetting.mutate({ key: BACKEND_KEY(documentType), value: JSON.stringify(options) });
     if (action === 'download') {
       setDownloading(true);
       try {
@@ -186,7 +201,7 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
                   type="number"
                   min={1}
                   value={validityDays}
-                  onChange={(e) => setValidityDays(Number(e.target.value) || 15)}
+                  onChange={(e) => setValidityDays(Number(e.target.value) || defaultQuoteValidityDays)}
                   className="w-24"
                 />
                 <span className="text-sm text-muted-foreground">dias a partir da emissão</span>

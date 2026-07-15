@@ -947,6 +947,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const { data: cardFees } = useCardFees();
   const { data: appSettings } = useAppSettings();
   const issRatePct = Number(appSettings?.iss_rate_pct ?? 5) || 0;
+  const defaultQuoteValidityDays = Number(appSettings?.quote_validity_days ?? 15) || 15;
   const travelRates = travelRatesFromSettings(appSettings);
   // Wrapper que injeta as tarifas configuráveis em todas as chamadas de cálculo de deslocamento
   const calcTravelCost = (p: Parameters<typeof calculateTravelCost>[0]) => calculateTravelCost(p, travelRates);
@@ -1044,7 +1045,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     custom_payment_installments: null as any[] | null,
     financial_notes: '',
     payment_method_preferred: '',
-    quote_validity_days: 15,
+    quote_validity_days: defaultQuoteValidityDays,
     card_installments: 1,
     card_fee_passthrough_enabled: false,
     signed_at: '' as string,
@@ -1310,7 +1311,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         custom_payment_installments: (d as any).custom_payment_installments || null,
         financial_notes: d.financial_notes || '',
         payment_method_preferred: d.payment_method_preferred || '',
-        quote_validity_days: d.quote_validity_days ?? 15,
+        quote_validity_days: d.quote_validity_days ?? defaultQuoteValidityDays,
         card_installments: (d as any).card_installments || 1,
         card_fee_passthrough_enabled: (d as any).card_fee_passthrough_enabled || false,
         signed_at: d.signed_at || '',
@@ -1475,7 +1476,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         discount_parts_pct: discountPartsPct,
         financial_notes: form.financial_notes || null,
         payment_method_preferred: form.payment_method_preferred || null,
-        quote_validity_days: form.quote_validity_days || 15,
+        quote_validity_days: form.quote_validity_days || defaultQuoteValidityDays,
       };
 
       if (isNew) {
@@ -4697,8 +4698,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   <div className="space-y-1.5">
                     <Label className="text-xs">Validade do orçamento (dias)</Label>
                     <Input type="number" min="1" className="h-8 text-sm"
-                      value={form.quote_validity_days || 15}
-                      onChange={e => set('quote_validity_days', parseInt(e.target.value) || 15)}
+                      value={form.quote_validity_days || defaultQuoteValidityDays}
+                      onChange={e => set('quote_validity_days', parseInt(e.target.value) || defaultQuoteValidityDays)}
                       disabled={isLocked} />
                   </div>
                 </div>
@@ -4944,7 +4945,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         open={!!pdfDialogType && !!pdfData}
         onOpenChange={v => { if (!v) setPdfDialogType(null); }}
         documentType={pdfDialogType || 'quote'}
-        initialValidityDays={form.quote_validity_days || 15}
+        initialValidityDays={form.quote_validity_days || defaultQuoteValidityDays}
         hasProductImages={pdfData?.parts?.some((p: any) => !!p.image_url) ?? false}
         onGenerate={async (action, options, validity, dueDate) => {
           if (!pdfData || !pdfDialogType) return;
