@@ -40,6 +40,7 @@ import ClientPortal from "./pages/ClientPortal";
 import ActiveProspectingPage from "./pages/ActiveProspectingPage";
 import ProspectingPage from "./pages/ProspectingPage";
 import ImportFiscalXML from "./pages/ImportFiscalXML";
+import FiscalEmission from "./pages/FiscalEmission";
 import CommissionsPage from "./pages/CommissionsPage";
 import SmartPurchasePage from "./pages/SmartPurchasePage";
 import QuoteList from "./pages/QuoteList";
@@ -97,6 +98,7 @@ const App = () => (
                         <Route path="/inventory" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><InventoryPage /></ProtectedRoute>} />
                         <Route path="/inventory/smart-purchase" element={<ProtectedRoute roles={['admin','financial']}><SmartPurchasePage /></ProtectedRoute>} />
                         <Route path="/inventory/import-xml" element={<ProtectedRoute roles={['admin']}><ImportFiscalXML /></ProtectedRoute>} />
+                        <Route path="/fiscal/emissao" element={<ProtectedRoute roles={['admin']}><FiscalEmission /></ProtectedRoute>} />
                         <Route path="/agenda" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><AgendaPage /></ProtectedRoute>} />
                         <Route path="/financial" element={
                           <ProtectedRoute roles={['admin', 'financial']} groupId="financeiro">

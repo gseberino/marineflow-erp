@@ -43,3 +43,16 @@ verify_jwt = false
 
 [functions.ai-business-monitor]
 verify_jwt = false
+
+# Emissão fiscal (NF-e/NFS-e via Contora).
+# Receptor do webhook do provedor: chega SEM Authorization (só headers X-Fiscal-*),
+# então o gateway não pode exigir JWT. A função valida a assinatura HMAC-SHA256
+# (X-Fiscal-Signature sobre timestamp.rawBody) internamente antes de processar.
+[functions.fiscal-webhook]
+verify_jwt = false
+
+# Reconciliação (rede de segurança para webhooks perdidos): pg_cron chama só com
+# x-cron-secret (sem Authorization). Faz GET /status (grátis) dos documentos ainda
+# não-terminais e atualiza o banco. Ação idempotente e interna.
+[functions.fiscal-reconcile]
+verify_jwt = false

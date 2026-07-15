@@ -173,6 +173,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
       items: [
         { label: 'Financeiro', icon: DollarSign, path: '/financial', roles: ['admin', 'financial'] },
         { label: 'Comissões', icon: Users, path: '/commissions', roles: ['admin', 'financial'] },
+        { label: 'Emissão Fiscal (NF-e)', icon: FileText, path: '/fiscal/emissao', roles: ['admin'] },
         { label: 'Relatórios', icon: BarChart3, path: '/reports', roles: ['admin', 'financial'] },
       ],
     },
