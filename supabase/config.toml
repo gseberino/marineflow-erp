@@ -26,3 +26,9 @@ verify_jwt = false
 # interna antes de chegar no código. Sem regressão no painel (a checagem manual continua).
 [functions.ai-agent]
 verify_jwt = false
+
+# Cron interno (Fase 5): expira pendências vencidas (ai_operator_pending_actions).
+# O pg_cron chama só com x-cron-secret (sem Authorization), então o gateway não pode
+# exigir JWT. Ação idempotente e interna (só marca 'expired' o que passou de expires_at).
+[functions.expire-pending-actions]
+verify_jwt = false
