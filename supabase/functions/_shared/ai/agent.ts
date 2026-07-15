@@ -101,10 +101,106 @@ function humanizeToolName(name: string): string {
   return name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function buildPendingSummary(toolDef: ToolDef, args: Record<string, unknown>): string {
-  const lines = [toolDef.description, "", "**Parâmetros:**"];
+// Rótulos em pt-BR para as ações que passam por aprovação — mesmo mapeamento usado no
+// sino de aprovações do painel (src/components/ai/PendingActionsBell.tsx), pra o título
+// ficar igual nos dois canais. Ferramenta gated nova sem entrada aqui cai no fallback
+// (nome técnico humanizado) em vez de quebrar.
+const TOOL_LABELS_PT: Record<string, string> = {
+  register_payment: "Registrar pagamento",
+  register_deposit_and_convert: "Registrar sinal e converter em OS",
+  receive_purchase_order: "Receber ordem de compra",
+  cancel_service_order: "Cancelar OS",
+  reopen_service_order: "Reabrir OS",
+  send_whatsapp_message: "Enviar WhatsApp a cliente",
+  send_collection_reminder: "Enviar lembrete de cobrança",
+  send_service_order_link: "Enviar link da OS ao cliente",
+  schedule_whatsapp_message: "Agendar WhatsApp a cliente",
+};
+
+function humanizeToolNamePt(name: string): string {
+  return TOOL_LABELS_PT[name] || humanizeToolName(name);
+}
+
+// Nomes técnicos de parâmetro -> rótulo pt-BR. Cobre os campos usados pelas tools gated
+// (financial.ts, purchasing.ts, service-orders.ts, whatsapp.ts).
+const FIELD_LABELS_PT: Record<string, string> = {
+  receivable_id: "Recebível",
+  payable_id: "Conta a pagar",
+  service_order_id: "OS/Orçamento",
+  po_id: "Pedido de compra",
+  client_id: "Cliente",
+  amount: "Valor",
+  payment_date: "Data do pagamento",
+  payment_method: "Forma de pagamento",
+  installments: "Parcelas",
+  card_fee_percent: "Taxa de cartão (%)",
+  notes: "Observações",
+  reason: "Motivo",
+  to_phone: "Telefone",
+  message: "Mensagem",
+  custom_message: "Mensagem personalizada",
+  scheduled_at: "Agendado para",
+  recurrence_type: "Recorrência",
+  collection_id: "Cobrança",
+  due_days: "Prazo (dias)",
+};
+
+const CURRENCY_FIELDS = new Set(["amount", "card_fee_percent"]);
+const DATE_FIELDS = new Set(["payment_date", "scheduled_at"]);
+const fmtBRL = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+
+function formatFieldValue(key: string, v: unknown): string {
+  if (v === null || v === undefined) return "—";
+  if (key === "amount" && typeof v === "number") return fmtBRL.format(v);
+  if (CURRENCY_FIELDS.has(key) && key !== "amount" && typeof v === "number") return `${v}%`;
+  if (DATE_FIELDS.has(key) && typeof v === "string") {
+    const d = new Date(v);
+    if (!isNaN(d.getTime())) return d.toLocaleDateString("pt-BR");
+  }
+  return typeof v === "object" ? JSON.stringify(v) : String(v);
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Troca um UUID cru pelo identificador que a pessoa reconhece (nº da OS, descrição da
+ * cobrança etc.) — best-effort: qualquer falha de consulta mantém o UUID como fallback. */
+async function resolveIdLabel(admin: any, key: string, id: string): Promise<string> {
+  try {
+    if (key === "receivable_id" || key === "payable_id") {
+      const table = key === "receivable_id" ? "receivables" : "payables";
+      const { data } = await admin.from(table).select("description").eq("id", id).maybeSingle();
+      if (data?.description) return data.description;
+    } else if (key === "service_order_id") {
+      const { data } = await admin.from("service_orders").select("service_order_number").eq("id", id).maybeSingle();
+      if (data?.service_order_number) return data.service_order_number;
+    } else if (key === "po_id") {
+      const { data } = await admin.from("purchase_orders").select("po_number").eq("id", id).maybeSingle();
+      if (data?.po_number) return data.po_number;
+    } else if (key === "client_id" || key === "collection_id") {
+      const table = key === "client_id" ? "clients" : "collections";
+      const col = key === "client_id" ? "name" : "description";
+      const { data } = await admin.from(table).select(col).eq("id", id).maybeSingle();
+      if ((data as any)?.[col]) return (data as any)[col];
+    }
+  } catch {
+    // best-effort — cai no UUID original
+  }
+  return id;
+}
+
+/**
+ * Resumo da ação pendente mostrado ao usuário (painel e WhatsApp) — mesmo texto nos dois
+ * canais. Usa asterisco simples (padrão WhatsApp; o painel exibe este campo como texto
+ * puro, então não há perda de negrito lá). Não expõe a descrição técnica da tool (escrita
+ * para o modelo, não para o usuário) nem UUIDs crus quando dá pra resolver o nome real.
+ */
+async function buildPendingSummary(admin: any, toolName: string, args: Record<string, unknown>): Promise<string> {
+  const lines: string[] = [];
   for (const [k, v] of Object.entries(args || {})) {
-    lines.push(`- ${k}: ${typeof v === "object" ? JSON.stringify(v) : String(v)}`);
+    const label = FIELD_LABELS_PT[k] || humanizeToolName(k);
+    let value = formatFieldValue(k, v);
+    if (typeof v === "string" && UUID_RE.test(v)) value = await resolveIdLabel(admin, k, v);
+    lines.push(`- ${label}: ${value}`);
   }
   return lines.join("\n");
 }
@@ -251,8 +347,8 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
             requested_by_user_id: params.toolCtx.userId,
             action_name: tc.name,
             risk_level: effectiveRisk,
-            title: humanizeToolName(tc.name),
-            summary: buildPendingSummary(toolDef, tc.input as Record<string, unknown>),
+            title: humanizeToolNamePt(tc.name),
+            summary: await buildPendingSummary(params.toolCtx.admin, tc.name, tc.input as Record<string, unknown>),
             payload: tc.input,
             status: "pending",
             expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
