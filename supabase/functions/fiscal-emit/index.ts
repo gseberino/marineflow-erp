@@ -7,6 +7,8 @@ import { createFiscalProvider, readFiscalEnvironment } from "../_shared/fiscal/f
 import { resolveIbgeCityCode } from "../_shared/fiscal/ibge.ts";
 import {
   buildNfeDraftPayload,
+  computeCfop,
+  findNatureOfOperation,
   validateNfeDraftInput,
   type BuildNfePayloadInput,
 } from "../_shared/fiscal/payload-builder.ts";
@@ -121,6 +123,12 @@ async function handleCreate(admin: any, body: any): Promise<Response> {
       422,
     );
   }
+  if (!company.state_code) {
+    return jr(
+      { error: "UF da empresa emissora não configurada. Complete a UF em 'Dados da Empresa' antes de emitir — ela define se o CFOP calculado é de operação interna ou interestadual." },
+      422,
+    );
+  }
 
   const addr = body.recipient?.address ?? {};
   let cityCode: string | null = addr.city_code || null;
@@ -128,8 +136,16 @@ async function handleCreate(admin: any, body: any): Promise<Response> {
     cityCode = await resolveIbgeCityCode(addr.state_code, addr.city_name);
   }
 
+  // Natureza de operação define o CFOP-base e se a nota é de saída (venda,
+  // devolução ao fornecedor, remessas) ou de entrada (devolução recebida do
+  // cliente) — o primeiro dígito do CFOP em si depende também de a UF do
+  // destinatário coincidir ou não com a UF do emitente.
+  const nature = findNatureOfOperation(body.nature_of_operation);
+  const defaultItemCfop = computeCfop(nature.baseCfopCode, nature.operationType, company.state_code, addr.state_code);
+
   const input: BuildNfePayloadInput = {
-    natureOperation: body.nature_operation || undefined,
+    natureOperation: nature.natureOperation,
+    operationType: nature.operationType,
     recipient: {
       name: body.recipient?.name,
       document: body.recipient?.document,
@@ -149,7 +165,7 @@ async function handleCreate(admin: any, body: any): Promise<Response> {
       code: String(it.code ?? it.sku ?? "ITEM"),
       name: String(it.name ?? ""),
       ncm: String(it.ncm ?? ""),
-      cfop: it.cfop ? String(it.cfop) : undefined,
+      cfop: it.cfop ? String(it.cfop) : defaultItemCfop,
       unit: it.unit ? String(it.unit) : undefined,
       quantity: Number(it.quantity),
       unitPrice: Number(it.unit_price),

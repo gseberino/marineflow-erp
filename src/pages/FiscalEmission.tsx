@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import { AddressFields } from '@/components/AddressFields';
+import { EntityCombobox, type EntityOption } from '@/components/EntityCombobox';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -17,7 +18,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import {
-  FileText, Loader2, Plus, Trash2, RefreshCw, Download, Ban, Pencil, Settings2,
+  FileText, Loader2, Plus, Trash2, RefreshCw, Download, Ban, Pencil, Settings2, Upload,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -26,11 +27,20 @@ import { useClients } from '@/hooks/use-clients';
 import { useProducts } from '@/hooks/use-products';
 import { useI18n } from '@/i18n';
 import { maskCPFCNPJ } from '@/lib/masks';
+import { parseNfeReferenceXml } from '@/lib/nfe-xml-parser';
 // Reaproveita os mesmos módulos que a edge function fiscal-emit usa no
-// servidor — evita duplicar a lista de formas de pagamento e o CFOP padrão.
-import { PAYMENT_METHODS, DEFAULT_CFOP } from '../../supabase/functions/_shared/fiscal/payload-builder';
+// servidor — evita duplicar a lista de formas de pagamento, natureza de
+// operação/CFOP e o CFOP padrão.
+import {
+  PAYMENT_METHODS, NATURE_OF_OPERATION_OPTIONS, findNatureOfOperation, computeCfop,
+} from '../../supabase/functions/_shared/fiscal/payload-builder';
 
 const MIN_JUSTIFICATION_LENGTH = 15; // mesmo mínimo exigido pela SEFAZ, checado de novo no backend
+
+const BRAZILIAN_STATES = [
+  'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG',
+  'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO',
+];
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface DraftItem {
@@ -139,12 +149,13 @@ export default function FiscalEmission() {
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsForm, setSettingsForm] = useState({
     legal_name: '', trade_name: '', cnpj: '', state_registration: '',
-    municipal_registration: '', tax_regime: 'simples', crt: 1,
+    municipal_registration: '', tax_regime: 'simples', crt: 1, state_code: '',
   });
 
   const [showEmit, setShowEmit] = useState(false);
   const [emitting, setEmitting] = useState(false);
   const [emitIdempotencyKey, setEmitIdempotencyKey] = useState('');
+  const [natureOfOperation, setNatureOfOperation] = useState('venda');
   const [clientId, setClientId] = useState<string>('');
   const [recipientName, setRecipientName] = useState('');
   const [recipientDocument, setRecipientDocument] = useState('');
@@ -152,6 +163,41 @@ export default function FiscalEmission() {
   const [address, setAddress] = useState<AddressState>(EMPTY_ADDRESS);
   const [paymentMethod, setPaymentMethod] = useState('01');
   const [items, setItems] = useState<DraftItem[]>([]);
+  const xmlInputRef = useRef<HTMLInputElement>(null);
+
+  const selectedNature = useMemo(() => findNatureOfOperation(natureOfOperation), [natureOfOperation]);
+  // Prévia do CFOP que será aplicado a itens novos — a mesma regra que o
+  // backend usa (intra vs. interestadual conforme UF emitente x destinatário),
+  // só que calculada aqui pra já popular os campos sem round-trip.
+  const defaultItemCfop = useMemo(
+    () => computeCfop(selectedNature.baseCfopCode, selectedNature.operationType, company?.state_code, address.state),
+    [selectedNature, company?.state_code, address.state],
+  );
+
+  // addItem()/handleItemProductChange() gravam defaultItemCfop no item no
+  // momento em que ele é criado, mas não reagem a uma troca posterior de
+  // Natureza da Operação (ex.: usuário adiciona itens em "Venda" e só depois
+  // muda para "Devolução ao fornecedor") — sem isso os itens ficariam com um
+  // CFOP de venda numa nota de devolução. Só reajusta itens cujo CFOP ainda é
+  // o default anterior (auto-preenchido); um CFOP editado manualmente, vindo
+  // do cadastro do produto ou importado de XML de referência é preservado.
+  const prevDefaultCfopRef = useRef(defaultItemCfop);
+  useEffect(() => {
+    const prev = prevDefaultCfopRef.current;
+    if (prev !== defaultItemCfop) {
+      setItems((current) => current.map((it) => (it.cfop === prev ? { ...it, cfop: defaultItemCfop } : it)));
+    }
+    prevDefaultCfopRef.current = defaultItemCfop;
+  }, [defaultItemCfop]);
+
+  const productOptions: EntityOption[] = useMemo(() => (products || [])
+    .filter((p) => p.active)
+    .map((p) => ({
+      value: p.id,
+      label: p.name,
+      description: p.sku || undefined,
+      searchTerms: [p.ncm || '', (p as any).cfop || ''],
+    })), [products]);
 
   const [cancelTarget, setCancelTarget] = useState<{ id: string } | null>(null);
   const [cancelReason, setCancelReason] = useState('');
@@ -177,6 +223,7 @@ export default function FiscalEmission() {
         municipal_registration: company.municipal_registration || '',
         tax_regime: company.tax_regime || 'simples',
         crt: company.crt ?? 1,
+        state_code: company.state_code || '',
       });
     }
     setShowSettings(true);
@@ -212,6 +259,7 @@ export default function FiscalEmission() {
 
   // ── Dialog de emissão ────────────────────────────────────────────────────
   const openEmitDialog = () => {
+    setNatureOfOperation('venda');
     setClientId('');
     setRecipientName('');
     setRecipientDocument('');
@@ -249,7 +297,7 @@ export default function FiscalEmission() {
   const addItem = () => {
     setItems((prev) => [
       ...prev,
-      { productId: null, code: '', name: '', ncm: '', cfop: DEFAULT_CFOP, unit: 'UN', quantity: 1, unit_price: 0 },
+      { productId: null, code: '', name: '', ncm: '', cfop: defaultItemCfop, unit: 'UN', quantity: 1, unit_price: 0 },
     ]);
   };
 
@@ -272,10 +320,61 @@ export default function FiscalEmission() {
       code: p.sku || p.id.slice(0, 8),
       name: p.name,
       ncm: p.ncm || '',
-      cfop: (p as any).cfop || DEFAULT_CFOP,
+      cfop: (p as any).cfop || defaultItemCfop,
       unit: p.unit || 'UN',
       unit_price: Number(p.sale_price || 0),
     });
+  };
+
+  // Callback do "+ Cadastrar novo" do EntityCombobox — não cria um produto no
+  // catálogo (isso seria um escopo bem maior), só inicia um item avulso já
+  // com o nome digitado, deixando NCM/CFOP/valor pra preencher nos campos
+  // abaixo. Resolve a queixa de "não dá pra cadastrar avulso direto no campo".
+  const handleItemAvulso = (index: number, typedName: string) => {
+    updateItem(index, { productId: null, name: typedName || items[index]?.name || '' });
+  };
+
+  const handleXmlFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // permite selecionar o mesmo arquivo de novo depois
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = parseNfeReferenceXml(text);
+      if (!parsed) {
+        toast.error('Arquivo não parece ser um XML de NF-e válido.');
+        return;
+      }
+      setClientId(''); // XML importado não necessariamente bate com um cliente cadastrado
+      setRecipientName(parsed.recipient.name);
+      setRecipientDocument(parsed.recipient.document);
+      setRecipientEmail(parsed.recipient.email);
+      setAddress({
+        postal_code: parsed.recipient.address.postalCode,
+        address_line_1: parsed.recipient.address.street,
+        address_number: parsed.recipient.address.number,
+        address_complement: parsed.recipient.address.complement,
+        neighborhood: parsed.recipient.address.district,
+        city: parsed.recipient.address.cityName,
+        state: parsed.recipient.address.stateCode,
+        country: 'Brasil',
+      });
+      if (parsed.items.length) {
+        setItems(parsed.items.map((it) => ({
+          productId: null,
+          code: it.code,
+          name: it.name,
+          ncm: it.ncm,
+          cfop: it.cfop || defaultItemCfop,
+          unit: it.unit || 'UN',
+          quantity: it.quantity,
+          unit_price: it.unitPrice,
+        })));
+      }
+      toast.success(`Dados importados de "${file.name}". Confira quantidade, valores e a natureza da operação antes de emitir.`);
+    } catch (err: any) {
+      toast.error('Erro ao ler o XML: ' + err.message);
+    }
   };
 
   const total = items.reduce((sum, it) => sum + it.quantity * it.unit_price, 0);
@@ -289,7 +388,7 @@ export default function FiscalEmission() {
           origin_type: 'manual',
           idempotency_key: emitIdempotencyKey,
           client_id: clientId || null,
-          nature_operation: 'Venda de mercadoria',
+          nature_of_operation: natureOfOperation,
           payment_method: paymentMethod,
           recipient: {
             name: recipientName,
@@ -538,7 +637,7 @@ export default function FiscalEmission() {
                 </Select>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               <div>
                 <Label>Inscrição Estadual</Label>
                 <Input value={settingsForm.state_registration} onChange={(e) => setSettingsForm((p) => ({ ...p, state_registration: e.target.value }))} />
@@ -547,11 +646,23 @@ export default function FiscalEmission() {
                 <Label>Inscrição Municipal</Label>
                 <Input value={settingsForm.municipal_registration} onChange={(e) => setSettingsForm((p) => ({ ...p, municipal_registration: e.target.value }))} />
               </div>
+              <div>
+                <Label>UF</Label>
+                <Select value={settingsForm.state_code} onValueChange={(v) => setSettingsForm((p) => ({ ...p, state_code: v }))}>
+                  <SelectTrigger><SelectValue placeholder="UF" /></SelectTrigger>
+                  <SelectContent>
+                    {BRAZILIAN_STATES.map((uf) => (
+                      <SelectItem key={uf} value={uf}>{uf}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              Isto é só um registro local, para exibição no sistema — não é enviado à Contora e não determina qual empresa
-              efetivamente emite. Quem manda isso é o cadastro feito direto no console da Contora (CNPJ + certificado A1),
-              vinculado ao token configurado nos Secrets do Supabase. Mantenha os dois sincronizados manualmente.
+              A UF é obrigatória: define se o CFOP calculado em cada emissão é de operação interna (mesmo estado) ou
+              interestadual. Os demais dados são só um registro local, para exibição — não são enviados à Contora e não
+              determinam qual empresa efetivamente emite. Quem manda isso é o cadastro feito direto no console da Contora
+              (CNPJ + certificado A1), vinculado ao token configurado nos Secrets do Supabase.
             </p>
           </div>
           <DialogFooter>
@@ -576,6 +687,33 @@ export default function FiscalEmission() {
           </DialogHeader>
 
           <div className="space-y-5">
+            <div className="flex items-end justify-between gap-4">
+              <div className="flex-1">
+                <Label>Natureza da Operação</Label>
+                <Select value={natureOfOperation} onValueChange={setNatureOfOperation}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {NATURE_OF_OPERATION_OPTIONS.map((n) => (
+                      <SelectItem key={n.value} value={n.value}>{n.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {selectedNature.operationType === 'entrada' && (
+                  <p className="text-xs text-amber-700 mt-1">
+                    Nota de ENTRADA — registra recebimento (ex.: devolução do cliente), não uma venda.
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground mt-1">
+                  CFOP dos novos itens: <span className="font-mono">{defaultItemCfop}</span>
+                  {!company?.state_code && ' (defina a UF da empresa em "Dados da Empresa" para o cálculo correto)'}
+                </p>
+              </div>
+              <input ref={xmlInputRef} type="file" accept=".xml" className="hidden" onChange={handleXmlFileChange} />
+              <Button type="button" size="sm" variant="outline" onClick={() => xmlInputRef.current?.click()}>
+                <Upload className="h-3.5 w-3.5 mr-1" />Importar de XML
+              </Button>
+            </div>
+
             <div>
               <Label>Cliente cadastrado (opcional — preenche os dados abaixo)</Label>
               <Select value={clientId || '__none'} onValueChange={(v) => handleClientChange(v === '__none' ? '' : v)}>
@@ -631,16 +769,19 @@ export default function FiscalEmission() {
                 {items.map((it, index) => (
                   <div key={index} className="rounded-lg border p-3 space-y-2">
                     <div className="flex items-center justify-between gap-2">
-                      <Select value={it.productId || '__manual'} onValueChange={(v) => handleItemProductChange(index, v === '__manual' ? '' : v)}>
-                        <SelectTrigger className="h-8 text-xs flex-1"><SelectValue placeholder="Produto do estoque (opcional)" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__manual">Item avulso (preencher manualmente)</SelectItem>
-                          {(products || []).filter((p) => p.active).map((p) => (
-                            <SelectItem key={p.id} value={p.id}>{p.name} {p.sku ? `(${p.sku})` : ''}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={() => removeItem(index)}>
+                      <EntityCombobox
+                        value={it.productId}
+                        onChange={(v) => handleItemProductChange(index, v)}
+                        options={productOptions}
+                        placeholder="Produto do estoque (opcional)"
+                        searchPlaceholder="Buscar produto... (digite 3+ letras)"
+                        emptyText="Nenhum produto encontrado"
+                        fallbackLabel={!it.productId && it.name ? `Avulso: ${it.name}` : undefined}
+                        onCreate={(typed) => handleItemAvulso(index, typed)}
+                        createLabel="Item avulso (preencher manualmente)"
+                        triggerClassName="h-8 text-xs"
+                      />
+                      <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive shrink-0" onClick={() => removeItem(index)}>
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
                     </div>

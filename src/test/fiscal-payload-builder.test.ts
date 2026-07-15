@@ -3,6 +3,9 @@ import {
   buildNfeDraftPayload,
   validateNfeDraftInput,
   DEFAULT_CFOP,
+  computeCfop,
+  findNatureOfOperation,
+  NATURE_OF_OPERATION_OPTIONS,
   type BuildNfePayloadInput,
 } from "../../supabase/functions/_shared/fiscal/payload-builder";
 
@@ -130,5 +133,73 @@ describe("validateNfeDraftInput", () => {
   it("exige forma de pagamento", () => {
     const errors = validateNfeDraftInput(makeInput({ paymentMethod: "" }));
     expect(errors).toContain("Forma de pagamento é obrigatória.");
+  });
+});
+
+describe("computeCfop", () => {
+  it("usa prefixo 5 (saída, mesmo estado) quando UF emitente e destinatário coincidem", () => {
+    expect(computeCfop("102", "saida", "SC", "SC")).toBe("5102");
+  });
+
+  it("usa prefixo 6 (saída, interestadual) quando as UFs divergem", () => {
+    expect(computeCfop("102", "saida", "SC", "SP")).toBe("6102");
+  });
+
+  it("usa prefixo 1 (entrada, mesmo estado) e 2 (entrada, interestadual)", () => {
+    expect(computeCfop("202", "entrada", "SC", "SC")).toBe("1202");
+    expect(computeCfop("202", "entrada", "SC", "SP")).toBe("2202");
+  });
+
+  it("é case-insensitive e tolera espaços na UF", () => {
+    expect(computeCfop("102", "saida", " sc ", "Sc")).toBe("5102");
+  });
+
+  it("assume interestadual (mais conservador) quando alguma UF está ausente", () => {
+    expect(computeCfop("102", "saida", null, "SC")).toBe("6102");
+    expect(computeCfop("102", "saida", "SC", undefined)).toBe("6102");
+    expect(computeCfop("202", "entrada", null, null)).toBe("2202");
+  });
+});
+
+describe("findNatureOfOperation / NATURE_OF_OPERATION_OPTIONS", () => {
+  it("resolve pelo value exato", () => {
+    const found = findNatureOfOperation("devolucao_compra");
+    expect(found.natureOperation).toBe("Devolução de compra");
+    expect(found.baseCfopCode).toBe("202");
+    expect(found.operationType).toBe("saida");
+  });
+
+  it("cai em 'venda' (primeira opção) para value desconhecido ou ausente", () => {
+    expect(findNatureOfOperation("algo-inexistente").value).toBe("venda");
+    expect(findNatureOfOperation(undefined).value).toBe("venda");
+    expect(findNatureOfOperation(null).value).toBe("venda");
+  });
+
+  it("devolução ao fornecedor e devolução do cliente usam o mesmo CFOP-base (202), só muda entrada/saída", () => {
+    const aoFornecedor = findNatureOfOperation("devolucao_compra");
+    const doCliente = findNatureOfOperation("devolucao_venda");
+    expect(aoFornecedor.baseCfopCode).toBe(doCliente.baseCfopCode);
+    expect(aoFornecedor.operationType).toBe("saida");
+    expect(doCliente.operationType).toBe("entrada");
+  });
+
+  it("toda opção tem um label, natureOperation e baseCfopCode não vazios", () => {
+    for (const opt of NATURE_OF_OPERATION_OPTIONS) {
+      expect(opt.label.length).toBeGreaterThan(0);
+      expect(opt.natureOperation.length).toBeGreaterThan(0);
+      expect(opt.baseCfopCode).toMatch(/^\d{3}$/);
+    }
+  });
+});
+
+describe("buildNfeDraftPayload — operationType", () => {
+  it("usa 'saida' por padrão quando operationType não é informado", () => {
+    const payload = buildNfeDraftPayload(makeInput()) as any;
+    expect(payload.operation_type).toBe("saida");
+  });
+
+  it("propaga operationType='entrada' quando informado (devolução recebida do cliente)", () => {
+    const payload = buildNfeDraftPayload(makeInput({ operationType: "entrada" })) as any;
+    expect(payload.operation_type).toBe("entrada");
   });
 });

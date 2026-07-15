@@ -14,6 +14,86 @@ export const PAYMENT_METHODS = [
 
 export const DEFAULT_CFOP = "5102"; // venda de mercadoria adquirida/recebida de terceiros
 
+// Catálogo de Natureza de Operação. "Natureza" em si é texto livre (não
+// padronizado), mas cada uma corresponde a um CFOP-base diferente — isso sim
+// é regulado. baseCfopCode é o sufixo de 3 dígitos comum às 4 variações
+// (mesmo estado/outro estado × saída/entrada); o dígito inicial (1/2/5/6) é
+// calculado em computeCfop() a partir da UF do emitente x UF da contraparte.
+export interface NatureOfOperationOption {
+  value: string;
+  label: string;
+  natureOperation: string;
+  baseCfopCode: string;
+  operationType: "saida" | "entrada";
+}
+
+export const NATURE_OF_OPERATION_OPTIONS: NatureOfOperationOption[] = [
+  {
+    value: "venda",
+    label: "Venda de mercadoria",
+    natureOperation: "Venda de mercadoria",
+    baseCfopCode: "102",
+    operationType: "saida",
+  },
+  {
+    value: "devolucao_compra",
+    label: "Devolução ao fornecedor (compra)",
+    natureOperation: "Devolução de compra",
+    baseCfopCode: "202",
+    operationType: "saida",
+  },
+  {
+    value: "remessa_conserto",
+    label: "Remessa para conserto/reparo",
+    natureOperation: "Remessa para conserto ou reparo",
+    baseCfopCode: "915",
+    operationType: "saida",
+  },
+  {
+    value: "remessa_bonificacao",
+    label: "Remessa em bonificação, doação ou brinde",
+    natureOperation: "Remessa em bonificação, doação ou brinde",
+    baseCfopCode: "910",
+    operationType: "saida",
+  },
+  {
+    value: "remessa_demonstracao",
+    label: "Remessa para demonstração",
+    natureOperation: "Remessa de mercadoria para demonstração",
+    baseCfopCode: "912",
+    operationType: "saida",
+  },
+  {
+    value: "devolucao_venda",
+    label: "Devolução recebida do cliente",
+    natureOperation: "Devolução de venda de mercadoria",
+    baseCfopCode: "202",
+    operationType: "entrada",
+  },
+];
+
+export function findNatureOfOperation(value: string | undefined | null): NatureOfOperationOption {
+  return NATURE_OF_OPERATION_OPTIONS.find((o) => o.value === value) ?? NATURE_OF_OPERATION_OPTIONS[0];
+}
+
+// CFOP muda o primeiro dígito conforme a operação circula dentro do mesmo
+// estado ou entre estados diferentes: saída = 5xxx (mesmo estado) / 6xxx
+// (outro estado); entrada = 1xxx (mesmo estado) / 2xxx (outro estado). Os
+// outros 3 dígitos (baseCfopCode) identificam o tipo de operação e não mudam.
+export function computeCfop(
+  baseCfopCode: string,
+  operationType: "saida" | "entrada",
+  companyStateCode: string | null | undefined,
+  counterpartStateCode: string | null | undefined,
+): string {
+  const sameState = !!companyStateCode && !!counterpartStateCode &&
+    companyStateCode.trim().toUpperCase() === counterpartStateCode.trim().toUpperCase();
+  const prefix = operationType === "entrada"
+    ? (sameState ? "1" : "2")
+    : (sameState ? "5" : "6");
+  return `${prefix}${baseCfopCode}`;
+}
+
 export interface NfeAddressInput {
   street: string;
   number: string;
@@ -44,6 +124,7 @@ export interface NfeItemInput {
 
 export interface BuildNfePayloadInput {
   natureOperation?: string;
+  operationType?: "saida" | "entrada"; // default "saida" (venda) — "entrada" p/ devolução recebida do cliente
   recipient: NfeRecipientInput;
   items: NfeItemInput[];
   paymentMethod: string;
@@ -68,7 +149,7 @@ export function buildNfeDraftPayload(
 
   return {
     nature_operation: input.natureOperation ?? "Venda de mercadoria",
-    operation_type: "saida",
+    operation_type: input.operationType ?? "saida",
     // CPF (11 dígitos) só existe para pessoa física — tratamos como consumidor
     // final por padrão; CNPJ (revenda/empresa) por padrão não é consumidor final.
     consumer_final: input.consumerFinal ?? documentDigits.length === 11,
