@@ -25,6 +25,8 @@ import { toast } from 'sonner';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useClients } from '@/hooks/use-clients';
 import { useProducts } from '@/hooks/use-products';
+import { useProductCategories } from '@/hooks/use-product-categories';
+import { useAppSettings } from '@/hooks/use-app-settings';
 import { useI18n } from '@/i18n';
 import { maskCPFCNPJ } from '@/lib/masks';
 import { parseNfeReferenceXml } from '@/lib/nfe-xml-parser';
@@ -34,6 +36,29 @@ import { parseNfeReferenceXml } from '@/lib/nfe-xml-parser';
 import {
   PAYMENT_METHODS, NATURE_OF_OPERATION_OPTIONS, findNatureOfOperation, computeCfop,
 } from '../../supabase/functions/_shared/fiscal/payload-builder';
+import {
+  resolveProductFiscal, type GlobalFiscalDefaults, type ResolvedProductFiscal,
+} from '../../supabase/functions/_shared/fiscal/product-fiscal';
+
+// Indicador de IE do destinatário (indIEDest).
+const IE_INDICATORS = [
+  { value: 9, label: 'Não contribuinte (consumidor)' },
+  { value: 1, label: 'Contribuinte do ICMS' },
+  { value: 2, label: 'Isento de Inscrição Estadual' },
+];
+
+// Indicador de presença (indPres) — os casos comuns do HBR.
+const PRESENCE_INDICATORS = [
+  { value: 1, label: 'Presencial' },
+  { value: 9, label: 'Não presencial / outros' },
+  { value: 2, label: 'Internet' },
+  { value: 4, label: 'Entrega a domicílio' },
+  { value: 0, label: 'Não se aplica' },
+];
+
+const SIMPLES_INFO_NOTE =
+  'Documento emitido por optante do Simples Nacional. Não gera direito a crédito fiscal de IPI. ' +
+  'Permite o aproveitamento do crédito de ICMS conforme a legislação (art. 23 da LC 123/2006).';
 
 const MIN_JUSTIFICATION_LENGTH = 15; // mesmo mínimo exigido pela SEFAZ, checado de novo no backend
 
@@ -52,7 +77,17 @@ interface DraftItem {
   unit: string;
   quantity: number;
   unit_price: number;
+  // Campos tributários (auto-preenchidos do produto, editáveis). Viram o bloco
+  // `taxes` no servidor. O CST de PIS/COFINS vem do default global (não por item).
+  csosn: string;
+  origin: number;
+  icms_rate: number;
+  pis_rate: number;
+  cofins_rate: number;
+  ipi_rate: number;
 }
+
+const EMPTY_RESOLVED = { csosn: '400', origin: 0, icms_rate: 0, pis_rate: 0, cofins_rate: 0, ipi_rate: 0 };
 
 interface AddressState {
   postal_code: string;
@@ -144,12 +179,40 @@ export default function FiscalEmission() {
   const { data: documents, isLoading: loadingDocs } = useIssuedFiscalDocuments();
   const { data: clients } = useClients();
   const { data: products } = useProducts();
+  const { data: productCategories } = useProductCategories();
+  const { data: appSettings } = useAppSettings();
+
+  // Defaults fiscais globais (fim da hierarquia produto→categoria→global). O
+  // hook devolve um mapa key→value; convertemos para o formato do resolver.
+  const globalFiscalDefaults: GlobalFiscalDefaults = useMemo(() => {
+    const m = appSettings || {};
+    const n = (k: string) => (m[k] != null && m[k] !== '' && !Number.isNaN(Number(m[k])) ? Number(m[k]) : undefined);
+    return {
+      default_csosn: m['default_csosn'] || undefined,
+      default_fiscal_origin: n('default_fiscal_origin'),
+      default_icms_rate: n('default_icms_rate'),
+      default_ipi_rate: n('default_ipi_rate'),
+      default_pis_rate: n('default_pis_rate'),
+      default_cofins_rate: n('default_cofins_rate'),
+      default_pis_cst: m['default_pis_cst'] || undefined,
+      default_cofins_cst: m['default_cofins_cst'] || undefined,
+    };
+  }, [appSettings]);
+
+  // Resolve os campos fiscais efetivos de um produto (produto→categoria→global),
+  // para pré-preencher os impostos do item. Mesmo cálculo do servidor.
+  const resolveItemFiscal = (productId: string | null): ResolvedProductFiscal => {
+    const p = productId ? (products || []).find((pr) => pr.id === productId) : null;
+    const cat = p?.product_category_id ? (productCategories || []).find((c) => c.id === p.product_category_id) : null;
+    return resolveProductFiscal(p, cat, globalFiscalDefaults);
+  };
 
   const [showSettings, setShowSettings] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsForm, setSettingsForm] = useState({
     legal_name: '', trade_name: '', cnpj: '', state_registration: '',
     municipal_registration: '', tax_regime: 'simples', crt: 1, state_code: '',
+    street: '', number: '', district: '', city_name: '', postal_code: '',
   });
 
   const [showEmit, setShowEmit] = useState(false);
@@ -160,8 +223,14 @@ export default function FiscalEmission() {
   const [recipientName, setRecipientName] = useState('');
   const [recipientDocument, setRecipientDocument] = useState('');
   const [recipientEmail, setRecipientEmail] = useState('');
+  const [recipientIeIndicator, setRecipientIeIndicator] = useState(9);
+  const [recipientIe, setRecipientIe] = useState('');
   const [address, setAddress] = useState<AddressState>(EMPTY_ADDRESS);
   const [paymentMethod, setPaymentMethod] = useState('01');
+  const [presenceIndicator, setPresenceIndicator] = useState(1);
+  const [consumerFinal, setConsumerFinal] = useState(true);
+  const [additionalInfo, setAdditionalInfo] = useState('');
+  const [referencedAccessKey, setReferencedAccessKey] = useState('');
   const [items, setItems] = useState<DraftItem[]>([]);
   const xmlInputRef = useRef<HTMLInputElement>(null);
 
@@ -199,6 +268,20 @@ export default function FiscalEmission() {
       searchTerms: [p.ncm || '', (p as any).cfop || ''],
     })), [products]);
 
+  // Checklist de pré-voo: o que ainda falta para a nota poder ser autorizada.
+  // Mostrado no diálogo para orientar o usuário antes de gastar cota fiscal.
+  const docDigits = recipientDocument.replace(/\D/g, '');
+  const itemsOk = items.length > 0 && items.every((it) => it.ncm.replace(/\D/g, '') && it.csosn && it.quantity > 0 && it.unit_price > 0);
+  const preflight = [
+    { ok: !!company?.state_code, label: 'UF da empresa emissora definida (calcula o CFOP)' },
+    { ok: !!recipientName.trim() && (docDigits.length === 11 || docDigits.length === 14), label: 'Destinatário com nome e CPF/CNPJ válido' },
+    { ok: !!(address.address_line_1 && address.city && address.state && address.postal_code), label: 'Endereço do destinatário completo' },
+    { ok: recipientIeIndicator !== 1 || !!recipientIe.trim(), label: 'IE informada (destinatário contribuinte)' },
+    { ok: itemsOk, label: 'Itens com NCM, CSOSN, quantidade e valor' },
+    { ok: !selectedNature.requiresReference || !!referencedAccessKey.replace(/\D/g, ''), label: 'Chave da NF-e original (devolução)' },
+  ];
+  const preflightOk = preflight.every((p) => p.ok);
+
   const [cancelTarget, setCancelTarget] = useState<{ id: string } | null>(null);
   const [cancelReason, setCancelReason] = useState('');
   // Por documento (não um único valor global) — senão a conclusão da ação de
@@ -224,12 +307,23 @@ export default function FiscalEmission() {
         tax_regime: company.tax_regime || 'simples',
         crt: company.crt ?? 1,
         state_code: company.state_code || '',
+        street: company.street || '',
+        number: company.number || '',
+        district: company.district || '',
+        city_name: company.city_name || '',
+        postal_code: company.postal_code || '',
       });
     }
     setShowSettings(true);
   };
 
   const handleSaveSettings = async () => {
+    // UF é obrigatória: define se o CFOP calculado é interno (5xxx/1xxx) ou
+    // interestadual (6xxx/2xxx). Sem ela a emissão trava no backend.
+    if (!settingsForm.state_code) {
+      toast.error('Selecione a UF da empresa — ela é obrigatória para calcular o CFOP das notas.');
+      return;
+    }
     setSavingSettings(true);
     try {
       const payload = { ...settingsForm, updated_at: new Date().toISOString() };
@@ -264,8 +358,14 @@ export default function FiscalEmission() {
     setRecipientName('');
     setRecipientDocument('');
     setRecipientEmail('');
+    setRecipientIeIndicator(9);
+    setRecipientIe('');
     setAddress(EMPTY_ADDRESS);
     setPaymentMethod('01');
+    setPresenceIndicator(1);
+    setConsumerFinal(true);
+    setAdditionalInfo(SIMPLES_INFO_NOTE);
+    setReferencedAccessKey('');
     setItems([]);
     // Gerada uma vez por abertura do diálogo: um duplo clique ou retry de
     // rede no mesmo envio reusa esta chave, e o backend deduplica por ela —
@@ -282,6 +382,15 @@ export default function FiscalEmission() {
     setRecipientName(c.name || '');
     setRecipientDocument(c.cpf_cnpj || '');
     setRecipientEmail(c.email || '');
+    // IE/indicador e consumidor final vindos do cadastro do cliente (colunas
+    // novas). Fallback conservador = 9 (não contribuinte), para não travar a
+    // emissão exigindo IE de quem não tem; o usuário marca "Contribuinte" quando
+    // for o caso (ex.: revenda). Consumidor final: CNPJ (revenda) → não.
+    const digits = (c.cpf_cnpj || '').replace(/\D/g, '');
+    const indicator = (c as any).ie_indicator ?? 9;
+    setRecipientIeIndicator(Number(indicator) || 9);
+    setRecipientIe((c as any).state_registration || '');
+    setConsumerFinal(digits.length === 11);
     setAddress({
       postal_code: c.postal_code || '',
       address_line_1: c.address_line_1 || '',
@@ -297,7 +406,12 @@ export default function FiscalEmission() {
   const addItem = () => {
     setItems((prev) => [
       ...prev,
-      { productId: null, code: '', name: '', ncm: '', cfop: defaultItemCfop, unit: 'UN', quantity: 1, unit_price: 0 },
+      {
+        productId: null, code: '', name: '', ncm: '', cfop: defaultItemCfop, unit: 'UN',
+        quantity: 1, unit_price: 0, ...EMPTY_RESOLVED,
+        // item avulso novo: herda os defaults globais de imposto
+        ...(() => { const r = resolveItemFiscal(null); return { csosn: r.csosn, origin: r.origin, icms_rate: r.icmsRate, pis_rate: r.pisRate, cofins_rate: r.cofinsRate, ipi_rate: r.ipiRate }; })(),
+      },
     ]);
   };
 
@@ -315,14 +429,21 @@ export default function FiscalEmission() {
       updateItem(index, { productId: null });
       return;
     }
+    const rf = resolveItemFiscal(p.id);
     updateItem(index, {
       productId: p.id,
       code: p.sku || p.id.slice(0, 8),
       name: p.name,
-      ncm: p.ncm || '',
+      ncm: rf.ncm || p.ncm || '',
       cfop: (p as any).cfop || defaultItemCfop,
       unit: p.unit || 'UN',
       unit_price: Number(p.sale_price || 0),
+      csosn: rf.csosn,
+      origin: rf.origin,
+      icms_rate: rf.icmsRate,
+      pis_rate: rf.pisRate,
+      cofins_rate: rf.cofinsRate,
+      ipi_rate: rf.ipiRate,
     });
   };
 
@@ -360,6 +481,7 @@ export default function FiscalEmission() {
         country: 'Brasil',
       });
       if (parsed.items.length) {
+        const r = resolveItemFiscal(null); // XML de referência não vincula produto → defaults globais
         setItems(parsed.items.map((it) => ({
           productId: null,
           code: it.code,
@@ -369,6 +491,12 @@ export default function FiscalEmission() {
           unit: it.unit || 'UN',
           quantity: it.quantity,
           unit_price: it.unitPrice,
+          csosn: r.csosn,
+          origin: r.origin,
+          icms_rate: r.icmsRate,
+          pis_rate: r.pisRate,
+          cofins_rate: r.cofinsRate,
+          ipi_rate: r.ipiRate,
         })));
       }
       toast.success(`Dados importados de "${file.name}". Confira quantidade, valores e a natureza da operação antes de emitir.`);
@@ -390,10 +518,16 @@ export default function FiscalEmission() {
           client_id: clientId || null,
           nature_of_operation: natureOfOperation,
           payment_method: paymentMethod,
+          presence_indicator: presenceIndicator,
+          consumer_final: consumerFinal,
+          additional_info: additionalInfo || undefined,
+          referenced_access_key: selectedNature.requiresReference ? (referencedAccessKey || undefined) : undefined,
           recipient: {
             name: recipientName,
             document: recipientDocument,
             email: recipientEmail || undefined,
+            state_registration_indicator: recipientIeIndicator,
+            state_registration: recipientIeIndicator === 1 ? (recipientIe || undefined) : undefined,
             address: {
               street: address.address_line_1,
               number: address.address_number,
@@ -405,6 +539,7 @@ export default function FiscalEmission() {
             },
           },
           items: items.map((it) => ({
+            product_id: it.productId || undefined,
             code: it.code,
             name: it.name,
             ncm: it.ncm,
@@ -412,6 +547,12 @@ export default function FiscalEmission() {
             unit: it.unit,
             quantity: it.quantity,
             unit_price: it.unit_price,
+            csosn: it.csosn || undefined,
+            origin: it.origin,
+            icms_rate: it.icms_rate,
+            pis_rate: it.pis_rate,
+            cofins_rate: it.cofins_rate,
+            ipi_rate: it.ipi_rate,
           })),
         },
       });
@@ -647,9 +788,9 @@ export default function FiscalEmission() {
                 <Input value={settingsForm.municipal_registration} onChange={(e) => setSettingsForm((p) => ({ ...p, municipal_registration: e.target.value }))} />
               </div>
               <div>
-                <Label>UF</Label>
+                <Label>UF <span className="text-destructive">*</span></Label>
                 <Select value={settingsForm.state_code} onValueChange={(v) => setSettingsForm((p) => ({ ...p, state_code: v }))}>
-                  <SelectTrigger><SelectValue placeholder="UF" /></SelectTrigger>
+                  <SelectTrigger className={!settingsForm.state_code ? 'border-destructive' : ''}><SelectValue placeholder="UF" /></SelectTrigger>
                   <SelectContent>
                     {BRAZILIAN_STATES.map((uf) => (
                       <SelectItem key={uf} value={uf}>{uf}</SelectItem>
@@ -658,9 +799,34 @@ export default function FiscalEmission() {
                 </Select>
               </div>
             </div>
+
+            {/* Endereço do emitente — registro interno (a nota usa o cadastro da Contora). */}
+            <div className="grid grid-cols-6 gap-2">
+              <div className="col-span-4">
+                <Label className="text-xs">Logradouro</Label>
+                <Input className="h-8 text-xs" value={settingsForm.street} onChange={(e) => setSettingsForm((p) => ({ ...p, street: e.target.value }))} />
+              </div>
+              <div className="col-span-2">
+                <Label className="text-xs">Número</Label>
+                <Input className="h-8 text-xs" value={settingsForm.number} onChange={(e) => setSettingsForm((p) => ({ ...p, number: e.target.value }))} />
+              </div>
+              <div className="col-span-2">
+                <Label className="text-xs">Bairro</Label>
+                <Input className="h-8 text-xs" value={settingsForm.district} onChange={(e) => setSettingsForm((p) => ({ ...p, district: e.target.value }))} />
+              </div>
+              <div className="col-span-2">
+                <Label className="text-xs">Cidade</Label>
+                <Input className="h-8 text-xs" value={settingsForm.city_name} onChange={(e) => setSettingsForm((p) => ({ ...p, city_name: e.target.value }))} />
+              </div>
+              <div className="col-span-2">
+                <Label className="text-xs">CEP</Label>
+                <Input className="h-8 text-xs" value={settingsForm.postal_code} onChange={(e) => setSettingsForm((p) => ({ ...p, postal_code: e.target.value.replace(/\D/g, '').slice(0, 8) }))} />
+              </div>
+            </div>
+
             <p className="text-xs text-muted-foreground">
-              A UF é obrigatória: define se o CFOP calculado em cada emissão é de operação interna (mesmo estado) ou
-              interestadual. Os demais dados são só um registro local, para exibição — não são enviados à Contora e não
+              A <strong>UF é obrigatória</strong>: define se o CFOP calculado em cada emissão é de operação interna (mesmo
+              estado) ou interestadual. Os demais dados são registro local, para exibição — não são enviados à Contora e não
               determinam qual empresa efetivamente emite. Quem manda isso é o cadastro feito direto no console da Contora
               (CNPJ + certificado A1), vinculado ao token configurado nos Secrets do Supabase.
             </p>
@@ -714,6 +880,22 @@ export default function FiscalEmission() {
               </Button>
             </div>
 
+            {selectedNature.requiresReference && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 space-y-1">
+                <Label className="text-amber-900">Chave da NF-e original (devolução) — 44 dígitos</Label>
+                <Input
+                  className="font-mono"
+                  placeholder="0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000"
+                  value={referencedAccessKey}
+                  onChange={(e) => setReferencedAccessKey(e.target.value.replace(/\D/g, '').slice(0, 44))}
+                />
+                <p className="text-xs text-amber-800">
+                  Uma nota de devolução (finalidade 4) deve referenciar a chave de acesso da NF-e original. O envio desse
+                  campo à Contora ainda está em validação — teste a devolução em homologação antes de usar em produção.
+                </p>
+              </div>
+            )}
+
             <div>
               <Label>Cliente cadastrado (opcional — preenche os dados abaixo)</Label>
               <Select value={clientId || '__none'} onValueChange={(v) => handleClientChange(v === '__none' ? '' : v)}>
@@ -743,9 +925,45 @@ export default function FiscalEmission() {
                     />
                   </div>
                 </div>
-                <div>
-                  <Label>E-mail (opcional)</Label>
-                  <Input type="email" value={recipientEmail} onChange={(e) => setRecipientEmail(e.target.value)} />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label>E-mail (opcional)</Label>
+                    <Input type="email" value={recipientEmail} onChange={(e) => setRecipientEmail(e.target.value)} />
+                  </div>
+                  <div>
+                    <Label>Indicador de IE</Label>
+                    <Select value={String(recipientIeIndicator)} onValueChange={(v) => setRecipientIeIndicator(Number(v))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {IE_INDICATORS.map((i) => (
+                          <SelectItem key={i.value} value={String(i.value)}>{i.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                {recipientIeIndicator === 1 && (
+                  <div>
+                    <Label>Inscrição Estadual do destinatário <span className="text-destructive">*</span></Label>
+                    <Input value={recipientIe} onChange={(e) => setRecipientIe(e.target.value)} placeholder="Obrigatória para contribuinte do ICMS" />
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-3 items-end">
+                  <div>
+                    <Label>Indicador de presença</Label>
+                    <Select value={String(presenceIndicator)} onValueChange={(v) => setPresenceIndicator(Number(v))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {PRESENCE_INDICATORS.map((i) => (
+                          <SelectItem key={i.value} value={String(i.value)}>{i.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <label className="flex items-center gap-2 text-sm h-9 cursor-pointer">
+                    <input type="checkbox" className="h-4 w-4" checked={consumerFinal} onChange={(e) => setConsumerFinal(e.target.checked)} />
+                    Consumidor final
+                  </label>
                 </div>
                 <AddressFields
                   value={address as any}
@@ -790,10 +1008,45 @@ export default function FiscalEmission() {
                       <Input placeholder="Código" className="h-8 text-xs" value={it.code} onChange={(e) => updateItem(index, { code: e.target.value })} />
                     </div>
                     <div className="grid grid-cols-4 gap-2">
-                      <Input placeholder="NCM" className="h-8 text-xs" maxLength={8} value={it.ncm} onChange={(e) => updateItem(index, { ncm: e.target.value.replace(/\D/g, '') })} />
-                      <Input placeholder="CFOP" className="h-8 text-xs" value={it.cfop} onChange={(e) => updateItem(index, { cfop: e.target.value })} />
-                      <Input placeholder="Unid." className="h-8 text-xs" value={it.unit} onChange={(e) => updateItem(index, { unit: e.target.value })} />
-                      <Input type="number" min="0" placeholder="Qtd" className="h-8 text-xs" value={it.quantity} onChange={(e) => updateItem(index, { quantity: Math.max(0, parseFloat(e.target.value) || 0) })} />
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground">NCM</Label>
+                        <Input placeholder="NCM" className="h-8 text-xs" maxLength={8} value={it.ncm} onChange={(e) => updateItem(index, { ncm: e.target.value.replace(/\D/g, '') })} />
+                      </div>
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground">CFOP</Label>
+                        <Input placeholder="CFOP" className="h-8 text-xs" value={it.cfop} onChange={(e) => updateItem(index, { cfop: e.target.value })} />
+                      </div>
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground">Unid.</Label>
+                        <Input placeholder="Unid." className="h-8 text-xs" value={it.unit} onChange={(e) => updateItem(index, { unit: e.target.value })} />
+                      </div>
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground">Qtd</Label>
+                        <Input type="number" min="0" placeholder="Qtd" className="h-8 text-xs" value={it.quantity} onChange={(e) => updateItem(index, { quantity: Math.max(0, parseFloat(e.target.value) || 0) })} />
+                      </div>
+                    </div>
+                    {/* Impostos — auto-preenchidos do cadastro fiscal do produto, editáveis. */}
+                    <div className="grid grid-cols-5 gap-2">
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground">CSOSN</Label>
+                        <Input placeholder="CSOSN" className="h-8 text-xs" value={it.csosn} onChange={(e) => updateItem(index, { csosn: e.target.value.replace(/\D/g, '').slice(0, 3) })} />
+                      </div>
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground">Origem</Label>
+                        <Input type="number" min="0" max="8" className="h-8 text-xs" value={it.origin} onChange={(e) => updateItem(index, { origin: Math.max(0, Math.min(8, parseInt(e.target.value) || 0)) })} />
+                      </div>
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground">ICMS %</Label>
+                        <Input type="number" min="0" step="0.01" className="h-8 text-xs" value={it.icms_rate} onChange={(e) => updateItem(index, { icms_rate: Math.max(0, parseFloat(e.target.value) || 0) })} />
+                      </div>
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground">PIS %</Label>
+                        <Input type="number" min="0" step="0.01" className="h-8 text-xs" value={it.pis_rate} onChange={(e) => updateItem(index, { pis_rate: Math.max(0, parseFloat(e.target.value) || 0) })} />
+                      </div>
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground">COFINS %</Label>
+                        <Input type="number" min="0" step="0.01" className="h-8 text-xs" value={it.cofins_rate} onChange={(e) => updateItem(index, { cofins_rate: Math.max(0, parseFloat(e.target.value) || 0) })} />
+                      </div>
                     </div>
                     <div className="flex items-center gap-2">
                       <Label className="text-xs whitespace-nowrap">Valor unitário</Label>
@@ -804,6 +1057,10 @@ export default function FiscalEmission() {
                     </div>
                   </div>
                 ))}
+                <p className="text-[11px] text-muted-foreground">
+                  CSOSN, origem e alíquotas vêm do cadastro fiscal do produto (ou do padrão global das Configurações) e
+                  podem ser ajustados por item. O CST de PIS/COFINS usa o padrão global.
+                </p>
               </CardContent>
             </Card>
 
@@ -824,11 +1081,38 @@ export default function FiscalEmission() {
                 <p className="text-2xl font-bold">{formatCurrency(total)}</p>
               </div>
             </div>
+
+            <div>
+              <Label>Informações complementares (opcional)</Label>
+              <Textarea
+                className="text-sm"
+                rows={2}
+                value={additionalInfo}
+                onChange={(e) => setAdditionalInfo(e.target.value)}
+                placeholder="Observações que saem no rodapé da nota"
+              />
+              <p className="text-[11px] text-muted-foreground mt-1">
+                A nota-padrão do Simples Nacional já vem preenchida. Ajuste conforme orientação da contadora.
+              </p>
+            </div>
+
+            {/* Checklist de pré-voo */}
+            <div className="rounded-lg border bg-muted/30 p-3">
+              <p className="text-xs font-semibold mb-2">Pronto para emitir?</p>
+              <ul className="space-y-1">
+                {preflight.map((p, i) => (
+                  <li key={i} className={`flex items-center gap-2 text-xs ${p.ok ? 'text-success' : 'text-muted-foreground'}`}>
+                    <span className={`inline-block h-2 w-2 rounded-full ${p.ok ? 'bg-success' : 'bg-amber-400'}`} />
+                    {p.label}
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowEmit(false)}>Cancelar</Button>
-            <Button onClick={handleEmit} disabled={emitting || items.length === 0}>
+            <Button onClick={handleEmit} disabled={emitting || items.length === 0 || !preflightOk}>
               {emitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FileText className="h-4 w-4 mr-2" />}
               Emitir NF-e
             </Button>

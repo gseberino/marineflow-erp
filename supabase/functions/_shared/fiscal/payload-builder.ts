@@ -25,6 +25,11 @@ export interface NatureOfOperationOption {
   natureOperation: string;
   baseCfopCode: string;
   operationType: "saida" | "entrada";
+  // finalidade da NF-e (Contora: `purpose`): 1=normal, 4=devolução. As remessas
+  // são finalidade normal (1) — o que muda nelas é o CFOP, não a finalidade.
+  purpose: number;
+  // quando true, a UI deve pedir a chave da NF-e original (refNFe).
+  requiresReference?: boolean;
 }
 
 export const NATURE_OF_OPERATION_OPTIONS: NatureOfOperationOption[] = [
@@ -34,6 +39,7 @@ export const NATURE_OF_OPERATION_OPTIONS: NatureOfOperationOption[] = [
     natureOperation: "Venda de mercadoria",
     baseCfopCode: "102",
     operationType: "saida",
+    purpose: 1,
   },
   {
     value: "devolucao_compra",
@@ -41,6 +47,8 @@ export const NATURE_OF_OPERATION_OPTIONS: NatureOfOperationOption[] = [
     natureOperation: "Devolução de compra",
     baseCfopCode: "202",
     operationType: "saida",
+    purpose: 4,
+    requiresReference: true,
   },
   {
     value: "remessa_conserto",
@@ -48,6 +56,7 @@ export const NATURE_OF_OPERATION_OPTIONS: NatureOfOperationOption[] = [
     natureOperation: "Remessa para conserto ou reparo",
     baseCfopCode: "915",
     operationType: "saida",
+    purpose: 1,
   },
   {
     value: "remessa_bonificacao",
@@ -55,6 +64,7 @@ export const NATURE_OF_OPERATION_OPTIONS: NatureOfOperationOption[] = [
     natureOperation: "Remessa em bonificação, doação ou brinde",
     baseCfopCode: "910",
     operationType: "saida",
+    purpose: 1,
   },
   {
     value: "remessa_demonstracao",
@@ -62,6 +72,7 @@ export const NATURE_OF_OPERATION_OPTIONS: NatureOfOperationOption[] = [
     natureOperation: "Remessa de mercadoria para demonstração",
     baseCfopCode: "912",
     operationType: "saida",
+    purpose: 1,
   },
   {
     value: "devolucao_venda",
@@ -69,6 +80,8 @@ export const NATURE_OF_OPERATION_OPTIONS: NatureOfOperationOption[] = [
     natureOperation: "Devolução de venda de mercadoria",
     baseCfopCode: "202",
     operationType: "entrada",
+    purpose: 4,
+    requiresReference: true,
   },
 ];
 
@@ -109,6 +122,8 @@ export interface NfeRecipientInput {
   name: string;
   document: string; // CPF or CNPJ, any formatting
   email?: string | null;
+  stateRegistrationIndicator?: number; // indIEDest: 1=contribuinte, 2=isento, 9=não contribuinte
+  stateRegistration?: string | null; // IE — obrigatória quando indicador=1
   address: NfeAddressInput;
 }
 
@@ -120,15 +135,61 @@ export interface NfeItemInput {
   unit?: string | null;
   quantity: number;
   unitPrice: number;
+  // Grupo tributário resolvido a partir do produto (ver product-fiscal.ts).
+  // Quando csosn+origin vêm preenchidos, montamos o bloco `taxes` que a Contora
+  // exige para a SEFAZ não rejeitar em produção (215). Todos opcionais para não
+  // quebrar chamadas antigas/manuais que ainda não trazem impostos.
+  csosn?: string | null; // vira taxes.icms.code
+  origin?: number | null; // vira taxes.icms.origin (0-8)
+  icmsRate?: number | null; // taxes.icms.aliquot
+  pisCst?: string | null; // taxes.pis.code
+  pisRate?: number | null; // taxes.pis.aliquot
+  cofinsCst?: string | null; // taxes.cofins.code
+  cofinsRate?: number | null; // taxes.cofins.aliquot
+  ipiCst?: string | null; // taxes.ipi.code (só quando ipiRate > 0)
+  ipiRate?: number | null; // taxes.ipi.aliquot
 }
 
 export interface BuildNfePayloadInput {
   natureOperation?: string;
   operationType?: "saida" | "entrada"; // default "saida" (venda) — "entrada" p/ devolução recebida do cliente
+  purpose?: number; // finalidade (Contora: campo `purpose`): 1=normal, 2=complementar, 3=ajuste, 4=devolução
+  referencedAccessKey?: string | null; // chave da NF-e original (devolução) — enviada só se informada
   recipient: NfeRecipientInput;
   items: NfeItemInput[];
   paymentMethod: string;
   consumerFinal?: boolean;
+  presenceIndicator?: number; // 0=não se aplica,1=presencial,2=internet,4=domicílio,9=não presencial...
+  additionalInfo?: string | null; // informações complementares (infCpl)
+}
+
+// Monta o bloco `taxes` de um item no formato da Contora (ver doc de Templates):
+//   { icms:{code,origin,aliquot}, pis:{code,aliquot}, cofins:{code,aliquot}, ipi? }
+// Retorna undefined quando não há dado tributário suficiente (mantém compat.
+// com o fluxo antigo, que não enviava impostos).
+export function buildItemTaxes(it: NfeItemInput): Record<string, unknown> | undefined {
+  const hasIcms = !!(it.csosn && String(it.csosn).trim());
+  if (!hasIcms) return undefined;
+
+  const taxes: Record<string, unknown> = {
+    icms: {
+      code: String(it.csosn),
+      origin: it.origin ?? 0,
+      aliquot: it.icmsRate ?? 0,
+    },
+    pis: {
+      code: it.pisCst || "49",
+      aliquot: it.pisRate ?? 0,
+    },
+    cofins: {
+      code: it.cofinsCst || "49",
+      aliquot: it.cofinsRate ?? 0,
+    },
+  };
+  if ((it.ipiRate ?? 0) > 0) {
+    taxes.ipi = { code: it.ipiCst || "99", aliquot: it.ipiRate };
+  }
+  return taxes;
 }
 
 function onlyDigits(s: string | null | undefined): string {
@@ -147,42 +208,65 @@ export function buildNfeDraftPayload(
     input.items.reduce((sum, it) => sum + it.quantity * it.unitPrice, 0),
   );
 
-  return {
+  // Indicador de IE do destinatário (indIEDest): 1=contribuinte, 2=isento, 9=não
+  // contribuinte. Default 9 mantém o comportamento antigo; a UI passa a informar.
+  const ieIndicator = input.recipient.stateRegistrationIndicator ?? 9;
+  const recipient: Record<string, unknown> = {
+    name: input.recipient.name,
+    document: documentDigits,
+    state_registration_indicator: ieIndicator,
+    email: input.recipient.email || undefined,
+    address: {
+      street: input.recipient.address.street,
+      number: input.recipient.address.number || "S/N",
+      complement: input.recipient.address.complement || undefined,
+      district: input.recipient.address.district,
+      city_name: input.recipient.address.cityName,
+      city_code: input.recipient.address.cityCode,
+      state_code: input.recipient.address.stateCode,
+      postal_code: onlyDigits(input.recipient.address.postalCode),
+    },
+  };
+  // A IE só faz sentido (e é exigida) quando o destinatário é contribuinte.
+  const ie = onlyDigits(input.recipient.stateRegistration);
+  if (ieIndicator === 1 && ie) recipient.state_registration = ie;
+
+  const payload: Record<string, unknown> = {
     nature_operation: input.natureOperation ?? "Venda de mercadoria",
     operation_type: input.operationType ?? "saida",
+    purpose: input.purpose ?? 1, // 1=normal por padrão; 4=devolução
     // CPF (11 dígitos) só existe para pessoa física — tratamos como consumidor
     // final por padrão; CNPJ (revenda/empresa) por padrão não é consumidor final.
     consumer_final: input.consumerFinal ?? documentDigits.length === 11,
-    presence_indicator: 1, // operação presencial — ajustar se a operação for remota
-    recipient: {
-      name: input.recipient.name,
-      document: documentDigits,
-      // 9 = não contribuinte do ICMS. Simplificação segura para o piloto:
-      // o MarineFlow ainda não coleta a Inscrição Estadual do cliente.
-      state_registration_indicator: 9,
-      email: input.recipient.email || undefined,
-      address: {
-        street: input.recipient.address.street,
-        number: input.recipient.address.number || "S/N",
-        complement: input.recipient.address.complement || undefined,
-        district: input.recipient.address.district,
-        city_name: input.recipient.address.cityName,
-        city_code: input.recipient.address.cityCode,
-        state_code: input.recipient.address.stateCode,
-        postal_code: onlyDigits(input.recipient.address.postalCode),
-      },
-    },
-    items: input.items.map((it) => ({
-      code: it.code,
-      name: it.name,
-      ncm: onlyDigits(it.ncm),
-      cfop: it.cfop || DEFAULT_CFOP,
-      unit: it.unit || "UN",
-      quantity: it.quantity,
-      unit_price: it.unitPrice,
-    })),
+    presence_indicator: input.presenceIndicator ?? 1, // 1=presencial por padrão
+    recipient,
+    items: input.items.map((it) => {
+      const item: Record<string, unknown> = {
+        code: it.code,
+        name: it.name,
+        ncm: onlyDigits(it.ncm),
+        cfop: it.cfop || DEFAULT_CFOP,
+        unit: it.unit || "UN",
+        quantity: it.quantity,
+        unit_price: it.unitPrice,
+      };
+      const taxes = buildItemTaxes(it);
+      if (taxes) item.taxes = taxes;
+      return item;
+    }),
     payments: [{ method: input.paymentMethod, amount: totalAmount }],
   };
+
+  // refNFe: chave da NF-e original em devoluções. Enviada só quando informada —
+  // o nome do campo ainda precisa ser confirmado com a Contora; usamos
+  // `referenced_access_keys` e a SEFAZ/Contora ignoram se não reconhecerem.
+  const refKey = onlyDigits(input.referencedAccessKey);
+  if (refKey) payload.referenced_access_keys = [refKey];
+
+  const info = (input.additionalInfo ?? "").trim();
+  if (info) payload.additional_info = info;
+
+  return payload;
 }
 
 // Validates the input before spending a fiscal-event quota unit on the
@@ -199,6 +283,11 @@ export function validateNfeDraftInput(input: BuildNfePayloadInput): string[] {
     errors.push("CPF/CNPJ do destinatário é obrigatório.");
   } else if (documentDigits.length !== 11 && documentDigits.length !== 14) {
     errors.push("CPF/CNPJ do destinatário deve ter 11 (CPF) ou 14 (CNPJ) dígitos.");
+  }
+  // Destinatário contribuinte do ICMS (indicador de IE = 1) precisa informar a IE,
+  // senão a SEFAZ rejeita. Isento (2) e não contribuinte (9) não têm IE.
+  if (r?.stateRegistrationIndicator === 1 && !onlyDigits(r?.stateRegistration)) {
+    errors.push("Inscrição Estadual do destinatário é obrigatória quando ele é contribuinte do ICMS (indicador 1).");
   }
   if (!addr?.street?.trim()) errors.push("Logradouro é obrigatório.");
   if (!addr?.district?.trim()) errors.push("Bairro é obrigatório.");

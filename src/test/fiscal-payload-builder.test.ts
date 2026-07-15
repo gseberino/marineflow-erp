@@ -1,12 +1,14 @@
 import { describe, it, expect } from "vitest";
 import {
   buildNfeDraftPayload,
+  buildItemTaxes,
   validateNfeDraftInput,
   DEFAULT_CFOP,
   computeCfop,
   findNatureOfOperation,
   NATURE_OF_OPERATION_OPTIONS,
   type BuildNfePayloadInput,
+  type NfeItemInput,
 } from "../../supabase/functions/_shared/fiscal/payload-builder";
 
 function makeInput(overrides: Partial<BuildNfePayloadInput> = {}): BuildNfePayloadInput {
@@ -201,5 +203,85 @@ describe("buildNfeDraftPayload — operationType", () => {
   it("propaga operationType='entrada' quando informado (devolução recebida do cliente)", () => {
     const payload = buildNfeDraftPayload(makeInput({ operationType: "entrada" })) as any;
     expect(payload.operation_type).toBe("entrada");
+  });
+});
+
+describe("buildItemTaxes", () => {
+  const base: NfeItemInput = { code: "X", name: "P", ncm: "85369090", quantity: 1, unitPrice: 10 };
+
+  it("retorna undefined quando não há CSOSN (mantém compat com fluxo antigo)", () => {
+    expect(buildItemTaxes(base)).toBeUndefined();
+  });
+
+  it("monta icms/pis/cofins no formato da Contora", () => {
+    const t = buildItemTaxes({ ...base, csosn: "102", origin: 0, icmsRate: 0, pisCst: "49", pisRate: 0, cofinsCst: "49", cofinsRate: 0 }) as any;
+    expect(t.icms).toEqual({ code: "102", origin: 0, aliquot: 0 });
+    expect(t.pis).toEqual({ code: "49", aliquot: 0 });
+    expect(t.cofins).toEqual({ code: "49", aliquot: 0 });
+    expect(t.ipi).toBeUndefined();
+  });
+
+  it("inclui ipi só quando a alíquota é maior que zero", () => {
+    const t = buildItemTaxes({ ...base, csosn: "500", ipiRate: 5 }) as any;
+    expect(t.ipi).toEqual({ code: "99", aliquot: 5 });
+  });
+
+  it("usa CST '49' de PIS/COFINS por padrão quando não informado", () => {
+    const t = buildItemTaxes({ ...base, csosn: "400" }) as any;
+    expect(t.pis.code).toBe("49");
+    expect(t.cofins.code).toBe("49");
+  });
+});
+
+describe("buildNfeDraftPayload — purpose / IE / infCpl / devolução", () => {
+  it("purpose default = 1 (normal) e propaga 4 (devolução)", () => {
+    expect((buildNfeDraftPayload(makeInput()) as any).purpose).toBe(1);
+    expect((buildNfeDraftPayload(makeInput({ purpose: 4 })) as any).purpose).toBe(4);
+  });
+
+  it("indicador de IE default 9; envia state_registration só quando contribuinte (1) com IE", () => {
+    const semIE = buildNfeDraftPayload(makeInput()) as any;
+    expect(semIE.recipient.state_registration_indicator).toBe(9);
+    expect(semIE.recipient.state_registration).toBeUndefined();
+
+    const contrib = buildNfeDraftPayload(
+      makeInput({ recipient: { ...makeInput().recipient, stateRegistrationIndicator: 1, stateRegistration: "123.456.789" } }),
+    ) as any;
+    expect(contrib.recipient.state_registration_indicator).toBe(1);
+    expect(contrib.recipient.state_registration).toBe("123456789");
+  });
+
+  it("propaga presence_indicator e additional_info quando informados", () => {
+    const p = buildNfeDraftPayload(makeInput({ presenceIndicator: 9, additionalInfo: "  Simples Nacional  " })) as any;
+    expect(p.presence_indicator).toBe(9);
+    expect(p.additional_info).toBe("Simples Nacional");
+  });
+
+  it("envia referenced_access_keys só quando há chave (devolução)", () => {
+    expect((buildNfeDraftPayload(makeInput()) as any).referenced_access_keys).toBeUndefined();
+    const p = buildNfeDraftPayload(makeInput({ referencedAccessKey: "4226 0550 0570 4900 0159 5500 1000 0001 1113 8202 6000" })) as any;
+    expect(p.referenced_access_keys).toEqual(["42260550057049000159550010000001111382026000"]);
+  });
+
+  it("monta taxes no item quando o item traz CSOSN", () => {
+    const input = makeInput({
+      items: [{ code: "A", name: "Item", ncm: "85369090", cfop: "5102", quantity: 1, unitPrice: 10, csosn: "102", origin: 0, pisRate: 0, cofinsRate: 0 }],
+    });
+    const payload = buildNfeDraftPayload(input) as any;
+    expect(payload.items[0].taxes.icms.code).toBe("102");
+  });
+});
+
+describe("validateNfeDraftInput — IE do contribuinte", () => {
+  it("exige IE quando indicador de IE = 1 e não há IE", () => {
+    const input = makeInput({ recipient: { ...makeInput().recipient, stateRegistrationIndicator: 1, stateRegistration: "" } });
+    expect(validateNfeDraftInput(input)).toContain(
+      "Inscrição Estadual do destinatário é obrigatória quando ele é contribuinte do ICMS (indicador 1).",
+    );
+  });
+
+  it("não exige IE para não contribuinte (9) nem isento (2)", () => {
+    expect(validateNfeDraftInput(makeInput({ recipient: { ...makeInput().recipient, stateRegistrationIndicator: 9 } }))).toEqual([]);
+    expect(validateNfeDraftInput(makeInput({ recipient: { ...makeInput().recipient, stateRegistrationIndicator: 2 } }))).toEqual([]);
   });
 });

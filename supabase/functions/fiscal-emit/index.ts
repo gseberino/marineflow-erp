@@ -12,6 +12,12 @@ import {
   validateNfeDraftInput,
   type BuildNfePayloadInput,
 } from "../_shared/fiscal/payload-builder.ts";
+import {
+  resolveProductFiscal,
+  type CategoryFiscalDefaults,
+  type GlobalFiscalDefaults,
+  type ProductFiscalInput,
+} from "../_shared/fiscal/product-fiscal.ts";
 
 // SEFAZ exige justificativa com pelo menos 15 caracteres tanto no cancelamento
 // quanto na Carta de Correção Eletrônica.
@@ -73,6 +79,53 @@ Deno.serve(async (req) => {
     return jr({ error: message }, 500);
   }
 });
+
+// Lê os defaults fiscais globais de app_settings (fim da hierarquia
+// produto→categoria→global). app_settings é key/value (colunas key, value) —
+// mesma leitura do hook useAppSettings no front. Fallbacks seguros no resolver.
+// deno-lint-ignore no-explicit-any
+async function loadGlobalFiscalDefaults(admin: any): Promise<GlobalFiscalDefaults> {
+  const { data } = await admin.from("app_settings").select("key, value");
+  const m: Record<string, string> = {};
+  for (const row of data ?? []) if (row?.key != null) m[String(row.key)] = String(row.value ?? "");
+  const numOrNull = (v: string | undefined) => (v != null && v !== "" && !Number.isNaN(Number(v)) ? Number(v) : undefined);
+  return {
+    default_csosn: m["default_csosn"] || undefined,
+    default_fiscal_origin: numOrNull(m["default_fiscal_origin"]),
+    default_icms_rate: numOrNull(m["default_icms_rate"]),
+    default_ipi_rate: numOrNull(m["default_ipi_rate"]),
+    default_pis_rate: numOrNull(m["default_pis_rate"]),
+    default_cofins_rate: numOrNull(m["default_cofins_rate"]),
+    default_pis_cst: m["default_pis_cst"] || undefined,
+    default_cofins_cst: m["default_cofins_cst"] || undefined,
+  };
+}
+
+// Carrega em lote os produtos referenciados pelos itens (por product_id) e as
+// categorias deles — para resolver os campos fiscais no servidor sem N+1.
+// deno-lint-ignore no-explicit-any
+async function loadItemFiscalSources(admin: any, items: Array<Record<string, unknown>>) {
+  const productsById: Record<string, ProductFiscalInput & { product_category_id?: string | null }> = {};
+  const categoriesById: Record<string, CategoryFiscalDefaults> = {};
+  const productIds = [...new Set(items.map((it) => (it.product_id ? String(it.product_id) : "")).filter(Boolean))];
+  if (!productIds.length) return { productsById, categoriesById };
+
+  const { data: prods } = await admin
+    .from("products")
+    .select("id, ncm, cfop, unit, csosn, fiscal_origin, icms_rate, ipi_rate, pis_rate, cofins_rate, use_global_fiscal, product_category_id")
+    .in("id", productIds);
+  for (const p of prods ?? []) productsById[String(p.id)] = p;
+
+  const catIds = [...new Set((prods ?? []).map((p: { product_category_id?: string | null }) => p.product_category_id).filter(Boolean))] as string[];
+  if (catIds.length) {
+    const { data: cats } = await admin
+      .from("product_categories")
+      .select("id, default_ncm, default_csosn, default_fiscal_origin, default_icms_rate, default_ipi_rate, default_pis_rate, default_cofins_rate")
+      .in("id", catIds);
+    for (const c of cats ?? []) categoriesById[String(c.id)] = c;
+  }
+  return { productsById, categoriesById };
+}
 
 // deno-lint-ignore no-explicit-any
 async function findActiveDocument(admin: any, documentType: string, originType: string, originId: string | null, idempotencyKey: string | null) {
@@ -143,13 +196,29 @@ async function handleCreate(admin: any, body: any): Promise<Response> {
   const nature = findNatureOfOperation(body.nature_of_operation);
   const defaultItemCfop = computeCfop(nature.baseCfopCode, nature.operationType, company.state_code, addr.state_code);
 
+  // Impostos por item são a fonte da verdade AQUI (não confiamos só no front):
+  // resolvemos os campos fiscais efetivos a partir do produto → categoria →
+  // defaults globais (mesma hierarquia da tela de produtos). Sem o bloco `taxes`
+  // montado, a SEFAZ rejeita em produção (215).
+  const globalDefaults = await loadGlobalFiscalDefaults(admin);
+  const { productsById, categoriesById } = await loadItemFiscalSources(admin, body.items ?? []);
+
   const input: BuildNfePayloadInput = {
     natureOperation: nature.natureOperation,
     operationType: nature.operationType,
+    purpose: nature.purpose,
+    referencedAccessKey: body.referenced_access_key ?? null,
+    presenceIndicator: body.presence_indicator != null ? Number(body.presence_indicator) : undefined,
+    consumerFinal: typeof body.consumer_final === "boolean" ? body.consumer_final : undefined,
+    additionalInfo: body.additional_info ?? null,
     recipient: {
       name: body.recipient?.name,
       document: body.recipient?.document,
       email: body.recipient?.email,
+      stateRegistrationIndicator: body.recipient?.state_registration_indicator != null
+        ? Number(body.recipient.state_registration_indicator)
+        : undefined,
+      stateRegistration: body.recipient?.state_registration ?? null,
       address: {
         street: addr.street,
         number: addr.number,
@@ -161,15 +230,32 @@ async function handleCreate(admin: any, body: any): Promise<Response> {
         postalCode: addr.postal_code,
       },
     },
-    items: (body.items ?? []).map((it: Record<string, unknown>) => ({
-      code: String(it.code ?? it.sku ?? "ITEM"),
-      name: String(it.name ?? ""),
-      ncm: String(it.ncm ?? ""),
-      cfop: it.cfop ? String(it.cfop) : defaultItemCfop,
-      unit: it.unit ? String(it.unit) : undefined,
-      quantity: Number(it.quantity),
-      unitPrice: Number(it.unit_price),
-    })),
+    items: (body.items ?? []).map((it: Record<string, unknown>) => {
+      const productId = it.product_id ? String(it.product_id) : null;
+      const product = productId ? productsById[productId] : null;
+      const category = product?.product_category_id ? categoriesById[String(product.product_category_id)] : null;
+      const rf = resolveProductFiscal(product, category, globalDefaults);
+      // Valor explícito enviado pelo front (usuário pode editar) tem precedência;
+      // senão cai no resolvido (produto→categoria→global).
+      const num = (v: unknown, fb: number) => (v != null && v !== "" && !Number.isNaN(Number(v)) ? Number(v) : fb);
+      return {
+        code: String(it.code ?? it.sku ?? "ITEM"),
+        name: String(it.name ?? ""),
+        ncm: String(it.ncm ?? rf.ncm ?? ""),
+        cfop: it.cfop ? String(it.cfop) : defaultItemCfop,
+        unit: it.unit ? String(it.unit) : undefined,
+        quantity: Number(it.quantity),
+        unitPrice: Number(it.unit_price),
+        csosn: it.csosn ? String(it.csosn) : rf.csosn,
+        origin: num(it.origin, rf.origin),
+        icmsRate: num(it.icms_rate, rf.icmsRate),
+        pisCst: it.pis_cst ? String(it.pis_cst) : rf.pisCst,
+        pisRate: num(it.pis_rate, rf.pisRate),
+        cofinsCst: it.cofins_cst ? String(it.cofins_cst) : rf.cofinsCst,
+        cofinsRate: num(it.cofins_rate, rf.cofinsRate),
+        ipiRate: num(it.ipi_rate, rf.ipiRate),
+      };
+    }),
     paymentMethod: body.payment_method || "01",
   };
 
