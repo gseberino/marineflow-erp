@@ -184,7 +184,11 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
         messages: withTrailingCacheMark(messages),
         tools: toolSchemas,
         maxTokens: DEFAULT_MAX_TOKENS,
-        effort: model === MODEL_AGENT ? "medium" : undefined,
+        // "medium" deixava cada volta do loop (cada tool-call) lenta o bastante para
+        // somar 38-66s em pedidos com várias etapas — "low" é suficiente para um
+        // assistente de CRUD/consulta de negócio (não é pesquisa complexa) e reduz a
+        // latência por chamada sem desligar o raciocínio de vez.
+        effort: model === MODEL_AGENT ? "low" : undefined,
       });
     } catch (e: any) {
       return {
