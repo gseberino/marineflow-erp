@@ -1,5 +1,24 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
 
+/**
+ * Recalcula os totais da OS após inserir/alterar item — best-effort, não deve derrubar a
+ * tool que a chama. O builder do supabase-js (.rpc()/.from()) só implementa `.then()`
+ * (PromiseLike), não `.catch()`/`.finally()` como uma Promise nativa — encadear
+ * `.catch()` direto nele (sem antes dar await) lança "X.catch is not a function". Bug real
+ * que quebrava add_material_to_order e as demais tools desta lista (todas usavam esse
+ * padrão): o INSERT já tinha sido gravado com sucesso quando o erro estourava aqui, então
+ * a tool reportava falha para um item que na verdade JÁ estava na OS — levando a IA a
+ * tentar de novo e duplicar a linha.
+ */
+async function recalcSoTotals(sb: any, soId: string | undefined | null): Promise<void> {
+  if (!soId) return;
+  try {
+    await sb.rpc("recalc_so_totals", { so_id: soId });
+  } catch {
+    // Não crítico — recalcular totais é best-effort.
+  }
+}
+
 // Espelha QUOTE_STATUS_TRANSITIONS de src/hooks/use-service-orders.ts — ciclo de vida
 // do orçamento (campo quote_status, separado do status geral da OS), válido enquanto
 // converted_to_os_at é nulo.
@@ -226,7 +245,7 @@ export const serviceOrderTools: ToolDef[] = [
         }
         if (partsRows.length) await sb.from("service_order_parts").insert(partsRows);
       }
-      await sb.rpc("recalc_so_totals", { so_id: data.id }).catch(() => null);
+      await recalcSoTotals(sb, data.id);
       return { ok: true, service_order: data };
     },
   },
@@ -309,7 +328,7 @@ export const serviceOrderTools: ToolDef[] = [
         .select()
         .single();
       if (error) throw error;
-      await sb.rpc("recalc_so_totals", { so_id: args.service_order_id || args.id }).catch(() => null);
+      await recalcSoTotals(sb, args.service_order_id || args.id);
       return { ok: true, part: data };
     },
   },
@@ -352,7 +371,7 @@ export const serviceOrderTools: ToolDef[] = [
         .select()
         .single();
       if (error) throw error;
-      await sb.rpc("recalc_so_totals", { so_id: args.service_order_id }).catch(() => null);
+      await recalcSoTotals(sb, args.service_order_id);
       return { ok: true, service: data };
     },
   },
@@ -390,7 +409,7 @@ export const serviceOrderTools: ToolDef[] = [
         .select()
         .single();
       if (error) throw error;
-      await sb.rpc("recalc_so_totals", { so_id: args.service_order_id }).catch(() => null);
+      await recalcSoTotals(sb, args.service_order_id);
       return { ok: true, material_item: data };
     },
   },
@@ -435,7 +454,7 @@ export const serviceOrderTools: ToolDef[] = [
     async execute(args, { sb }) {
       const { data, error } = await sb.from("service_orders").update({ discount_amount: args.discount_amount }).eq("id", args.id).select().single();
       if (error) throw error;
-      await sb.rpc("recalc_so_totals", { so_id: args.service_order_id || args.id }).catch(() => null);
+      await recalcSoTotals(sb, args.service_order_id || args.id);
       return { ok: true, service_order: data };
     },
   },
