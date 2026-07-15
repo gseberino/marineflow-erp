@@ -32,3 +32,14 @@ verify_jwt = false
 # exigir JWT. Ação idempotente e interna (só marca 'expired' o que passou de expires_at).
 [functions.expire-pending-actions]
 verify_jwt = false
+
+# Rotinas proativas da Fase 5 (chamadas pelo pg_cron só com x-cron-secret, sem JWT).
+# Cada uma valida o próprio CRON_SECRET internamente.
+[functions.ai-daily-briefing]
+verify_jwt = false
+
+[functions.ai-whatsapp-followups]
+verify_jwt = false
+
+[functions.ai-business-monitor]
+verify_jwt = false
