@@ -1051,6 +1051,18 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     signed_at: '' as string,
   });
 
+  // Em orçamento NOVO, o valor inicial de quote_validity_days acima pode ter usado o
+  // fallback (15) se app_settings ainda não tinha carregado no primeiro render (useState
+  // só aplica o valor inicial uma vez). Este efeito corrige assim que a configuração
+  // chegar — mas só uma vez (ref), pra nunca sobrescrever uma edição manual do usuário.
+  const appliedDefaultValidityRef = useRef(false);
+  useEffect(() => {
+    if (isNew && appSettings && !appliedDefaultValidityRef.current) {
+      appliedDefaultValidityRef.current = true;
+      setForm(f => ({ ...f, quote_validity_days: defaultQuoteValidityDays }));
+    }
+  }, [isNew, appSettings, defaultQuoteValidityDays]);
+
   const [manualTravel, setManualTravel] = useState(false);
   const [selectedTechnicians, setSelectedTechnicians] = useState<string[]>([]);
   const [extraFieldsOpen, setExtraFieldsOpen] = useState(false);

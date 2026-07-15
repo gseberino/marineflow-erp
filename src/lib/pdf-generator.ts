@@ -35,6 +35,25 @@ export const DEFAULT_PDF_OPTIONS: PDFOptions = {
   showPaymentInstructions: true,
 };
 
+/**
+ * Resolve as opções de PDF a usar para um tipo de documento: preferência salva em
+ * app_settings (chave pdf_options_<tipo>, gravada pelo PDFOptionsDialog) sobre o padrão de
+ * fábrica. Usado tanto pelo diálogo de Baixar/Imprimir quanto pelo envio direto via
+ * WhatsApp, para que as duas trilhas de geração de PDF respeitem a mesma preferência.
+ */
+export function resolvePdfOptions(
+  appSettings: Record<string, string> | undefined,
+  documentType: PDFDocumentType,
+): PDFOptions {
+  const raw = appSettings?.[`pdf_options_${documentType}`];
+  if (!raw) return { ...DEFAULT_PDF_OPTIONS };
+  try {
+    return { ...DEFAULT_PDF_OPTIONS, ...JSON.parse(raw) };
+  } catch {
+    return { ...DEFAULT_PDF_OPTIONS };
+  }
+}
+
 export type PDFData = {
   documentType: PDFDocumentType;
   company: {

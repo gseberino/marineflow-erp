@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { AlertTriangle, Download, Printer, Loader2 } from 'lucide-react';
 import type { PDFOptions, PDFDocumentType } from '@/lib/pdf-generator';
-import { DEFAULT_PDF_OPTIONS } from '@/lib/pdf-generator';
+import { DEFAULT_PDF_OPTIONS, resolvePdfOptions } from '@/lib/pdf-generator';
 import { useAppSetting, useAppSettings, useUpdateAppSetting } from '@/hooks/use-app-settings';
 
 export type ValidityConfig = {
@@ -64,11 +64,11 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
   useEffect(() => {
     if (open) {
       // Preferência salva: backend (fonte da verdade) > cache local > padrão de fábrica.
-      let backendPrefs: Partial<PDFOptions> = {};
-      const raw = appSettings?.[BACKEND_KEY(documentType)];
-      if (raw) { try { backendPrefs = JSON.parse(raw); } catch { /* valor inválido, ignora */ } }
-      const saved = { ...loadLocalPrefs(documentType), ...backendPrefs };
-      setOptions({ ...DEFAULT_PDF_OPTIONS, ...saved });
+      const hasBackendValue = !!appSettings?.[BACKEND_KEY(documentType)];
+      const saved = hasBackendValue
+        ? resolvePdfOptions(appSettings, documentType)
+        : { ...DEFAULT_PDF_OPTIONS, ...loadLocalPrefs(documentType) };
+      setOptions(saved);
       setDownloading(false);
       setValidityMode('days');
       setValidityDays(initialValidityDays ?? defaultQuoteValidityDays);

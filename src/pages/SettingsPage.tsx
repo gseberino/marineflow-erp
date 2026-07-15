@@ -20,6 +20,7 @@ import { useAppUsers as useAppUsersHook, useCreateAppUser, useUpdateAppUser, USE
 import { useAllPaymentConditionPresets, useCreatePaymentConditionPreset, useUpdatePaymentConditionPreset } from '@/hooks/use-payment-conditions';
 import { Switch } from '@/components/ui/switch';
 import { supabase } from '@/integrations/supabase/client';
+import { useAppSettings, useUpdateAppSettings } from '@/hooks/use-app-settings';
 import { toast } from 'sonner';
 import { CSOSN_OPTIONS, FISCAL_ORIGIN_OPTIONS } from '@/lib/price-calculator';
 import { maskCNPJ, maskPhone, maskCEP } from '@/lib/masks';
@@ -1364,6 +1365,12 @@ const PAYMENT_METHOD_OPTIONS = [
 ];
 
 function QuoteSettingsSection() {
+  // Lê/escreve via os hooks compartilhados (useAppSettings/useUpdateAppSettings) — antes
+  // esta seção usava supabase.from() direto, então salvar aqui não invalidava o cache do
+  // React Query usado por ServiceOrderForm/PDFOptionsDialog: a validade padrão gravava no
+  // banco, mas o resto do app só via o valor novo depois de um refresh completo da página.
+  const { data: appSettings, isLoading: loading } = useAppSettings();
+  const updateSettings = useUpdateAppSettings();
   const [cfg, setCfg] = useState({
     quote_deposit_percentage: 30,
     default_payment_method:   'pix',
@@ -1373,47 +1380,36 @@ function QuoteSettingsSection() {
     quote_expiry_days:        30,
     quote_followup_days:      7,
   });
-  const [loading, setLoading]   = useState(true);
-  const [saving,  setSaving]    = useState(false);
+  const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
-    (async () => {
-      const { data } = await supabase.from('app_settings').select('key, value');
-      if (data) {
-        const m: Record<string, string> = {};
-        for (const r of data) if (r.key) m[r.key] = String(r.value || '');
-        setCfg({
-          quote_deposit_percentage: Number(m.quote_deposit_percentage) || 30,
-          default_payment_method:   m.default_payment_method   || 'pix',
-          default_card_fee_percent: Number(m.default_card_fee_percent) || 0,
-          iss_rate_pct:             m.iss_rate_pct !== undefined && m.iss_rate_pct !== '' ? Number(m.iss_rate_pct) : 5,
-          quote_validity_days:      Number(m.quote_validity_days)      || 15,
-          quote_expiry_days:        Number(m.quote_expiry_days)        || 30,
-          quote_followup_days:      Number(m.quote_followup_days)      || 7,
-        });
-      }
-      setLoading(false);
-    })();
-  }, []);
+    if (!appSettings || initialized) return;
+    const m = appSettings;
+    setCfg({
+      quote_deposit_percentage: Number(m.quote_deposit_percentage) || 30,
+      default_payment_method:   m.default_payment_method   || 'pix',
+      default_card_fee_percent: Number(m.default_card_fee_percent) || 0,
+      iss_rate_pct:             m.iss_rate_pct !== undefined && m.iss_rate_pct !== '' ? Number(m.iss_rate_pct) : 5,
+      quote_validity_days:      Number(m.quote_validity_days)      || 15,
+      quote_expiry_days:        Number(m.quote_expiry_days)        || 30,
+      quote_followup_days:      Number(m.quote_followup_days)      || 7,
+    });
+    setInitialized(true);
+  }, [appSettings, initialized]);
 
   const handleSave = async () => {
-    setSaving(true);
+    const entries = Object.fromEntries(Object.entries(cfg).map(([k, v]) => [k, String(v)]));
     try {
-      const entries = Object.entries(cfg).map(([k, v]) => ({ key: k, value: String(v) }));
-      for (const e of entries) {
-        await supabase.from('app_settings').upsert(e, { onConflict: 'key' });
-      }
-      toast.success('Configurações de orçamento salvas');
-    } catch (e: any) {
-      toast.error(e.message || 'Erro ao salvar');
-    } finally {
-      setSaving(false);
+      await updateSettings.mutateAsync(entries);
+    } catch {
+      /* erro já exibido pelo hook */
     }
   };
 
   const set = (k: keyof typeof cfg, v: any) => setCfg(prev => ({ ...prev, [k]: v }));
+  const saving = updateSettings.isPending;
 
-  if (loading) return <p className="text-sm text-muted-foreground">Carregando...</p>;
+  if (loading || !initialized) return <p className="text-sm text-muted-foreground">Carregando...</p>;
 
   return (
     <div className="rounded-xl border bg-card p-6 space-y-5">

@@ -7,8 +7,9 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Loader2, Send, CalendarClock, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { normalizePhoneE164 } from '@/lib/masks';
-import { type PDFDocumentType } from '@/lib/pdf-generator';
+import { type PDFDocumentType, resolvePdfOptions } from '@/lib/pdf-generator';
 import { usePDFData } from '@/hooks/use-pdf';
+import { useAppSettings } from '@/hooks/use-app-settings';
 import { useWhatsAppTemplates, applyTemplateVariables } from '@/hooks/use-whatsapp-templates';
 import {
   useClientWhatsAppSettings,
@@ -151,6 +152,15 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
     if (target?.kind === 'service_order') return target.documentType || 'service_order';
     return 'invoice';
   }, [target]);
+
+  // Mesma preferência de opções (mostrar termos, preços etc.) configurada em
+  // Baixar/Imprimir PDF — sem isso, o envio via WhatsApp sempre usava o padrão de fábrica,
+  // ignorando o que foi salvo em Configurações/PDFOptionsDialog para este tipo de documento.
+  const { data: appSettings } = useAppSettings();
+  const pdfOptions = useMemo(
+    () => resolvePdfOptions(appSettings, documentType),
+    [appSettings, documentType],
+  );
 
   const publicUrl = useMemo(() => {
     if (!target) return '';
@@ -333,6 +343,7 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
         documentType,
         filename,
         caption,
+        pdfOptions,
       },
       { autoRetry, maxAttempts },
     );

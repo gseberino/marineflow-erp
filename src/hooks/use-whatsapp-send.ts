@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
-import { generatePDFBlob, DEFAULT_PDF_OPTIONS, type PDFDocumentType } from '@/lib/pdf-generator';
+import { generatePDFBlob, DEFAULT_PDF_OPTIONS, type PDFDocumentType, type PDFOptions } from '@/lib/pdf-generator';
 
 export interface WhatsAppSendPayload {
   phone: string;
@@ -21,6 +21,8 @@ export interface WhatsAppSendPayload {
   documentType?: PDFDocumentType;
   filename?: string;
   caption?: string;
+  // Opções do PDF (mostrar termos, preços, etc.) — se omitido, usa DEFAULT_PDF_OPTIONS.
+  pdfOptions?: PDFOptions;
 }
 
 export interface RetryConfig {
@@ -83,7 +85,7 @@ export function useWhatsAppSend() {
       if (!payload.pdfData) throw new Error('Dados do documento ainda carregando — tente novamente.');
       const blob = await generatePDFBlob(
         { ...payload.pdfData, documentType: payload.documentType } as any,
-        DEFAULT_PDF_OPTIONS,
+        payload.pdfOptions ?? DEFAULT_PDF_OPTIONS,
       );
       const filename = payload.filename || 'documento.pdf';
       const url = await uploadPdfBlob(blob, filename);
