@@ -97,9 +97,20 @@ const EMPTY_RESOLVED = { csosn: '400', origin: 0, icms_rate: 0, pis_rate: 0, cof
 interface DiagnosticsResult {
   token_ok: boolean;
   sefaz_ok: boolean;
+  // Candidatos ao verProc (versão do software, máx 20 na NF-e). O que tiver
+  // comprimento > 20 é o suspeito do erro "verProc length 21".
+  verproc_candidates?: {
+    token_name?: string | null;
+    token_name_len?: number;
+    legal_name?: string | null;
+    legal_name_len?: number;
+    trade_name?: string | null;
+    trade_name_len?: number;
+  };
   company: {
     found: boolean;
     legal_name?: string | null;
+    trade_name?: string | null;
     state_code?: string | null;
     city_code?: string | null;
     has_certificate?: boolean;
@@ -309,7 +320,7 @@ export default function FiscalEmission() {
   const preflight = [
     { ok: !!company?.state_code, label: 'UF da empresa emissora definida (calcula o CFOP)' },
     { ok: !!recipientName.trim() && (docDigits.length === 11 || docDigits.length === 14), label: 'Destinatário com nome e CPF/CNPJ válido' },
-    { ok: !!(address.address_line_1 && address.city && address.state && address.postal_code), label: 'Endereço do destinatário completo' },
+    { ok: !!(address.address_line_1 && address.city && address.state) && address.postal_code.replace(/\D/g, '').length === 8, label: 'Endereço do destinatário completo (CEP com 8 dígitos)' },
     { ok: recipientIeIndicator !== 1 || !!recipientIe.trim(), label: 'IE informada (destinatário contribuinte)' },
     { ok: itemsOk, label: 'Itens com NCM (8 díg.), CFOP (4 díg.), CSOSN, qtd e valor' },
     { ok: !selectedNature.requiresReference || !!referencedAccessKey.replace(/\D/g, ''), label: 'Chave da NF-e original (devolução)' },
@@ -1000,6 +1011,34 @@ export default function FiscalEmission() {
                       editável por aqui (a API não expõe update de empresa).
                     </li>
                   )}
+                  {/* Diagnóstico do verProc: o campo que a Contora usa como "versão do
+                      software" tem limite de 20 caracteres. Mostramos os candidatos e
+                      o comprimento — o que passar de 20 é a causa do erro de schema. */}
+                  {diagResult.verproc_candidates && (() => {
+                    const vc = diagResult.verproc_candidates!;
+                    const rows = [
+                      { label: 'Nome do token de API', val: vc.token_name, len: vc.token_name_len ?? 0 },
+                      { label: 'Razão social (Contora)', val: vc.legal_name, len: vc.legal_name_len ?? 0 },
+                      { label: 'Nome fantasia (Contora)', val: vc.trade_name, len: vc.trade_name_len ?? 0 },
+                    ].filter((r) => r.val);
+                    const suspect = rows.find((r) => r.len > 20);
+                    return (
+                      <li className="mt-2 border-t pt-2 list-none">
+                        <p className="font-semibold text-foreground">verProc (versão do software, máx. 20):</p>
+                        {rows.map((r, i) => (
+                          <div key={i} className={r.len > 20 ? 'text-destructive' : 'text-muted-foreground'}>
+                            {r.len > 20 ? '❌' : '•'} {r.label}: "{r.val}" ({r.len} caract.)
+                          </div>
+                        ))}
+                        {suspect && (
+                          <p className="text-amber-700 mt-1">
+                            ⚠ O campo <strong>{suspect.label}</strong> tem {suspect.len} caracteres (a Contora provavelmente
+                            o usa como verProc, limitado a 20). Renomeie-o para ≤20 no console da Contora e reemita.
+                          </p>
+                        )}
+                      </li>
+                    );
+                  })()}
                 </ul>
               )}
             </div>
@@ -1104,7 +1143,7 @@ export default function FiscalEmission() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <Label>Nome / Razão Social</Label>
-                    <Input value={recipientName} onChange={(e) => setRecipientName(e.target.value)} />
+                    <Input maxLength={60} value={recipientName} onChange={(e) => setRecipientName(e.target.value)} />
                   </div>
                   <div>
                     <Label>CPF/CNPJ</Label>
@@ -1193,8 +1232,8 @@ export default function FiscalEmission() {
                       </Button>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
-                      <Input placeholder="Descrição" className="h-8 text-xs" value={it.name} onChange={(e) => updateItem(index, { name: e.target.value })} />
-                      <Input placeholder="Código" className="h-8 text-xs" value={it.code} onChange={(e) => updateItem(index, { code: e.target.value })} />
+                      <Input placeholder="Descrição" className="h-8 text-xs" maxLength={120} value={it.name} onChange={(e) => updateItem(index, { name: e.target.value })} />
+                      <Input placeholder="Código" className="h-8 text-xs" maxLength={60} value={it.code} onChange={(e) => updateItem(index, { code: e.target.value })} />
                     </div>
                     <div className="grid grid-cols-4 gap-2">
                       <div>
@@ -1203,11 +1242,11 @@ export default function FiscalEmission() {
                       </div>
                       <div>
                         <Label className="text-[10px] text-muted-foreground">CFOP</Label>
-                        <Input placeholder="CFOP" className="h-8 text-xs" value={it.cfop} onChange={(e) => updateItem(index, { cfop: e.target.value })} />
+                        <Input placeholder="CFOP" className="h-8 text-xs" maxLength={4} value={it.cfop} onChange={(e) => updateItem(index, { cfop: e.target.value.replace(/\D/g, '') })} />
                       </div>
                       <div>
                         <Label className="text-[10px] text-muted-foreground">Unid.</Label>
-                        <Input placeholder="Unid." className="h-8 text-xs" value={it.unit} onChange={(e) => updateItem(index, { unit: e.target.value })} />
+                        <Input placeholder="Unid." className="h-8 text-xs" maxLength={6} value={it.unit} onChange={(e) => updateItem(index, { unit: e.target.value })} />
                       </div>
                       <div>
                         <Label className="text-[10px] text-muted-foreground">Qtd</Label>
@@ -1226,6 +1265,11 @@ export default function FiscalEmission() {
                             ))}
                           </SelectContent>
                         </Select>
+                        {['101', '201', '202', '500'].includes(it.csosn) && (
+                          <p className="text-[10px] text-amber-700 mt-0.5">
+                            Este CSOSN exige campos extras (crédito/ICMS-ST) que ainda não enviamos — confirme com a contadora.
+                          </p>
+                        )}
                       </div>
                       <div>
                         <Label className="text-[10px] text-muted-foreground">Origem da mercadoria</Label>

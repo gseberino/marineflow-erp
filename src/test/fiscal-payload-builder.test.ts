@@ -226,7 +226,7 @@ describe("buildItemTaxes", () => {
     expect(t.ipi).toEqual({ code: "99", aliquot: 5 });
   });
 
-  it("usa CST '49' de PIS/COFINS por padrão quando não informado", () => {
+  it("usa CST '49' de PIS/COFINS por padrão quando não informado (valor com que a 1ª NF-e autorizou)", () => {
     const t = buildItemTaxes({ ...base, csosn: "400" }) as any;
     expect(t.pis.code).toBe("49");
     expect(t.cofins.code).toBe("49");
@@ -269,6 +269,65 @@ describe("buildNfeDraftPayload — purpose / IE / infCpl / devolução", () => {
     });
     const payload = buildNfeDraftPayload(input) as any;
     expect(payload.items[0].taxes.icms.code).toBe("102");
+  });
+});
+
+describe("buildNfeDraftPayload — sanitização de campos (leiaute 4.00)", () => {
+  it("envia cEAN/cEANTrib: GTIN válido do barcode, senão 'SEM GTIN'", () => {
+    const comGtin = buildNfeDraftPayload(makeInput({
+      items: [{ code: "A", name: "Item", ncm: "85369090", cfop: "5102", quantity: 1, unitPrice: 10, barcode: "7891234567895" }],
+    })) as any;
+    expect(comGtin.items[0].cean).toBe("7891234567895");
+    expect(comGtin.items[0].cean_trib).toBe("7891234567895");
+
+    const semGtin = buildNfeDraftPayload(makeInput()) as any; // fixture sem barcode
+    expect(semGtin.items[0].cean).toBe("SEM GTIN");
+  });
+
+  it("trunca nome do destinatário em 60 e descrição do item em 120", () => {
+    const p = buildNfeDraftPayload(makeInput({
+      recipient: { ...makeInput().recipient, name: "X".repeat(80) },
+      items: [{ code: "A", name: "Y".repeat(140), ncm: "85369090", cfop: "5102", quantity: 1, unitPrice: 10 }],
+    })) as any;
+    expect(p.recipient.name.length).toBe(60);
+    expect(p.items[0].name.length).toBe(120);
+  });
+
+  it("apara espaços e colapsa espaços internos nos textos", () => {
+    const p = buildNfeDraftPayload(makeInput({
+      items: [{ code: "  A  ", name: "Item   com   espaços ", ncm: "85369090", cfop: "5102", quantity: 1, unitPrice: 10 }],
+    })) as any;
+    expect(p.items[0].name).toBe("Item com espaços");
+    expect(p.items[0].code).toBe("A");
+  });
+
+  it("trunca a unidade comercial em 6 caracteres", () => {
+    const p = buildNfeDraftPayload(makeInput({
+      items: [{ code: "A", name: "Item", ncm: "85369090", cfop: "5102", unit: "UNIDADE", quantity: 1, unitPrice: 10 }],
+    })) as any;
+    expect(p.items[0].unit).toBe("UNIDAD"); // 6 chars
+  });
+});
+
+describe("validateNfeDraftInput — NCM/CFOP/CEP", () => {
+  it("rejeita NCM que não tem 8 dígitos", () => {
+    const errors = validateNfeDraftInput(makeInput({
+      items: [{ code: "A", name: "Item", ncm: "8536909", cfop: "5102", quantity: 1, unitPrice: 10 }],
+    }));
+    expect(errors).toContain("Item 1: NCM deve ter 8 dígitos.");
+  });
+
+  it("rejeita CFOP que não tem 4 dígitos", () => {
+    const errors = validateNfeDraftInput(makeInput({
+      items: [{ code: "A", name: "Item", ncm: "85369090", cfop: "510", quantity: 1, unitPrice: 10 }],
+    }));
+    expect(errors).toContain("Item 1: CFOP deve ter 4 dígitos.");
+  });
+
+  it("rejeita CEP que não tem 8 dígitos", () => {
+    const input = makeInput();
+    input.recipient.address.postalCode = "8000000"; // 7 dígitos
+    expect(validateNfeDraftInput(input)).toContain("CEP deve ter 8 dígitos.");
   });
 });
 

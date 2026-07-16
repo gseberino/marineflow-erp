@@ -113,7 +113,7 @@ async function loadItemFiscalSources(admin: any, items: Array<Record<string, unk
 
   const { data: prods } = await admin
     .from("products")
-    .select("id, ncm, cfop, unit, csosn, fiscal_origin, icms_rate, ipi_rate, pis_rate, cofins_rate, use_global_fiscal, product_category_id")
+    .select("id, ncm, cfop, unit, barcode, csosn, fiscal_origin, icms_rate, ipi_rate, pis_rate, cofins_rate, use_global_fiscal, product_category_id")
     .in("id", productIds);
   for (const p of prods ?? []) productsById[String(p.id)] = p;
 
@@ -239,6 +239,8 @@ async function handleCreate(admin: any, body: any): Promise<Response> {
       // Valor explícito enviado pelo front (usuário pode editar) tem precedência;
       // senão cai no resolvido (produto→categoria→global).
       const num = (v: unknown, fb: number) => (v != null && v !== "" && !Number.isNaN(Number(v)) ? Number(v) : fb);
+      // deno-lint-ignore no-explicit-any
+      const productBarcode = (product as any)?.barcode as string | undefined;
       return {
         code: String(it.code ?? it.sku ?? "ITEM"),
         name: String(it.name ?? ""),
@@ -247,6 +249,7 @@ async function handleCreate(admin: any, body: any): Promise<Response> {
         unit: it.unit ? String(it.unit) : undefined,
         quantity: Number(it.quantity),
         unitPrice: Number(it.unit_price),
+        barcode: it.barcode ? String(it.barcode) : (productBarcode ?? null),
         csosn: it.csosn ? String(it.csosn) : rf.csosn,
         origin: num(it.origin, rf.origin),
         icmsRate: num(it.icms_rate, rf.icmsRate),
@@ -265,9 +268,13 @@ async function handleCreate(admin: any, body: any): Promise<Response> {
 
   const payload = buildNfeDraftPayload(input);
 
-  // Numeração atômica. Séries distintas por ambiente evitam colisão de
-  // numeração quando homologação e produção passarem a coexistir.
-  const series = environment === "producao" ? 1 : 900;
+  // Numeração atômica. IMPORTANTE: a faixa de série 900–999 é RESERVADA pela
+  // SEFAZ (contingência / NFC-e modelo 65) e gera Rejeição 244 numa NF-e normal
+  // modelo 55. Por isso usamos a faixa normal (1–889) nos dois ambientes: série
+  // 1 em produção e 2 em homologação (o ambiente já separa as sequências no
+  // fiscal_document_sequences e na SEFAZ). Antes usávamos 900 em homologação, o
+  // que a Contora vinha normalizando à força para 1 ("No-Lock Policy").
+  const series = environment === "producao" ? 1 : 2;
   const { data: number, error: seqErr } = await admin.rpc("next_fiscal_number", {
     p_document_type: documentType,
     p_series: series,
@@ -394,15 +401,33 @@ async function handleDiagnostics(): Promise<Response> {
   ]);
 
   const firstCompany = companies.ok ? companies.data[0] : undefined;
+  const tokenName = me.ok ? (me.data.name ?? null) : null;
+  const legalName = firstCompany?.legalName ?? null;
+  const tradeName = firstCompany?.tradeName ?? null;
+  // O verProc (versão do software emissor, máx 20) é preenchido pela Contora,
+  // provavelmente a partir de um destes valores. Expor o comprimento ajuda a
+  // achar qual passou de 20 caracteres — a causa do erro de schema.
+  const len = (s: string | null) => (s ? s.length : 0);
+
   return jr({
     ok: true,
     data: {
       token_ok: me.ok,
       sefaz_ok: sefaz.ok ? sefaz.data.ok : false,
+      // Candidatos ao verProc + comprimento (o que tiver > 20 é o suspeito).
+      verproc_candidates: {
+        token_name: tokenName,
+        token_name_len: len(tokenName),
+        legal_name: legalName,
+        legal_name_len: len(legalName),
+        trade_name: tradeName,
+        trade_name_len: len(tradeName),
+      },
       company: firstCompany
         ? {
           found: true,
-          legal_name: firstCompany.legalName ?? null,
+          legal_name: legalName,
+          trade_name: tradeName,
           state_code: firstCompany.stateCode ?? null,
           city_code: firstCompany.cityCode ?? null,
           has_certificate: firstCompany.hasCertificate ?? false,

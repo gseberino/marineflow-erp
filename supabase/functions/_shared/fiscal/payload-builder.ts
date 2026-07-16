@@ -1,6 +1,15 @@
 // Pure functions that turn UI-friendly input into the Contora NF-e draft
 // payload (see https://fiscal.contora.com.br/documentacao/nfe). No fetch, no
 // Deno APIs — safe to unit test under Vitest as well as run under Deno.
+import {
+  cleanText,
+  isValidCep,
+  isValidCfop,
+  isValidNcm,
+  NFE_LIMITS,
+  resolveGtin,
+  roundTo,
+} from "./nfe-sanitize.ts";
 
 export const PAYMENT_METHODS = [
   { value: "01", label: "Dinheiro" },
@@ -135,6 +144,7 @@ export interface NfeItemInput {
   unit?: string | null;
   quantity: number;
   unitPrice: number;
+  barcode?: string | null; // GTIN/EAN do produto → cEAN/cEANTrib ("SEM GTIN" se ausente)
   // Grupo tributário resolvido a partir do produto (ver product-fiscal.ts).
   // Quando csosn+origin vêm preenchidos, montamos o bloco `taxes` que a Contora
   // exige para a SEFAZ não rejeitar em produção (215). Todos opcionais para não
@@ -177,6 +187,10 @@ export function buildItemTaxes(it: NfeItemInput): Record<string, unknown> | unde
       origin: it.origin ?? 0,
       aliquot: it.icmsRate ?? 0,
     },
+    // CST "49" (Outras Operações de Saída) — valor com o qual a 1ª NF-e do HBR
+    // foi autorizada. "99" é uma alternativa recomendada p/ Simples; deixamos
+    // configurável em app_settings (default_pis_cst/default_cofins_cst) para a
+    // contadora escolher, sem trocar o que já funciona.
     pis: {
       code: it.pisCst || "49",
       aliquot: it.pisRate ?? 0,
@@ -211,17 +225,18 @@ export function buildNfeDraftPayload(
   // Indicador de IE do destinatário (indIEDest): 1=contribuinte, 2=isento, 9=não
   // contribuinte. Default 9 mantém o comportamento antigo; a UI passa a informar.
   const ieIndicator = input.recipient.stateRegistrationIndicator ?? 9;
+  const cleanEmail = cleanText(input.recipient.email, NFE_LIMITS.email);
   const recipient: Record<string, unknown> = {
-    name: input.recipient.name,
+    name: cleanText(input.recipient.name, NFE_LIMITS.recipientName),
     document: documentDigits,
     state_registration_indicator: ieIndicator,
-    email: input.recipient.email || undefined,
+    email: cleanEmail || undefined,
     address: {
-      street: input.recipient.address.street,
-      number: input.recipient.address.number || "S/N",
-      complement: input.recipient.address.complement || undefined,
-      district: input.recipient.address.district,
-      city_name: input.recipient.address.cityName,
+      street: cleanText(input.recipient.address.street, NFE_LIMITS.street),
+      number: cleanText(input.recipient.address.number, NFE_LIMITS.number) || "S/N",
+      complement: cleanText(input.recipient.address.complement, NFE_LIMITS.complement) || undefined,
+      district: cleanText(input.recipient.address.district, NFE_LIMITS.district),
+      city_name: cleanText(input.recipient.address.cityName, NFE_LIMITS.cityName),
       city_code: input.recipient.address.cityCode,
       state_code: input.recipient.address.stateCode,
       postal_code: onlyDigits(input.recipient.address.postalCode),
@@ -232,7 +247,7 @@ export function buildNfeDraftPayload(
   if (ieIndicator === 1 && ie) recipient.state_registration = ie;
 
   const payload: Record<string, unknown> = {
-    nature_operation: input.natureOperation ?? "Venda de mercadoria",
+    nature_operation: cleanText(input.natureOperation ?? "Venda de mercadoria", 60),
     operation_type: input.operationType ?? "saida",
     purpose: input.purpose ?? 1, // 1=normal por padrão; 4=devolução
     // CPF (11 dígitos) só existe para pessoa física — tratamos como consumidor
@@ -241,14 +256,18 @@ export function buildNfeDraftPayload(
     presence_indicator: input.presenceIndicator ?? 1, // 1=presencial por padrão
     recipient,
     items: input.items.map((it) => {
+      const gtin = resolveGtin(it.barcode);
       const item: Record<string, unknown> = {
-        code: it.code,
-        name: it.name,
+        code: cleanText(it.code, NFE_LIMITS.itemCode) || "ITEM",
+        name: cleanText(it.name, NFE_LIMITS.itemName),
         ncm: onlyDigits(it.ncm),
-        cfop: it.cfop || DEFAULT_CFOP,
-        unit: it.unit || "UN",
-        quantity: it.quantity,
-        unit_price: it.unitPrice,
+        cfop: (it.cfop || DEFAULT_CFOP).trim(),
+        unit: cleanText(it.unit, NFE_LIMITS.unit) || "UN",
+        quantity: roundTo(it.quantity, 4),
+        unit_price: roundTo(it.unitPrice, 10),
+        // cEAN/cEANTrib são obrigatórios: GTIN válido ou "SEM GTIN".
+        cean: gtin,
+        cean_trib: gtin,
       };
       const taxes = buildItemTaxes(it);
       if (taxes) item.taxes = taxes;
@@ -263,7 +282,7 @@ export function buildNfeDraftPayload(
   const refKey = onlyDigits(input.referencedAccessKey);
   if (refKey) payload.referenced_access_keys = [refKey];
 
-  const info = (input.additionalInfo ?? "").trim();
+  const info = cleanText(input.additionalInfo, NFE_LIMITS.additionalInfo);
   if (info) payload.additional_info = info;
 
   return payload;
@@ -296,7 +315,11 @@ export function validateNfeDraftInput(input: BuildNfePayloadInput): string[] {
     errors.push("Código IBGE do município não foi resolvido — confira UF e cidade.");
   }
   if (!addr?.stateCode?.trim()) errors.push("UF é obrigatória.");
-  if (!onlyDigits(addr?.postalCode)) errors.push("CEP é obrigatório.");
+  if (!onlyDigits(addr?.postalCode)) {
+    errors.push("CEP é obrigatório.");
+  } else if (!isValidCep(addr?.postalCode)) {
+    errors.push("CEP deve ter 8 dígitos.");
+  }
 
   if (!input.items?.length) {
     errors.push("Adicione pelo menos um item.");
@@ -304,7 +327,12 @@ export function validateNfeDraftInput(input: BuildNfePayloadInput): string[] {
     input.items.forEach((it, i) => {
       const n = i + 1;
       if (!it.name?.trim()) errors.push(`Item ${n}: descrição é obrigatória.`);
-      if (!onlyDigits(it.ncm)) errors.push(`Item ${n}: NCM é obrigatório.`);
+      if (!onlyDigits(it.ncm)) {
+        errors.push(`Item ${n}: NCM é obrigatório.`);
+      } else if (!isValidNcm(it.ncm)) {
+        errors.push(`Item ${n}: NCM deve ter 8 dígitos.`);
+      }
+      if (!isValidCfop(it.cfop)) errors.push(`Item ${n}: CFOP deve ter 4 dígitos.`);
       if (!(it.quantity > 0)) errors.push(`Item ${n}: quantidade deve ser maior que zero.`);
       if (!(it.unitPrice > 0)) errors.push(`Item ${n}: valor unitário deve ser maior que zero.`);
     });

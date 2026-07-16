@@ -210,6 +210,7 @@ export class ContoraProvider implements FiscalProvider {
       return {
         id: o["id"] ? String(o["id"]) : undefined,
         legalName: (o["legal_name"] as string) ?? null,
+        tradeName: (o["trade_name"] as string) ?? null,
         document: (o["document"] as string) ?? null,
         stateCode: (o["state_code"] as string) ?? null,
         cityCode: (o["city_code"] as string) ?? null,

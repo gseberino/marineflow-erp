@@ -78,6 +78,7 @@ export interface FiscalWebhookEvent {
 export interface CompanyInfo {
   id?: string;
   legalName?: string | null;
+  tradeName?: string | null;
   document?: string | null;
   stateCode?: string | null;
   cityCode?: string | null;
