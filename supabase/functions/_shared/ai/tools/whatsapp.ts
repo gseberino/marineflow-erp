@@ -233,4 +233,64 @@ export const whatsappTools: ToolDef[] = [
       return { ok: true, cancelled_id: args.scheduled_id };
     },
   },
+  {
+    name: "schedule_self_reminder",
+    description:
+      "LEMBRETE PARA O PRÓPRIO USUÁRIO (a pessoa que está falando com você), NUNCA para um cliente. Use SEMPRE que o pedido for 'me lembre', 'me avise', 'lembrete pra mim', 'não me deixe esquecer', 'me cutuca amanhã' etc. Agenda uma mensagem de WhatsApp para o número do próprio solicitante. NÃO use client_id, NÃO use schedule_whatsapp_message, NÃO peça confirmação — é uma ação interna e segura.",
+    input_schema: {
+      type: "object",
+      properties: {
+        message: {
+          type: "string",
+          description: "O texto que a pessoa vai receber. Escreva claro e amigável, já com a lista de pendências que ela pediu para lembrar (uma por linha).",
+        },
+        scheduled_at: {
+          type: "string",
+          description: "Data e hora do lembrete em ISO 8601 (ex: 2026-07-17T07:00:00). 'bem cedo'/'de manhã' → 07:00; 'amanhã' sem hora → 08:00; 'mais tarde' → +3h.",
+        },
+        recurrence_type: {
+          type: "string",
+          enum: ["once", "daily", "weekly", "monthly"],
+          description: "Recorrência do lembrete. Padrão: once (uma vez).",
+        },
+      },
+      required: ["message", "scheduled_at"],
+    },
+    risk: "low",
+    async execute(args, { admin, userId }) {
+      const when = new Date(args.scheduled_at);
+      if (isNaN(when.getTime())) return { error: "Data/hora do lembrete inválida." };
+      const { data: u } = await admin.from("app_users").select("phone_normalized").eq("id", userId).maybeSingle();
+      const phone = (u?.phone_normalized || "").replace(/\D/g, "");
+      if (!phone) {
+        return { error: "Você ainda não tem um número de WhatsApp cadastrado para receber lembretes. Cadastre em Configurações → Usuários (aba IA/Zap)." };
+      }
+      const scheduledAt = when.toISOString();
+      const { data: created, error } = await admin
+        .from("whatsapp_scheduled_sends")
+        .insert({
+          phone,
+          message: args.message,
+          scheduled_at: scheduledAt,
+          next_run_at: scheduledAt,
+          recurrence_type: args.recurrence_type || "once",
+          send_mode: "text",
+          target_kind: "self_reminder",
+          status: "pending",
+          created_by: userId,
+          auto_retry: true,
+          max_attempts: 3,
+        })
+        .select("id, scheduled_at, recurrence_type")
+        .single();
+      if (error) return { error: error.message };
+      return {
+        ok: true,
+        reminder_id: created.id,
+        scheduled_at: created.scheduled_at,
+        recurrence_type: created.recurrence_type,
+        message_preview: args.message.slice(0, 120),
+      };
+    },
+  },
 ];

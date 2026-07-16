@@ -58,6 +58,11 @@ export interface RunAgentLoopParams {
   maxIterations?: number;
   /** Guardado no payload de auditoria — o loop em si é agnóstico de canal. */
   channel?: "panel" | "whatsapp" | "system";
+  /** Esforço de raciocínio do modelo agente. Painel e WhatsApp usam o MESMO cérebro
+   * (este runAgentLoop), mas podem pedir esforços diferentes: painel faz trabalho
+   * complexo de ERP (montar orçamento com vários itens) e tolera mais latência →
+   * "medium"; WhatsApp é conversa rápida → "low". Padrão "low" se omitido. */
+  effort?: "low" | "medium" | "high";
 }
 
 type AutoDisambigConfig = {
@@ -285,11 +290,10 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
         messages: withTrailingCacheMark(messages),
         tools: toolSchemas,
         maxTokens: DEFAULT_MAX_TOKENS,
-        // "medium" deixava cada volta do loop (cada tool-call) lenta o bastante para
-        // somar 38-66s em pedidos com várias etapas — "low" é suficiente para um
-        // assistente de CRUD/consulta de negócio (não é pesquisa complexa) e reduz a
-        // latência por chamada sem desligar o raciocínio de vez.
-        effort: model === MODEL_AGENT ? "low" : undefined,
+        // Esforço configurável por canal (ver RunAgentLoopParams.effort): painel usa
+        // "medium" (trabalho complexo), WhatsApp "low" (conversa rápida). Só o modelo
+        // agente raciocina; o lite (Haiku) não recebe effort.
+        effort: model === MODEL_AGENT ? (params.effort ?? "low") : undefined,
       });
     } catch (e: any) {
       return {

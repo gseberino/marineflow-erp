@@ -427,6 +427,7 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
     toolCtx,
     sessionId,
     channel: "whatsapp",
+    effort: "low", // WhatsApp: conversa rápida, prioriza latência baixa
   });
 
   try {
@@ -704,6 +705,7 @@ Deno.serve(async (req) => {
       toolCtx: { sb, admin, userId, userRole: userRole as Role, jwt, appOrigin, settings },
       sessionId: resolvedSessionId,
       channel: "panel",
+      effort: "medium", // painel: trabalho complexo de ERP, tolera mais latência
     });
 
     // ---- Persiste as mensagens novas deste turno (best-effort — não derruba a resposta) ----
