@@ -72,6 +72,7 @@ Deno.serve(async (req) => {
   try {
     if (body.action === "cancel") return await handleCancel(admin, body);
     if (body.action === "correction") return await handleCorrection(admin, body);
+    if (body.action === "diagnostics") return await handleDiagnostics();
     return await handleCreate(admin, body);
   } catch (err) {
     console.error("[fiscal-emit] erro:", err);
@@ -340,8 +341,9 @@ async function handleCreate(admin: any, body: any): Promise<Response> {
   // ambiguidade sobre a sequência exigida antes de autorizar.
   const built = await provider.build(documentType, created.data.providerDocumentId, true);
   if (!built.ok) {
-    await markFailed(admin, draftRow.id, built.error, built.errorType, built.details);
-    return jr({ error: built.error, details: built.details }, 422);
+    const msg = didaticize(built.error);
+    await markFailed(admin, draftRow.id, msg, built.errorType, built.details);
+    return jr({ error: msg, details: built.details }, 422);
   }
 
   const dispatched = await provider.dispatch(
@@ -361,6 +363,57 @@ async function handleCreate(admin: any, body: any): Promise<Response> {
   }).eq("id", draftRow.id);
 
   return jr({ ok: true, data: { id: draftRow.id, status: "queued", environment } });
+}
+
+// Enriquece mensagens de erro cruas do provedor com orientação acionável — em
+// especial o "empresa sem city_code", que NÃO se resolve neste app (a API v1 da
+// Contora não expõe update de empresa): é correção no console da Contora.
+function didaticize(error: string): string {
+  const e = (error || "").toLowerCase();
+  if (e.includes("city_code") || e.includes("código do município") || e.includes("codigo do municipio")) {
+    return error +
+      " — Corrija no console da Contora: Empresas → editar a empresa emissora → preencher o Município (código IBGE). " +
+      "Use o botão 'Diagnóstico da conta Contora' em Dados da Empresa para confirmar.";
+  }
+  if (e.includes("certificate") || e.includes("certificado")) {
+    return error + " — Suba/renove o certificado A1 no console da Contora (Empresas → Certificado).";
+  }
+  return error;
+}
+
+// Diagnóstico read-only da conta na Contora: token válido? empresa cadastrada
+// com city_code/certificado? SEFAZ online? Não grava nada, não gasta cota.
+// Serve para o usuário entender por que a emissão falha (ex.: "empresa sem
+// city_code" é corrigido no console da Contora, não neste app).
+async function handleDiagnostics(): Promise<Response> {
+  const provider = createFiscalProvider();
+  const [me, companies, sefaz] = await Promise.all([
+    provider.validateToken(),
+    provider.listCompanies(),
+    provider.sefazStatus(),
+  ]);
+
+  const firstCompany = companies.ok ? companies.data[0] : undefined;
+  return jr({
+    ok: true,
+    data: {
+      token_ok: me.ok,
+      sefaz_ok: sefaz.ok ? sefaz.data.ok : false,
+      company: firstCompany
+        ? {
+          found: true,
+          legal_name: firstCompany.legalName ?? null,
+          state_code: firstCompany.stateCode ?? null,
+          city_code: firstCompany.cityCode ?? null,
+          has_certificate: firstCompany.hasCertificate ?? false,
+          default_environment: firstCompany.defaultEnvironment ?? null,
+        }
+        : { found: false },
+      message: !companies.ok
+        ? ("Falha ao consultar empresas na Contora: " + companies.error)
+        : undefined,
+    },
+  });
 }
 
 // deno-lint-ignore no-explicit-any

@@ -74,11 +74,37 @@ export interface FiscalWebhookEvent {
   raw: unknown;
 }
 
+// Resumo de uma empresa emissora cadastrada no provedor (Contora: GET /companies).
+export interface CompanyInfo {
+  id?: string;
+  legalName?: string | null;
+  document?: string | null;
+  stateCode?: string | null;
+  cityCode?: string | null;
+  hasCertificate?: boolean;
+  defaultEnvironment?: string | null;
+  raw: unknown;
+}
+
+export interface SefazStatusInfo {
+  ok: boolean; // a consulta respondeu (tooling da SEFAZ acessível p/ a empresa)
+  certificateLoaded?: boolean;
+  stateCode?: string | null;
+  environment?: string | null;
+  raw: unknown;
+}
+
 export interface FiscalProvider {
   readonly name: string;
 
   // Auth smoke test (Contora: GET /me).
   validateToken(): Promise<FiscalResult<{ tokenId?: string; name?: string }>>;
+
+  // Empresas emissoras da conta (Contora: GET /companies). Consulta leve.
+  listCompanies(): Promise<FiscalResult<CompanyInfo[]>>;
+
+  // Status da SEFAZ / prontidão da empresa (Contora: GET /sefaz/status).
+  sefazStatus(): Promise<FiscalResult<SefazStatusInfo>>;
 
   createDraft(input: CreateDraftInput): Promise<FiscalResult<DraftCreated>>;
 

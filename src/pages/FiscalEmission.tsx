@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/select';
 import {
   FileText, Loader2, Plus, Trash2, RefreshCw, Download, Ban, Pencil, Settings2, Upload,
+  Stethoscope, CheckCircle2, XCircle,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -30,6 +31,8 @@ import { useAppSettings } from '@/hooks/use-app-settings';
 import { useI18n } from '@/i18n';
 import { maskCPFCNPJ } from '@/lib/masks';
 import { parseNfeReferenceXml } from '@/lib/nfe-xml-parser';
+import { parseLegacyAddress } from '@/lib/address-legacy';
+import { CSOSN_OPTIONS, FISCAL_ORIGIN_OPTIONS } from '@/lib/price-calculator';
 // Reaproveita os mesmos módulos que a edge function fiscal-emit usa no
 // servidor — evita duplicar a lista de formas de pagamento, natureza de
 // operação/CFOP e o CFOP padrão.
@@ -88,6 +91,21 @@ interface DraftItem {
 }
 
 const EMPTY_RESOLVED = { csosn: '400', origin: 0, icms_rate: 0, pis_rate: 0, cofins_rate: 0, ipi_rate: 0 };
+
+// Resultado do diagnóstico da conta na Contora (action="diagnostics" no fiscal-emit).
+interface DiagnosticsResult {
+  token_ok: boolean;
+  sefaz_ok: boolean;
+  company: {
+    found: boolean;
+    legal_name?: string | null;
+    state_code?: string | null;
+    city_code?: string | null;
+    has_certificate?: boolean;
+    default_environment?: string | null;
+  } | null;
+  message?: string;
+}
 
 interface AddressState {
   postal_code: string;
@@ -209,6 +227,8 @@ export default function FiscalEmission() {
 
   const [showSettings, setShowSettings] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
+  const [runningDiag, setRunningDiag] = useState(false);
+  const [diagResult, setDiagResult] = useState<DiagnosticsResult | null>(null);
   const [settingsForm, setSettingsForm] = useState({
     legal_name: '', trade_name: '', cnpj: '', state_registration: '',
     municipal_registration: '', tax_regime: 'simples', crt: 1, state_code: '',
@@ -268,16 +288,27 @@ export default function FiscalEmission() {
       searchTerms: [p.ncm || '', (p as any).cfop || ''],
     })), [products]);
 
+  const clientOptions: EntityOption[] = useMemo(() => (clients || [])
+    .filter((c) => c.active)
+    .map((c) => ({
+      value: c.id,
+      label: c.name,
+      description: c.cpf_cnpj || undefined,
+      searchTerms: [c.cpf_cnpj || '', c.city || ''],
+    })), [clients]);
+
   // Checklist de pré-voo: o que ainda falta para a nota poder ser autorizada.
   // Mostrado no diálogo para orientar o usuário antes de gastar cota fiscal.
   const docDigits = recipientDocument.replace(/\D/g, '');
-  const itemsOk = items.length > 0 && items.every((it) => it.ncm.replace(/\D/g, '') && it.csosn && it.quantity > 0 && it.unit_price > 0);
+  const itemsOk = items.length > 0 && items.every((it) =>
+    it.ncm.replace(/\D/g, '').length === 8 && it.csosn &&
+    /^\d{4}$/.test((it.cfop || '').trim()) && it.quantity > 0 && it.unit_price > 0);
   const preflight = [
     { ok: !!company?.state_code, label: 'UF da empresa emissora definida (calcula o CFOP)' },
     { ok: !!recipientName.trim() && (docDigits.length === 11 || docDigits.length === 14), label: 'Destinatário com nome e CPF/CNPJ válido' },
     { ok: !!(address.address_line_1 && address.city && address.state && address.postal_code), label: 'Endereço do destinatário completo' },
     { ok: recipientIeIndicator !== 1 || !!recipientIe.trim(), label: 'IE informada (destinatário contribuinte)' },
-    { ok: itemsOk, label: 'Itens com NCM, CSOSN, quantidade e valor' },
+    { ok: itemsOk, label: 'Itens com NCM (8 díg.), CFOP (4 díg.), CSOSN, qtd e valor' },
     { ok: !selectedNature.requiresReference || !!referencedAccessKey.replace(/\D/g, ''), label: 'Chave da NF-e original (devolução)' },
   ];
   const preflightOk = preflight.every((p) => p.ok);
@@ -351,6 +382,25 @@ export default function FiscalEmission() {
     }
   };
 
+  // Consulta o estado real da conta na Contora (empresa/city_code/certificado/
+  // ambiente/SEFAZ). Read-only, não gasta cota — serve para o usuário entender
+  // por que a emissão falha (ex.: "empresa sem city_code" é corrigido no console
+  // da Contora, não aqui).
+  const handleRunDiagnostics = async () => {
+    setRunningDiag(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('fiscal-emit', { body: { action: 'diagnostics' } });
+      if (error) throw new Error(await extractInvokeErrorMessage(error));
+      if (data?.error) throw new Error(data.error);
+      setDiagResult((data?.data ?? data) as DiagnosticsResult);
+    } catch (err: any) {
+      toast.error('Erro no diagnóstico: ' + err.message);
+      setDiagResult(null);
+    } finally {
+      setRunningDiag(false);
+    }
+  };
+
   // ── Dialog de emissão ────────────────────────────────────────────────────
   const openEmitDialog = () => {
     setNatureOfOperation('venda');
@@ -382,21 +432,26 @@ export default function FiscalEmission() {
     setRecipientName(c.name || '');
     setRecipientDocument(c.cpf_cnpj || '');
     setRecipientEmail(c.email || '');
+    // Colunas novas ainda fora do types.ts gerado — acesso via Record.
+    const cc = c as unknown as Record<string, unknown>;
     // IE/indicador e consumidor final vindos do cadastro do cliente (colunas
     // novas). Fallback conservador = 9 (não contribuinte), para não travar a
     // emissão exigindo IE de quem não tem; o usuário marca "Contribuinte" quando
     // for o caso (ex.: revenda). Consumidor final: CNPJ (revenda) → não.
     const digits = (c.cpf_cnpj || '').replace(/\D/g, '');
-    const indicator = (c as any).ie_indicator ?? 9;
-    setRecipientIeIndicator(Number(indicator) || 9);
-    setRecipientIe((c as any).state_registration || '');
+    setRecipientIeIndicator(Number(cc.ie_indicator ?? 9) || 9);
+    setRecipientIe((cc.state_registration as string) || '');
     setConsumerFinal(digits.length === 11);
+    // Preferir colunas estruturadas (número/bairro/complemento); se vazias,
+    // desempacotar o endereço legado — antes, a line_2 inteira ("número, bairro")
+    // caía toda no complemento.
+    const legacy = parseLegacyAddress(c.address_line_1, c.address_line_2);
     setAddress({
       postal_code: c.postal_code || '',
-      address_line_1: c.address_line_1 || '',
-      address_number: '',
-      address_complement: c.address_line_2 || '',
-      neighborhood: '',
+      address_line_1: legacy.street || c.address_line_1 || '',
+      address_number: (cc.address_number as string) || legacy.number,
+      address_complement: (cc.address_complement as string) || legacy.complement,
+      neighborhood: (cc.neighborhood as string) || legacy.neighborhood,
       city: c.city || '',
       state: c.state || '',
       country: c.country || 'Brasil',
@@ -830,6 +885,46 @@ export default function FiscalEmission() {
               determinam qual empresa efetivamente emite. Quem manda isso é o cadastro feito direto no console da Contora
               (CNPJ + certificado A1), vinculado ao token configurado nos Secrets do Supabase.
             </p>
+
+            {/* Diagnóstico da conta na Contora — mostra o que impede a emissão. */}
+            <div className="rounded-lg border p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold flex items-center gap-1.5">
+                  <Stethoscope className="h-4 w-4" /> Diagnóstico da conta Contora
+                </p>
+                <Button type="button" size="sm" variant="outline" onClick={handleRunDiagnostics} disabled={runningDiag}>
+                  {runningDiag ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <RefreshCw className="h-3.5 w-3.5 mr-1" />}
+                  Verificar
+                </Button>
+              </div>
+              {!diagResult ? (
+                <p className="text-xs text-muted-foreground">
+                  Confirma, direto na Contora, se a empresa emissora está pronta (município/IBGE, certificado, ambiente) e
+                  se a SEFAZ está online. Não gasta cota fiscal.
+                </p>
+              ) : (
+                <ul className="space-y-1 text-xs">
+                  {[
+                    { ok: diagResult.token_ok, label: 'Token da Contora válido' },
+                    { ok: !!diagResult.company?.found, label: `Empresa cadastrada na Contora${diagResult.company?.legal_name ? ` (${diagResult.company.legal_name})` : ''}` },
+                    { ok: !!diagResult.company?.city_code, label: `Município/código IBGE preenchido${diagResult.company?.city_code ? ` (${diagResult.company.city_code})` : ''}` },
+                    { ok: !!diagResult.company?.has_certificate, label: 'Certificado A1 enviado' },
+                    { ok: diagResult.sefaz_ok, label: 'SEFAZ online' },
+                  ].map((c, i) => (
+                    <li key={i} className={`flex items-center gap-2 ${c.ok ? 'text-success' : 'text-destructive'}`}>
+                      {c.ok ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
+                      {c.label}
+                    </li>
+                  ))}
+                  {!diagResult.company?.city_code && (
+                    <li className="text-amber-700 mt-1">
+                      ⚠ Corrija no <strong>console da Contora → Empresas → editar → Município</strong>. Esse campo não é
+                      editável por aqui (a API não expõe update de empresa).
+                    </li>
+                  )}
+                </ul>
+              )}
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowSettings(false)}>Cancelar</Button>
@@ -898,15 +993,14 @@ export default function FiscalEmission() {
 
             <div>
               <Label>Cliente cadastrado (opcional — preenche os dados abaixo)</Label>
-              <Select value={clientId || '__none'} onValueChange={(v) => handleClientChange(v === '__none' ? '' : v)}>
-                <SelectTrigger><SelectValue placeholder="Selecione um cliente..." /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none">Sem cliente vinculado</SelectItem>
-                  {(clients || []).filter((c) => c.active).map((c) => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <EntityCombobox
+                value={clientId || null}
+                onChange={(v) => handleClientChange(v)}
+                options={clientOptions}
+                placeholder="Selecione um cliente..."
+                searchPlaceholder="Buscar cliente... (digite 3+ letras)"
+                emptyText="Nenhum cliente encontrado"
+              />
             </div>
 
             <Card>
@@ -1026,15 +1120,31 @@ export default function FiscalEmission() {
                       </div>
                     </div>
                     {/* Impostos — auto-preenchidos do cadastro fiscal do produto, editáveis. */}
-                    <div className="grid grid-cols-5 gap-2">
+                    <div className="grid grid-cols-2 gap-2">
                       <div>
-                        <Label className="text-[10px] text-muted-foreground">CSOSN</Label>
-                        <Input placeholder="CSOSN" className="h-8 text-xs" value={it.csosn} onChange={(e) => updateItem(index, { csosn: e.target.value.replace(/\D/g, '').slice(0, 3) })} />
+                        <Label className="text-[10px] text-muted-foreground">CSOSN (situação do ICMS)</Label>
+                        <Select value={it.csosn || '400'} onValueChange={(v) => updateItem(index, { csosn: v })}>
+                          <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {CSOSN_OPTIONS.map((o) => (
+                              <SelectItem key={o.value} value={o.value} className="text-xs">{o.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
                       <div>
-                        <Label className="text-[10px] text-muted-foreground">Origem</Label>
-                        <Input type="number" min="0" max="8" className="h-8 text-xs" value={it.origin} onChange={(e) => updateItem(index, { origin: Math.max(0, Math.min(8, parseInt(e.target.value) || 0)) })} />
+                        <Label className="text-[10px] text-muted-foreground">Origem da mercadoria</Label>
+                        <Select value={String(it.origin ?? 0)} onValueChange={(v) => updateItem(index, { origin: Number(v) })}>
+                          <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {FISCAL_ORIGIN_OPTIONS.map((o) => (
+                              <SelectItem key={o.value} value={String(o.value)} className="text-xs">{o.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
                       <div>
                         <Label className="text-[10px] text-muted-foreground">ICMS %</Label>
                         <Input type="number" min="0" step="0.01" className="h-8 text-xs" value={it.icms_rate} onChange={(e) => updateItem(index, { icms_rate: Math.max(0, parseFloat(e.target.value) || 0) })} />

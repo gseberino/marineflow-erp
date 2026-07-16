@@ -14,6 +14,7 @@ import { useCnpj } from '@/hooks/use-cnpj';
 import { toast } from 'sonner';
 import type { TablesInsert } from '@/integrations/supabase/types';
 import { maskCPF, maskCNPJ, maskPhone } from '@/lib/masks';
+import { parseLegacyAddress } from '@/lib/address-legacy';
 import {
   useClientWhatsAppSettings,
   useUpsertClientWhatsAppSetting,
@@ -49,7 +50,15 @@ const empty = {
   country: 'Brazil',
   notes: '',
   active: true,
+  state_registration: '',
+  ie_indicator: 9 as number,
 };
+
+const IE_INDICATOR_OPTIONS = [
+  { value: 9, label: '9 — Não contribuinte (consumidor)' },
+  { value: 1, label: '1 — Contribuinte do ICMS (exige IE)' },
+  { value: 2, label: '2 — Contribuinte isento de IE' },
+];
 
 export function ClientFormDialog({ open, onOpenChange, client, initialName, onCreated }: Props) {
   const { t } = useI18n();
@@ -61,6 +70,14 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
 
   useEffect(() => {
     if (client) {
+      // Preferir as colunas estruturadas (preenchidas pelo backfill); se ainda
+      // vazias (cliente muito antigo ou sem line_2), desempacotar o legado com o
+      // mesmo parser usado no backfill/emissão.
+      const c = client as unknown as Record<string, unknown>;
+      const structNumber = (c.address_number as string) || '';
+      const structNeigh = (c.neighborhood as string) || '';
+      const structCompl = (c.address_complement as string) || '';
+      const legacy = parseLegacyAddress(client.address_line_1, client.address_line_2);
       setForm({
         type: client.type,
         name: client.name,
@@ -69,16 +86,18 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
         whatsapp: client.whatsapp ?? '',
         email: client.email ?? '',
         postal_code: client.postal_code ?? '',
-        address_line_1: client.address_line_1 ?? '',
-        address_number: '',
-        address_complement: '',
-        neighborhood: '',
+        address_line_1: legacy.street || client.address_line_1 || '',
+        address_number: structNumber || legacy.number,
+        address_complement: structCompl || legacy.complement,
+        neighborhood: structNeigh || legacy.neighborhood,
         address_line_2: client.address_line_2 ?? '',
         city: client.city ?? '',
         state: client.state ?? '',
         country: client.country ?? 'Brazil',
         notes: client.notes ?? '',
         active: client.active,
+        state_registration: (c.state_registration as string) ?? '',
+        ie_indicator: Number(c.ie_indicator ?? 9) || 9,
       });
     } else {
       setForm({ ...empty, name: initialName || '' });
@@ -106,6 +125,16 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
         country: form.country || 'Brazil',
         notes: form.notes || null,
         active: form.active,
+        // Colunas estruturadas + fiscais (ainda fora do types.ts gerado — mesmo
+        // padrão de cast já usado no projeto). Persistir número/bairro/complemento
+        // separados alimenta a emissão de NF-e sem depender do desempacotamento.
+        ...( {
+          address_number: form.address_number || null,
+          address_complement: form.address_complement || null,
+          neighborhood: form.neighborhood || null,
+          state_registration: form.state_registration || null,
+          ie_indicator: form.ie_indicator ?? 9,
+        } as Record<string, unknown> ),
       };
 
       if (isEdit && client) {
@@ -196,6 +225,30 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
                   </Button>
                 )}
               </div>
+            </div>
+            {/* Dados fiscais — usados na emissão de NF-e para este cliente. */}
+            <div>
+              <Label>Indicador de IE</Label>
+              <Select value={String(form.ie_indicator)} onValueChange={v => set('ie_indicator', Number(v))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {IE_INDICATOR_OPTIONS.map(o => (
+                    <SelectItem key={o.value} value={String(o.value)}>{o.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Contribuinte (1) — comum para revenda/empresas — exige a Inscrição Estadual na NF-e.
+              </p>
+            </div>
+            <div>
+              <Label>Inscrição Estadual {form.ie_indicator === 1 && <span className="text-destructive">*</span>}</Label>
+              <Input
+                value={form.state_registration}
+                onChange={e => set('state_registration', e.target.value)}
+                placeholder={form.ie_indicator === 1 ? 'Obrigatória p/ contribuinte' : 'Isento / não contribuinte'}
+                disabled={form.ie_indicator !== 1}
+              />
             </div>
             <div>
               <Label>{t.clients.email}</Label>

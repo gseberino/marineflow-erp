@@ -153,6 +153,54 @@ describe("ContoraProvider — chamadas HTTP (fetch mockado)", () => {
     const err = r as Extract<typeof r, { ok: false }>;
     expect(err.retryable).toBe(true);
   });
+
+  it("listCompanies normaliza a empresa (city_code/certificado/UF) do envelope { data: [...] }", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({
+        ok: true,
+        data: [{
+          id: "cmp-1", legal_name: "HBR LTDA", document: "50057049000159",
+          state_code: "SC", city_code: "4204202", has_certificate: true, default_environment: "homologacao",
+        }],
+      }),
+    );
+    const r = await makeProvider().listCompanies();
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.data).toHaveLength(1);
+      expect(r.data[0]).toMatchObject({
+        legalName: "HBR LTDA", stateCode: "SC", cityCode: "4204202", hasCertificate: true,
+      });
+    }
+  });
+
+  it("listCompanies detecta empresa SEM city_code (causa do erro de build)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ ok: true, data: [{ id: "cmp-1", legal_name: "HBR", state_code: "SC", has_certificate: true }] }),
+    );
+    const r = await makeProvider().listCompanies();
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.data[0].cityCode ?? null).toBeNull();
+  });
+
+  it("sefazStatus reporta ok=true e certificateLoaded no sucesso", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ ok: true, data: { environment: "homologacao", state_code: "SC", certificate_loaded: true } }),
+    );
+    const r = await makeProvider().sefazStatus();
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.data.ok).toBe(true);
+      expect(r.data.certificateLoaded).toBe(true);
+    }
+  });
+
+  it("sefazStatus reporta ok=false quando a consulta falha (SEFAZ indisponível)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ ok: false, message: "sefaz offline" }, 503));
+    const r = await makeProvider().sefazStatus();
+    expect(r.ok).toBe(true); // o método nunca "falha"; embute o status
+    if (r.ok) expect(r.data.ok).toBe(false);
+  });
 });
 
 describe("ContoraProvider.parseWebhook", () => {

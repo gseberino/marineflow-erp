@@ -4,6 +4,7 @@
 // Uses only Web-standard APIs (fetch, crypto.subtle) so it runs in Deno (edge
 // functions) and under Vitest (Node) for unit tests.
 import type {
+  CompanyInfo,
   CreateDraftInput,
   DocumentStatusInfo,
   DocumentType,
@@ -14,6 +15,7 @@ import type {
   FiscalResult,
   FiscalStatus,
   FiscalWebhookEvent,
+  SefazStatusInfo,
 } from "./types.ts";
 
 export interface ContoraConfig {
@@ -190,6 +192,48 @@ export class ContoraProvider implements FiscalProvider {
       data: {
         tokenId: token?.["id"] ? String(token["id"]) : undefined,
         name: token?.["name"] ? String(token["name"]) : undefined,
+      },
+    };
+  }
+
+  async listCompanies(): Promise<FiscalResult<CompanyInfo[]>> {
+    const r = await this.request<unknown>("GET", "/companies");
+    if (!r.ok) return r as FiscalResult<CompanyInfo[]>;
+    const raw = r.data as Record<string, unknown> | unknown[];
+    const arr: unknown[] = Array.isArray(raw)
+      ? raw
+      : ((raw as Record<string, unknown>)?.["data"] as unknown[]) ??
+        ((raw as Record<string, unknown>)?.["companies"] as unknown[]) ??
+        [];
+    const companies: CompanyInfo[] = arr.map((c) => {
+      const o = c as Record<string, unknown>;
+      return {
+        id: o["id"] ? String(o["id"]) : undefined,
+        legalName: (o["legal_name"] as string) ?? null,
+        document: (o["document"] as string) ?? null,
+        stateCode: (o["state_code"] as string) ?? null,
+        cityCode: (o["city_code"] as string) ?? null,
+        hasCertificate: o["has_certificate"] === true,
+        defaultEnvironment: (o["default_environment"] as string) ?? null,
+        raw: o,
+      };
+    });
+    return { ok: true, data: companies };
+  }
+
+  async sefazStatus(): Promise<FiscalResult<SefazStatusInfo>> {
+    const r = await this.request<Record<string, unknown>>("GET", "/sefaz/status");
+    // ok:false aqui já significa SEFAZ indisponível / não pronta.
+    if (!r.ok) return { ok: true, data: { ok: false, raw: r } };
+    const d = r.data ?? {};
+    return {
+      ok: true,
+      data: {
+        ok: true,
+        certificateLoaded: d["certificate_loaded"] === true,
+        stateCode: (d["state_code"] as string) ?? null,
+        environment: (d["environment"] as string) ?? null,
+        raw: d,
       },
     };
   }
