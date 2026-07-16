@@ -242,9 +242,16 @@ export class ContoraProvider implements FiscalProvider {
     input: CreateDraftInput,
   ): Promise<FiscalResult<DraftCreated>> {
     const fam = family(input.documentType);
+    // A Contora lê série/número DE DENTRO do `payload` no build ("Informe number
+    // no payload com valor maior que zero"); a doc também os mostra no topo do
+    // request. Enviamos nos dois lugares para satisfazer as duas variações.
+    const payload: Record<string, unknown> = { ...input.payload };
+    if (input.series !== undefined) payload.series = input.series;
+    if (input.number !== undefined) payload.number = input.number;
+
     const body: Record<string, unknown> = {
       environment: input.environment ?? this.environment,
-      payload: input.payload,
+      payload,
     };
     if (input.series !== undefined) body.series = input.series;
     if (input.number !== undefined) body.number = input.number;

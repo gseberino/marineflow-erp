@@ -107,6 +107,11 @@ describe("ContoraProvider — chamadas HTTP (fetch mockado)", () => {
     const sentBody = JSON.parse((init as RequestInit).body as string);
     expect(sentBody.document_type).toBe("nfe");
     expect(sentBody.series).toBe(1);
+    expect(sentBody.number).toBe(214);
+    // A Contora valida number/series DENTRO do payload no build — devem ir nos dois lugares.
+    expect(sentBody.payload.number).toBe(214);
+    expect(sentBody.payload.series).toBe(1);
+    expect(sentBody.payload.nature_operation).toBe("Venda");
   });
 
   it("getStatus normaliza autorização com chave/protocolo", async () => {
