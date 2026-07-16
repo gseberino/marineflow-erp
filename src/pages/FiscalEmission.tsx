@@ -745,13 +745,28 @@ export default function FiscalEmission() {
     }
   };
 
-  const handleDownloadXml = async (path: string) => {
-    const { data, error } = await supabase.storage.from('fiscal-xml').createSignedUrl(path, 60);
-    if (error || !data?.signedUrl) {
-      toast.error('Erro ao gerar link de download: ' + (error?.message || ''));
-      return;
+  // Abre DANFE/XML pelo proxy autenticado — as URLs de artefato da Contora
+  // exigem o Bearer token, então não dá para abrir direto no navegador
+  // ("Bearer token ausente"). O edge function busca com o token e devolve os
+  // bytes; abrimos como blob local.
+  const handleViewArtifact = async (docId: string, kind: 'pdf_danfe' | 'xml_authorized') => {
+    markBusy(docId, true);
+    try {
+      const { data, error } = await supabase.functions.invoke('fiscal-emit', {
+        body: { action: 'artifact', document_id: docId, artifact: kind },
+      });
+      if (error) throw new Error(await extractInvokeErrorMessage(error));
+      const blob = data instanceof Blob
+        ? data
+        : new Blob([data as BlobPart], { type: kind === 'pdf_danfe' ? 'application/pdf' : 'application/xml' });
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err: any) {
+      toast.error('Erro ao abrir o documento: ' + err.message);
+    } finally {
+      markBusy(docId, false);
     }
-    window.open(data.signedUrl, '_blank');
   };
 
   return (
@@ -856,15 +871,15 @@ export default function FiscalEmission() {
                             {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
                           </Button>
                         )}
-                        {doc.xml_storage_path && (
-                          <Button size="sm" variant="outline" onClick={() => handleDownloadXml(doc.xml_storage_path)}>
-                            <Download className="h-3.5 w-3.5" />
-                          </Button>
-                        )}
-                        {doc.pdf_url && (
-                          <Button size="sm" variant="outline" onClick={() => window.open(doc.pdf_url, '_blank')}>
-                            DANFE
-                          </Button>
+                        {doc.status === 'authorized' && (
+                          <>
+                            <Button size="sm" variant="outline" disabled={isBusy} title="Baixar XML autorizado" onClick={() => handleViewArtifact(doc.id, 'xml_authorized')}>
+                              <Download className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button size="sm" variant="outline" disabled={isBusy} onClick={() => handleViewArtifact(doc.id, 'pdf_danfe')}>
+                              DANFE
+                            </Button>
+                          </>
                         )}
                         {doc.status === 'authorized' && (
                           <Button

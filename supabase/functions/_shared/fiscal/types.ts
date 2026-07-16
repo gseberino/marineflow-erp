@@ -134,6 +134,13 @@ export interface FiscalProvider {
     providerDocumentId: string,
   ): Promise<FiscalResult<FiscalArtifact[]>>;
 
+  // Baixa os bytes de um artefato (XML/DANFE) autenticando com o token — as
+  // download_url da Contora são endpoints protegidos (Bearer), então abrir no
+  // navegador retorna "Bearer token ausente".
+  fetchArtifact(
+    url: string,
+  ): Promise<FiscalResult<{ contentType: string; bytes: ArrayBuffer }>>;
+
   cancel(
     documentType: DocumentType,
     providerDocumentId: string,

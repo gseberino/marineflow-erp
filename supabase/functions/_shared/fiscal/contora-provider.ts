@@ -369,6 +369,34 @@ export class ContoraProvider implements FiscalProvider {
     return { ok: true, data: artifacts };
   }
 
+  async fetchArtifact(
+    url: string,
+  ): Promise<FiscalResult<{ contentType: string; bytes: ArrayBuffer }>> {
+    try {
+      // Autentica com o mesmo Bearer das demais rotas. A URL pode redirecionar
+      // para um link pré-assinado (o fetch segue o 3xx automaticamente).
+      const res = await fetch(url, {
+        headers: { "Authorization": this.headers["Authorization"], "Accept": "*/*" },
+      });
+      if (!res.ok) {
+        return {
+          ok: false,
+          error: `HTTP ${res.status} ao baixar o artefato`,
+          retryable: res.status >= 500 || res.status === 429 || res.status === 408,
+        };
+      }
+      const contentType = res.headers.get("content-type") ?? "application/octet-stream";
+      const bytes = await res.arrayBuffer();
+      return { ok: true, data: { contentType, bytes } };
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+        retryable: true,
+      };
+    }
+  }
+
   cancel(
     documentType: DocumentType,
     id: string,

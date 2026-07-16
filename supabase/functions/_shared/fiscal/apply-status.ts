@@ -96,12 +96,14 @@ async function archiveArtifacts(
     );
 
     if (xmlArtifact?.downloadUrl) {
-      const xmlRes = await fetch(xmlArtifact.downloadUrl);
+      // As download_url da Contora exigem o Bearer token — usar fetchArtifact do
+      // provedor (autenticado), não um fetch cru (que retornaria "Bearer token
+      // ausente" e nunca arquivaria o XML, quebrando a guarda legal de 5 anos).
+      const xmlRes = await provider.fetchArtifact(xmlArtifact.downloadUrl);
       if (xmlRes.ok) {
-        const xmlText = await xmlRes.text();
-        // Sanity check: uma URL de download expirada pode redirecionar para
-        // uma página de erro HTML retornando 200 — só arquiva se o conteúdo
-        // realmente parece XML, para não corromper o registro legal.
+        const xmlText = new TextDecoder().decode(xmlRes.data.bytes);
+        // Sanity check: uma URL expirada/erro pode devolver HTML com 200 — só
+        // arquiva se o conteúdo realmente parece XML.
         if (xmlText.trim().startsWith("<")) {
           const path = `${doc.environment}/${doc.document_type}/${doc.id}.xml`;
           const { error } = await admin.storage
@@ -120,10 +122,12 @@ async function archiveArtifacts(
           console.error(`[fiscal] conteúdo baixado para ${doc.id} não parece XML — não arquivado, será retentado.`);
         }
       } else {
-        console.error(`[fiscal] download do XML falhou para ${doc.id}: HTTP ${xmlRes.status}`);
+        console.error(`[fiscal] download do XML falhou para ${doc.id}: ${xmlRes.error}`);
       }
     }
     if (pdfArtifact?.downloadUrl) {
+      // Guardamos a URL do provedor só como referência; o front NÃO abre direto
+      // (precisa de token) — usa o proxy autenticado (action "artifact").
       result.pdf_url = pdfArtifact.downloadUrl;
     }
   } catch (err) {

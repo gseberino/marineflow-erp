@@ -73,6 +73,7 @@ Deno.serve(async (req) => {
     if (body.action === "cancel") return await handleCancel(admin, body);
     if (body.action === "correction") return await handleCorrection(admin, body);
     if (body.action === "diagnostics") return await handleDiagnostics();
+    if (body.action === "artifact") return await handleArtifact(admin, body);
     return await handleCreate(admin, body);
   } catch (err) {
     console.error("[fiscal-emit] erro:", err);
@@ -386,6 +387,51 @@ function didaticize(error: string): string {
     return error + " — Suba/renove o certificado A1 no console da Contora (Empresas → Certificado).";
   }
   return error;
+}
+
+// Proxy autenticado de artefatos (DANFE/XML). As download_url da Contora são
+// endpoints protegidos por Bearer — abrir direto no navegador dá "Bearer token
+// ausente". Aqui buscamos com o token e devolvemos os bytes ao front (que está
+// autenticado por JWT admin). Consultar/baixar artefato não gasta cota.
+// deno-lint-ignore no-explicit-any
+async function handleArtifact(admin: any, body: any): Promise<Response> {
+  const documentId: string | undefined = body.document_id;
+  const kind: string = body.artifact === "xml_authorized" ? "xml_authorized" : "pdf_danfe";
+  if (!documentId) return jr({ error: "document_id é obrigatório" }, 422);
+
+  const { data: doc, error: docErr } = await admin
+    .from("issued_fiscal_documents")
+    .select("*")
+    .eq("id", documentId)
+    .maybeSingle();
+  if (docErr) return jr({ error: "Falha ao consultar documento: " + docErr.message }, 500);
+  if (!doc) return jr({ error: "Documento não encontrado" }, 404);
+  if (!doc.provider_document_id) return jr({ error: "Documento ainda não foi enviado ao provedor" }, 422);
+
+  const provider = createFiscalProvider();
+  const artifacts = await provider.listArtifacts(doc.document_type, doc.provider_document_id);
+  if (!artifacts.ok) return jr({ error: "Falha ao listar artefatos: " + artifacts.error }, 502);
+
+  const art = artifacts.data.find((a) => a.type === kind && a.available && a.downloadUrl);
+  if (!art?.downloadUrl) {
+    return jr({ error: `Artefato "${kind}" ainda não disponível para esta nota.` }, 404);
+  }
+
+  const fetched = await provider.fetchArtifact(art.downloadUrl);
+  if (!fetched.ok) return jr({ error: "Falha ao baixar o artefato: " + fetched.error }, 502);
+
+  const isPdf = kind === "pdf_danfe";
+  const contentType = isPdf ? "application/pdf" : "application/xml";
+  const filename = art.filename || `${kind}-${doc.series}-${doc.number}.${isPdf ? "pdf" : "xml"}`;
+  const blob = new Blob([fetched.data.bytes], { type: contentType });
+  return new Response(blob, {
+    status: 200,
+    headers: {
+      ...corsHeaders,
+      "Content-Type": contentType,
+      "Content-Disposition": `inline; filename="${filename}"`,
+    },
+  });
 }
 
 // Diagnóstico read-only da conta na Contora: token válido? empresa cadastrada

@@ -206,6 +206,26 @@ describe("ContoraProvider — chamadas HTTP (fetch mockado)", () => {
     expect(r.ok).toBe(true); // o método nunca "falha"; embute o status
     if (r.ok) expect(r.data.ok).toBe(false);
   });
+
+  it("fetchArtifact envia o Bearer token e devolve os bytes + content-type", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(new Uint8Array([37, 80, 68, 70]), { status: 200, headers: { "content-type": "application/pdf" } }),
+    );
+    const r = await makeProvider().fetchArtifact("https://fiscal.contora.com.br/api/v1/companies/x/nfe/drafts/y/artifacts/z");
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.data.contentType).toBe("application/pdf");
+      expect(Array.from(new Uint8Array(r.data.bytes))).toEqual([37, 80, 68, 70]); // "%PDF"
+    }
+    const [, init] = spy.mock.calls[0];
+    expect((init as RequestInit).headers).toMatchObject({ Authorization: "Bearer token-teste" });
+  });
+
+  it("fetchArtifact propaga erro em resposta não-2xx (ex.: token ausente)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ ok: false, message: "Bearer token ausente." }, 401));
+    const r = await makeProvider().fetchArtifact("https://fiscal.contora.com.br/x");
+    expect(r.ok).toBe(false);
+  });
 });
 
 describe("ContoraProvider.parseWebhook", () => {
