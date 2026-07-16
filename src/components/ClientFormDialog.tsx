@@ -30,6 +30,9 @@ interface Props {
   client?: Client | null;
   initialName?: string;
   onCreated?: (client: { id: string; name: string }) => void;
+  // Disparado após salvar (criação OU edição) — recebe o id do cliente salvo.
+  // Usado, ex., pela emissão de NF-e para repreencher o destinatário na hora.
+  onSaved?: (clientId: string) => void;
 }
 
 const empty = {
@@ -60,7 +63,7 @@ const IE_INDICATOR_OPTIONS = [
   { value: 2, label: '2 — Contribuinte isento de IE' },
 ];
 
-export function ClientFormDialog({ open, onOpenChange, client, initialName, onCreated }: Props) {
+export function ClientFormDialog({ open, onOpenChange, client, initialName, onCreated, onSaved }: Props) {
   const { t } = useI18n();
   const create = useCreateClient();
   const update = useUpdateClient();
@@ -140,11 +143,13 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
       if (isEdit && client) {
         await update.mutateAsync({ id: client.id, ...payload });
         toast.success(t.clients.updateSuccess);
+        onSaved?.(client.id);
       } else {
         const result = await create.mutateAsync(payload);
         toast.success(t.clients.createSuccess);
-        if (onCreated && result) {
-          onCreated({ id: result.id, name: result.name });
+        if (result) {
+          onCreated?.({ id: result.id, name: result.name });
+          onSaved?.(result.id);
         }
       }
       onOpenChange(false);

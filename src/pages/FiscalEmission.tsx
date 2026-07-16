@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import { AddressFields } from '@/components/AddressFields';
+import { ClientFormDialog } from '@/components/ClientFormDialog';
 import { EntityCombobox, type EntityOption } from '@/components/EntityCombobox';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -235,6 +236,8 @@ export default function FiscalEmission() {
     street: '', number: '', district: '', city_name: '', postal_code: '',
   });
 
+  const [showClientForm, setShowClientForm] = useState(false);
+
   const [showEmit, setShowEmit] = useState(false);
   const [emitting, setEmitting] = useState(false);
   const [emitIdempotencyKey, setEmitIdempotencyKey] = useState('');
@@ -425,37 +428,103 @@ export default function FiscalEmission() {
     setShowEmit(true);
   };
 
-  const handleClientChange = (id: string) => {
-    setClientId(id);
-    const c = (clients || []).find((cl) => cl.id === id);
-    if (!c) return;
+  // Preenche o destinatário a partir de um registro de cliente. Extraído para
+  // ser reusado tanto na seleção do combo quanto após editar o cadastro no popup.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const populateFromClient = (c: any) => {
     setRecipientName(c.name || '');
     setRecipientDocument(c.cpf_cnpj || '');
     setRecipientEmail(c.email || '');
-    // Colunas novas ainda fora do types.ts gerado — acesso via Record.
-    const cc = c as unknown as Record<string, unknown>;
-    // IE/indicador e consumidor final vindos do cadastro do cliente (colunas
-    // novas). Fallback conservador = 9 (não contribuinte), para não travar a
-    // emissão exigindo IE de quem não tem; o usuário marca "Contribuinte" quando
-    // for o caso (ex.: revenda). Consumidor final: CNPJ (revenda) → não.
+    // IE/indicador e consumidor final vindos do cadastro. Fallback conservador
+    // = 9 (não contribuinte) para não travar exigindo IE de quem não tem.
     const digits = (c.cpf_cnpj || '').replace(/\D/g, '');
-    setRecipientIeIndicator(Number(cc.ie_indicator ?? 9) || 9);
-    setRecipientIe((cc.state_registration as string) || '');
+    setRecipientIeIndicator(Number(c.ie_indicator ?? 9) || 9);
+    setRecipientIe(c.state_registration || '');
     setConsumerFinal(digits.length === 11);
-    // Preferir colunas estruturadas (número/bairro/complemento); se vazias,
-    // desempacotar o endereço legado — antes, a line_2 inteira ("número, bairro")
-    // caía toda no complemento.
+    // Preferir colunas estruturadas; se vazias, desempacotar o endereço legado.
     const legacy = parseLegacyAddress(c.address_line_1, c.address_line_2);
     setAddress({
       postal_code: c.postal_code || '',
       address_line_1: legacy.street || c.address_line_1 || '',
-      address_number: (cc.address_number as string) || legacy.number,
-      address_complement: (cc.address_complement as string) || legacy.complement,
-      neighborhood: (cc.neighborhood as string) || legacy.neighborhood,
+      address_number: c.address_number || legacy.number,
+      address_complement: c.address_complement || legacy.complement,
+      neighborhood: c.neighborhood || legacy.neighborhood,
       city: c.city || '',
       state: c.state || '',
       country: c.country || 'Brasil',
     });
+  };
+
+  const handleClientChange = (id: string) => {
+    setClientId(id);
+    const c = (clients || []).find((cl) => cl.id === id);
+    if (c) populateFromClient(c);
+  };
+
+  // Depois de editar o cadastro no popup: busca a versão fresca (a lista em
+  // cache pode ainda estar desatualizada no instante do onSaved) e repreenche
+  // o destinatário com os dados novos — sem o usuário redigitar nada.
+  const handleClientSaved = async (savedClientId: string) => {
+    setShowClientForm(false);
+    qc.invalidateQueries({ queryKey: ['clients'] });
+    setClientId(savedClientId);
+    const { data } = await (supabase.from as any)('clients').select('*').eq('id', savedClientId).maybeSingle();
+    if (data) populateFromClient(data);
+  };
+
+  // "Corrigir e reemitir": reabre o diálogo já preenchido a partir do payload de
+  // uma NF-e registrada (falha/rejeitada/cancelada). Gera uma NOVA emissão (nova
+  // chave de idempotência, novo número) — o documento antigo fica no histórico.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleReemitFromDoc = (doc: any) => {
+    const p = doc.request_payload || {};
+    const r = p.recipient || {};
+    const a = r.address || {};
+    const nat = NATURE_OF_OPERATION_OPTIONS.find(
+      (o) => o.natureOperation === p.nature_operation && o.operationType === (p.operation_type || 'saida'),
+    ) || NATURE_OF_OPERATION_OPTIONS.find((o) => o.natureOperation === p.nature_operation)
+      || NATURE_OF_OPERATION_OPTIONS[0];
+
+    setEmitIdempotencyKey(crypto.randomUUID());
+    setNatureOfOperation(nat.value);
+    setClientId(doc.client_id || '');
+    setRecipientName(r.name || '');
+    setRecipientDocument(r.document || '');
+    setRecipientEmail(r.email || '');
+    setRecipientIeIndicator(Number(r.state_registration_indicator ?? 9) || 9);
+    setRecipientIe(r.state_registration || '');
+    setConsumerFinal(p.consumer_final !== false);
+    setPresenceIndicator(Number(p.presence_indicator ?? 1) || 1);
+    setAdditionalInfo(p.additional_info || '');
+    setReferencedAccessKey((p.referenced_access_keys && p.referenced_access_keys[0]) || '');
+    setPaymentMethod((p.payments && p.payments[0]?.method) || '01');
+    setAddress({
+      postal_code: a.postal_code || '',
+      address_line_1: a.street || '',
+      address_number: a.number && a.number !== 'S/N' ? a.number : '',
+      address_complement: a.complement || '',
+      neighborhood: a.district || '',
+      city: a.city_name || '',
+      state: a.state_code || '',
+      country: 'Brasil',
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setItems((p.items || []).map((it: any) => {
+      const t = it.taxes || {};
+      const icms = t.icms || {}; const pis = t.pis || {}; const cofins = t.cofins || {}; const ipi = t.ipi || {};
+      return {
+        productId: null,
+        code: it.code || '', name: it.name || '', ncm: it.ncm || '',
+        cfop: it.cfop || '', unit: it.unit || 'UN',
+        quantity: Number(it.quantity) || 0, unit_price: Number(it.unit_price) || 0,
+        csosn: icms.code || '400', origin: Number(icms.origin ?? 0) || 0,
+        icms_rate: Number(icms.aliquot ?? 0) || 0,
+        pis_rate: Number(pis.aliquot ?? 0) || 0,
+        cofins_rate: Number(cofins.aliquot ?? 0) || 0,
+        ipi_rate: Number(ipi.aliquot ?? 0) || 0,
+      };
+    }));
+    setShowEmit(true);
   };
 
   const addItem = () => {
@@ -762,6 +831,15 @@ export default function FiscalEmission() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
+                        {['failed', 'rejected', 'cancelled', 'draft'].includes(doc.status) && doc.request_payload && (
+                          <Button
+                            size="sm" variant="outline" className="text-xs"
+                            onClick={() => handleReemitFromDoc(doc)}
+                            title="Reabrir esta nota já preenchida para corrigir os dados e emitir de novo"
+                          >
+                            <Pencil className="h-3.5 w-3.5 mr-1" />Corrigir e reemitir
+                          </Button>
+                        )}
                         {['draft', 'queued', 'processing'].includes(doc.status) && (
                           <Button size="sm" variant="outline" disabled={isBusy} onClick={() => handleRefreshStatus(doc.id)}>
                             {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
@@ -993,14 +1071,31 @@ export default function FiscalEmission() {
 
             <div>
               <Label>Cliente cadastrado (opcional — preenche os dados abaixo)</Label>
-              <EntityCombobox
-                value={clientId || null}
-                onChange={(v) => handleClientChange(v)}
-                options={clientOptions}
-                placeholder="Selecione um cliente..."
-                searchPlaceholder="Buscar cliente... (digite 3+ letras)"
-                emptyText="Nenhum cliente encontrado"
-              />
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <EntityCombobox
+                    value={clientId || null}
+                    onChange={(v) => handleClientChange(v)}
+                    options={clientOptions}
+                    placeholder="Selecione um cliente..."
+                    searchPlaceholder="Buscar cliente... (digite 3+ letras)"
+                    emptyText="Nenhum cliente encontrado"
+                  />
+                </div>
+                <Button
+                  type="button" variant="outline" disabled={!clientId}
+                  onClick={() => setShowClientForm(true)}
+                  title="Abrir o cadastro do cliente para completar/corrigir (IE, endereço) sem sair da emissão"
+                >
+                  <Pencil className="h-3.5 w-3.5 mr-1" />Editar cadastro
+                </Button>
+              </div>
+              {clientId && (
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Faltou algum dado (IE, número, bairro)? Edite o cadastro aqui — ele é salvo e os campos abaixo se
+                  atualizam na hora.
+                </p>
+              )}
             </div>
 
             <Card>
@@ -1254,6 +1349,14 @@ export default function FiscalEmission() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Cadastro do cliente (popup) — editar na hora durante a emissão. */}
+      <ClientFormDialog
+        open={showClientForm}
+        onOpenChange={setShowClientForm}
+        client={(clients || []).find((c) => c.id === clientId) || null}
+        onSaved={handleClientSaved}
+      />
     </div>
   );
 }
