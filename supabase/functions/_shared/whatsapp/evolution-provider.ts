@@ -9,6 +9,19 @@ export interface EvolutionConfig {
   instance: string;   // Instance name configured in Evolution (e.g. "marineflow")
 }
 
+// Simula digitação humana antes de entregar: o Evolution mostra "digitando…" (presence
+// "composing") por `delay` ms e só então envia. Dois motivos:
+//  1) Parece natural (foi o que o usuário notou no OpenClaw — a ferramenta "digitava").
+//  2) Espaçar o envio reduz o "Aguardando esta mensagem" do WhatsApp, que é
+//     dessincronização de sessão E2E do Baileys quando as mensagens saem rápido demais.
+// Proporcional ao tamanho do texto (com piso e teto), como um humano digitando.
+function typingDelayMs(message: string): number {
+  const BASE = 900;     // ms mínimos de "digitando"
+  const PER_CHAR = 16;  // ms por caractere
+  const CAP = 3000;     // teto para não travar a fila em textos longos
+  return Math.min(BASE + (message?.length ?? 0) * PER_CHAR, CAP);
+}
+
 // Evolution API returns numeric delivery statuses on messages.update events.
 const EVOLUTION_STATUS_MAP: Record<number, string> = {
   1: "pending",
@@ -67,10 +80,12 @@ export class EvolutionProvider implements WhatsAppProvider {
   }
 
   async sendText(to: string, message: string): Promise<SendResult> {
-    // Evolution v2: flat payload { number, text } (v1 used { textMessage: { text } }).
+    // Evolution v2: flat payload { number, text, delay, presence } (v1 usava options{}).
     return this.post(`message/sendText/${this.instance}`, {
       number: normalizePhoneNumber(to),
       text: message,
+      delay: typingDelayMs(message),
+      presence: "composing",
     });
   }
 
@@ -86,11 +101,13 @@ export class EvolutionProvider implements WhatsAppProvider {
     // body and linkPreview:true lets WhatsApp fetch OG metadata automatically.
     // title, description, imageUrl are not customisable via the Evolution API.
     const text = message.includes(linkUrl) ? message : `${message}\n${linkUrl}`;
-    // Evolution v2: flat payload { number, text, linkPreview }.
+    // Evolution v2: flat payload { number, text, linkPreview, delay, presence }.
     return this.post(`message/sendText/${this.instance}`, {
       number: normalizePhoneNumber(to),
       text,
       linkPreview: true,
+      delay: typingDelayMs(text),
+      presence: "composing",
     });
   }
 

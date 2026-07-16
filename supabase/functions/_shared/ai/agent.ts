@@ -176,11 +176,16 @@ async function resolveIdLabel(admin: any, key: string, id: string): Promise<stri
     } else if (key === "po_id") {
       const { data } = await admin.from("purchase_orders").select("po_number").eq("id", id).maybeSingle();
       if (data?.po_number) return data.po_number;
-    } else if (key === "client_id" || key === "collection_id") {
-      const table = key === "client_id" ? "clients" : "collections";
-      const col = key === "client_id" ? "name" : "description";
-      const { data } = await admin.from(table).select(col).eq("id", id).maybeSingle();
-      if ((data as any)?.[col]) return (data as any)[col];
+    } else if (key === "client_id") {
+      const { data } = await admin.from("clients").select("name").eq("id", id).maybeSingle();
+      if (data?.name) return data.name;
+      // A IA às vezes passa o id de um app_user (a própria pessoa) como client_id —
+      // resolve o nome mesmo assim, pra nunca mostrar UUID cru pro usuário.
+      const { data: u } = await admin.from("app_users").select("full_name").eq("id", id).maybeSingle();
+      if (u?.full_name) return u.full_name;
+    } else if (key === "collection_id") {
+      const { data } = await admin.from("collections").select("description").eq("id", id).maybeSingle();
+      if (data?.description) return data.description;
     }
   } catch {
     // best-effort — cai no UUID original
