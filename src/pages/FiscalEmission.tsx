@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/select';
 import {
   FileText, Loader2, Plus, Trash2, RefreshCw, Download, Ban, Pencil, Settings2, Upload,
-  Stethoscope, CheckCircle2, XCircle, Undo2,
+  Stethoscope, CheckCircle2, XCircle, Undo2, Send, FileDown,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -33,6 +33,7 @@ import { useAppSettings } from '@/hooks/use-app-settings';
 import { useI18n } from '@/i18n';
 import { maskCPFCNPJ } from '@/lib/masks';
 import { parseNfeReferenceXml } from '@/lib/nfe-xml-parser';
+import { createZipBlob, type ZipEntry } from '@/lib/zip';
 import { parseLegacyAddress } from '@/lib/address-legacy';
 import { CSOSN_OPTIONS, FISCAL_ORIGIN_OPTIONS } from '@/lib/price-calculator';
 // Reaproveita os mesmos módulos que a edge function fiscal-emit usa no
@@ -255,6 +256,15 @@ export default function FiscalEmission() {
   });
 
   const [showClientForm, setShowClientForm] = useState(false);
+
+  // Export de XMLs / relatório p/ contadora (período).
+  const [showExport, setShowExport] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportFrom, setExportFrom] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+  });
+  const [exportTo, setExportTo] = useState(() => new Date().toISOString().slice(0, 10));
 
   const [showEmit, setShowEmit] = useState(false);
   const [emitting, setEmitting] = useState(false);
@@ -679,6 +689,79 @@ export default function FiscalEmission() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state, company, products]);
 
+  // Devolução ao fornecedor a partir de uma nota de COMPRA importada
+  // (ImportFiscalXML navega para cá com `returnToSupplier`). Emite uma NF-e de
+  // SAÍDA, finalidade 4, CFOP 5202/6202 (devolução de compra p/ comercialização),
+  // destinatário = fornecedor (emitente da original), referência POR ITEM
+  // (chave do fornecedor + nItem, VC02-14). CSOSN 900 é o padrão do Simples para
+  // devolução de compra (a contadora ajusta se necessário); origem e valores
+  // vêm EXATOS do XML da compra. Sem pagamento (tPag 90, resolvido no builder).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleReturnToSupplier = (ret: any) => {
+    const nature = findNatureOfOperation('devolucao_compra');
+    const uf = ret?.issuer?.address?.stateCode || '';
+    const devCfop = computeCfop(nature.baseCfopCode, nature.operationType, company?.state_code, uf);
+    const key: string = ret?.accessKey || '';
+    const hasIe = !!String(ret?.issuer?.stateRegistration || '').replace(/\D/g, '').length;
+
+    setEmitOrigin({ type: 'manual', id: null });
+    setEmitIdempotencyKey(crypto.randomUUID());
+    setNatureOfOperation('devolucao_compra');
+    setClientId(''); // o fornecedor não é um "cliente" do cadastro
+    setRecipientName(ret?.issuer?.name || '');
+    setRecipientDocument(ret?.issuer?.document || '');
+    setRecipientEmail('');
+    // Fornecedor é contribuinte do ICMS (Regime Normal) → indIEDest=1 + IE quando
+    // veio no XML; sem IE, cai para 9 (não contribuinte) para não travar a emissão.
+    setRecipientIeIndicator(hasIe ? 1 : 9);
+    setRecipientIe(ret?.issuer?.stateRegistration || '');
+    setConsumerFinal(false); // devolução B2B — o fornecedor não é consumidor final
+    setPresenceIndicator(1);
+    setPaymentMethod('01'); // ignorado (natureza sem pagamento → tPag 90)
+    setAdditionalInfo(`Devolução de compra referente à NF-e do fornecedor${key ? `, chave ${key}` : ''}.`);
+    setReferencedAccessKey(key);
+    const a = ret?.issuer?.address || {};
+    setAddress({
+      postal_code: a.postalCode || '',
+      address_line_1: a.street || '',
+      address_number: a.number && a.number !== 'S/N' ? a.number : '',
+      address_complement: a.complement || '',
+      neighborhood: a.district || '',
+      city: a.cityName || '',
+      state: a.stateCode || '',
+      country: 'Brasil',
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setItems((ret?.items || []).map((it: any, i: number) => {
+      const qty = Number(it.quantity) || 0;
+      return {
+        productId: null,
+        code: it.code || '', name: it.name || '', ncm: it.ncm || '',
+        cfop: devCfop, unit: it.unit || 'UN',
+        quantity: qty, unit_price: Number(it.unitPrice) || 0,
+        // Simples em devolução de compra: CSOSN 900, sem destaque de ICMS. A
+        // origem da mercadoria é preservada do XML da compra (intrínseca ao item).
+        csosn: '900', origin: Number(it.origin ?? 0) || 0,
+        icms_rate: 0, pis_rate: 0, cofins_rate: 0, ipi_rate: 0,
+        included: true,
+        maxQuantity: qty, // não permite devolver mais do que foi comprado
+        referencedKey: key,
+        referencedItemNumber: i + 1, // nItem na nota de compra original
+      };
+    }));
+    setShowEmit(true);
+  };
+
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ret = (location.state as any)?.returnToSupplier;
+    if (ret && company) {
+      handleReturnToSupplier(ret);
+      window.history.replaceState({}, '');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state, company]);
+
   const addItem = () => {
     setItems((prev) => [
       ...prev,
@@ -947,6 +1030,154 @@ export default function FiscalEmission() {
     }
   };
 
+  // Envia o DANFE (PDF) ao cliente por WhatsApp. O PDF é arquivado no bucket
+  // privado fiscal-xml (apply-status, autenticado) — geramos uma URL assinada
+  // de curta duração (o front tem policy de leitura só p/ admin) e a passamos
+  // ao whatsapp-send (kind=document). Se o PDF ainda não foi arquivado (webhook
+  // pode não ter chegado), força um reconcile pontual e re-lê o caminho.
+  const handleSendToClient = async (doc: any) => {
+    const client = (clients || []).find((c: any) => c.id === doc.client_id);
+    const phoneRaw: string = client?.whatsapp || client?.phone || '';
+    const phoneDigits = phoneRaw.replace(/\D/g, '');
+    if (!doc.client_id || phoneDigits.length < 10) {
+      toast.error('Cliente sem WhatsApp/telefone válido. Edite o cadastro do cliente (com DDD) e tente de novo.');
+      return;
+    }
+    markBusy(doc.id, true);
+    const tId = toast.loading('Preparando o DANFE e enviando…');
+    try {
+      let pdfPath: string | null = doc.pdf_storage_path || null;
+      if (!pdfPath) {
+        // Arquiva sob demanda (idempotente): reconcile reconsulta a nota
+        // autorizada sem PDF e baixa o DANFE para o Storage.
+        await supabase.functions.invoke('fiscal-reconcile', { body: { document_id: doc.id } });
+        const { data: fresh } = await (supabase.from as any)('issued_fiscal_documents')
+          .select('pdf_storage_path')
+          .eq('id', doc.id)
+          .maybeSingle();
+        pdfPath = fresh?.pdf_storage_path || null;
+      }
+      if (!pdfPath) {
+        toast.error('O DANFE ainda está sendo gerado. Tente novamente em alguns instantes.', { id: tId });
+        return;
+      }
+      const { data: signed, error: signErr } = await supabase.storage
+        .from('fiscal-xml')
+        .createSignedUrl(pdfPath, 3600);
+      if (signErr || !signed?.signedUrl) throw new Error(signErr?.message || 'Falha ao gerar o link do DANFE.');
+
+      const filename = `NFe-${doc.series}-${doc.number}.pdf`;
+      const caption = `Olá${client?.name ? ' ' + client.name : ''}! Segue em anexo o DANFE da NF-e ${doc.series}/${doc.number}. Qualquer dúvida, estamos à disposição.`;
+      const { data: sendRes, error: sendErr } = await supabase.functions.invoke('whatsapp-send', {
+        body: {
+          phone: phoneDigits,
+          kind: 'document',
+          document_url: signed.signedUrl,
+          document_filename: filename,
+          document_caption: caption,
+          context: 'nfe',
+        },
+      });
+      if (sendErr) throw new Error(await extractInvokeErrorMessage(sendErr));
+      if ((sendRes as any)?.error) {
+        const e = (sendRes as any).error;
+        throw new Error(typeof e === 'string' ? e : 'Falha no envio pelo WhatsApp.');
+      }
+      toast.success('DANFE enviado ao cliente por WhatsApp.', { id: tId });
+      qc.invalidateQueries({ queryKey: ['issued_fiscal_documents'] });
+    } catch (err: any) {
+      toast.error('Erro ao enviar ao cliente: ' + (err?.message || 'desconhecido'), { id: tId });
+    } finally {
+      markBusy(doc.id, false);
+    }
+  };
+
+  // Export de XMLs autorizados de um período + um resumo CSV (livro de saída),
+  // num único .zip para a contadora. Os XMLs são baixados pelo proxy autenticado
+  // (action "artifact") — as URLs da Contora exigem token; o CSV é montado a
+  // partir dos próprios registros (série/nº, chave, data, valor, destinatário).
+  const handleExportXmls = async () => {
+    if (!exportFrom || !exportTo || exportFrom > exportTo) {
+      toast.error('Informe um período válido (início ≤ fim).');
+      return;
+    }
+    setExporting(true);
+    const tId = toast.loading('Consultando notas do período…');
+    try {
+      const { data: docs, error } = await (supabase.from as any)('issued_fiscal_documents')
+        .select('id, series, number, access_key, status, authorized_at, environment, request_payload')
+        .eq('status', 'authorized')
+        .gte('authorized_at', `${exportFrom}T00:00:00`)
+        .lte('authorized_at', `${exportTo}T23:59:59`)
+        .order('number', { ascending: true });
+      if (error) throw error;
+      if (!docs?.length) {
+        toast.error('Nenhuma NF-e autorizada nesse período.', { id: tId });
+        return;
+      }
+
+      // CSV com ; (Excel pt-BR) e BOM UTF-8; sanitiza campos livres.
+      const csvSafe = (s: string) => String(s ?? '').replace(/[;\r\n]+/g, ' ').trim();
+      const rows = ['Serie;Numero;Chave de Acesso;Data;Valor Total;Destinatario;CNPJ/CPF;Ambiente'];
+      const entries: ZipEntry[] = [];
+      let ok = 0;
+      let failed = 0;
+
+      for (let i = 0; i < docs.length; i++) {
+        const d = docs[i];
+        toast.loading(`Baixando XML ${i + 1}/${docs.length}…`, { id: tId });
+        const rec = d.request_payload?.recipient || {};
+        const total = Number(d.request_payload?.payments?.[0]?.amount ?? 0);
+        const dateStr = d.authorized_at ? new Date(d.authorized_at).toLocaleDateString('pt-BR') : '';
+        rows.push([
+          d.series, d.number, d.access_key || '', dateStr,
+          total.toFixed(2).replace('.', ','),
+          csvSafe(rec.name || ''), rec.document || '',
+          d.environment === 'producao' ? 'Producao' : 'Homologacao',
+        ].join(';'));
+
+        try {
+          const { data: xmlData, error: xmlErr } = await supabase.functions.invoke('fiscal-emit', {
+            body: { action: 'artifact', document_id: d.id, artifact: 'xml_authorized' },
+          });
+          if (xmlErr) throw xmlErr;
+          const text = xmlData instanceof Blob
+            ? await xmlData.text()
+            : typeof xmlData === 'string'
+              ? xmlData
+              : new TextDecoder().decode(xmlData as ArrayBuffer);
+          if (text && text.trim().startsWith('<')) {
+            const num = String(d.number).padStart(9, '0');
+            entries.push({ name: `NFe-${d.series}-${num}-${d.access_key || d.id}.xml`, content: text });
+            ok++;
+          } else {
+            failed++;
+          }
+        } catch {
+          failed++;
+        }
+      }
+
+      entries.push({ name: '_resumo-livro-saida.csv', content: '﻿' + rows.join('\r\n') + '\r\n' });
+      const blob = createZipBlob(entries);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `NFe-XMLs_${exportFrom}_a_${exportTo}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+
+      toast.success(`Exportadas ${ok} nota(s)${failed ? ` (${failed} XML não baixado)` : ''} + resumo CSV.`, { id: tId });
+      setShowExport(false);
+    } catch (err: any) {
+      toast.error('Erro ao exportar: ' + (err?.message || 'desconhecido'), { id: tId });
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       <PageHeader
@@ -956,6 +1187,10 @@ export default function FiscalEmission() {
         <Button variant="outline" onClick={openSettings}>
           <Settings2 className="h-4 w-4 mr-2" />
           {company ? 'Dados da Empresa' : 'Configurar Empresa'}
+        </Button>
+        <Button variant="outline" onClick={() => setShowExport(true)} title="Baixar os XMLs autorizados de um período + resumo CSV para a contadora">
+          <FileDown className="h-4 w-4 mr-2" />
+          Exportar XMLs
         </Button>
         <Button onClick={openEmitDialog} disabled={!company}>
           <FileText className="h-4 w-4 mr-2" />
@@ -1057,6 +1292,16 @@ export default function FiscalEmission() {
                             <Button size="sm" variant="outline" disabled={isBusy} onClick={() => handleViewArtifact(doc.id, 'pdf_danfe')}>
                               DANFE
                             </Button>
+                            {doc.client_id && (
+                              <Button
+                                size="sm" variant="outline" className="text-xs"
+                                disabled={isBusy}
+                                title="Enviar o DANFE (PDF) ao cliente por WhatsApp"
+                                onClick={() => handleSendToClient(doc)}
+                              >
+                                <Send className="h-3.5 w-3.5 mr-1" />Enviar ao cliente
+                              </Button>
+                            )}
                             {doc.request_payload?.purpose !== 4 && doc.access_key && (
                               <Button
                                 size="sm" variant="outline" className="text-xs"
@@ -1683,6 +1928,40 @@ export default function FiscalEmission() {
             >
               {correctionTarget && busyDocIds.has(correctionTarget.id) ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Enviar Correção
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Dialog: exportar XMLs do período (contadora) ── */}
+      <Dialog open={showExport} onOpenChange={(o) => { if (!exporting) setShowExport(o); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Exportar XMLs para a contadora</DialogTitle>
+            <DialogDescription>
+              Baixa, num único arquivo .zip, os XMLs de todas as NF-es <strong>autorizadas</strong> no
+              período escolhido, mais um resumo em CSV (livro de saída: série/nº, chave, data, valor, destinatário).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Início</Label>
+              <Input type="date" value={exportFrom} max={exportTo} onChange={(e) => setExportFrom(e.target.value)} />
+            </div>
+            <div>
+              <Label>Fim</Label>
+              <Input type="date" value={exportTo} min={exportFrom} onChange={(e) => setExportTo(e.target.value)} />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Cada XML é baixado com autenticação (a chave/token nunca sai do servidor). Em períodos com muitas
+            notas o download pode levar alguns segundos.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowExport(false)} disabled={exporting}>Voltar</Button>
+            <Button onClick={handleExportXmls} disabled={exporting}>
+              {exporting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FileDown className="h-4 w-4 mr-2" />}
+              Exportar .zip
             </Button>
           </DialogFooter>
         </DialogContent>

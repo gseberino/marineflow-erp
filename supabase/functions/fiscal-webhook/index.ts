@@ -52,7 +52,7 @@ Deno.serve(async (req) => {
 
   const { data: doc } = await admin
     .from("issued_fiscal_documents")
-    .select("id, document_type, provider_document_id, environment, status, xml_storage_path, provider_status")
+    .select("id, document_type, provider_document_id, environment, status, xml_storage_path, pdf_storage_path, provider_status")
     .eq("provider_document_id", event.providerDocumentId)
     .maybeSingle();
 

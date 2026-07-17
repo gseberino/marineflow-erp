@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseNfeReferenceXml } from "../lib/nfe-xml-parser";
+import { parseNfeReferenceXml, parseNfeSupplierNote } from "../lib/nfe-xml-parser";
 
 // Estrutura mínima porém real do layout nacional da NF-e (modelo 55),
 // inspirada na nota de referência real usada nesta sessão (HBR → Apolo).
@@ -86,5 +86,112 @@ describe("parseNfeReferenceXml", () => {
   it("não confunde CNPJ do emitente com o do destinatário", () => {
     const parsed = parseNfeReferenceXml(SAMPLE_XML)!;
     expect(parsed.recipient.document).not.toBe("50057049000159"); // CNPJ do emitente (HBR)
+  });
+});
+
+// Nota de COMPRA (entrada) de um fornecedor, para a devolução ao fornecedor:
+// aqui o <emit> é o fornecedor (vira destinatário da devolução) e o <dest>
+// somos nós (HBR). Precisamos da chave, do emitente e da origem por item.
+const SUPPLIER_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc>
+  <NFe>
+    <infNFe Id="NFe35240612345678000199550010000000451123456789" versao="4.00">
+      <ide><nNF>45</nNF></ide>
+      <emit>
+        <CNPJ>12345678000199</CNPJ>
+        <xNome>FORNECEDOR NAUTICO LTDA</xNome>
+        <IE>110042490114</IE>
+        <enderEmit>
+          <xLgr>Av. Industrial</xLgr>
+          <nro>500</nro>
+          <xBairro>Distrito</xBairro>
+          <xMun>Sao Paulo</xMun>
+          <UF>SP</UF>
+          <CEP>04001000</CEP>
+        </enderEmit>
+      </emit>
+      <dest>
+        <CNPJ>50057049000159</CNPJ>
+        <xNome>HBR Marine Solutions LTDA</xNome>
+      </dest>
+      <det nItem="1">
+        <prod>
+          <cProd>MOTOR-01</cProd>
+          <xProd>MOTOR DE POPA 15HP</xProd>
+          <NCM>84079010</NCM>
+          <CFOP>6102</CFOP>
+          <uCom>UN</uCom>
+          <qCom>2.0000</qCom>
+          <vUnCom>5000.00</vUnCom>
+          <vProd>10000.00</vProd>
+        </prod>
+        <imposto><ICMS><ICMS00>
+          <orig>0</orig><CST>00</CST><vICMS>1200.00</vICMS>
+        </ICMS00></ICMS></imposto>
+      </det>
+      <det nItem="2">
+        <prod>
+          <cProd>HELICE-09</cProd>
+          <xProd>HELICE INOX</xProd>
+          <NCM>84879000</NCM>
+          <CFOP>6102</CFOP>
+          <uCom>UN</uCom>
+          <qCom>4.0000</qCom>
+          <vUnCom>250.00</vUnCom>
+          <vProd>1000.00</vProd>
+        </prod>
+        <imposto><ICMS><ICMS00>
+          <orig>2</orig><CST>00</CST>
+        </ICMS00></ICMS></imposto>
+      </det>
+    </infNFe>
+  </NFe>
+</nfeProc>`;
+
+describe("parseNfeSupplierNote", () => {
+  it("retorna null quando não é uma NF-e", () => {
+    expect(parseNfeSupplierNote("<html>nada</html>")).toBeNull();
+  });
+
+  it("retorna null quando não há chave de acesso de 44 dígitos", () => {
+    const semChave = SUPPLIER_XML.replace(
+      /Id="NFe35240612345678000199550010000000451123456789"/,
+      'versao="4.00"',
+    );
+    expect(parseNfeSupplierNote(semChave)).toBeNull();
+  });
+
+  it("extrai a chave de acesso do atributo Id do infNFe", () => {
+    const note = parseNfeSupplierNote(SUPPLIER_XML)!;
+    expect(note.accessKey).toBe("35240612345678000199550010000000451123456789");
+    expect(note.accessKey).toHaveLength(44);
+  });
+
+  it("usa o EMITENTE (fornecedor) como destinatário da devolução, não o dest", () => {
+    const { issuer } = parseNfeSupplierNote(SUPPLIER_XML)!;
+    expect(issuer.name).toBe("FORNECEDOR NAUTICO LTDA");
+    expect(issuer.document).toBe("12345678000199");
+    expect(issuer.document).not.toBe("50057049000159"); // não é o CNPJ da HBR (dest)
+    expect(issuer.stateRegistration).toBe("110042490114");
+  });
+
+  it("extrai o endereço do emitente (enderEmit)", () => {
+    const { address } = parseNfeSupplierNote(SUPPLIER_XML)!.issuer;
+    expect(address.street).toBe("Av. Industrial");
+    expect(address.number).toBe("500");
+    expect(address.cityName).toBe("Sao Paulo");
+    expect(address.stateCode).toBe("SP");
+    expect(address.postalCode).toBe("04001000");
+  });
+
+  it("preserva quantidade, valor e origem EXATOS de cada item", () => {
+    const { items } = parseNfeSupplierNote(SUPPLIER_XML)!;
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({
+      code: "MOTOR-01", ncm: "84079010", quantity: 2, unitPrice: 5000, origin: 0,
+    });
+    expect(items[1]).toMatchObject({
+      code: "HELICE-09", ncm: "84879000", quantity: 4, unitPrice: 250, origin: 2,
+    });
   });
 });

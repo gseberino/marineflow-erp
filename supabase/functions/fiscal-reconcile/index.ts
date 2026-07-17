@@ -1,10 +1,11 @@
 // Edge Function: fiscal-reconcile
 // Rede de segurança: reconsulta o status (grátis, não consome cota) de
 // documentos ainda não-terminais, para o caso de o webhook ter se perdido.
-// Também retenta arquivar o XML de documentos já autorizados cujo XML ainda
-// não foi salvo (ex.: falha transitória de download/Storage na hora da
-// autorização) — o próprio applyStatusUpdate só faz o upload quando
-// xml_storage_path está nulo, então incluir esses documentos aqui é seguro.
+// Também retenta arquivar o XML e o DANFE (PDF) de documentos já autorizados
+// cujo artefato ainda não foi salvo (ex.: falha transitória de download/Storage
+// na hora da autorização) — o próprio applyStatusUpdate só baixa o que estiver
+// faltando (xml_storage_path/pdf_storage_path nulos), então incluir esses
+// documentos aqui é seguro e idempotente.
 // Dois caminhos de entrada (mesmo padrão dual-auth já usado em ai-agent):
 //   (1) pg_cron — só x-cron-secret, sem Authorization: varredura em lote.
 //   (2) painel  — JWT de admin + { document_id }: botão "Atualizar status".
@@ -28,7 +29,7 @@ function jr(body: unknown, status = 200) {
 }
 
 const NON_TERMINAL = ["draft", "queued", "processing"];
-const SELECT_COLS = "id, document_type, provider_document_id, environment, status, xml_storage_path, provider_status";
+const SELECT_COLS = "id, document_type, provider_document_id, environment, status, xml_storage_path, pdf_storage_path, provider_status";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -73,7 +74,7 @@ Deno.serve(async (req) => {
     .from("issued_fiscal_documents")
     .select(SELECT_COLS)
     .not("provider_document_id", "is", null)
-    .or(`status.in.(${NON_TERMINAL.join(",")}),and(status.eq.authorized,xml_storage_path.is.null)`)
+    .or(`status.in.(${NON_TERMINAL.join(",")}),and(status.eq.authorized,xml_storage_path.is.null),and(status.eq.authorized,pdf_storage_path.is.null)`)
     .limit(isCron ? 50 : 1);
   if (documentId) query = query.eq("id", documentId);
 

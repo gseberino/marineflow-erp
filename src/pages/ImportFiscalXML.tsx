@@ -16,15 +16,17 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import {
-  Upload, FileText, CheckCircle2, AlertCircle, Loader2, Package, Banknote, RefreshCw,
+  Upload, FileText, CheckCircle2, AlertCircle, Loader2, Package, Banknote, RefreshCw, Undo2,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { useSuppliers } from '@/hooks/use-suppliers';
 import { useI18n } from '@/i18n';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { useProducts } from '@/hooks/use-products';
+import { parseNfeSupplierNote } from '@/lib/nfe-xml-parser';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface NFeItem {
@@ -84,6 +86,7 @@ function useFiscalNotes() {
 export default function ImportFiscalXML() {
   const { formatCurrency, formatDate } = useI18n();
   const qc = useQueryClient();
+  const navigate = useNavigate();
 
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -92,6 +95,7 @@ export default function ImportFiscalXML() {
   const [supplierId, setSupplierId] = useState<string>('__none');
   const [showConfirm, setShowConfirm] = useState(false);
   const [manualMappings, setManualMappings] = useState<Record<string, string>>({});
+  const [returningNoteId, setReturningNoteId] = useState<string | null>(null);
 
   const { data: fiscalNotes, isLoading: loadingNotes } = useFiscalNotes();
   const { data: suppliers } = useSuppliers();
@@ -196,6 +200,39 @@ export default function ImportFiscalXML() {
     } else {
       toast.success('Nota cancelada.');
       qc.invalidateQueries({ queryKey: ['fiscal_notes'] });
+    }
+  };
+
+  // ── Devolução ao fornecedor ────────────────────────────────────────────
+  // Relê o XML original da nota de compra (fiscal_notes.xml_content) para
+  // extrair EXATAMENTE o fornecedor (emitente), a chave de acesso e os itens
+  // (qtd/valor/origem), e navega para a Emissão Fiscal em modo devolução de
+  // compra (CFOP 5202/6202, referência por item). Nada é emitido aqui — o
+  // usuário revisa e confirma na tela fiscal.
+  const handleReturnToSupplier = async (noteId: string) => {
+    setReturningNoteId(noteId);
+    try {
+      const { data, error } = await supabase
+        .from('fiscal_notes')
+        .select('xml_content')
+        .eq('id', noteId)
+        .single();
+      if (error) throw error;
+      const xml = (data as any)?.xml_content as string | null;
+      if (!xml) {
+        toast.error('Esta nota não tem o XML original arquivado — não é possível gerar a devolução com exatidão.');
+        return;
+      }
+      const supplierNote = parseNfeSupplierNote(xml);
+      if (!supplierNote) {
+        toast.error('Não foi possível ler a chave de acesso / o emitente do XML desta nota.');
+        return;
+      }
+      navigate('/fiscal/emissao', { state: { returnToSupplier: supplierNote } });
+    } catch (err: any) {
+      toast.error('Erro ao preparar a devolução: ' + (err?.message || 'desconhecido'));
+    } finally {
+      setReturningNoteId(null);
     }
   };
 
@@ -479,9 +516,24 @@ export default function ImportFiscalXML() {
                         </div>
                       )}
                       {note.status === 'confirmed' && (
-                        <span className="text-xs text-muted-foreground">
-                          {note.confirmed_at ? formatDate(note.confirmed_at) : 'Confirmada'}
-                        </span>
+                        <div className="flex items-center justify-end gap-2">
+                          <span className="text-xs text-muted-foreground">
+                            {note.confirmed_at ? formatDate(note.confirmed_at) : 'Confirmada'}
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-xs"
+                            disabled={returningNoteId === note.id}
+                            title="Gerar uma NF-e de devolução (total ou parcial) desta compra ao fornecedor, referenciando a nota original por item"
+                            onClick={() => handleReturnToSupplier(note.id)}
+                          >
+                            {returningNoteId === note.id
+                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              : <Undo2 className="h-3.5 w-3.5 mr-1" />}
+                            Devolver ao fornecedor
+                          </Button>
+                        </div>
                       )}
                     </TableCell>
                   </TableRow>

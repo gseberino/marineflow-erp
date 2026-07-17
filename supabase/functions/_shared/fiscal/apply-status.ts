@@ -14,6 +14,7 @@ export interface IssuedFiscalDocumentRow {
   environment: string;
   status: string;
   xml_storage_path: string | null;
+  pdf_storage_path?: string | null;
   provider_status?: Record<string, unknown> | null;
 }
 
@@ -56,11 +57,15 @@ export async function applyStatusUpdate(
     update.cancelled_at = new Date().toISOString();
   }
 
-  // Tenta arquivar o XML autorizado sempre que ainda não foi salvo — não é
-  // "só uma vez": fiscal-reconcile também reconsulta documentos já
-  // autorizados com xml_storage_path nulo, então uma falha transitória aqui
-  // tem uma segunda (e terceira...) chance na próxima reconciliação.
-  if (statusInfo.status === "authorized" && !doc.xml_storage_path) {
+  // Tenta arquivar o XML autorizado e o DANFE (PDF) sempre que qualquer um dos
+  // dois ainda não foi salvo — não é "só uma vez": fiscal-reconcile também
+  // reconsulta documentos já autorizados com xml_storage_path/pdf_storage_path
+  // nulo, então uma falha transitória aqui tem uma segunda (e terceira...)
+  // chance na próxima reconciliação. archiveArtifacts baixa só o que falta.
+  if (
+    statusInfo.status === "authorized" &&
+    (!doc.xml_storage_path || !doc.pdf_storage_path)
+  ) {
     Object.assign(update, await archiveArtifacts(admin, provider, doc, statusInfo));
   }
 
@@ -95,10 +100,10 @@ async function archiveArtifacts(
       (a) => a.type === "pdf_danfe" && a.available && a.downloadUrl,
     );
 
-    if (xmlArtifact?.downloadUrl) {
-      // As download_url da Contora exigem o Bearer token — usar fetchArtifact do
-      // provedor (autenticado), não um fetch cru (que retornaria "Bearer token
-      // ausente" e nunca arquivaria o XML, quebrando a guarda legal de 5 anos).
+    // As download_url da Contora exigem o Bearer token — usar fetchArtifact do
+    // provedor (autenticado), não um fetch cru (que retornaria "Bearer token
+    // ausente" e nunca arquivaria o artefato, quebrando a guarda legal de 5 anos).
+    if (!doc.xml_storage_path && xmlArtifact?.downloadUrl) {
       const xmlRes = await provider.fetchArtifact(xmlArtifact.downloadUrl);
       if (xmlRes.ok) {
         const xmlText = new TextDecoder().decode(xmlRes.data.bytes);
@@ -125,10 +130,37 @@ async function archiveArtifacts(
         console.error(`[fiscal] download do XML falhou para ${doc.id}: ${xmlRes.error}`);
       }
     }
-    if (pdfArtifact?.downloadUrl) {
-      // Guardamos a URL do provedor só como referência; o front NÃO abre direto
-      // (precisa de token) — usa o proxy autenticado (action "artifact").
-      result.pdf_url = pdfArtifact.downloadUrl;
+    // DANFE (PDF): arquiva os bytes no mesmo bucket para poder gerar URL
+    // assinada e enviar ao cliente (WhatsApp) sem expor o token da Contora.
+    if (!doc.pdf_storage_path && pdfArtifact?.downloadUrl) {
+      const pdfRes = await provider.fetchArtifact(pdfArtifact.downloadUrl);
+      if (pdfRes.ok) {
+        const bytes = new Uint8Array(pdfRes.data.bytes);
+        // Sanity check: PDF começa com "%PDF" (0x25 0x50 0x44 0x46). Uma URL
+        // expirada/erro pode devolver HTML/JSON com 200 — só arquiva PDF real.
+        const isPdf = bytes.length > 4 &&
+          bytes[0] === 0x25 && bytes[1] === 0x50 &&
+          bytes[2] === 0x44 && bytes[3] === 0x46;
+        if (isPdf) {
+          const path = `${doc.environment}/${doc.document_type}/${doc.id}.pdf`;
+          const { error } = await admin.storage
+            .from("fiscal-xml")
+            .upload(path, new Blob([bytes], { type: "application/pdf" }), {
+              contentType: "application/pdf",
+              upsert: true,
+            });
+          if (!error) {
+            result.pdf_storage_path = path;
+          } else {
+            console.error("[fiscal] falha ao arquivar DANFE no Storage:", error);
+            result.pdf_url = pdfArtifact.downloadUrl; // fallback: URL do provedor
+          }
+        } else {
+          console.error(`[fiscal] conteúdo baixado para DANFE de ${doc.id} não parece PDF — não arquivado, será retentado.`);
+        }
+      } else {
+        console.error(`[fiscal] download do DANFE falhou para ${doc.id}: ${pdfRes.error}`);
+      }
     }
   } catch (err) {
     console.error("[fiscal] falha ao processar artefatos:", err);
