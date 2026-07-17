@@ -309,6 +309,28 @@ describe("buildNfeDraftPayload — sanitização de campos (leiaute 4.00)", () =
   });
 });
 
+describe("buildNfeDraftPayload — sem pagamento (devolução/remessa)", () => {
+  it("força tPag=90 (Sem Pagamento) e valor 0 quando noPayment=true", () => {
+    const p = buildNfeDraftPayload(makeInput({ noPayment: true, paymentMethod: "17" })) as any;
+    expect(p.payments).toEqual([{ method: "90", amount: 0 }]);
+  });
+
+  it("mantém a forma de pagamento e o total quando é venda (noPayment ausente)", () => {
+    const p = buildNfeDraftPayload(makeInput({ paymentMethod: "17" })) as any;
+    expect(p.payments[0].method).toBe("17");
+    expect(p.payments[0].amount).toBeGreaterThan(0);
+  });
+});
+
+describe("NATURE_OF_OPERATION_OPTIONS — hasPayment", () => {
+  it("só a venda tem pagamento; devolução e remessas são Sem Pagamento", () => {
+    expect(findNatureOfOperation("venda").hasPayment).toBe(true);
+    for (const v of ["devolucao_compra", "devolucao_venda", "remessa_conserto", "remessa_bonificacao", "remessa_demonstracao"]) {
+      expect(findNatureOfOperation(v).hasPayment).toBe(false);
+    }
+  });
+});
+
 describe("buildNfeDraftPayload — referência por item (devolução VC02-14)", () => {
   it("monta referenced_document {access_key,item} por item quando informado", () => {
     const p = buildNfeDraftPayload(makeInput({

@@ -265,6 +265,8 @@ async function handleCreate(admin: any, body: any): Promise<Response> {
       };
     }),
     paymentMethod: body.payment_method || "01",
+    // Devolução e remessas não têm pagamento (tPag=90). Só "venda" tem transação.
+    noPayment: !nature.hasPayment,
   };
 
   const errors = validateNfeDraftInput(input);

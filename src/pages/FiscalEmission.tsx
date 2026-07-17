@@ -1452,14 +1452,20 @@ export default function FiscalEmission() {
             <div className="flex items-center justify-between gap-4">
               <div className="flex-1">
                 <Label>Forma de Pagamento</Label>
-                <Select value={paymentMethod} onValueChange={setPaymentMethod}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {PAYMENT_METHODS.map((m) => (
-                      <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {selectedNature.hasPayment ? (
+                  <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {PAYMENT_METHODS.filter((m) => m.value !== '90').map((m) => (
+                        <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <div className="h-10 flex items-center px-3 rounded-md border bg-muted/40 text-sm text-muted-foreground">
+                    Sem Pagamento (devolução/remessa não têm transação financeira)
+                  </div>
+                )}
               </div>
               <div className="text-right">
                 <p className="text-xs text-muted-foreground uppercase">Total da Nota</p>

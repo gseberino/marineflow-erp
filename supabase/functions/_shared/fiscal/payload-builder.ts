@@ -18,8 +18,14 @@ export const PAYMENT_METHODS = [
   { value: "05", label: "Crédito Loja" },
   { value: "15", label: "Boleto Bancário" },
   { value: "17", label: "PIX" },
+  { value: "90", label: "Sem Pagamento" },
   { value: "99", label: "Outros" },
 ] as const;
+
+// tPag=90 (Sem Pagamento): usado quando não há transação financeira na nota —
+// devoluções e remessas (conserto, bonificação, doação, demonstração). Enviar
+// forma de pagamento real nesses casos gera a Rejeição 871.
+export const NO_PAYMENT_METHOD = "90";
 
 export const DEFAULT_CFOP = "5102"; // venda de mercadoria adquirida/recebida de terceiros
 
@@ -39,6 +45,9 @@ export interface NatureOfOperationOption {
   purpose: number;
   // quando true, a UI deve pedir a chave da NF-e original (refNFe).
   requiresReference?: boolean;
+  // true só para operações com transação financeira (venda). Devolução e
+  // remessas não têm pagamento → tPag=90 (Sem Pagamento), senão Rejeição 871.
+  hasPayment: boolean;
 }
 
 export const NATURE_OF_OPERATION_OPTIONS: NatureOfOperationOption[] = [
@@ -49,6 +58,7 @@ export const NATURE_OF_OPERATION_OPTIONS: NatureOfOperationOption[] = [
     baseCfopCode: "102",
     operationType: "saida",
     purpose: 1,
+    hasPayment: true,
   },
   {
     value: "devolucao_compra",
@@ -58,6 +68,7 @@ export const NATURE_OF_OPERATION_OPTIONS: NatureOfOperationOption[] = [
     operationType: "saida",
     purpose: 4,
     requiresReference: true,
+    hasPayment: false,
   },
   {
     value: "remessa_conserto",
@@ -66,6 +77,7 @@ export const NATURE_OF_OPERATION_OPTIONS: NatureOfOperationOption[] = [
     baseCfopCode: "915",
     operationType: "saida",
     purpose: 1,
+    hasPayment: false,
   },
   {
     value: "remessa_bonificacao",
@@ -74,6 +86,7 @@ export const NATURE_OF_OPERATION_OPTIONS: NatureOfOperationOption[] = [
     baseCfopCode: "910",
     operationType: "saida",
     purpose: 1,
+    hasPayment: false,
   },
   {
     value: "remessa_demonstracao",
@@ -82,6 +95,7 @@ export const NATURE_OF_OPERATION_OPTIONS: NatureOfOperationOption[] = [
     baseCfopCode: "912",
     operationType: "saida",
     purpose: 1,
+    hasPayment: false,
   },
   {
     value: "devolucao_venda",
@@ -91,6 +105,7 @@ export const NATURE_OF_OPERATION_OPTIONS: NatureOfOperationOption[] = [
     operationType: "entrada",
     purpose: 4,
     requiresReference: true,
+    hasPayment: false,
   },
 ];
 
@@ -173,6 +188,7 @@ export interface BuildNfePayloadInput {
   recipient: NfeRecipientInput;
   items: NfeItemInput[];
   paymentMethod: string;
+  noPayment?: boolean; // true p/ devolução/remessa → tPag=90 (Sem Pagamento), valor 0
   consumerFinal?: boolean;
   presenceIndicator?: number; // 0=não se aplica,1=presencial,2=internet,4=domicílio,9=não presencial...
   additionalInfo?: string | null; // informações complementares (infCpl)
@@ -285,7 +301,11 @@ export function buildNfeDraftPayload(
       }
       return item;
     }),
-    payments: [{ method: input.paymentMethod, amount: totalAmount }],
+    // Devolução/remessa não têm transação financeira → tPag=90 (Sem Pagamento)
+    // com valor 0. Enviar forma de pagamento real gera Rejeição 871.
+    payments: input.noPayment
+      ? [{ method: NO_PAYMENT_METHOD, amount: 0 }]
+      : [{ method: input.paymentMethod, amount: totalAmount }],
   };
 
   // refNFe (nota inteira): além da referência por item acima, mandamos também a
