@@ -1104,21 +1104,27 @@ export default function FiscalEmission() {
     setExporting(true);
     const tId = toast.loading('Consultando notas do período…');
     try {
+      // Converte os limites do dia LOCAL para instantes UTC — authorized_at é
+      // timestamptz; comparar string ingênua colocaria notas da virada do dia no
+      // mês errado. Inclui autorizadas E canceladas (a contadora precisa da
+      // cancelada no livro; senão o número parece uma inutilização/lacuna).
+      const fromInstant = new Date(`${exportFrom}T00:00:00`).toISOString();
+      const toInstant = new Date(`${exportTo}T23:59:59.999`).toISOString();
       const { data: docs, error } = await (supabase.from as any)('issued_fiscal_documents')
         .select('id, series, number, access_key, status, authorized_at, environment, request_payload')
-        .eq('status', 'authorized')
-        .gte('authorized_at', `${exportFrom}T00:00:00`)
-        .lte('authorized_at', `${exportTo}T23:59:59`)
+        .in('status', ['authorized', 'cancelled'])
+        .gte('authorized_at', fromInstant)
+        .lte('authorized_at', toInstant)
         .order('number', { ascending: true });
       if (error) throw error;
       if (!docs?.length) {
-        toast.error('Nenhuma NF-e autorizada nesse período.', { id: tId });
+        toast.error('Nenhuma NF-e autorizada/cancelada nesse período.', { id: tId });
         return;
       }
 
       // CSV com ; (Excel pt-BR) e BOM UTF-8; sanitiza campos livres.
       const csvSafe = (s: string) => String(s ?? '').replace(/[;\r\n]+/g, ' ').trim();
-      const rows = ['Serie;Numero;Chave de Acesso;Data;Valor Total;Destinatario;CNPJ/CPF;Ambiente'];
+      const rows = ['Serie;Numero;Chave de Acesso;Data;Valor Total;Destinatario;CNPJ/CPF;Situacao;Ambiente'];
       const entries: ZipEntry[] = [];
       let ok = 0;
       let failed = 0;
@@ -1133,6 +1139,7 @@ export default function FiscalEmission() {
           d.series, d.number, d.access_key || '', dateStr,
           total.toFixed(2).replace('.', ','),
           csvSafe(rec.name || ''), rec.document || '',
+          d.status === 'cancelled' ? 'Cancelada' : 'Autorizada',
           d.environment === 'producao' ? 'Producao' : 'Homologacao',
         ].join(';'));
 
