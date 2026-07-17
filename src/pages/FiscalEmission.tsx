@@ -207,6 +207,24 @@ function useIssuedFiscalDocuments() {
   });
 }
 
+// Ambiente REAL de emissão, lido do servidor (secret FISCAL_ENVIRONMENT) — não
+// um palpite do front. Alimenta o banner de "PRODUÇÃO / nota real". Em erro,
+// assume 'homologacao' (a confirmação de verdade continua sendo a mensagem
+// pós-emissão + o botão Diagnóstico); nunca grita produção por engano.
+function useFiscalEnvironment() {
+  return useQuery({
+    queryKey: ['fiscal_environment'],
+    queryFn: async () => {
+      const { data, error } = await supabase.functions.invoke('fiscal-emit', {
+        body: { action: 'environment' },
+      });
+      if (error) return 'homologacao';
+      return ((data as any)?.data?.environment as string) || 'homologacao';
+    },
+    staleTime: 30_000,
+  });
+}
+
 // ── Página ─────────────────────────────────────────────────────────────────
 export default function FiscalEmission() {
   const { formatCurrency, formatDate } = useI18n();
@@ -215,6 +233,8 @@ export default function FiscalEmission() {
 
   const { data: company, isLoading: loadingCompany } = useCompanyFiscalSettings();
   const { data: documents, isLoading: loadingDocs } = useIssuedFiscalDocuments();
+  const { data: fiscalEnv } = useFiscalEnvironment();
+  const isProducao = fiscalEnv === 'producao';
   const { data: clients } = useClients();
   const { data: products } = useProducts();
   const { data: productCategories } = useProductCategories();
@@ -1205,6 +1225,15 @@ export default function FiscalEmission() {
         </Button>
       </PageHeader>
 
+      {isProducao && (
+        <div className="rounded-lg border-2 border-red-500 bg-red-50 px-4 py-2.5 flex items-center gap-2">
+          <span className="text-red-600 font-bold">⚠ AMBIENTE DE PRODUÇÃO</span>
+          <span className="text-sm text-red-800">
+            As NF-e emitidas aqui são <strong>reais</strong> e vão para a SEFAZ. Confira cada nota antes de emitir.
+          </span>
+        </div>
+      )}
+
       {!loadingCompany && !company && (
         <Card className="border-dashed border-2 border-amber-300 bg-amber-50">
           <CardContent className="py-6">
@@ -1526,6 +1555,12 @@ export default function FiscalEmission() {
           </DialogHeader>
 
           <div className="space-y-5">
+            {isProducao && (
+              <div className="rounded-lg border-2 border-red-500 bg-red-50 p-3 text-sm text-red-800">
+                <span className="font-bold text-red-600">⚠ PRODUÇÃO — nota fiscal REAL.</span>{' '}
+                Esta emissão vai para a SEFAZ de verdade e não é um teste. Revise destinatário, itens e impostos.
+              </div>
+            )}
             {isReturn && (
               <div className="rounded-lg border border-blue-300 bg-blue-50 p-3 text-xs text-blue-900 space-y-1">
                 <p className="font-semibold flex items-center gap-1.5"><Undo2 className="h-3.5 w-3.5" />Nota de Devolução (finalidade 4)</p>

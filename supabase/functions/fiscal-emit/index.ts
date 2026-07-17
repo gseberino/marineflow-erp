@@ -70,6 +70,12 @@ Deno.serve(async (req) => {
   if (!body) return jr({ error: "invalid_json" }, 400);
 
   try {
+    // Ambiente REAL de emissão (lê o secret FISCAL_ENVIRONMENT do servidor, sem
+    // chamar a Contora) — a UI usa para exibir o banner "PRODUÇÃO / nota real" e
+    // evitar emissão acidental. É a fonte da verdade (o mesmo valor que handleCreate usa).
+    if (body.action === "environment") {
+      return jr({ ok: true, data: { environment: readFiscalEnvironment() } });
+    }
     if (body.action === "cancel") return await handleCancel(admin, body);
     if (body.action === "correction") return await handleCorrection(admin, body);
     if (body.action === "diagnostics") return await handleDiagnostics();
