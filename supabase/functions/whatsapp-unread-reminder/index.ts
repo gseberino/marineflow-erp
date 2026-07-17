@@ -158,10 +158,10 @@ Deno.serve(async (req) => {
       const lastSent = await getSetting(admin, stateKey, "");
       if (lastSent && lastSent > cooldownCutoff) continue;
 
-      // pega display_name
+      // pega o nome do contato (coluna correta é `name`, não `display_name`)
       const { data: lead } = await admin
         .from("whatsapp_leads")
-        .select("display_name")
+        .select("name")
         .eq("phone_normalized", phone)
         .maybeSingle();
 
@@ -169,7 +169,7 @@ Deno.serve(async (req) => {
         phone,
         since: info.at,
         preview: info.body,
-        displayName: lead?.display_name || null,
+        displayName: lead?.name || null,
       });
     }
 

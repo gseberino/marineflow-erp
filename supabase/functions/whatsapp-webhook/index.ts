@@ -287,7 +287,7 @@ Deno.serve(async (req) => {
             .from("whatsapp_leads")
             .insert({
               phone_normalized: phone,
-              display_name: event.senderName || null,
+              name: event.senderName || null,
               status: "pending",
             })
             .select("id")
@@ -322,9 +322,15 @@ Deno.serve(async (req) => {
     }
 
     if (leadId) {
+      // Mantém o cache de frescor do lead atualizado (antes só gravava updated_at, o que
+      // deixava last_inbound_at/last_outbound_at congelados e quebrava a caixa de entrada).
+      const nowIso = new Date().toISOString();
+      const leadPatch: Record<string, unknown> = { updated_at: nowIso, last_message_at: nowIso };
+      if (event.fromMe) leadPatch.last_outbound_at = nowIso;
+      else leadPatch.last_inbound_at = nowIso;
       await admin
         .from("whatsapp_leads")
-        .update({ updated_at: new Date().toISOString() })
+        .update(leadPatch)
         .eq("id", leadId);
     } else if (clientId) {
       await admin

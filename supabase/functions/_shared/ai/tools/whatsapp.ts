@@ -312,61 +312,29 @@ export const whatsappTools: ToolDef[] = [
     risk: "low",
     async execute(args, { admin }) {
       const limit = Math.min(Math.max(Number(args.limit) || 15, 1), 30);
-      let q = admin
-        .from("whatsapp_leads")
-        .select("phone_normalized, name, unread_count, last_inbound_at, last_outbound_at, linked_client_id")
-        .not("last_inbound_at", "is", null)
-        .order("last_inbound_at", { ascending: false })
-        .limit(200);
-      if (Number(args.since_hours) > 0) {
-        const cut = new Date(Date.now() - Number(args.since_hours) * 3_600_000).toISOString();
-        q = q.gte("last_inbound_at", cut);
-      }
-      const { data: leads, error } = await q;
+      const since = Number(args.since_hours) > 0
+        ? new Date(Date.now() - Number(args.since_hours) * 3_600_000).toISOString()
+        : null;
+      // Fonte da verdade = whatsapp_messages (via RPC whatsapp_pending_inbox). NÃO usa o
+      // cache whatsapp_leads, que pode congelar. Pendente = última entrada depois da
+      // última saída, por telefone; exclui a equipe interna (IA no WhatsApp).
+      const { data, error } = await admin.rpc("whatsapp_pending_inbox", { _since: since, _limit: limit });
       if (error) return { error: error.message };
-
-      // Não respondidas: última entrada depois da última saída (ou nunca respondida).
-      const pending = (leads || [])
-        .filter((l: any) => l.last_inbound_at && (!l.last_outbound_at || l.last_inbound_at > l.last_outbound_at))
-        .slice(0, limit);
-      if (pending.length === 0) {
+      const rows = (data as any[]) || [];
+      if (rows.length === 0) {
         return { ok: true, total: 0, pendentes: [], message: "Nenhuma mensagem pendente de resposta." };
       }
-
-      // Nome do cliente vinculado (distingue cliente conhecido de outro contato/fornecedor).
-      const clientIds = [...new Set(pending.map((p: any) => p.linked_client_id).filter(Boolean))];
-      const clientNames = new Map<string, string>();
-      if (clientIds.length) {
-        const { data: cs } = await admin.from("clients").select("id, name").in("id", clientIds as string[]);
-        for (const c of cs || []) clientNames.set(c.id, c.name);
-      }
-
-      // Prévia: última mensagem recebida de cada telefone (1 query, reduzida em memória).
-      const phones = pending.map((p: any) => p.phone_normalized);
-      const previews = new Map<string, string>();
-      const { data: msgs } = await admin
-        .from("whatsapp_messages")
-        .select("phone_normalized, body, occurred_at")
-        .eq("direction", "inbound")
-        .in("phone_normalized", phones)
-        .order("occurred_at", { ascending: false })
-        .limit(400);
-      for (const m of msgs || []) {
-        if (!previews.has(m.phone_normalized)) previews.set(m.phone_normalized, (m.body || "").slice(0, 100));
-      }
-
       const now = Date.now();
-      const pendentes = pending.map((p: any) => {
-        const mins = Math.max(0, Math.round((now - new Date(p.last_inbound_at).getTime()) / 60000));
+      const pendentes = rows.map((r: any) => {
+        const mins = Math.max(0, Math.round((now - new Date(r.last_inbound_at).getTime()) / 60000));
         const ha = mins < 60 ? `${mins} min` : mins < 1440 ? `${Math.round(mins / 60)} h` : `${Math.round(mins / 1440)} d`;
         return {
-          contato: (p.name && String(p.name).trim()) || p.phone_normalized,
-          tipo: p.linked_client_id ? "cliente" : "contato",
-          cliente_vinculado: p.linked_client_id ? (clientNames.get(p.linked_client_id) || null) : null,
+          contato: r.contato,
+          tipo: r.is_client ? "cliente" : "contato",
           ha,
-          recebida_em: p.last_inbound_at,
-          nao_lidas: p.unread_count || 0,
-          previa: previews.get(p.phone_normalized) || null,
+          recebida_em: r.last_inbound_at,
+          nao_lidas: r.unread_count || 0,
+          previa: r.last_body ? String(r.last_body).slice(0, 100) : null,
         };
       });
       return { ok: true, total: pendentes.length, pendentes };
