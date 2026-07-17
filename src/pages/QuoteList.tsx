@@ -11,8 +11,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import {
   Plus, FileText, MoreHorizontal, Printer, MessageCircle, Send,
   Copy, Download, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp,
-  ArrowDown, Loader2, ArrowRightCircle, History, Wrench,
+  ArrowDown, Loader2, ArrowRightCircle, History, Wrench, Receipt,
 } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
 import { exportToCSV } from '@/lib/export';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { MultiFilterBar } from '@/components/MultiFilterBar';
@@ -116,6 +117,34 @@ export default function QuoteList() {
       setStockConfirm({ id: so.id, number: so.service_order_number });
     } catch (e: any) {
       toast.error(e?.message || 'Erro ao converter em OS');
+    }
+  };
+
+  // Faturar: leva os PRODUTOS do orçamento para a emissão de NF-e já
+  // pré-preenchida (serviços/mão de obra ficam de fora — NF-e é de produto).
+  const handleInvoice = async (so: any) => {
+    try {
+      const { data: parts, error } = await supabase
+        .from('service_order_parts')
+        .select('product_id, quantity, unit_sale_snapshot')
+        .eq('service_order_id', so.id);
+      if (error) throw error;
+      const items = (parts || [])
+        .filter((p: any) => p.product_id)
+        .map((p: any) => ({
+          productId: p.product_id,
+          quantity: Number(p.quantity) || 0,
+          unitPrice: Number(p.unit_sale_snapshot) || 0,
+        }));
+      if (!items.length) {
+        toast.error('Este orçamento não tem produtos para faturar (só serviços/mão de obra).');
+        return;
+      }
+      navigate('/fiscal/emissao', {
+        state: { invoiceFrom: { serviceOrderId: so.id, clientId: so.client_id || so.clients?.id || null, items } },
+      });
+    } catch (e: any) {
+      toast.error(e?.message || 'Erro ao preparar o faturamento');
     }
   };
 
@@ -386,6 +415,13 @@ export default function QuoteList() {
                             >
                               <ArrowRightCircle className="h-4 w-4" />
                               Converter em OS
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => handleInvoice(so)}
+                              className="gap-2 text-emerald-700 font-medium focus:text-emerald-700 focus:bg-emerald-50"
+                            >
+                              <Receipt className="h-4 w-4" />
+                              Emitir NF-e / Faturar
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem onClick={() => handleDuplicate(so.id)} className="gap-2">

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { PageHeader } from '@/components/PageHeader';
 import { AddressFields } from '@/components/AddressFields';
 import { ClientFormDialog } from '@/components/ClientFormDialog';
@@ -209,6 +210,7 @@ function useIssuedFiscalDocuments() {
 export default function FiscalEmission() {
   const { formatCurrency, formatDate } = useI18n();
   const qc = useQueryClient();
+  const location = useLocation();
 
   const { data: company, isLoading: loadingCompany } = useCompanyFiscalSettings();
   const { data: documents, isLoading: loadingDocs } = useIssuedFiscalDocuments();
@@ -257,6 +259,8 @@ export default function FiscalEmission() {
   const [showEmit, setShowEmit] = useState(false);
   const [emitting, setEmitting] = useState(false);
   const [emitIdempotencyKey, setEmitIdempotencyKey] = useState('');
+  // Origem da emissão: 'manual' (avulsa) ou uma OS/orçamento sendo faturado.
+  const [emitOrigin, setEmitOrigin] = useState<{ type: string; id: string | null }>({ type: 'manual', id: null });
   const [natureOfOperation, setNatureOfOperation] = useState('venda');
   const [clientId, setClientId] = useState<string>('');
   const [recipientName, setRecipientName] = useState('');
@@ -341,8 +345,10 @@ export default function FiscalEmission() {
   ];
   const preflightOk = preflight.every((p) => p.ok);
 
-  const [cancelTarget, setCancelTarget] = useState<{ id: string } | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<{ id: string; authorized_at?: string | null } | null>(null);
   const [cancelReason, setCancelReason] = useState('');
+  const [correctionTarget, setCorrectionTarget] = useState<{ id: string; number?: number; series?: number } | null>(null);
+  const [correctionText, setCorrectionText] = useState('');
   // Por documento (não um único valor global) — senão a conclusão da ação de
   // um documento pode reabilitar/destravar o botão de outro ainda em voo.
   const [busyDocIds, setBusyDocIds] = useState<Set<string>>(new Set());
@@ -431,6 +437,7 @@ export default function FiscalEmission() {
 
   // ── Dialog de emissão ────────────────────────────────────────────────────
   const openEmitDialog = () => {
+    setEmitOrigin({ type: 'manual', id: null });
     setNatureOfOperation('venda');
     setClientId('');
     setRecipientName('');
@@ -510,6 +517,7 @@ export default function FiscalEmission() {
     ) || NATURE_OF_OPERATION_OPTIONS.find((o) => o.natureOperation === p.nature_operation)
       || NATURE_OF_OPERATION_OPTIONS[0];
 
+    setEmitOrigin({ type: 'manual', id: null });
     setEmitIdempotencyKey(crypto.randomUUID());
     setNatureOfOperation(nat.value);
     setClientId(doc.client_id || '');
@@ -568,6 +576,7 @@ export default function FiscalEmission() {
     const nature = findNatureOfOperation('devolucao_venda');
     const devCfop = computeCfop(nature.baseCfopCode, nature.operationType, company?.state_code, a.state_code);
 
+    setEmitOrigin({ type: 'manual', id: null });
     setEmitIdempotencyKey(crypto.randomUUID());
     setNatureOfOperation('devolucao_venda');
     setClientId(doc.client_id || '');
@@ -615,6 +624,60 @@ export default function FiscalEmission() {
     }));
     setShowEmit(true);
   };
+
+  // Faturar um orçamento/OS: abre a emissão pré-preenchida com o cliente e os
+  // PRODUTOS da OS (serviços/mão de obra ficam de fora — NF-e é de produto). A
+  // nota fica vinculada à OS (origin_type=service_order) e marca invoicing_status.
+  const handleInvoiceFrom = (inv: { serviceOrderId: string; clientId: string | null; items: Array<{ productId: string; quantity: number; unitPrice: number }> }) => {
+    setEmitOrigin({ type: 'service_order', id: inv.serviceOrderId });
+    setEmitIdempotencyKey(crypto.randomUUID());
+    setNatureOfOperation('venda');
+    setPaymentMethod('01');
+    setPresenceIndicator(1);
+    setConsumerFinal(true);
+    setAdditionalInfo(SIMPLES_INFO_NOTE);
+    setReferencedAccessKey('');
+    const c = inv.clientId ? (clients || []).find((cl) => cl.id === inv.clientId) : null;
+    if (c) { setClientId(c.id); populateFromClient(c); }
+    else {
+      setClientId(''); setRecipientName(''); setRecipientDocument(''); setRecipientEmail('');
+      setRecipientIeIndicator(9); setRecipientIe(''); setAddress(EMPTY_ADDRESS);
+    }
+    // CFOP de venda calculado agora (state ainda não atualizou): intra/inter UF.
+    const vendaCfop = computeCfop('102', 'saida', company?.state_code, c?.state);
+    setItems(inv.items.map((it) => {
+      const p = (products || []).find((pr) => pr.id === it.productId);
+      const rf = resolveItemFiscal(it.productId);
+      return {
+        productId: it.productId,
+        code: p?.sku || it.productId.slice(0, 8),
+        name: p?.name || '',
+        ncm: rf.ncm || p?.ncm || '',
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        cfop: (p as any)?.cfop || vendaCfop,
+        unit: p?.unit || 'UN',
+        quantity: it.quantity,
+        unit_price: it.unitPrice,
+        csosn: rf.csosn, origin: rf.origin, icms_rate: rf.icmsRate,
+        pis_rate: rf.pisRate, cofins_rate: rf.cofinsRate, ipi_rate: rf.ipiRate,
+        included: true,
+      };
+    }));
+    setShowEmit(true);
+  };
+
+  // Faturar a partir de um orçamento/OS: QuoteList/ServiceOrderList navegam para
+  // cá com o estado `invoiceFrom`. Espera company+products carregarem (para
+  // resolver os impostos), abre o diálogo e limpa o estado (não reabre ao voltar).
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const inv = (location.state as any)?.invoiceFrom;
+    if (inv && company && products) {
+      handleInvoiceFrom(inv);
+      window.history.replaceState({}, '');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state, company, products]);
 
   const addItem = () => {
     setItems((prev) => [
@@ -729,7 +792,8 @@ export default function FiscalEmission() {
       const { data, error } = await supabase.functions.invoke('fiscal-emit', {
         body: {
           action: 'create',
-          origin_type: 'manual',
+          origin_type: emitOrigin.type,
+          origin_id: emitOrigin.id || undefined,
           idempotency_key: emitIdempotencyKey,
           client_id: clientId || null,
           nature_of_operation: natureOfOperation,
@@ -779,6 +843,13 @@ export default function FiscalEmission() {
 
       const env = data?.data?.environment === 'producao' ? 'produção' : 'homologação';
       toast.success(`NF-e enviada para processamento (ambiente: ${env}). Acompanhe o status abaixo.`);
+      // Ao faturar um orçamento/OS, marca a OS como faturada.
+      if (emitOrigin.type === 'service_order' && emitOrigin.id) {
+        await (supabase.from as any)('service_orders')
+          .update({ invoicing_status: 'invoiced', updated_at: new Date().toISOString() })
+          .eq('id', emitOrigin.id);
+        qc.invalidateQueries({ queryKey: ['service-orders'] });
+      }
       setShowEmit(false);
       qc.invalidateQueries({ queryKey: ['issued_fiscal_documents'] });
     } catch (err: any) {
@@ -825,6 +896,30 @@ export default function FiscalEmission() {
     } catch (err: any) {
       toast.error('Erro ao cancelar: ' + err.message);
       markBusy(cancelTarget.id, false);
+    }
+  };
+
+  // Carta de Correção Eletrônica (CC-e): corrige erros que NÃO alteram valores,
+  // impostos, destinatário ou datas (ex.: endereço, observações). Prazo legal
+  // de 30 dias. O backend (action="correction") exige nota autorizada + mínimo
+  // de 15 caracteres.
+  const handleConfirmCorrection = async () => {
+    if (!correctionTarget || correctionText.trim().length < MIN_JUSTIFICATION_LENGTH) return;
+    markBusy(correctionTarget.id, true);
+    try {
+      const { data, error } = await supabase.functions.invoke('fiscal-emit', {
+        body: { action: 'correction', document_id: correctionTarget.id, text: correctionText.trim() },
+      });
+      if (error) throw new Error(await extractInvokeErrorMessage(error));
+      if (data?.error) throw new Error(data.error);
+      toast.success('Carta de Correção enviada. Acompanhe o status.');
+      markBusy(correctionTarget.id, false);
+      setCorrectionTarget(null);
+      setCorrectionText('');
+      qc.invalidateQueries({ queryKey: ['issued_fiscal_documents'] });
+    } catch (err: any) {
+      toast.error('Erro ao enviar a correção: ' + err.message);
+      markBusy(correctionTarget.id, false);
     }
   };
 
@@ -972,9 +1067,18 @@ export default function FiscalEmission() {
                               </Button>
                             )}
                             <Button
+                              size="sm" variant="outline" className="text-xs"
+                              disabled={isBusy}
+                              title="Carta de Correção Eletrônica (CC-e) — corrige erros que não mudam valores, impostos, destinatário ou datas"
+                              onClick={() => { setCorrectionTarget({ id: doc.id, number: doc.number, series: doc.series }); setCorrectionText(''); }}
+                            >
+                              CC-e
+                            </Button>
+                            <Button
                               size="sm" variant="ghost" className="text-destructive hover:text-destructive"
                               disabled={isBusy}
-                              onClick={() => setCancelTarget({ id: doc.id })}
+                              title="Cancelar a NF-e (janela de 24h após a autorização)"
+                              onClick={() => setCancelTarget({ id: doc.id, authorized_at: doc.authorized_at })}
                             >
                               <Ban className="h-3.5 w-3.5" />
                             </Button>
@@ -1518,6 +1622,22 @@ export default function FiscalEmission() {
             <DialogTitle>Cancelar NF-e</DialogTitle>
             <DialogDescription>Informe o motivo do cancelamento (a SEFAZ exige pelo menos {MIN_JUSTIFICATION_LENGTH} caracteres).</DialogDescription>
           </DialogHeader>
+          {(() => {
+            // Janela padrão de cancelamento sem ônus: 24h após a autorização.
+            const authAt = cancelTarget?.authorized_at ? new Date(cancelTarget.authorized_at).getTime() : null;
+            const hrs = authAt ? (Date.now() - authAt) / 3_600_000 : null;
+            if (hrs == null) return null;
+            return hrs > 24 ? (
+              <p className="text-xs text-destructive bg-destructive/10 rounded-md p-2">
+                ⚠ Já se passaram {Math.floor(hrs)}h da autorização — o prazo de 24h para cancelamento sem ônus
+                venceu. A SEFAZ pode recusar o cancelamento; se for só corrigir um dado, use a CC-e.
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Dentro do prazo de 24h (autorizada há {Math.floor(hrs)}h{Math.round((hrs % 1) * 60)}min).
+              </p>
+            );
+          })()}
           <Textarea value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} placeholder="Ex.: Erro de digitação no endereço do destinatário" />
           <p className={`text-xs ${cancelReason.trim().length < MIN_JUSTIFICATION_LENGTH ? 'text-muted-foreground' : 'text-success'}`}>
             {cancelReason.trim().length}/{MIN_JUSTIFICATION_LENGTH} caracteres mínimos
@@ -1531,6 +1651,38 @@ export default function FiscalEmission() {
             >
               {cancelTarget && busyDocIds.has(cancelTarget.id) ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Confirmar Cancelamento
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Dialog: Carta de Correção (CC-e) ── */}
+      <Dialog open={!!correctionTarget} onOpenChange={(o) => { if (!o) { setCorrectionTarget(null); setCorrectionText(''); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Carta de Correção — NF-e {correctionTarget?.series}/{correctionTarget?.number}</DialogTitle>
+            <DialogDescription>
+              Corrija erros que <strong>não</strong> alteram valores, impostos, destinatário ou datas (ex.: endereço,
+              informações complementares). Prazo legal: 30 dias da emissão.
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            value={correctionText}
+            onChange={(e) => setCorrectionText(e.target.value)}
+            placeholder="Ex.: No campo Informações Complementares, onde se lê X, leia-se Y."
+            rows={4}
+          />
+          <p className={`text-xs ${correctionText.trim().length < MIN_JUSTIFICATION_LENGTH ? 'text-muted-foreground' : 'text-success'}`}>
+            {correctionText.trim().length}/{MIN_JUSTIFICATION_LENGTH} caracteres mínimos
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCorrectionTarget(null)}>Voltar</Button>
+            <Button
+              disabled={correctionText.trim().length < MIN_JUSTIFICATION_LENGTH || (correctionTarget ? busyDocIds.has(correctionTarget.id) : false)}
+              onClick={handleConfirmCorrection}
+            >
+              {correctionTarget && busyDocIds.has(correctionTarget.id) ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Enviar Correção
             </Button>
           </DialogFooter>
         </DialogContent>

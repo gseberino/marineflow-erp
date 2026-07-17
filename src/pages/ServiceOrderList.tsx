@@ -7,7 +7,7 @@ import { useServiceOrders, useDuplicateServiceOrder } from '@/hooks/use-service-
 import { statusConfig, priorityConfig, paymentStatusConfig } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Plus, ClipboardList, MoreHorizontal, FileText, Printer, MessageCircle, Send, CheckCircle2, XCircle, History, Copy, Download, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Loader2, Wrench } from 'lucide-react';
+import { Plus, ClipboardList, MoreHorizontal, FileText, Printer, MessageCircle, Send, CheckCircle2, XCircle, History, Copy, Download, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Loader2, Wrench, Receipt } from 'lucide-react';
 import { exportToCSV } from '@/lib/export';
 import { supabase } from '@/integrations/supabase/client';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -79,6 +79,27 @@ export default function ServiceOrderList() {
       navigate(`/service-orders/${(newSO as any).id}`);
     } catch (e: any) {
       toast.error(e?.message || 'Erro ao duplicar');
+    }
+  };
+
+  // Faturar: leva os PRODUTOS da OS para a emissão de NF-e pré-preenchida
+  // (serviços/mão de obra ficam de fora — NF-e é de produto).
+  const handleInvoice = async (so: any) => {
+    try {
+      const { data: parts, error } = await supabase
+        .from('service_order_parts')
+        .select('product_id, quantity, unit_sale_snapshot')
+        .eq('service_order_id', so.id);
+      if (error) throw error;
+      const items = (parts || [])
+        .filter((p: any) => p.product_id)
+        .map((p: any) => ({ productId: p.product_id, quantity: Number(p.quantity) || 0, unitPrice: Number(p.unit_sale_snapshot) || 0 }));
+      if (!items.length) { toast.error('Esta OS não tem produtos para faturar (só serviços/mão de obra).'); return; }
+      navigate('/fiscal/emissao', {
+        state: { invoiceFrom: { serviceOrderId: so.id, clientId: so.client_id || so.clients?.id || null, items } },
+      });
+    } catch (e: any) {
+      toast.error(e?.message || 'Erro ao preparar o faturamento');
     }
   };
 
@@ -604,6 +625,13 @@ export default function ServiceOrderList() {
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem asChild>
                               <Link to={`/service-orders/${so.id}`}>Abrir</Link>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => handleInvoice(so)}
+                              className="gap-2 text-emerald-700 font-medium focus:text-emerald-700 focus:bg-emerald-50"
+                            >
+                              <Receipt className="h-4 w-4" />
+                              Emitir NF-e / Faturar
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => handleDuplicate(so.id)} className="gap-2">
                               <Copy className="h-4 w-4" />
