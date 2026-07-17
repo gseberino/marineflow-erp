@@ -20,7 +20,7 @@ import {
 } from '@/components/ui/select';
 import {
   FileText, Loader2, Plus, Trash2, RefreshCw, Download, Ban, Pencil, Settings2, Upload,
-  Stethoscope, CheckCircle2, XCircle,
+  Stethoscope, CheckCircle2, XCircle, Undo2,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -89,6 +89,11 @@ interface DraftItem {
   pis_rate: number;
   cofins_rate: number;
   ipi_rate: number;
+  // Devolução: seleção total/parcial + referência por item (VC02-14).
+  included?: boolean; // marcado por padrão; desmarcar exclui o item (parcial)
+  maxQuantity?: number; // teto = qtd da nota original (só no modo devolução)
+  referencedKey?: string | null; // chave da NF-e original
+  referencedItemNumber?: number | null; // nItem na nota original
 }
 
 const EMPTY_RESOLVED = { csosn: '400', origin: 0, icms_rate: 0, pis_rate: 0, cofins_rate: 0, ipi_rate: 0 };
@@ -314,16 +319,25 @@ export default function FiscalEmission() {
   // Checklist de pré-voo: o que ainda falta para a nota poder ser autorizada.
   // Mostrado no diálogo para orientar o usuário antes de gastar cota fiscal.
   const docDigits = recipientDocument.replace(/\D/g, '');
-  const itemsOk = items.length > 0 && items.every((it) =>
+  // Só os itens marcados (no modo devolução, o usuário pode desmarcar — parcial).
+  const includedItems = items.filter((it) => it.included !== false);
+  const itemsOk = includedItems.length > 0 && includedItems.every((it) =>
     it.ncm.replace(/\D/g, '').length === 8 && it.csosn &&
     /^\d{4}$/.test((it.cfop || '').trim()) && it.quantity > 0 && it.unit_price > 0);
+  const isReturn = selectedNature.purpose === 4;
+  // Numa devolução por item (VC02-14) cada item incluído precisa referenciar a
+  // nota original (chave + nItem). Quando a devolução vem do botão "Gerar
+  // devolução", isso já vem preenchido; no fluxo manual, ao menos a chave.
+  const returnRefsOk = !isReturn
+    || includedItems.every((it) => (it.referencedKey || '').replace(/\D/g, '').length === 44 && !!it.referencedItemNumber)
+    || !!referencedAccessKey.replace(/\D/g, '');
   const preflight = [
     { ok: !!company?.state_code, label: 'UF da empresa emissora definida (calcula o CFOP)' },
     { ok: !!recipientName.trim() && (docDigits.length === 11 || docDigits.length === 14), label: 'Destinatário com nome e CPF/CNPJ válido' },
     { ok: !!(address.address_line_1 && address.city && address.state) && address.postal_code.replace(/\D/g, '').length === 8, label: 'Endereço do destinatário completo (CEP com 8 dígitos)' },
     { ok: recipientIeIndicator !== 1 || !!recipientIe.trim(), label: 'IE informada (destinatário contribuinte)' },
     { ok: itemsOk, label: 'Itens com NCM (8 díg.), CFOP (4 díg.), CSOSN, qtd e valor' },
-    { ok: !selectedNature.requiresReference || !!referencedAccessKey.replace(/\D/g, ''), label: 'Chave da NF-e original (devolução)' },
+    ...(isReturn ? [{ ok: returnRefsOk, label: 'Referência à NF-e original por item (chave + nº do item)' }] : []),
   ];
   const preflightOk = preflight.every((p) => p.ok);
 
@@ -533,6 +547,70 @@ export default function FiscalEmission() {
         pis_rate: Number(pis.aliquot ?? 0) || 0,
         cofins_rate: Number(cofins.aliquot ?? 0) || 0,
         ipi_rate: Number(ipi.aliquot ?? 0) || 0,
+        included: true,
+      };
+    }));
+    setShowEmit(true);
+  };
+
+  // "Gerar devolução" a partir de uma nota AUTORIZADA: cria uma NF-e de devolução
+  // de venda (entrada, finNFe=4, CFOP 1202/2202) espelhando exatamente a nota
+  // original (itens, impostos, cliente) e referenciando-a POR ITEM (VC02-14:
+  // chave + nItem). O usuário escolhe total ou parcial (checkbox + quantidade).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleGenerateReturn = (doc: any) => {
+    const p = doc.request_payload || {};
+    const r = p.recipient || {};
+    const a = r.address || {};
+    const key: string = doc.access_key || '';
+    // CFOP de devolução de venda calculado agora (o state da natureza ainda não
+    // atualizou neste render), para já gravar 1202/2202 em cada item.
+    const nature = findNatureOfOperation('devolucao_venda');
+    const devCfop = computeCfop(nature.baseCfopCode, nature.operationType, company?.state_code, a.state_code);
+
+    setEmitIdempotencyKey(crypto.randomUUID());
+    setNatureOfOperation('devolucao_venda');
+    setClientId(doc.client_id || '');
+    setRecipientName(r.name || '');
+    setRecipientDocument(r.document || '');
+    setRecipientEmail(r.email || '');
+    setRecipientIeIndicator(Number(r.state_registration_indicator ?? 9) || 9);
+    setRecipientIe(r.state_registration || '');
+    setConsumerFinal(p.consumer_final !== false);
+    setPresenceIndicator(Number(p.presence_indicator ?? 1) || 1);
+    setAdditionalInfo(`Devolução referente à NF-e nº ${doc.number}, série ${doc.series}${key ? `, chave ${key}` : ''}.`);
+    setReferencedAccessKey(key);
+    setPaymentMethod((p.payments && p.payments[0]?.method) || '01');
+    setAddress({
+      postal_code: a.postal_code || '',
+      address_line_1: a.street || '',
+      address_number: a.number && a.number !== 'S/N' ? a.number : '',
+      address_complement: a.complement || '',
+      neighborhood: a.district || '',
+      city: a.city_name || '',
+      state: a.state_code || '',
+      country: 'Brasil',
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setItems((p.items || []).map((it: any, i: number) => {
+      const t = it.taxes || {};
+      const icms = t.icms || {}; const pis = t.pis || {}; const cofins = t.cofins || {}; const ipi = t.ipi || {};
+      const qty = Number(it.quantity) || 0;
+      return {
+        productId: null,
+        code: it.code || '', name: it.name || '', ncm: it.ncm || '',
+        cfop: devCfop, unit: it.unit || 'UN',
+        quantity: qty, unit_price: Number(it.unit_price) || 0,
+        // Espelha os impostos da nota original (é a nossa própria nota Simples).
+        csosn: icms.code || '400', origin: Number(icms.origin ?? 0) || 0,
+        icms_rate: Number(icms.aliquot ?? 0) || 0,
+        pis_rate: Number(pis.aliquot ?? 0) || 0,
+        cofins_rate: Number(cofins.aliquot ?? 0) || 0,
+        ipi_rate: Number(ipi.aliquot ?? 0) || 0,
+        included: true,
+        maxQuantity: qty, // não deixa devolver mais do que foi vendido
+        referencedKey: key,
+        referencedItemNumber: i + 1, // nItem na nota original
       };
     }));
     setShowEmit(true);
@@ -640,7 +718,10 @@ export default function FiscalEmission() {
     }
   };
 
-  const total = items.reduce((sum, it) => sum + it.quantity * it.unit_price, 0);
+  // No modo devolução o usuário pode desmarcar itens (parcial) — só contam/vão
+  // os incluídos (included !== false).
+  const activeItems = items.filter((it) => it.included !== false);
+  const total = activeItems.reduce((sum, it) => sum + it.quantity * it.unit_price, 0);
 
   const handleEmit = async () => {
     setEmitting(true);
@@ -673,7 +754,7 @@ export default function FiscalEmission() {
               postal_code: address.postal_code,
             },
           },
-          items: items.map((it) => ({
+          items: activeItems.map((it) => ({
             product_id: it.productId || undefined,
             code: it.code,
             name: it.name,
@@ -688,6 +769,8 @@ export default function FiscalEmission() {
             pis_rate: it.pis_rate,
             cofins_rate: it.cofins_rate,
             ipi_rate: it.ipi_rate,
+            referenced_key: it.referencedKey || undefined,
+            referenced_item: it.referencedItemNumber || undefined,
           })),
         },
       });
@@ -879,16 +962,23 @@ export default function FiscalEmission() {
                             <Button size="sm" variant="outline" disabled={isBusy} onClick={() => handleViewArtifact(doc.id, 'pdf_danfe')}>
                               DANFE
                             </Button>
+                            {doc.request_payload?.purpose !== 4 && doc.access_key && (
+                              <Button
+                                size="sm" variant="outline" className="text-xs"
+                                title="Gerar uma NF-e de devolução (total ou parcial) desta venda, já referenciando a nota original"
+                                onClick={() => handleGenerateReturn(doc)}
+                              >
+                                <Undo2 className="h-3.5 w-3.5 mr-1" />Gerar devolução
+                              </Button>
+                            )}
+                            <Button
+                              size="sm" variant="ghost" className="text-destructive hover:text-destructive"
+                              disabled={isBusy}
+                              onClick={() => setCancelTarget({ id: doc.id })}
+                            >
+                              <Ban className="h-3.5 w-3.5" />
+                            </Button>
                           </>
-                        )}
-                        {doc.status === 'authorized' && (
-                          <Button
-                            size="sm" variant="ghost" className="text-destructive hover:text-destructive"
-                            disabled={isBusy}
-                            onClick={() => setCancelTarget({ id: doc.id })}
-                          >
-                            <Ban className="h-3.5 w-3.5" />
-                          </Button>
                         )}
                       </div>
                     </TableCell>
@@ -1080,6 +1170,16 @@ export default function FiscalEmission() {
           </DialogHeader>
 
           <div className="space-y-5">
+            {isReturn && (
+              <div className="rounded-lg border border-blue-300 bg-blue-50 p-3 text-xs text-blue-900 space-y-1">
+                <p className="font-semibold flex items-center gap-1.5"><Undo2 className="h-3.5 w-3.5" />Nota de Devolução (finalidade 4)</p>
+                <p>
+                  Os itens abaixo espelham a nota original e já referenciam a NF-e origem <strong>por item</strong> (regra
+                  VC02-14). Para devolução <strong>parcial</strong>, desmarque itens ou reduza a quantidade (teto = o que foi
+                  vendido). Confira os valores e o CSOSN com a contadora antes de emitir em produção.
+                </p>
+              </div>
+            )}
             <div className="flex items-end justify-between gap-4">
               <div className="flex-1">
                 <Label>Natureza da Operação</Label>
@@ -1228,7 +1328,19 @@ export default function FiscalEmission() {
                   <p className="text-sm text-muted-foreground">Nenhum item adicionado ainda.</p>
                 )}
                 {items.map((it, index) => (
-                  <div key={index} className="rounded-lg border p-3 space-y-2">
+                  <div key={index} className={`rounded-lg border p-3 space-y-2 ${it.included === false ? 'opacity-50' : ''}`}>
+                    {/* Devolução: incluir/excluir o item (parcial) + referência por item (VC02-14). */}
+                    {it.referencedItemNumber != null && (
+                      <div className="flex items-center justify-between gap-2 border-b pb-2 mb-1">
+                        <label className="flex items-center gap-2 text-xs cursor-pointer">
+                          <input type="checkbox" className="h-4 w-4" checked={it.included !== false} onChange={(e) => updateItem(index, { included: e.target.checked })} />
+                          Incluir na devolução
+                        </label>
+                        <span className="text-[10px] text-muted-foreground font-mono">
+                          ref: item {it.referencedItemNumber} da NF-e {it.referencedKey ? `…${it.referencedKey.slice(-6)}` : '—'}
+                        </span>
+                      </div>
+                    )}
                     <div className="flex items-center justify-between gap-2">
                       <EntityCombobox
                         value={it.productId}
@@ -1264,8 +1376,17 @@ export default function FiscalEmission() {
                         <Input placeholder="Unid." className="h-8 text-xs" maxLength={6} value={it.unit} onChange={(e) => updateItem(index, { unit: e.target.value })} />
                       </div>
                       <div>
-                        <Label className="text-[10px] text-muted-foreground">Qtd</Label>
-                        <Input type="number" min="0" placeholder="Qtd" className="h-8 text-xs" value={it.quantity} onChange={(e) => updateItem(index, { quantity: Math.max(0, parseFloat(e.target.value) || 0) })} />
+                        <Label className="text-[10px] text-muted-foreground">Qtd{it.maxQuantity != null ? ` (máx ${it.maxQuantity})` : ''}</Label>
+                        <Input
+                          type="number" min="0" max={it.maxQuantity ?? undefined} placeholder="Qtd" className="h-8 text-xs"
+                          value={it.quantity}
+                          onChange={(e) => {
+                            let q = Math.max(0, parseFloat(e.target.value) || 0);
+                            // Devolução não pode exceder a quantidade vendida na nota original.
+                            if (it.maxQuantity != null && q > it.maxQuantity) q = it.maxQuantity;
+                            updateItem(index, { quantity: q });
+                          }}
+                        />
                       </div>
                     </div>
                     {/* Impostos — auto-preenchidos do cadastro fiscal do produto, editáveis. */}
@@ -1376,9 +1497,9 @@ export default function FiscalEmission() {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowEmit(false)}>Cancelar</Button>
-            <Button onClick={handleEmit} disabled={emitting || items.length === 0 || !preflightOk}>
+            <Button onClick={handleEmit} disabled={emitting || includedItems.length === 0 || !preflightOk}>
               {emitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FileText className="h-4 w-4 mr-2" />}
-              Emitir NF-e
+              {isReturn ? 'Emitir Devolução' : 'Emitir NF-e'}
             </Button>
           </DialogFooter>
         </DialogContent>

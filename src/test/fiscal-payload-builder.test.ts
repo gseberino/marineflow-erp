@@ -309,6 +309,39 @@ describe("buildNfeDraftPayload — sanitização de campos (leiaute 4.00)", () =
   });
 });
 
+describe("buildNfeDraftPayload — referência por item (devolução VC02-14)", () => {
+  it("monta referenced_document {access_key,item} por item quando informado", () => {
+    const p = buildNfeDraftPayload(makeInput({
+      purpose: 4,
+      items: [{
+        code: "A", name: "Item", ncm: "85369090", cfop: "1202", quantity: 1, unitPrice: 10,
+        referencedKey: "4226 0750 0570 4900 0159 5500 2000 0000 0117 3735 9835", referencedItemNumber: 1,
+      }],
+    })) as any;
+    expect(p.items[0].referenced_document).toEqual({
+      access_key: "42260750057049000159550020000000011737359835", item: 1,
+    });
+  });
+
+  it("agrega as chaves por item em referenced_access_keys (nível da nota)", () => {
+    const p = buildNfeDraftPayload(makeInput({
+      items: [
+        { code: "A", name: "A", ncm: "85369090", cfop: "1202", quantity: 1, unitPrice: 10, referencedKey: "42260750057049000159550020000000011737359835", referencedItemNumber: 1 },
+        { code: "B", name: "B", ncm: "85369090", cfop: "1202", quantity: 1, unitPrice: 5, referencedKey: "42260750057049000159550020000000011737359835", referencedItemNumber: 2 },
+      ],
+    })) as any;
+    expect(p.referenced_access_keys).toEqual(["42260750057049000159550020000000011737359835"]);
+  });
+
+  it("não inclui referenced_document quando falta chave ou nItem", () => {
+    const p = buildNfeDraftPayload(makeInput({
+      items: [{ code: "A", name: "Item", ncm: "85369090", cfop: "5102", quantity: 1, unitPrice: 10 }],
+    })) as any;
+    expect(p.items[0].referenced_document).toBeUndefined();
+    expect(p.referenced_access_keys).toBeUndefined();
+  });
+});
+
 describe("validateNfeDraftInput — NCM/CFOP/CEP", () => {
   it("rejeita NCM que não tem 8 dígitos", () => {
     const errors = validateNfeDraftInput(makeInput({

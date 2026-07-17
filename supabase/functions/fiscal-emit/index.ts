@@ -259,6 +259,9 @@ async function handleCreate(admin: any, body: any): Promise<Response> {
         cofinsCst: it.cofins_cst ? String(it.cofins_cst) : rf.cofinsCst,
         cofinsRate: num(it.cofins_rate, rf.cofinsRate),
         ipiRate: num(it.ipi_rate, rf.ipiRate),
+        // Referência por item à NF-e original (devolução, VC02-14).
+        referencedKey: it.referenced_key ? String(it.referenced_key) : null,
+        referencedItemNumber: it.referenced_item != null ? Number(it.referenced_item) : null,
       };
     }),
     paymentMethod: body.payment_method || "01",

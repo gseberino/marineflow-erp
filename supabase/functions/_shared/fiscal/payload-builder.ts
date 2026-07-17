@@ -158,6 +158,11 @@ export interface NfeItemInput {
   cofinsRate?: number | null; // taxes.cofins.aliquot
   ipiCst?: string | null; // taxes.ipi.code (só quando ipiRate > 0)
   ipiRate?: number | null; // taxes.ipi.aliquot
+  // Referência por item à NF-e original (devolução) — grupo DFeReferenciado da
+  // regra VC02-14: chaveAcesso (44 díg.) + nItem da original. Obrigatório em
+  // homologação desde 01/07/2026 e em produção a partir de 01/09/2026.
+  referencedKey?: string | null;
+  referencedItemNumber?: number | null;
 }
 
 export interface BuildNfePayloadInput {
@@ -271,16 +276,29 @@ export function buildNfeDraftPayload(
       };
       const taxes = buildItemTaxes(it);
       if (taxes) item.taxes = taxes;
+      // Referência por item à NF-e original (devolução). Nome exato do campo na
+      // Contora a confirmar — usamos `referenced_document: {access_key, item}`,
+      // que mapeia direto para DFeReferenciado (chaveAcesso + nItem).
+      const refKeyItem = onlyDigits(it.referencedKey);
+      if (refKeyItem && it.referencedItemNumber && it.referencedItemNumber > 0) {
+        item.referenced_document = { access_key: refKeyItem, item: it.referencedItemNumber };
+      }
       return item;
     }),
     payments: [{ method: input.paymentMethod, amount: totalAmount }],
   };
 
-  // refNFe: chave da NF-e original em devoluções. Enviada só quando informada —
-  // o nome do campo ainda precisa ser confirmado com a Contora; usamos
-  // `referenced_access_keys` e a SEFAZ/Contora ignoram se não reconhecerem.
-  const refKey = onlyDigits(input.referencedAccessKey);
-  if (refKey) payload.referenced_access_keys = [refKey];
+  // refNFe (nota inteira): além da referência por item acima, mandamos também a
+  // lista de chaves no nível da nota — cobre o caso "total" e provedores que só
+  // leem a referência agregada. Reúne a chave informada + as chaves por item.
+  const noteKeys = new Set<string>();
+  const topKey = onlyDigits(input.referencedAccessKey);
+  if (topKey) noteKeys.add(topKey);
+  for (const it of input.items) {
+    const k = onlyDigits(it.referencedKey);
+    if (k) noteKeys.add(k);
+  }
+  if (noteKeys.size) payload.referenced_access_keys = [...noteKeys];
 
   const info = cleanText(input.additionalInfo, NFE_LIMITS.additionalInfo);
   if (info) payload.additional_info = info;
