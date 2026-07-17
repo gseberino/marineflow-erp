@@ -5,7 +5,9 @@
 // e enfileira a mensagem em whatsapp_send_queue (o whatsapp-queue-worker entrega).
 //
 // Destinatários são INTERNOS (a própria equipe), então o envio direto pela fila é adequado.
-// Agendado via pg_cron (jobid 6, ai-daily-briefing, 10:30 UTC) — DESATIVADO até validação.
+// Agendado via pg_cron (jobid 6, ai-daily-briefing, 10:30 UTC = 07:30 BRT) — ATIVO.
+// Inclui a seção "Esperando resposta" (Fase 1 do piloto): mensagens sem resposta via RPC
+// whatsapp_pending_inbox. Use ?dry=1 para pré-visualizar a mensagem sem enfileirar/enviar.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
@@ -80,6 +82,28 @@ Deno.serve(async (req) => {
       .select("id", { count: "exact", head: true })
       .eq("status", "pending");
 
+    // ── Mensagens esperando resposta (Fase 1 · fatia Mensagens) ──
+    // Fonte da verdade via RPC whatsapp_pending_inbox: já exclui listas de transmissão e a
+    // equipe interna. Janela recente (7 dias) para manter o digest quieto e acionável;
+    // a consulta sob demanda ("quem me mandou?") continua mostrando tudo. Clientes primeiro.
+    const since7d = new Date(now.getTime() - 7 * 86400000).toISOString();
+    const { data: waitingRows } = await admin.rpc("whatsapp_pending_inbox", { _since: since7d, _limit: 12 });
+    const waiting = ((waitingRows as any[]) || []).slice();
+    waiting.sort((a: any, b: any) => Number(b.is_client) - Number(a.is_client)); // sort estável preserva recência
+    const topWaiting = waiting.slice(0, 6);
+    const waitingLines: string[] = [];
+    if (waiting.length > 0) {
+      waitingLines.push(`💬 Esperando resposta: *${waiting.length}*`);
+      for (const w of topWaiting) {
+        const mins = Math.max(0, Math.round((now.getTime() - new Date(w.last_inbound_at as string).getTime()) / 60000));
+        const ha = mins < 60 ? `${mins} min` : mins < 1440 ? `${Math.round(mins / 60)} h` : `${Math.round(mins / 1440)} d`;
+        waitingLines.push(`   • ${w.contato}${w.is_client ? " (cliente)" : ""} — há ${ha}`);
+      }
+      if (waiting.length > topWaiting.length) waitingLines.push(`   …e mais ${waiting.length - topWaiting.length}`);
+    } else {
+      waitingLines.push(`💬 Esperando resposta: *0* ✅`);
+    }
+
     const fmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
     const dateBR = now.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" });
 
@@ -90,10 +114,16 @@ Deno.serve(async (req) => {
       `📄 Orçamentos aguardando resposta: *${quotesCount ?? 0}*`,
       `💸 Recebíveis vencidos: *${overdueCount}*${overdueCount > 0 ? ` (${fmt.format(overdueSum)})` : ""}`,
       `✅ Aprovações da IA pendentes: *${pendingCount ?? 0}*`,
+      ...waitingLines,
       "",
       `_Enviado pelo assistente de ${companyName}. Responda por aqui para pedir qualquer coisa._`,
     ];
     const message = linhas.join("\n");
+
+    // Dry-run (?dry=1): monta a mensagem mas NÃO enfileira — para pré-visualizar com segurança.
+    if (new URL(req.url).searchParams.get("dry") === "1") {
+      return jr({ ok: true, dry: true, recipients: recipients.length, preview: message });
+    }
 
     // Enfileira uma mensagem por destinatário. O whatsapp-queue-worker (cron de 1min) entrega.
     const rows = recipients.map((rec: any) => ({
