@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/select';
 import {
   FileText, Loader2, Plus, Trash2, RefreshCw, Download, Ban, Pencil, Settings2, Upload,
-  Stethoscope, CheckCircle2, XCircle, Undo2, Send, FileDown,
+  Stethoscope, CheckCircle2, XCircle, Undo2, Send, FileDown, Copy,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -534,9 +534,11 @@ export default function FiscalEmission() {
     if (data) populateFromClient(data);
   };
 
-  // "Corrigir e reemitir": reabre o diálogo já preenchido a partir do payload de
-  // uma NF-e registrada (falha/rejeitada/cancelada). Gera uma NOVA emissão (nova
-  // chave de idempotência, novo número) — o documento antigo fica no histórico.
+  // "Corrigir e reemitir" (notas com falha/rejeitada/cancelada) e "Duplicar"
+  // (notas autorizadas): reabre o diálogo já preenchido a partir do payload de
+  // uma NF-e registrada. Gera sempre uma NOVA emissão — origem manual (sem
+  // conflito com o índice único por origem), nova chave de idempotência e novo
+  // número; o documento original permanece intacto no histórico.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleReemitFromDoc = (doc: any) => {
     const p = doc.request_payload || {};
@@ -1345,6 +1347,16 @@ export default function FiscalEmission() {
                                 onClick={() => handleGenerateReturn(doc)}
                               >
                                 <Undo2 className="h-3.5 w-3.5 mr-1" />Gerar devolução
+                              </Button>
+                            )}
+                            {doc.request_payload?.purpose !== 4 && doc.request_payload && (
+                              <Button
+                                size="sm" variant="outline" className="text-xs"
+                                disabled={isBusy}
+                                title="Duplicar: abre uma nova NF-e com os mesmos dados desta (cliente, itens, impostos). Ganha um novo número e você revisa antes de emitir — ideal para vendas recorrentes."
+                                onClick={() => handleReemitFromDoc(doc)}
+                              >
+                                <Copy className="h-3.5 w-3.5 mr-1" />Duplicar
                               </Button>
                             )}
                             <Button
