@@ -298,4 +298,78 @@ export const whatsappTools: ToolDef[] = [
       };
     },
   },
+  {
+    name: "list_unanswered_messages",
+    description:
+      "CAIXA DE ENTRADA — mensagens recebidas que ainda NÃO foram respondidas. Use SEMPRE que o usuário perguntar coisas como 'quem me mandou mensagem?', 'quais mensagens não respondi?', 'tem alguém esperando resposta?', 'resumo do WhatsApp', 'como está a caixa de entrada?', 'o que chegou?'. Retorna os contatos cuja última mensagem recebida veio DEPOIS da última resposta enviada, com nome, há quanto tempo chegou, quantas não lidas, se é cliente conhecido (vinculado) ou outro contato/fornecedor, e uma prévia. Somente leitura — não pede confirmação. Ao responder, priorize clientes conhecidos e as mensagens mais recentes, e sempre mostre o nome e o horário/tempo.",
+    input_schema: {
+      type: "object",
+      properties: {
+        since_hours: { type: "number", description: "Opcional: considerar só mensagens recebidas nas últimas N horas (ex.: 24 = 'hoje', 48). Sem valor = todas as pendentes." },
+        limit: { type: "number", description: "Máximo de contatos a retornar. Padrão 15, teto 30." },
+      },
+    },
+    risk: "low",
+    async execute(args, { admin }) {
+      const limit = Math.min(Math.max(Number(args.limit) || 15, 1), 30);
+      let q = admin
+        .from("whatsapp_leads")
+        .select("phone_normalized, name, unread_count, last_inbound_at, last_outbound_at, linked_client_id")
+        .not("last_inbound_at", "is", null)
+        .order("last_inbound_at", { ascending: false })
+        .limit(200);
+      if (Number(args.since_hours) > 0) {
+        const cut = new Date(Date.now() - Number(args.since_hours) * 3_600_000).toISOString();
+        q = q.gte("last_inbound_at", cut);
+      }
+      const { data: leads, error } = await q;
+      if (error) return { error: error.message };
+
+      // Não respondidas: última entrada depois da última saída (ou nunca respondida).
+      const pending = (leads || [])
+        .filter((l: any) => l.last_inbound_at && (!l.last_outbound_at || l.last_inbound_at > l.last_outbound_at))
+        .slice(0, limit);
+      if (pending.length === 0) {
+        return { ok: true, total: 0, pendentes: [], message: "Nenhuma mensagem pendente de resposta." };
+      }
+
+      // Nome do cliente vinculado (distingue cliente conhecido de outro contato/fornecedor).
+      const clientIds = [...new Set(pending.map((p: any) => p.linked_client_id).filter(Boolean))];
+      const clientNames = new Map<string, string>();
+      if (clientIds.length) {
+        const { data: cs } = await admin.from("clients").select("id, name").in("id", clientIds as string[]);
+        for (const c of cs || []) clientNames.set(c.id, c.name);
+      }
+
+      // Prévia: última mensagem recebida de cada telefone (1 query, reduzida em memória).
+      const phones = pending.map((p: any) => p.phone_normalized);
+      const previews = new Map<string, string>();
+      const { data: msgs } = await admin
+        .from("whatsapp_messages")
+        .select("phone_normalized, body, occurred_at")
+        .eq("direction", "inbound")
+        .in("phone_normalized", phones)
+        .order("occurred_at", { ascending: false })
+        .limit(400);
+      for (const m of msgs || []) {
+        if (!previews.has(m.phone_normalized)) previews.set(m.phone_normalized, (m.body || "").slice(0, 100));
+      }
+
+      const now = Date.now();
+      const pendentes = pending.map((p: any) => {
+        const mins = Math.max(0, Math.round((now - new Date(p.last_inbound_at).getTime()) / 60000));
+        const ha = mins < 60 ? `${mins} min` : mins < 1440 ? `${Math.round(mins / 60)} h` : `${Math.round(mins / 1440)} d`;
+        return {
+          contato: (p.name && String(p.name).trim()) || p.phone_normalized,
+          tipo: p.linked_client_id ? "cliente" : "contato",
+          cliente_vinculado: p.linked_client_id ? (clientNames.get(p.linked_client_id) || null) : null,
+          ha,
+          recebida_em: p.last_inbound_at,
+          nao_lidas: p.unread_count || 0,
+          previa: previews.get(p.phone_normalized) || null,
+        };
+      });
+      return { ok: true, total: pendentes.length, pendentes };
+    },
+  },
 ];
