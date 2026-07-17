@@ -107,11 +107,42 @@ Deno.serve(async (req) => {
     const fmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
     const dateBR = now.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" });
 
+    // ── Orçamentos parados / expirando (Fase 2 do piloto) ──
+    // Só lista os que pedem ação: parados há ≥2 dias OU perto de expirar / expirados.
+    // Orçamento recém-mexido não polui o digest. Ordena pelos mais parados primeiro.
+    const { data: openQuotes } = await admin
+      .from("service_orders")
+      .select("service_order_number, grand_total, updated_at, quote_validity_date, clients(name)")
+      .eq("status", "draft")
+      .in("quote_status", ["sent", "awaiting_approval", "awaiting_deposit"])
+      .order("updated_at", { ascending: true })
+      .limit(20);
+    const todayMid = new Date(`${todayISO}T00:00:00`).getTime();
+    const quoteLines: string[] = [];
+    const flaggedQuotes = ((openQuotes as any[]) || [])
+      .map((q: any) => {
+        const dias = Math.floor((now.getTime() - new Date(q.updated_at).getTime()) / 86400000);
+        const vd = q.quote_validity_date ? new Date(`${q.quote_validity_date}T00:00:00`).getTime() : null;
+        const expired = vd !== null && vd < todayMid;
+        const expiringSoon = vd !== null && !expired && vd <= todayMid + 3 * 86400000;
+        const nome = Array.isArray(q.clients) ? q.clients[0]?.name : q.clients?.name;
+        return { nome: nome || "(sem cliente)", valor: Number(q.grand_total || 0), dias, expired, expiringSoon };
+      })
+      .filter((q: any) => q.dias >= 2 || q.expired || q.expiringSoon)
+      .slice(0, 5);
+    if (flaggedQuotes.length > 0) {
+      for (const q of flaggedQuotes) {
+        const tag = q.expired ? " · ⚠️ expirado" : q.expiringSoon ? " · ⏳ expira em breve" : "";
+        quoteLines.push(`   • ${q.nome} — ${fmt.format(q.valor)} · parado ${q.dias}d${tag}`);
+      }
+    }
+
     const linhas = [
       `☀️ *Bom dia! Resumo de ${dateBR}*`,
       "",
       `📅 Agendamentos hoje: *${scheduledCount ?? 0}*`,
       `📄 Orçamentos aguardando resposta: *${quotesCount ?? 0}*`,
+      ...quoteLines,
       `💸 Recebíveis vencidos: *${overdueCount}*${overdueCount > 0 ? ` (${fmt.format(overdueSum)})` : ""}`,
       `✅ Aprovações da IA pendentes: *${pendingCount ?? 0}*`,
       ...waitingLines,
