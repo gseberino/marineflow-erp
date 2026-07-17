@@ -83,7 +83,28 @@ export async function checkWhatsAppRateLimit(admin: any, phoneNormalized: string
   return (count ?? 0) < maxPerMinute;
 }
 
-/** Enfileira a resposta da IA — reusa o worker/rate-limit que já existe pros outros envios. */
+/**
+ * Entrega a resposta da IA. Tenta ENVIO IMEDIATO via whatsapp-send (que aplica typing
+ * delay/presence e test mode); se falhar, cai no whatsapp_send_queue (worker a cada ~1 min)
+ * para não perder a mensagem. O envio direto elimina o atraso de até ~60s do tick do worker,
+ * que era a maior parte da latência percebida na conversa.
+ */
 export async function queueWhatsAppReply(admin: any, phoneNormalized: string, message: string): Promise<void> {
+  try {
+    const url = `${Deno.env.get("SUPABASE_URL")}/functions/v1/whatsapp-send`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+      },
+      body: JSON.stringify({ phone: phoneNormalized, message, kind: "text" }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok && !(body as Record<string, unknown>)?.["error"]) return; // enviado na hora
+  } catch (_e) {
+    // rede/timeout — cai para a fila abaixo
+  }
+  // Fallback: enfileira (o worker reenvia em ~1 min) para garantir entrega.
   await admin.from("whatsapp_send_queue").insert({ phone_normalized: phoneNormalized, message, source: "ai_agent" });
 }

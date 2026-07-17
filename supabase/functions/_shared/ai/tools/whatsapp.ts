@@ -260,17 +260,22 @@ export const whatsappTools: ToolDef[] = [
     async execute(args, { admin, userId }) {
       const when = new Date(args.scheduled_at);
       if (isNaN(when.getTime())) return { error: "Data/hora do lembrete inválida." };
-      const { data: u } = await admin.from("app_users").select("phone_normalized").eq("id", userId).maybeSingle();
+      const { data: u } = await admin.from("app_users").select("phone_normalized, full_name").eq("id", userId).maybeSingle();
       const phone = (u?.phone_normalized || "").replace(/\D/g, "");
       if (!phone) {
         return { error: "Você ainda não tem um número de WhatsApp cadastrado para receber lembretes. Cadastre em Configurações → Usuários (aba IA/Zap)." };
       }
+      // Envelope padronizado do lembrete (com nome, se houver) — evita mensagem crua/genérica.
+      const firstName = String(u?.full_name || "").trim().split(/\s+/)[0] || "";
+      const reminderText = firstName
+        ? `⏰ *Lembrete, ${firstName}!*\n\n${args.message}`
+        : `⏰ *Lembrete!*\n\n${args.message}`;
       const scheduledAt = when.toISOString();
       const { data: created, error } = await admin
         .from("whatsapp_scheduled_sends")
         .insert({
           phone,
-          message: args.message,
+          message: reminderText,
           scheduled_at: scheduledAt,
           next_run_at: scheduledAt,
           recurrence_type: args.recurrence_type || "once",
