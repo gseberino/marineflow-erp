@@ -42,7 +42,21 @@ Deno.serve(async (req) => {
   const provider = createFiscalProvider();
   const event = await provider.parseWebhook(headers, rawBody);
   if (!event) {
-    console.warn("[fiscal-webhook] assinatura inválida ou payload malformado");
+    // Diagnóstico de assinatura SEM vazar segredo: mostra quais headers a Contora
+    // mandou, se timestamp/assinatura chegaram e o tamanho/amostra da assinatura
+    // (é um hash, não um segredo). Distingue "segredo divergente" (headers ok,
+    // HMAC não bate) de "headers/formato diferentes" (nomes de header ausentes).
+    const fiscalHeaders = Object.keys(headers).filter((k) => k.startsWith("x-fiscal"));
+    console.warn("[fiscal-webhook] 401 — assinatura inválida ou payload malformado.", JSON.stringify({
+      fiscal_headers_recebidos: fiscalHeaders,
+      tem_timestamp: !!headers["x-fiscal-timestamp"],
+      tem_assinatura: !!headers["x-fiscal-signature"],
+      tamanho_assinatura: (headers["x-fiscal-signature"] || "").length, // 64 = hex SHA-256; ~44 = base64
+      amostra_assinatura: (headers["x-fiscal-signature"] || "").slice(0, 12),
+      timestamp_recebido: (headers["x-fiscal-timestamp"] || "").slice(0, 40),
+      tamanho_corpo: rawBody.length,
+      todos_os_headers: Object.keys(headers),
+    }));
     return jr({ error: "invalid_signature" }, 401);
   }
 
