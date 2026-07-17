@@ -340,4 +340,69 @@ export const whatsappTools: ToolDef[] = [
       return { ok: true, total: pendentes.length, pendentes };
     },
   },
+  {
+    name: "mute_contact",
+    description:
+      "SILENCIAR um contato na caixa de entrada / digest de mensagens. Use quando o usuário disser 'não me avise sobre X', 'silenciar fulano', 'esse contato não é relevante', 'pode ignorar a [empresa]', 'para de me lembrar do fornecedor Y'. O contato para de aparecer em 'quem está esperando resposta'. Informe phone (só dígitos) OU name (parte do nome). Baixo risco.",
+    input_schema: {
+      type: "object",
+      properties: {
+        phone: { type: "string", description: "Telefone do contato (só dígitos, DDI+DDD). Opcional se informar o nome." },
+        name: { type: "string", description: "Nome (ou parte) do contato. Opcional se informar o telefone." },
+      },
+    },
+    risk: "low",
+    async execute(args, { admin }) {
+      const phone = String(args.phone || "").replace(/\D/g, "");
+      const name = String(args.name || "").trim();
+      if (!phone && !name) return { error: "Diga o telefone ou o nome do contato a silenciar." };
+      const nowIso = new Date().toISOString();
+      if (phone) {
+        const { data: existing } = await admin.from("whatsapp_leads").select("id, name, phone_normalized").eq("phone_normalized", phone);
+        if (existing && existing.length > 0) {
+          await admin.from("whatsapp_leads").update({ muted_at: nowIso }).in("id", existing.map((l: any) => l.id));
+          return { ok: true, silenciados: existing.map((l: any) => l.name || l.phone_normalized) };
+        }
+        const { data: created, error } = await admin.from("whatsapp_leads")
+          .insert({ phone_normalized: phone, name: name || null, status: "pending", muted_at: nowIso })
+          .select("name, phone_normalized").single();
+        if (error) return { error: error.message };
+        return { ok: true, silenciados: [created.name || created.phone_normalized] };
+      }
+      const { data: matches } = await admin.from("whatsapp_leads").select("id, name, phone_normalized").ilike("name", `%${name}%`).limit(10);
+      if (!matches || matches.length === 0) return { error: `Não encontrei nenhum contato com "${name}".` };
+      if (matches.length > 1) {
+        return { precisa_desambiguar: true, opcoes: matches.map((l: any) => ({ nome: l.name, phone: l.phone_normalized })), instrucao: "Pergunte ao usuário qual silenciar e chame de novo com o phone específico." };
+      }
+      await admin.from("whatsapp_leads").update({ muted_at: nowIso }).eq("id", matches[0].id);
+      return { ok: true, silenciados: [matches[0].name || matches[0].phone_normalized] };
+    },
+  },
+  {
+    name: "unmute_contact",
+    description:
+      "REATIVAR um contato silenciado (volta a aparecer na caixa de entrada / digest). Use quando o usuário disser 'volte a me avisar sobre X', 'reativar fulano', 'tirar do silêncio'. Informe phone OU name.",
+    input_schema: {
+      type: "object",
+      properties: {
+        phone: { type: "string", description: "Telefone do contato (só dígitos). Opcional se informar o nome." },
+        name: { type: "string", description: "Nome (ou parte) do contato. Opcional se informar o telefone." },
+      },
+    },
+    risk: "low",
+    async execute(args, { admin }) {
+      const phone = String(args.phone || "").replace(/\D/g, "");
+      const name = String(args.name || "").trim();
+      if (!phone && !name) return { error: "Diga o telefone ou o nome do contato a reativar." };
+      let q = admin.from("whatsapp_leads").select("id, name, phone_normalized").not("muted_at", "is", null);
+      q = phone ? q.eq("phone_normalized", phone) : q.ilike("name", `%${name}%`);
+      const { data: matches } = await q.limit(10);
+      if (!matches || matches.length === 0) return { error: "Não encontrei contato silenciado com esse dado." };
+      if (matches.length > 1) {
+        return { precisa_desambiguar: true, opcoes: matches.map((l: any) => ({ nome: l.name, phone: l.phone_normalized })) };
+      }
+      await admin.from("whatsapp_leads").update({ muted_at: null }).eq("id", matches[0].id);
+      return { ok: true, reativado: matches[0].name || matches[0].phone_normalized };
+    },
+  },
 ];
