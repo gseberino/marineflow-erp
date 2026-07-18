@@ -83,6 +83,10 @@ export interface CompanyInfo {
   stateCode?: string | null;
   cityCode?: string | null;
   hasCertificate?: boolean;
+  // Validade do certificado A1 (data ISO "YYYY-MM-DD") — do objeto certificate
+  // que a Contora aninha na empresa (GET /companies). Um A1 vencido trava toda
+  // emissão, então a UI alerta com antecedência (Painel de Saúde Fiscal).
+  certificateValidUntil?: string | null;
   defaultEnvironment?: string | null;
   raw: unknown;
 }

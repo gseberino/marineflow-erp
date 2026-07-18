@@ -488,6 +488,7 @@ async function handleDiagnostics(): Promise<Response> {
           state_code: firstCompany.stateCode ?? null,
           city_code: firstCompany.cityCode ?? null,
           has_certificate: firstCompany.hasCertificate ?? false,
+          certificate_valid_until: firstCompany.certificateValidUntil ?? null,
           default_environment: firstCompany.defaultEnvironment ?? null,
         }
         : { found: false },

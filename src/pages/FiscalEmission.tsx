@@ -225,6 +225,23 @@ function useFiscalEnvironment() {
   });
 }
 
+// Diagnóstico da conta (empresa/certificado/SEFAZ) para o Painel de Saúde Fiscal.
+// Cacheado por 10 min (faz chamadas à Contora, mas de graça — não consome cota).
+function useFiscalDiagnostics() {
+  return useQuery({
+    queryKey: ['fiscal_diagnostics_health'],
+    queryFn: async () => {
+      const { data, error } = await supabase.functions.invoke('fiscal-emit', {
+        body: { action: 'diagnostics' },
+      });
+      if (error) return null;
+      return (data as any)?.data ?? null;
+    },
+    staleTime: 10 * 60_000,
+    refetchOnWindowFocus: false,
+  });
+}
+
 // ── Página ─────────────────────────────────────────────────────────────────
 export default function FiscalEmission() {
   const { formatCurrency, formatDate } = useI18n();
@@ -235,7 +252,42 @@ export default function FiscalEmission() {
   const { data: documents, isLoading: loadingDocs } = useIssuedFiscalDocuments();
   const { data: fiscalEnv } = useFiscalEnvironment();
   const isProducao = fiscalEnv === 'producao';
+  const { data: health } = useFiscalDiagnostics();
   const { data: clients } = useClients();
+
+  // Métricas do mês corrente para o Painel de Saúde Fiscal (calculadas do
+  // histórico já carregado — no volume do HBR as 100 notas recentes cobrem o mês).
+  const monthStats = useMemo(() => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const month = (documents || []).filter((d: any) => {
+      const dt = new Date(d.created_at);
+      return dt.getFullYear() === y && dt.getMonth() === m;
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const by = (s: string) => month.filter((d: any) => d.status === s);
+    const authorized = by('authorized');
+    const faturamento = authorized.reduce(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (sum: number, d: any) => sum + Number(d.request_payload?.payments?.[0]?.amount ?? 0),
+      0,
+    );
+    const rejected = by('rejected').length;
+    const cancelled = by('cancelled').length;
+    // Proxy da cota Contora: eventos que chegaram à SEFAZ (autorizada+rejeitada+cancelada).
+    const eventos = authorized.length + rejected + cancelled;
+    return { authorized: authorized.length, rejected, cancelled, faturamento, eventos };
+  }, [documents]);
+
+  // Validade do certificado A1 → dias a vencer (alerta antecipado de "apagão fiscal").
+  const certInfo = useMemo(() => {
+    const vu = health?.company?.certificate_valid_until as string | undefined;
+    if (!vu) return null;
+    const days = Math.floor((new Date(`${vu}T23:59:59`).getTime() - Date.now()) / 86_400_000);
+    return { validUntil: vu, days };
+  }, [health]);
   const { data: products } = useProducts();
   const { data: productCategories } = useProductCategories();
   const { data: appSettings } = useAppSettings();
@@ -1233,6 +1285,68 @@ export default function FiscalEmission() {
           <span className="text-sm text-red-800">
             As NF-e emitidas aqui são <strong>reais</strong> e vão para a SEFAZ. Confira cada nota antes de emitir.
           </span>
+        </div>
+      )}
+
+      {/* ── Painel de Saúde Fiscal ── */}
+      {company && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {/* Certificado A1 */}
+          {(() => {
+            let tone = 'muted', label = '—', sub = 'Consultando…';
+            if (certInfo) {
+              sub = `Vence em ${formatDate(certInfo.validUntil)}`;
+              if (certInfo.days < 0) { tone = 'red'; label = 'VENCIDO'; }
+              else if (certInfo.days <= 7) { tone = 'red'; label = `Vence em ${certInfo.days}d`; }
+              else if (certInfo.days <= 30) { tone = 'amber'; label = `Vence em ${certInfo.days}d`; }
+              else { tone = 'green'; label = 'Válido'; }
+            } else if (health?.company?.has_certificate) { tone = 'green'; label = 'Carregado'; sub = 'Sem data de validade informada'; }
+            else if (health && health.company && health.company.has_certificate === false) { tone = 'red'; label = 'Sem certificado'; sub = 'Suba o A1 no painel da Contora'; }
+            const t = { red: 'border-red-300 bg-red-50 text-red-700', amber: 'border-amber-300 bg-amber-50 text-amber-700', green: 'border-emerald-200 bg-emerald-50 text-emerald-700', muted: 'border-border bg-card text-muted-foreground' }[tone];
+            return (
+              <div className={`rounded-xl border p-3 ${t}`}>
+                <p className="text-xs opacity-70">Certificado A1</p>
+                <p className="text-base font-bold leading-tight">{label}</p>
+                <p className="text-[11px] opacity-70 mt-0.5">{sub}</p>
+              </div>
+            );
+          })()}
+
+          {/* Cota Contora do mês (estimada) */}
+          {(() => {
+            const pct = monthStats.eventos / 500;
+            const tone = pct >= 1 ? 'red' : pct >= 0.8 ? 'amber' : 'green';
+            const bar = { red: 'bg-red-500', amber: 'bg-amber-500', green: 'bg-emerald-500' }[tone];
+            return (
+              <div className="rounded-xl border bg-card p-3">
+                <p className="text-xs text-muted-foreground">Cota do mês (estimada)</p>
+                <p className="text-base font-bold leading-tight">{monthStats.eventos} <span className="text-muted-foreground font-normal">/ 500</span></p>
+                <div className="h-1.5 rounded-full bg-muted mt-2 overflow-hidden">
+                  <div className={`h-full ${bar}`} style={{ width: `${Math.min(100, pct * 100)}%` }} />
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Faturamento do mês */}
+          <div className="rounded-xl border bg-card p-3">
+            <p className="text-xs text-muted-foreground">Faturado no mês</p>
+            <p className="text-base font-bold leading-tight">{formatCurrency(monthStats.faturamento)}</p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">{monthStats.authorized} nota(s) autorizada(s)</p>
+          </div>
+
+          {/* Notas por status */}
+          <div className={`rounded-xl border p-3 ${monthStats.rejected > 0 ? 'border-red-300 bg-red-50' : 'bg-card'}`}>
+            <p className="text-xs text-muted-foreground">Notas do mês</p>
+            <p className="text-base font-bold leading-tight">
+              <span className="text-emerald-600">{monthStats.authorized}</span>
+              <span className="text-muted-foreground font-normal text-sm"> aut.</span>
+              {monthStats.rejected > 0 && <span className="text-red-600 ml-2">{monthStats.rejected} <span className="font-normal text-sm">rej.</span></span>}
+            </p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {monthStats.cancelled > 0 ? `${monthStats.cancelled} cancelada(s)` : 'nenhuma cancelada'}
+            </p>
+          </div>
         </div>
       )}
 

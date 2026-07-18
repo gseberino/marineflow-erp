@@ -207,6 +207,9 @@ export class ContoraProvider implements FiscalProvider {
         [];
     const companies: CompanyInfo[] = arr.map((c) => {
       const o = c as Record<string, unknown>;
+      // A Contora aninha um resumo do certificado (CompanyCertificateSummary)
+      // no objeto da empresa, com valid_until (validade do A1).
+      const cert = o["certificate"] as Record<string, unknown> | null | undefined;
       return {
         id: o["id"] ? String(o["id"]) : undefined,
         legalName: (o["legal_name"] as string) ?? null,
@@ -215,6 +218,7 @@ export class ContoraProvider implements FiscalProvider {
         stateCode: (o["state_code"] as string) ?? null,
         cityCode: (o["city_code"] as string) ?? null,
         hasCertificate: o["has_certificate"] === true,
+        certificateValidUntil: (cert?.["valid_until"] as string) ?? null,
         defaultEnvironment: (o["default_environment"] as string) ?? null,
         raw: o,
       };
