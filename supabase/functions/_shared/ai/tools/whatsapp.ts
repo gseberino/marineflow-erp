@@ -2,6 +2,17 @@ import type { ToolDef } from "./registry.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// Prévia amigável de mídia ("identificar e encaminhar" — sem custo de vision/transcrição).
+function prettyPreview(body?: string | null): string | null {
+  const b = (body || "").trim();
+  if (!b) return null;
+  if (b === "[audio]") return "🎤 áudio";
+  if (b === "[image]") return "📷 imagem";
+  if (b === "[video]") return "🎬 vídeo";
+  if (b === "[document]") return "📎 arquivo";
+  return b.slice(0, 100);
+}
+
 /**
  * Usa a edge function whatsapp-send (não whatsapp-send-text) para respeitar
  * wa_test_mode/wa_test_number do app_settings. Lê env em tempo de chamada
@@ -334,7 +345,7 @@ export const whatsappTools: ToolDef[] = [
           ha,
           recebida_em: r.last_inbound_at,
           nao_lidas: r.unread_count || 0,
-          previa: r.last_body ? String(r.last_body).slice(0, 100) : null,
+          previa: prettyPreview(r.last_body),
         };
       });
       return { ok: true, total: pendentes.length, pendentes };

@@ -24,6 +24,18 @@ function jr(body: unknown, status = 200) {
   });
 }
 
+// "Identificar e encaminhar" (mídia): sem gastar token/vision, sinaliza o tipo do último
+// conteúdo recebido para o humano saber que há um áudio/imagem/arquivo para abrir.
+function mediaHint(body?: string | null): string {
+  switch ((body || "").trim()) {
+    case "[audio]": return " · 🎤 áudio (ouça)";
+    case "[image]": return " · 📷 imagem (veja)";
+    case "[video]": return " · 🎬 vídeo";
+    case "[document]": return " · 📎 arquivo";
+    default: return "";
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -97,7 +109,7 @@ Deno.serve(async (req) => {
       for (const w of topWaiting) {
         const mins = Math.max(0, Math.round((now.getTime() - new Date(w.last_inbound_at as string).getTime()) / 60000));
         const ha = mins < 60 ? `${mins} min` : mins < 1440 ? `${Math.round(mins / 60)} h` : `${Math.round(mins / 1440)} d`;
-        waitingLines.push(`   • ${w.contato}${w.is_client ? " (cliente)" : ""} — há ${ha}`);
+        waitingLines.push(`   • ${w.contato}${w.is_client ? " (cliente)" : ""} — há ${ha}${mediaHint(w.last_body)}`);
       }
       if (waiting.length > topWaiting.length) waitingLines.push(`   …e mais ${waiting.length - topWaiting.length}`);
     } else {
