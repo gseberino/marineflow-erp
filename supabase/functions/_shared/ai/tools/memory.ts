@@ -42,4 +42,60 @@ export const memoryTools: ToolDef[] = [
       return { ok: true, note_id: data.id };
     },
   },
+  {
+    name: "list_memory_notes",
+    description:
+      "Lista as notas de memória — a 'constituição viva': regras e preferências que você já aprendeu com o usuário. Use quando ele perguntar 'o que você já aprendeu?', 'quais suas regras?', 'o que você lembra sobre mim/a empresa?', ou antes de guardar uma lição parecida (evita duplicar).",
+    input_schema: {
+      type: "object",
+      properties: { category: { type: "string", description: "Opcional: filtrar por categoria (topic)." } },
+    },
+    risk: "low",
+    async execute(args, { admin }) {
+      let q = admin
+        .from("ai_operator_memory_notes")
+        .select("id, topic, body, created_at")
+        .order("created_at", { ascending: false })
+        .limit(50);
+      const cat = String(args.category || "").trim();
+      if (cat) q = q.eq("topic", cat);
+      const { data, error } = await q;
+      if (error) return { error: error.message };
+      return { count: data?.length ?? 0, notes: (data || []).map((n: any) => ({ id: n.id, categoria: n.topic, licao: n.body })) };
+    },
+  },
+  {
+    name: "forget_note",
+    description:
+      "Remove uma nota de memória errada/obsoleta (uma 'regra' que não vale mais). Use quando o usuário disser 'esquece isso', 'essa regra não vale mais', 'apaga o que você aprendeu sobre X'. Informe note_id (de list_memory_notes) OU um trecho do conteúdo para localizar.",
+    input_schema: {
+      type: "object",
+      properties: {
+        note_id: { type: "string", description: "UUID da nota (preferível)." },
+        content_match: { type: "string", description: "Trecho do texto da nota, se não tiver o id." },
+      },
+    },
+    risk: "low",
+    async execute(args, { admin }) {
+      if (args.note_id) {
+        const { error } = await admin.from("ai_operator_memory_notes").delete().eq("id", args.note_id);
+        if (error) return { error: error.message };
+        return { ok: true, removed_id: args.note_id };
+      }
+      const match = String(args.content_match || "").trim();
+      if (!match) return { error: "Informe o note_id ou um trecho do conteúdo da nota." };
+      const { data: found } = await admin
+        .from("ai_operator_memory_notes")
+        .select("id, body")
+        .ilike("body", `%${match}%`)
+        .limit(5);
+      if (!found || found.length === 0) return { error: `Não encontrei nota com "${match}".` };
+      if (found.length > 1) {
+        return { precisa_desambiguar: true, opcoes: found.map((n: any) => ({ id: n.id, licao: String(n.body).slice(0, 80) })) };
+      }
+      const { error } = await admin.from("ai_operator_memory_notes").delete().eq("id", found[0].id);
+      if (error) return { error: error.message };
+      return { ok: true, removed_id: found[0].id, licao: String(found[0].body).slice(0, 80) };
+    },
+  },
 ];
