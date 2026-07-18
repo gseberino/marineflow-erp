@@ -37,17 +37,22 @@ export function AIConfirmCard({
       {status === 'pending' && (
         <>
           {showNote && (
-            <textarea
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="O que ajustar, ou por que cancelar? A IA aprende com isso."
-              disabled={disabled}
-              className="mb-2 w-full min-h-[60px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-            />
+            <div className="mb-2">
+              <textarea
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="Ex.: 'use um tom mais amigável', 'o valor era 500'. A IA guarda pra acertar da próxima."
+                disabled={disabled}
+                className="w-full min-h-[60px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              />
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                Isto ensina a IA para as próximas — não muda esta ação. Se estiver errada, use Cancelar.
+              </p>
+            </div>
           )}
           <div className="flex flex-wrap gap-2">
             <Button size="sm" onClick={() => onConfirm(trimmed || undefined)} disabled={disabled} className="gap-1">
-              <Check className="h-4 w-4" /> {trimmed ? 'Confirmar com ajuste' : 'Confirmar'}
+              <Check className="h-4 w-4" /> Confirmar
             </Button>
             <Button size="sm" variant="outline" onClick={() => onCancel(trimmed || undefined)} disabled={disabled} className="gap-1">
               <X className="h-4 w-4" /> Cancelar
@@ -60,7 +65,7 @@ export function AIConfirmCard({
                 disabled={disabled}
                 className="gap-1 text-muted-foreground"
               >
-                <Pencil className="h-3.5 w-3.5" /> Ajustar
+                <Pencil className="h-3.5 w-3.5" /> Ensinar a IA
               </Button>
             )}
           </div>
