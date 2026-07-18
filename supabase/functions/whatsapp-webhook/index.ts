@@ -339,6 +339,26 @@ Deno.serve(async (req) => {
         .eq("id", clientId);
     }
 
+    // Áudio inbound → transcreve via Groq Whisper (fire-and-forget; não atrasa o webhook).
+    // Se GROQ_API_KEY não estiver setada, a função sai sem efeito (a mensagem segue "[audio]").
+    if (!event.fromMe && event.messageType === "audio" && msg?.id) {
+      const transcribe = async () => {
+        try {
+          await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/whatsapp-transcribe-audio`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+            },
+            body: JSON.stringify({ message_id: msg.id }),
+          });
+        } catch (_e) { /* graceful — a mensagem segue como "[audio]" */ }
+      };
+      const waitUntil = (globalThis as any).EdgeRuntime?.waitUntil;
+      if (typeof waitUntil === "function") waitUntil(transcribe());
+      else transcribe().catch(() => null);
+    }
+
     return jr({ ok: true, message_id: msg?.id });
   } catch (err: any) {
     return jr({ error: err.message }, 500);
