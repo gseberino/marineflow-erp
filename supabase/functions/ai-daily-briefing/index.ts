@@ -90,6 +90,40 @@ Deno.serve(async (req) => {
     const upcomingCount = upcomingRows?.length ?? 0;
     const upcomingSum = (upcomingRows || []).reduce((a: number, r: any) => a + Number(r.balance_amount ?? r.amount ?? 0), 0);
 
+    // Saúde operacional: OS ATIVA parada (trabalho em andamento sem movimento há +10 dias).
+    const stuckCut = new Date(now.getTime() - 10 * 86400000).toISOString();
+    const { data: stuckOs } = await admin
+      .from("service_orders")
+      .select("service_order_number, updated_at, clients(name)")
+      .in("status", ["approved", "in_progress", "open", "scheduled", "awaiting_parts"])
+      .lt("updated_at", stuckCut)
+      .order("updated_at", { ascending: true })
+      .limit(10);
+    const stuckLines: string[] = [];
+    if (stuckOs && stuckOs.length > 0) {
+      stuckLines.push(`🔧 OS paradas (+10 dias): *${stuckOs.length}*`);
+      for (const o of (stuckOs as any[]).slice(0, 3)) {
+        const nome = Array.isArray(o.clients) ? o.clients[0]?.name : o.clients?.name;
+        const dias = Math.floor((now.getTime() - new Date(o.updated_at).getTime()) / 86400000);
+        stuckLines.push(`   • ${o.service_order_number}${nome ? ` — ${nome}` : ""} · parada ${dias}d`);
+      }
+    }
+
+    // Saúde de estoque: itens no/abaixo do mínimo (comparação coluna-a-coluna feita em memória).
+    const { data: prodRows } = await admin
+      .from("products")
+      .select("name, stock_quantity, minimum_stock")
+      .gt("minimum_stock", 0)
+      .limit(300);
+    const lowStock = ((prodRows as any[]) || []).filter((p: any) => Number(p.stock_quantity ?? 0) <= Number(p.minimum_stock ?? 0));
+    const stockLines: string[] = [];
+    if (lowStock.length > 0) {
+      stockLines.push(`📦 Estoque crítico: *${lowStock.length}*`);
+      for (const p of lowStock.slice(0, 3)) {
+        stockLines.push(`   • ${p.name} · ${p.stock_quantity}/${p.minimum_stock}`);
+      }
+    }
+
     const { count: quotesCount } = await admin
       .from("service_orders")
       .select("id", { count: "exact", head: true })
@@ -185,6 +219,8 @@ Deno.serve(async (req) => {
       ...recebLines,
       ...(upcomingCount > 0 ? [`🔜 A vencer (próx. 3 dias): *${upcomingCount}* (${fmt.format(upcomingSum)})`] : []),
       `✅ Aprovações da IA pendentes: *${pendingCount ?? 0}*`,
+      ...stuckLines,
+      ...stockLines,
       ...waitingLines,
       "",
       `_Enviado pelo assistente de ${companyName}. Responda por aqui para pedir qualquer coisa._`,
