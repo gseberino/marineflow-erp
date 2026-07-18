@@ -77,6 +77,19 @@ Deno.serve(async (req) => {
     const overdueCount = overdueRows?.length ?? 0;
     const overdueSum = (overdueRows || []).reduce((a: number, r: any) => a + Number(r.balance_amount ?? r.amount ?? 0), 0);
 
+    // Saúde do negócio (Frente 2): recebíveis A VENCER nos próximos 3 dias — heads-up do
+    // caixa que entra, complementando os vencidos (visão de fluxo pra frente).
+    const in3days = new Date(now.getTime() + 3 * 86400000).toISOString().slice(0, 10);
+    const { data: upcomingRows } = await admin
+      .from("receivables")
+      .select("balance_amount, amount")
+      .in("status", ["pending", "partially_paid"])
+      .eq("is_deposit", false)
+      .gte("due_date", todayISO)
+      .lte("due_date", in3days);
+    const upcomingCount = upcomingRows?.length ?? 0;
+    const upcomingSum = (upcomingRows || []).reduce((a: number, r: any) => a + Number(r.balance_amount ?? r.amount ?? 0), 0);
+
     const { count: quotesCount } = await admin
       .from("service_orders")
       .select("id", { count: "exact", head: true })
@@ -170,6 +183,7 @@ Deno.serve(async (req) => {
       ...quoteLines,
       `💸 Recebíveis vencidos: *${overdueCount}*${overdueCount > 0 ? ` (${fmt.format(overdueSum)})` : ""}`,
       ...recebLines,
+      ...(upcomingCount > 0 ? [`🔜 A vencer (próx. 3 dias): *${upcomingCount}* (${fmt.format(upcomingSum)})`] : []),
       `✅ Aprovações da IA pendentes: *${pendingCount ?? 0}*`,
       ...waitingLines,
       "",
