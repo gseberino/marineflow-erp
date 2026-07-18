@@ -27,13 +27,19 @@ function jr(body: unknown, status = 200) {
 // "Identificar e encaminhar" (mídia): sem gastar token/vision, sinaliza o tipo do último
 // conteúdo recebido para o humano saber que há um áudio/imagem/arquivo para abrir.
 function mediaHint(body?: string | null): string {
-  switch ((body || "").trim()) {
+  const b = (body || "").trim();
+  switch (b) {
     case "[audio]": return " · 🎤 áudio (ouça)";
     case "[image]": return " · 📷 imagem (veja)";
     case "[video]": return " · 🎬 vídeo";
     case "[document]": return " · 📎 arquivo";
-    default: return "";
   }
+  // Áudio já transcrito ("🎤 <texto>") → mostra um trecho no digest.
+  if (b.startsWith("🎤 ")) {
+    const snip = b.slice(2).trim();
+    return ` · 🎤 "${snip.slice(0, 40)}${snip.length > 40 ? "…" : ""}"`;
+  }
+  return "";
 }
 
 Deno.serve(async (req) => {
