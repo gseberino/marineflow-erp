@@ -536,6 +536,9 @@ Deno.serve(async (req) => {
       if (!pendingActionId || (decision !== "approve" && decision !== "reject")) {
         return jr({ error: "pending_action_id e decision ('approve'|'reject') são obrigatórios" }, 400);
       }
+      // Sinal de aprendizado (diff-capture): correção/motivo que o usuário digitou no card ao
+      // aprovar-com-ajuste ou rejeitar. Fica na auditoria para a auto-revisão/constituição depois.
+      const userNote = typeof body.note === "string" ? body.note.trim().slice(0, 500) : "";
 
       const { data: pending, error: pendingErr } = await admin
         .from("ai_operator_pending_actions")
@@ -562,8 +565,8 @@ Deno.serve(async (req) => {
           actor_user_id: userId,
           actor_kind: "user",
           event_type: `reject:${pending.action_name}`,
-          event_category: "security",
-          payload: { args: pending.payload },
+          event_category: userNote ? "learning" : "security",
+          payload: { args: pending.payload, user_note: userNote || null },
         });
         const rejectMsg = `❌ Ação rejeitada: ${pending.title}.`;
         if (pending.session_id) {
@@ -590,8 +593,8 @@ Deno.serve(async (req) => {
         actor_user_id: userId,
         actor_kind: "user",
         event_type: `approve_execute:${pending.action_name}`,
-        event_category: "data",
-        payload: { args: pending.payload, risk: pending.risk_level, result_summary: JSON.stringify(execResult ?? null).slice(0, 500) },
+        event_category: userNote ? "learning" : "data",
+        payload: { args: pending.payload, risk: pending.risk_level, user_note: userNote || null, result_summary: JSON.stringify(execResult ?? null).slice(0, 500) },
       });
 
       const executedAt = new Date().toISOString();

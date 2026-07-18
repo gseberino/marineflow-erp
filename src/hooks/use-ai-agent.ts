@@ -173,12 +173,12 @@ export function useAIAgent(context: AIContext) {
   // Fase 3: confirmação/rejeição é determinística — o servidor executa (ou não) a tool
   // com o payload já gravado em ai_operator_pending_actions, SEM chamar o LLM de novo.
   const callConfirmAction = useCallback(
-    async (pendingActionId: string, decision: 'approve' | 'reject') => {
+    async (pendingActionId: string, decision: 'approve' | 'reject', note?: string) => {
       setLoading(true);
       setError(null);
       try {
         const { data, error } = await supabase.functions.invoke('ai-agent', {
-          body: { type: 'confirm_action', pending_action_id: pendingActionId, decision },
+          body: { type: 'confirm_action', pending_action_id: pendingActionId, decision, note: note || undefined },
         });
         if (error) {
           const rawBody = (error as any)?.context?.responseBody ?? '';
@@ -202,7 +202,7 @@ export function useAIAgent(context: AIContext) {
     [invalidateAll]
   );
 
-  const confirmProposal = useCallback(async () => {
+  const confirmProposal = useCallback(async (note?: string) => {
     if (!activeProposal) return;
     const proposalIdx = activeProposal.idx;
     const pendingActionId = activeProposal.proposal.pending_action_id;
@@ -210,13 +210,13 @@ export function useAIAgent(context: AIContext) {
       d.map((it, i) => (i === proposalIdx && it.kind === 'proposal' ? { ...it, status: 'confirmed' } : it))
     );
     setActiveProposal(null);
-    await callConfirmAction(pendingActionId, 'approve');
+    await callConfirmAction(pendingActionId, 'approve', note);
     setDisplay((d) =>
       d.map((it, i) => (i === proposalIdx && it.kind === 'proposal' ? { ...it, status: 'executed' as any } : it))
     );
   }, [activeProposal, callConfirmAction]);
 
-  const cancelProposal = useCallback(async () => {
+  const cancelProposal = useCallback(async (note?: string) => {
     if (!activeProposal) return;
     const proposalIdx = activeProposal.idx;
     const pendingActionId = activeProposal.proposal.pending_action_id;
@@ -224,7 +224,7 @@ export function useAIAgent(context: AIContext) {
       d.map((it, i) => (i === proposalIdx && it.kind === 'proposal' ? { ...it, status: 'cancelled' } : it))
     );
     setActiveProposal(null);
-    await callConfirmAction(pendingActionId, 'reject');
+    await callConfirmAction(pendingActionId, 'reject', note);
   }, [activeProposal, callConfirmAction]);
 
   const selectOption = useCallback(async (value: string, label: string) => {
