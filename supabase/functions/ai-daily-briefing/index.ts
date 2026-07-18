@@ -58,7 +58,7 @@ Deno.serve(async (req) => {
     // ── Métricas do dia ──
     const { data: overdueRows } = await admin
       .from("receivables")
-      .select("balance_amount, amount")
+      .select("balance_amount, amount, due_date, clients(name)")
       .in("status", ["pending", "partially_paid"])
       .eq("is_deposit", false)
       .lt("due_date", todayISO);
@@ -137,6 +137,19 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ── Recebíveis vencidos priorizados por VALOR (impacto de caixa) — top 4 (Fase 2) ──
+    // Não trata todo vencido igual: os maiores primeiro (prática de AR 2026).
+    const recebLines: string[] = [];
+    const overdueSorted = ((overdueRows as any[]) || [])
+      .slice()
+      .sort((a: any, b: any) => Number(b.balance_amount ?? b.amount ?? 0) - Number(a.balance_amount ?? a.amount ?? 0))
+      .slice(0, 4);
+    for (const r of overdueSorted) {
+      const nome = Array.isArray(r.clients) ? r.clients[0]?.name : r.clients?.name;
+      const dias = r.due_date ? Math.floor((todayMid - new Date(`${r.due_date}T00:00:00`).getTime()) / 86400000) : 0;
+      recebLines.push(`   • ${nome || "(sem cliente)"} — ${fmt.format(Number(r.balance_amount ?? r.amount ?? 0))} · vencido ${dias}d`);
+    }
+
     const linhas = [
       `☀️ *Bom dia! Resumo de ${dateBR}*`,
       "",
@@ -144,6 +157,7 @@ Deno.serve(async (req) => {
       `📄 Orçamentos aguardando resposta: *${quotesCount ?? 0}*`,
       ...quoteLines,
       `💸 Recebíveis vencidos: *${overdueCount}*${overdueCount > 0 ? ` (${fmt.format(overdueSum)})` : ""}`,
+      ...recebLines,
       `✅ Aprovações da IA pendentes: *${pendingCount ?? 0}*`,
       ...waitingLines,
       "",
