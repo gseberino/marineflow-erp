@@ -98,4 +98,47 @@ export const memoryTools: ToolDef[] = [
       return { ok: true, removed_id: found[0].id, licao: String(found[0].body).slice(0, 80) };
     },
   },
+  {
+    name: "agent_health_report",
+    description:
+      "Relatório de saúde do próprio assistente de IA. Use quando o usuário perguntar 'como está a IA?', 'relatório do assistente/agente', 'quantas ações você fez?', 'a IA está indo bem?'. Retorna atividade e taxa de aprovação dos últimos dias — bom para confiança e para decidir dar mais autonomia. Somente leitura.",
+    input_schema: {
+      type: "object",
+      properties: { days: { type: "number", description: "Janela em dias (padrão 7, máx 90)." } },
+    },
+    risk: "low",
+    async execute(args, { admin }) {
+      const days = Math.min(Math.max(Number(args.days) || 7, 1), 90);
+      const since = new Date(Date.now() - days * 86400000).toISOString();
+      const { data: pa } = await admin
+        .from("ai_operator_pending_actions")
+        .select("status")
+        .gte("created_at", since);
+      const rows = (pa as any[]) || [];
+      const byStatus: Record<string, number> = {};
+      for (const r of rows) byStatus[r.status] = (byStatus[r.status] || 0) + 1;
+      const aprovadas = (byStatus["approved"] || 0) + (byStatus["executed"] || 0);
+      const rejeitadas = byStatus["rejected"] || 0;
+      const falhas = byStatus["failed"] || 0;
+      const decididas = aprovadas + rejeitadas;
+      const taxaAprovacao = decididas > 0 ? Math.round((aprovadas / decididas) * 100) : null;
+      const { count: pendentesAgora } = await admin
+        .from("ai_operator_pending_actions").select("id", { count: "exact", head: true }).eq("status", "pending");
+      const { count: conversas } = await admin
+        .from("ai_operator_sessions").select("id", { count: "exact", head: true }).gte("last_activity_at", since);
+      const { count: regras } = await admin
+        .from("ai_operator_memory_notes").select("id", { count: "exact", head: true });
+      return {
+        periodo_dias: days,
+        acoes_que_pediram_confirmacao: rows.length,
+        aprovadas,
+        rejeitadas,
+        falhas,
+        taxa_aprovacao_pct: taxaAprovacao,
+        pendentes_agora: pendentesAgora ?? 0,
+        conversas_ativas: conversas ?? 0,
+        regras_na_constituicao: regras ?? 0,
+      };
+    },
+  },
 ];
