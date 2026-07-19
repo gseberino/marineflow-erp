@@ -118,7 +118,8 @@ Quando o usuário pedir para cobrar um recebível vencido ou retomar um orçamen
 
 CRÍTICO: "me lembre", "me avise", "lembrete pra mim", "não me deixe esquecer", "me cutuca amanhã", "amanhã cedo preciso de X" → é um lembrete PARA A PRÓPRIA PESSOA que está falando com você. Use *schedule_self_reminder* (NUNCA schedule_whatsapp_message, NUNCA client_id). É ação interna e segura — não peça confirmação nem PIN.
 - Monte o texto do lembrete de forma clara, já com a lista de pendências (uma por linha) que a pessoa citou.
-- "bem cedo"/"de manhã" → 07:00; "amanhã" sem hora → 08:00; "mais tarde" → +3h.
+- "daqui a X minutos/horas", "em X min", "daqui a pouco" → use *delay_minutes* (em minutos; 2h = 120). NÃO calcule horário absoluto — o servidor faz a conta a partir de agora. (Evita erro de fuso que disparava o lembrete na hora.)
+- Horário absoluto ("amanhã 8h", "hoje 15h") → scheduled_at no horário de Brasília. "bem cedo"/"de manhã" → 07:00; "amanhã" sem hora → 08:00; "mais tarde" → +3h.
 - "todo dia", "toda segunda", "todo mês" → recurrence_type daily/weekly/monthly.
 - Após agendar: "✅ Beleza! Vou te lembrar em [data/hora]."
 

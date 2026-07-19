@@ -255,9 +255,13 @@ export const whatsappTools: ToolDef[] = [
           type: "string",
           description: "O texto que a pessoa vai receber. Escreva claro e amigável, já com a lista de pendências que ela pediu para lembrar (uma por linha).",
         },
+        delay_minutes: {
+          type: "number",
+          description: "Para lembretes RELATIVOS ('daqui a X minutos/horas'): minutos a partir de AGORA (ex.: 'daqui a 3 min' → 3; 'em 2 horas' → 120). Use este campo nesses casos e NÃO calcule horário absoluto. Com delay_minutes, pode omitir scheduled_at.",
+        },
         scheduled_at: {
           type: "string",
-          description: "Data e hora do lembrete em ISO 8601 (ex: 2026-07-17T07:00:00). 'bem cedo'/'de manhã' → 07:00; 'amanhã' sem hora → 08:00; 'mais tarde' → +3h.",
+          description: "Para horário ABSOLUTO ('amanhã 8h', 'hoje 15h'): data/hora ISO 8601 no horário de Brasília (ex: 2026-07-19T08:00:00 — pode omitir o fuso, o sistema assume Brasília). 'bem cedo'/'de manhã' → 07:00; 'amanhã' sem hora → 08:00. NÃO use para 'daqui a X' (use delay_minutes).",
         },
         recurrence_type: {
           type: "string",
@@ -265,12 +269,24 @@ export const whatsappTools: ToolDef[] = [
           description: "Recorrência do lembrete. Padrão: once (uma vez).",
         },
       },
-      required: ["message", "scheduled_at"],
+      required: ["message"],
     },
     risk: "low",
     async execute(args, { admin, userId }) {
-      const when = new Date(args.scheduled_at);
-      if (isNaN(when.getTime())) return { error: "Data/hora do lembrete inválida." };
+      let when: Date;
+      if (args.delay_minutes != null && Number(args.delay_minutes) > 0) {
+        // Lembrete relativo: o servidor calcula "agora + X" (sem conta de fuso pelo modelo).
+        when = new Date(Date.now() + Number(args.delay_minutes) * 60000);
+      } else {
+        const raw = String(args.scheduled_at || "").trim();
+        // Horário absoluto sem fuso (naive) → interpreta como Brasília (-03:00), não UTC.
+        const hasTz = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(raw);
+        when = new Date(hasTz || !raw ? raw : `${raw}-03:00`);
+      }
+      if (isNaN(when.getTime())) return { error: "Data/hora do lembrete inválida. Informe delay_minutes (relativo) ou scheduled_at (absoluto)." };
+      // Rede de segurança: se caiu no passado (ex.: erro de fuso), joga 1 min à frente em vez
+      // de disparar imediatamente.
+      if (when.getTime() < Date.now() - 30000) when = new Date(Date.now() + 60000);
       const { data: u } = await admin.from("app_users").select("phone_normalized, full_name").eq("id", userId).maybeSingle();
       const phone = (u?.phone_normalized || "").replace(/\D/g, "");
       if (!phone) {
