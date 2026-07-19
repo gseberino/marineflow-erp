@@ -315,6 +315,16 @@ async function handleCreate(admin: any, body: any): Promise<Response> {
       status: "draft",
       idempotency_key: idempotencyKey,
       request_payload: payload,
+      // Vínculo item→produto do catálogo (só itens com product_id), para a baixa
+      // opt-in de estoque/recebível (RPC settle_nfe_stock_and_receivable). O
+      // request_payload é layout SEFAZ e não guarda product_id.
+      source_items: (body.items ?? [])
+        .filter((it: Record<string, unknown>) => it.product_id)
+        .map((it: Record<string, unknown>) => ({
+          product_id: String(it.product_id),
+          quantity: Number(it.quantity),
+          unit_price: Number(it.unit_price),
+        })),
     })
     .select()
     .single();

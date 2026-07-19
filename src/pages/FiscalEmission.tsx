@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/select';
 import {
   FileText, Loader2, Plus, Trash2, RefreshCw, Download, Ban, Pencil, Settings2, Upload,
-  Stethoscope, CheckCircle2, XCircle, Undo2, Send, FileDown, Copy,
+  Stethoscope, CheckCircle2, XCircle, Undo2, Send, FileDown, Copy, Boxes,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -1166,6 +1166,31 @@ export default function FiscalEmission() {
     }
   };
 
+  // "Baixar estoque + gerar recebível" (opt-in) numa NF-e AVULSA autorizada.
+  // Chama a RPC atômica settle_nfe_stock_and_receivable: baixa o estoque dos
+  // itens ligados a produtos do catálogo e cria o recebível (à vista). Notas de
+  // OS não entram (a OS já faz); é idempotente (o botão some após lançar).
+  const handleSettleStock = async (doc: any) => {
+    markBusy(doc.id, true);
+    const tId = toast.loading('Baixando estoque e gerando recebível…');
+    try {
+      const { data, error } = await (supabase.rpc as any)('settle_nfe_stock_and_receivable', {
+        p_document_id: doc.id,
+      });
+      if (error) throw new Error(error.message);
+      if (data && data.ok === false) throw new Error(data.error || 'Falha ao lançar.');
+      const n = Number(data?.stock_items ?? 0);
+      toast.success(`Recebível gerado${n > 0 ? ` e estoque baixado (${n} item${n > 1 ? 'ns' : ''})` : ''}.`, { id: tId });
+      qc.invalidateQueries({ queryKey: ['issued_fiscal_documents'] });
+      qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: ['receivables'] });
+    } catch (err: any) {
+      toast.error('Erro ao lançar estoque/recebível: ' + (err?.message || 'desconhecido'), { id: tId });
+    } finally {
+      markBusy(doc.id, false);
+    }
+  };
+
   // Export de XMLs autorizados de um período + um resumo CSV (livro de saída),
   // num único .zip para a contadora. Os XMLs são baixados pelo proxy autenticado
   // (action "artifact") — as URLs da Contora exigem token; o CSV é montado a
@@ -1471,6 +1496,19 @@ export default function FiscalEmission() {
                                 onClick={() => handleReemitFromDoc(doc)}
                               >
                                 <Copy className="h-3.5 w-3.5 mr-1" />Duplicar
+                              </Button>
+                            )}
+                            {doc.request_payload?.purpose !== 4
+                              && doc.origin_type === 'manual'
+                              && doc.client_id
+                              && !doc.stock_settled_at && (
+                              <Button
+                                size="sm" variant="outline" className="text-xs"
+                                disabled={isBusy}
+                                title="Baixar o estoque dos itens ligados a produtos do catálogo e gerar um recebível (à vista) desta venda avulsa. Notas de OS já fazem isso pelo fluxo da OS."
+                                onClick={() => handleSettleStock(doc)}
+                              >
+                                <Boxes className="h-3.5 w-3.5 mr-1" />Baixar estoque + recebível
                               </Button>
                             )}
                             <Button
