@@ -10,6 +10,7 @@
 // Agendado via pg_cron (jobid 5, ai-business-monitor, hora em hora) — DESATIVADO até validação.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { createFiscalProvider } from "../_shared/fiscal/factory.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -65,6 +66,43 @@ Deno.serve(async (req) => {
       .lt("created_at", d7);
     if ((staleQuotes ?? 0) > 0 && await claim(`stale_quotes:${todayISO}`, { n: staleQuotes })) {
       alerts.push(`📄 *${staleQuotes}* orçamento(s) parado(s) há mais de 7 dias sem resposta. Talvez valha um follow-up.`);
+    }
+
+    // ── Sinais FISCAIS (NF-e) — reaproveitam o mesmo canal/dedup ──
+    // (3) Certificado A1 vencendo (um A1 vencido trava TODA a emissão de NF-e).
+    try {
+      const provider = createFiscalProvider();
+      const companies = await provider.listCompanies();
+      const vu = companies.ok ? companies.data[0]?.certificateValidUntil : null;
+      if (vu) {
+        const days = Math.floor((new Date(`${vu}T23:59:59`).getTime() - now.getTime()) / 864e5);
+        if (days <= 30 && await claim(`fiscal_cert_expiry:${todayISO}`, { days, vu })) {
+          const urg = days <= 7 ? " *URGENTE*" : "";
+          const quando = days < 0 ? "está VENCIDO" : `vence em ${days} dia(s)`;
+          alerts.push(`🔐 Certificado A1${urg}: ${quando} (${vu}). Renove na Contora para não parar a emissão de NF-e.`);
+        }
+      }
+    } catch (_e) {
+      // Nunca deixa uma falha na Contora derrubar os demais sinais do monitor.
+      console.warn("[ai-business-monitor] checagem de certificado falhou (ignorada)");
+    }
+
+    // (4) Cota Contora do mês (plano Gratuito = 500 eventos/mês). Alerta em 80%.
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const { count: fiscalEvents } = await admin
+      .from("issued_fiscal_documents").select("id", { count: "exact", head: true })
+      .in("status", ["authorized", "rejected", "cancelled"]).gte("created_at", monthStart);
+    if ((fiscalEvents ?? 0) > 400 && await claim(`fiscal_quota_high:${todayISO}`, { n: fiscalEvents })) {
+      alerts.push(`📊 Cota fiscal do mês: ~*${fiscalEvents}*/500 eventos usados. Fique de olho para não estourar o plano.`);
+    }
+
+    // (5) NF-e rejeitadas nas últimas 24h (não deixar uma rejeição passar batida).
+    const d1 = new Date(now.getTime() - 864e5).toISOString();
+    const { count: rejectedNfe } = await admin
+      .from("issued_fiscal_documents").select("id", { count: "exact", head: true })
+      .eq("status", "rejected").gte("updated_at", d1);
+    if ((rejectedNfe ?? 0) > 0 && await claim(`fiscal_rejected:${todayISO}`, { n: rejectedNfe })) {
+      alerts.push(`❌ *${rejectedNfe}* NF-e rejeitada(s) nas últimas 24h. Confira o motivo no histórico e reemita.`);
     }
 
     if (alerts.length === 0) return jr({ ok: true, queued: 0, note: "sem sinais novos hoje" });
