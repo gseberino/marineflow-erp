@@ -241,10 +241,29 @@ Deno.serve(async (req) => {
 
         const dispatchToAgent = async () => {
           try {
+            // Áudio-comando do dono: transcreve o áudio ANTES de despachar, para o agente
+            // agir sobre o que foi FALADO (e não sobre "[audio]"). Roda no fundo (waitUntil),
+            // então o webhook responde rápido. Se falhar, cai em "[audio]" e o agente pede
+            // para repetir/digitar.
+            let dispatchText = body;
+            if (event.messageType === "audio" && msg?.id) {
+              try {
+                const tr = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/whatsapp-transcribe-audio`, {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+                  },
+                  body: JSON.stringify({ message_id: msg.id }),
+                });
+                const trBody = await tr.json().catch(() => ({}));
+                if (trBody?.ok && trBody?.text) dispatchText = String(trBody.text);
+              } catch (_e) { /* mantém "[audio]" */ }
+            }
             const res = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/ai-agent`, {
               method: "POST",
               headers: { "Content-Type": "application/json", "x-internal-secret": Deno.env.get("AI_INTERNAL_SECRET") ?? "" },
-              body: JSON.stringify({ channel: "whatsapp", phone_normalized: phone, app_user_id: aiUser.id, text: body }),
+              body: JSON.stringify({ channel: "whatsapp", phone_normalized: phone, app_user_id: aiUser.id, text: dispatchText }),
             });
             if (!res.ok) console.error("[whatsapp-webhook] ai-agent respondeu", res.status, await res.text().catch(() => ""));
           } catch (e) {
