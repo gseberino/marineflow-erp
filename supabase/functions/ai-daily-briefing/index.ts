@@ -215,6 +215,25 @@ Deno.serve(async (req) => {
       recebLines.push(`   • ${nome || "(sem cliente)"} — ${fmt.format(Number(r.balance_amount ?? r.amount ?? 0))} · vencido ${dias}d`);
     }
 
+    // Sugestão do dia (Onda 1): 1 sugestão acionável, rotativa por dia — reusa os candidatos
+    // já levantados (orçamentos parados, recebíveis vencidos, OS paradas). Uma por dia, sem spam.
+    const sugestoes: string[] = [];
+    for (const q of flaggedQuotes) {
+      sugestoes.push(`dar um follow-up no orçamento de *${q.nome}* (${fmt.format(q.valor)}), parado há ${q.dias}d. Me peça que eu preparo.`);
+    }
+    for (const r of overdueSorted) {
+      const nome = Array.isArray(r.clients) ? r.clients[0]?.name : r.clients?.name;
+      const dias = r.due_date ? Math.floor((todayMid - new Date(`${r.due_date}T00:00:00`).getTime()) / 86400000) : 0;
+      sugestoes.push(`cobrar *${nome || "um cliente"}* (${fmt.format(Number(r.balance_amount ?? r.amount ?? 0))}, vencido ${dias}d). Me peça que eu redijo a mensagem.`);
+    }
+    for (const o of ((stuckOs as any[]) || []).slice(0, 3)) {
+      const nome = Array.isArray(o.clients) ? o.clients[0]?.name : o.clients?.name;
+      const dias = Math.floor((now.getTime() - new Date(o.updated_at).getTime()) / 86400000);
+      sugestoes.push(`retomar a *${o.service_order_number}*${nome ? ` (${nome})` : ""}, parada há ${dias}d.`);
+    }
+    const diaDoAno = Math.floor((now.getTime() - new Date(now.getFullYear(), 0, 0).getTime()) / 86400000);
+    const sugestaoLine = sugestoes.length > 0 ? `💡 *Sugestão de hoje:* ${sugestoes[diaDoAno % sugestoes.length]}` : "";
+
     const linhas = [
       `☀️ *Bom dia! Resumo de ${dateBR}*`,
       "",
@@ -228,6 +247,7 @@ Deno.serve(async (req) => {
       ...stuckLines,
       ...stockLines,
       ...waitingLines,
+      ...(sugestaoLine ? ["", sugestaoLine] : []),
       "",
       `_Enviado pelo assistente de ${companyName}. Responda por aqui para pedir qualquer coisa._`,
     ];
