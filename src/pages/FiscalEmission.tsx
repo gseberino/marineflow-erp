@@ -357,6 +357,11 @@ export default function FiscalEmission() {
   const [recipientIe, setRecipientIe] = useState('');
   const [address, setAddress] = useState<AddressState>(EMPTY_ADDRESS);
   const [paymentMethod, setPaymentMethod] = useState('01');
+  // Plano de pagamento na emissão (à vista / parcelado com vencimentos).
+  const [payMode, setPayMode] = useState<'avista' | 'parcelado'>('avista');
+  const [payN, setPayN] = useState(2);
+  const [payInterval, setPayInterval] = useState(30);
+  const [payFirstDue, setPayFirstDue] = useState('');
   const [presenceIndicator, setPresenceIndicator] = useState(1);
   const [consumerFinal, setConsumerFinal] = useState(true);
   const [additionalInfo, setAdditionalInfo] = useState('');
@@ -567,6 +572,10 @@ export default function FiscalEmission() {
     setRecipientIe('');
     setAddress(EMPTY_ADDRESS);
     setPaymentMethod('01');
+    setPayMode('avista');
+    setPayN(2);
+    setPayInterval(30);
+    setPayFirstDue('');
     setPresenceIndicator(1);
     setConsumerFinal(true);
     setAdditionalInfo(SIMPLES_INFO_NOTE);
@@ -993,6 +1002,11 @@ export default function FiscalEmission() {
           client_id: clientId || null,
           nature_of_operation: natureOfOperation,
           payment_method: paymentMethod,
+          // Plano de pagamento (à vista/parcelado) definido na emissão — só faz
+          // sentido em naturezas com pagamento (venda); vira os recebíveis depois.
+          payment_terms: (selectedNature.hasPayment && payMode === 'parcelado' && payFirstDue)
+            ? { mode: 'parcelado', method: paymentMethod, installments: buildSchedule(total, payN, payFirstDue, payInterval, paymentMethod) }
+            : (selectedNature.hasPayment ? { mode: 'avista', method: paymentMethod, installments: null } : null),
           presence_indicator: presenceIndicator,
           consumer_final: consumerFinal,
           additional_info: additionalInfo || undefined,
@@ -1223,11 +1237,25 @@ export default function FiscalEmission() {
 
   const openSettleDialog = (doc: any) => {
     setSettleTarget(doc);
-    setSettleMode('avista');
-    setSettleN(2);
-    setSettleInterval(30);
-    setSettleFirstDue(new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10));
-    setSettleMethod(String(doc.request_payload?.payments?.[0]?.method || '15'));
+    // Pré-preenche a partir do plano de pagamento escolhido NA EMISSÃO (payment_terms),
+    // se houver; o usuário ainda pode ajustar antes de confirmar.
+    const pt = doc.payment_terms;
+    const inst = Array.isArray(pt?.installments) ? pt.installments : [];
+    if (pt?.mode === 'parcelado' && inst.length > 1) {
+      setSettleMode('parcelado');
+      setSettleN(inst.length);
+      setSettleFirstDue(inst[0].due_date);
+      const d0 = new Date(`${inst[0].due_date}T00:00:00`).getTime();
+      const d1 = new Date(`${inst[1].due_date}T00:00:00`).getTime();
+      setSettleInterval(Math.max(1, Math.round((d1 - d0) / 86400000)));
+      setSettleMethod(String(pt.method || doc.request_payload?.payments?.[0]?.method || '15'));
+    } else {
+      setSettleMode('avista');
+      setSettleN(2);
+      setSettleInterval(30);
+      setSettleFirstDue(new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10));
+      setSettleMethod(String(pt?.method || doc.request_payload?.payments?.[0]?.method || '15'));
+    }
   };
 
   // "Baixar estoque + gerar recebível(is)" (opt-in) numa NF-e AVULSA autorizada.
@@ -2122,28 +2150,90 @@ export default function FiscalEmission() {
               </CardContent>
             </Card>
 
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex-1">
-                <Label>Forma de Pagamento</Label>
-                {selectedNature.hasPayment ? (
-                  <Select value={paymentMethod} onValueChange={setPaymentMethod}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {PAYMENT_METHODS.filter((m) => m.value !== '90').map((m) => (
-                        <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <div className="h-10 flex items-center px-3 rounded-md border bg-muted/40 text-sm text-muted-foreground">
-                    Sem Pagamento (devolução/remessa não têm transação financeira)
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex-1">
+                  <Label>Forma de Pagamento</Label>
+                  {selectedNature.hasPayment ? (
+                    <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {PAYMENT_METHODS.filter((m) => m.value !== '90').map((m) => (
+                          <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <div className="h-10 flex items-center px-3 rounded-md border bg-muted/40 text-sm text-muted-foreground">
+                      Sem Pagamento (devolução/remessa não têm transação financeira)
+                    </div>
+                  )}
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-muted-foreground uppercase">Total da Nota</p>
+                  <p className="text-2xl font-bold">{formatCurrency(total)}</p>
+                </div>
+              </div>
+
+              {/* Plano de pagamento: à vista ou parcelado (duplicatas com vencimentos). */}
+              {selectedNature.hasPayment && (
+                <div className="rounded-lg border p-3 space-y-2.5">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Button type="button" size="sm" variant={payMode === 'avista' ? 'default' : 'outline'}
+                      onClick={() => setPayMode('avista')}>À vista</Button>
+                    <Button type="button" size="sm" variant={payMode === 'parcelado' ? 'default' : 'outline'}
+                      onClick={() => { setPayMode('parcelado'); if (!payFirstDue) setPayFirstDue(new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10)); }}>Parcelado</Button>
+                    <span className="text-xs text-muted-foreground">Define os vencimentos (duplicatas → recebíveis).</span>
                   </div>
-                )}
-              </div>
-              <div className="text-right">
-                <p className="text-xs text-muted-foreground uppercase">Total da Nota</p>
-                <p className="text-2xl font-bold">{formatCurrency(total)}</p>
-              </div>
+                  {payMode === 'parcelado' && (
+                    <>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <Label className="text-xs">Parcelas</Label>
+                          <Input type="number" min={2} max={60} className="h-8 text-xs" value={payN}
+                            onChange={(e) => setPayN(Math.max(1, Math.min(60, parseInt(e.target.value, 10) || 1)))} />
+                        </div>
+                        <div>
+                          <Label className="text-xs">1º vencimento</Label>
+                          <Input type="date" className="h-8 text-xs" value={payFirstDue}
+                            onChange={(e) => setPayFirstDue(e.target.value)} />
+                        </div>
+                        <div>
+                          <Label className="text-xs">Intervalo (dias)</Label>
+                          <Input type="number" min={1} max={365} className="h-8 text-xs" value={payInterval}
+                            onChange={(e) => setPayInterval(Math.max(1, parseInt(e.target.value, 10) || 30))} />
+                        </div>
+                      </div>
+                      {(() => {
+                        const sched = payN >= 1 && payFirstDue ? buildSchedule(total, payN, payFirstDue, payInterval, paymentMethod) : [];
+                        return (
+                          <div className="rounded-md border bg-muted/30 max-h-36 overflow-y-auto">
+                            <table className="w-full text-xs">
+                              <thead className="text-muted-foreground"><tr>
+                                <th className="text-left px-2 py-1">Parcela</th>
+                                <th className="text-left px-2 py-1">Vencimento</th>
+                                <th className="text-right px-2 py-1">Valor</th>
+                              </tr></thead>
+                              <tbody>
+                                {sched.map((p, i) => (
+                                  <tr key={i} className="border-t">
+                                    <td className="px-2 py-1">{i + 1}/{sched.length}</td>
+                                    <td className="px-2 py-1">{formatDate(p.due_date)}</td>
+                                    <td className="px-2 py-1 text-right font-medium">{formatCurrency(p.amount)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        );
+                      })()}
+                      <p className="text-[11px] text-muted-foreground">
+                        As parcelas viram recebíveis (com estes vencimentos) ao clicar em "Baixar estoque + recebível" na nota autorizada.
+                      </p>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
 
             <div>

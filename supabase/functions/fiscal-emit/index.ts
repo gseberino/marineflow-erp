@@ -330,6 +330,9 @@ async function handleCreate(admin: any, body: any): Promise<Response> {
           quantity: Number(it.quantity),
           unit_price: Number(it.unit_price),
         })),
+      // Plano de pagamento escolhido na emissão (à vista/parcelado + vencimentos)
+      // — reaproveitado ao gerar os recebíveis (e, futuramente, as duplicatas no XML).
+      payment_terms: body.payment_terms ?? null,
     })
     .select()
     .single();
