@@ -325,7 +325,12 @@ export default function FiscalEmission() {
     legal_name: '', trade_name: '', cnpj: '', state_registration: '',
     municipal_registration: '', tax_regime: 'simples', crt: 1, state_code: '',
     street: '', number: '', district: '', city_name: '', postal_code: '',
+    // Série da NF-e em produção (configurável) — empresas que já emitiram em
+    // outro sistema usam uma série nova para começar a numeração limpa (evita
+    // Rejeição 539 "número já utilizado"). Homologação fica sempre na série 2.
+    nfe_series_producao: 1,
   });
+  const [nextNumberInput, setNextNumberInput] = useState('');
 
   const [showClientForm, setShowClientForm] = useState(false);
 
@@ -462,9 +467,31 @@ export default function FiscalEmission() {
         district: company.district || '',
         city_name: company.city_name || '',
         postal_code: company.postal_code || '',
+        nfe_series_producao: company.nfe_series_producao ?? 1,
       });
     }
     setShowSettings(true);
+  };
+
+  // Alinha o próximo número da NF-e de produção com o histórico da empresa na
+  // SEFAZ (empresas que já emitiram em outro sistema). Chama a RPC admin-only
+  // set_fiscal_next_number, que guarda contra apontar para um número já autorizado.
+  const handleSetNextNumber = async () => {
+    const n = parseInt(nextNumberInput, 10);
+    if (!n || n < 1) { toast.error('Informe um número válido (maior ou igual a 1).'); return; }
+    try {
+      const { error } = await (supabase.rpc as any)('set_fiscal_next_number', {
+        p_document_type: 'nfe',
+        p_series: Number(settingsForm.nfe_series_producao) || 1,
+        p_environment: 'producao',
+        p_next_number: n,
+      });
+      if (error) throw new Error(error.message);
+      toast.success(`Próximo número da série ${settingsForm.nfe_series_producao} (produção) definido como ${n}.`);
+      setNextNumberInput('');
+    } catch (err: any) {
+      toast.error('Erro ao definir o número: ' + (err?.message || 'desconhecido'));
+    }
   };
 
   const handleSaveSettings = async () => {
@@ -1638,6 +1665,41 @@ export default function FiscalEmission() {
               determinam qual empresa efetivamente emite. Quem manda isso é o cadastro feito direto no console da Contora
               (CNPJ + certificado A1), vinculado ao token configurado nos Secrets do Supabase.
             </p>
+
+            {/* Numeração da NF-e em produção (série + próximo número). */}
+            <div className="rounded-lg border p-3 space-y-2.5">
+              <p className="text-sm font-semibold">Numeração da NF-e (produção)</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">Série de produção</Label>
+                  <Input
+                    type="number" min={1} className="h-8 text-xs"
+                    value={settingsForm.nfe_series_producao}
+                    onChange={(e) => setSettingsForm((p) => ({ ...p, nfe_series_producao: Math.max(1, parseInt(e.target.value, 10) || 1) }))}
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Ajustar próximo número</Label>
+                  <div className="flex gap-1.5">
+                    <Input
+                      type="number" min={1} className="h-8 text-xs"
+                      placeholder="ex.: 1"
+                      value={nextNumberInput}
+                      onChange={(e) => setNextNumberInput(e.target.value.replace(/\D/g, ''))}
+                    />
+                    <Button type="button" size="sm" variant="outline" className="h-8 text-xs shrink-0" onClick={handleSetNextNumber}>
+                      Definir
+                    </Button>
+                  </div>
+                </div>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Se a empresa <strong>já emitiu NF-e em outro sistema</strong>, use uma <strong>série nova</strong> (que nunca
+                emitiu em produção) para começar a numeração limpa — assim evita a Rejeição 539 ("número já utilizado").
+                O "próximo número" só é necessário para <strong>continuar</strong> uma série existente a partir de um número
+                específico (confirme o último número com a contadora). Homologação usa sempre a série 2. Salve a série no botão abaixo.
+              </p>
+            </div>
 
             {/* Diagnóstico da conta na Contora — mostra o que impede a emissão. */}
             <div className="rounded-lg border p-3 space-y-2">

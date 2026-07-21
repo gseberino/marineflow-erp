@@ -286,7 +286,11 @@ async function handleCreate(admin: any, body: any): Promise<Response> {
   // 1 em produção e 2 em homologação (o ambiente já separa as sequências no
   // fiscal_document_sequences e na SEFAZ). Antes usávamos 900 em homologação, o
   // que a Contora vinha normalizando à força para 1 ("No-Lock Policy").
-  const series = environment === "producao" ? 1 : 2;
+  // Série de produção é configurável (company_fiscal_settings.nfe_series_producao):
+  // empresas que já emitiram em outro sistema usam uma série nova para começar a
+  // numeração limpa e evitar Rejeição 539. Homologação fica sempre na série 2.
+  const prodSeries = Number(company.nfe_series_producao ?? 1) || 1;
+  const series = environment === "producao" ? prodSeries : 2;
   const { data: number, error: seqErr } = await admin.rpc("next_fiscal_number", {
     p_document_type: documentType,
     p_series: series,
