@@ -432,7 +432,11 @@ export function validateNfeDraftInput(input: BuildNfePayloadInput): string[] {
   const parcels = input.noPayment ? [] : (input.installments ?? []);
   if (parcels.length) {
     if (parcels.length > 120) errors.push("Máximo de 120 parcelas (duplicatas).");
-    const today = new Date().toISOString().slice(0, 10);
+    // "Hoje" no fuso de Brasília (UTC-3; o Brasil não tem horário de verão desde
+    // 2019). A edge function roda em UTC: usar a data UTC recusaria por engano um
+    // vencimento para HOJE em emissões feitas depois das 21h, quando o UTC já
+    // virou o dia seguinte.
+    const today = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
     let prev = "";
     parcels.forEach((p, i) => {
       const n = i + 1;

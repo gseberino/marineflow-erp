@@ -181,6 +181,19 @@ async function extractInvokeErrorMessage(error: unknown): Promise<string> {
   return error instanceof Error ? error.message : String(error);
 }
 
+// Primeira forma de pagamento que EXISTE no seletor da UI. Necessário porque o
+// payload de uma nota com duplicatas traz method "14" (Duplicata Mercantil), que
+// não é uma das opções oferecidas — jogá-lo no estado deixaria o campo inválido.
+// Ordem de preferência: o método real escolhido na emissão (payment_terms) e só
+// depois o do payload.
+function selectablePaymentMethod(...candidates: unknown[]): string {
+  for (const c of candidates) {
+    const v = c == null ? '' : String(c);
+    if (v && PAYMENT_METHODS.some((o) => o.value === v)) return v;
+  }
+  return '01';
+}
+
 // ── Hooks locais ───────────────────────────────────────────────────────────
 // company_fiscal_settings e issued_fiscal_documents são tabelas novas (ver
 // migração 20260714120000_fiscal_emit_foundation.sql) ainda não presentes no
@@ -444,6 +457,11 @@ export default function FiscalEmission() {
     { ok: recipientIeIndicator !== 1 || !!recipientIe.trim(), label: 'IE informada (destinatário contribuinte)' },
     { ok: itemsOk, label: 'Itens com NCM (8 díg.), CFOP (4 díg.), CSOSN, qtd e valor' },
     ...(isReturn ? [{ ok: returnRefsOk, label: 'Referência à NF-e original por item (chave + nº do item)' }] : []),
+    // Sem 1º vencimento o plano cai para "à vista" silenciosamente (ver
+    // buildEmissionBody) e a nota sairia SEM as duplicatas — melhor travar.
+    ...(selectedNature.hasPayment && payMode === 'parcelado'
+      ? [{ ok: !!payFirstDue && payN >= 1, label: 'Parcelamento com nº de parcelas e 1º vencimento definidos' }]
+      : []),
   ];
   const preflightOk = preflight.every((p) => p.ok);
 
@@ -671,7 +689,25 @@ export default function FiscalEmission() {
     setPresenceIndicator(Number(p.presence_indicator ?? 1) || 1);
     setAdditionalInfo(p.additional_info || '');
     setReferencedAccessKey((p.referenced_access_keys && p.referenced_access_keys[0]) || '');
-    setPaymentMethod((p.payments && p.payments[0]?.method) || '01');
+    // Plano de pagamento: a fonte é payment_terms (guarda a forma REAL escolhida
+    // e as parcelas); sem isso, duplicar uma nota parcelada perdia o parcelamento.
+    const pt = doc.payment_terms;
+    setPaymentMethod(selectablePaymentMethod(pt?.method, p.payments?.[0]?.method));
+    const ptInst: Array<{ due_date?: string }> = Array.isArray(pt?.installments) ? pt.installments : [];
+    if (pt?.mode === 'parcelado' && ptInst.length > 0) {
+      setPayMode('parcelado');
+      setPayN(ptInst.length);
+      setPayFirstDue(ptInst[0]?.due_date || '');
+      if (ptInst.length >= 2 && ptInst[0]?.due_date && ptInst[1]?.due_date) {
+        const dias = Math.round(
+          (new Date(`${ptInst[1].due_date}T00:00:00`).getTime() - new Date(`${ptInst[0].due_date}T00:00:00`).getTime())
+          / 86400000,
+        );
+        if (dias > 0) setPayInterval(dias);
+      }
+    } else {
+      setPayMode('avista');
+    }
     setAddress({
       postal_code: a.postal_code || '',
       address_line_1: a.street || '',
@@ -730,7 +766,7 @@ export default function FiscalEmission() {
     setPresenceIndicator(Number(p.presence_indicator ?? 1) || 1);
     setAdditionalInfo(`Devolução referente à NF-e nº ${doc.number}, série ${doc.series}${key ? `, chave ${key}` : ''}.`);
     setReferencedAccessKey(key);
-    setPaymentMethod((p.payments && p.payments[0]?.method) || '01');
+    setPaymentMethod(selectablePaymentMethod(doc.payment_terms?.method, p.payments?.[0]?.method));
     setAddress({
       postal_code: a.postal_code || '',
       address_line_1: a.street || '',

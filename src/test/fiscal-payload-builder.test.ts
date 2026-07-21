@@ -498,3 +498,14 @@ describe("validateNfeDraftInput — parcelas (duplicatas)", () => {
     expect(errors).toContain("Máximo de 120 parcelas (duplicatas).");
   });
 });
+
+describe("validateNfeDraftInput — fuso na data de vencimento", () => {
+  it("aceita vencimento para HOJE no fuso de Brasília (a edge roda em UTC)", () => {
+    // A edge function roda em UTC. Usando a data UTC, uma emissão feita depois
+    // das 21h (quando o UTC já virou o dia seguinte) recusaria por engano um
+    // vencimento para hoje. Este caso trava essa regressão.
+    const hojeBrasilia = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const errors = validateNfeDraftInput(makeInput({ installments: [{ dueDate: hojeBrasilia, amount: 301 }] }));
+    expect(errors).toEqual([]);
+  });
+});
