@@ -439,6 +439,14 @@ export default function FiscalEmission() {
   // Documento cujo erro está sendo inspecionado no diálogo de detalhes.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [errorDetail, setErrorDetail] = useState<any | null>(null);
+  // Diálogo de "Baixar estoque + recebível" (à vista ou parcelado).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [settleTarget, setSettleTarget] = useState<any | null>(null);
+  const [settleMode, setSettleMode] = useState<'avista' | 'parcelado'>('avista');
+  const [settleN, setSettleN] = useState(2);
+  const [settleInterval, setSettleInterval] = useState(30);
+  const [settleFirstDue, setSettleFirstDue] = useState('');
+  const [settleMethod, setSettleMethod] = useState('15');
   // Por documento (não um único valor global) — senão a conclusão da ação de
   // um documento pode reabilitar/destravar o botão de outro ainda em voo.
   const [busyDocIds, setBusyDocIds] = useState<Set<string>>(new Set());
@@ -1196,21 +1204,52 @@ export default function FiscalEmission() {
     }
   };
 
-  // "Baixar estoque + gerar recebível" (opt-in) numa NF-e AVULSA autorizada.
-  // Chama a RPC atômica settle_nfe_stock_and_receivable: baixa o estoque dos
-  // itens ligados a produtos do catálogo e cria o recebível (à vista). Notas de
-  // OS não entram (a OS já faz); é idempotente (o botão some após lançar).
-  const handleSettleStock = async (doc: any) => {
+  // Monta o cronograma de parcelas: divide o total em N (a última parcela recebe
+  // o arredondamento para o somatório fechar exato) e distribui os vencimentos a
+  // partir da 1ª data, de X em X dias.
+  const buildSchedule = (total: number, n: number, firstDue: string, intervalDays: number, method: string) => {
+    const per = Math.floor((total / n) * 100) / 100;
+    const parcels: Array<{ due_date: string; amount: number; method: string }> = [];
+    let acc = 0;
+    for (let i = 0; i < n; i++) {
+      const amount = i === n - 1 ? Math.round((total - acc) * 100) / 100 : per;
+      acc += amount;
+      const d = new Date(`${firstDue}T00:00:00`);
+      d.setDate(d.getDate() + i * intervalDays);
+      parcels.push({ due_date: d.toISOString().slice(0, 10), amount, method });
+    }
+    return parcels;
+  };
+
+  const openSettleDialog = (doc: any) => {
+    setSettleTarget(doc);
+    setSettleMode('avista');
+    setSettleN(2);
+    setSettleInterval(30);
+    setSettleFirstDue(new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10));
+    setSettleMethod(String(doc.request_payload?.payments?.[0]?.method || '15'));
+  };
+
+  // "Baixar estoque + gerar recebível(is)" (opt-in) numa NF-e AVULSA autorizada.
+  // À vista → 1 recebível hoje; parcelado → 1 recebível por parcela (vencimentos).
+  // Baixa o estoque dos itens ligados a produto. Idempotente (some após lançar).
+  const handleSettleStock = async (doc: any, installments: Array<{ due_date: string; amount: number; method: string }> | null) => {
     markBusy(doc.id, true);
-    const tId = toast.loading('Baixando estoque e gerando recebível…');
+    const tId = toast.loading('Baixando estoque e gerando recebível(is)…');
     try {
       const { data, error } = await (supabase.rpc as any)('settle_nfe_stock_and_receivable', {
         p_document_id: doc.id,
+        p_installments: installments && installments.length ? installments : null,
       });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) throw new Error(data.error || 'Falha ao lançar.');
-      const n = Number(data?.stock_items ?? 0);
-      toast.success(`Recebível gerado${n > 0 ? ` e estoque baixado (${n} item${n > 1 ? 'ns' : ''})` : ''}.`, { id: tId });
+      const nItems = Number(data?.stock_items ?? 0);
+      const nParc = Number(data?.installments ?? 1);
+      toast.success(
+        `${nParc > 1 ? `${nParc} recebíveis gerados` : 'Recebível gerado'}${nItems > 0 ? ` · estoque baixado (${nItems} item${nItems > 1 ? 'ns' : ''})` : ''}.`,
+        { id: tId },
+      );
+      setSettleTarget(null);
       qc.invalidateQueries({ queryKey: ['issued_fiscal_documents'] });
       qc.invalidateQueries({ queryKey: ['products'] });
       qc.invalidateQueries({ queryKey: ['receivables'] });
@@ -1549,8 +1588,8 @@ export default function FiscalEmission() {
                               <Button
                                 size="sm" variant="outline" className="text-xs"
                                 disabled={isBusy}
-                                title="Baixar o estoque dos itens ligados a produtos do catálogo e gerar um recebível (à vista) desta venda avulsa. Notas de OS já fazem isso pelo fluxo da OS."
-                                onClick={() => handleSettleStock(doc)}
+                                title="Baixar o estoque dos itens ligados a produtos do catálogo e gerar o(s) recebível(is) — à vista ou parcelado — desta venda avulsa. Notas de OS já fazem isso pelo fluxo da OS."
+                                onClick={() => openSettleDialog(doc)}
                               >
                                 <Boxes className="h-3.5 w-3.5 mr-1" />Baixar estoque + recebível
                               </Button>
@@ -2312,6 +2351,118 @@ export default function FiscalEmission() {
                 <Pencil className="h-4 w-4 mr-2" />Corrigir e reemitir
               </Button>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Dialog: baixar estoque + recebível (à vista / parcelado) ── */}
+      <Dialog open={!!settleTarget} onOpenChange={(o) => { if (!o) setSettleTarget(null); }}>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Baixar estoque + gerar recebível</DialogTitle>
+            <DialogDescription>
+              NF-e {settleTarget?.series}/{settleTarget?.number} — total {formatCurrency(Number(settleTarget?.request_payload?.payments?.[0]?.amount ?? 0))}.
+              Baixa o estoque dos itens ligados a produto e gera o financeiro. Idempotente.
+            </DialogDescription>
+          </DialogHeader>
+          {settleTarget && (() => {
+            const total = Number(settleTarget.request_payload?.payments?.[0]?.amount ?? 0);
+            const schedule = settleMode === 'parcelado' && settleN >= 1 && settleFirstDue
+              ? buildSchedule(total, settleN, settleFirstDue, settleInterval, settleMethod)
+              : [];
+            return (
+              <div className="space-y-3">
+                <div className="flex gap-2">
+                  <Button
+                    type="button" size="sm"
+                    variant={settleMode === 'avista' ? 'default' : 'outline'}
+                    onClick={() => setSettleMode('avista')}
+                  >À vista</Button>
+                  <Button
+                    type="button" size="sm"
+                    variant={settleMode === 'parcelado' ? 'default' : 'outline'}
+                    onClick={() => setSettleMode('parcelado')}
+                  >Parcelado</Button>
+                </div>
+
+                {settleMode === 'parcelado' && (
+                  <>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <Label className="text-xs">Parcelas</Label>
+                        <Input type="number" min={2} max={60} className="h-8 text-xs"
+                          value={settleN}
+                          onChange={(e) => setSettleN(Math.max(1, Math.min(60, parseInt(e.target.value, 10) || 1)))} />
+                      </div>
+                      <div>
+                        <Label className="text-xs">1º vencimento</Label>
+                        <Input type="date" className="h-8 text-xs"
+                          value={settleFirstDue}
+                          onChange={(e) => setSettleFirstDue(e.target.value)} />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Intervalo (dias)</Label>
+                        <Input type="number" min={1} max={365} className="h-8 text-xs"
+                          value={settleInterval}
+                          onChange={(e) => setSettleInterval(Math.max(1, parseInt(e.target.value, 10) || 30))} />
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="text-xs">Forma de pagamento</Label>
+                      <Select value={settleMethod} onValueChange={setSettleMethod}>
+                        <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {PAYMENT_METHODS.filter((m) => m.value !== '90').map((m) => (
+                            <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Prévia das parcelas */}
+                    <div className="rounded-lg border bg-muted/30 max-h-40 overflow-y-auto">
+                      <table className="w-full text-xs">
+                        <thead className="text-muted-foreground">
+                          <tr><th className="text-left px-2 py-1">Parcela</th><th className="text-left px-2 py-1">Vencimento</th><th className="text-right px-2 py-1">Valor</th></tr>
+                        </thead>
+                        <tbody>
+                          {schedule.map((p, i) => (
+                            <tr key={i} className="border-t">
+                              <td className="px-2 py-1">{i + 1}/{schedule.length}</td>
+                              <td className="px-2 py-1">{formatDate(p.due_date)}</td>
+                              <td className="px-2 py-1 text-right font-medium">{formatCurrency(p.amount)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      Gera um recebível por parcela em Contas a Receber; você registra o pagamento de cada uma quando for paga.
+                      A soma das parcelas fecha exatamente o total (a última ajusta o arredondamento).
+                    </p>
+                  </>
+                )}
+                {settleMode === 'avista' && (
+                  <p className="text-xs text-muted-foreground">Gera <strong>um recebível à vista</strong> (vencendo hoje) no valor total.</p>
+                )}
+              </div>
+            );
+          })()}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSettleTarget(null)} disabled={settleTarget ? busyDocIds.has(settleTarget.id) : false}>Voltar</Button>
+            <Button
+              disabled={settleTarget ? busyDocIds.has(settleTarget.id) : false}
+              onClick={() => {
+                const total = Number(settleTarget.request_payload?.payments?.[0]?.amount ?? 0);
+                const inst = settleMode === 'parcelado'
+                  ? buildSchedule(total, settleN, settleFirstDue, settleInterval, settleMethod)
+                  : null;
+                handleSettleStock(settleTarget, inst);
+              }}
+            >
+              {settleTarget && busyDocIds.has(settleTarget.id) ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Boxes className="h-4 w-4 mr-2" />}
+              Confirmar lançamento
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

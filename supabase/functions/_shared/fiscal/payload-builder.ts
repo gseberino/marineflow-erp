@@ -11,13 +11,18 @@ import {
   roundTo,
 } from "./nfe-sanitize.ts";
 
+// Formas de pagamento (tPag da NF-e). Lista alinhada ao leiaute 4.00, focada no
+// que um B2B náutico usa (sem os vales alimentação/refeição, raros aqui).
 export const PAYMENT_METHODS = [
   { value: "01", label: "Dinheiro" },
+  { value: "02", label: "Cheque" },
   { value: "03", label: "Cartão de Crédito" },
   { value: "04", label: "Cartão de Débito" },
   { value: "05", label: "Crédito Loja" },
   { value: "15", label: "Boleto Bancário" },
+  { value: "16", label: "Depósito Bancário" },
   { value: "17", label: "PIX" },
+  { value: "18", label: "Transferência bancária / Carteira digital" },
   { value: "90", label: "Sem Pagamento" },
   { value: "99", label: "Outros" },
 ] as const;
