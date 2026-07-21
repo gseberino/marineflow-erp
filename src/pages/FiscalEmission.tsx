@@ -37,6 +37,7 @@ import { createZipBlob, type ZipEntry } from '@/lib/zip';
 import { parseLegacyAddress } from '@/lib/address-legacy';
 import { CSOSN_OPTIONS, FISCAL_ORIGIN_OPTIONS } from '@/lib/price-calculator';
 import { buildEspelhoHtml } from '@/lib/danfe-espelho';
+import { SIMPLES_INFO_NOTE, normalizeAdditionalInfo } from '@/lib/nfe-info-complementar';
 // Reaproveita os mesmos módulos que a edge function fiscal-emit usa no
 // servidor — evita duplicar a lista de formas de pagamento, natureza de
 // operação/CFOP e o CFOP padrão.
@@ -62,15 +63,6 @@ const PRESENCE_INDICATORS = [
   { value: 4, label: 'Entrega a domicílio' },
   { value: 0, label: 'Não se aplica' },
 ];
-
-// Declaração OBRIGATÓRIA do Simples Nacional (Resolução CGSN 140/2018, art. 59).
-// A frase de "aproveitamento do crédito de ICMS" só é válida com CSOSN 101 E os
-// campos pCredSN/vCredICMSSN preenchidos (art. 23 LC 123/2006) — por isso NÃO a
-// colocamos aqui de forma genérica; quando o crédito for configurado (CSOSN 101),
-// a linha do crédito com valor/alíquota é gerada com os campos corretos.
-const SIMPLES_INFO_NOTE =
-  'Documento emitido por ME ou EPP optante pelo Simples Nacional. ' +
-  'Não gera direito a crédito fiscal de IPI.';
 
 const MIN_JUSTIFICATION_LENGTH = 15; // mesmo mínimo exigido pela SEFAZ, checado de novo no backend
 
@@ -687,7 +679,9 @@ export default function FiscalEmission() {
     setRecipientIe(r.state_registration || '');
     setConsumerFinal(p.consumer_final !== false);
     setPresenceIndicator(Number(p.presence_indicator ?? 1) || 1);
-    setAdditionalInfo(p.additional_info || '');
+    // Notas antigas gravaram a frase de crédito de ICMS (inválida com CSOSN 102);
+    // normalizar impede que o erro se propague ao duplicar/reemitir.
+    setAdditionalInfo(normalizeAdditionalInfo(p.additional_info));
     setReferencedAccessKey((p.referenced_access_keys && p.referenced_access_keys[0]) || '');
     // Plano de pagamento: a fonte é payment_terms (guarda a forma REAL escolhida
     // e as parcelas); sem isso, duplicar uma nota parcelada perdia o parcelamento.
@@ -764,7 +758,9 @@ export default function FiscalEmission() {
     setRecipientIe(r.state_registration || '');
     setConsumerFinal(p.consumer_final !== false);
     setPresenceIndicator(Number(p.presence_indicator ?? 1) || 1);
-    setAdditionalInfo(`Devolução referente à NF-e nº ${doc.number}, série ${doc.series}${key ? `, chave ${key}` : ''}.`);
+    setAdditionalInfo(normalizeAdditionalInfo(
+      `Devolução referente à NF-e nº ${doc.number}, série ${doc.series}${key ? `, chave ${key}` : ''}.`,
+    ));
     setReferencedAccessKey(key);
     setPaymentMethod(selectablePaymentMethod(doc.payment_terms?.method, p.payments?.[0]?.method));
     setAddress({
@@ -885,7 +881,9 @@ export default function FiscalEmission() {
     setConsumerFinal(false); // devolução B2B — o fornecedor não é consumidor final
     setPresenceIndicator(1);
     setPaymentMethod('01'); // ignorado (natureza sem pagamento → tPag 90)
-    setAdditionalInfo(`Devolução de compra referente à NF-e do fornecedor${key ? `, chave ${key}` : ''}.`);
+    setAdditionalInfo(normalizeAdditionalInfo(
+      `Devolução de compra referente à NF-e do fornecedor${key ? `, chave ${key}` : ''}.`,
+    ));
     setReferencedAccessKey(key);
     const a = ret?.issuer?.address || {};
     setAddress({
