@@ -58,7 +58,9 @@ export interface ResolvedProductFiscal {
 }
 
 // Fallbacks quando nada foi configurado (mesmos defaults do schema/DB).
-const FALLBACK_CSOSN = "400";
+// CSOSN 102 = Tributada pelo Simples SEM permissão de crédito (correto p/ revenda);
+// 400 (não tributada) só serve p/ operações especiais (remessa/conserto/bonificação).
+const FALLBACK_CSOSN = "102";
 const FALLBACK_ORIGIN = 0;
 const FALLBACK_PIS_CST = "49";
 const FALLBACK_COFINS_CST = "49";

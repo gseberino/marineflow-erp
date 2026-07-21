@@ -103,7 +103,10 @@ interface DraftItem {
   referencedItemNumber?: number | null; // nItem na nota original
 }
 
-const EMPTY_RESOLVED = { csosn: '400', origin: 0, icms_rate: 0, pis_rate: 0, cofins_rate: 0, ipi_rate: 0 };
+// CSOSN padrão 102 (Tributada pelo Simples SEM permissão de crédito) — correto
+// para revenda de mercadoria no Simples. 400 (não tributada) só serve p/ operações
+// especiais (remessa/conserto/bonificação). A contadora ajusta em Configurações.
+const EMPTY_RESOLVED = { csosn: '102', origin: 0, icms_rate: 0, pis_rate: 0, cofins_rate: 0, ipi_rate: 0 };
 
 // Resultado do diagnóstico da conta na Contora (action="diagnostics" no fiscal-emit).
 interface DiagnosticsResult {
@@ -686,7 +689,7 @@ export default function FiscalEmission() {
         code: it.code || '', name: it.name || '', ncm: it.ncm || '',
         cfop: it.cfop || '', unit: it.unit || 'UN',
         quantity: Number(it.quantity) || 0, unit_price: Number(it.unit_price) || 0,
-        csosn: icms.code || '400', origin: Number(icms.origin ?? 0) || 0,
+        csosn: icms.code || '102', origin: Number(icms.origin ?? 0) || 0,
         icms_rate: Number(icms.aliquot ?? 0) || 0,
         pis_rate: Number(pis.aliquot ?? 0) || 0,
         cofins_rate: Number(cofins.aliquot ?? 0) || 0,
@@ -747,7 +750,7 @@ export default function FiscalEmission() {
         cfop: devCfop, unit: it.unit || 'UN',
         quantity: qty, unit_price: Number(it.unit_price) || 0,
         // Espelha os impostos da nota original (é a nossa própria nota Simples).
-        csosn: icms.code || '400', origin: Number(icms.origin ?? 0) || 0,
+        csosn: icms.code || '102', origin: Number(icms.origin ?? 0) || 0,
         icms_rate: Number(icms.aliquot ?? 0) || 0,
         pis_rate: Number(pis.aliquot ?? 0) || 0,
         cofins_rate: Number(cofins.aliquot ?? 0) || 0,
@@ -2121,7 +2124,7 @@ export default function FiscalEmission() {
                     <div className="grid grid-cols-2 gap-2">
                       <div>
                         <Label className="text-[10px] text-muted-foreground">CSOSN (situação do ICMS)</Label>
-                        <Select value={it.csosn || '400'} onValueChange={(v) => updateItem(index, { csosn: v })}>
+                        <Select value={it.csosn || '102'} onValueChange={(v) => updateItem(index, { csosn: v })}>
                           <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                           <SelectContent>
                             {CSOSN_OPTIONS.map((o) => (
