@@ -185,6 +185,12 @@ export interface NfeItemInput {
   referencedItemNumber?: number | null;
 }
 
+// Parcela a prazo → vira uma duplicata do grupo cobr (nDup/dVenc/vDup).
+export interface NfeInstallmentInput {
+  dueDate: string; // vencimento YYYY-MM-DD
+  amount: number; // valor da parcela
+}
+
 export interface BuildNfePayloadInput {
   natureOperation?: string;
   operationType?: "saida" | "entrada"; // default "saida" (venda) — "entrada" p/ devolução recebida do cliente
@@ -194,6 +200,10 @@ export interface BuildNfePayloadInput {
   items: NfeItemInput[];
   paymentMethod: string;
   noPayment?: boolean; // true p/ devolução/remessa → tPag=90 (Sem Pagamento), valor 0
+  // Venda a prazo (parcelada) → grupo de cobrança (cobr = fatura + duplicatas).
+  // Vazio/ausente = à vista (pagamento único). Ver buildNfeDraftPayload.
+  installments?: NfeInstallmentInput[] | null;
+  invoiceNumber?: string | null; // nFat (número da fatura) — default "1" quando há duplicatas
   consumerFinal?: boolean;
   presenceIndicator?: number; // 0=não se aplica,1=presencial,2=internet,4=domicílio,9=não presencial...
   additionalInfo?: string | null; // informações complementares (infCpl)
@@ -313,6 +323,40 @@ export function buildNfeDraftPayload(
       : [{ method: input.paymentMethod, amount: totalAmount }],
   };
 
+  // Grupo de cobrança (cobr = fatura + duplicatas) — só em venda a prazo
+  // (parcelada). A Contora exige (doc NF-e modelo 55):
+  //   payments com method "14" (Duplicata Mercantil) + indicator 1 (a prazo)
+  //   somando o net_amount; a soma das duplicatas = net_amount;
+  //   net_amount = original_amount - discount_amount; parcelas numeradas
+  //   001,002…; até 120; vencimentos YYYY-MM-DD, não anteriores à emissão e em
+  //   ordem crescente. Sem desconto por ora (desconto = vDesc por item, fase
+  //   futura), então net_amount = valor total dos produtos.
+  const parcels = (input.noPayment ? [] : (input.installments ?? []))
+    .filter((p) => p && p.dueDate && p.amount > 0);
+  if (parcels.length) {
+    const net = totalAmount;
+    // A soma das duplicatas DEVE bater exatamente com net_amount — a diferença
+    // de centavos do arredondamento vai na última parcela.
+    const rounded = parcels.map((p) => round2(p.amount));
+    const drift = round2(net - rounded.reduce((s, v) => s + v, 0));
+    const duplicates = parcels.map((p, i) => ({
+      number: String(i + 1).padStart(3, "0"),
+      due_date: p.dueDate,
+      amount: i === parcels.length - 1 ? round2(rounded[i] + drift) : rounded[i],
+    }));
+    payload.billing = {
+      invoice: {
+        number: cleanText(input.invoiceNumber, 60) || "1",
+        original_amount: net,
+        discount_amount: 0,
+        net_amount: net,
+      },
+      installments: duplicates,
+    };
+    // pag: Duplicata Mercantil (14), a prazo (indicator 1), somando o net_amount.
+    payload.payments = [{ method: "14", indicator: 1, amount: net }];
+  }
+
   // refNFe (nota inteira): além da referência por item acima, mandamos também a
   // lista de chaves no nível da nota — cobre o caso "total" e provedores que só
   // leem a referência agregada. Reúne a chave informada + as chaves por item.
@@ -382,6 +426,26 @@ export function validateNfeDraftInput(input: BuildNfePayloadInput): string[] {
   }
 
   if (!input.paymentMethod) errors.push("Forma de pagamento é obrigatória.");
+
+  // Parcelas (duplicatas) — regras da Contora/SEFAZ: vencimentos não anteriores
+  // à emissão, em ordem crescente, valor > 0 e no máximo 120 parcelas.
+  const parcels = input.noPayment ? [] : (input.installments ?? []);
+  if (parcels.length) {
+    if (parcels.length > 120) errors.push("Máximo de 120 parcelas (duplicatas).");
+    const today = new Date().toISOString().slice(0, 10);
+    let prev = "";
+    parcels.forEach((p, i) => {
+      const n = i + 1;
+      if (!p?.dueDate) {
+        errors.push(`Parcela ${n}: vencimento é obrigatório.`);
+      } else {
+        if (p.dueDate < today) errors.push(`Parcela ${n}: vencimento não pode ser anterior à data de emissão.`);
+        if (prev && p.dueDate < prev) errors.push(`Parcela ${n}: vencimentos devem estar em ordem crescente.`);
+        prev = p.dueDate;
+      }
+      if (!(p?.amount > 0)) errors.push(`Parcela ${n}: valor deve ser maior que zero.`);
+    });
+  }
 
   return errors;
 }

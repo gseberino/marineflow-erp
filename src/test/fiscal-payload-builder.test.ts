@@ -399,3 +399,102 @@ describe("validateNfeDraftInput — IE do contribuinte", () => {
     expect(validateNfeDraftInput(makeInput({ recipient: { ...makeInput().recipient, stateRegistrationIndicator: 2 } }))).toEqual([]);
   });
 });
+
+describe("buildNfeDraftPayload — cobrança (cobr = fatura + duplicatas)", () => {
+  // total do makeInput padrão = 2 × 150.50 = 301.00
+  const future = (days: number) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+
+  it("monta billing (fatura + duplicatas) e pag Duplicata Mercantil (14) quando há parcelas", () => {
+    const p = buildNfeDraftPayload(makeInput({
+      installments: [
+        { dueDate: future(30), amount: 150.5 },
+        { dueDate: future(60), amount: 150.5 },
+      ],
+    })) as any;
+    expect(p.billing.invoice).toEqual({ number: "1", original_amount: 301, discount_amount: 0, net_amount: 301 });
+    expect(p.billing.installments).toEqual([
+      { number: "001", due_date: future(30), amount: 150.5 },
+      { number: "002", due_date: future(60), amount: 150.5 },
+    ]);
+    // pag: método 14 (Duplicata Mercantil), a prazo (indicator 1), somando net_amount.
+    expect(p.payments).toEqual([{ method: "14", indicator: 1, amount: 301 }]);
+  });
+
+  it("a soma das duplicatas bate EXATAMENTE com o net_amount (ajuste de centavos na última)", () => {
+    // 301.00 / 3 = 100.333… → 100.33 + 100.33 + 100.34
+    const p = buildNfeDraftPayload(makeInput({
+      installments: [
+        { dueDate: future(30), amount: 100.33 },
+        { dueDate: future(60), amount: 100.33 },
+        { dueDate: future(90), amount: 100.33 },
+      ],
+    })) as any;
+    const soma = p.billing.installments.reduce((s: number, d: any) => s + d.amount, 0);
+    expect(Math.round(soma * 100) / 100).toBe(301);
+    expect(p.billing.installments[2].amount).toBe(100.34);
+  });
+
+  it("à vista (sem installments) mantém pagamento único e NÃO gera billing", () => {
+    const p = buildNfeDraftPayload(makeInput({ paymentMethod: "17" })) as any;
+    expect(p.billing).toBeUndefined();
+    expect(p.payments).toEqual([{ method: "17", amount: 301 }]);
+  });
+
+  it("devolução/remessa (noPayment) ignora parcelas e força tPag=90", () => {
+    const p = buildNfeDraftPayload(makeInput({
+      noPayment: true,
+      installments: [{ dueDate: future(30), amount: 301 }],
+    })) as any;
+    expect(p.billing).toBeUndefined();
+    expect(p.payments).toEqual([{ method: "90", amount: 0 }]);
+  });
+
+  it("respeita invoiceNumber (nFat) quando informado", () => {
+    const p = buildNfeDraftPayload(makeInput({
+      invoiceNumber: "FAT-000214",
+      installments: [{ dueDate: future(30), amount: 301 }],
+    })) as any;
+    expect(p.billing.invoice.number).toBe("FAT-000214");
+  });
+});
+
+describe("validateNfeDraftInput — parcelas (duplicatas)", () => {
+  const future = (days: number) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+  const past = (days: number) => new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+
+  it("aceita parcelas válidas (crescentes, futuras, valor > 0)", () => {
+    const errors = validateNfeDraftInput(makeInput({
+      installments: [
+        { dueDate: future(30), amount: 150.5 },
+        { dueDate: future(60), amount: 150.5 },
+      ],
+    }));
+    expect(errors).toEqual([]);
+  });
+
+  it("rejeita vencimento anterior à emissão", () => {
+    const errors = validateNfeDraftInput(makeInput({ installments: [{ dueDate: past(1), amount: 301 }] }));
+    expect(errors.some((e) => e.includes("anterior à data de emissão"))).toBe(true);
+  });
+
+  it("rejeita vencimentos fora de ordem crescente", () => {
+    const errors = validateNfeDraftInput(makeInput({
+      installments: [
+        { dueDate: future(60), amount: 150.5 },
+        { dueDate: future(30), amount: 150.5 },
+      ],
+    }));
+    expect(errors.some((e) => e.includes("ordem crescente"))).toBe(true);
+  });
+
+  it("rejeita parcela com valor <= 0", () => {
+    const errors = validateNfeDraftInput(makeInput({ installments: [{ dueDate: future(30), amount: 0 }] }));
+    expect(errors.some((e) => e.includes("valor deve ser maior que zero"))).toBe(true);
+  });
+
+  it("rejeita mais de 120 parcelas", () => {
+    const many = Array.from({ length: 121 }, (_, i) => ({ dueDate: future(30 + i), amount: 1 }));
+    const errors = validateNfeDraftInput(makeInput({ installments: many }));
+    expect(errors).toContain("Máximo de 120 parcelas (duplicatas).");
+  });
+});

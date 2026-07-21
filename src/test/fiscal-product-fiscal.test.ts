@@ -73,9 +73,11 @@ describe("resolveProductFiscal", () => {
     expect(resolveProductFiscal({ use_global_fiscal: true }, null, { default_pis_cst: "01" }).pisCst).toBe("01");
   });
 
-  it("fallbacks seguros quando tudo está vazio (csosn 400 / origem 0)", () => {
+  it("fallbacks seguros quando tudo está vazio (csosn 102 / origem 0)", () => {
+    // 102 = Tributada pelo Simples SEM crédito (correto p/ revenda); 400 (não
+    // tributada) só vale p/ operações especiais e é fallback fiscalmente errado.
     const r = resolveProductFiscal(null, null, null);
-    expect(r.csosn).toBe("400");
+    expect(r.csosn).toBe("102");
     expect(r.origin).toBe(0);
     expect(r.icmsRate).toBe(0);
     expect(r.ncm).toBe("");
@@ -83,6 +85,6 @@ describe("resolveProductFiscal", () => {
 
   it("trata string vazia como ausente na cadeia (não deixa csosn='')", () => {
     const p: ProductFiscalInput = { csosn: "", use_global_fiscal: false };
-    expect(resolveProductFiscal(p, null, null).csosn).toBe("400");
+    expect(resolveProductFiscal(p, null, null).csosn).toBe("102");
   });
 });

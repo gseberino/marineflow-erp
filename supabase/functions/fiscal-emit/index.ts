@@ -263,6 +263,15 @@ async function prepareNfePayload(
     paymentMethod: body.payment_method || "01",
     // Devolução e remessas não têm pagamento (tPag=90). Só "venda" tem transação.
     noPayment: !nature.hasPayment,
+    // Venda a prazo (payment_terms.mode === "parcelado") → duplicatas do grupo
+    // cobr. À vista / sem pagamento → sem duplicatas (pagamento único).
+    installments: (() => {
+      const pt = body.payment_terms;
+      if (!nature.hasPayment || !pt || pt.mode !== "parcelado" || !Array.isArray(pt.installments)) return null;
+      return pt.installments
+        .filter((p: Record<string, unknown>) => p && p.due_date && Number(p.amount) > 0)
+        .map((p: Record<string, unknown>) => ({ dueDate: String(p.due_date), amount: Number(p.amount) }));
+    })(),
   };
 
   const errors = validateNfeDraftInput(input);
