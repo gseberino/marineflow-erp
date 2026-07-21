@@ -280,76 +280,38 @@ async function prepareNfePayload(
   return { ok: true, payload: buildNfeDraftPayload(input), company };
 }
 
-// Espelho (pré-visualização): monta o MESMO payload da emissão real, cria um
-// rascunho e faz o BUILD (gera o XML) — SEM dispatch. Nada vai à SEFAZ, não
-// grava nota real nem consome a numeração. Devolve o pré-DANFE (ou o XML) para
-// conferência antes da emissão de verdade.
+// Espelho (pré-visualização / pré-DANFE): devolve o MESMO payload da emissão
+// real (impostos por item e CFOP já resolvidos no servidor) + os dados do
+// emitente, em JSON, para o cliente RENDERIZAR o espelho "SEM VALOR FISCAL".
 //
-// Ambiente: usa o ambiente REAL da conta (o mesmo da emissão). Não forçamos
-// homologação porque a chave/empresa da Contora atende só o ambiente em que a
-// empresa está cadastrada — se ela está em produção, um rascunho de homologação
-// é recusado ("chave não permite trabalhar neste ambiente"). Como o espelho
-// nunca é despachado, gerá-lo em produção é seguro (não existe nota até o
-// dispatch).
-//
-// Número: ESPIAMOS o próximo número (last_number + 1) SEM consumir a sequência —
-// o espelho não é despachado, então não pode "queimar" um número de produção
-// (abriria lacuna na numeração da SEFAZ). A emissão real depois reserva o número
-// de verdade via next_fiscal_number.
+// NÃO chama a SEFAZ/Contora: a DANFE em PDF da Contora só existe depois do
+// dispatch (precisa do protocolo de autorização), então um `build` sem dispatch
+// devolve um pdf_danfe vazio — daí o "falha ao carregar PDF". O padrão dos ERPs
+// (Omie "Pré-DANFE", Conta Azul, NF-Easy) é justamente renderizar a pré-nota a
+// partir dos dados, sem tocar na SEFAZ. Assim: sem número consumido, sem cota,
+// e funciona em produção (fim do erro de ambiente da chave).
 // deno-lint-ignore no-explicit-any
 async function handlePreview(admin: any, body: any): Promise<Response> {
   const prep = await prepareNfePayload(admin, body);
   if (!prep.ok) return jr({ error: prep.error }, prep.status);
 
-  const environment = readFiscalEnvironment();
-  const prodSeries = Number(prep.company?.nfe_series_producao ?? 1) || 1;
-  const series = environment === "producao" ? prodSeries : 2;
-  const { data: seqRow, error: seqErr } = await admin
-    .from("fiscal_document_sequences")
-    .select("last_number")
-    .eq("document_type", "nfe")
-    .eq("series", series)
-    .eq("environment", environment)
-    .maybeSingle();
-  if (seqErr) return jr({ error: "Falha ao consultar numeração do espelho: " + seqErr.message }, 500);
-  const number = (Number(seqRow?.last_number ?? 0) || 0) + 1;
-
-  const provider = createFiscalProvider();
-  const created = await provider.createDraft({
-    documentType: "nfe",
-    environment,
-    series,
-    number,
-    payload: prep.payload,
-  });
-  if (!created.ok) return jr({ error: didaticize(created.error), details: created.details }, 422);
-  const providerId = created.data.providerDocumentId;
-  if (!providerId) return jr({ error: "Espelho: o provedor não retornou identificador do rascunho." }, 502);
-
-  // Build assinado gera o XML (e, quando disponível, o DANFE de pré-visualização).
-  const built = await provider.build("nfe", providerId, true);
-  if (!built.ok) return jr({ error: "Falha ao gerar o espelho (build): " + didaticize(built.error), details: built.details }, 422);
-
-  const arts = await provider.listArtifacts("nfe", providerId);
-  if (!arts.ok) return jr({ error: "Falha ao listar artefatos do espelho: " + arts.error }, 502);
-  const pick = arts.data.find((a) => a.type === "pdf_danfe" && a.available && a.downloadUrl) ??
-    arts.data.find((a) => a.type === "xml_signed" && a.available && a.downloadUrl) ??
-    arts.data.find((a) => a.type === "xml_unsigned" && a.available && a.downloadUrl);
-  if (!pick?.downloadUrl) {
-    return jr({ error: "Espelho gerado, mas nenhum artefato (DANFE/XML) disponível ainda. Artefatos: " + arts.data.map((a) => a.type).join(", ") }, 502);
-  }
-  const fetched = await provider.fetchArtifact(pick.downloadUrl);
-  if (!fetched.ok) return jr({ error: "Falha ao baixar o espelho: " + fetched.error }, 502);
-
-  const isPdf = pick.type === "pdf_danfe";
-  return new Response(new Blob([fetched.data.bytes], { type: isPdf ? "application/pdf" : "application/xml" }), {
-    status: 200,
-    headers: {
-      ...corsHeaders,
-      "Content-Type": isPdf ? "application/pdf" : "application/xml",
-      "X-Artifact-Type": pick.type,
-    },
-  });
+  const c = prep.company ?? {};
+  const emitter = {
+    legal_name: c.legal_name ?? null,
+    trade_name: c.trade_name ?? null,
+    cnpj: c.cnpj ?? null,
+    state_registration: c.state_registration ?? null,
+    tax_regime: c.tax_regime ?? null,
+    crt: c.crt ?? null,
+    street: c.street ?? null,
+    number: c.number ?? null,
+    complement: c.complement ?? null,
+    district: c.district ?? null,
+    city_name: c.city_name ?? null,
+    state_code: c.state_code ?? null,
+    postal_code: c.postal_code ?? null,
+  };
+  return jr({ ok: true, payload: prep.payload, emitter, environment: readFiscalEnvironment() });
 }
 
 // deno-lint-ignore no-explicit-any

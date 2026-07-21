@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/select';
 import {
   FileText, Loader2, Plus, Trash2, RefreshCw, Download, Ban, Pencil, Settings2, Upload,
-  Stethoscope, CheckCircle2, XCircle, Undo2, Send, FileDown, Copy, Boxes,
+  Stethoscope, CheckCircle2, XCircle, Undo2, Send, FileDown, Copy, Boxes, Eye,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -36,6 +36,7 @@ import { parseNfeReferenceXml } from '@/lib/nfe-xml-parser';
 import { createZipBlob, type ZipEntry } from '@/lib/zip';
 import { parseLegacyAddress } from '@/lib/address-legacy';
 import { CSOSN_OPTIONS, FISCAL_ORIGIN_OPTIONS } from '@/lib/price-calculator';
+import { buildEspelhoHtml } from '@/lib/danfe-espelho';
 // Reaproveita os mesmos módulos que a edge function fiscal-emit usa no
 // servidor — evita duplicar a lista de formas de pagamento, natureza de
 // operação/CFOP e o CFOP padrão.
@@ -1059,27 +1060,25 @@ export default function FiscalEmission() {
       return;
     }
     setGeneratingEspelho(true);
-    const tId = toast.loading('Gerando espelho em homologação…');
+    const tId = toast.loading('Gerando espelho para conferência…');
     try {
+      // O servidor devolve o payload EXATO da emissão (impostos por item e CFOP
+      // já resolvidos) + os dados do emitente; a pré-visualização é renderizada
+      // aqui. Não toca na SEFAZ: nenhuma nota é criada e nenhum número é
+      // reservado — a DANFE de verdade só existe após a autorização.
       const { data, error } = await supabase.functions.invoke('fiscal-emit', {
         body: { action: 'preview', ...buildEmissionBody() },
       });
       if (error) throw new Error(await extractInvokeErrorMessage(error));
-      if (data && (data as any).error) throw new Error((data as any).error);
-      const blob = data instanceof Blob
-        ? data
-        : new Blob([data as BlobPart], { type: 'application/pdf' });
-      const isXml = blob.type.includes('xml');
-      const cliente = String(recipientName || '').replace(/[<>:"/\\|?* -]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `ESPELHO NF-e${cliente ? ' ' + cliente : ''}.${isXml ? 'xml' : 'pdf'}`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
-      toast.success('Espelho (homologação, sem valor fiscal) baixado. Envie ao cliente/fornecedor para conferência.', { id: tId });
+      const res = data as any;
+      if (res?.error) throw new Error(res.error);
+      if (!res?.payload) throw new Error('O servidor não devolveu os dados do espelho.');
+      const html = buildEspelhoHtml(res.payload, res.emitter ?? {}, { environment: res.environment });
+      const win = window.open('', '_blank');
+      if (!win) throw new Error('O navegador bloqueou a janela do espelho. Libere os pop-ups para este site e tente de novo.');
+      win.document.write(html);
+      win.document.close();
+      toast.success('Espelho aberto em nova aba. Confira e use "Imprimir → Salvar como PDF" para enviar.', { id: tId });
     } catch (err: any) {
       toast.error('Erro ao gerar o espelho: ' + (err?.message || 'desconhecido'), { id: tId });
     } finally {
@@ -2344,10 +2343,10 @@ export default function FiscalEmission() {
               variant="outline"
               onClick={handleGenerateEspelho}
               disabled={generatingEspelho || emitting || includedItems.length === 0 || !preflightOk}
-              title="Gerar uma prévia (espelho) em homologação, SEM enviar à SEFAZ — para conferência antes de emitir de verdade"
+              title="Abre o espelho (pré-DANFE) numa nova aba, SEM VALOR FISCAL e SEM enviar à SEFAZ — confira e salve como PDF para enviar ao cliente/fornecedor antes de emitir de verdade"
             >
-              {generatingEspelho ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Download className="h-4 w-4 mr-2" />}
-              Gerar espelho
+              {generatingEspelho ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Eye className="h-4 w-4 mr-2" />}
+              Pré-visualizar (espelho)
             </Button>
             <Button onClick={handleEmit} disabled={emitting || generatingEspelho || includedItems.length === 0 || !preflightOk}>
               {emitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FileText className="h-4 w-4 mr-2" />}
