@@ -56,6 +56,36 @@ describe("normalizeAdditionalInfo", () => {
     expect(out.match(/optante/gi)?.length).toBe(1);
   });
 
+  // Regressão real: a redação ANTIGA diz "optante DO Simples Nacional" e a nova
+  // "ME ou EPP optante PELO". A checagem de presença só cobria "pelo", então a
+  // declaração era anexada e saía DUPLICADA na nota.
+  it("não duplica quando o texto traz a redação ANTIGA (optante DO Simples)", () => {
+    const out = normalizeAdditionalInfo(NOTA_REAL);
+    expect(out.match(/Documento emitido por/gi)?.length).toBe(1);
+    expect(out.match(/cr[ée]dito fiscal de IPI/gi)?.length).toBe(1);
+    expect(out).not.toMatch(/optante\s+do\s+Simples/i); // redação antiga some
+    expect(out).toContain(SIMPLES_INFO_NOTE); // fica só a canônica
+    expect(out).toContain("Ordem de Compra N. 05447");
+  });
+
+  it("colapsa um texto que JÁ saiu duplicado (as duas redações juntas)", () => {
+    const duplicado =
+      "Referente a Ordem de Compra N. 05447. Comprador: Everton " +
+      "Documento emitido por optante do Simples Nacional. Não gera direito a crédito fiscal de IPI. " +
+      "Documento emitido por ME ou EPP optante pelo Simples Nacional. Não gera direito a crédito fiscal de IPI.";
+    const out = normalizeAdditionalInfo(duplicado);
+    expect(out.match(/Documento emitido por/gi)?.length).toBe(1);
+    expect(out.match(/cr[ée]dito fiscal de IPI/gi)?.length).toBe(1);
+    expect(out).toBe(
+      "Referente a Ordem de Compra N. 05447. Comprador: Everton. " + SIMPLES_INFO_NOTE,
+    );
+  });
+
+  it("separa com ponto quando o texto do usuário não termina em pontuação", () => {
+    const out = normalizeAdditionalInfo("Comprador: Everton");
+    expect(out).toBe("Comprador: Everton. " + SIMPLES_INFO_NOTE);
+  });
+
   it("devolve a declaração obrigatória quando o texto vem vazio/nulo", () => {
     expect(normalizeAdditionalInfo("")).toBe(SIMPLES_INFO_NOTE);
     expect(normalizeAdditionalInfo(null)).toBe(SIMPLES_INFO_NOTE);

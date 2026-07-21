@@ -33,15 +33,29 @@ export function stripInvalidIcmsCreditClaim(text: string): string {
   return out.replace(/[ \t]{2,}/g, ' ').trim();
 }
 
+// Declaração do Simples em QUALQUER redação já usada pelo sistema — a antiga
+// ("optante DO Simples Nacional") e a atual ("ME ou EPP optante PELO Simples
+// Nacional") —, com ou sem a frase do IPI logo em seguida.
+//
+// Removemos todas e reinserimos UMA vez na redação canônica. Só *detectar* a
+// declaração não bastava: a variante antiga escapava do teste de presença e a
+// declaração acabava ANEXADA, saindo duplicada na nota.
+const SIMPLES_DECLARATIONS =
+  /Documento\s+emitido\s+por\s+(?:ME\s+ou\s+EPP\s+)?optante\s+(?:pelo|pela|do|da|de)\s+Simples\s+Nacional\s*\.?\s*(?:N[ãa]o\s+gera\s+direito\s+a\s+cr[ée]dito\s+fiscal\s+de\s+IPI\s*\.?)?/gi;
+
 /**
  * Normaliza o infCpl ao reaproveitar/gerar uma nota: tira a frase de crédito de
- * ICMS inválida e garante a declaração obrigatória do Simples Nacional.
+ * ICMS inválida, remove qualquer redação da declaração do Simples e devolve o
+ * texto com a declaração obrigatória UMA única vez, ao final.
  * Preserva o texto livre do usuário (ordem de compra, comprador etc.).
  */
 export function normalizeAdditionalInfo(text: string | null | undefined): string {
-  const cleaned = stripInvalidIcmsCreditClaim(String(text ?? ''));
-  if (!cleaned) return SIMPLES_INFO_NOTE;
-  // Já traz a declaração obrigatória (em qualquer redação) → não duplicar.
-  if (/optante\s+(pelo\s+)?Simples\s+Nacional/i.test(cleaned)) return cleaned;
-  return `${cleaned} ${SIMPLES_INFO_NOTE}`;
+  const base = stripInvalidIcmsCreditClaim(String(text ?? ''))
+    .replace(SIMPLES_DECLARATIONS, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+  if (!base) return SIMPLES_INFO_NOTE;
+  // Sem pontuação no fim do texto do usuário, a declaração colaria na frase dele.
+  const separator = /[.;:!?]$/.test(base) ? ' ' : '. ';
+  return `${base}${separator}${SIMPLES_INFO_NOTE}`;
 }
