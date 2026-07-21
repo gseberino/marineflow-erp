@@ -353,6 +353,7 @@ export default function FiscalEmission() {
 
   const [showEmit, setShowEmit] = useState(false);
   const [emitting, setEmitting] = useState(false);
+  const [generatingEspelho, setGeneratingEspelho] = useState(false);
   const [emitIdempotencyKey, setEmitIdempotencyKey] = useState('');
   // Origem da emissão: 'manual' (avulsa) ou uma OS/orçamento sendo faturado.
   const [emitOrigin, setEmitOrigin] = useState<{ type: string; id: string | null }>({ type: 'manual', id: null });
@@ -998,6 +999,94 @@ export default function FiscalEmission() {
   const activeItems = items.filter((it) => it.included !== false);
   const total = activeItems.reduce((sum, it) => sum + it.quantity * it.unit_price, 0);
 
+  // Campos comuns do body de emissão — usados TANTO pela emissão real quanto
+  // pelo espelho (preview), para o espelho refletir exatamente o que será emitido.
+  const buildEmissionBody = () => ({
+    client_id: clientId || null,
+    nature_of_operation: natureOfOperation,
+    payment_method: paymentMethod,
+    // Plano de pagamento (à vista/parcelado) definido na emissão — só faz
+    // sentido em naturezas com pagamento (venda); vira os recebíveis depois.
+    payment_terms: (selectedNature.hasPayment && payMode === 'parcelado' && payFirstDue)
+      ? { mode: 'parcelado', method: paymentMethod, installments: buildSchedule(total, payN, payFirstDue, payInterval, paymentMethod) }
+      : (selectedNature.hasPayment ? { mode: 'avista', method: paymentMethod, installments: null } : null),
+    presence_indicator: presenceIndicator,
+    consumer_final: consumerFinal,
+    additional_info: additionalInfo || undefined,
+    referenced_access_key: selectedNature.requiresReference ? (referencedAccessKey || undefined) : undefined,
+    recipient: {
+      name: recipientName,
+      document: recipientDocument,
+      email: recipientEmail || undefined,
+      state_registration_indicator: recipientIeIndicator,
+      state_registration: recipientIeIndicator === 1 ? (recipientIe || undefined) : undefined,
+      address: {
+        street: address.address_line_1,
+        number: address.address_number,
+        complement: address.address_complement || undefined,
+        district: address.neighborhood,
+        city_name: address.city,
+        state_code: address.state,
+        postal_code: address.postal_code,
+      },
+    },
+    items: activeItems.map((it) => ({
+      product_id: it.productId || undefined,
+      code: it.code,
+      name: it.name,
+      ncm: it.ncm,
+      cfop: it.cfop,
+      unit: it.unit,
+      quantity: it.quantity,
+      unit_price: it.unit_price,
+      csosn: it.csosn || undefined,
+      origin: it.origin,
+      icms_rate: it.icms_rate,
+      pis_rate: it.pis_rate,
+      cofins_rate: it.cofins_rate,
+      ipi_rate: it.ipi_rate,
+      referenced_key: it.referencedKey || undefined,
+      referenced_item: it.referencedItemNumber || undefined,
+    })),
+  });
+
+  // "Gerar espelho": cria e builda a nota em HOMOLOGAÇÃO (sem enviar à SEFAZ) e
+  // baixa o pré-DANFE/XML para conferência — antes da emissão real. Idêntico à
+  // emissão porque usa o mesmo buildEmissionBody().
+  const handleGenerateEspelho = async () => {
+    if (activeItems.length === 0 || !preflightOk) {
+      toast.error('Complete os dados da nota (o checklist de pré-voo) antes de gerar o espelho.');
+      return;
+    }
+    setGeneratingEspelho(true);
+    const tId = toast.loading('Gerando espelho em homologação…');
+    try {
+      const { data, error } = await supabase.functions.invoke('fiscal-emit', {
+        body: { action: 'preview', ...buildEmissionBody() },
+      });
+      if (error) throw new Error(await extractInvokeErrorMessage(error));
+      if (data && (data as any).error) throw new Error((data as any).error);
+      const blob = data instanceof Blob
+        ? data
+        : new Blob([data as BlobPart], { type: 'application/pdf' });
+      const isXml = blob.type.includes('xml');
+      const cliente = String(recipientName || '').replace(/[<>:"/\\|?* -]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ESPELHO NF-e${cliente ? ' ' + cliente : ''}.${isXml ? 'xml' : 'pdf'}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      toast.success('Espelho (homologação, sem valor fiscal) baixado. Envie ao cliente/fornecedor para conferência.', { id: tId });
+    } catch (err: any) {
+      toast.error('Erro ao gerar o espelho: ' + (err?.message || 'desconhecido'), { id: tId });
+    } finally {
+      setGeneratingEspelho(false);
+    }
+  };
+
   const handleEmit = async () => {
     setEmitting(true);
     try {
@@ -1007,52 +1096,7 @@ export default function FiscalEmission() {
           origin_type: emitOrigin.type,
           origin_id: emitOrigin.id || undefined,
           idempotency_key: emitIdempotencyKey,
-          client_id: clientId || null,
-          nature_of_operation: natureOfOperation,
-          payment_method: paymentMethod,
-          // Plano de pagamento (à vista/parcelado) definido na emissão — só faz
-          // sentido em naturezas com pagamento (venda); vira os recebíveis depois.
-          payment_terms: (selectedNature.hasPayment && payMode === 'parcelado' && payFirstDue)
-            ? { mode: 'parcelado', method: paymentMethod, installments: buildSchedule(total, payN, payFirstDue, payInterval, paymentMethod) }
-            : (selectedNature.hasPayment ? { mode: 'avista', method: paymentMethod, installments: null } : null),
-          presence_indicator: presenceIndicator,
-          consumer_final: consumerFinal,
-          additional_info: additionalInfo || undefined,
-          referenced_access_key: selectedNature.requiresReference ? (referencedAccessKey || undefined) : undefined,
-          recipient: {
-            name: recipientName,
-            document: recipientDocument,
-            email: recipientEmail || undefined,
-            state_registration_indicator: recipientIeIndicator,
-            state_registration: recipientIeIndicator === 1 ? (recipientIe || undefined) : undefined,
-            address: {
-              street: address.address_line_1,
-              number: address.address_number,
-              complement: address.address_complement || undefined,
-              district: address.neighborhood,
-              city_name: address.city,
-              state_code: address.state,
-              postal_code: address.postal_code,
-            },
-          },
-          items: activeItems.map((it) => ({
-            product_id: it.productId || undefined,
-            code: it.code,
-            name: it.name,
-            ncm: it.ncm,
-            cfop: it.cfop,
-            unit: it.unit,
-            quantity: it.quantity,
-            unit_price: it.unit_price,
-            csosn: it.csosn || undefined,
-            origin: it.origin,
-            icms_rate: it.icms_rate,
-            pis_rate: it.pis_rate,
-            cofins_rate: it.cofins_rate,
-            ipi_rate: it.ipi_rate,
-            referenced_key: it.referencedKey || undefined,
-            referenced_item: it.referencedItemNumber || undefined,
-          })),
+          ...buildEmissionBody(),
         },
       });
       if (error) throw new Error(await extractInvokeErrorMessage(error));
@@ -2294,9 +2338,18 @@ export default function FiscalEmission() {
             </div>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="gap-2 sm:gap-2">
             <Button variant="outline" onClick={() => setShowEmit(false)}>Cancelar</Button>
-            <Button onClick={handleEmit} disabled={emitting || includedItems.length === 0 || !preflightOk}>
+            <Button
+              variant="outline"
+              onClick={handleGenerateEspelho}
+              disabled={generatingEspelho || emitting || includedItems.length === 0 || !preflightOk}
+              title="Gerar uma prévia (espelho) em homologação, SEM enviar à SEFAZ — para conferência antes de emitir de verdade"
+            >
+              {generatingEspelho ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Download className="h-4 w-4 mr-2" />}
+              Gerar espelho
+            </Button>
+            <Button onClick={handleEmit} disabled={emitting || generatingEspelho || includedItems.length === 0 || !preflightOk}>
               {emitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FileText className="h-4 w-4 mr-2" />}
               {isReturn ? 'Emitir Devolução' : 'Emitir NF-e'}
             </Button>

@@ -81,6 +81,7 @@ Deno.serve(async (req) => {
     if (body.action === "correction") return await handleCorrection(admin, body);
     if (body.action === "diagnostics") return await handleDiagnostics();
     if (body.action === "artifact") return await handleArtifact(admin, body);
+    if (body.action === "preview") return await handlePreview(admin, body);
     return await handleCreate(admin, body);
   } catch (err) {
     console.error("[fiscal-emit] erro:", err);
@@ -149,47 +150,35 @@ async function findActiveDocument(admin: any, documentType: string, originType: 
   return await query.maybeSingle();
 }
 
+// Monta o payload da NF-e a partir do body: empresa emissora (+validação de UF),
+// endereço/IBGE do destinatário, natureza/CFOP e impostos por item resolvidos na
+// hierarquia produto→categoria→global. FONTE ÚNICA usada tanto pela emissão real
+// (handleCreate) quanto pelo espelho (handlePreview) — garante que o preview seja
+// idêntico ao que será emitido de fato.
 // deno-lint-ignore no-explicit-any
-async function handleCreate(admin: any, body: any): Promise<Response> {
-  const documentType = "nfe"; // piloto: só NF-e por ora (NFS-e fica para a Fase 3)
-  const environment = readFiscalEnvironment();
-  const originType: string = body.origin_type ?? "manual";
-  const originId: string | null = body.origin_id ?? null;
-  // Chave de idempotência: o front gera uma vez por abertura do diálogo de
-  // emissão e reenvia a mesma em caso de duplo clique/retry de rede — sem
-  // isso, o fluxo manual (único exposto na UI, sempre sem origin_id) não
-  // tinha NENHUMA proteção contra emitir duas NF-e reais para a mesma venda.
-  const clientIdempotencyKey: string | null = body.idempotency_key || null;
-
-  if (originId || clientIdempotencyKey) {
-    const { data: existing, error: existingErr } = await findActiveDocument(
-      admin, documentType, originType, originId, clientIdempotencyKey,
-    );
-    if (existingErr) {
-      return jr({ error: "Falha ao checar duplicidade: " + existingErr.message }, 500);
-    }
-    if (existing) return jr({ ok: true, data: existing, reused: true });
-  }
-
+async function prepareNfePayload(
+  admin: any,
+  // deno-lint-ignore no-explicit-any
+  body: any,
+  // deno-lint-ignore no-explicit-any
+): Promise<{ ok: true; payload: Record<string, unknown>; company: any } | { ok: false; error: string; status: number }> {
   const { data: company, error: companyErr } = await admin
     .from("company_fiscal_settings")
     .select("*")
     .limit(1)
     .maybeSingle();
   if (companyErr) {
-    return jr({ error: "Falha ao consultar empresa emissora: " + companyErr.message }, 500);
+    return { ok: false, error: "Falha ao consultar empresa emissora: " + companyErr.message, status: 500 };
   }
   if (!company) {
-    return jr(
-      { error: "Empresa emissora não configurada. Preencha os dados fiscais da empresa antes de emitir." },
-      422,
-    );
+    return { ok: false, error: "Empresa emissora não configurada. Preencha os dados fiscais da empresa antes de emitir.", status: 422 };
   }
   if (!company.state_code) {
-    return jr(
-      { error: "UF da empresa emissora não configurada. Complete a UF em 'Dados da Empresa' antes de emitir — ela define se o CFOP calculado é de operação interna ou interestadual." },
-      422,
-    );
+    return {
+      ok: false,
+      error: "UF da empresa emissora não configurada. Complete a UF em 'Dados da Empresa' antes de emitir — ela define se o CFOP calculado é de operação interna ou interestadual.",
+      status: 422,
+    };
   }
 
   const addr = body.recipient?.address ?? {};
@@ -277,9 +266,93 @@ async function handleCreate(admin: any, body: any): Promise<Response> {
   };
 
   const errors = validateNfeDraftInput(input);
-  if (errors.length) return jr({ error: errors.join(" ") }, 422);
+  if (errors.length) return { ok: false, error: errors.join(" "), status: 422 };
 
-  const payload = buildNfeDraftPayload(input);
+  return { ok: true, payload: buildNfeDraftPayload(input), company };
+}
+
+// Espelho (pré-visualização): monta o MESMO payload da emissão real, cria um
+// rascunho em HOMOLOGAÇÃO e faz o BUILD (gera o XML) — SEM dispatch. Nada vai à
+// SEFAZ, não grava nota real nem consome a numeração de produção. Devolve o
+// pré-DANFE (ou o XML) para conferência antes da emissão de verdade.
+// deno-lint-ignore no-explicit-any
+async function handlePreview(admin: any, body: any): Promise<Response> {
+  const prep = await prepareNfePayload(admin, body);
+  if (!prep.ok) return jr({ error: prep.error }, prep.status);
+
+  // Numeração de HOMOLOGAÇÃO (série 2) só para o rascunho de espelho.
+  const { data: number, error: seqErr } = await admin.rpc("next_fiscal_number", {
+    p_document_type: "nfe",
+    p_series: 2,
+    p_environment: "homologacao",
+  });
+  if (seqErr) return jr({ error: "Falha ao reservar numeração do espelho: " + seqErr.message }, 500);
+
+  const provider = createFiscalProvider();
+  const created = await provider.createDraft({
+    documentType: "nfe",
+    environment: "homologacao",
+    series: 2,
+    number,
+    payload: prep.payload,
+  });
+  if (!created.ok) return jr({ error: didaticize(created.error), details: created.details }, 422);
+  const providerId = created.data.providerDocumentId;
+  if (!providerId) return jr({ error: "Espelho: o provedor não retornou identificador do rascunho." }, 502);
+
+  // Build assinado gera o XML (e, quando disponível, o DANFE de pré-visualização).
+  const built = await provider.build("nfe", providerId, true);
+  if (!built.ok) return jr({ error: "Falha ao gerar o espelho (build): " + didaticize(built.error), details: built.details }, 422);
+
+  const arts = await provider.listArtifacts("nfe", providerId);
+  if (!arts.ok) return jr({ error: "Falha ao listar artefatos do espelho: " + arts.error }, 502);
+  const pick = arts.data.find((a) => a.type === "pdf_danfe" && a.available && a.downloadUrl) ??
+    arts.data.find((a) => a.type === "xml_signed" && a.available && a.downloadUrl) ??
+    arts.data.find((a) => a.type === "xml_unsigned" && a.available && a.downloadUrl);
+  if (!pick?.downloadUrl) {
+    return jr({ error: "Espelho gerado, mas nenhum artefato (DANFE/XML) disponível ainda. Artefatos: " + arts.data.map((a) => a.type).join(", ") }, 502);
+  }
+  const fetched = await provider.fetchArtifact(pick.downloadUrl);
+  if (!fetched.ok) return jr({ error: "Falha ao baixar o espelho: " + fetched.error }, 502);
+
+  const isPdf = pick.type === "pdf_danfe";
+  return new Response(new Blob([fetched.data.bytes], { type: isPdf ? "application/pdf" : "application/xml" }), {
+    status: 200,
+    headers: {
+      ...corsHeaders,
+      "Content-Type": isPdf ? "application/pdf" : "application/xml",
+      "X-Artifact-Type": pick.type,
+    },
+  });
+}
+
+// deno-lint-ignore no-explicit-any
+async function handleCreate(admin: any, body: any): Promise<Response> {
+  const documentType = "nfe"; // piloto: só NF-e por ora (NFS-e fica para a Fase 3)
+  const environment = readFiscalEnvironment();
+  const originType: string = body.origin_type ?? "manual";
+  const originId: string | null = body.origin_id ?? null;
+  // Chave de idempotência: o front gera uma vez por abertura do diálogo de
+  // emissão e reenvia a mesma em caso de duplo clique/retry de rede — sem
+  // isso, o fluxo manual (único exposto na UI, sempre sem origin_id) não
+  // tinha NENHUMA proteção contra emitir duas NF-e reais para a mesma venda.
+  const clientIdempotencyKey: string | null = body.idempotency_key || null;
+
+  if (originId || clientIdempotencyKey) {
+    const { data: existing, error: existingErr } = await findActiveDocument(
+      admin, documentType, originType, originId, clientIdempotencyKey,
+    );
+    if (existingErr) {
+      return jr({ error: "Falha ao checar duplicidade: " + existingErr.message }, 500);
+    }
+    if (existing) return jr({ ok: true, data: existing, reused: true });
+  }
+
+  // Monta o payload (empresa + impostos por item + validação) — mesma função
+  // usada pelo espelho, para o preview ser IDÊNTICO à emissão real.
+  const prep = await prepareNfePayload(admin, body);
+  if (!prep.ok) return jr({ error: prep.error }, prep.status);
+  const { payload, company } = prep;
 
   // Numeração atômica. IMPORTANTE: a faixa de série 900–999 é RESERVADA pela
   // SEFAZ (contingência / NFC-e modelo 65) e gera Rejeição 244 numa NF-e normal
