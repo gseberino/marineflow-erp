@@ -281,27 +281,44 @@ async function prepareNfePayload(
 }
 
 // Espelho (pré-visualização): monta o MESMO payload da emissão real, cria um
-// rascunho em HOMOLOGAÇÃO e faz o BUILD (gera o XML) — SEM dispatch. Nada vai à
-// SEFAZ, não grava nota real nem consome a numeração de produção. Devolve o
-// pré-DANFE (ou o XML) para conferência antes da emissão de verdade.
+// rascunho e faz o BUILD (gera o XML) — SEM dispatch. Nada vai à SEFAZ, não
+// grava nota real nem consome a numeração. Devolve o pré-DANFE (ou o XML) para
+// conferência antes da emissão de verdade.
+//
+// Ambiente: usa o ambiente REAL da conta (o mesmo da emissão). Não forçamos
+// homologação porque a chave/empresa da Contora atende só o ambiente em que a
+// empresa está cadastrada — se ela está em produção, um rascunho de homologação
+// é recusado ("chave não permite trabalhar neste ambiente"). Como o espelho
+// nunca é despachado, gerá-lo em produção é seguro (não existe nota até o
+// dispatch).
+//
+// Número: ESPIAMOS o próximo número (last_number + 1) SEM consumir a sequência —
+// o espelho não é despachado, então não pode "queimar" um número de produção
+// (abriria lacuna na numeração da SEFAZ). A emissão real depois reserva o número
+// de verdade via next_fiscal_number.
 // deno-lint-ignore no-explicit-any
 async function handlePreview(admin: any, body: any): Promise<Response> {
   const prep = await prepareNfePayload(admin, body);
   if (!prep.ok) return jr({ error: prep.error }, prep.status);
 
-  // Numeração de HOMOLOGAÇÃO (série 2) só para o rascunho de espelho.
-  const { data: number, error: seqErr } = await admin.rpc("next_fiscal_number", {
-    p_document_type: "nfe",
-    p_series: 2,
-    p_environment: "homologacao",
-  });
-  if (seqErr) return jr({ error: "Falha ao reservar numeração do espelho: " + seqErr.message }, 500);
+  const environment = readFiscalEnvironment();
+  const prodSeries = Number(prep.company?.nfe_series_producao ?? 1) || 1;
+  const series = environment === "producao" ? prodSeries : 2;
+  const { data: seqRow, error: seqErr } = await admin
+    .from("fiscal_document_sequences")
+    .select("last_number")
+    .eq("document_type", "nfe")
+    .eq("series", series)
+    .eq("environment", environment)
+    .maybeSingle();
+  if (seqErr) return jr({ error: "Falha ao consultar numeração do espelho: " + seqErr.message }, 500);
+  const number = (Number(seqRow?.last_number ?? 0) || 0) + 1;
 
   const provider = createFiscalProvider();
   const created = await provider.createDraft({
     documentType: "nfe",
-    environment: "homologacao",
-    series: 2,
+    environment,
+    series,
     number,
     payload: prep.payload,
   });
