@@ -326,18 +326,31 @@ export class ContoraProvider implements FiscalProvider {
     const statusStr = (lifecycle["status"] ?? d["status"]) as string;
     const procStr = (lifecycle["processing_status"] ??
       d["processing_status"]) as string;
+
+    // CANCELAMENTO: a Contora rastreia num grupo SEPARADO (`cancellation`) — o
+    // lifecycle.status continua "authorized" mesmo após cancelar. Se o
+    // cancelamento foi homologado (SEFAZ 135 "evento registrado" / 155 "fora do
+    // prazo") ou já tem cancelled_at, o status EFETIVO do documento é
+    // "cancelled". Sem isto, o reconcile/webhook sobrescrevia de volta para
+    // "authorized" e a nota cancelada aparecia como autorizada.
+    const cancellation = (d["cancellation"] ?? {}) as Record<string, unknown>;
+    const cancelCode = cancellation["status_code"] != null ? String(cancellation["status_code"]) : "";
+    const cancelledAt = (cancellation["cancelled_at"] as string) ?? null;
+    const isCancelled = !!cancelledAt || cancelCode === "135" || cancelCode === "155";
+
     return {
       ok: true,
       data: {
         providerDocumentId: String(d["id"] ?? id),
-        status: mapContoraStatus(statusStr, procStr),
-        statusCode: (sefaz["status_code"] as string) ?? null,
-        statusMessage: (sefaz["status_message"] ??
-          d["last_error_message"] ?? null) as string | null,
+        status: isCancelled ? "cancelled" : mapContoraStatus(statusStr, procStr),
+        statusCode: isCancelled ? cancelCode : ((sefaz["status_code"] as string) ?? null),
+        statusMessage: isCancelled
+          ? ((cancellation["status_message"] as string) ?? "Cancelamento homologado pela SEFAZ.")
+          : ((sefaz["status_message"] ?? d["last_error_message"] ?? null) as string | null),
         accessKey: (sefaz["access_key"] as string) ?? null,
-        protocol: (sefaz["protocol"] ?? provider["protocol"] ?? null) as
-          | string
-          | null,
+        protocol: isCancelled
+          ? ((cancellation["protocol"] as string) ?? (sefaz["protocol"] as string) ?? null)
+          : ((sefaz["protocol"] ?? provider["protocol"] ?? null) as string | null),
         authorizedAt: (sefaz["authorized_at"] as string) ?? null,
         raw: d,
       },

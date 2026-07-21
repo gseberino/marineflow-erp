@@ -1500,6 +1500,13 @@ export default function FiscalEmission() {
                         )}
                         {doc.status === 'authorized' && (
                           <>
+                            <Button
+                              size="sm" variant="ghost" disabled={isBusy}
+                              title="Atualizar status na SEFAZ — use se cancelou a nota e ela ainda aparece como autorizada"
+                              onClick={() => handleRefreshStatus(doc.id)}
+                            >
+                              {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                            </Button>
                             <Button size="sm" variant="outline" disabled={isBusy} title="Baixar XML autorizado" onClick={() => handleViewArtifact(doc.id, 'xml_authorized')}>
                               <Download className="h-3.5 w-3.5" />
                             </Button>

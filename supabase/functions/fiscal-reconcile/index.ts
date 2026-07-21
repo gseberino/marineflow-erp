@@ -73,10 +73,19 @@ Deno.serve(async (req) => {
   let query = admin
     .from("issued_fiscal_documents")
     .select(SELECT_COLS)
-    .not("provider_document_id", "is", null)
-    .or(`status.in.(${NON_TERMINAL.join(",")}),and(status.eq.authorized,xml_storage_path.is.null),and(status.eq.authorized,pdf_storage_path.is.null)`)
-    .limit(isCron ? 50 : 1);
-  if (documentId) query = query.eq("id", documentId);
+    .not("provider_document_id", "is", null);
+  if (documentId) {
+    // Caminho MANUAL (painel, "Atualizar status"): re-checa QUALQUER documento
+    // por id — inclusive um já 'authorized' que foi cancelado na SEFAZ e precisa
+    // refletir 'cancelled' (o cancelamento fica num grupo separado; ver getStatus).
+    // Sem isto, o filtro de lote abaixo excluiria uma nota autorizada-com-artefatos.
+    query = query.eq("id", documentId).limit(1);
+  } else {
+    // Caminho CRON (lote): só não-terminais + autorizados sem artefato arquivado.
+    query = query
+      .or(`status.in.(${NON_TERMINAL.join(",")}),and(status.eq.authorized,xml_storage_path.is.null),and(status.eq.authorized,pdf_storage_path.is.null)`)
+      .limit(50);
+  }
 
   const { data: docs, error: fetchErr } = await query;
   if (fetchErr) return jr({ error: fetchErr.message }, 500);

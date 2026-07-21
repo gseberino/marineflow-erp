@@ -4,6 +4,7 @@
 // Ações: action="create" (default) | "cancel" | "correction".
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { createFiscalProvider, readFiscalEnvironment } from "../_shared/fiscal/factory.ts";
+import { applyStatusUpdate } from "../_shared/fiscal/apply-status.ts";
 import { resolveIbgeCityCode } from "../_shared/fiscal/ibge.ts";
 import {
   buildNfeDraftPayload,
@@ -558,13 +559,26 @@ async function handleCancel(admin: any, body: any): Promise<Response> {
   const result = await provider.cancel(doc.document_type, doc.provider_document_id, reason.trim());
   if (!result.ok) return jr({ error: result.error, details: result.details }, 422);
 
-  // Cancelamento também é assíncrono — webhook/reconcile confirmam o status final.
+  // Cancelamento também é assíncrono, mas homologa em segundos. Marca
+  // 'processing' e faz um curto polling para refletir "cancelada" na hora — o
+  // cancelamento vive num grupo separado na Contora, então o getStatus (ajustado)
+  // detecta 135/155/cancelled_at. Se não confirmar a tempo, fica 'processing' e
+  // o reconcile (cron/manual "Atualizar status") fecha depois.
   await admin.from("issued_fiscal_documents").update({
     status: "processing",
     updated_at: new Date().toISOString(),
   }).eq("id", documentId);
 
-  return jr({ ok: true });
+  for (let i = 0; i < 4; i++) {
+    await new Promise((r) => setTimeout(r, 1500));
+    const st = await provider.getStatus(doc.document_type, doc.provider_document_id);
+    if (st.ok && st.data.status === "cancelled") {
+      await applyStatusUpdate(admin, provider, { ...doc, status: "processing" }, st.data);
+      return jr({ ok: true, cancelled: true });
+    }
+  }
+
+  return jr({ ok: true, pending: true });
 }
 
 // deno-lint-ignore no-explicit-any
