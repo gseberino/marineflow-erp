@@ -431,6 +431,9 @@ export default function FiscalEmission() {
   const [cancelReason, setCancelReason] = useState('');
   const [correctionTarget, setCorrectionTarget] = useState<{ id: string; number?: number; series?: number } | null>(null);
   const [correctionText, setCorrectionText] = useState('');
+  // Documento cujo erro está sendo inspecionado no diálogo de detalhes.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [errorDetail, setErrorDetail] = useState<any | null>(null);
   // Por documento (não um único valor global) — senão a conclusão da ação de
   // um documento pode reabilitar/destravar o botão de outro ainda em voo.
   const [busyDocIds, setBusyDocIds] = useState<Set<string>>(new Set());
@@ -1439,10 +1442,17 @@ export default function FiscalEmission() {
                       <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${s.className}`}>
                         {s.label}
                       </span>
-                      {doc.status_message && (
-                        <p className="text-[11px] text-muted-foreground mt-0.5 max-w-[220px] truncate" title={doc.status_message}>
-                          {doc.status_message}
-                        </p>
+                      {(doc.status_message || ['failed', 'rejected'].includes(doc.status)) && (
+                        <button
+                          type="button"
+                          onClick={() => setErrorDetail(doc)}
+                          title="Clique para ver o erro completo"
+                          className={`block text-left text-[11px] mt-0.5 max-w-[220px] truncate underline decoration-dotted underline-offset-2 hover:opacity-80 ${
+                            ['failed', 'rejected'].includes(doc.status) ? 'text-red-600' : 'text-muted-foreground'
+                          }`}
+                        >
+                          {doc.status_message || 'Ver detalhe do erro'}
+                        </button>
                       )}
                     </TableCell>
                     <TableCell className="text-right">
@@ -2169,6 +2179,70 @@ export default function FiscalEmission() {
               {exporting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FileDown className="h-4 w-4 mr-2" />}
               Exportar .zip
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Dialog: detalhe do erro (mensagem completa + técnico) ── */}
+      <Dialog open={!!errorDetail} onOpenChange={(o) => { if (!o) setErrorDetail(null); }}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              Detalhe do erro — NF-e {errorDetail?.series}/{errorDetail?.number}
+            </DialogTitle>
+            <DialogDescription>
+              {STATUS_MAP[errorDetail?.status ?? '']?.label ?? errorDetail?.status}
+              {errorDetail?.status_code ? ` · código ${errorDetail.status_code}` : ''}
+            </DialogDescription>
+          </DialogHeader>
+          {errorDetail && (() => {
+            const ps = errorDetail.provider_status || {};
+            const errType = ps.error_type || ps.errorType;
+            const technical = JSON.stringify(ps, null, 2);
+            return (
+              <div className="space-y-3">
+                {/* Mensagem principal (SEFAZ/Contora) — completa, sem cortar. */}
+                <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+                  <p className="text-xs font-semibold text-red-700 mb-1">Mensagem</p>
+                  <p className="text-sm text-red-900 whitespace-pre-wrap break-words">
+                    {errorDetail.status_message || '(sem mensagem — veja os detalhes técnicos abaixo)'}
+                  </p>
+                  {errType && (
+                    <p className="text-[11px] text-red-700 mt-1.5">Tipo: {String(errType)}</p>
+                  )}
+                </div>
+
+                {/* Detalhes técnicos completos (para conferir com a Contora/contadora). */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-xs font-semibold text-muted-foreground">Detalhes técnicos (SEFAZ/Contora)</p>
+                    <Button
+                      size="sm" variant="ghost" className="h-6 text-xs"
+                      onClick={() => {
+                        const full = `NF-e ${errorDetail.series}/${errorDetail.number}\nStatus: ${errorDetail.status} ${errorDetail.status_code || ''}\nMensagem: ${errorDetail.status_message || ''}\n\n${technical}`;
+                        navigator.clipboard?.writeText(full).then(
+                          () => toast.success('Erro copiado.'),
+                          () => toast.error('Não foi possível copiar.'),
+                        );
+                      }}
+                    >
+                      <Copy className="h-3.5 w-3.5 mr-1" />Copiar
+                    </Button>
+                  </div>
+                  <pre className="text-[11px] leading-relaxed bg-muted/50 rounded-lg p-3 overflow-x-auto max-h-64 whitespace-pre-wrap break-words">
+                    {technical === '{}' ? '(sem detalhes técnicos adicionais)' : technical}
+                  </pre>
+                </div>
+              </div>
+            );
+          })()}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setErrorDetail(null)}>Fechar</Button>
+            {errorDetail && ['failed', 'rejected', 'cancelled', 'draft'].includes(errorDetail.status) && errorDetail.request_payload && (
+              <Button onClick={() => { const d = errorDetail; setErrorDetail(null); handleReemitFromDoc(d); }}>
+                <Pencil className="h-4 w-4 mr-2" />Corrigir e reemitir
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
