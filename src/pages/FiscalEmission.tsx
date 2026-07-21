@@ -62,9 +62,14 @@ const PRESENCE_INDICATORS = [
   { value: 0, label: 'Não se aplica' },
 ];
 
+// Declaração OBRIGATÓRIA do Simples Nacional (Resolução CGSN 140/2018, art. 59).
+// A frase de "aproveitamento do crédito de ICMS" só é válida com CSOSN 101 E os
+// campos pCredSN/vCredICMSSN preenchidos (art. 23 LC 123/2006) — por isso NÃO a
+// colocamos aqui de forma genérica; quando o crédito for configurado (CSOSN 101),
+// a linha do crédito com valor/alíquota é gerada com os campos corretos.
 const SIMPLES_INFO_NOTE =
-  'Documento emitido por optante do Simples Nacional. Não gera direito a crédito fiscal de IPI. ' +
-  'Permite o aproveitamento do crédito de ICMS conforme a legislação (art. 23 da LC 123/2006).';
+  'Documento emitido por ME ou EPP optante pelo Simples Nacional. ' +
+  'Não gera direito a crédito fiscal de IPI.';
 
 const MIN_JUSTIFICATION_LENGTH = 15; // mesmo mínimo exigido pela SEFAZ, checado de novo no backend
 
@@ -1136,23 +1141,45 @@ export default function FiscalEmission() {
   // exigem o Bearer token, então não dá para abrir direto no navegador
   // ("Bearer token ausente"). O edge function busca com o token e devolve os
   // bytes; abrimos como blob local.
-  const handleViewArtifact = async (docId: string, kind: 'pdf_danfe' | 'xml_authorized') => {
-    markBusy(docId, true);
+  // Nome de arquivo padronizado: "NF-e 15-2 APOLO INDUSTRIA.pdf" (tipo, número,
+  // série, cliente). Remove caracteres inválidos p/ nome de arquivo e trunca o cliente.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const buildArtifactFilename = (doc: any, kind: 'pdf_danfe' | 'xml_authorized') => {
+    const t = String(doc.document_type || 'nfe').toLowerCase();
+    const tipo = t === 'nfse' ? 'NFS-e' : t === 'nfce' ? 'NFC-e' : 'NF-e';
+    const cliente = String(doc.request_payload?.recipient?.name || '')
+      // eslint-disable-next-line no-control-regex
+      .replace(/[<>:"/\\|?* -]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+    const base = `${tipo} ${doc.number ?? ''}-${doc.series ?? ''}${cliente ? ' ' + cliente : ''}`.trim();
+    return `${base}.${kind === 'pdf_danfe' ? 'pdf' : 'xml'}`;
+  };
+
+  // Baixa o artefato (XML autorizado ou DANFE) DE FATO como arquivo, com nome
+  // padronizado — o XML é salvo como .xml (antes abria um "blob:" ilegível) e o
+  // PDF como .pdf. Usa o proxy autenticado (as download_url da Contora exigem token).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleViewArtifact = async (doc: any, kind: 'pdf_danfe' | 'xml_authorized') => {
+    markBusy(doc.id, true);
     try {
       const { data, error } = await supabase.functions.invoke('fiscal-emit', {
-        body: { action: 'artifact', document_id: docId, artifact: kind },
+        body: { action: 'artifact', document_id: doc.id, artifact: kind },
       });
       if (error) throw new Error(await extractInvokeErrorMessage(error));
       const blob = data instanceof Blob
         ? data
         : new Blob([data as BlobPart], { type: kind === 'pdf_danfe' ? 'application/pdf' : 'application/xml' });
       const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = buildArtifactFilename(doc, kind);
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (err: any) {
-      toast.error('Erro ao abrir o documento: ' + err.message);
+      toast.error('Erro ao baixar o documento: ' + err.message);
     } finally {
-      markBusy(docId, false);
+      markBusy(doc.id, false);
     }
   };
 
@@ -1574,10 +1601,10 @@ export default function FiscalEmission() {
                             >
                               {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
                             </Button>
-                            <Button size="sm" variant="outline" disabled={isBusy} title="Baixar XML autorizado" onClick={() => handleViewArtifact(doc.id, 'xml_authorized')}>
+                            <Button size="sm" variant="outline" disabled={isBusy} title="Baixar XML autorizado (.xml)" onClick={() => handleViewArtifact(doc, 'xml_authorized')}>
                               <Download className="h-3.5 w-3.5" />
                             </Button>
-                            <Button size="sm" variant="outline" disabled={isBusy} onClick={() => handleViewArtifact(doc.id, 'pdf_danfe')}>
+                            <Button size="sm" variant="outline" disabled={isBusy} title="Baixar o DANFE (.pdf)" onClick={() => handleViewArtifact(doc, 'pdf_danfe')}>
                               DANFE
                             </Button>
                             {doc.client_id && (
