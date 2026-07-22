@@ -96,7 +96,15 @@ export default function ServiceOrderList() {
         .map((p: any) => ({ productId: p.product_id, quantity: Number(p.quantity) || 0, unitPrice: Number(p.unit_sale_snapshot) || 0 }));
       if (!items.length) { toast.error('Esta OS não tem produtos para faturar (só serviços/mão de obra).'); return; }
       navigate('/fiscal/emissao', {
-        state: { invoiceFrom: { serviceOrderId: so.id, clientId: so.client_id || so.clients?.id || null, items } },
+        state: { invoiceFrom: {
+          serviceOrderId: so.id,
+          clientId: so.client_id || so.clients?.id || null,
+          items,
+          // Pedido do cliente informado na OS/orcamento segue ate a NF-e.
+          purchaseOrder: so.customer_po_number || '',
+          buyerName: so.customer_buyer_name || so.requested_by_name || '',
+          orderNumber: so.service_order_number || null,
+        } },
       });
     } catch (e: any) {
       toast.error(e?.message || 'Erro ao preparar o faturamento');

@@ -1014,6 +1014,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     vessel_id: '',
     marina_id: '',
     requested_by_name: '',
+    customer_po_number: '',
+    customer_buyer_name: '',
     requested_by_contact_id: '',
     scheduled_start_at: '',
     scheduled_end_at: '',
@@ -1292,6 +1294,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         vessel_id: d.vessel_id || '',
         marina_id: d.marina_id || '',
         requested_by_name: d.requested_by_name || '',
+        customer_po_number: d.customer_po_number || '',
+        customer_buyer_name: d.customer_buyer_name || '',
         requested_by_contact_id: d.requested_by_contact_id || '',
         scheduled_start_at: d.scheduled_start_at ? d.scheduled_start_at.slice(0, 16) : '',
         scheduled_end_at: d.scheduled_end_at ? d.scheduled_end_at.slice(0, 16) : '',
@@ -2791,6 +2795,35 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 )}
               </div>
             )}
+          </div>
+
+          {/* Pedido do cliente: viaja até a NF-e ao faturar e sai no início das
+              informações complementares da nota. */}
+          <div>
+            <Label>Ordem de compra do cliente</Label>
+            <Input
+              value={form.customer_po_number}
+              onChange={e => set('customer_po_number', e.target.value)}
+              placeholder="Ex.: 05447"
+              maxLength={15}
+              disabled={isLocked}
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Sai na NF-e ao faturar
+            </p>
+          </div>
+
+          <div>
+            <Label>Comprador</Label>
+            <Input
+              value={form.customer_buyer_name}
+              onChange={e => set('customer_buyer_name', e.target.value)}
+              placeholder="Ex.: Everton"
+              disabled={isLocked}
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Em branco, usa o solicitante
+            </p>
           </div>
         </div>
       </section>

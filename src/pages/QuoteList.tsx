@@ -141,7 +141,15 @@ export default function QuoteList() {
         return;
       }
       navigate('/fiscal/emissao', {
-        state: { invoiceFrom: { serviceOrderId: so.id, clientId: so.client_id || so.clients?.id || null, items } },
+        state: { invoiceFrom: {
+          serviceOrderId: so.id,
+          clientId: so.client_id || so.clients?.id || null,
+          items,
+          // Pedido do cliente informado na OS/orcamento segue ate a NF-e.
+          purchaseOrder: so.customer_po_number || '',
+          buyerName: so.customer_buyer_name || so.requested_by_name || '',
+          orderNumber: so.service_order_number || null,
+        } },
       });
     } catch (e: any) {
       toast.error(e?.message || 'Erro ao preparar o faturamento');

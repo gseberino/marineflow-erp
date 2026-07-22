@@ -410,6 +410,11 @@ async function handleCreate(admin: any, body: any): Promise<Response> {
       // Plano de pagamento escolhido na emissão (à vista/parcelado + vencimentos)
       // — reaproveitado ao gerar os recebíveis (e, futuramente, as duplicatas no XML).
       payment_terms: body.payment_terms ?? null,
+      // Pedido do cliente em colunas próprias: o infCpl é texto (não dá para
+      // reconstituir com segurança) — assim duplicar/reemitir restaura os campos
+      // estruturados e a nota fica pesquisável pelo nº do pedido.
+      customer_po_number: body.customer_po_number ?? null,
+      customer_buyer_name: body.customer_buyer_name ?? null,
     })
     .select()
     .single();

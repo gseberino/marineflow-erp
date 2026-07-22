@@ -37,7 +37,7 @@ import { createZipBlob, type ZipEntry } from '@/lib/zip';
 import { parseLegacyAddress } from '@/lib/address-legacy';
 import { CSOSN_OPTIONS, FISCAL_ORIGIN_OPTIONS } from '@/lib/price-calculator';
 import { buildEspelhoHtml } from '@/lib/danfe-espelho';
-import { composeAdditionalInfo, stripManagedBlocks } from '@/lib/nfe-info-complementar';
+import { composeAdditionalInfo, stripManagedBlocks, stripPurchaseBlock } from '@/lib/nfe-info-complementar';
 // Reaproveita os mesmos módulos que a edge function fiscal-emit usa no
 // servidor — evita duplicar a lista de formas de pagamento, natureza de
 // operação/CFOP e o CFOP padrão.
@@ -689,11 +689,17 @@ export default function FiscalEmission() {
     setRecipientIe(r.state_registration || '');
     setConsumerFinal(p.consumer_final !== false);
     setPresenceIndicator(Number(p.presence_indicator ?? 1) || 1);
-    // Notas antigas gravaram a frase de crédito de ICMS (inválida com CSOSN 102);
-    // normalizar impede que o erro se propague ao duplicar/reemitir.
-    setAdditionalInfo(stripManagedBlocks(p.additional_info));
-    setPurchaseOrder('');
-    setBuyerName('');
+    // Pedido do cliente vem das COLUNAS (estruturado), não de parsing do texto.
+    // Notas antigas (sem as colunas) mantêm o bloco dentro do texto livre — daí
+    // só removê-lo do textarea quando de fato restauramos os campos.
+    const po = doc.customer_po_number || '';
+    const buyer = doc.customer_buyer_name || '';
+    setPurchaseOrder(po);
+    setBuyerName(buyer);
+    // stripManagedBlocks tira a declaração do Simples e a frase de crédito de
+    // ICMS inválida (CSOSN 102), que são recompostas na emissão.
+    const freeText = stripManagedBlocks(p.additional_info);
+    setAdditionalInfo(po || buyer ? stripPurchaseBlock(freeText) : freeText);
     setReferencedAccessKey((p.referenced_access_keys && p.referenced_access_keys[0]) || '');
     // Plano de pagamento: a fonte é payment_terms (guarda a forma REAL escolhida
     // e as parcelas); sem isso, duplicar uma nota parcelada perdia o parcelamento.
@@ -812,16 +818,25 @@ export default function FiscalEmission() {
   // Faturar um orçamento/OS: abre a emissão pré-preenchida com o cliente e os
   // PRODUTOS da OS (serviços/mão de obra ficam de fora — NF-e é de produto). A
   // nota fica vinculada à OS (origin_type=service_order) e marca invoicing_status.
-  const handleInvoiceFrom = (inv: { serviceOrderId: string; clientId: string | null; items: Array<{ productId: string; quantity: number; unitPrice: number }> }) => {
+  const handleInvoiceFrom = (inv: {
+    serviceOrderId: string;
+    clientId: string | null;
+    items: Array<{ productId: string; quantity: number; unitPrice: number }>;
+    purchaseOrder?: string | null;
+    buyerName?: string | null;
+    orderNumber?: string | null;
+  }) => {
     setEmitOrigin({ type: 'service_order', id: inv.serviceOrderId });
     setEmitIdempotencyKey(crypto.randomUUID());
     setNatureOfOperation('venda');
     setPaymentMethod('01');
     setPresenceIndicator(1);
     setConsumerFinal(true);
-    setAdditionalInfo('');
-    setPurchaseOrder('');
-    setBuyerName('');
+    // O faturamento descartava tudo o que vinha da OS/orçamento. Agora o pedido
+    // do cliente chega preenchido e o nº da OS vira referência na nota.
+    setAdditionalInfo(inv.orderNumber ? `Ref. OS/Orçamento nº ${inv.orderNumber}.` : '');
+    setPurchaseOrder(inv.purchaseOrder || '');
+    setBuyerName(inv.buyerName || '');
     setReferencedAccessKey('');
     const c = inv.clientId ? (clients || []).find((cl) => cl.id === inv.clientId) : null;
     if (c) { setClientId(c.id); populateFromClient(c); }
@@ -1063,6 +1078,9 @@ export default function FiscalEmission() {
     additional_info: composeAdditionalInfo({
       purchaseOrder, buyer: buyerName, freeText: additionalInfo,
     }) || undefined,
+    // Guardados tambem em colunas proprias (restaura ao duplicar; nota pesquisavel).
+    customer_po_number: purchaseOrder.trim() || undefined,
+    customer_buyer_name: buyerName.trim() || undefined,
     referenced_access_key: selectedNature.requiresReference ? (referencedAccessKey || undefined) : undefined,
     recipient: {
       name: recipientName,
