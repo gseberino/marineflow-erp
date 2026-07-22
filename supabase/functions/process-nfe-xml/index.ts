@@ -152,6 +152,7 @@ Deno.serve(async (req) => {
     const totalDiscount = parseFloat(tag(totals, "vDesc") ?? "0");
     const totalFreight  = parseFloat(tag(totals, "vFrete") ?? "0");
     const totalOther    = parseFloat(tag(totals, "vOutro") ?? "0");
+    const totalInsurance = parseFloat(tag(totals, "vSeg") ?? "0");
 
     // ── 4. Extract items (det blocks) ─────────────────────────────────────
     const detBlocks = tagAll(xmlText, "det");
@@ -257,6 +258,13 @@ Deno.serve(async (req) => {
         tax_ipi:       totalIPI,
         tax_pis:       totalPIS,
         tax_cofins:    totalCOFINS,
+        // Composicao do total: sem ela a conferencia acusava divergencia em
+        // toda nota com IPI (vNF = produtos + IPI + frete + seguro + outros - desconto).
+        total_products:  totalProducts,
+        total_discount:  totalDiscount,
+        total_freight:   totalFreight,
+        total_insurance: totalInsurance,
+        total_other:     totalOther,
         items:         items,
         xml_content:   xmlText,   // ← Armazena o XML original
         status:        "pending",
@@ -309,6 +317,7 @@ Deno.serve(async (req) => {
         totalProducts,
         totalDiscount,
         totalFreight,
+        totalInsurance,
         totalOther,
         items,
       }),

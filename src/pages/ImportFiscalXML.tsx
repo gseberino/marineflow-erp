@@ -120,6 +120,16 @@ export default function ImportFiscalXML() {
   const [creatingSupplier, setCreatingSupplier] = useState(false);
   const [revertingId, setRevertingId] = useState<string | null>(null);
 
+  // '__new' significa FORCAR produto novo; qualquer outro valor e um vinculo
+  // manual a um produto existente. Traduzir num lugar so evita divergencia
+  // entre o que a conferencia mostra e o que a confirmacao grava.
+  const mapeamentosParaEnvio = () =>
+    Object.entries(manualMappings).map(([sku, prodId]) =>
+      prodId === '__new'
+        ? { sku_supplier: sku, force_new: true }
+        : { sku_supplier: sku, internal_product_id: prodId },
+    );
+
   const { data: fiscalNotes, isLoading: loadingNotes } = useFiscalNotes();
   const { data: suppliers } = useSuppliers();
   const { data: purchaseOrders } = usePurchaseOrders();
@@ -196,9 +206,7 @@ export default function ImportFiscalXML() {
         const { data, error } = await (supabase.rpc as any)('preview_nfe_import', {
           p_note_id: parsed.noteId,
           p_supplier_id: supplierId === '__none' ? null : supplierId,
-          p_manual_mappings: Object.entries(manualMappings).map(([sku, prodId]) => ({
-            sku_supplier: sku, internal_product_id: prodId,
-          })),
+          p_manual_mappings: mapeamentosParaEnvio(),
         });
         if (error) throw error;
         if (!cancelado) setPreview(data);
@@ -279,10 +287,7 @@ export default function ImportFiscalXML() {
       const { data, error } = await (supabase.rpc as any)('confirm_nfe_import', {
         p_note_id:     parsed.noteId,
         p_supplier_id: supplierId === '__none' ? null : supplierId,
-        p_manual_mappings: Object.entries(manualMappings).map(([sku, prodId]) => ({
-          sku_supplier: sku,
-          internal_product_id: prodId
-        })),
+        p_manual_mappings: mapeamentosParaEnvio(),
         // Três vias: amarra a nota ao pedido de compra que a originou.
         p_purchase_order_id: purchaseOrderId === '__none' ? null : purchaseOrderId,
       });
@@ -422,7 +427,10 @@ export default function ImportFiscalXML() {
 
       {/* ── Confirmation dialog ── */}
       <Dialog open={showConfirm} onOpenChange={(o) => { if (!o) { setShowConfirm(false); setParsed(null); setFile(null); } }}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        {/* Largura maior: a tabela tem 7 colunas e descrições longas de
+            fornecedor (as da Kamell passam de 80 caracteres). Em max-w-4xl tudo
+            espremia e quebrava de forma irregular. */}
+        <DialogContent className="max-w-6xl w-[96vw] max-h-[92vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Confirmar Importação da NF-e</DialogTitle>
             <DialogDescription>
@@ -432,25 +440,72 @@ export default function ImportFiscalXML() {
 
           {parsed && (
             <div className="space-y-4 mt-2">
-              {/* Header cards */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <Card>
-                  <CardHeader className="pb-1"><CardTitle className="text-xs text-muted-foreground uppercase">Emitente</CardTitle></CardHeader>
-                  <CardContent><p className="font-semibold text-sm leading-tight">{parsed.issuerName || '—'}</p><p className="text-xs text-muted-foreground">{parsed.issuerCNPJ || '—'}</p></CardContent>
-                </Card>
-                <Card>
-                  <CardHeader className="pb-1"><CardTitle className="text-xs text-muted-foreground uppercase">Nº da Nota</CardTitle></CardHeader>
-                  <CardContent><p className="font-semibold text-2xl text-primary">{parsed.nfeNumber || '—'}</p></CardContent>
-                </Card>
-                <Card>
-                  <CardHeader className="pb-1"><CardTitle className="text-xs text-muted-foreground uppercase">Total NF-e</CardTitle></CardHeader>
-                  <CardContent><p className="font-semibold text-2xl">{formatCurrency(parsed.totalNF)}</p></CardContent>
-                </Card>
-                <Card>
-                  <CardHeader className="pb-1"><CardTitle className="text-xs text-muted-foreground uppercase">ICMS Total</CardTitle></CardHeader>
-                  <CardContent><p className="font-semibold text-sm">{formatCurrency(parsed.totalICMS)}</p><p className="text-xs text-muted-foreground">IPI: {formatCurrency(parsed.totalIPI)}</p></CardContent>
-                </Card>
+              {/* Cabeçalho da nota — uma faixa só, com alturas iguais. Antes eram
+                  4 cards com tipografia disparatada (2xl ao lado de sm), o que
+                  deixava a linha visualmente torta. */}
+              <div className="rounded-lg border bg-muted/30 p-3">
+                <div className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
+                  <div className="min-w-0">
+                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Fornecedor</p>
+                    <p className="truncate font-medium" title={parsed.issuerName || ''}>{parsed.issuerName || '—'}</p>
+                    <p className="text-xs text-muted-foreground">{parsed.issuerCNPJ || '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Nota</p>
+                    <p className="font-medium">nº {parsed.nfeNumber || '—'}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {parsed.issueDate ? formatDate(parsed.issueDate) : '—'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Itens</p>
+                    <p className="font-medium">{parsed.items.length}</p>
+                    <p className="text-xs text-muted-foreground">
+                      ICMS {formatCurrency(parsed.totalICMS)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Total da nota</p>
+                    <p className="text-xl font-semibold">{formatCurrency(parsed.totalNF)}</p>
+                  </div>
+                </div>
               </div>
+
+              {/* Composição do total. Antes a tela só comparava a soma dos itens
+                  com o total e gritava "divergente" — o que acontecia em TODA
+                  nota com IPI. Mostrar as parcelas explica de onde vem a diferença
+                  e só alerta quando a conta realmente não fecha. */}
+              {preview && (
+                <div className={`rounded-lg border p-3 text-sm ${
+                  preview.total_matches ? 'bg-muted/30' : 'border-destructive/40 bg-destructive/10'
+                }`}>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="text-muted-foreground">Produtos</span>
+                    <span className="font-medium">{formatCurrency(Number(preview.items_sum))}</span>
+                    {Number(preview.total_ipi) > 0 && (
+                      <><span className="text-muted-foreground">+ IPI</span>
+                        <span className="font-medium">{formatCurrency(Number(preview.total_ipi))}</span></>
+                    )}
+                    {Number(preview.total_freight) > 0 && (
+                      <><span className="text-muted-foreground">+ frete</span>
+                        <span className="font-medium">{formatCurrency(Number(preview.total_freight))}</span></>
+                    )}
+                    {Number(preview.total_other) > 0 && (
+                      <><span className="text-muted-foreground">+ despesas</span>
+                        <span className="font-medium">{formatCurrency(Number(preview.total_other))}</span></>
+                    )}
+                    {Number(preview.total_discount) > 0 && (
+                      <><span className="text-muted-foreground">− desconto</span>
+                        <span className="font-medium">{formatCurrency(Number(preview.total_discount))}</span></>
+                    )}
+                    <span className="text-muted-foreground">=</span>
+                    <span className="font-semibold">{formatCurrency(Number(preview.expected_total))}</span>
+                    {preview.total_matches
+                      ? <Badge variant="outline" className="border-success/40 bg-success/10 text-success">confere com a nota</Badge>
+                      : <Badge variant="destructive">não fecha com o total da nota ({formatCurrency(Number(preview.note_total))})</Badge>}
+                  </div>
+                </div>
+              )}
 
               {/* Fornecedor — identificado pelo CNPJ do próprio XML */}
               <div className="grid gap-3 sm:grid-cols-2">
@@ -505,30 +560,22 @@ export default function ImportFiscalXML() {
                 </div>
               </div>
 
-              {/* Conferência de totais: soma dos itens x total da nota */}
-              {preview && !preview.total_matches && (
-                <div className="rounded border border-destructive/40 bg-destructive/10 p-3 text-xs">
-                  <b>Atenção:</b> a soma dos itens ({formatCurrency(Number(preview.items_sum))}) é
-                  diferente do total da nota ({formatCurrency(Number(preview.note_total))}). Isso
-                  costuma ser frete, desconto ou despesas acessórias não distribuídos nos itens —
-                  confira antes de confirmar.
-                </div>
-              )}
-
               {/* Items table */}
               <Card>
                 <CardHeader><CardTitle className="text-sm">Itens da Nota ({parsed.items.length})</CardTitle></CardHeader>
-                <CardContent className="p-0">
-                  <Table>
+                {/* Rolagem horizontal PRÓPRIA: sem isto, a tabela (7 colunas)
+                    empurrava o diálogo inteiro e desalinhava o restante da página. */}
+                <CardContent className="overflow-x-auto p-0">
+                  <Table className="min-w-[900px]">
                     <TableHeader>
                       <TableRow>
-                        <TableHead>#</TableHead>
-                        <TableHead>Descrição</TableHead>
-                        <TableHead>NCM</TableHead>
-                        <TableHead className="text-right">Qtd</TableHead>
-                        <TableHead className="text-right">V. Unit.</TableHead>
-                        <TableHead className="text-right">Total</TableHead>
-                        <TableHead>No Sistema</TableHead>
+                        <TableHead className="w-10">#</TableHead>
+                        <TableHead className="min-w-[280px]">Descrição</TableHead>
+                        <TableHead className="w-24">NCM</TableHead>
+                        <TableHead className="w-24 text-right">Qtd</TableHead>
+                        <TableHead className="w-28 text-right">V. Unit.</TableHead>
+                        <TableHead className="w-28 text-right">Total</TableHead>
+                        <TableHead className="w-[260px]">No Sistema</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -553,9 +600,19 @@ export default function ImportFiscalXML() {
 
                         return (
                           <TableRow key={item.index}>
-                            <TableCell className="text-muted-foreground">{item.index}</TableCell>
-                            <TableCell>
-                              <p className="font-medium">{item.description}</p>
+                            <TableCell className="align-top text-muted-foreground">{item.index}</TableCell>
+                            <TableCell className="align-top">
+                              {/* Fornecedores usam " - " como quebra de linha dentro
+                                  do xProd (a Kamell faz isso em todos os itens), o
+                                  que deixava a descrição truncando de forma
+                                  irregular. Normalizar e limitar a 2 linhas
+                                  uniformiza; o texto completo fica no title. */}
+                              <p
+                                className="font-medium leading-snug line-clamp-2"
+                                title={item.description || ''}
+                              >
+                                {(item.description || '').replace(/\s+-\s+/g, ' — ').replace(/\s{2,}/g, ' ')}
+                              </p>
                               <p className="text-[11px] text-muted-foreground">
                                 SKU: {sku || '—'}{item.barcode ? ` · EAN: ${item.barcode}` : ''}
                               </p>
@@ -591,8 +648,12 @@ export default function ImportFiscalXML() {
                                       // Mandar '' faria o servidor tratar como "sem
                                       // vínculo manual" e recair na cascata; remover
                                       // a chave expressa a mesma intenção sem ruído.
-                                      if (val === '__new') delete next[sku];
-                                      else next[sku] = val;
+                                      // '__new' é uma DECISÃO (forçar produto
+                                      // novo), não ausência de decisão: removendo
+                                      // a chave, a cascata rodaria e poderia
+                                      // vincular a um produto existente, ao
+                                      // contrário do que o usuário escolheu.
+                                      next[sku] = val;
                                       return next;
                                     });
                                   }
