@@ -151,3 +151,68 @@ export function composeAdditionalInfo(input: {
 export function normalizeAdditionalInfo(text: string | null | undefined): string {
   return composeAdditionalInfo({ freeText: text });
 }
+
+// "R$ " montado à mão de propósito: o style:'currency' do toLocaleString insere
+// um espaço NÃO-QUEBRÁVEL (U+00A0) antes do número. Ele não é caractere de
+// controle, então passaria pelo cleanText e iria parar no XML fiscal — melhor
+// não arriscar num campo que a SEFAZ valida por charset.
+function brl(v: number): string {
+  return 'R$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// YYYY-MM-DD -> DD/MM/YYYY sem passar por Date (evita o deslocamento de fuso
+// que mostraria o dia anterior).
+function dataBR(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso ?? ''));
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : '';
+}
+
+/**
+ * Texto de dados adicionais de uma DEVOLUÇÃO AO FORNECEDOR.
+ *
+ * Reproduz o que o fornecedor precisa para se creditar (formato pedido pela
+ * Kamell): referência à nota de compra original e os valores de ICMS e IPI
+ * destacados nela. Emitente do Simples Nacional não destaca ICMS/IPI na nota —
+ * por isso os valores vão informados aqui, e o IPI entra em "despesas
+ * acessórias" (outras despesas) para o total da devolução fechar com a compra.
+ *
+ * Cada bloco é separado por ";" → vira uma linha no DANFE.
+ */
+export function buildDevolucaoInfo(input: {
+  noteNumber?: string | null;
+  noteSeries?: string | null;
+  issueDate?: string | null; // YYYY-MM-DD
+  accessKey?: string | null;
+  icmsValue?: number | null;
+  ipiValue?: number | null;
+  partial?: boolean;
+}): string {
+  const partes: string[] = [];
+
+  const numero = String(input.noteNumber ?? '').trim();
+  if (numero) {
+    // "40480" -> "40.480", como o fornecedor escreve na conferência.
+    const numeroFmt = /^\d+$/.test(numero) ? Number(numero).toLocaleString('pt-BR') : numero;
+    const serie = String(input.noteSeries ?? '').trim();
+    const data = dataBR(String(input.issueDate ?? ''));
+    partes.push(
+      `Devolução ${input.partial === false ? 'Total' : 'Parcial'} Ref. NF-e nº ${numeroFmt}` +
+      (serie ? `, série ${serie}` : '') +
+      (data ? `, de ${data}` : ''),
+    );
+  }
+
+  const chave = String(input.accessKey ?? '').replace(/\D/g, '');
+  if (chave.length === 44) partes.push(`Chave de acesso da NF-e de origem: ${chave}`);
+
+  if (input.icmsValue != null && input.icmsValue > 0) {
+    partes.push(`Valor do ICMS para crédito do destinatário: ${brl(input.icmsValue)}`);
+  }
+  if (input.ipiValue != null && input.ipiValue > 0) {
+    partes.push(
+      `Valor do IPI para crédito do destinatário (informado no campo despesas acessórias): ${brl(input.ipiValue)}`,
+    );
+  }
+
+  return partes.join(BLOCK_SEPARATOR);
+}

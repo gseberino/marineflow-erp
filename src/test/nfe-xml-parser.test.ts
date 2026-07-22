@@ -195,3 +195,113 @@ describe("parseNfeSupplierNote", () => {
     });
   });
 });
+
+// Nota de compra REAL de fornecedor do regime normal: ICMS e IPI destacados,
+// desconto por item e <ide> completo. Espelha o caso da devolução por garantia.
+// As bases de ICMS e IPI são PROPOSITALMENTE diferentes: é o que prova que cada
+// grupo é lido isoladamente (a tag <vBC> existe nos dois).
+const SUPPLIER_XML_COM_IMPOSTOS = `<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc>
+  <NFe>
+    <infNFe Id="NFe35250912345678000199550010000404801123456789" versao="4.00">
+      <ide>
+        <natOp>VENDA DE MERCADORIA</natOp>
+        <serie>1</serie>
+        <nNF>40480</nNF>
+        <dhEmi>2025-09-11T10:32:00-03:00</dhEmi>
+      </ide>
+      <emit>
+        <CNPJ>12345678000199</CNPJ>
+        <xNome>KAMELL DISTRIBUIDORA LTDA</xNome>
+        <IE>110042490114</IE>
+        <enderEmit>
+          <xLgr>Rod. Industrial</xLgr><nro>1500</nro><xBairro>Centro</xBairro>
+          <xMun>Curitiba</xMun><UF>PR</UF><CEP>80000000</CEP>
+        </enderEmit>
+      </emit>
+      <det nItem="1">
+        <prod>
+          <cProd>7891234</cProd>
+          <xProd>BOMBA DE COMBUSTIVEL</xProd>
+          <NCM>84133090</NCM>
+          <CFOP>6102</CFOP>
+          <uCom>PC</uCom>
+          <qCom>1.0000</qCom>
+          <vUnCom>1699.2500</vUnCom>
+          <vProd>1699.25</vProd>
+          <vDesc>50.98</vDesc>
+        </prod>
+        <imposto>
+          <ICMS><ICMS00>
+            <orig>0</orig><CST>00</CST><modBC>3</modBC>
+            <vBC>1648.27</vBC><pICMS>12.00</pICMS><vICMS>197.79</vICMS>
+          </ICMS00></ICMS>
+          <IPI>
+            <cEnq>999</cEnq>
+            <IPITrib><CST>50</CST><vBC>1699.25</vBC><pIPI>5.00</pIPI><vIPI>84.96</vIPI></IPITrib>
+          </IPI>
+        </imposto>
+      </det>
+      <det nItem="2">
+        <prod>
+          <cProd>FILTRO-22</cProd>
+          <xProd>FILTRO DE OLEO</xProd>
+          <NCM>84212300</NCM>
+          <CFOP>6102</CFOP>
+          <uCom>PC</uCom>
+          <qCom>3.0000</qCom>
+          <vUnCom>40.00</vUnCom>
+          <vProd>120.00</vProd>
+        </prod>
+        <imposto>
+          <ICMS><ICMS00>
+            <orig>0</orig><CST>00</CST><vBC>120.00</vBC><pICMS>12.00</pICMS><vICMS>14.40</vICMS>
+          </ICMS00></ICMS>
+          <IPI><cEnq>999</cEnq><IPINT><CST>53</CST></IPINT></IPI>
+        </imposto>
+      </det>
+    </infNFe>
+  </NFe>
+</nfeProc>`;
+
+describe("parseNfeSupplierNote — impostos exatos p/ a devolução ao fornecedor", () => {
+  it("lê número, série e data da nota de compra (sem deslocar o dia por fuso)", () => {
+    const note = parseNfeSupplierNote(SUPPLIER_XML_COM_IMPOSTOS)!;
+    expect(note.number).toBe("40480");
+    expect(note.series).toBe("1");
+    expect(note.issueDate).toBe("2025-09-11"); // dhEmi tem offset -03:00
+  });
+
+  it("extrai ICMS e IPI de grupos SEPARADOS (a tag vBC existe nos dois)", () => {
+    const [item] = parseNfeSupplierNote(SUPPLIER_XML_COM_IMPOSTOS)!.items;
+    expect(item.icmsBase).toBe(1648.27);
+    expect(item.icmsRate).toBe(12);
+    expect(item.icmsValue).toBe(197.79);
+    expect(item.ipiBase).toBe(1699.25); // diferente da base de ICMS
+    expect(item.ipiRate).toBe(5);
+    expect(item.ipiValue).toBe(84.96);
+  });
+
+  it("extrai total e desconto do item", () => {
+    const [item] = parseNfeSupplierNote(SUPPLIER_XML_COM_IMPOSTOS)!.items;
+    expect(item.itemTotal).toBe(1699.25);
+    expect(item.discount).toBe(50.98);
+    expect(item.quantity).toBe(1);
+    expect(item.unitPrice).toBe(1699.25);
+  });
+
+  it("item sem IPI tributado (IPINT) não inventa valor de IPI", () => {
+    const [, item2] = parseNfeSupplierNote(SUPPLIER_XML_COM_IMPOSTOS)!.items;
+    expect(item2.ipiValue).toBeUndefined();
+    expect(item2.ipiRate).toBeUndefined();
+    expect(item2.icmsValue).toBe(14.4); // mas o ICMS continua lido
+    expect(item2.discount).toBeUndefined(); // sem desconto nesse item
+  });
+
+  it("não quebra em nota antiga sem os grupos de imposto", () => {
+    const note = parseNfeSupplierNote(SUPPLIER_XML)!;
+    expect(note.items[1].icmsValue).toBeUndefined();
+    expect(note.items[0].icmsValue).toBe(1200);
+    expect(note.number).toBe("45");
+  });
+});

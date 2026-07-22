@@ -8,6 +8,7 @@ import {
   stripManagedBlocks,
   stripPurchaseBlock,
   START_CONTENT_ON_NEW_LINE,
+  buildDevolucaoInfo,
 } from "../lib/nfe-info-complementar";
 
 // O infCpl comeca com o separador para desgrudar o conteudo do rotulo
@@ -228,5 +229,60 @@ describe("rótulo 'Inf. Contribuinte:' do DANFE da Contora", () => {
     expect(segunda).toBe(primeira);
     expect(segunda).not.toMatch(/^;/);
     expect(segunda).not.toMatch(/;\s*$/);
+  });
+});
+
+describe("buildDevolucaoInfo — dados adicionais da devolução ao fornecedor", () => {
+  const base = {
+    noteNumber: "40480",
+    noteSeries: "1",
+    issueDate: "2025-09-11",
+    accessKey: "35250912345678000199550010000404801123456789",
+    icmsValue: 197.79,
+    ipiValue: 84.96,
+  };
+
+  it("monta a referência e os valores de crédito no formato pedido pelo fornecedor", () => {
+    const out = buildDevolucaoInfo(base);
+    expect(out).toContain("Devolução Parcial Ref. NF-e nº 40.480, série 1, de 11/09/2025");
+    expect(out).toContain("Valor do ICMS para crédito do destinatário: R$ 197,79");
+    expect(out).toContain("Valor do IPI para crédito do destinatário (informado no campo despesas acessórias): R$ 84,96");
+    expect(out).toContain("Chave de acesso da NF-e de origem: " + base.accessKey);
+  });
+
+  it("usa o separador de blocos (cada informação vira uma linha no DANFE)", () => {
+    const out = buildDevolucaoInfo(base);
+    expect(out.split(BLOCK_SEPARATOR).length).toBe(4);
+    expect(out).not.toMatch(/[\r\n]/);
+  });
+
+  it("diz 'Total' quando a devolução não é parcial", () => {
+    expect(buildDevolucaoInfo({ ...base, partial: false })).toContain("Devolução Total Ref.");
+  });
+
+  it("não formata a data com deslocamento de fuso", () => {
+    expect(buildDevolucaoInfo({ ...base, issueDate: "2025-01-01" })).toContain("de 01/01/2025");
+  });
+
+  it("omite os valores que não existem (item sem IPI, nota sem chave)", () => {
+    const out = buildDevolucaoInfo({ noteNumber: "45", icmsValue: 10, ipiValue: 0, accessKey: "123" });
+    expect(out).toContain("Valor do ICMS");
+    expect(out).not.toContain("IPI");
+    expect(out).not.toContain("Chave de acesso");
+  });
+
+  it("combina com composeAdditionalInfo mantendo a declaração do Simples por último", () => {
+    const out = composeAdditionalInfo({ freeText: buildDevolucaoInfo(base) });
+    expect(out.startsWith("Devolução Parcial Ref.")).toBe(true);
+    expect(out.endsWith(SIMPLES_INFO_NOTE)).toBe(true);
+  });
+});
+
+describe("buildDevolucaoInfo — segurança de caracteres no XML", () => {
+  it("não usa espaço não-quebrável (U+00A0) nos valores em reais", () => {
+    const out = buildDevolucaoInfo({ noteNumber: "40480", icmsValue: 1234.5, ipiValue: 84.96 });
+    expect(out).not.toMatch(/ /);
+    expect(out).toContain("R$ 1.234,50");
+    expect(out).toContain("R$ 84,96");
   });
 });

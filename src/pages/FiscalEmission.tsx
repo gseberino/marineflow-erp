@@ -37,7 +37,7 @@ import { createZipBlob, type ZipEntry } from '@/lib/zip';
 import { parseLegacyAddress } from '@/lib/address-legacy';
 import { CSOSN_OPTIONS, FISCAL_ORIGIN_OPTIONS } from '@/lib/price-calculator';
 import { buildEspelhoHtml } from '@/lib/danfe-espelho';
-import { composeAdditionalInfo, stripManagedBlocks, stripPurchaseBlock } from '@/lib/nfe-info-complementar';
+import { BLOCK_SEPARATOR, buildDevolucaoInfo, composeAdditionalInfo, stripManagedBlocks, stripPurchaseBlock } from '@/lib/nfe-info-complementar';
 // Reaproveita os mesmos módulos que a edge function fiscal-emit usa no
 // servidor — evita duplicar a lista de formas de pagamento, natureza de
 // operação/CFOP e o CFOP padrão.
@@ -388,6 +388,11 @@ export default function FiscalEmission() {
   // antes do texto livre e da declaracao do Simples (composeAdditionalInfo).
   const [purchaseOrder, setPurchaseOrder] = useState('');
   const [buyerName, setBuyerName] = useState('');
+  // Nota de compra que originou a devolucao ao fornecedor: identificacao usada
+  // nos dados adicionais (ref. + valores de ICMS/IPI para credito do destinatario).
+  const [returnSource, setReturnSource] = useState<
+    { number: string; series: string; issueDate: string; accessKey: string } | null
+  >(null);
   const [referencedAccessKey, setReferencedAccessKey] = useState('');
   const [items, setItems] = useState<DraftItem[]>([]);
   const xmlInputRef = useRef<HTMLInputElement>(null);
@@ -609,6 +614,7 @@ export default function FiscalEmission() {
     setAdditionalInfo('');
     setPurchaseOrder('');
     setBuyerName('');
+    setReturnSource(null);
     setReferencedAccessKey('');
     setItems([]);
     // Gerada uma vez por abertura do diálogo: um duplo clique ou retry de
@@ -696,6 +702,7 @@ export default function FiscalEmission() {
     const buyer = doc.customer_buyer_name || '';
     setPurchaseOrder(po);
     setBuyerName(buyer);
+    setReturnSource(null);
     // stripManagedBlocks tira a declaração do Simples e a frase de crédito de
     // ICMS inválida (CSOSN 102), que são recompostas na emissão.
     const freeText = stripManagedBlocks(p.additional_info);
@@ -779,6 +786,7 @@ export default function FiscalEmission() {
     // Só o texto livre: a declaração do Simples é acrescentada na composição.
     setAdditionalInfo(`Devolução referente à NF-e nº ${doc.number}, série ${doc.series}${key ? `, chave ${key}` : ''}.`);
     setReferencedAccessKey(key);
+    setReturnSource(null);
     setPaymentMethod(selectablePaymentMethod(doc.payment_terms?.method, p.payments?.[0]?.method));
     setAddress({
       postal_code: a.postal_code || '',
@@ -837,6 +845,7 @@ export default function FiscalEmission() {
     setAdditionalInfo(inv.orderNumber ? `Ref. OS/Orçamento nº ${inv.orderNumber}.` : '');
     setPurchaseOrder(inv.purchaseOrder || '');
     setBuyerName(inv.buyerName || '');
+    setReturnSource(null);
     setReferencedAccessKey('');
     const c = inv.clientId ? (clients || []).find((cl) => cl.id === inv.clientId) : null;
     if (c) { setClientId(c.id); populateFromClient(c); }
@@ -909,7 +918,19 @@ export default function FiscalEmission() {
     setConsumerFinal(false); // devolução B2B — o fornecedor não é consumidor final
     setPresenceIndicator(1);
     setPaymentMethod('01'); // ignorado (natureza sem pagamento → tPag 90)
-    setAdditionalInfo(`Devolução de compra referente à NF-e do fornecedor${key ? `, chave ${key}` : ''}.`);
+    // Os dados adicionais da devolução (referência à nota de compra + valores de
+    // ICMS/IPI para crédito do destinatário) são GERADOS na emissão, a partir dos
+    // itens efetivamente devolvidos — ver buildEmissionBody. O campo livre fica
+    // vazio para o usuário escrever o que quiser (ex.: "garantia concedida").
+    setAdditionalInfo('');
+    setPurchaseOrder('');
+    setBuyerName('');
+    setReturnSource({
+      number: String(ret?.number ?? ''),
+      series: String(ret?.series ?? ''),
+      issueDate: String(ret?.issueDate ?? ''),
+      accessKey: key,
+    });
     setReferencedAccessKey(key);
     const a = ret?.issuer?.address || {};
     setAddress({
@@ -938,6 +959,11 @@ export default function FiscalEmission() {
         maxQuantity: qty, // não permite devolver mais do que foi comprado
         referencedKey: key,
         referencedItemNumber: i + 1, // nItem na nota de compra original
+        // ICMS/IPI que o FORNECEDOR destacou, por UNIDADE. Guardar por unidade
+        // (e não o total do item) é o que permite calcular o crédito
+        // proporcional quando se devolve só parte da quantidade comprada.
+        icmsUnit: qty > 0 ? (Number(it.icmsValue) || 0) / qty : 0,
+        ipiUnit: qty > 0 ? (Number(it.ipiValue) || 0) / qty : 0,
       };
     }));
     setShowEmit(true);
@@ -1060,6 +1086,35 @@ export default function FiscalEmission() {
   const activeItems = items.filter((it) => it.included !== false);
   const total = activeItems.reduce((sum, it) => sum + it.quantity * it.unit_price, 0);
 
+  // Dados adicionais da devolução ao fornecedor, calculados a partir dos itens
+  // REALMENTE devolvidos: o crédito de ICMS/IPI é proporcional à quantidade
+  // (devolver 1 de 3 unidades transfere 1/3 do imposto que o fornecedor
+  // destacou). Recalcula sozinho quando o usuário muda a seleção ou a qtd.
+  const devolucaoInfo = useMemo(() => {
+    if (!isReturn || !returnSource) return '';
+    const somaPorUnidade = (campo: 'icmsUnit' | 'ipiUnit') =>
+      Math.round(
+        includedItems.reduce(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (soma, it: any) => soma + (Number(it[campo]) || 0) * (Number(it.quantity) || 0),
+          0,
+        ) * 100,
+      ) / 100;
+    // "Parcial" quando algum item foi excluído ou teve a quantidade reduzida.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const parcial = includedItems.length < items.length || includedItems.some((it: any) =>
+      it.maxQuantity != null && Number(it.quantity) < Number(it.maxQuantity));
+    return buildDevolucaoInfo({
+      noteNumber: returnSource.number,
+      noteSeries: returnSource.series,
+      issueDate: returnSource.issueDate,
+      accessKey: returnSource.accessKey,
+      icmsValue: somaPorUnidade('icmsUnit'),
+      ipiValue: somaPorUnidade('ipiUnit'),
+      partial: parcial,
+    });
+  }, [isReturn, returnSource, includedItems, items.length]);
+
   // Campos comuns do body de emissão — usados TANTO pela emissão real quanto
   // pelo espelho (preview), para o espelho refletir exatamente o que será emitido.
   const buildEmissionBody = () => ({
@@ -1074,9 +1129,10 @@ export default function FiscalEmission() {
     presence_indicator: presenceIndicator,
     consumer_final: consumerFinal,
     // Ordem garantida por contrato (ver composeAdditionalInfo): pedido/comprador
-    // → texto livre → declaração obrigatória do Simples, sempre por último.
+    // → devolução/texto livre → declaração obrigatória do Simples, por último.
     additional_info: composeAdditionalInfo({
-      purchaseOrder, buyer: buyerName, freeText: additionalInfo,
+      purchaseOrder, buyer: buyerName,
+      freeText: [devolucaoInfo, additionalInfo].filter(Boolean).join(BLOCK_SEPARATOR),
     }) || undefined,
     // Guardados tambem em colunas proprias (restaura ao duplicar; nota pesquisavel).
     customer_po_number: purchaseOrder.trim() || undefined,
@@ -2428,6 +2484,22 @@ export default function FiscalEmission() {
                   />
                 </div>
               </div>
+              {devolucaoInfo && (
+                <div className="mb-3 rounded border border-amber-300 bg-amber-50 p-2">
+                  <div className="text-[11px] font-semibold text-amber-900 mb-1">
+                    Dados da devolução (gerados automaticamente, entram na nota)
+                  </div>
+                  <div className="text-[11px] text-amber-900 leading-relaxed">
+                    {devolucaoInfo.split(';').map((linha, i) => (
+                      <div key={i}>{linha.trim()}</div>
+                    ))}
+                  </div>
+                  <div className="text-[10px] text-amber-800 mt-1">
+                    Os valores de ICMS/IPI são proporcionais aos itens e quantidades marcados acima —
+                    mudam sozinhos se você alterar a seleção.
+                  </div>
+                </div>
+              )}
               <Label>Informações complementares (opcional)</Label>
               <Textarea
                 className="text-sm"

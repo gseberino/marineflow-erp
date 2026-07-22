@@ -34,6 +34,17 @@ export interface ParsedNfeItem {
   // adquirida no mercado interno, …). Intrínseca ao produto — reaproveitada na
   // devolução ao fornecedor. Ausente no parse de venda (fica undefined).
   origin?: number;
+  // Valores EXATOS da nota de compra. A devolução tem que espelhar o que o
+  // fornecedor destacou, senão o crédito dele não fecha. Todos por item e
+  // opcionais (o parse de uma nota de venda nossa não os usa).
+  itemTotal?: number; // prod/vProd
+  discount?: number; // prod/vDesc
+  icmsBase?: number; // imposto/ICMS/*/vBC
+  icmsRate?: number; // imposto/ICMS/*/pICMS
+  icmsValue?: number; // imposto/ICMS/*/vICMS
+  ipiBase?: number; // imposto/IPI/IPITrib/vBC
+  ipiRate?: number; // imposto/IPI/IPITrib/pIPI
+  ipiValue?: number; // imposto/IPI/IPITrib/vIPI
 }
 
 export interface ParsedNfeReference {
@@ -54,11 +65,31 @@ export interface ParsedNfeSupplierNote {
   accessKey: string;
   issuer: ParsedNfeIssuer;
   items: ParsedNfeItem[];
+  // Identificação da nota de compra (grupo <ide>) — usada nos dados adicionais
+  // da devolução ("Devolução Parcial Ref. Nº 40.480 de 11/09/2025").
+  number: string; // ide/nNF
+  series: string; // ide/serie
+  issueDate: string; // ide/dhEmi (ou dEmi), normalizado em YYYY-MM-DD
 }
 
 function tag(xml: string, name: string): string {
   const re = new RegExp(`<${name}[^>]*>([^<]*)<\\/${name}>`, "i");
   return xml.match(re)?.[1]?.trim() ?? "";
+}
+
+// Recorta um grupo do XML (<ICMS>…</ICMS>, <IPI>…</IPI>) para ler as tags de
+// dentro dele. Necessário porque nomes se repetem entre grupos: <vBC> existe
+// tanto no ICMS quanto no IPI, e ler do <det> inteiro pegaria o primeiro.
+function block(xml: string, name: string): string {
+  const re = new RegExp(`<${name}[^>]*>([\\s\\S]*?)<\\/${name}>`, "i");
+  return xml.match(re)?.[1] ?? "";
+}
+
+function num(xml: string, name: string): number | undefined {
+  const raw = tag(xml, name);
+  if (raw === "") return undefined;
+  const v = parseFloat(raw);
+  return Number.isFinite(v) ? v : undefined;
 }
 
 function tagAll(xml: string, name: string): string[] {
@@ -106,6 +137,11 @@ export function parseNfeReferenceXml(xmlText: string): ParsedNfeReference | null
 function parseDetItem(det: string): ParsedNfeItem {
   const prod = det.match(/<prod>([\s\S]*?)<\/prod>/i)?.[1] ?? det;
   const origRaw = tag(det, "orig");
+  // Os grupos são recortados antes de ler: ICMS e IPI têm tags homônimas (vBC).
+  // O <ICMS> abriga um filho por CST/CSOSN (ICMS00, ICMS10, ICMSSN101…) — como
+  // só nos interessam os valores, lemos direto do grupo inteiro.
+  const icms = block(det, "ICMS");
+  const ipi = block(det, "IPI");
   return {
     code: tag(prod, "cProd"),
     name: tag(prod, "xProd"),
@@ -115,6 +151,14 @@ function parseDetItem(det: string): ParsedNfeItem {
     quantity: parseFloat(tag(prod, "qCom") || "0") || 0,
     unitPrice: parseFloat(tag(prod, "vUnCom") || "0") || 0,
     origin: origRaw !== "" ? (parseInt(origRaw, 10) || 0) : undefined,
+    itemTotal: num(prod, "vProd"),
+    discount: num(prod, "vDesc"),
+    icmsBase: num(icms, "vBC"),
+    icmsRate: num(icms, "pICMS"),
+    icmsValue: num(icms, "vICMS"),
+    ipiBase: num(ipi, "vBC"),
+    ipiRate: num(ipi, "pIPI"),
+    ipiValue: num(ipi, "vIPI"),
   };
 }
 
@@ -159,5 +203,19 @@ export function parseNfeSupplierNote(xmlText: string): ParsedNfeSupplierNote | n
 
   const items: ParsedNfeItem[] = tagAll(xmlText, "det").map(parseDetItem);
 
-  return { accessKey, issuer, items };
+  // Identificação da nota de compra. dhEmi (leiaute 4.00) vem como
+  // "2025-09-11T10:00:00-03:00"; dEmi (antigo) já é a data pura. Cortar os 10
+  // primeiros caracteres evita converter para Date e cair no clássico
+  // deslocamento de fuso que mostraria o dia anterior.
+  const ide = block(xmlText, "ide");
+  const issueDate = (tag(ide, "dhEmi") || tag(ide, "dEmi")).slice(0, 10);
+
+  return {
+    accessKey,
+    issuer,
+    items,
+    number: tag(ide, "nNF"),
+    series: tag(ide, "serie"),
+    issueDate,
+  };
 }
