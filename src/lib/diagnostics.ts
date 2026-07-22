@@ -1,5 +1,6 @@
 import { supabase } from '@/integrations/supabase/client';
 import { queryClient } from '@/lib/query-client';
+import { toast } from 'sonner';
 
 const MAX_ERRORS = 50;
 const MAX_NETWORK = 50;
@@ -101,6 +102,50 @@ function safeStringify(value: unknown): string {
   }
 }
 
+/**
+ * Registra um erro no banco (tabela app_error_logs) para diagnóstico posterior.
+ *
+ * Antes, um erro só existia no toast — que some — ou no console do navegador.
+ * As piores falhas recentes foram SILENCIOSAS (edge não deployada, RPC com
+ * colunas inexistentes, auditoria em tabela errada) e ninguém as viu no primeiro
+ * uso. Aqui o erro fica consultável por SQL.
+ *
+ * NUNCA lança: um log que quebra a operação do usuário seria pior que não ter log.
+ * O texto passa por mask(), que já remove JWT/Bearer/tokens longos.
+ */
+export async function logError(input: {
+  message: string;
+  context?: string;
+  action?: string;
+  level?: 'error' | 'warn';
+  error?: unknown;
+  details?: Record<string, unknown>;
+}): Promise<void> {
+  try {
+    const msg = mask(String(input.message ?? '')).slice(0, 2000);
+    if (!msg.trim()) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const err = input.error as any;
+    const details: Record<string, unknown> = { ...(input.details ?? {}) };
+    if (err?.stack) details.stack = mask(String(err.stack)).slice(0, 4000);
+    if (typeof navigator !== 'undefined') details.userAgent = navigator.userAgent;
+    // Mascara também o corpo: um payload de erro pode carregar token.
+    const safeDetails = JSON.parse(mask(safeStringify(details)) || '{}');
+
+    await supabase.rpc('log_app_error' as never, {
+      p_source: 'frontend',
+      p_message: msg,
+      p_context: input.context
+        ?? (typeof window !== 'undefined' ? window.location.pathname : null),
+      p_action: input.action ?? null,
+      p_level: input.level ?? 'error',
+      p_details: safeDetails,
+    } as never);
+  } catch {
+    /* silencioso de propósito — ver comentário acima */
+  }
+}
+
 let installed = false;
 
 export function installDiagnostics() {
@@ -137,6 +182,68 @@ export function installDiagnostics() {
       MAX_ERRORS,
     );
   });
+
+  // --- persistência dos erros no banco ---
+  // Os dois listeners acima já guardavam em memória (pacote de diagnóstico
+  // baixável). Agora também vão para app_error_logs, para poderem ser
+  // consultados sem depender de o usuário exportar o arquivo.
+  //
+  // Janela curta anti-repetição: um erro em laço de render dispararia centenas
+  // de chamadas. O agrupamento definitivo é por fingerprint no banco.
+  const recentes = new Map<string, number>();
+  const naoRepetir = (chave: string, janelaMs = 15_000) => {
+    const agora = Date.now();
+    const visto = recentes.get(chave);
+    if (visto && agora - visto < janelaMs) return true;
+    recentes.set(chave, agora);
+    if (recentes.size > 50) recentes.clear();
+    return false;
+  };
+
+  window.addEventListener('error', (ev) => {
+    const msg = ev.message || 'Erro não identificado';
+    if (naoRepetir('err:' + msg)) return;
+    void logError({
+      message: msg,
+      error: ev.error,
+      action: 'window.onerror',
+      details: { source: ev.filename ? maskUrl(ev.filename) : undefined, lineno: ev.lineno },
+    });
+  });
+
+  window.addEventListener('unhandledrejection', (ev) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const reason = ev.reason as any;
+    const msg = safeStringify(reason?.message ?? reason);
+    if (naoRepetir('rej:' + msg)) return;
+    void logError({ message: msg, error: reason, action: 'unhandledrejection' });
+  });
+
+  // --- toast.error wrapper ---
+  // São 232 chamadas de toast.error espalhadas pelo sistema: é justamente aí que
+  // os erros aparecem para o usuário e desaparecem em seguida. Interceptar num
+  // ponto só evita ter que alterar (e manter) 232 lugares — mesmo padrão já
+  // usado logo abaixo para o console. Falha do wrapper nunca impede o toast.
+  try {
+    const originalToastError = toast.error;
+    if (typeof originalToastError === 'function' && !(toast as { __logged?: boolean }).__logged) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (toast as any).error = (message: unknown, opts?: unknown) => {
+        try {
+          const texto = typeof message === 'string' ? message : safeStringify(message);
+          if (!naoRepetir('toast:' + texto)) {
+            void logError({ message: texto, action: 'toast.error' });
+          }
+        } catch {
+          /* nunca impedir o toast */
+        }
+        return originalToastError(message as string, opts as never);
+      };
+      (toast as { __logged?: boolean }).__logged = true;
+    }
+  } catch {
+    /* ignore */
+  }
 
   // --- console wrapper ---
   (['log', 'warn', 'error', 'info', 'debug'] as const).forEach((level) => {
