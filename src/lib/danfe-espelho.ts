@@ -204,16 +204,16 @@ export function buildEspelhoHtml(
     ? payments.map((p) => `${paymentLabel(p?.method)} — ${brl(p?.amount)}`).join('<br>')
     : '—';
 
-  // A DANFE imprime o conteúdo de infCpl precedido do rótulo "Inf. Contribuinte:"
-  // (e o de infAdFisco como "Inf. Fisco:") — é o renderizador da DANFE que
-  // identifica de qual campo veio o texto. Reproduzimos o mesmo rótulo aqui para
-  // o espelho não divergir do documento final.
+  // O quadro começa direto pelo conteúdo, igual ao DANFE. A Contora imprimia um
+  // rótulo "Inf. Contribuinte:" antes do infCpl; a pedido nosso, criaram uma
+  // preferência por CNPJ que o suprime (já ativa para a HBR) — o rótulo era
+  // redundante com o título do próprio quadro. Se o espelho continuasse
+  // mostrando o rótulo, voltaria a divergir do papel.
   //
-  // O ";" também é convertido em quebra de linha visual pelo DANFE (confirmado
-  // pela Contora) — o espelho faz o mesmo, senão mostraria em linha corrida algo
-  // que sairá quebrado no papel.
-  // Dividir ANTES de escapar: entidades HTML (&lt; &gt; &amp;) terminam em ";",
-  // então trocar ";" por <br> depois do escape corromperia o próprio escape.
+  // O ";" é convertido em quebra de linha visual pelo DANFE (confirmado pela
+  // Contora) — o espelho faz o mesmo, senão mostraria em linha corrida algo que
+  // sairá quebrado no papel. Dividir ANTES de escapar: entidades HTML
+  // (&lt; &gt; &amp;) terminam em ";", então trocar depois do escape o corromperia.
   const infCplHtml = String(payload?.additional_info ?? '')
     .split(/;[ \t]*/)
     .map((parte) => esc(parte))
@@ -221,7 +221,7 @@ export function buildEspelhoHtml(
   const infoAdicional = payload?.additional_info
     ? `<div class="box">
         <div class="box-title">Dados adicionais / Informações complementares</div>
-        <div class="infcpl"><span class="lbl-inline">Inf. Contribuinte:</span> ${infCplHtml}</div>
+        <div class="infcpl">${infCplHtml}</div>
       </div>`
     : '';
 
@@ -269,7 +269,6 @@ export function buildEspelhoHtml(
   .totais { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 14px; padding: 8px; }
   .total-nota { font-size: 15px; font-weight: 800; }
   .infcpl { padding: 8px; white-space: pre-wrap; line-height: 1.45; }
-  .lbl-inline { font-weight: 700; }
   .foot { margin-top: 14px; color: #64748b; font-size: 10px; line-height: 1.5; border-top: 1px solid #e2e8f0; padding-top: 8px; }
   @media print {
     body { background: #fff; padding: 0; font-size: 10.5px; }

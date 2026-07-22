@@ -213,18 +213,20 @@ describe("rótulo 'Inf. Contribuinte:' do DANFE da Contora", () => {
     expect(out).not.toMatch(/Inf\.\s*Fisco/i);
   });
 
-  it("começa com o separador para o conteúdo cair na linha DEPOIS do rótulo", () => {
+  // A Contora suprimiu o prefixo para o CNPJ da HBR, então o paliativo do ";"
+  // inicial saiu de cena — eles recomendaram enviar o conteúdo direto.
+  it("não começa mais com separador (prefixo removido pela Contora)", () => {
     const out = composeAdditionalInfo({ purchaseOrder: "05447" });
-    expect(START_CONTENT_ON_NEW_LINE).toBe(true);
-    expect(out.startsWith(BLOCK_SEPARATOR)).toBe(true);
-    // e sem sobrar separador duplicado logo em seguida
-    expect(out).not.toMatch(/^;\s*;/);
+    expect(START_CONTENT_ON_NEW_LINE).toBe(false);
+    expect(out.startsWith(BLOCK_SEPARATOR)).toBe(false);
+    expect(out.startsWith("Pedido de Compra: 05447")).toBe(true);
   });
 
-  it("o prefixo não se acumula ao recompor a partir de um texto já composto", () => {
+  it("não deixa separador órfão nas pontas ao recompor um texto já composto", () => {
     const primeira = composeAdditionalInfo({ purchaseOrder: "05447", freeText: "Entrega parcial." });
     const segunda = composeAdditionalInfo({ purchaseOrder: "05447", freeText: primeira });
     expect(segunda).toBe(primeira);
-    expect(segunda.match(/^;\s*/g)?.length).toBe(1);
+    expect(segunda).not.toMatch(/^;/);
+    expect(segunda).not.toMatch(/;\s*$/);
   });
 });

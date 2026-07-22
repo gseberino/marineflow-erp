@@ -127,15 +127,16 @@ describe("buildEspelhoHtml", () => {
     expect(html).toContain("previsto"); // deixa claro que a reserva é na emissão
   });
 
-  it("reproduz o rótulo 'Inf. Contribuinte:' que a DANFE imprime antes do infCpl", () => {
-    // A DANFE identifica de qual campo veio o texto (infCpl = contribuinte,
-    // infAdFisco = fisco). Sem o rótulo, o espelho divergia do documento final.
+  it("NÃO imprime o rótulo 'Inf. Contribuinte:' (a Contora o suprimiu p/ a HBR)", () => {
+    // O espelho tem que espelhar a DANFE: como o renderizador deles deixou de
+    // prefixar o quadro, manter o rótulo aqui recriaria a divergência.
     const html = buildEspelhoHtml(
       makePayload({ additional_info: "Referente a Ordem de Compra N. 05447." }),
       emitter,
     );
-    expect(html).toContain("Inf. Contribuinte:");
+    expect(html).not.toContain("Inf. Contribuinte:");
     expect(html).toContain("Referente a Ordem de Compra N. 05447.");
+    expect(html).toContain("Informações complementares"); // o título do quadro fica
   });
 
   it("não quebra com payload mínimo (sem itens, sem impostos, sem endereço)", () => {
@@ -156,9 +157,10 @@ describe("buildEspelhoHtml — infCpl igual ao DANFE", () => {
     expect(html).toContain("Pedido de Compra: 05447<br>Entrega parcial.<br>Documento emitido por ME ou EPP.");
   });
 
-  it("mantém o rótulo 'Inf. Contribuinte:' antes do conteúdo", () => {
+  it("o quadro começa direto pelo conteúdo, sem rótulo", () => {
     const html = buildEspelhoHtml({ items: [], additional_info: "Pedido de Compra: 05447" }, emitterMin);
-    expect(html).toContain("Inf. Contribuinte:");
+    expect(html).not.toContain("Inf. Contribuinte:");
+    expect(html).toContain("Pedido de Compra: 05447");
   });
 
   it("continua escapando HTML depois da conversão", () => {
