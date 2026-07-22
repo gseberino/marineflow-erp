@@ -19,6 +19,120 @@ async function recalcSoTotals(sb: any, soId: string | undefined | null): Promise
   }
 }
 
+// Um item de OS/orçamento vive em UMA de duas tabelas: produtos em service_order_parts,
+// serviços/materiais em service_order_services. As tools de editar/remover precisam achar
+// o item em qualquer das duas, por id (vindo de get_service_order) ou por descrição.
+type SoItem = {
+  table: "service_order_parts" | "service_order_services";
+  id: string;
+  label: string;
+  quantity: number;
+  unit_price: number;
+  total: number;
+  /** Só para peças (produtos) — necessário para mover estoque no editar/remover. */
+  product_id?: string | null;
+  unit_cost?: number;
+};
+
+async function loadSoItems(sb: any, soId: string): Promise<SoItem[]> {
+  const { data: parts } = await sb
+    .from("service_order_parts")
+    .select("id, product_id, quantity, unit_sale_snapshot, unit_cost_snapshot, line_total_sale, products(name)")
+    .eq("service_order_id", soId);
+  const { data: services } = await sb
+    .from("service_order_services")
+    .select("id, name_snapshot, quantity, unit_price_snapshot, line_total")
+    .eq("service_order_id", soId);
+  const partItems: SoItem[] = (parts || []).map((p: any) => ({
+    table: "service_order_parts",
+    id: p.id,
+    label: p.products?.name || "Produto",
+    quantity: Number(p.quantity) || 0,
+    unit_price: Number(p.unit_sale_snapshot) || 0,
+    total: Number(p.line_total_sale) || 0,
+    product_id: p.product_id ?? null,
+    unit_cost: Number(p.unit_cost_snapshot) || 0,
+  }));
+  const svcItems: SoItem[] = (services || []).map((s: any) => ({
+    table: "service_order_services",
+    id: s.id,
+    label: s.name_snapshot || "Serviço",
+    quantity: Number(s.quantity) || 0,
+    unit_price: Number(s.unit_price_snapshot) || 0,
+    total: Number(s.line_total) || 0,
+    product_id: null,
+    unit_cost: 0,
+  }));
+  return [...partItems, ...svcItems];
+}
+
+// Espelha o movimento de estoque do frontend (use-service-orders.ts): baixa no add-da-peça,
+// estorno no remover, ajuste no editar. `delta` = variação em products.stock_quantity
+// (negativo = baixa; positivo = devolução). Só para PEÇAS (produto) — serviço/material não
+// tem estoque. Segue o mesmo padrão read-then-update não-atômico da tela (sem piso em 0,
+// igual ao frontend). Best-effort: não deve derrubar a tool que a chama.
+async function applyStockDelta(
+  sb: any,
+  productId: string | null | undefined,
+  delta: number,
+  soId: string,
+  unitCost: number,
+): Promise<void> {
+  if (!productId || !delta) return;
+  try {
+    const { data: prod } = await sb.from("products").select("stock_quantity").eq("id", productId).maybeSingle();
+    const current = Number(prod?.stock_quantity) || 0;
+    await sb.from("products").update({ stock_quantity: current + delta }).eq("id", productId);
+    await sb.from("inventory_movements").insert({
+      product_id: productId,
+      movement_type: delta < 0 ? "service_order_usage" : "return",
+      quantity_delta: delta,
+      reference_type: "service_order",
+      reference_id: soId,
+      unit_cost_snapshot: unitCost,
+    });
+  } catch (_e) {
+    // Best-effort — igual ao padrão do frontend; não interrompe a tool.
+  }
+}
+
+// Resolve um item por id (exato) ou por descrição (substring, case-insensitive). Retorna
+// { item } quando há exatamente um; { matches } quando a descrição é ambígua (>1).
+function resolveSoItem(items: SoItem[], itemId?: string, description?: string): { item?: SoItem; matches?: SoItem[] } {
+  if (itemId) {
+    const item = items.find((i) => i.id === itemId);
+    return item ? { item } : {};
+  }
+  if (description) {
+    const q = String(description).trim().toLowerCase();
+    const matches = items.filter((i) => i.label.toLowerCase().includes(q));
+    if (matches.length === 1) return { item: matches[0] };
+    return { matches };
+  }
+  return {};
+}
+
+// Total atual (após recalc) + margem BRUTA sobre custo de peças. Serviço/mão de obra não tem
+// custo registrado, então esta margem cobre só o custo de produtos — rotulada como tal.
+async function soTotalsSummary(sb: any, soId: string): Promise<{ total_atual: number; custo_pecas: number; margem_bruta_pct: number | null }> {
+  const { data: so } = await sb.from("service_orders").select("grand_total").eq("id", soId).maybeSingle();
+  const { data: parts } = await sb.from("service_order_parts").select("line_total_cost").eq("service_order_id", soId);
+  const custoPecas = (parts || []).reduce((a: number, p: any) => a + (Number(p.line_total_cost) || 0), 0);
+  const grand = Number(so?.grand_total) || 0;
+  const margemBrutaPct = grand > 0 ? Math.round(((grand - custoPecas) / grand) * 1000) / 10 : null;
+  return { total_atual: grand, custo_pecas: Math.round(custoPecas * 100) / 100, margem_bruta_pct: margemBrutaPct };
+}
+
+// Bloqueia edição/remoção de item em OS que não deve mais mudar. Cancelada tem total
+// "congelado" de propósito (ver recalc_so_totals) e faturada desincronizaria o financeiro.
+async function assertEditableSo(sb: any, soId: string): Promise<{ error: string } | null> {
+  const { data: so } = await sb.from("service_orders").select("status").eq("id", soId).maybeSingle();
+  if (!so) return { error: "Orçamento/OS não encontrado." };
+  if (so.status === "cancelled") return { error: "OS cancelada não pode ser editada." };
+  if (so.status === "invoiced") return { error: "OS já faturada não pode ter itens alterados." };
+  return null;
+}
+
 // Espelha QUOTE_STATUS_TRANSITIONS de src/hooks/use-service-orders.ts — ciclo de vida
 // do orçamento (campo quote_status, separado do status geral da OS), válido enquanto
 // converted_to_os_at é nulo.
@@ -134,11 +248,15 @@ export const serviceOrderTools: ToolDef[] = [
           embarcacao: so.vessels?.name || "—",
         },
         parts: (parts || []).map((p: any) => ({
+          item_id: p.id,
+          tipo: "part",
           produto: p.products?.name || "Desconhecido",
           quantidade: p.quantity,
           total: p.line_total_sale,
         })),
         services: (services || []).map((s: any) => ({
+          item_id: s.id,
+          tipo: "service",
           servico: s.name_snapshot,
           quantidade: s.quantity,
           preco_unitario: s.unit_price_snapshot,
@@ -243,7 +361,13 @@ export const serviceOrderTools: ToolDef[] = [
             line_total_sale: (prod.sale_price || 0) * it.quantity,
           });
         }
-        if (partsRows.length) await sb.from("service_order_parts").insert(partsRows);
+        if (partsRows.length) {
+          await sb.from("service_order_parts").insert(partsRows);
+          // Baixa de estoque por peça — espelha o frontend (baixa no add).
+          for (const row of partsRows) {
+            await applyStockDelta(sb, row.product_id, -Number(row.quantity), data.id, row.unit_cost_snapshot);
+          }
+        }
       }
       await recalcSoTotals(sb, data.id);
       return { ok: true, service_order: data };
@@ -328,6 +452,8 @@ export const serviceOrderTools: ToolDef[] = [
         .select()
         .single();
       if (error) throw error;
+      // Baixa de estoque — espelha o frontend (baixa no add-da-peça).
+      await applyStockDelta(sb, args.product_id, -Number(args.quantity), args.service_order_id, prod.cost_price || 0);
       await recalcSoTotals(sb, args.service_order_id || args.id);
       return { ok: true, part: data };
     },
@@ -411,6 +537,115 @@ export const serviceOrderTools: ToolDef[] = [
       if (error) throw error;
       await recalcSoTotals(sb, args.service_order_id);
       return { ok: true, material_item: data };
+    },
+  },
+  {
+    name: "remove_service_order_item",
+    description:
+      "Remove um item (produto OU serviço/material) de um orçamento/OS. Identifique o item por item_id (campo item_id vindo de get_service_order) ou por descrição. Se a descrição casar com vários itens, a tool retorna a lista (needs_choice) para você perguntar qual — nunca adivinhe. Recalcula total e margem. Não funciona em OS cancelada ou faturada.",
+    input_schema: {
+      type: "object",
+      properties: {
+        service_order_id: { type: "string", description: "UUID do orçamento/OS" },
+        item_id: { type: "string", description: "ID do item (campo item_id de get_service_order). Forma preferencial." },
+        description: { type: "string", description: "Nome/descrição do item, quando não se tem o item_id." },
+      },
+      required: ["service_order_id"],
+    },
+    risk: "low",
+    async execute(args, { sb }) {
+      if (!args.item_id && !args.description) return { error: "Informe item_id ou description do item a remover." };
+      const guard = await assertEditableSo(sb, args.service_order_id);
+      if (guard) return guard;
+      const items = await loadSoItems(sb, args.service_order_id);
+      if (items.length === 0) return { error: "Este orçamento/OS não tem itens para remover." };
+      const { item, matches } = resolveSoItem(items, args.item_id, args.description);
+      if (!item) {
+        if (matches && matches.length > 1) {
+          return {
+            needs_choice: true,
+            message: `Encontrei ${matches.length} itens parecidos. Pergunte qual remover (passe o item_id).`,
+            options: matches.map((m) => ({ item_id: m.id, descricao: m.label, quantidade: m.quantity, total: m.total })),
+          };
+        }
+        return { error: "Item não encontrado neste orçamento/OS." };
+      }
+      const { error } = await sb.from(item.table).delete().eq("id", item.id).eq("service_order_id", args.service_order_id);
+      if (error) throw error;
+      // Estorno de estoque — espelha o frontend (devolve no remover). No-op p/ serviço (product_id nulo).
+      await applyStockDelta(sb, item.product_id, item.quantity, args.service_order_id, item.unit_cost || 0);
+      await recalcSoTotals(sb, args.service_order_id);
+      const totais = await soTotalsSummary(sb, args.service_order_id);
+      return { ok: true, removido: { descricao: item.label, quantidade: item.quantity, total: item.total }, ...totais };
+    },
+  },
+  {
+    name: "edit_service_order_item",
+    description:
+      "Edita a quantidade e/ou o preço unitário de um item (produto OU serviço/material) de um orçamento/OS. Identifique por item_id (de get_service_order) ou por descrição (ambígua → retorna needs_choice, pergunte qual). Recalcula total e margem. Rejeita quantidade <= 0 (para zerar, remova o item) e preço negativo. Desconto NÃO é por item: use apply_service_order_discount, que desconta no total da OS. Não funciona em OS cancelada ou faturada.",
+    input_schema: {
+      type: "object",
+      properties: {
+        service_order_id: { type: "string", description: "UUID do orçamento/OS" },
+        item_id: { type: "string", description: "ID do item (campo item_id de get_service_order). Forma preferencial." },
+        description: { type: "string", description: "Nome/descrição do item, quando não se tem o item_id." },
+        quantity: { type: "number", description: "Nova quantidade (opcional; > 0)." },
+        unit_price: { type: "number", description: "Novo preço unitário em R$ (opcional; >= 0)." },
+      },
+      required: ["service_order_id"],
+    },
+    risk: "low",
+    async execute(args, { sb }) {
+      if (args.quantity == null && args.unit_price == null) return { error: "Informe ao menos quantity ou unit_price para editar." };
+      if (args.quantity != null && Number(args.quantity) <= 0) return { error: "Quantidade deve ser maior que zero. Para remover o item, use remove_service_order_item." };
+      if (args.unit_price != null && Number(args.unit_price) < 0) return { error: "Preço não pode ser negativo." };
+      if (!args.item_id && !args.description) return { error: "Informe item_id ou description do item a editar." };
+      const guard = await assertEditableSo(sb, args.service_order_id);
+      if (guard) return guard;
+      const items = await loadSoItems(sb, args.service_order_id);
+      if (items.length === 0) return { error: "Este orçamento/OS não tem itens para editar." };
+      const { item, matches } = resolveSoItem(items, args.item_id, args.description);
+      if (!item) {
+        if (matches && matches.length > 1) {
+          return {
+            needs_choice: true,
+            message: `Encontrei ${matches.length} itens parecidos. Pergunte qual editar (passe o item_id).`,
+            options: matches.map((m) => ({ item_id: m.id, descricao: m.label, quantidade: m.quantity, total: m.total })),
+          };
+        }
+        return { error: "Item não encontrado neste orçamento/OS." };
+      }
+      const antes = { quantidade: item.quantity, preco_unitario: item.unit_price, total: item.total };
+      const newQty = args.quantity != null ? Number(args.quantity) : item.quantity;
+      const newPrice = args.unit_price != null ? Number(args.unit_price) : item.unit_price;
+
+      if (item.table === "service_order_parts") {
+        // Preço de custo é preservado (snapshot da compra); só recalculamos o custo da linha.
+        const unitCost = Number(item.unit_cost) || 0;
+        const { error } = await sb
+          .from("service_order_parts")
+          .update({ quantity: newQty, unit_sale_snapshot: newPrice, line_total_sale: newPrice * newQty, line_total_cost: unitCost * newQty })
+          .eq("id", item.id);
+        if (error) throw error;
+        // Ajuste de estoque pelo delta de quantidade (old - new): +new baixa, -new devolve.
+        // Espelha o frontend (mudança de qtd move estoque). Sem mudança de qtd = no-op.
+        await applyStockDelta(sb, item.product_id, item.quantity - newQty, args.service_order_id, unitCost);
+      } else {
+        const { error } = await sb
+          .from("service_order_services")
+          .update({ quantity: newQty, unit_price_snapshot: newPrice, line_total: newPrice * newQty })
+          .eq("id", item.id);
+        if (error) throw error;
+      }
+      await recalcSoTotals(sb, args.service_order_id);
+      const totais = await soTotalsSummary(sb, args.service_order_id);
+      return {
+        ok: true,
+        item: item.label,
+        antes,
+        depois: { quantidade: newQty, preco_unitario: newPrice, total: Math.round(newPrice * newQty * 100) / 100 },
+        ...totais,
+      };
     },
   },
   {

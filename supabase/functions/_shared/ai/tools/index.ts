@@ -7,6 +7,14 @@ import { agendaTools } from "./agenda.ts";
 import { financialTools } from "./financial.ts";
 import { reportTools } from "./reports.ts";
 import { purchasingTools } from "./purchasing.ts";
+import { fiscalTools } from "./fiscal.ts";
+import { quoteTools } from "./quotes.ts";
+import { crmTools } from "./crm.ts";
+import { fieldOpsTools } from "./field-ops.ts";
+import { autonomyTools } from "./autonomy.ts";
+import { contactTools } from "./contacts.ts";
+import { entityMemoryTools } from "./entity-memory.ts";
+import { entity360Tools } from "./entity-360.ts";
 import { whatsappTools } from "./whatsapp.ts";
 import { uiTools } from "./ui.ts";
 import { memoryTools } from "./memory.ts";
@@ -24,6 +32,14 @@ export const allTools: ToolDef[] = [
   ...financialTools,
   ...reportTools,
   ...purchasingTools,
+  ...fiscalTools,
+  ...quoteTools,
+  ...crmTools,
+  ...fieldOpsTools,
+  ...autonomyTools,
+  ...entity360Tools,
+  ...contactTools,
+  ...entityMemoryTools,
   ...whatsappTools,
   ...uiTools,
   ...memoryTools,

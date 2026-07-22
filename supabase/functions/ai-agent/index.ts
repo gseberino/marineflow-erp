@@ -21,6 +21,7 @@ import {
   resolveOrCreateWhatsAppSession,
 } from "../_shared/ai/whatsapp-channel.ts";
 import { verifyPin } from "../_shared/ai/whatsapp-pin.ts";
+import { STATUS_INJETAVEL, colunaDaEntidade } from "../_shared/ai/memory-scope.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -677,7 +678,9 @@ Deno.serve(async (req) => {
     const newUserMsg = alreadyPersistedCount > 0 ? [...incoming].reverse().find((m) => m.role === "user") : undefined;
     const historyMessages: ChatMessage[] = alreadyPersistedCount > 0 ? (newUserMsg ? [...seedMessages, newUserMsg] : seedMessages) : incoming;
 
-    // ---- Notas de memória ativas (Fase 2) — só as globais já verificadas ----
+    // ---- Notas de memória ativas ----
+    // Globais (Fase 2) + as da ENTIDADE em contexto (Fase 3). Só notas 'verified' entram:
+    // sugestão pendente não influencia resposta. Tetos separados para o contexto não inchar.
     const { data: memoryRows } = await admin
       .from("ai_operator_memory_notes")
       .select("title, body")
@@ -686,6 +689,24 @@ Deno.serve(async (req) => {
       .order("created_at", { ascending: false })
       .limit(10);
     const memoryNotes = (memoryRows || []).map((r: any) => `${r.title}: ${r.body}`);
+
+    // A tela sabe qual entidade está aberta (context.entityType/entityId) — se for cliente,
+    // ativo ou fornecedor, o que já aprendemos sobre ela entra sozinho no contexto.
+    const colunaEntidade = colunaDaEntidade(context.entityType);
+    if (colunaEntidade && context.entityId) {
+      try {
+        const { data: entRows } = await admin
+          .from("ai_operator_memory_notes")
+          .select("title, body")
+          .eq(colunaEntidade, context.entityId)
+          .eq("verification_status", STATUS_INJETAVEL)
+          .order("created_at", { ascending: false })
+          .limit(8);
+        for (const r of (entRows as any[]) || []) memoryNotes.push(`${r.title}: ${r.body}`);
+      } catch (_e) {
+        // Memória é enriquecimento — nunca derruba o turno.
+      }
+    }
 
     const system = buildSystemBlocks(settings, {
       userName,

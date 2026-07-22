@@ -9,6 +9,7 @@ import {
   type ClaudeUsage,
 } from "./anthropic.ts";
 import { allTools, type ToolCtx, type ToolDef } from "./tools/index.ts";
+import { isAutonomyGranted } from "./autonomy-policy.ts";
 import { DEFAULT_MAX_TOKENS, MAX_ITERATIONS as DEFAULT_MAX_ITERATIONS, MODEL_AGENT } from "./models.ts";
 
 export interface Proposal {
@@ -105,6 +106,7 @@ const AUTO_DISAMBIG: Record<string, AutoDisambigConfig> = {
 function humanizeToolName(name: string): string {
   return name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
+
 
 // Rótulos em pt-BR para as ações que passam por aprovação — mesmo mapeamento usado no
 // sino de aprovações do painel (src/components/ai/PendingActionsBell.tsx), pra o título
@@ -225,7 +227,7 @@ async function writeAudit(
   toolCtx: ToolCtx,
   sessionId: string,
   channel: string | undefined,
-  entry: { eventType: string; risk: string; args: unknown; result: unknown }
+  entry: { eventType: string; risk: string; args: unknown; result: unknown; autonomous?: boolean }
 ): Promise<void> {
   try {
     await toolCtx.admin.from("ai_operator_audit").insert({
@@ -233,8 +235,16 @@ async function writeAudit(
       actor_user_id: toolCtx.userId,
       actor_kind: "ai_model",
       event_type: entry.eventType,
-      event_category: "data",
-      payload: { channel: channel ?? "panel", risk: entry.risk, args: entry.args, result_summary: summarizeForAudit(entry.result) },
+      // Ação sensível executada SEM confirmação (autonomia concedida) entra como 'security'
+      // para ficar fácil de auditar depois "o que o agente fez sozinho".
+      event_category: entry.autonomous ? "security" : "data",
+      payload: {
+        channel: channel ?? "panel",
+        risk: entry.risk,
+        args: entry.args,
+        result_summary: summarizeForAudit(entry.result),
+        ...(entry.autonomous ? { autonomous: true } : {}),
+      },
     });
   } catch (e) {
     console.error("[agent] falha ao gravar auditoria:", e);
@@ -344,9 +354,13 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
 
       const effectiveRisk = toolDef ? (toolDef.computeRisk ? toolDef.computeRisk(tc.input) : toolDef.risk) : "low";
 
+      // Autonomia concedida pelo dono para ESTA ação (Onda 2). Ações de dinheiro/destrutivas
+      // nunca entram aqui — ver NEVER_AUTONOMOUS.
+      const autonomo = toolDef ? isAutonomyGranted(tc.name, effectiveRisk, params.toolCtx.settings) : false;
+
       if (!toolDef) {
         toolResult = { error: `Tool desconhecida: ${tc.name}` };
-      } else if (effectiveRisk !== "low") {
+      } else if (effectiveRisk !== "low" && !autonomo) {
         // Interceptação por risco (Fase 3): não executa — grava a pendência e devolve
         // um tool_result sintético. A tool real só roda via confirm_action, sem LLM.
         const { data: pending, error: pendingErr } = await params.toolCtx.admin
@@ -378,7 +392,13 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
         } catch (e: any) {
           toolResult = { error: e?.message || "Falha na execução da tool" };
         }
-        await writeAudit(params.toolCtx, params.sessionId, params.channel, { eventType: `tool:${tc.name}`, risk: toolDef.risk, args: tc.input, result: toolResult });
+        await writeAudit(params.toolCtx, params.sessionId, params.channel, {
+          eventType: `tool:${tc.name}`,
+          risk: toolDef.risk,
+          args: tc.input,
+          result: toolResult,
+          autonomous: effectiveRisk !== "low", // sensível que rodou direto = autonomia concedida
+        });
       }
 
       toolEvents.push({ name: tc.name, args: tc.input, result: toolResult });

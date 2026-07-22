@@ -54,8 +54,17 @@ Deno.serve(async (req) => {
   try {
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
-    const { data: cn } = await admin.from("app_settings").select("value").eq("key", "company_name").maybeSingle();
-    const companyName = (cn?.value as string) || "MarineFlow";
+    const { data: cfgRows } = await admin
+      .from("app_settings")
+      .select("key, value")
+      .in("key", ["company_name", "digest_show_low_stock"]);
+    const cfg: Record<string, string> = {};
+    for (const r of (cfgRows as any[]) || []) if (r?.key) cfg[String(r.key)] = String(r.value ?? "");
+    const companyName = cfg["company_name"] || "MarineFlow";
+    // "Estoque crítico" fica DESLIGADO por padrão: a operação é compra sob demanda (sem estoque),
+    // então alerta de mínimo é ruído. Para religar quando houver estoque de fato, basta gravar
+    // app_settings.digest_show_low_stock = 'true' — sem precisar de deploy.
+    const showLowStock = cfg["digest_show_low_stock"] === "true";
 
     // Destinatários: quem usa a IA (canal habilitado) e está ativo, com número.
     const { data: recipients } = await admin
@@ -115,20 +124,69 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Saúde de estoque: itens no/abaixo do mínimo (comparação coluna-a-coluna feita em memória).
-    const { data: prodRows } = await admin
-      .from("products")
-      .select("name, stock_quantity, minimum_stock")
-      .gt("minimum_stock", 0)
-      .limit(300);
-    const lowStock = ((prodRows as any[]) || []).filter((p: any) => Number(p.stock_quantity ?? 0) <= Number(p.minimum_stock ?? 0));
+    // Saúde de estoque: itens no/abaixo do mínimo. Só roda se digest_show_low_stock='true'
+    // (ver acima) — a operação atual é compra sob demanda, sem estoque.
     const stockLines: string[] = [];
-    if (lowStock.length > 0) {
-      stockLines.push(`📦 Estoque crítico: *${lowStock.length}*`);
-      for (const p of lowStock.slice(0, 3)) {
-        stockLines.push(`   • ${p.name} · ${p.stock_quantity}/${p.minimum_stock}`);
+    if (showLowStock) {
+      const { data: prodRows } = await admin
+        .from("products")
+        .select("name, stock_quantity, minimum_stock")
+        .gt("minimum_stock", 0)
+        .limit(300);
+      const lowStock = ((prodRows as any[]) || []).filter((p: any) => Number(p.stock_quantity ?? 0) <= Number(p.minimum_stock ?? 0));
+      if (lowStock.length > 0) {
+        stockLines.push(`📦 Estoque crítico: *${lowStock.length}*`);
+        for (const p of lowStock.slice(0, 3)) {
+          stockLines.push(`   • ${p.name} · ${p.stock_quantity}/${p.minimum_stock}`);
+        }
       }
     }
+
+    // Manutenção preventiva (CRM proativo): ativos com serviço concluído há 12+ meses.
+    // Num negócio náutico de serviço, cada um destes é um orçamento em potencial — e todo
+    // orçamento novo cai no loop de cotação. Best-effort: nunca derruba o digest.
+    const manutLines: string[] = [];
+    const manutCandidatos: Array<{ ativo: string; cliente: string; meses: number }> = [];
+    try {
+      const { data: doneOs } = await admin
+        .from("service_orders")
+        .select("vessel_id, check_out_at, scheduled_end_at, updated_at")
+        .in("status", ["completed", "invoiced"])
+        .not("vessel_id", "is", null)
+        .order("updated_at", { ascending: false })
+        .limit(1000);
+      const lastByVessel: Record<string, string> = {};
+      for (const so of (doneOs as any[]) || []) {
+        const when = so.check_out_at || so.scheduled_end_at || so.updated_at;
+        if (!when) continue;
+        const k = String(so.vessel_id);
+        if (!lastByVessel[k] || new Date(when).getTime() > new Date(lastByVessel[k]).getTime()) lastByVessel[k] = when;
+      }
+      const vesselIds = Object.keys(lastByVessel);
+      if (vesselIds.length > 0) {
+        const { data: vs } = await admin
+          .from("vessels")
+          .select("id, name, clients(name)")
+          .eq("active", true)
+          .in("id", vesselIds)
+          .limit(500);
+        for (const v of (vs as any[]) || []) {
+          const when = lastByVessel[String(v.id)];
+          const m = Math.floor((now.getTime() - new Date(when).getTime()) / (30.44 * 86400000));
+          if (m >= 12) {
+            const nome = Array.isArray(v.clients) ? v.clients[0]?.name : v.clients?.name;
+            manutCandidatos.push({ ativo: v.name, cliente: nome || "(sem cliente)", meses: m });
+          }
+        }
+        manutCandidatos.sort((a, b) => b.meses - a.meses);
+        if (manutCandidatos.length > 0) {
+          manutLines.push(`🔧 Revisão vencida (12+ meses): *${manutCandidatos.length}*`);
+          for (const c of manutCandidatos.slice(0, 3)) {
+            manutLines.push(`   • ${c.ativo} — ${c.cliente} · ${c.meses} meses`);
+          }
+        }
+      }
+    } catch (_e) { /* não derruba o digest */ }
 
     const { count: quotesCount } = await admin
       .from("service_orders")
@@ -231,8 +289,29 @@ Deno.serve(async (req) => {
       const dias = Math.floor((now.getTime() - new Date(o.updated_at).getTime()) / 86400000);
       sugestoes.push(`retomar a *${o.service_order_number}*${nome ? ` (${nome})` : ""}, parada há ${dias}d.`);
     }
+    for (const c of manutCandidatos.slice(0, 3)) {
+      sugestoes.push(`oferecer revisão do *${c.ativo}* (${c.cliente}) — ${c.meses} meses sem serviço. Me peça que eu preparo o orçamento.`);
+    }
     const diaDoAno = Math.floor((now.getTime() - new Date(now.getFullYear(), 0, 0).getTime()) / 86400000);
     const sugestaoLine = sugestoes.length > 0 ? `💡 *Sugestão de hoje:* ${sugestoes[diaDoAno % sugestoes.length]}` : "";
+
+    // Ações rápidas (Bloco A' · Ciclo 2): o Evolution não tem botão nativo, então a versão
+    // acionável no WhatsApp é um menu "tap-e-responde" — comandos concretos que o agente já
+    // sabe executar. O dono só responde com um deles; envio a cliente ainda passa pelo card
+    // de confirmação. Deriva dos mesmos candidatos do dia (não inventa trabalho).
+    const quickActions: string[] = [];
+    const topOverdue = overdueSorted[0] as any;
+    if (topOverdue) {
+      const nome = Array.isArray(topOverdue.clients) ? topOverdue.clients[0]?.name : topOverdue.clients?.name;
+      if (nome) quickActions.push(`   • *Cobrar ${nome}*`);
+    }
+    if (flaggedQuotes[0]?.nome && flaggedQuotes[0].nome !== "(sem cliente)") {
+      quickActions.push(`   • *Follow-up ${flaggedQuotes[0].nome}*`);
+    }
+    if (waiting.length > 0) quickActions.push(`   • *Quem está esperando resposta?*`);
+    const quickActionLines = quickActions.length > 0
+      ? ["", "⚡ *Ações rápidas* (responda com uma):", ...quickActions]
+      : [];
 
     const linhas = [
       `☀️ *Bom dia! Resumo de ${dateBR}*`,
@@ -245,9 +324,11 @@ Deno.serve(async (req) => {
       ...(upcomingCount > 0 ? [`🔜 A vencer (próx. 3 dias): *${upcomingCount}* (${fmt.format(upcomingSum)})`] : []),
       `✅ Aprovações da IA pendentes: *${pendingCount ?? 0}*`,
       ...stuckLines,
+      ...manutLines,
       ...stockLines,
       ...waitingLines,
       ...(sugestaoLine ? ["", sugestaoLine] : []),
+      ...quickActionLines,
       "",
       `_Enviado pelo assistente de ${companyName}. Responda por aqui para pedir qualquer coisa._`,
     ];

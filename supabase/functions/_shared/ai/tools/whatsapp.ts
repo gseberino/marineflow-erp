@@ -1,4 +1,4 @@
-import type { ToolDef } from "./registry.ts";
+import { NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -20,13 +20,20 @@ function prettyPreview(body?: string | null): string | null {
  */
 async function sendWhatsapp(phone: string, message: string, jwt: string) {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const anon = Deno.env.get("SUPABASE_ANON_KEY")!;
+  // No canal WhatsApp não há JWT de usuário (o toolCtx traz jwt=""), então usamos a
+  // service-role key: o whatsapp-send tem um bypass explícito (isServiceRoleCall) para
+  // chamadas de sistema. No painel, jwt é o token real do usuário.
+  const authToken = jwt || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  // NÃO enviar header `apikey`: espelha o chamador que já funciona
+  // (whatsapp-process-scheduled manda só Authorization: Bearer <service_role>).
+  // Enviar `apikey: anon` JUNTO com um bearer service_role faz o gateway rejeitar com
+  // 401 (sem corpo) por conflito de papel — foi o "HTTP 401" que o envio do agente dava.
+  // whatsapp-send tem verify_jwt=false, então o apikey nem é necessário.
   const r = await fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${jwt}`,
-      apikey: anon,
+      Authorization: `Bearer ${authToken}`,
     },
     body: JSON.stringify({ phone, message, kind: "text" }),
   });
@@ -59,6 +66,83 @@ export const whatsappTools: ToolDef[] = [
       }
       if (!phone) return { error: "Telefone não fornecido nem encontrado para o cliente." };
       return await sendWhatsapp(phone, args.message, jwt);
+    },
+  },
+  {
+    name: "send_supplier_quote_request",
+    description:
+      "Envia um pedido de COTAÇÃO por WhatsApp a um ou mais FORNECEDORES (ação sensível — pede confirmação). Informe supplier_ids (ache com suggest_suppliers) e os itens a cotar. As respostas dos fornecedores chegam na caixa normal do WhatsApp — a consolidação é manual (MVP). NÃO cria ordem de compra. MOSTRE a prévia da mensagem e a lista de fornecedores antes de confirmar.",
+    input_schema: {
+      type: "object",
+      properties: {
+        supplier_ids: { type: "array", items: { type: "string" }, description: "UUIDs dos fornecedores (de suggest_suppliers/create_supplier)." },
+        items: {
+          type: "array",
+          description: "Itens a cotar.",
+          items: {
+            type: "object",
+            properties: { description: { type: "string" }, quantity: { type: "number" } },
+            required: ["description"],
+          },
+        },
+        notes: { type: "string", description: "Observação opcional (prazo desejado, condições de pagamento)." },
+        quote_request_id: { type: "string", description: "UUID de uma cotação criada com create_quote_request. FORMA PREFERIDA: manda o código COT-XXXXX e os itens numerados, o que faz a resposta do fornecedor voltar interpretável." },
+      },
+    },
+    risk: "high",
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, { sb, jwt }) {
+      let supplierIds: string[] = Array.isArray(args.supplier_ids) ? args.supplier_ids : [];
+      let items: any[] = Array.isArray(args.items) ? args.items : [];
+      let codigo = "";
+
+      // Caminho preferido: a cotação já existe → usa código + itens numerados dela.
+      if (args.quote_request_id) {
+        const { data: req } = await sb
+          .from("quote_requests")
+          .select("id, code, sent_supplier_ids, notes")
+          .eq("id", args.quote_request_id)
+          .maybeSingle();
+        if (!req) return { error: "Cotação não encontrada." };
+        const { data: qItems } = await sb
+          .from("quote_request_items")
+          .select("position, description, quantity")
+          .eq("quote_request_id", req.id)
+          .order("position", { ascending: true });
+        codigo = req.code;
+        if (supplierIds.length === 0) supplierIds = (req.sent_supplier_ids as string[]) || [];
+        items = (qItems || []).map((i: any) => ({ position: i.position, description: i.description, quantity: Number(i.quantity) }));
+        if (!args.notes && req.notes) args.notes = req.notes;
+      }
+
+      if (supplierIds.length === 0) return { error: "Informe ao menos um fornecedor (supplier_ids) ou uma cotação com fornecedores." };
+      if (items.length === 0) return { error: "Informe ao menos um item para cotar." };
+
+      const { data: comp } = await sb.from("app_settings").select("value").eq("key", "company_name").maybeSingle();
+      const company = comp?.value || "nossa empresa";
+      const { data: suppliers } = await sb.from("suppliers").select("id, name, phone").in("id", supplierIds);
+      const byId: Record<string, any> = Object.fromEntries((suppliers || []).map((s: any) => [s.id, s]));
+      // Itens NUMERADOS: é o que faz o fornecedor responder "1 - R$ 850 - 5 dias".
+      const itemLines = items
+        .map((it, i) => `${it.position ?? i + 1}. ${it.quantity ? `${it.quantity}x ` : ""}${it.description ?? ""}`.trimEnd())
+        .join("\n");
+
+      const resultados: Array<{ fornecedor: string; status: string }> = [];
+      for (const sid of supplierIds) {
+        const sup = byId[sid];
+        if (!sup) { resultados.push({ fornecedor: sid, status: "não encontrado" }); continue; }
+        if (!sup.phone) { resultados.push({ fornecedor: sup.name || sid, status: "sem WhatsApp cadastrado" }); continue; }
+        // Pedir o formato de volta é o que torna a resposta interpretável sem erro.
+        const msg =
+          `Olá${sup.name ? ` ${sup.name}` : ""}, tudo bem? Aqui é da ${company}.\n` +
+          `Gostaríamos de uma cotação${codigo ? ` (${codigo})` : ""}:\n${itemLines}` +
+          `${args.notes ? `\n\n${args.notes}` : ""}\n\n` +
+          `Pode responder com o número do item, preço unitário e prazo? Ex.: "1 - R$ 850 - 5 dias". Obrigado!`;
+        const r = await sendWhatsapp(sup.phone, msg, jwt);
+        resultados.push({ fornecedor: sup.name || sid, status: r.ok ? "enviado" : `falhou: ${r.error}` });
+      }
+      const enviados = resultados.filter((r) => r.status === "enviado").length;
+      return { ok: true, cotacao: codigo || null, enviados, total: supplierIds.length, resultados };
     },
   },
   {

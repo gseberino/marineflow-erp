@@ -324,4 +324,190 @@ export const financialTools: ToolDef[] = [
       return { ok: true, result: data };
     },
   },
+  {
+    name: "get_period_summary",
+    description:
+      "FECHAMENTO do período: quanto ENTROU, quanto SAIU, o saldo, e as pendências que pedem ação (a receber vencido, contas a pagar vencendo, OS concluídas). Use para 'como foi hoje?', 'fechamento da semana', 'resumo do mês'. Só leitura — não registra nada.",
+    input_schema: {
+      type: "object",
+      properties: {
+        period: { type: "string", enum: ["hoje", "ontem", "semana", "mes"], description: "Período do fechamento (padrão: hoje). 'semana' = últimos 7 dias; 'mes' = mês corrente." },
+      },
+    },
+    risk: "low",
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { sb } = ctx;
+
+      const hoje = new Date();
+      const iso = (d: Date) => d.toISOString().slice(0, 10);
+      const periodo = String(args.period || "hoje");
+      let de = iso(hoje);
+      let ate = iso(hoje);
+      if (periodo === "ontem") {
+        const o = new Date(hoje.getTime() - 86400000);
+        de = iso(o); ate = iso(o);
+      } else if (periodo === "semana") {
+        de = iso(new Date(hoje.getTime() - 6 * 86400000));
+      } else if (periodo === "mes") {
+        de = iso(new Date(hoje.getFullYear(), hoje.getMonth(), 1));
+      }
+
+      // ENTRADAS: vêm da tabela payments (payment_date é a data do recebimento).
+      const { data: pays } = await sb
+        .from("payments")
+        .select("amount, net_amount, receivable_id, payment_method, payment_date, status")
+        .gte("payment_date", de)
+        .lte("payment_date", ate)
+        .eq("status", "confirmed");
+
+      let entrou = 0, nEntradas = 0;
+      const porMetodo: Record<string, number> = {};
+      for (const p of (pays as any[]) || []) {
+        if (!p.receivable_id) continue;
+        const v = Number(p.net_amount ?? p.amount) || 0;
+        entrou += v; nEntradas++;
+        const m = p.payment_method || "não informado";
+        porMetodo[m] = (porMetodo[m] || 0) + v;
+      }
+
+      // SAÍDAS: conferido no banco — pagamento de conta a pagar NÃO passa por `payments`
+      // (é marcado direto em payables). Então a fonte da verdade aqui é payables.
+      // Não existe paid_at no schema: usamos updated_at (quando a conta foi marcada paga).
+      const { data: pagos } = await sb
+        .from("payables")
+        .select("paid_amount, amount, status, updated_at")
+        .eq("status", "paid")
+        .gte("updated_at", `${de}T00:00:00`)
+        .lte("updated_at", `${ate}T23:59:59`);
+      let saiu = 0, nSaidas = 0;
+      for (const p of (pagos as any[]) || []) {
+        saiu += Number(p.paid_amount ?? p.amount) || 0;
+        nSaidas++;
+      }
+
+      // Pendências que pedem ação.
+      const { data: venc } = await sb
+        .from("receivables")
+        .select("balance_amount, amount")
+        .in("status", ["pending", "partially_paid"])
+        .eq("is_deposit", false)
+        .lt("due_date", iso(hoje));
+      const vencidoTotal = ((venc as any[]) || []).reduce((a, r) => a + (Number(r.balance_amount ?? r.amount) || 0), 0);
+
+      const em7 = iso(new Date(hoje.getTime() + 7 * 86400000));
+      const { data: pag } = await sb
+        .from("payables")
+        .select("amount, balance_amount, due_date")
+        .lte("due_date", em7)
+        .gt("balance_amount", 0);
+      const aPagar = ((pag as any[]) || []).reduce((a, p) => a + (Number(p.balance_amount ?? p.amount) || 0), 0);
+
+      const { count: osConcluidas } = await sb
+        .from("service_orders")
+        .select("id", { count: "exact", head: true })
+        .in("status", ["completed", "invoiced"])
+        .gte("updated_at", `${de}T00:00:00`);
+
+      const r2 = (n: number) => Math.round(n * 100) / 100;
+      return {
+        periodo,
+        de,
+        ate,
+        entrou: r2(entrou),
+        saiu: r2(saiu),
+        saldo: r2(entrou - saiu),
+        qtd_entradas: nEntradas,
+        qtd_saidas: nSaidas,
+        entradas_por_metodo: Object.fromEntries(Object.entries(porMetodo).map(([k, v]) => [k, r2(v)])),
+        pendencias: {
+          a_receber_vencido: r2(vencidoTotal),
+          a_pagar_proximos_7_dias: r2(aPagar),
+        },
+        os_concluidas_no_periodo: osConcluidas ?? 0,
+      };
+    },
+  },
+  {
+    name: "get_delinquency_plan",
+    description:
+      "Plano de ação da INADIMPLÊNCIA: recebíveis vencidos priorizados por impacto (maior valor primeiro), com dias de atraso e QUANDO o cliente foi cobrado pela última vez — para não cobrar a mesma pessoa duas vezes. Só leitura: não envia cobrança (isso é send_collection_reminder, que pede confirmação).",
+    input_schema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Máximo de casos (padrão 10, teto 30)." },
+        min_days_overdue: { type: "number", description: "Só vencidos há pelo menos N dias (padrão 1)." },
+      },
+    },
+    risk: "low",
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { sb } = ctx;
+      const limite = Math.min(Number(args.limit) || 10, 30);
+      const minDias = Number(args.min_days_overdue) > 0 ? Number(args.min_days_overdue) : 1;
+      const hoje = new Date();
+      const hojeIso = hoje.toISOString().slice(0, 10);
+
+      const { data: recs, error } = await sb
+        .from("receivables")
+        .select("id, description, amount, balance_amount, due_date, client_id, service_order_id, clients(name)")
+        .in("status", ["pending", "partially_paid"])
+        .eq("is_deposit", false)
+        .lt("due_date", hojeIso)
+        .limit(200);
+      if (error) throw error;
+
+      // Última cobrança enviada por cliente — evita cobrar de novo no mesmo dia.
+      const clientIds = [...new Set(((recs as any[]) || []).map((r) => r.client_id).filter(Boolean))];
+      const ultimaCobranca: Record<string, string> = {};
+      if (clientIds.length) {
+        const { data: cols } = await sb
+          .from("collections")
+          .select("client_id, last_auto_sent_at")
+          .in("client_id", clientIds)
+          .not("last_auto_sent_at", "is", null);
+        for (const c of (cols as any[]) || []) {
+          const k = String(c.client_id);
+          if (!ultimaCobranca[k] || new Date(c.last_auto_sent_at) > new Date(ultimaCobranca[k])) {
+            ultimaCobranca[k] = c.last_auto_sent_at;
+          }
+        }
+      }
+
+      const casos = ((recs as any[]) || [])
+        .map((r: any) => {
+          const saldo = Number(r.balance_amount ?? r.amount) || 0;
+          const dias = Math.floor((hoje.getTime() - new Date(`${r.due_date}T00:00:00`).getTime()) / 86400000);
+          const ult = r.client_id ? ultimaCobranca[String(r.client_id)] || null : null;
+          const diasDesdeCobranca = ult ? Math.floor((hoje.getTime() - new Date(ult).getTime()) / 86400000) : null;
+          return {
+            receivable_id: r.id,
+            cliente: r.clients?.name || "(sem cliente)",
+            client_id: r.client_id,
+            descricao: r.description || null,
+            saldo: Math.round(saldo * 100) / 100,
+            dias_atraso: dias,
+            ultima_cobranca: ult,
+            dias_desde_ultima_cobranca: diasDesdeCobranca,
+            ja_cobrado_hoje: diasDesdeCobranca === 0,
+          };
+        })
+        .filter((c) => c.dias_atraso >= minDias && c.saldo > 0)
+        .sort((a, b) => b.saldo - a.saldo)
+        .slice(0, limite);
+
+      const total = casos.reduce((a, c) => a + c.saldo, 0);
+      return {
+        count: casos.length,
+        total_em_atraso: Math.round(total * 100) / 100,
+        ordem_sugerida: "maior valor primeiro (impacto de caixa)",
+        casos,
+        nota: "Não cobre quem já foi cobrado hoje. Enviar cobrança é ação sensível — o sistema pede sua confirmação.",
+      };
+    },
+  },
 ];

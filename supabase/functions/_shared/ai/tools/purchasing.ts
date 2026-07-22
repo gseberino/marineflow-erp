@@ -2,7 +2,7 @@ import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.
 
 // Mesmo esquema de numeração não-atômico usado em useCreatePOFromOS (frontend) —
 // replicado aqui para gerar o mesmo formato "OC-00001".
-async function generatePONumber(admin: any): Promise<string> {
+export async function generatePONumber(admin: any): Promise<string> {
   const { data } = await admin.from("purchase_orders").select("po_number").order("created_at", { ascending: false }).limit(1);
   let seq = 1;
   const last = data?.[0]?.po_number;
@@ -186,6 +186,60 @@ export const purchasingTools: ToolDef[] = [
       const { data, error } = await admin.from("suppliers").insert(args).select().single();
       if (error) throw error;
       return { ok: true, supplier: data };
+    },
+  },
+  {
+    name: "suggest_suppliers",
+    description:
+      "Sugere fornecedores para um produto do catálogo, rankeados por preferência e histórico (tabela product_suppliers). SÓ LEITURA — não abre OC nem envia nada. Use antes de create_purchase_order_from_so ('quem vende o inversor Victron?', 'de quem eu compro essa bateria?').",
+    input_schema: {
+      type: "object",
+      properties: {
+        product_id: { type: "string", description: "UUID do produto (use search_products para achar)." },
+      },
+      required: ["product_id"],
+    },
+    risk: "low",
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { sb } = ctx;
+      const { data: prod } = await sb.from("products").select("name").eq("id", args.product_id).maybeSingle();
+      if (!prod) return { error: "Produto não encontrado. Use search_products primeiro." };
+      const { data: rels, error } = await sb
+        .from("product_suppliers")
+        .select("supplier_id, cost_price, currency, lead_time_days, is_preferred, last_purchase_date, last_purchase_price, minimum_order_qty, suppliers(name, contact_name, phone, active)")
+        .eq("product_id", args.product_id);
+      if (error) throw error;
+      const ativos = (rels || []).filter((r: any) => r.suppliers && r.suppliers.active !== false);
+      if (ativos.length === 0) {
+        return {
+          produto: prod.name,
+          count: 0,
+          message: "Nenhum fornecedor vinculado a este produto. Cadastre e vincule (create_supplier), ou escolha manualmente ao abrir a OC.",
+          results: [],
+        };
+      }
+      ativos.sort((a: any, b: any) => {
+        if (!!b.is_preferred !== !!a.is_preferred) return Number(!!b.is_preferred) - Number(!!a.is_preferred);
+        const da = a.last_purchase_date ? new Date(a.last_purchase_date).getTime() : 0;
+        const db = b.last_purchase_date ? new Date(b.last_purchase_date).getTime() : 0;
+        return db - da;
+      });
+      const results = ativos.map((r: any) => ({
+        supplier_id: r.supplier_id,
+        fornecedor: r.suppliers?.name || "—",
+        contato: r.suppliers?.phone || r.suppliers?.contact_name || null,
+        preferencial: !!r.is_preferred,
+        custo: r.cost_price != null ? Number(r.cost_price) : (r.last_purchase_price != null ? Number(r.last_purchase_price) : null),
+        moeda: r.currency || "BRL",
+        prazo_dias: r.lead_time_days ?? null,
+        qtd_minima: r.minimum_order_qty ?? null,
+        ultima_compra: r.last_purchase_date || null,
+        motivo: r.is_preferred ? "preferencial" : (r.last_purchase_date ? "comprado antes" : "vinculado"),
+      }));
+      return { produto: prod.name, count: results.length, results };
     },
   },
 ];
