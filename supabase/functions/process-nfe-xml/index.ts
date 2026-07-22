@@ -269,7 +269,10 @@ Deno.serve(async (req) => {
     const noteId = noteRow.id;
 
     // ── 7. Audit log ───────────────────────────────────────────────────────
-    await supabase.from("audit_logs").insert({
+    // A tabela é audit_log (SINGULAR). Estava gravando em "audit_logs", que não
+    // existe — e como o insert não checava o erro, toda importação perdia o
+    // rastro de auditoria em silêncio.
+    const { error: auditErr } = await supabase.from("audit_log").insert({
       table_name: "fiscal_notes",
       record_id:  noteId,
       action:     "import_xml",
@@ -281,6 +284,9 @@ Deno.serve(async (req) => {
       },
       reason: "Importação automática de XML de NF-e",
     });
+    // A auditoria é acessória: não derruba a importação, mas precisa aparecer
+    // em algum lugar — silenciar foi justamente o que escondeu o bug do nome.
+    if (auditErr) console.error("[process-nfe-xml] falha ao gravar audit_log:", auditErr.message);
 
     // ── 8. Return parsed data (UI will confirm stock update) ──────────────
     return new Response(
