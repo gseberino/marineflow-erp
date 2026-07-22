@@ -60,6 +60,22 @@ const SIMPLES_DECLARATIONS =
  */
 export const BLOCK_SEPARATOR = '; ';
 
+/**
+ * Começa o infCpl com o separador, para o conteúdo cair na LINHA DE BAIXO.
+ *
+ * O DANFE da Contora imprime o rótulo "Inf. Contribuinte:" grudado no início do
+ * infCpl. Esse prefixo é escolha do renderizador DELES — o layout oficial da
+ * DANFE já identifica o campo pelo título do quadro ("INFORMAÇÕES
+ * COMPLEMENTARES", com um quadro separado "RESERVADO AO FISCO" para o
+ * infAdFisco), sem prefixo nenhum. Nada disso vem do nosso XML: o que enviamos
+ * em additional_info não contém o rótulo (conferido no request_payload gravado).
+ *
+ * Como o ";" vira quebra de linha no DANFE deles, iniciar com o separador
+ * desgruda o nosso conteúdo do rótulo. Desligar aqui caso a Contora passe a
+ * suprimir o prefixo.
+ */
+export const START_CONTENT_ON_NEW_LINE = true;
+
 // Delimitador de bloco aceito ao LER textos já gravados: ";" (atual) ou "|"
 // (usado brevemente antes da confirmação da Contora).
 const DELIM = '[;|]';
@@ -121,7 +137,8 @@ export function composeAdditionalInfo(input: {
   // livre legado que contenha "Comprador: ..." não é apagado à toa.
   const free = purchase ? stripPurchaseBlock(managed) : managed;
 
-  return [purchase, free, SIMPLES_INFO_NOTE].filter(Boolean).join(BLOCK_SEPARATOR);
+  const corpo = [purchase, free, SIMPLES_INFO_NOTE].filter(Boolean).join(BLOCK_SEPARATOR);
+  return START_CONTENT_ON_NEW_LINE ? `${BLOCK_SEPARATOR}${corpo}` : corpo;
 }
 
 /**

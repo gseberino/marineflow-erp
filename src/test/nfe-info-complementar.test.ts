@@ -7,7 +7,13 @@ import {
   stripInvalidIcmsCreditClaim,
   stripManagedBlocks,
   stripPurchaseBlock,
+  START_CONTENT_ON_NEW_LINE,
 } from "../lib/nfe-info-complementar";
+
+// O infCpl comeca com o separador para desgrudar o conteudo do rotulo
+// "Inf. Contribuinte:" que o DANFE da Contora imprime. Os testes comparam pelo
+// helper para nao quebrarem se esse comportamento for ligado/desligado.
+const comLead = (texto: string) => (START_CONTENT_ON_NEW_LINE ? BLOCK_SEPARATOR + texto : texto);
 
 // Texto EXATO que o sistema gravava antes da correção (commit 9a3886d) e que
 // reapareceu numa nota real por ter sido reaproveitado ao duplicar/reemitir.
@@ -56,7 +62,7 @@ describe("normalizeAdditionalInfo", () => {
 
   it("não duplica a declaração quando ela já existe", () => {
     const out = normalizeAdditionalInfo(SIMPLES_INFO_NOTE);
-    expect(out).toBe(SIMPLES_INFO_NOTE);
+    expect(out).toBe(comLead(SIMPLES_INFO_NOTE));
     expect(out.match(/optante/gi)?.length).toBe(1);
   });
 
@@ -80,20 +86,18 @@ describe("normalizeAdditionalInfo", () => {
     const out = normalizeAdditionalInfo(duplicado);
     expect(out.match(/Documento emitido por/gi)?.length).toBe(1);
     expect(out.match(/cr[ée]dito fiscal de IPI/gi)?.length).toBe(1);
-    expect(out).toBe(
-      "Referente a Ordem de Compra N. 05447. Comprador: Everton" + BLOCK_SEPARATOR + SIMPLES_INFO_NOTE,
-    );
+    expect(out).toBe(comLead("Referente a Ordem de Compra N. 05447. Comprador: Everton" + BLOCK_SEPARATOR + SIMPLES_INFO_NOTE));
   });
 
   it("não apaga um 'Comprador:' escrito pelo usuário quando não há campo estruturado", () => {
     const out = normalizeAdditionalInfo("Comprador: Everton");
-    expect(out).toBe("Comprador: Everton" + BLOCK_SEPARATOR + SIMPLES_INFO_NOTE);
+    expect(out).toBe(comLead("Comprador: Everton" + BLOCK_SEPARATOR + SIMPLES_INFO_NOTE));
   });
 
   it("devolve a declaração obrigatória quando o texto vem vazio/nulo", () => {
-    expect(normalizeAdditionalInfo("")).toBe(SIMPLES_INFO_NOTE);
-    expect(normalizeAdditionalInfo(null)).toBe(SIMPLES_INFO_NOTE);
-    expect(normalizeAdditionalInfo(undefined)).toBe(SIMPLES_INFO_NOTE);
+    expect(normalizeAdditionalInfo("")).toBe(comLead(SIMPLES_INFO_NOTE));
+    expect(normalizeAdditionalInfo(null)).toBe(comLead(SIMPLES_INFO_NOTE));
+    expect(normalizeAdditionalInfo(undefined)).toBe(comLead(SIMPLES_INFO_NOTE));
   });
 
   it("a declaração padrão NÃO afirma crédito de ICMS (só a vedação de IPI)", () => {
@@ -109,10 +113,8 @@ describe("composeAdditionalInfo — ordem por contrato", () => {
       buyer: "Everton",
       freeText: "Referente a entrega parcial.",
     });
-    expect(out).toBe(
-      "Pedido de Compra: 05447 - Comprador: Everton" + BLOCK_SEPARATOR +
-      "Referente a entrega parcial." + BLOCK_SEPARATOR + SIMPLES_INFO_NOTE,
-    );
+    expect(out).toBe(comLead("Pedido de Compra: 05447 - Comprador: Everton" + BLOCK_SEPARATOR +
+      "Referente a entrega parcial." + BLOCK_SEPARATOR + SIMPLES_INFO_NOTE));
     // a ordem é o ponto central do pedido do usuário
     expect(out.indexOf("Pedido de Compra")).toBeLessThan(out.indexOf("Referente a entrega"));
     expect(out.indexOf("Referente a entrega")).toBeLessThan(out.indexOf("Documento emitido"));
@@ -120,11 +122,11 @@ describe("composeAdditionalInfo — ordem por contrato", () => {
 
   it("omite as partes não preenchidas", () => {
     expect(composeAdditionalInfo({ purchaseOrder: "05447" }))
-      .toBe("Pedido de Compra: 05447" + BLOCK_SEPARATOR + SIMPLES_INFO_NOTE);
+      .toBe(comLead("Pedido de Compra: 05447" + BLOCK_SEPARATOR + SIMPLES_INFO_NOTE));
     expect(composeAdditionalInfo({ buyer: "Everton" }))
-      .toBe("Comprador: Everton" + BLOCK_SEPARATOR + SIMPLES_INFO_NOTE);
-    expect(composeAdditionalInfo({})).toBe(SIMPLES_INFO_NOTE);
-    expect(composeAdditionalInfo({ purchaseOrder: "   ", buyer: "  " })).toBe(SIMPLES_INFO_NOTE);
+      .toBe(comLead("Comprador: Everton" + BLOCK_SEPARATOR + SIMPLES_INFO_NOTE));
+    expect(composeAdditionalInfo({})).toBe(comLead(SIMPLES_INFO_NOTE));
+    expect(composeAdditionalInfo({ purchaseOrder: "   ", buyer: "  " })).toBe(comLead(SIMPLES_INFO_NOTE));
   });
 
   it("NÃO duplica o bloco de pedido ao recompor (duplicar/reemitir)", () => {
@@ -144,7 +146,7 @@ describe("composeAdditionalInfo — ordem por contrato", () => {
     const out = composeAdditionalInfo({ purchaseOrder: "05447", buyer: "Everton", freeText: legado });
     expect(out).not.toMatch(/aproveitamento do cr[ée]dito de ICMS/i);
     expect(out.match(/Documento emitido por/gi)?.length).toBe(1);
-    expect(out.startsWith("Pedido de Compra: 05447 - Comprador: Everton")).toBe(true);
+    expect(out.startsWith(comLead("Pedido de Compra: 05447 - Comprador: Everton"))).toBe(true);
   });
 
   it("nunca usa quebra de linha (infCpl não aceita CR/LF — Rejeição 215/588)", () => {
@@ -180,18 +182,18 @@ describe("separador de blocos — comportamento confirmado pela Contora", () => 
     expect(BLOCK_SEPARATOR.trim()).toBe(";");
     const out = composeAdditionalInfo({ purchaseOrder: "05447", freeText: "Entrega parcial." });
     expect(out).not.toContain("|");
-    expect(out).toBe("Pedido de Compra: 05447; Entrega parcial.; " + SIMPLES_INFO_NOTE);
+    expect(out).toBe(comLead("Pedido de Compra: 05447; Entrega parcial.; " + SIMPLES_INFO_NOTE));
   });
 
   it("converte quebra digitada pelo usuário em separador (vira linha no DANFE, sem CR/LF no XML)", () => {
     const out = composeAdditionalInfo({ freeText: "Linha 1\nLinha 2\r\nLinha 3" });
     expect(out).not.toMatch(/[\r\n\t]/); // infCpl não aceita char de controle
-    expect(out).toBe("Linha 1; Linha 2; Linha 3; " + SIMPLES_INFO_NOTE);
+    expect(out).toBe(comLead("Linha 1; Linha 2; Linha 3; " + SIMPLES_INFO_NOTE));
   });
 
   it("não deixa separadores em sequência quando o usuário pula linhas em branco", () => {
     const out = composeAdditionalInfo({ freeText: "Linha 1\n\n\nLinha 2" });
-    expect(out).toBe("Linha 1; Linha 2; " + SIMPLES_INFO_NOTE);
+    expect(out).toBe(comLead("Linha 1; Linha 2; " + SIMPLES_INFO_NOTE));
     expect(out).not.toMatch(/;\s*;/);
   });
 
@@ -200,6 +202,29 @@ describe("separador de blocos — comportamento confirmado pela Contora", () => 
     const out = composeAdditionalInfo({ purchaseOrder: "05447", buyer: "Everton", freeText: legado });
     expect(out.match(/Pedido de Compra/gi)?.length).toBe(1);
     expect(out.match(/Documento emitido por/gi)?.length).toBe(1);
-    expect(out).toBe("Pedido de Compra: 05447 - Comprador: Everton; Entrega parcial.; " + SIMPLES_INFO_NOTE);
+    expect(out).toBe(comLead("Pedido de Compra: 05447 - Comprador: Everton; Entrega parcial.; " + SIMPLES_INFO_NOTE));
+  });
+});
+
+describe("rótulo 'Inf. Contribuinte:' do DANFE da Contora", () => {
+  it("o texto que ENVIAMOS nunca contém o rótulo (ele é do renderizador deles)", () => {
+    const out = composeAdditionalInfo({ purchaseOrder: "05447", buyer: "Everton" });
+    expect(out).not.toMatch(/Inf\.\s*Contribuinte/i);
+    expect(out).not.toMatch(/Inf\.\s*Fisco/i);
+  });
+
+  it("começa com o separador para o conteúdo cair na linha DEPOIS do rótulo", () => {
+    const out = composeAdditionalInfo({ purchaseOrder: "05447" });
+    expect(START_CONTENT_ON_NEW_LINE).toBe(true);
+    expect(out.startsWith(BLOCK_SEPARATOR)).toBe(true);
+    // e sem sobrar separador duplicado logo em seguida
+    expect(out).not.toMatch(/^;\s*;/);
+  });
+
+  it("o prefixo não se acumula ao recompor a partir de um texto já composto", () => {
+    const primeira = composeAdditionalInfo({ purchaseOrder: "05447", freeText: "Entrega parcial." });
+    const segunda = composeAdditionalInfo({ purchaseOrder: "05447", freeText: primeira });
+    expect(segunda).toBe(primeira);
+    expect(segunda.match(/^;\s*/g)?.length).toBe(1);
   });
 });
