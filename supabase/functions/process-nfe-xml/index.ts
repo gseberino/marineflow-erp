@@ -162,7 +162,42 @@ Deno.serve(async (req) => {
       };
     });
 
+    // ── 4b. A nota é MESMO de entrada para esta empresa? ───────────────────
+    // Sem isso, subir por engano uma NF-e de VENDA da própria empresa faria o
+    // sistema somar ao estoque o que foi vendido e criar uma conta a pagar para
+    // o próprio cliente. O destinatário do XML tem que ser o nosso CNPJ.
+    const dest = block(xmlText, "dest");
+    const destCnpj = (tag(dest, "CNPJ") ?? tag(dest, "CPF") ?? "").replace(/\D/g, "");
+    const { data: empresa } = await supabase
+      .from("company_fiscal_settings")
+      .select("cnpj")
+      .limit(1)
+      .maybeSingle();
+    const ownCnpj = String(empresa?.cnpj ?? "").replace(/\D/g, "");
+    const emitCnpj = String(issuerCNPJ ?? "").replace(/\D/g, "");
+
+    if (ownCnpj && emitCnpj && emitCnpj === ownCnpj) {
+      throw new Error(
+        "Esta NF-e foi EMITIDA pela sua empresa (nota de saída) — não pode dar entrada em estoque. " +
+        "Para dar entrada, use o XML enviado pelo fornecedor.",
+      );
+    }
+    if (ownCnpj && destCnpj && destCnpj !== ownCnpj) {
+      throw new Error(
+        "O destinatário desta NF-e não é a sua empresa (CNPJ do destinatário: " +
+        destCnpj + "). Confira se o XML é da nota de compra correta.",
+      );
+    }
+
     // ── 5. Duplicate check via NFe key ─────────────────────────────────────
+    // Sem chave não há como impedir a mesma nota de entrar duas vezes — e
+    // entrada duplicada infla estoque e financeiro. Melhor recusar o arquivo.
+    if (!nfeKey) {
+      throw new Error(
+        "Não foi possível ler a chave de acesso (44 dígitos) deste XML. " +
+        "Sem ela não é possível garantir que a nota não será importada em duplicidade.",
+      );
+    }
     if (nfeKey) {
       const { data: existing } = await supabase
         .from("fiscal_notes")
