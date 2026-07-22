@@ -37,6 +37,7 @@ import { createZipBlob, type ZipEntry } from '@/lib/zip';
 import { parseLegacyAddress } from '@/lib/address-legacy';
 import { CSOSN_OPTIONS, FISCAL_ORIGIN_OPTIONS } from '@/lib/price-calculator';
 import { buildEspelhoHtml } from '@/lib/danfe-espelho';
+import { extractInvokeErrorMessage } from '@/lib/invoke-error';
 import { BLOCK_SEPARATOR, buildDevolucaoInfo, composeAdditionalInfo, stripManagedBlocks, stripPurchaseBlock } from '@/lib/nfe-info-complementar';
 // Reaproveita os mesmos módulos que a edge function fiscal-emit usa no
 // servidor — evita duplicar a lista de formas de pagamento, natureza de
@@ -158,20 +159,6 @@ const STATUS_MAP: Record<string, { label: string; className: string }> = {
 // corpo JSON real ({error: "..."}) só é acessível via error.context.json().
 // Sem isso, toda mensagem específica do backend (validação, rejeição da
 // SEFAZ, etc.) era substituída por esse texto inútil no toast.
-async function extractInvokeErrorMessage(error: unknown): Promise<string> {
-  if (error && typeof error === 'object' && 'context' in error) {
-    const ctx = (error as { context?: unknown }).context;
-    if (ctx && typeof (ctx as Response).json === 'function') {
-      try {
-        const parsed = await (ctx as Response).clone().json();
-        if (parsed?.error) return String(parsed.error);
-      } catch {
-        // corpo não era JSON — cai para a mensagem genérica abaixo
-      }
-    }
-  }
-  return error instanceof Error ? error.message : String(error);
-}
 
 // Primeira forma de pagamento que EXISTE no seletor da UI. Necessário porque o
 // payload de uma nota com duplicatas traz method "14" (Duplicata Mercantil), que

@@ -28,6 +28,7 @@ import { useI18n } from '@/i18n';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { useProducts } from '@/hooks/use-products';
 import { parseNfeSupplierNote } from '@/lib/nfe-xml-parser';
+import { extractInvokeErrorMessage } from '@/lib/invoke-error';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface NFeItem {
@@ -144,7 +145,11 @@ export default function ImportFiscalXML() {
         body: { xmlBase64 },
       });
 
-      if (error) throw error;
+      // A mensagem útil ("Arquivo não é uma NF-e válida", "chave de acesso
+      // ilegível", "destinatário não é a sua empresa") vem no CORPO da resposta.
+      // Sem extrair, o usuário e o log recebiam apenas "Edge Function returned a
+      // non-2xx status code", que não diz nada.
+      if (error) throw new Error(await extractInvokeErrorMessage(error));
       if (data?.error) {
         if (data.duplicate) {
           toast.warning(data.error);
