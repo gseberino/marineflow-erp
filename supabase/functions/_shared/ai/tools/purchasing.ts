@@ -163,6 +163,54 @@ export const purchasingTools: ToolDef[] = [
     },
   },
   {
+    name: "search_suppliers",
+    description:
+      "Busca FORNECEDORES por nome, nome fantasia, CNPJ/CPF, telefone ou cidade. Use para achar o supplier_id quando o produto NÃO está no catálogo (aí suggest_suppliers não serve), para pesquisar se uma marca/fornecedor já é cadastrado, ou antes de disparar cotação. Só leitura.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Nome, marca, CNPJ, telefone ou cidade." },
+        limit: { type: "number", description: "Máximo de resultados (padrão 10, teto 25)." },
+      },
+      required: ["query"],
+    },
+    risk: "low",
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { sb } = ctx;
+      const q = String(args.query || "").trim();
+      if (q.length < 2) return { error: "Termo de busca muito curto. Diga o nome (ou parte) do fornecedor." };
+      const limit = Math.min(Number(args.limit) || 10, 25);
+
+      const { data, error } = await sb
+        .from("suppliers")
+        .select("id, name, trade_name, cnpj_cpf, contact_name, phone, email, city, state, payment_terms, active")
+        .or(`name.ilike.%${q}%,trade_name.ilike.%${q}%,cnpj_cpf.ilike.%${q}%,phone.ilike.%${q}%,city.ilike.%${q}%`)
+        .limit(limit);
+      if (error) throw error;
+
+      const results = ((data as any[]) || []).map((s) => ({
+        supplier_id: s.id,
+        nome: s.name,
+        nome_fantasia: s.trade_name || null,
+        documento: s.cnpj_cpf || null,
+        contato: s.contact_name || null,
+        telefone: s.phone || null,
+        tem_whatsapp: !!s.phone,
+        cidade: [s.city, s.state].filter(Boolean).join("/") || null,
+        condicao_pagamento: s.payment_terms || null,
+        ativo: s.active !== false,
+      }));
+      return {
+        count: results.length,
+        results,
+        nota: results.length === 0 ? `Nenhum fornecedor encontrado para "${q}". Se for um fornecedor novo, use create_supplier.` : null,
+      };
+    },
+  },
+  {
     name: "create_supplier",
     description: "Cadastra um novo fornecedor.",
     input_schema: {
