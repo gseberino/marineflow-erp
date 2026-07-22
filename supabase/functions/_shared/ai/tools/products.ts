@@ -82,6 +82,93 @@ export const productTools: ToolDef[] = [
     },
   },
   {
+    name: "get_product_price_history",
+    description:
+      "HISTÓRICO DE PREÇO de um produto: quanto já foi COBRADO dele em orçamentos/OS anteriores (com data, número da OS e cliente), qual o custo praticado, a última compra por fornecedor e o preço atual do catálogo. Use SEMPRE que precisar dizer a ORIGEM e a DATA de um valor — por exemplo, ao montar orçamento com base no que já foi praticado. Se não houver histórico, diga que o preço vem do catálogo atual.",
+    input_schema: {
+      type: "object",
+      properties: {
+        product_id: { type: "string", description: "UUID do produto." },
+        limit: { type: "number", description: "Quantos usos anteriores trazer (padrão 5, teto 15)." },
+      },
+      required: ["product_id"],
+    },
+    risk: "low",
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { sb } = ctx;
+      const limite = Math.min(Number(args.limit) || 5, 15);
+
+      const { data: prod } = await sb
+        .from("products")
+        .select("id, name, sku, sale_price, cost_price, product_category_id")
+        .eq("id", args.product_id)
+        .maybeSingle();
+      if (!prod) return { error: "Produto não encontrado." };
+
+      // Preço REALMENTE praticado: cada linha de peça guarda o snapshot do momento.
+      const { data: usos } = await sb
+        .from("service_order_parts")
+        .select("quantity, unit_cost_snapshot, unit_sale_snapshot, created_at, service_orders(service_order_number, status, created_at, clients(name))")
+        .eq("product_id", prod.id)
+        .order("created_at", { ascending: false })
+        .limit(limite);
+
+      const historico = ((usos as any[]) || []).map((u) => {
+        const so = Array.isArray(u.service_orders) ? u.service_orders[0] : u.service_orders;
+        const cli = so?.clients ? (Array.isArray(so.clients) ? so.clients[0] : so.clients) : null;
+        return {
+          origem: so?.service_order_number ? `OS/Orçamento ${so.service_order_number}` : "registro anterior",
+          data: so?.created_at || u.created_at,
+          cliente: cli?.name || null,
+          quantidade: Number(u.quantity) || 0,
+          custo_unitario: u.unit_cost_snapshot != null ? Number(u.unit_cost_snapshot) : null,
+          preco_vendido: u.unit_sale_snapshot != null ? Number(u.unit_sale_snapshot) : null,
+        };
+      });
+
+      // Última compra por fornecedor (custo de entrada).
+      const { data: forn } = await sb
+        .from("product_suppliers")
+        .select("last_purchase_price, last_purchase_date, cost_price, is_preferred, suppliers(name)")
+        .eq("product_id", prod.id)
+        .order("last_purchase_date", { ascending: false })
+        .limit(3);
+
+      // Margem padrão da CATEGORIA (varia por categoria — não presuma um valor fixo).
+      let margemCategoria: number | null = null;
+      if (prod.product_category_id) {
+        const { data: cat } = await sb
+          .from("product_categories")
+          .select("name, default_profit_margin")
+          .eq("id", prod.product_category_id)
+          .maybeSingle();
+        margemCategoria = cat?.default_profit_margin != null ? Number(cat.default_profit_margin) : null;
+      }
+
+      return {
+        produto: { id: prod.id, nome: prod.name, sku: prod.sku || null },
+        catalogo_atual: {
+          preco_venda: prod.sale_price != null ? Number(prod.sale_price) : null,
+          custo: prod.cost_price != null ? Number(prod.cost_price) : null,
+        },
+        margem_padrao_da_categoria_pct: margemCategoria,
+        ja_praticado: historico,
+        compras_de_fornecedor: ((forn as any[]) || []).map((f) => ({
+          fornecedor: f.suppliers?.name || null,
+          preferencial: !!f.is_preferred,
+          ultimo_preco_compra: f.last_purchase_price != null ? Number(f.last_purchase_price) : null,
+          data_ultima_compra: f.last_purchase_date || null,
+        })),
+        instrucao: historico.length > 0
+          ? "Ao citar o valor, informe a ORIGEM e a DATA (ex.: 'R$ X — praticado na OS-00042 em 12/05/2026')."
+          : "Sem histórico de uso: informe que o valor vem do CADASTRO ATUAL do catálogo.",
+      };
+    },
+  },
+  {
     name: "search_services",
     description: "Busca serviços de mão de obra no catálogo por nome ou descrição.",
     input_schema: {

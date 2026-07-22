@@ -694,6 +694,87 @@ export const serviceOrderTools: ToolDef[] = [
     },
   },
   {
+    name: "set_service_order_charges",
+    description:
+      "Define IMPOSTO e COMISSÃO de um orçamento/OS e recalcula o total. Use quando o usuário pedir algo como 'aplique 6% de imposto e 3% de comissão'. O imposto pode vir em % (calculado sobre o subtotal) ou em valor fixo. Recalcula e devolve o antes/depois. Não funciona em OS cancelada ou faturada.",
+    input_schema: {
+      type: "object",
+      properties: {
+        service_order_id: { type: "string", description: "UUID do orçamento/OS." },
+        tax_percent: { type: "number", description: "Imposto em % sobre o subtotal (ex.: 6 = 6%)." },
+        tax_amount: { type: "number", description: "Imposto em R$ (alternativa ao percentual)." },
+        commission_rate: { type: "number", description: "Comissão em % (ex.: 3 = 3%)." },
+        commissioned_person: { type: "string", description: "Nome de quem recebe a comissão (opcional)." },
+      },
+      required: ["service_order_id"],
+    },
+    risk: "low",
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { sb } = ctx;
+      const guard = await assertEditableSo(sb, args.service_order_id);
+      if (guard) return guard;
+      if (args.tax_percent == null && args.tax_amount == null && args.commission_rate == null) {
+        return { error: "Informe ao menos tax_percent, tax_amount ou commission_rate." };
+      }
+
+      const { data: so } = await sb
+        .from("service_orders")
+        .select("id, service_order_number, grand_total, tax_amount, commission_rate, labor_cost_total, parts_cost_total, operational_cost_total, travel_cost_total, is_travel_billable, subcontract_cost_total, discount_amount")
+        .eq("id", args.service_order_id)
+        .maybeSingle();
+      if (!so) return { error: "Orçamento/OS não encontrado." };
+
+      const antes = {
+        total: Number(so.grand_total) || 0,
+        imposto: Number(so.tax_amount) || 0,
+        comissao_pct: so.commission_rate != null ? Number(so.commission_rate) : null,
+      };
+
+      // Subtotal na MESMA fórmula do recalc_so_totals (viagem só entra se for cobrável).
+      const viagem = so.is_travel_billable === false ? 0 : Number(so.travel_cost_total) || 0;
+      const subtotal =
+        (Number(so.labor_cost_total) || 0) + (Number(so.parts_cost_total) || 0) +
+        (Number(so.operational_cost_total) || 0) + viagem + (Number(so.subcontract_cost_total) || 0);
+      const baseImposto = subtotal - (Number(so.discount_amount) || 0);
+
+      const patch: Record<string, unknown> = {};
+      if (args.tax_amount != null) {
+        patch.tax_amount = Math.round(Number(args.tax_amount) * 100) / 100;
+      } else if (args.tax_percent != null) {
+        if (Number(args.tax_percent) < 0) return { error: "Imposto não pode ser negativo." };
+        patch.tax_amount = Math.round(baseImposto * (Number(args.tax_percent) / 100) * 100) / 100;
+      }
+      if (args.commission_rate != null) {
+        if (Number(args.commission_rate) < 0) return { error: "Comissão não pode ser negativa." };
+        patch.commission_rate = Number(args.commission_rate);
+        // Comissão incide sobre a venda (subtotal menos desconto), não sobre o imposto.
+        patch.commission_amount = Math.round(baseImposto * (Number(args.commission_rate) / 100) * 100) / 100;
+      }
+      if (args.commissioned_person) patch.commissioned_person = String(args.commissioned_person);
+
+      const { error } = await sb.from("service_orders").update(patch).eq("id", so.id);
+      if (error) throw error;
+      await recalcSoTotals(sb, so.id);
+
+      const { data: depois } = await sb.from("service_orders").select("grand_total, tax_amount, commission_rate, commission_amount").eq("id", so.id).maybeSingle();
+      return {
+        ok: true,
+        os: so.service_order_number,
+        antes,
+        depois: {
+          total: Number(depois?.grand_total) || 0,
+          imposto: Number(depois?.tax_amount) || 0,
+          comissao_pct: depois?.commission_rate != null ? Number(depois.commission_rate) : null,
+          comissao_valor: Number(depois?.commission_amount) || 0,
+        },
+        base_de_calculo: Math.round(baseImposto * 100) / 100,
+      };
+    },
+  },
+  {
     name: "update_quote_status",
     description:
       "Altera o status do CICLO DE ORÇAMENTO (campo quote_status, separado do status geral da OS): draft → sent → awaiting_approval → approved → awaiting_deposit, ou rejected a qualquer momento (exceto de rejected, que só volta pra draft). Use para mover um orçamento no funil de aprovação do cliente — não confundir com update_service_order_status.",
