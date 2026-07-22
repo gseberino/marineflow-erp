@@ -223,15 +223,27 @@ export const productTools: ToolDef[] = [
   },
   {
     name: "create_product",
-    description: "Cadastra um novo produto/equipamento.",
+    description:
+      "Cadastra um novo produto/equipamento. Grave TUDO que o usuário informar — principalmente marca, unidade e NCM: sem NCM o produto não pode entrar em nota fiscal depois. A resposta avisa se ficou faltando algo para faturamento.",
     input_schema: {
       type: "object",
       properties: {
         name: { type: "string" },
         sku: { type: "string" },
-        sale_price: { type: "number" },
-        cost_price: { type: "number" },
-        unit: { type: "string" },
+        brand: { type: "string", description: "Marca/fabricante (ex.: Victron, Usina)." },
+        category: { type: "string" },
+        unit: { type: "string", description: "Unidade (UN, PC, M...)." },
+        sale_price: { type: "number", description: "Preço de venda." },
+        cost_price: { type: "number", description: "Custo de compra." },
+        minimum_stock: { type: "number" },
+        barcode: { type: "string" },
+        notes: { type: "string" },
+        ncm: { type: "string", description: "NCM — necessário para emitir NF-e com este produto." },
+        cfop: { type: "string" },
+        csosn: { type: "string" },
+        fiscal_origin: { type: "number", description: "Origem fiscal (0=nacional...)." },
+        profit_margin: { type: "number", description: "Margem em %." },
+        supplier_id: { type: "string", description: "Fornecedor principal, se conhecido." },
       },
       required: ["name"],
     },
@@ -239,7 +251,16 @@ export const productTools: ToolDef[] = [
     async execute(args, { sb }) {
       const { data, error } = await sb.from("products").insert(args).select().single();
       if (error) throw error;
-      return { ok: true, product: data };
+      // Aviso em cadeia: produto sem NCM trava a NF-e lá na frente — melhor dizer agora.
+      const faltando: string[] = [];
+      if (!data.ncm) faltando.push("NCM");
+      if (data.sale_price == null) faltando.push("preço de venda");
+      return {
+        ok: true,
+        product: data,
+        pronto_para_nota_fiscal: faltando.length === 0,
+        aviso: faltando.length ? `Cadastrado, mas falta ${faltando.join(" e ")} — sem isso ele não entra em NF-e.` : null,
+      };
     },
   },
   {
