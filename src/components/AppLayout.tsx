@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Users, Ship, Anchor, Package, ClipboardList,
   DollarSign, BarChart3, Settings, ChevronLeft, ChevronRight, Menu,
   Warehouse, Building2, Wrench, History, LogOut, CalendarDays, MessageCircle, CreditCard,
-  Database, ChevronDown, Rocket, ShoppingCart, FileDown, Target, CheckCircle2, Bell, CalendarClock, Truck, Camera, FileText, Bot
+  Database, ChevronDown, Rocket, ShoppingCart, FileDown, Target, CheckCircle2, Bell, CalendarClock, Truck, Camera, FileText, Bot, Boxes
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -133,7 +133,6 @@ export function AppLayout({ children }: { children: ReactNode }) {
         { label: 'CRM & Funil', icon: Target, path: '/crm' },
         { label: 'Ordens de Serviço', icon: ClipboardList, path: '/service-orders' },
         { label: 'Orçamentos', icon: FileText, path: '/quotes' },
-        { label: 'Ordens de Compra', icon: Truck, path: '/purchase-orders', roles: ['admin', 'financial'] },
         { label: 'Agenda', icon: CalendarDays, path: '/agenda' },
         { label: 'Motor de Vendas', icon: Rocket, path: '/prospecting', roles: ['admin'] },
         { label: 'Cobranças', icon: CreditCard, path: '/collections', roles: ['admin', 'financial'] },
@@ -161,9 +160,23 @@ export function AppLayout({ children }: { children: ReactNode }) {
         { label: 'Marinas', icon: Anchor, path: '/marinas' },
         { label: 'Produtos', icon: Package, path: '/products' },
         { label: 'Serviços', icon: Wrench, path: '/services' },
-        { label: 'Assistente de Compras', icon: ShoppingCart, path: '/inventory/smart-purchase', roles: ['admin', 'financial'] },
         { label: 'Fornecedores', icon: Building2, path: '/suppliers' },
-        { label: 'Importar XML', icon: FileDown, path: '/inventory/import-xml', roles: ['admin'] },
+      ],
+    },
+    {
+      // Operações de suprimento: comprar, receber a mercadoria e conferir o
+      // estoque. "Entrada de Mercadoria (XML)" vivia em Cadastros, mas não é um
+      // cadastro — movimenta estoque e gera contas a pagar; e ficava longe de
+      // Ordens de Compra, que é justamente a etapa anterior do mesmo processo.
+      id: 'estoque-compras',
+      label: 'Estoque & Compras',
+      icon: Boxes,
+      roles: ['admin', 'financial'],
+      items: [
+        { label: 'Entrada de Mercadoria (XML)', icon: FileDown, path: '/inventory/import-xml', roles: ['admin'] },
+        { label: 'Ordens de Compra', icon: Truck, path: '/purchase-orders', roles: ['admin', 'financial'] },
+        { label: 'Assistente de Compras', icon: ShoppingCart, path: '/inventory/smart-purchase', roles: ['admin', 'financial'] },
+        { label: 'Estoque', icon: Package, path: '/inventory', roles: ['admin', 'financial'] },
       ],
     },
     {

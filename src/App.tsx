@@ -177,11 +177,6 @@ const App = () => (
                             <AIActivityPage />
                           </ProtectedRoute>
                         } />
-                        <Route path="/inventory/import-xml" element={
-                          <ProtectedRoute roles={['admin']}>
-                            <ImportFiscalXML />
-                          </ProtectedRoute>
-                        } />
                         <Route path="/settings" element={
                           <ProtectedRoute roles={['admin']} groupId="sistema">
                             <SettingsPage />
