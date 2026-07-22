@@ -1,24 +1,29 @@
 name: Deploy Supabase Edge Functions
 
+# Gatilho automático em push DESLIGADO de propósito (22/07/2026): este workflow falhava em
+# TODO push porque os segredos SUPABASE_ACCESS_TOKEN / SUPABASE_PROJECT_ID não estão
+# configurados (ou expiraram) — gerando notificações "run failed" o tempo todo. O código está
+# ok: `supabase functions deploy` (todas as 28) roda sem erro com credencial válida.
+#
+# Hoje o deploy é feito manualmente pela CLI a cada mudança. Para RELIGAR o deploy automático,
+# basta: (1) em GitHub → Settings → Secrets and variables → Actions, criar
+#   SUPABASE_ACCESS_TOKEN = <token pessoal do Supabase>  e
+#   SUPABASE_PROJECT_ID   = okurngvcodmljjicopdp
+# e (2) descomentar o bloco `push:` abaixo.
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'supabase/functions/**'
-  workflow_dispatch:   # permite disparar manualmente pela aba "Actions" do GitHub
+  # push:
+  #   branches: [ main ]
+  #   paths: [ 'supabase/functions/**' ]
+  workflow_dispatch:   # disparo manual pela aba "Actions" continua disponível
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: supabase/setup-cli@v1
         with:
           version: latest
-
       - name: Deploy all Edge Functions
         run: supabase functions deploy --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}
         env:
