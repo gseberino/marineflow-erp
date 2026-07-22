@@ -1,8 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
+  BLOCK_SEPARATOR,
   SIMPLES_INFO_NOTE,
+  composeAdditionalInfo,
   normalizeAdditionalInfo,
   stripInvalidIcmsCreditClaim,
+  stripManagedBlocks,
+  stripPurchaseBlock,
 } from "../lib/nfe-info-complementar";
 
 // Texto EXATO que o sistema gravava antes da correção (commit 9a3886d) e que
@@ -77,13 +81,13 @@ describe("normalizeAdditionalInfo", () => {
     expect(out.match(/Documento emitido por/gi)?.length).toBe(1);
     expect(out.match(/cr[ée]dito fiscal de IPI/gi)?.length).toBe(1);
     expect(out).toBe(
-      "Referente a Ordem de Compra N. 05447. Comprador: Everton. " + SIMPLES_INFO_NOTE,
+      "Referente a Ordem de Compra N. 05447. Comprador: Everton" + BLOCK_SEPARATOR + SIMPLES_INFO_NOTE,
     );
   });
 
-  it("separa com ponto quando o texto do usuário não termina em pontuação", () => {
+  it("não apaga um 'Comprador:' escrito pelo usuário quando não há campo estruturado", () => {
     const out = normalizeAdditionalInfo("Comprador: Everton");
-    expect(out).toBe("Comprador: Everton. " + SIMPLES_INFO_NOTE);
+    expect(out).toBe("Comprador: Everton" + BLOCK_SEPARATOR + SIMPLES_INFO_NOTE);
   });
 
   it("devolve a declaração obrigatória quando o texto vem vazio/nulo", () => {
@@ -95,5 +99,78 @@ describe("normalizeAdditionalInfo", () => {
   it("a declaração padrão NÃO afirma crédito de ICMS (só a vedação de IPI)", () => {
     expect(SIMPLES_INFO_NOTE).toMatch(/não gera direito a crédito fiscal de IPI/i);
     expect(SIMPLES_INFO_NOTE).not.toMatch(/cr[ée]dito de ICMS/i);
+  });
+});
+
+describe("composeAdditionalInfo — ordem por contrato", () => {
+  it("põe pedido/comprador PRIMEIRO e a declaração do Simples POR ÚLTIMO", () => {
+    const out = composeAdditionalInfo({
+      purchaseOrder: "05447",
+      buyer: "Everton",
+      freeText: "Referente a entrega parcial.",
+    });
+    expect(out).toBe(
+      "Pedido de Compra: 05447 - Comprador: Everton" + BLOCK_SEPARATOR +
+      "Referente a entrega parcial." + BLOCK_SEPARATOR + SIMPLES_INFO_NOTE,
+    );
+    // a ordem é o ponto central do pedido do usuário
+    expect(out.indexOf("Pedido de Compra")).toBeLessThan(out.indexOf("Referente a entrega"));
+    expect(out.indexOf("Referente a entrega")).toBeLessThan(out.indexOf("Documento emitido"));
+  });
+
+  it("omite as partes não preenchidas", () => {
+    expect(composeAdditionalInfo({ purchaseOrder: "05447" }))
+      .toBe("Pedido de Compra: 05447" + BLOCK_SEPARATOR + SIMPLES_INFO_NOTE);
+    expect(composeAdditionalInfo({ buyer: "Everton" }))
+      .toBe("Comprador: Everton" + BLOCK_SEPARATOR + SIMPLES_INFO_NOTE);
+    expect(composeAdditionalInfo({})).toBe(SIMPLES_INFO_NOTE);
+    expect(composeAdditionalInfo({ purchaseOrder: "   ", buyer: "  " })).toBe(SIMPLES_INFO_NOTE);
+  });
+
+  it("NÃO duplica o bloco de pedido ao recompor (duplicar/reemitir)", () => {
+    const primeira = composeAdditionalInfo({ purchaseOrder: "05447", buyer: "Everton", freeText: "Entrega parcial." });
+    const segunda = composeAdditionalInfo({ purchaseOrder: "05447", buyer: "Everton", freeText: primeira });
+    expect(segunda).toBe(primeira);
+    expect(segunda.match(/Pedido de Compra/gi)?.length).toBe(1);
+    expect(segunda.match(/Comprador:/gi)?.length).toBe(1);
+    expect(segunda.match(/Documento emitido por/gi)?.length).toBe(1);
+  });
+
+  it("limpa a frase inválida de crédito de ICMS vinda de nota antiga", () => {
+    const legado =
+      "Referente a Ordem de Compra N. 05447. Comprador: Everton. " +
+      "Documento emitido por optante do Simples Nacional. Não gera direito a crédito fiscal de IPI. " +
+      "Permite o aproveitamento do crédito de ICMS conforme a legislação (art. 23 da LC 123/2006).";
+    const out = composeAdditionalInfo({ purchaseOrder: "05447", buyer: "Everton", freeText: legado });
+    expect(out).not.toMatch(/aproveitamento do cr[ée]dito de ICMS/i);
+    expect(out.match(/Documento emitido por/gi)?.length).toBe(1);
+    expect(out.startsWith("Pedido de Compra: 05447 - Comprador: Everton")).toBe(true);
+  });
+
+  it("nunca usa quebra de linha (infCpl não aceita CR/LF — Rejeição 215/588)", () => {
+    const out = composeAdditionalInfo({
+      purchaseOrder: "05447", buyer: "Everton", freeText: "Linha 1\nLinha 2",
+    });
+    expect(BLOCK_SEPARATOR).not.toMatch(/[\r\n\t]/);
+    expect(out).not.toMatch(/[\r\n]/);
+  });
+});
+
+describe("stripManagedBlocks / stripPurchaseBlock", () => {
+  it("stripManagedBlocks devolve só o texto do usuário (para o campo editável)", () => {
+    const composto = composeAdditionalInfo({ purchaseOrder: "05447", freeText: "Entrega parcial." });
+    const livre = stripManagedBlocks(composto);
+    expect(livre).not.toContain("Documento emitido por");
+    expect(livre).toContain("Entrega parcial.");
+    expect(livre).toContain("Pedido de Compra: 05447"); // ainda visível p/ o usuário
+  });
+
+  it("stripPurchaseBlock remove o bloco de pedido sem deixar separador órfão", () => {
+    const composto = composeAdditionalInfo({ purchaseOrder: "05447", buyer: "Everton", freeText: "Entrega parcial." });
+    const semPedido = stripPurchaseBlock(composto);
+    expect(semPedido).not.toMatch(/Pedido de Compra/i);
+    expect(semPedido.startsWith("Entrega parcial.")).toBe(true);
+    expect(semPedido).not.toMatch(/^\s*\|/);
+    expect(semPedido).not.toMatch(/\|\s*\|/);
   });
 });

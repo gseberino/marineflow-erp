@@ -44,18 +44,81 @@ const SIMPLES_DECLARATIONS =
   /Documento\s+emitido\s+por\s+(?:ME\s+ou\s+EPP\s+)?optante\s+(?:pelo|pela|do|da|de)\s+Simples\s+Nacional\s*\.?\s*(?:N[ãa]o\s+gera\s+direito\s+a\s+cr[ée]dito\s+fiscal\s+de\s+IPI\s*\.?)?/gi;
 
 /**
- * Normaliza o infCpl ao reaproveitar/gerar uma nota: tira a frase de crédito de
- * ICMS inválida, remove qualquer redação da declaração do Simples e devolve o
- * texto com a declaração obrigatória UMA única vez, ao final.
- * Preserva o texto livre do usuário (ordem de compra, comprador etc.).
+ * Separador entre os blocos do infCpl.
+ *
+ * ⚠️ NÃO usar "\n": o infCpl não aceita caracteres de formatação (CR/LF/TAB) —
+ * quebra de linha literal é causa conhecida de Rejeição 215 (falha no schema) e
+ * 588 (caractere de controle), e uma emissão rejeitada já consumiu o número
+ * reservado (lacuna que exige inutilização de numeração). O "|" é o marcador
+ * usual de fim de linha no infCpl. Este é o ÚNICO ponto a trocar caso a Contora
+ * confirme que converte algum marcador em quebra real na DANFE.
+ */
+export const BLOCK_SEPARATOR = ' | ';
+
+// Segmentos "Pedido de Compra: …" / "Comprador: …" que NÓS compomos — sempre no
+// início do texto ou logo após um separador de blocos. A âncora (^|\|) evita
+// engolir um "Comprador:" que o usuário tenha escrito no meio do texto dele.
+const PURCHASE_SEGMENTS = /(?:^|\|)\s*(?:Pedido\s+de\s+Compra|Comprador)\s*:[^|]*/gi;
+
+function tidy(text: string): string {
+  return text
+    // Chars de formatação viram espaço: o infCpl não os aceita (Rejeição
+    // 215/588) e o servidor já os removeria no cleanText — se deixássemos passar
+    // aqui, o espelho mostraria uma quebra que o XML não teria.
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s*\|\s*\|\s*/g, BLOCK_SEPARATOR) // separadores órfãos no meio
+    .replace(/^\s*\|\s*/, '')
+    .replace(/\s*\|\s*$/, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+/** Remove o bloco de pedido/comprador já composto (evita duplicá-lo ao recompor). */
+export function stripPurchaseBlock(text: string | null | undefined): string {
+  return tidy(String(text ?? '').replace(PURCHASE_SEGMENTS, ''));
+}
+
+/**
+ * Devolve só o texto do USUÁRIO: sem a declaração do Simples e sem a frase
+ * inválida de crédito de ICMS — os blocos que o sistema gerencia e reinsere.
+ * É o que deve aparecer no campo editável da tela.
+ */
+export function stripManagedBlocks(text: string | null | undefined): string {
+  return tidy(
+    stripInvalidIcmsCreditClaim(String(text ?? '')).replace(SIMPLES_DECLARATIONS, ''),
+  );
+}
+
+/**
+ * Monta o infCpl na ordem fixa, por contrato:
+ *   1) Pedido de Compra / Comprador   2) texto livre   3) declaração do Simples.
+ * A declaração obrigatória fica SEMPRE por último, e os dados do cliente
+ * sempre primeiro — sem depender de como o usuário digitou.
+ */
+export function composeAdditionalInfo(input: {
+  purchaseOrder?: string | null;
+  buyer?: string | null;
+  freeText?: string | null;
+}): string {
+  const purchase = [
+    input.purchaseOrder?.trim() ? `Pedido de Compra: ${input.purchaseOrder.trim()}` : '',
+    input.buyer?.trim() ? `Comprador: ${input.buyer.trim()}` : '',
+  ].filter(Boolean).join(' - ');
+
+  const managed = stripManagedBlocks(input.freeText);
+  // Só limpamos o bloco de pedido quando vamos reinseri-lo — assim um texto
+  // livre legado que contenha "Comprador: ..." não é apagado à toa.
+  const free = purchase ? stripPurchaseBlock(managed) : managed;
+
+  return [purchase, free, SIMPLES_INFO_NOTE].filter(Boolean).join(BLOCK_SEPARATOR);
+}
+
+/**
+ * Normaliza um infCpl existente (duplicar/reemitir, devoluções): tira a frase de
+ * crédito de ICMS inválida, remove qualquer redação da declaração do Simples e
+ * devolve o texto com a declaração obrigatória UMA única vez, ao final.
+ * Preserva o texto livre do usuário.
  */
 export function normalizeAdditionalInfo(text: string | null | undefined): string {
-  const base = stripInvalidIcmsCreditClaim(String(text ?? ''))
-    .replace(SIMPLES_DECLARATIONS, '')
-    .replace(/[ \t]{2,}/g, ' ')
-    .trim();
-  if (!base) return SIMPLES_INFO_NOTE;
-  // Sem pontuação no fim do texto do usuário, a declaração colaria na frase dele.
-  const separator = /[.;:!?]$/.test(base) ? ' ' : '. ';
-  return `${base}${separator}${SIMPLES_INFO_NOTE}`;
+  return composeAdditionalInfo({ freeText: text });
 }

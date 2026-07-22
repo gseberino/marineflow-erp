@@ -37,7 +37,7 @@ import { createZipBlob, type ZipEntry } from '@/lib/zip';
 import { parseLegacyAddress } from '@/lib/address-legacy';
 import { CSOSN_OPTIONS, FISCAL_ORIGIN_OPTIONS } from '@/lib/price-calculator';
 import { buildEspelhoHtml } from '@/lib/danfe-espelho';
-import { SIMPLES_INFO_NOTE, normalizeAdditionalInfo } from '@/lib/nfe-info-complementar';
+import { composeAdditionalInfo, stripManagedBlocks } from '@/lib/nfe-info-complementar';
 // Reaproveita os mesmos módulos que a edge function fiscal-emit usa no
 // servidor — evita duplicar a lista de formas de pagamento, natureza de
 // operação/CFOP e o CFOP padrão.
@@ -384,6 +384,10 @@ export default function FiscalEmission() {
   const [presenceIndicator, setPresenceIndicator] = useState(1);
   const [consumerFinal, setConsumerFinal] = useState(true);
   const [additionalInfo, setAdditionalInfo] = useState('');
+  // Pedido do cliente: campos estruturados. Saem SEMPRE no inicio do infCpl,
+  // antes do texto livre e da declaracao do Simples (composeAdditionalInfo).
+  const [purchaseOrder, setPurchaseOrder] = useState('');
+  const [buyerName, setBuyerName] = useState('');
   const [referencedAccessKey, setReferencedAccessKey] = useState('');
   const [items, setItems] = useState<DraftItem[]>([]);
   const xmlInputRef = useRef<HTMLInputElement>(null);
@@ -602,7 +606,9 @@ export default function FiscalEmission() {
     setPayFirstDue('');
     setPresenceIndicator(1);
     setConsumerFinal(true);
-    setAdditionalInfo(SIMPLES_INFO_NOTE);
+    setAdditionalInfo('');
+    setPurchaseOrder('');
+    setBuyerName('');
     setReferencedAccessKey('');
     setItems([]);
     // Gerada uma vez por abertura do diálogo: um duplo clique ou retry de
@@ -685,7 +691,9 @@ export default function FiscalEmission() {
     setPresenceIndicator(Number(p.presence_indicator ?? 1) || 1);
     // Notas antigas gravaram a frase de crédito de ICMS (inválida com CSOSN 102);
     // normalizar impede que o erro se propague ao duplicar/reemitir.
-    setAdditionalInfo(normalizeAdditionalInfo(p.additional_info));
+    setAdditionalInfo(stripManagedBlocks(p.additional_info));
+    setPurchaseOrder('');
+    setBuyerName('');
     setReferencedAccessKey((p.referenced_access_keys && p.referenced_access_keys[0]) || '');
     // Plano de pagamento: a fonte é payment_terms (guarda a forma REAL escolhida
     // e as parcelas); sem isso, duplicar uma nota parcelada perdia o parcelamento.
@@ -762,9 +770,8 @@ export default function FiscalEmission() {
     setRecipientIe(r.state_registration || '');
     setConsumerFinal(p.consumer_final !== false);
     setPresenceIndicator(Number(p.presence_indicator ?? 1) || 1);
-    setAdditionalInfo(normalizeAdditionalInfo(
-      `Devolução referente à NF-e nº ${doc.number}, série ${doc.series}${key ? `, chave ${key}` : ''}.`,
-    ));
+    // Só o texto livre: a declaração do Simples é acrescentada na composição.
+    setAdditionalInfo(`Devolução referente à NF-e nº ${doc.number}, série ${doc.series}${key ? `, chave ${key}` : ''}.`);
     setReferencedAccessKey(key);
     setPaymentMethod(selectablePaymentMethod(doc.payment_terms?.method, p.payments?.[0]?.method));
     setAddress({
@@ -812,7 +819,9 @@ export default function FiscalEmission() {
     setPaymentMethod('01');
     setPresenceIndicator(1);
     setConsumerFinal(true);
-    setAdditionalInfo(SIMPLES_INFO_NOTE);
+    setAdditionalInfo('');
+    setPurchaseOrder('');
+    setBuyerName('');
     setReferencedAccessKey('');
     const c = inv.clientId ? (clients || []).find((cl) => cl.id === inv.clientId) : null;
     if (c) { setClientId(c.id); populateFromClient(c); }
@@ -885,9 +894,7 @@ export default function FiscalEmission() {
     setConsumerFinal(false); // devolução B2B — o fornecedor não é consumidor final
     setPresenceIndicator(1);
     setPaymentMethod('01'); // ignorado (natureza sem pagamento → tPag 90)
-    setAdditionalInfo(normalizeAdditionalInfo(
-      `Devolução de compra referente à NF-e do fornecedor${key ? `, chave ${key}` : ''}.`,
-    ));
+    setAdditionalInfo(`Devolução de compra referente à NF-e do fornecedor${key ? `, chave ${key}` : ''}.`);
     setReferencedAccessKey(key);
     const a = ret?.issuer?.address || {};
     setAddress({
@@ -1051,7 +1058,11 @@ export default function FiscalEmission() {
       : (selectedNature.hasPayment ? { mode: 'avista', method: paymentMethod, installments: null } : null),
     presence_indicator: presenceIndicator,
     consumer_final: consumerFinal,
-    additional_info: additionalInfo || undefined,
+    // Ordem garantida por contrato (ver composeAdditionalInfo): pedido/comprador
+    // → texto livre → declaração obrigatória do Simples, sempre por último.
+    additional_info: composeAdditionalInfo({
+      purchaseOrder, buyer: buyerName, freeText: additionalInfo,
+    }) || undefined,
     referenced_access_key: selectedNature.requiresReference ? (referencedAccessKey || undefined) : undefined,
     recipient: {
       name: recipientName,
@@ -2378,6 +2389,27 @@ export default function FiscalEmission() {
             </div>
 
             <div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                <div>
+                  <Label>Ordem de compra (pedido do cliente)</Label>
+                  <Input
+                    className="text-sm"
+                    maxLength={15}
+                    value={purchaseOrder}
+                    onChange={(e) => setPurchaseOrder(e.target.value)}
+                    placeholder="Ex.: 05447"
+                  />
+                </div>
+                <div>
+                  <Label>Comprador</Label>
+                  <Input
+                    className="text-sm"
+                    value={buyerName}
+                    onChange={(e) => setBuyerName(e.target.value)}
+                    placeholder="Ex.: Everton"
+                  />
+                </div>
+              </div>
               <Label>Informações complementares (opcional)</Label>
               <Textarea
                 className="text-sm"
@@ -2387,7 +2419,8 @@ export default function FiscalEmission() {
                 placeholder="Observações que saem no rodapé da nota"
               />
               <p className="text-[11px] text-muted-foreground mt-1">
-                A nota-padrão do Simples Nacional já vem preenchida. Ajuste conforme orientação da contadora.
+                Ordem: pedido/comprador primeiro, depois este texto, e a declaração obrigatória do
+                Simples Nacional por último (acrescentada automaticamente).
               </p>
             </div>
 
