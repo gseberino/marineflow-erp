@@ -24,6 +24,64 @@ export const productTools: ToolDef[] = [
     },
   },
   {
+    name: "search_products_batch",
+    description:
+      "Busca VÁRIOS produtos de uma vez e devolve as melhores opções de cada um. Use SEMPRE que precisar levantar preços de uma lista de itens (montar orçamento, cotação, comparar): uma chamada resolve a lista inteira, em vez de dezenas de buscas. Devolve, por termo, até 3 candidatos com id, nome e preço — e marca os termos SEM resultado, que você deve tratar como 'valor provisório' em vez de travar o trabalho.",
+    input_schema: {
+      type: "object",
+      properties: {
+        queries: {
+          type: "array",
+          items: { type: "string" },
+          description: "Termos a buscar (ex.: ['MultiPlus-II 12/3000','Orion 12/12','MPPT 100/50','SmartShunt']). Máximo 25.",
+        },
+        per_query: { type: "number", description: "Candidatos por termo (padrão 3, teto 5)." },
+      },
+      required: ["queries"],
+    },
+    risk: "low",
+    async execute(args, { sb }) {
+      const termos = (Array.isArray(args.queries) ? args.queries : [])
+        .map((q: unknown) => String(q || "").trim())
+        .filter(Boolean)
+        .slice(0, 25);
+      if (termos.length === 0) return { error: "Informe ao menos um termo em queries." };
+      const porTermo = Math.min(Number(args.per_query) || 3, 5);
+
+      const achados: Array<Record<string, unknown>> = [];
+      const semResultado: string[] = [];
+      // Em paralelo: 25 buscas curtas custam menos que 25 turnos de conversa.
+      await Promise.all(
+        termos.map(async (q: string) => {
+          const { data } = await sb
+            .from("products")
+            .select("id, name, sku, brand, sale_price, cost_price, unit")
+            .eq("active", true)
+            .or(`name.ilike.%${q}%,sku.ilike.%${q}%,brand.ilike.%${q}%`)
+            .limit(porTermo);
+          const opcoes = ((data as any[]) || []).map((p) => ({
+            product_id: p.id,
+            nome: p.name,
+            sku: p.sku || null,
+            marca: p.brand || null,
+            preco_venda: p.sale_price != null ? Number(p.sale_price) : null,
+            custo: p.cost_price != null ? Number(p.cost_price) : null,
+            unidade: p.unit || null,
+          }));
+          if (opcoes.length === 0) semResultado.push(q);
+          else achados.push({ termo: q, encontrados: opcoes.length, opcoes });
+        }),
+      );
+
+      return {
+        resultados: achados,
+        sem_resultado: semResultado,
+        instrucao:
+          "Escolha o candidato mais adequado por termo e DIGA qual escolheu (nome e preço). Para os termos em 'sem_resultado', não trave: marque como 'Valor provisório — aguardando cotação do fornecedor' e siga.",
+      };
+    },
+  },
+  {
     name: "search_services",
     description: "Busca serviços de mão de obra no catálogo por nome ou descrição.",
     input_schema: {

@@ -9,7 +9,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { runAgentLoop, type Proposal } from "../_shared/ai/agent.ts";
 import { buildSystemBlocks } from "../_shared/ai/prompt.ts";
 import { callClaude, ClaudeApiError, type ClaudeContentBlock, type ClaudeMessage } from "../_shared/ai/anthropic.ts";
-import { MODEL_AGENT, MODEL_LITE } from "../_shared/ai/models.ts";
+import { MAX_ITERATIONS_WHATSAPP, MODEL_AGENT, MODEL_LITE } from "../_shared/ai/models.ts";
 import { allTools, toolsByName, type Role } from "../_shared/ai/tools/index.ts";
 import {
   checkWhatsAppRateLimit,
@@ -429,6 +429,7 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
     sessionId,
     channel: "whatsapp",
     effort: "low", // WhatsApp: conversa rápida, prioriza latência baixa
+    maxIterations: MAX_ITERATIONS_WHATSAPP, // teto menor que o painel: protege a latência
   });
 
   try {

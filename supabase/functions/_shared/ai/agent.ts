@@ -96,11 +96,10 @@ const AUTO_DISAMBIG: Record<string, AutoDisambigConfig> = {
     label: (p) => `${p.name}${p.sale_price ? ` — R$ ${Number(p.sale_price).toFixed(2)}` : ""}`,
     value: (p) => p.id,
   },
-  list_service_orders: {
-    question: (_q, n) => (n > 5 ? `Encontrei ${n} ordens de serviço. Escolha ou refine:` : "Qual ordem de serviço?"),
-    label: (so) => `${so.numero} — R$ ${Number(so.valor_total || 0).toFixed(2)} — ${so.status}${so.embarcacao && so.embarcacao !== "—" ? ` · ${so.embarcacao}` : ""}`,
-    value: (so) => so.id,
-  },
+  // list_service_orders foi REMOVIDO daqui de propósito: é uma tool de LISTAGEM, não de
+  // escolha. Forçar "qual ordem de serviço?" quebrava pedidos legítimos de consulta
+  // ("pesquise os preços já usados nas OS anteriores") — o usuário não queria escolher uma.
+  // Quando realmente for preciso escolher, o modelo chama present_options.
 };
 
 function humanizeToolName(name: string): string {
@@ -407,7 +406,13 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
       if (!shortCircuit) {
         const disambig = AUTO_DISAMBIG[tc.name];
         const items: any[] = (toolResult as any)?.results ?? [];
-        if (disambig && items.length > 1) {
+        // Em TRABALHO COMPOSTO (o modelo disparou várias buscas no mesmo turno, ex.: montar um
+        // orçamento com 20 itens), interromper a cada busca ambígua inviabiliza a tarefa: vira
+        // uma pergunta por item. Nesse caso devolvemos a lista ao modelo, que escolhe e informa
+        // o que escolheu — ou chama present_options por conta própria se estiver realmente em
+        // dúvida. A desambiguação forçada continua valendo quando a busca é o assunto do turno.
+        const trabalhoComposto = toolUses.length > 1;
+        if (disambig && items.length > 1 && !trabalhoComposto) {
           const searchQuery = (tc.input as any)?.query || (tc.input as any)?.client_id || "";
           const top5 = items.slice(0, 5);
           const options: OptionItem[] = top5.map((item) => ({ label: disambig.label(item).slice(0, 60), value: disambig.value(item) }));
