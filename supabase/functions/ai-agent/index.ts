@@ -430,6 +430,7 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
     channel: "whatsapp",
     effort: "low", // WhatsApp: conversa rápida, prioriza latência baixa
     maxIterations: MAX_ITERATIONS_WHATSAPP, // teto menor que o painel: protege a latência
+    timeBudgetMs: 45_000, // WhatsApp é conversa: melhor responder rápido e pedir "continue"
   });
 
   try {

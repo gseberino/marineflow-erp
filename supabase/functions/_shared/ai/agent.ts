@@ -57,6 +57,9 @@ export interface RunAgentLoopParams {
   sessionId: string;
   model?: string;
   maxIterations?: number;
+  /** Teto de tempo do turno em ms. Protege contra o limite de parede da Edge Function
+   * (~150s): estourar devolve 546 e joga fora TODO o trabalho já pago. Padrão 100s. */
+  timeBudgetMs?: number;
   /** Guardado no payload de auditoria — o loop em si é agnóstico de canal. */
   channel?: "panel" | "whatsapp" | "system";
   /** Esforço de raciocínio do modelo agente. Painel e WhatsApp usam o MESMO cérebro
@@ -290,7 +293,21 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
   const toolSchemas = tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema }));
   const toolsByName: Record<string, ToolDef> = Object.fromEntries(tools.map((t) => [t.name, t]));
 
+  // ORÇAMENTO DE TEMPO — o que realmente protege o turno.
+  // A Edge Function do Supabase tem teto de parede de ~150s: estourar devolve HTTP 546 e o
+  // turno INTEIRO é descartado — o usuário paga todas as chamadas do LLM e não recebe nada.
+  // Foi o que aconteceu ao subir maxIterations de 8 para 24: contar iterações não protege,
+  // porque cada chamada leva de 5 a 35 segundos. Aqui paramos ANTES do limite e devolvemos o
+  // que já foi feito (as mensagens são persistidas por quem chama, então "continue" retoma).
+  const inicioDoTurno = Date.now();
+  const orcamentoMs = params.timeBudgetMs ?? 100_000; // margem confortável sob os 150s
+  let pausadoPorTempo = false;
+
   for (let iter = 0; iter < maxIterations; iter++) {
+    if (Date.now() - inicioDoTurno > orcamentoMs) {
+      pausadoPorTempo = true;
+      break;
+    }
     let result;
     try {
       result = await callClaude({
@@ -441,11 +458,30 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
     // Sem short-circuit — segue pro próximo giro do loop.
   }
 
+  // Saída por tempo é DIFERENTE de erro: o trabalho até aqui é válido e está salvo.
+  if (pausadoPorTempo) {
+    return {
+      message: {
+        role: "assistant",
+        content:
+          "Cheguei ao limite de tempo desta rodada, mas **o que já fiz está salvo**. " +
+          "Me diga *continue* que eu retomo exatamente de onde parei.",
+      },
+      toolEvents,
+      messages,
+      usage: usageLog,
+    };
+  }
+
   return {
-    message: { role: "assistant", content: "" },
+    message: {
+      role: "assistant",
+      content:
+        "Fiz várias etapas nesta rodada e cheguei ao limite de passos. **O que já fiz está salvo** — " +
+        "me diga *continue* para eu seguir de onde parei.",
+    },
     toolEvents,
     messages,
     usage: usageLog,
-    error: "Limite de iterações de tool-calling atingido",
   };
 }
