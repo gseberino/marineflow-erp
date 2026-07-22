@@ -14,6 +14,7 @@ import { fieldOpsTools } from "./field-ops.ts";
 import { autonomyTools } from "./autonomy.ts";
 import { contactTools } from "./contacts.ts";
 import { entityMemoryTools } from "./entity-memory.ts";
+import { fiscalEmitTools } from "./fiscal-emit.ts";
 import { entity360Tools } from "./entity-360.ts";
 import { whatsappTools } from "./whatsapp.ts";
 import { uiTools } from "./ui.ts";
@@ -40,6 +41,7 @@ export const allTools: ToolDef[] = [
   ...entity360Tools,
   ...contactTools,
   ...entityMemoryTools,
+  ...fiscalEmitTools,
   ...whatsappTools,
   ...uiTools,
   ...memoryTools,

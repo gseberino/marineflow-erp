@@ -53,6 +53,154 @@ async function requireAdmin(admin: any, req: Request): Promise<{ id: string } | 
   return { id: profile.id };
 }
 
+/**
+ * Caminho interno do agente de IA (WhatsApp/painel), alternativo ao JWT de admin.
+ *
+ * Só autoriza com as DUAS condições: o segredo interno (que apenas nossas edge functions
+ * conhecem) e um acting_user_id que seja admin ATIVO. A confirmação humana — "sim + PIN" —
+ * acontece antes, no agente, porque emitir é ação de risco alto lá.
+ *
+ * Trade-off assumido conscientemente: troca o portão "JWT de admin" pelo portão
+ * "segredo interno + cargo revalidado + PIN a montante", que é o que torna possível emitir
+ * pelo WhatsApp (onde não existe sessão de usuário).
+ */
+// deno-lint-ignore no-explicit-any
+async function requireInternalAgentAdmin(admin: any, req: Request, body: any): Promise<{ id: string } | null> {
+  const enviado = req.headers.get("x-internal-secret");
+  const esperado = Deno.env.get("AI_INTERNAL_SECRET");
+  if (!enviado || !esperado || enviado !== esperado) return null;
+
+  const uid = body?.acting_user_id;
+  if (!uid) return null;
+  const { data: profile } = await admin
+    .from("app_users")
+    .select("id, role, active")
+    .eq("id", uid)
+    .maybeSingle();
+  if (!profile || profile.role !== "admin" || profile.active === false) return null;
+
+  console.log(`[fiscal-emit] chamada interna do agente autorizada por admin ${profile.id}`);
+  return { id: profile.id };
+}
+
+/**
+ * Ponte Ordem de Serviço → corpo da NF-e.
+ *
+ * Monta destinatário (a partir do cliente) e itens (a partir das PEÇAS da OS). A mão de
+ * obra é deliberadamente SEPARADA e devolvida no resumo: NF-e é documento de produto, e
+ * serviço é NFS-e — que ainda não existe no módulo.
+ *
+ * SEAM PARA NFS-e: quando a NFS-e entrar, `servicos` já sai daqui pronto (descrição, qtd,
+ * valor). Bastará montar o payload de serviço e emitir o segundo documento — sem mexer
+ * nesta separação nem no que o agente já sabe fazer.
+ */
+// deno-lint-ignore no-explicit-any
+async function buildBodyFromServiceOrder(admin: any, body: any): Promise<
+  | { ok: true; body: Record<string, unknown>; resumo: Record<string, unknown> }
+  | { ok: false; error: string; status: number }
+> {
+  const soId = String(body.service_order_id);
+  const { data: so } = await admin
+    .from("service_orders")
+    .select("id, service_order_number, status, client_id, customer_po_number")
+    .eq("id", soId)
+    .maybeSingle();
+  if (!so) return { ok: false, error: "Ordem de serviço não encontrada.", status: 404 };
+  if (so.status === "cancelled") return { ok: false, error: "OS cancelada não pode gerar nota.", status: 422 };
+  if (!so.client_id) return { ok: false, error: "Essa OS não tem cliente vinculado — sem destinatário não há nota.", status: 422 };
+
+  const { data: cli } = await admin
+    .from("clients")
+    .select("name, cpf_cnpj, email, address_line_1, address_number, address_complement, neighborhood, city, state, postal_code, state_registration, ie_indicator")
+    .eq("id", so.client_id)
+    .maybeSingle();
+  if (!cli) return { ok: false, error: "Cliente da OS não encontrado.", status: 404 };
+
+  // Itens = PEÇAS com produto do catálogo (produto avulso sem cadastro não tem NCM).
+  const { data: parts } = await admin
+    .from("service_order_parts")
+    .select("product_id, quantity, unit_sale_snapshot, products(name, sku, unit, ncm)")
+    .eq("service_order_id", soId);
+
+  const itens: Array<Record<string, unknown>> = [];
+  const semProduto: string[] = [];
+  for (const p of (parts as any[]) || []) {
+    if (!p.product_id) {
+      semProduto.push("item sem produto cadastrado");
+      continue;
+    }
+    itens.push({
+      product_id: p.product_id,
+      code: p.products?.sku || "ITEM",
+      name: p.products?.name || "Produto",
+      unit: p.products?.unit || undefined,
+      ncm: p.products?.ncm || undefined,
+      quantity: Number(p.quantity) || 0,
+      unit_price: Number(p.unit_sale_snapshot) || 0,
+    });
+  }
+  if (itens.length === 0) {
+    return { ok: false, error: "Essa OS não tem peças de catálogo para emitir NF-e (NF-e é documento de produto).", status: 422 };
+  }
+
+  // Mão de obra / materiais livres: NÃO entram na NF-e. Ficam prontos para a NFS-e.
+  const { data: servicos } = await admin
+    .from("service_order_services")
+    .select("name_snapshot, quantity, unit_price_snapshot, line_total")
+    .eq("service_order_id", soId);
+  const listaServicos = ((servicos as any[]) || []).map((s) => ({
+    descricao: s.name_snapshot,
+    quantidade: Number(s.quantity) || 1,
+    valor_unitario: Number(s.unit_price_snapshot) || 0,
+    total: Number(s.line_total) || 0,
+  }));
+  const totalServicos = listaServicos.reduce((a, s) => a + s.total, 0);
+  const totalPecas = itens.reduce((a, i) => a + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0);
+
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  return {
+    ok: true,
+    body: {
+      origin_type: "service_order",
+      origin_id: so.id,
+      client_id: so.client_id,
+      nature_of_operation: body.nature_of_operation ?? "venda",
+      customer_po_number: body.customer_po_number ?? so.customer_po_number ?? null,
+      recipient: {
+        name: cli.name,
+        document: cli.cpf_cnpj,
+        email: cli.email,
+        state_registration_indicator: cli.ie_indicator,
+        state_registration: cli.state_registration,
+        address: {
+          street: cli.address_line_1,
+          number: cli.address_number,
+          complement: cli.address_complement,
+          district: cli.neighborhood,
+          city_name: cli.city,
+          state_code: cli.state,
+          postal_code: cli.postal_code,
+        },
+      },
+      items: itens,
+    },
+    resumo: {
+      os: so.service_order_number,
+      cliente: cli.name,
+      pecas_na_nota: itens.length,
+      total_pecas: r2(totalPecas),
+      // O que NÃO entra — o agente precisa dizer isso em voz alta ao dono.
+      servicos_fora_da_nfe: listaServicos.length,
+      total_servicos_fora: r2(totalServicos),
+      itens_ignorados_sem_cadastro: semProduto.length,
+      aviso_nfse: listaServicos.length > 0
+        ? "A mão de obra NÃO entra na NF-e (é NFS-e, ainda não disponível). Esta nota cobre só as peças."
+        : null,
+      servicos_para_nfse: listaServicos, // seam: pronto para a NFS-e quando existir
+    },
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return jr({ error: "method_not_allowed" }, 405);
@@ -63,14 +211,36 @@ Deno.serve(async (req) => {
     { auth: { persistSession: false, autoRefreshToken: false } },
   );
 
-  const caller = await requireAdmin(admin, req);
-  if (!caller) return jr({ error: "unauthorized" }, 401);
-
+  // O corpo é lido ANTES da autenticação porque o caminho interno (agente) precisa
+  // declarar no corpo QUAL admin autorizou a operação.
   // deno-lint-ignore no-explicit-any
   const body = (await req.json().catch(() => null)) as any;
   if (!body) return jr({ error: "invalid_json" }, 400);
 
+  // Dois caminhos de autorização:
+  //  1) JWT de admin (a tela) — o de sempre.
+  //  2) Chamada INTERNA do agente de IA: só passa com o AI_INTERNAL_SECRET (que apenas
+  //     nossas edge functions possuem) E declarando um acting_user_id que seja admin ativo.
+  //     A confirmação humana acontece ANTES, no agente: emitir é ação de risco alto, que
+  //     exige o "sim + PIN" do dono. Aqui revalidamos o cargo — o PIN não viaja.
+  const caller = (await requireAdmin(admin, req)) ?? (await requireInternalAgentAdmin(admin, req, body));
+  if (!caller) return jr({ error: "unauthorized" }, 401);
+
   try {
+    // Ponte OS → payload: quando vem service_order_id e não vieram itens, montamos o
+    // destinatário e os itens a partir da Ordem de Serviço (peças). Assim o agente não
+    // precisa saber nada de fiscal — ele só diz "de qual OS".
+    if (body.service_order_id && !Array.isArray(body.items)) {
+      const ponte = await buildBodyFromServiceOrder(admin, body);
+      if (!ponte.ok) return jr({ error: ponte.error }, ponte.status);
+      Object.assign(body, ponte.body);
+      if (body.action === "prepare") {
+        return jr({ ok: true, data: { resumo: ponte.resumo, payload_pronto: true } });
+      }
+      // O resumo viaja para o preview responder "o que entrou e o que ficou de fora".
+      body.__resumo_os = ponte.resumo;
+    }
+
     // Ambiente REAL de emissão (lê o secret FISCAL_ENVIRONMENT do servidor, sem
     // chamar a Contora) — a UI usa para exibir o banner "PRODUÇÃO / nota real" e
     // evitar emissão acidental. É a fonte da verdade (o mesmo valor que handleCreate usa).
@@ -328,7 +498,8 @@ async function handlePreview(admin: any, body: any): Promise<Response> {
   if (seqErr) return jr({ error: "Falha ao consultar a numeração: " + seqErr.message }, 500);
   const number = (Number(seqRow?.last_number ?? 0) || 0) + 1;
 
-  return jr({ ok: true, payload: prep.payload, emitter, environment, series, number });
+  // resumo_os: presente quando o espelho veio de uma OS (o que entrou e o que ficou de fora).
+  return jr({ ok: true, payload: prep.payload, emitter, environment, series, number, resumo_os: body.__resumo_os ?? null });
 }
 
 // deno-lint-ignore no-explicit-any
