@@ -325,6 +325,97 @@ export const financialTools: ToolDef[] = [
     },
   },
   {
+    name: "update_receivable",
+    description:
+      "Corrige um RECEBÍVEL já lançado: vencimento, valor, descrição, categoria, centro de custo ou observação. Use para 'muda o vencimento dessa parcela', 'o valor está errado'. Ação sensível (mexe no que o cliente deve) — pede confirmação. NÃO registra pagamento: para isso use register_payment.",
+    input_schema: {
+      type: "object",
+      properties: {
+        receivable_id: { type: "string", description: "UUID do recebível (de list_overdue_receivables/get_os_receivables)." },
+        due_date: { type: "string", description: "Novo vencimento (ISO date)." },
+        amount: { type: "number", description: "Novo valor total." },
+        description: { type: "string" },
+        category: { type: "string", description: "Categoria financeira (veja list_reference_data)." },
+        cost_center_id: { type: "string" },
+        notes: { type: "string" },
+      },
+      required: ["receivable_id"],
+    },
+    risk: "medium",
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { sb } = ctx;
+      const { receivable_id, ...campos } = args as Record<string, unknown>;
+      const patch = Object.fromEntries(Object.entries(campos).filter(([, v]) => v !== undefined && v !== null && v !== ""));
+      if (Object.keys(patch).length === 0) return { error: "Informe ao menos um campo para alterar." };
+
+      const { data: antes } = await sb.from("receivables").select("description, amount, balance_amount, due_date, status, paid_amount").eq("id", receivable_id).maybeSingle();
+      if (!antes) return { error: "Recebível não encontrado." };
+      if (antes.status === "cancelled") return { error: "Recebível cancelado não pode ser alterado." };
+      // Reduzir o valor abaixo do que já foi pago deixaria o título inconsistente.
+      if (patch.amount != null && Number(patch.amount) < (Number(antes.paid_amount) || 0)) {
+        return { error: `O novo valor (R$ ${Number(patch.amount).toFixed(2)}) é menor que o já pago (R$ ${(Number(antes.paid_amount) || 0).toFixed(2)}).` };
+      }
+      // Mexer no valor exige recalcular o saldo em aberto.
+      if (patch.amount != null) patch.balance_amount = Number(patch.amount) - (Number(antes.paid_amount) || 0);
+
+      const { data, error } = await sb.from("receivables").update(patch).eq("id", receivable_id).select().single();
+      if (error) throw error;
+      return {
+        ok: true,
+        antes: { valor: Number(antes.amount) || 0, vencimento: antes.due_date, saldo: Number(antes.balance_amount) || 0 },
+        depois: { valor: Number(data.amount) || 0, vencimento: data.due_date, saldo: Number(data.balance_amount) || 0 },
+      };
+    },
+  },
+  {
+    name: "update_payable",
+    description:
+      "Corrige uma CONTA A PAGAR já lançada: vencimento, valor, descrição, fornecedor, categoria de despesa, centro de custo ou observação. Use para 'adia o vencimento dessa conta', 'o valor veio diferente na nota'. Ação sensível — pede confirmação.",
+    input_schema: {
+      type: "object",
+      properties: {
+        payable_id: { type: "string", description: "UUID da conta a pagar (de list_payables_due)." },
+        due_date: { type: "string", description: "Novo vencimento (ISO date)." },
+        amount: { type: "number", description: "Novo valor total." },
+        description: { type: "string" },
+        supplier_id: { type: "string" },
+        expense_category: { type: "string" },
+        cost_center_id: { type: "string" },
+        notes: { type: "string" },
+      },
+      required: ["payable_id"],
+    },
+    risk: "medium",
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { sb } = ctx;
+      const { payable_id, ...campos } = args as Record<string, unknown>;
+      const patch = Object.fromEntries(Object.entries(campos).filter(([, v]) => v !== undefined && v !== null && v !== ""));
+      if (Object.keys(patch).length === 0) return { error: "Informe ao menos um campo para alterar." };
+
+      const { data: antes } = await sb.from("payables").select("description, amount, balance_amount, due_date, status, paid_amount").eq("id", payable_id).maybeSingle();
+      if (!antes) return { error: "Conta a pagar não encontrada." };
+      if (antes.status === "paid") return { error: "Conta já paga não pode ser alterada." };
+      if (patch.amount != null && Number(patch.amount) < (Number(antes.paid_amount) || 0)) {
+        return { error: "O novo valor é menor que o já pago nessa conta." };
+      }
+      if (patch.amount != null) patch.balance_amount = Number(patch.amount) - (Number(antes.paid_amount) || 0);
+
+      const { data, error } = await sb.from("payables").update(patch).eq("id", payable_id).select().single();
+      if (error) throw error;
+      return {
+        ok: true,
+        antes: { valor: Number(antes.amount) || 0, vencimento: antes.due_date },
+        depois: { valor: Number(data.amount) || 0, vencimento: data.due_date },
+      };
+    },
+  },
+  {
     name: "get_period_summary",
     description:
       "FECHAMENTO do período: quanto ENTROU, quanto SAIU, o saldo, e as pendências que pedem ação (a receber vencido, contas a pagar vencendo, OS concluídas). Use para 'como foi hoje?', 'fechamento da semana', 'resumo do mês'. Só leitura — não registra nada.",

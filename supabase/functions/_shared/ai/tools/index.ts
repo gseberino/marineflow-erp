@@ -17,6 +17,7 @@ import { entityMemoryTools } from "./entity-memory.ts";
 import { fiscalEmitTools } from "./fiscal-emit.ts";
 import { entity360Tools } from "./entity-360.ts";
 import { registryCrudTools } from "./registry-crud.ts";
+import { referenceDataTools } from "./reference-data.ts";
 import { whatsappTools } from "./whatsapp.ts";
 import { uiTools } from "./ui.ts";
 import { memoryTools } from "./memory.ts";
@@ -41,6 +42,7 @@ export const allTools: ToolDef[] = [
   ...autonomyTools,
   ...entity360Tools,
   ...registryCrudTools,
+  ...referenceDataTools,
   ...contactTools,
   ...entityMemoryTools,
   ...fiscalEmitTools,
