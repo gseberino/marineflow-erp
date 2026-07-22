@@ -108,6 +108,70 @@ export const crmTools: ToolDef[] = [
     },
   },
   {
+    name: "list_untouched_assets",
+    description:
+      "Lista os ativos FRIOS: nunca tiveram serviço concluído E não têm orçamento em aberto — oportunidade parada de verdade. Exclui quem já está em negociação (senão você cobraria alguém que já está sendo atendido). Traz cliente, contato e equipamentos para uma abordagem concreta. Só leitura — nunca contate o cliente sem o dono mandar.",
+    input_schema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Máximo de ativos (padrão 10, teto 40)." },
+        only_with_client: { type: "boolean", description: "Só ativos com cliente vinculado (padrão true — sem cliente não há a quem abordar)." },
+      },
+    },
+    risk: "low",
+    async execute(args, { sb }) {
+      const limite = Math.min(Number(args.limit) || 10, 40);
+      const soComCliente = args.only_with_client !== false;
+
+      // Uma passada nas OS: quem já foi atendido e quem já está em negociação.
+      const { data: oss } = await sb
+        .from("service_orders")
+        .select("vessel_id, status, quote_status")
+        .not("vessel_id", "is", null)
+        .limit(2000);
+      const atendidos = new Set<string>();
+      const emNegociacao = new Set<string>();
+      for (const s of (oss as any[]) || []) {
+        const k = String(s.vessel_id);
+        if (["completed", "invoiced"].includes(s.status)) atendidos.add(k);
+        if (s.status === "draft" && ["sent", "awaiting_approval", "awaiting_deposit"].includes(s.quote_status || "")) {
+          emNegociacao.add(k);
+        }
+      }
+
+      const { data: vessels, error } = await sb
+        .from("vessels")
+        .select("id, name, manufacturer, model, year, asset_type, client_id, created_at, engine_brand, engine_model, battery_bank_summary, inverter_charger_summary, navigation_electronics_summary, clients(name, whatsapp, phone)")
+        .eq("active", true)
+        .limit(500);
+      if (error) throw error;
+
+      const frios = ((vessels as any[]) || [])
+        .filter((v) => !atendidos.has(String(v.id)) && !emNegociacao.has(String(v.id)))
+        .filter((v) => (soComCliente ? !!v.client_id : true))
+        // Cadastrado há mais tempo primeiro: está parado há mais tempo.
+        .sort((a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime())
+        .slice(0, limite);
+
+      return {
+        criterio: "nunca teve serviço concluído e não tem orçamento em aberto",
+        count: frios.length,
+        results: frios.map((v: any) => ({
+          vessel_id: v.id,
+          ativo: v.name,
+          tipo: v.asset_type || null,
+          modelo: [v.manufacturer, v.model, v.year].filter(Boolean).join(" ") || null,
+          cliente: v.clients?.name || "(sem cliente)",
+          client_id: v.client_id,
+          tem_whatsapp: !!(v.clients?.whatsapp || v.clients?.phone),
+          cadastrado_em: v.created_at,
+          equipamentos: equipamentos(v),
+        })),
+        nota: "Oportunidade comercial parada. Proponha ao dono uma abordagem por ativo — nunca contate por conta própria.",
+      };
+    },
+  },
+  {
     name: "list_inactive_clients",
     description:
       "Lista CLIENTES sem nenhum serviço concluído há X meses (oportunidade de reativação). Traz quando foi o último serviço e quantos ativos o cliente tem. Só leitura — não envia nada.",
