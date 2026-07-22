@@ -1,9 +1,10 @@
 // Resolvedor por PALAVRA-CHAVE — o "a IA só comanda, o código executa".
 //
-// O LLM passa termos ("MultiPlus-II 12/3000", "Orion 12/12"); este código casa cada termo
-// contra o catálogo de forma DETERMINÍSTICA e traz o preço já praticado (com origem e data).
-// Nunca interrompe por item: resolve tudo e REPORTA o que assumiu / o que ficou provisório,
-// para o dono corrigir depois. É a base das macro-tools (uma ida ao LLM em vez de dezenas).
+// O LLM passa termos ("MultiPlus-II 12/3000"); este código casa cada termo contra o catálogo
+// de forma DETERMINÍSTICA, na ordem: (1) APELIDO aprendido → (2) BUSCA FUZZY por trigrama
+// (RPC search_products_trgm, tolera formatação/erro/acento) → pontuação por sobreposição de
+// tokens para a escolha final. Traz o preço já praticado (com origem/data). Nunca interrompe
+// por item: resolve tudo e REPORTA o que assumiu / o que ficou provisório.
 
 export type ItemResolvido = {
   keyword: string;
@@ -15,35 +16,26 @@ export type ItemResolvido = {
   custo: number;
   origem: string;
   candidatos?: number;
-  /** preço informado pelo LLM (override/estimativa), quando houver. */
   preco_informado?: number;
 };
 
-/** Quebra em tokens alfanuméricos (ignora hífen, barra, pontuação). "MultiPlus-II 12/3000" -> [multiplus, ii, 12, 3000]. */
-function tokenizar(s: string): string[] {
-  return s.toLowerCase().split(/[^a-z0-9]+/i).filter((t) => t.length >= 2);
+/** Mesma regra do normalize_alias no banco: minúsculo, sem acento, espaços colapsados. */
+export function normalizarTermo(s: string): string {
+  return String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
 }
 
-/**
- * Token ÂNCORA = a palavra distintiva para a BUSCA (marca/modelo). Buscar pela frase inteira
- * falha quando a formatação do cadastro difere ("MultiPlus-II 12/3000" vs "MultiPlus 12/3000/120").
- * Então buscamos pela âncora (o maior token alfabético) e depois pontuamos os candidatos pela
- * sobreposição COMPLETA de tokens — incluindo números de spec (3000, 100, 50).
- */
-function tokenAncora(termo: string): string | null {
-  const tokens = tokenizar(termo);
-  const alfabeticos = tokens.filter((t) => /[a-z]/.test(t) && t.length >= 3);
-  if (alfabeticos.length) return alfabeticos.sort((a, b) => b.length - a.length)[0];
-  return tokens.sort((a, b) => b.length - a.length)[0] ?? null;
+/** Tokens alfanuméricos. "MultiPlus-II 12/3000" -> [multiplus, ii, 12, 3000]. */
+export function tokenizar(s: string): string[] {
+  return normalizarTermo(s).split(/[^a-z0-9]+/i).filter((t) => t.length >= 2);
 }
 
-/** Pontua o candidato: nº de tokens do termo presentes no nome/sku; desempate por nome mais curto. */
-function pontua(termo: string, nome: string, sku: string | null): number {
+/** Pontua o candidato: nº de tokens do termo presentes no nome/sku; desempate por nome mais curto (mais específico). */
+export function pontuaCandidato(termo: string, nome: string, sku: string | null): number {
   const tokens = tokenizar(termo);
-  const alvo = `${nome} ${sku || ""}`.toLowerCase();
+  const alvo = normalizarTermo(`${nome} ${sku || ""}`);
   let achou = 0;
   for (const t of tokens) if (alvo.includes(t)) achou++;
-  return achou * 1000 - nome.length;
+  return achou * 1000 - String(nome).length;
 }
 
 function origemDoHistorico(row: any): string {
@@ -55,9 +47,22 @@ function origemDoHistorico(row: any): string {
   return "praticado antes";
 }
 
+/** Preço já praticado deste produto (fonte da verdade de "valor já usado"). */
+async function ultimoPreco(sb: any, productId: string): Promise<{ preco: number | null; origem: string }> {
+  const { data: hist } = await sb
+    .from("service_order_parts")
+    .select("unit_sale_snapshot, created_at, service_orders(service_order_number, created_at)")
+    .eq("product_id", productId)
+    .not("unit_sale_snapshot", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  const h = ((hist as any[]) || [])[0];
+  if (h?.unit_sale_snapshot != null) return { preco: Number(h.unit_sale_snapshot), origem: origemDoHistorico(h) };
+  return { preco: null, origem: "cadastro atual do catálogo" };
+}
+
 /**
- * Resolve uma lista de itens (palavra-chave + quantidade + preço opcional).
- * Roda tudo em paralelo — 20 itens = 20 buscas curtas simultâneas, uma única execução.
+ * Resolve uma lista de itens (palavra-chave + quantidade + preço opcional), em paralelo.
  */
 export async function resolverItens(
   sb: any,
@@ -68,66 +73,48 @@ export async function resolverItens(
       const termo = String(it.keyword || "").trim();
       const qtd = Number(it.quantity) || 1;
       const precoInformado = it.unit_price != null ? Number(it.unit_price) : undefined;
+      const provisorio = (origem: string): ItemResolvido => ({ keyword: termo, quantidade: qtd, status: "provisorio", preco_venda: precoInformado ?? 0, custo: 0, origem, preco_informado: precoInformado });
 
-      if (termo.length < 2) {
-        return { keyword: termo, quantidade: qtd, status: "provisorio", preco_venda: precoInformado ?? 0, custo: 0, origem: "termo vazio", preco_informado: precoInformado };
+      if (termo.length < 2) return provisorio("termo vazio");
+
+      // 1) APELIDO aprendido — acerto direto, sem adivinhação.
+      const norm = normalizarTermo(termo);
+      const { data: alias } = await sb.from("product_aliases").select("product_id").eq("alias_normalized", norm).maybeSingle();
+      if (alias?.product_id) {
+        const { data: p } = await sb.from("products").select("id, name, cost_price, sale_price").eq("id", alias.product_id).maybeSingle();
+        if (p) {
+          const preco = await ultimoPreco(sb, p.id);
+          return {
+            keyword: termo, quantidade: qtd, status: "resolvido", product_id: p.id, nome: p.name,
+            preco_venda: precoInformado ?? preco.preco ?? (p.sale_price != null ? Number(p.sale_price) : 0),
+            custo: p.cost_price != null ? Number(p.cost_price) : 0,
+            origem: precoInformado != null ? "preço informado no pedido" : (preco.preco != null ? preco.origem : "apelido aprendido → cadastro"),
+            preco_informado: precoInformado,
+          };
+        }
       }
 
-      // Busca pela ÂNCORA (palavra distintiva), não pela frase — senão spec/formatação derruba o match.
-      const ancora = tokenAncora(termo);
-      if (!ancora) {
-        return { keyword: termo, quantidade: qtd, status: "provisorio", preco_venda: precoInformado ?? 0, custo: 0, origem: "termo sem palavra utilizável", preco_informado: precoInformado };
-      }
-      const { data: cands } = await sb
-        .from("products")
-        .select("id, name, sku, brand, sale_price, cost_price")
-        .eq("active", true)
-        .or(`name.ilike.%${ancora}%,sku.ilike.%${ancora}%,brand.ilike.%${ancora}%`)
-        .limit(20);
-
+      // 2) BUSCA FUZZY (trigrama) — tolera formatação, erro de digitação e acento.
+      const { data: cands } = await sb.rpc("search_products_trgm", { _term: termo, _lim: 20 });
       const lista = (cands as any[]) || [];
-      if (lista.length === 0) {
-        // Sem cadastro → provisório. Usa o preço informado pelo LLM, se houver.
-        return { keyword: termo, quantidade: qtd, status: "provisorio", preco_venda: precoInformado ?? 0, custo: 0, origem: "não encontrado no catálogo — aguardando cotação", preco_informado: precoInformado };
-      }
+      if (lista.length === 0) return provisorio("não encontrado no catálogo — aguardando cotação");
 
-      // Melhor candidato pela sobreposição COMPLETA de tokens (spec incluída).
-      lista.sort((a, b) => pontua(termo, b.name, b.sku) - pontua(termo, a.name, a.sku));
+      // 3) Escolha final pela sobreposição COMPLETA de tokens (spec incluída), desempate por nome curto.
+      lista.sort((a, b) => pontuaCandidato(termo, b.name, b.sku) - pontuaCandidato(termo, a.name, a.sku));
       const p = lista[0];
 
-      // Último preço PRATICADO deste produto (fonte da verdade de "valor já usado").
-      const { data: hist } = await sb
-        .from("service_order_parts")
-        .select("unit_sale_snapshot, created_at, service_orders(service_order_number, created_at)")
-        .eq("product_id", p.id)
-        .not("unit_sale_snapshot", "is", null)
-        .order("created_at", { ascending: false })
-        .limit(1);
-      const h = ((hist as any[]) || [])[0];
-
-      const precoPraticado = h?.unit_sale_snapshot != null ? Number(h.unit_sale_snapshot) : null;
-      const precoVenda = precoInformado ?? precoPraticado ?? (p.sale_price != null ? Number(p.sale_price) : 0);
-      const origem = precoInformado != null
-        ? "preço informado no pedido"
-        : precoPraticado != null
-        ? origemDoHistorico(h)
-        : "cadastro atual do catálogo";
-
-      // Confiança pela cobertura de tokens: casou TODOS os tokens do termo = resolvido; parcial = assumido.
       const toks = tokenizar(termo);
-      const alvo = `${p.name} ${p.sku || ""}`.toLowerCase();
+      const alvo = normalizarTermo(`${p.name} ${p.sku || ""}`);
       const casados = toks.filter((t) => alvo.includes(t)).length;
-      const status: ItemResolvido["status"] = casados === toks.length ? "resolvido" : "assumido";
+      // Casou todos os tokens = alta confiança; parcial = assumido (o dono confirma).
+      const status: ItemResolvido["status"] = toks.length > 0 && casados === toks.length ? "resolvido" : "assumido";
 
+      const preco = await ultimoPreco(sb, p.id);
       return {
-        keyword: termo,
-        quantidade: qtd,
-        status,
-        product_id: p.id,
-        nome: p.name,
-        preco_venda: precoVenda,
+        keyword: termo, quantidade: qtd, status, product_id: p.id, nome: p.name,
+        preco_venda: precoInformado ?? preco.preco ?? (p.sale_price != null ? Number(p.sale_price) : 0),
         custo: p.cost_price != null ? Number(p.cost_price) : 0,
-        origem,
+        origem: precoInformado != null ? "preço informado no pedido" : (preco.preco != null ? preco.origem : "cadastro atual do catálogo"),
         candidatos: lista.length,
         preco_informado: precoInformado,
       };

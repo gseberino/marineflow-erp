@@ -1,4 +1,5 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
+import { normalizarTermo } from "../keyword-resolver.ts";
 
 export const productTools: ToolDef[] = [
   {
@@ -79,6 +80,34 @@ export const productTools: ToolDef[] = [
         instrucao:
           "Escolha o candidato mais adequado por termo e DIGA qual escolheu (nome e preço). Para os termos em 'sem_resultado', não trave: marque como 'Valor provisório — aguardando cotação do fornecedor' e siga.",
       };
+    },
+  },
+  {
+    name: "learn_product_alias",
+    description:
+      "Ensina que uma PALAVRA-CHAVE se refere a um produto específico do catálogo. Use quando o usuário CORRIGE um match ('não, MultiPlus-II é o 12/3000/120') ou confirma um item que você tinha ASSUMIDO. Na próxima vez que esse termo aparecer (em orçamento/cotação), o sistema acerta de primeira — o agente fica mais certeiro a cada correção, sem retreinar nada.",
+    input_schema: {
+      type: "object",
+      properties: {
+        alias: { type: "string", description: "O termo/apelido como o usuário costuma dizer (ex.: 'MultiPlus-II 12/3000')." },
+        product_id: { type: "string", description: "UUID do produto correto (de search_products)." },
+      },
+      required: ["alias", "product_id"],
+    },
+    risk: "low",
+    async execute(args, { sb, userId }) {
+      const alias = String(args.alias || "").trim();
+      if (alias.length < 2) return { error: "Apelido curto demais." };
+      const { data: prod } = await sb.from("products").select("id, name").eq("id", args.product_id).maybeSingle();
+      if (!prod) return { error: "Produto não encontrado." };
+
+      const norm = normalizarTermo(alias);
+      // upsert por alias_normalized (um apelido -> um produto; corrigir reaponta).
+      const { error } = await sb
+        .from("product_aliases")
+        .upsert({ alias_normalized: norm, alias_original: alias, product_id: prod.id, created_by: userId ?? null }, { onConflict: "alias_normalized" });
+      if (error) throw error;
+      return { ok: true, aprendido: `"${alias}" → ${prod.name}`, efeito: "Da próxima vez que esse termo aparecer, eu já uso esse produto direto." };
     },
   },
   {
