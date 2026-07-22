@@ -10,13 +10,10 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
-} from '@/components/ui/dialog';
-import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import {
-  Upload, FileText, CheckCircle2, AlertCircle, Loader2, Package, Banknote, RefreshCw, Undo2,
+  Upload, FileText, CheckCircle2, AlertCircle, Loader2, Package, Banknote, RefreshCw, Undo2, ArrowLeft,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -384,7 +381,8 @@ export default function ImportFiscalXML() {
         description="Importe XMLs de NF-e para dar entrada no estoque, registrar fornecedores e gerar contas a pagar automaticamente."
       />
 
-      {/* ── Upload area ── */}
+      {/* ── Upload area (oculta enquanto uma nota está sendo conferida) ── */}
+      {!showConfirm && (
       <Card className="border-dashed border-2 bg-muted/20">
         <CardContent className="flex flex-col items-center justify-center py-10 space-y-4">
           <div className="h-16 w-16 bg-primary/10 rounded-full flex items-center justify-center">
@@ -424,25 +422,29 @@ export default function ImportFiscalXML() {
           )}
         </CardContent>
       </Card>
+      )}
 
-      {/* ── Confirmation dialog ── */}
-      <Dialog open={showConfirm} onOpenChange={(o) => { if (!o) { setShowConfirm(false); setParsed(null); setFile(null); } }}>
-        {/* Com os itens em lista (e não mais em tabela de largura fixa), o
-            conteúdo se adapta: dá para voltar a uma largura confortável de
-            leitura em vez de um diálogo gigante. A rolagem vertical é do CORPO,
-            não do diálogo inteiro — assim o título e os botões de ação ficam
-            sempre visíveis, sem precisar rolar para achar "Confirmar". */}
-        <DialogContent className="flex max-h-[88vh] max-w-3xl flex-col gap-0 overflow-hidden p-0">
-          <DialogHeader className="shrink-0 border-b px-5 py-4">
-            <DialogTitle>Conferir entrada de mercadoria</DialogTitle>
-            <DialogDescription>
-              Nada é gravado até você confirmar. Ao confirmar, o estoque entra e a conta a pagar é criada.
-            </DialogDescription>
-          </DialogHeader>
+      {/* ── Conferência da entrada — PÁGINA, não modal ──
+          Conferir dezenas de itens, trocar vínculos e ler divergências é uma
+          tarefa de verdade; modal apertava. Enquanto uma nota é conferida, esta
+          seção substitui o upload/histórico e usa a largura toda. */}
+      {showConfirm && parsed && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="sm" className="gap-1.5"
+              onClick={() => { setShowConfirm(false); setParsed(null); setFile(null); }}>
+              <ArrowLeft className="h-4 w-4" /> Voltar
+            </Button>
+            <div>
+              <h2 className="text-lg font-semibold leading-tight">Conferir entrada de mercadoria</h2>
+              <p className="text-sm text-muted-foreground">
+                Nada é gravado até você confirmar. Ao confirmar, o estoque entra e a conta a pagar é criada.
+              </p>
+            </div>
+          </div>
 
           {parsed && (
-            /* Só o CORPO rola: cabeçalho e rodapé ficam fixos. */
-            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
+            <div className="space-y-4">
               {/* Cabeçalho da nota — uma faixa só, com alturas iguais. Antes eram
                   4 cards com tipografia disparatada (2xl ao lado de sm), o que
                   deixava a linha visualmente torta. */}
@@ -698,11 +700,10 @@ export default function ImportFiscalXML() {
             </div>
           )}
 
-          {/* Rodapé FIXO: com 16 itens, os botões ficavam no fim de uma rolagem
-              longa. O resumo à esquerda evita ter que voltar para conferir
-              quantos produtos serão criados. */}
+          {/* Barra de ação STICKY: acompanha a rolagem da página e mantém
+              "Confirmar" sempre alcançável, com o resumo do que será feito. */}
           {parsed && (
-            <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t bg-muted/20 px-5 py-3">
+            <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-background/95 px-4 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80">
               <p className="text-xs text-muted-foreground">
                 {(() => {
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -727,10 +728,11 @@ export default function ImportFiscalXML() {
               </div>
             </div>
           )}
-        </DialogContent>
-      </Dialog>
+        </div>
+      )}
 
-      {/* ── Fiscal notes list ── */}
+      {/* ── Histórico (oculto enquanto uma nota está sendo conferida) ── */}
+      {!showConfirm && (
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Histórico de NF-es Importadas</h2>
@@ -873,6 +875,7 @@ export default function ImportFiscalXML() {
           </Table>
         </div>
       </div>
+      )}
     </div>
   );
 }
