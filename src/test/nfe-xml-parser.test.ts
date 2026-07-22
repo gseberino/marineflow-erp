@@ -305,3 +305,47 @@ describe("parseNfeSupplierNote — impostos exatos p/ a devolução ao fornecedo
     expect(note.number).toBe("45");
   });
 });
+
+// Trecho VERBATIM de uma NF-e REAL da Kamell (nº 40.480): a descrição do item
+// vem com entidade XML codificada em dobro. Sem decodificar, esse texto viraria
+// o nome do produto no cadastro E seguiria para a SEFAZ na devolução.
+const XML_COM_ENTIDADES = `<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc><NFe><infNFe Id="NFe32250912696968000183550010000404801006419392" versao="4.00">
+<ide><serie>1</serie><nNF>40480</nNF><dhEmi>2025-09-11T16:25:06-03:00</dhEmi></ide>
+<emit><CNPJ>12696968000183</CNPJ><xNome>KAMELL COMERCIO GLOBAL LTDA</xNome><IE>082747059</IE>
+<enderEmit><xLgr>RUA TENENTE SETUBAL</xLgr><nro>55</nro><xMun>VILA VELHA</xMun><UF>ES</UF><CEP>29101570</CEP></enderEmit></emit>
+<det nItem="1"><prod><cProd>2391</cProd><cEAN>SEM GTIN</cEAN>
+<xProd>ECRA TOUCH GX TOUCH 50 (5&amp;quot;) SENDO MONITOR</xProd>
+<NCM>85285900</NCM><CFOP>6102</CFOP><uCom>UN</uCom><qCom>1.0000</qCom>
+<vUnCom>1699.2474000000</vUnCom><vProd>1699.25</vProd><vDesc>50.98</vDesc></prod>
+<imposto><ICMS><ICMS00><orig>2</orig><vBC>1648.27</vBC><pICMS>4.00</pICMS><vICMS>65.93</vICMS></ICMS00></ICMS>
+<IPI><cEnq>999</cEnq><IPITrib><CST>50</CST><vBC>1648.27</vBC><pIPI>13.00</pIPI><vIPI>214.28</vIPI></IPITrib></IPI></imposto></det>
+<det nItem="2"><prod><cProd>1492</cProd><xProd>FITA A &amp; B</xProd><NCM>63079090</NCM><CFOP>6102</CFOP>
+<uCom>UN</uCom><qCom>2.0000</qCom><vUnCom>48.9000000000</vUnCom><vProd>97.80</vProd></prod>
+<imposto><ICMS><ICMS00><orig>2</orig><vBC>97.80</vBC><vICMS>3.91</vICMS></ICMS00></ICMS>
+<IPI><cEnq>999</cEnq><IPINT><CST>51</CST></IPINT></IPI></imposto></det>
+</infNFe></NFe></nfeProc>`;
+
+describe("parseNfeSupplierNote — NF-e REAL com entidades XML", () => {
+  it("decodifica a entidade da descrição (não grava &amp;quot; no cadastro)", () => {
+    const [item] = parseNfeSupplierNote(XML_COM_ENTIDADES)!.items;
+    expect(item.name).toBe('ECRA TOUCH GX TOUCH 50 (5") SENDO MONITOR');
+    expect(item.name).not.toMatch(/&(amp|quot);/i);
+  });
+
+  it("resolve o & isolado sem estragar o texto", () => {
+    const [, item2] = parseNfeSupplierNote(XML_COM_ENTIDADES)!.items;
+    expect(item2.name).toBe("FITA A & B");
+  });
+
+  it("lê os impostos reais desta nota (base do crédito da devolução)", () => {
+    const note = parseNfeSupplierNote(XML_COM_ENTIDADES)!;
+    expect(note.number).toBe("40480");
+    expect(note.issueDate).toBe("2025-09-11");
+    expect(note.items[0].icmsValue).toBe(65.93);
+    expect(note.items[0].ipiValue).toBe(214.28);
+    expect(note.items[0].discount).toBe(50.98);
+    expect(note.items[1].ipiValue).toBeUndefined(); // IPINT não tem valor
+    expect(note.items[0].origin).toBe(2);
+  });
+});

@@ -72,9 +72,32 @@ export interface ParsedNfeSupplierNote {
   issueDate: string; // ide/dhEmi (ou dEmi), normalizado em YYYY-MM-DD
 }
 
+/**
+ * Decodifica entidades XML no texto lido.
+ *
+ * A leitura é por regex (sem parser), então as entidades chegam cruas: uma NF-e
+ * real de fornecedor traz `ECRA TOUCH GX TOUCH 50 (5&amp;quot;)` — sem decodificar,
+ * esse nome iria para a NF-e de DEVOLUÇÃO que emitimos à SEFAZ. Duas passadas no
+ * máximo (há emissores que codificam em dobro) e `&amp;` sempre por ÚLTIMO em
+ * cada passada, senão `&amp;lt;` viraria `<` indevidamente.
+ */
+function decodeEntities(s: string): string {
+  const once = (t: string) =>
+    t.replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/&quot;/gi, '"')
+      .replace(/&apos;/gi, "'")
+      .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+      .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
+      .replace(/&amp;/gi, "&");
+  const first = once(s);
+  return /&(amp|lt|gt|quot|apos|#\d+|#x[0-9a-f]+);/i.test(first) ? once(first) : first;
+}
+
 function tag(xml: string, name: string): string {
   const re = new RegExp(`<${name}[^>]*>([^<]*)<\\/${name}>`, "i");
-  return xml.match(re)?.[1]?.trim() ?? "";
+  const raw = xml.match(re)?.[1];
+  return raw == null ? "" : decodeEntities(raw).trim();
 }
 
 // Recorta um grupo do XML (<ICMS>…</ICMS>, <IPI>…</IPI>) para ler as tags de
