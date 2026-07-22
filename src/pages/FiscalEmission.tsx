@@ -2412,7 +2412,7 @@ export default function FiscalEmission() {
                   <Label>Ordem de compra (pedido do cliente)</Label>
                   <Input
                     className="text-sm"
-                    maxLength={15}
+                    maxLength={60}
                     value={purchaseOrder}
                     onChange={(e) => setPurchaseOrder(e.target.value)}
                     placeholder="Ex.: 05447"

@@ -44,31 +44,42 @@ const SIMPLES_DECLARATIONS =
   /Documento\s+emitido\s+por\s+(?:ME\s+ou\s+EPP\s+)?optante\s+(?:pelo|pela|do|da|de)\s+Simples\s+Nacional\s*\.?\s*(?:N[ãa]o\s+gera\s+direito\s+a\s+cr[ée]dito\s+fiscal\s+de\s+IPI\s*\.?)?/gi;
 
 /**
- * Separador entre os blocos do infCpl.
+ * Separador entre os blocos do infCpl — ";" (confirmado pela Contora).
  *
- * ⚠️ NÃO usar "\n": o infCpl não aceita caracteres de formatação (CR/LF/TAB) —
- * quebra de linha literal é causa conhecida de Rejeição 215 (falha no schema) e
- * 588 (caractere de controle), e uma emissão rejeitada já consumiu o número
- * reservado (lacuna que exige inutilização de numeração). O "|" é o marcador
- * usual de fim de linha no infCpl. Este é o ÚNICO ponto a trocar caso a Contora
- * confirme que converte algum marcador em quebra real na DANFE.
+ * O infCpl não aceita caracteres de formatação (CR/LF/TAB): quebra literal é
+ * causa conhecida de Rejeição 215 (falha no schema) e 588 (caractere de
+ * controle), e uma emissão rejeitada já consumiu o número reservado (lacuna que
+ * exige inutilização). Por isso NUNCA emitimos "\n" aqui.
+ *
+ * A Contora confirmou o comportamento do DANFE deles:
+ *   - ";" é convertido em QUEBRA DE LINHA visual na impressão;
+ *   - "|" NÃO é convertido — sairia impresso literalmente (era o que fazíamos);
+ *   - a API até aceita "\n" em additional_info, mas ela própria sanitiza para
+ *     ";" antes de gerar o XML — mandar ";" direto deixa o que gravamos idêntico
+ *     ao que vai no XML (sem divergência entre payload salvo e documento).
  */
-export const BLOCK_SEPARATOR = ' | ';
+export const BLOCK_SEPARATOR = '; ';
+
+// Delimitador de bloco aceito ao LER textos já gravados: ";" (atual) ou "|"
+// (usado brevemente antes da confirmação da Contora).
+const DELIM = '[;|]';
 
 // Segmentos "Pedido de Compra: …" / "Comprador: …" que NÓS compomos — sempre no
-// início do texto ou logo após um separador de blocos. A âncora (^|\|) evita
+// início do texto ou logo após um separador de blocos. A âncora inicial evita
 // engolir um "Comprador:" que o usuário tenha escrito no meio do texto dele.
-const PURCHASE_SEGMENTS = /(?:^|\|)\s*(?:Pedido\s+de\s+Compra|Comprador)\s*:[^|]*/gi;
+const PURCHASE_SEGMENTS = new RegExp(
+  `(?:^|${DELIM})\\s*(?:Pedido\\s+de\\s+Compra|Comprador)\\s*:[^;|]*`,
+  'gi',
+);
 
 function tidy(text: string): string {
   return text
-    // Chars de formatação viram espaço: o infCpl não os aceita (Rejeição
-    // 215/588) e o servidor já os removeria no cleanText — se deixássemos passar
-    // aqui, o espelho mostraria uma quebra que o XML não teria.
-    .replace(/[\r\n\t]+/g, ' ')
-    .replace(/\s*\|\s*\|\s*/g, BLOCK_SEPARATOR) // separadores órfãos no meio
-    .replace(/^\s*\|\s*/, '')
-    .replace(/\s*\|\s*$/, '')
+    // Quebras digitadas pelo usuário viram o separador de blocos: assim elas
+    // aparecem como linhas no DANFE, sem jamais colocar CR/LF no XML.
+    .replace(/[\r\n\t]+/g, BLOCK_SEPARATOR)
+    .replace(new RegExp(`\\s*${DELIM}\\s*(?=${DELIM})`, 'g'), '') // separadores em sequência
+    .replace(new RegExp(`^\\s*${DELIM}\\s*`), '')
+    .replace(new RegExp(`\\s*${DELIM}\\s*$`), '')
     .replace(/\s{2,}/g, ' ')
     .trim();
 }

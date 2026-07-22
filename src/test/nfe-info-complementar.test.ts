@@ -174,3 +174,32 @@ describe("stripManagedBlocks / stripPurchaseBlock", () => {
     expect(semPedido).not.toMatch(/\|\s*\|/);
   });
 });
+
+describe("separador de blocos — comportamento confirmado pela Contora", () => {
+  it("usa ';' (vira quebra de linha no DANFE) e NUNCA '|' (sai impresso literal)", () => {
+    expect(BLOCK_SEPARATOR.trim()).toBe(";");
+    const out = composeAdditionalInfo({ purchaseOrder: "05447", freeText: "Entrega parcial." });
+    expect(out).not.toContain("|");
+    expect(out).toBe("Pedido de Compra: 05447; Entrega parcial.; " + SIMPLES_INFO_NOTE);
+  });
+
+  it("converte quebra digitada pelo usuário em separador (vira linha no DANFE, sem CR/LF no XML)", () => {
+    const out = composeAdditionalInfo({ freeText: "Linha 1\nLinha 2\r\nLinha 3" });
+    expect(out).not.toMatch(/[\r\n\t]/); // infCpl não aceita char de controle
+    expect(out).toBe("Linha 1; Linha 2; Linha 3; " + SIMPLES_INFO_NOTE);
+  });
+
+  it("não deixa separadores em sequência quando o usuário pula linhas em branco", () => {
+    const out = composeAdditionalInfo({ freeText: "Linha 1\n\n\nLinha 2" });
+    expect(out).toBe("Linha 1; Linha 2; " + SIMPLES_INFO_NOTE);
+    expect(out).not.toMatch(/;\s*;/);
+  });
+
+  it("ainda entende o delimitador '|' de notas gravadas antes da confirmação", () => {
+    const legado = "Pedido de Compra: 05447 - Comprador: Everton | Entrega parcial. | " + SIMPLES_INFO_NOTE;
+    const out = composeAdditionalInfo({ purchaseOrder: "05447", buyer: "Everton", freeText: legado });
+    expect(out.match(/Pedido de Compra/gi)?.length).toBe(1);
+    expect(out.match(/Documento emitido por/gi)?.length).toBe(1);
+    expect(out).toBe("Pedido de Compra: 05447 - Comprador: Everton; Entrega parcial.; " + SIMPLES_INFO_NOTE);
+  });
+});

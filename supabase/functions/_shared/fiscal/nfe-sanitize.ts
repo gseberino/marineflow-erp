@@ -16,6 +16,7 @@ export const NFE_LIMITS = {
   itemName: 120, // xProd
   unit: 6, // uCom / uTrib
   additionalInfo: 5000, // infCpl
+  purchaseOrder: 60, // compra/xPed (o xPed POR ITEM, det/prod, tem 15)
 } as const;
 
 // Limpa um texto para caber no XML da NF-e:

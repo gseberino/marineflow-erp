@@ -144,3 +144,26 @@ describe("buildEspelhoHtml", () => {
     expect(html).toContain("Nenhum item");
   });
 });
+
+describe("buildEspelhoHtml — infCpl igual ao DANFE", () => {
+  const emitterMin = {};
+
+  it("converte ';' em quebra de linha, como o DANFE da Contora faz", () => {
+    const html = buildEspelhoHtml(
+      { items: [], additional_info: "Pedido de Compra: 05447; Entrega parcial.; Documento emitido por ME ou EPP." },
+      emitterMin,
+    );
+    expect(html).toContain("Pedido de Compra: 05447<br>Entrega parcial.<br>Documento emitido por ME ou EPP.");
+  });
+
+  it("mantém o rótulo 'Inf. Contribuinte:' antes do conteúdo", () => {
+    const html = buildEspelhoHtml({ items: [], additional_info: "Pedido de Compra: 05447" }, emitterMin);
+    expect(html).toContain("Inf. Contribuinte:");
+  });
+
+  it("continua escapando HTML depois da conversão", () => {
+    const html = buildEspelhoHtml({ items: [], additional_info: "<script>x</script>; ok" }, emitterMin);
+    expect(html).not.toContain("<script>x");
+    expect(html).toContain("&lt;script&gt;");
+  });
+});

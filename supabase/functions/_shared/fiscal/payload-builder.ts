@@ -204,6 +204,11 @@ export interface BuildNfePayloadInput {
   // Vazio/ausente = à vista (pagamento único). Ver buildNfeDraftPayload.
   installments?: NfeInstallmentInput[] | null;
   invoiceNumber?: string | null; // nFat (número da fatura) — default "1" quando há duplicatas
+  // Pedido de compra do CLIENTE, no nível da nota (grupo "compra" da NF-e).
+  // A Contora recomenda este caminho quando há um único pedido para a nota
+  // inteira; os campos por item (det/prod/xPed) seguem disponíveis para quando
+  // cada produto precisar de referência própria.
+  purchaseOrder?: string | null;
   consumerFinal?: boolean;
   presenceIndicator?: number; // 0=não se aplica,1=presencial,2=internet,4=domicílio,9=não presencial...
   additionalInfo?: string | null; // informações complementares (infCpl)
@@ -368,6 +373,12 @@ export function buildNfeDraftPayload(
     if (k) noteKeys.add(k);
   }
   if (noteKeys.size) payload.referenced_access_keys = [...noteKeys];
+
+  // Grupo "compra" da NF-e: purchase.order -> compra/xPed (mapeamento confirmado
+  // pela Contora). Fica só no XML — o layout padrão do DANFE não imprime esses
+  // campos, mas o sistema do cliente consegue ler o pedido automaticamente.
+  const purchaseOrder = cleanText(input.purchaseOrder, NFE_LIMITS.purchaseOrder);
+  if (purchaseOrder) payload.purchase = { order: purchaseOrder };
 
   const info = cleanText(input.additionalInfo, NFE_LIMITS.additionalInfo);
   if (info) payload.additional_info = info;

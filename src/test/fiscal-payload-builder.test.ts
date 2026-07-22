@@ -514,3 +514,20 @@ describe("validateNfeDraftInput — fuso na data de vencimento", () => {
     expect(errors).toEqual([]);
   });
 });
+
+describe("buildNfeDraftPayload — pedido de compra do cliente (grupo compra)", () => {
+  it("envia purchase.order (→ compra/xPed) quando informado", () => {
+    const p = buildNfeDraftPayload(makeInput({ purchaseOrder: "OC-05447" })) as any;
+    expect(p.purchase).toEqual({ order: "OC-05447" });
+  });
+
+  it("omite o grupo quando não há pedido", () => {
+    expect((buildNfeDraftPayload(makeInput()) as any).purchase).toBeUndefined();
+    expect((buildNfeDraftPayload(makeInput({ purchaseOrder: "   " })) as any).purchase).toBeUndefined();
+  });
+
+  it("respeita o limite de 60 do compra/xPed", () => {
+    const p = buildNfeDraftPayload(makeInput({ purchaseOrder: "X".repeat(80) })) as any;
+    expect(p.purchase.order.length).toBe(60);
+  });
+});

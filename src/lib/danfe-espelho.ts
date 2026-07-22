@@ -208,10 +208,20 @@ export function buildEspelhoHtml(
   // (e o de infAdFisco como "Inf. Fisco:") — é o renderizador da DANFE que
   // identifica de qual campo veio o texto. Reproduzimos o mesmo rótulo aqui para
   // o espelho não divergir do documento final.
+  //
+  // O ";" também é convertido em quebra de linha visual pelo DANFE (confirmado
+  // pela Contora) — o espelho faz o mesmo, senão mostraria em linha corrida algo
+  // que sairá quebrado no papel.
+  // Dividir ANTES de escapar: entidades HTML (&lt; &gt; &amp;) terminam em ";",
+  // então trocar ";" por <br> depois do escape corromperia o próprio escape.
+  const infCplHtml = String(payload?.additional_info ?? '')
+    .split(/;[ \t]*/)
+    .map((parte) => esc(parte))
+    .join('<br>');
   const infoAdicional = payload?.additional_info
     ? `<div class="box">
         <div class="box-title">Dados adicionais / Informações complementares</div>
-        <div class="infcpl"><span class="lbl-inline">Inf. Contribuinte:</span> ${esc(payload.additional_info)}</div>
+        <div class="infcpl"><span class="lbl-inline">Inf. Contribuinte:</span> ${infCplHtml}</div>
       </div>`
     : '';
 

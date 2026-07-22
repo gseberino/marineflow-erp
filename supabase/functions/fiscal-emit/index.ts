@@ -209,6 +209,7 @@ async function prepareNfePayload(
     presenceIndicator: body.presence_indicator != null ? Number(body.presence_indicator) : undefined,
     consumerFinal: typeof body.consumer_final === "boolean" ? body.consumer_final : undefined,
     additionalInfo: body.additional_info ?? null,
+    purchaseOrder: body.customer_po_number ?? null,
     recipient: {
       name: body.recipient?.name,
       document: body.recipient?.document,
