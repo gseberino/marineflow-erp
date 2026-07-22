@@ -9,6 +9,7 @@ import { reportTools } from "./reports.ts";
 import { purchasingTools } from "./purchasing.ts";
 import { fiscalTools } from "./fiscal.ts";
 import { quoteTools } from "./quotes.ts";
+import { quoteBuilderTools } from "./quote-builder.ts";
 import { crmTools } from "./crm.ts";
 import { fieldOpsTools } from "./field-ops.ts";
 import { autonomyTools } from "./autonomy.ts";
@@ -37,6 +38,7 @@ export const allTools: ToolDef[] = [
   ...purchasingTools,
   ...fiscalTools,
   ...quoteTools,
+  ...quoteBuilderTools,
   ...crmTools,
   ...fieldOpsTools,
   ...autonomyTools,

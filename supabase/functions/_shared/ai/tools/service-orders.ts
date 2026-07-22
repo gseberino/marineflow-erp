@@ -71,7 +71,7 @@ async function loadSoItems(sb: any, soId: string): Promise<SoItem[]> {
 // (negativo = baixa; positivo = devolução). Só para PEÇAS (produto) — serviço/material não
 // tem estoque. Segue o mesmo padrão read-then-update não-atômico da tela (sem piso em 0,
 // igual ao frontend). Best-effort: não deve derrubar a tool que a chama.
-async function applyStockDelta(
+export async function applyStockDelta(
   sb: any,
   productId: string | null | undefined,
   delta: number,
