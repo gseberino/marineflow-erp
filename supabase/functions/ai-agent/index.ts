@@ -22,6 +22,7 @@ import {
 } from "../_shared/ai/whatsapp-channel.ts";
 import { verifyPin } from "../_shared/ai/whatsapp-pin.ts";
 import { STATUS_INJETAVEL, colunaDaEntidade } from "../_shared/ai/memory-scope.ts";
+import { podarHistoricoParaLLM } from "../_shared/ai/context-pruning.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -423,7 +424,7 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
 
   const result = await runAgentLoop({
     system,
-    messages: toAnthropicMessages(historyMessages),
+    messages: toAnthropicMessages(podarHistoricoParaLLM(historyMessages)),
     tools: toolsForRole,
     toolCtx,
     sessionId,
@@ -624,7 +625,7 @@ Deno.serve(async (req) => {
         const result = await callClaude({
           model: MODEL_LITE,
           system: [{ type: "text", text: SALES_COPY_PROMPT }],
-          messages: toAnthropicMessages(incoming),
+          messages: toAnthropicMessages(podarHistoricoParaLLM(incoming)),
           maxTokens: 1024,
         });
         const content = result.content
@@ -726,7 +727,7 @@ Deno.serve(async (req) => {
 
     const result = await runAgentLoop({
       system,
-      messages: toAnthropicMessages(historyMessages),
+      messages: toAnthropicMessages(podarHistoricoParaLLM(historyMessages)),
       tools: toolsForRole,
       toolCtx: { sb, admin, userId, userRole: userRole as Role, jwt, appOrigin, settings },
       sessionId: resolvedSessionId,
