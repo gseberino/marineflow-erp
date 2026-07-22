@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -23,6 +23,7 @@ import { toast } from 'sonner';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useSuppliers } from '@/hooks/use-suppliers';
+import { usePurchaseOrders } from '@/hooks/use-purchase-orders';
 import { useI18n } from '@/i18n';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { useProducts } from '@/hooks/use-products';
@@ -40,6 +41,11 @@ interface NFeItem {
   unit_price: number;
   total_price: number;
   icms_value: number;
+  // Extraídos do XML a partir da correção do parser: GTIN (casamento por código
+  // de barras), origem da mercadoria e desconto do item.
+  barcode?: string | null;
+  origin?: string | null;
+  discount?: number;
 }
 
 interface NFeParsed {
@@ -55,6 +61,15 @@ interface NFeParsed {
   totalPIS: number;
   totalCOFINS: number;
   items: NFeItem[];
+  // Emitente completo (IE, fantasia, endereço) — permite identificar o
+  // fornecedor pelo CNPJ do XML ou cadastrá-lo já preenchido.
+  issuer?: {
+    name: string | null;
+    document: string | null;
+    tradeName: string | null;
+    stateRegistration: string | null;
+    address: Record<string, string | null>;
+  } | null;
 }
 
 // ── Status badge helper ────────────────────────────────────────────────────
@@ -96,9 +111,17 @@ export default function ImportFiscalXML() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [manualMappings, setManualMappings] = useState<Record<string, string>>({});
   const [returningNoteId, setReturningNoteId] = useState<string | null>(null);
+  // Conferência: simulação read-only do que a confirmação faria (preview_nfe_import).
+  const [preview, setPreview] = useState<any | null>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  // Três vias: vincular a nota ao pedido de compra que a originou.
+  const [purchaseOrderId, setPurchaseOrderId] = useState<string>('__none');
+  const [creatingSupplier, setCreatingSupplier] = useState(false);
+  const [revertingId, setRevertingId] = useState<string | null>(null);
 
   const { data: fiscalNotes, isLoading: loadingNotes } = useFiscalNotes();
   const { data: suppliers } = useSuppliers();
+  const { data: purchaseOrders } = usePurchaseOrders();
   const { data: products } = useProducts();
 
   // ── Upload & parse XML ─────────────────────────────────────────────────
@@ -131,13 +154,115 @@ export default function ImportFiscalXML() {
         throw new Error(data.error);
       }
 
-      setParsed(data as NFeParsed);
+      const nota = data as NFeParsed;
+      setParsed(nota);
+
+      // Fornecedor pelo CNPJ do PRÓPRIO XML. Antes o campo começava em "nenhum"
+      // e, se o usuário esquecesse de escolher, a importação seguia sem aprender
+      // o de-para e sem gerar a conta a pagar — silenciosamente.
+      const cnpjXml = String((nota as any).issuerCNPJ || '').replace(/\D/g, '');
+      const achado = cnpjXml
+        ? (suppliers || []).find((s: any) => String(s.cnpj_cpf || '').replace(/\D/g, '') === cnpjXml)
+        : null;
+      setSupplierId(achado ? achado.id : '__none');
+
       setShowConfirm(true);
-      toast.success('XML processado! Revise os itens antes de confirmar.');
+      toast.success(
+        achado
+          ? `XML processado! Fornecedor identificado: ${achado.name}. Confira os itens antes de confirmar.`
+          : 'XML processado! Confira os itens antes de confirmar.',
+      );
     } catch (err: any) {
       toast.error('Erro ao processar XML: ' + err.message);
     } finally {
       setUploading(false);
+    }
+  };
+
+  // ── Conferência: simula a importação sem tocar em estoque/financeiro ────
+  // Recalcula quando muda o fornecedor ou um vínculo manual, porque ambos
+  // alteram o casamento (o de-para é por fornecedor).
+  useEffect(() => {
+    if (!parsed?.noteId) { setPreview(null); return; }
+    let cancelado = false;
+    (async () => {
+      setLoadingPreview(true);
+      try {
+        const { data, error } = await (supabase.rpc as any)('preview_nfe_import', {
+          p_note_id: parsed.noteId,
+          p_supplier_id: supplierId === '__none' ? null : supplierId,
+          p_manual_mappings: Object.entries(manualMappings).map(([sku, prodId]) => ({
+            sku_supplier: sku, internal_product_id: prodId,
+          })),
+        });
+        if (error) throw error;
+        if (!cancelado) setPreview(data);
+      } catch (err: any) {
+        if (!cancelado) {
+          setPreview(null);
+          toast.error('Erro ao conferir a nota: ' + err.message);
+        }
+      } finally {
+        if (!cancelado) setLoadingPreview(false);
+      }
+    })();
+    return () => { cancelado = true; };
+  }, [parsed?.noteId, supplierId, manualMappings]);
+
+  // ── Cadastrar o fornecedor a partir do XML ─────────────────────────────
+  const handleCreateSupplierFromXml = async () => {
+    const emit = (parsed as any)?.issuer;
+    if (!emit?.document) { toast.error('O XML não trouxe o CNPJ do emitente.'); return; }
+    setCreatingSupplier(true);
+    try {
+      const { data, error } = await supabase.from('suppliers').insert({
+        name: emit.name || 'Fornecedor sem nome',
+        trade_name: emit.tradeName || null,
+        cnpj_cpf: String(emit.document).replace(/\D/g, ''),
+        phone: emit.address?.phone || null,
+        postal_code: emit.address?.postalCode || null,
+        address_line_1: emit.address?.street || null,
+        address_number: emit.address?.number || null,
+        address_complement: emit.address?.complement || null,
+        neighborhood: emit.address?.district || null,
+        city: emit.address?.cityName || null,
+        state: emit.address?.stateCode || null,
+        country: 'Brasil',
+        active: true,
+      }).select().single();
+      if (error) throw error;
+      setSupplierId(data.id);
+      qc.invalidateQueries({ queryKey: ['suppliers'] });
+      toast.success(`Fornecedor "${data.name}" cadastrado a partir do XML.`);
+    } catch (err: any) {
+      toast.error('Erro ao cadastrar fornecedor: ' + err.message);
+    } finally {
+      setCreatingSupplier(false);
+    }
+  };
+
+  // ── Desfazer importação (estorna estoque e conta a pagar) ───────────────
+  const handleRevert = async (noteId: string) => {
+    setRevertingId(noteId);
+    try {
+      const { data, error } = await (supabase.rpc as any)('revert_nfe_import', { p_note_id: noteId });
+      if (error) throw error;
+      const r = data as any;
+      toast.success(
+        `Importação desfeita: ${r.movements_reverted} movimento(s) estornado(s)` +
+        (r.payables_removed ? `, ${r.payables_removed} conta(s) a pagar removida(s)` : '') + '.',
+      );
+      await writeAuditLog({
+        table_name: 'fiscal_notes', record_id: noteId, action: 'revert_import' as any,
+        new_value: r, reason: 'Reversão de importação de NF-e pelo usuário',
+      });
+      qc.invalidateQueries({ queryKey: ['fiscal_notes'] });
+      qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: ['payables'] });
+    } catch (err: any) {
+      toast.error('Erro ao desfazer: ' + err.message);
+    } finally {
+      setRevertingId(null);
     }
   };
 
@@ -152,7 +277,9 @@ export default function ImportFiscalXML() {
         p_manual_mappings: Object.entries(manualMappings).map(([sku, prodId]) => ({
           sku_supplier: sku,
           internal_product_id: prodId
-        }))
+        })),
+        // Três vias: amarra a nota ao pedido de compra que a originou.
+        p_purchase_order_id: purchaseOrderId === '__none' ? null : purchaseOrderId,
       });
       if (error) throw error;
 
@@ -177,6 +304,9 @@ export default function ImportFiscalXML() {
       setParsed(null);
       setFile(null);
       setSupplierId('__none');
+      setPurchaseOrderId('__none');
+      setPreview(null);
+      setManualMappings({});
       setShowConfirm(false);
       qc.invalidateQueries({ queryKey: ['fiscal_notes'] });
       qc.invalidateQueries({ queryKey: ['inventory'] });
@@ -317,21 +447,68 @@ export default function ImportFiscalXML() {
                 </Card>
               </div>
 
-              {/* Supplier link */}
-              <div className="space-y-1">
-                <Label>Vincular ao Fornecedor (opcional — gera Conta a Pagar)</Label>
-                <Select value={supplierId} onValueChange={setSupplierId}>
-                  <SelectTrigger className="w-full max-w-sm">
-                    <SelectValue placeholder="Selecione..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none">Não vincular</SelectItem>
-                    {(suppliers || []).map((s: any) => (
-                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              {/* Fornecedor — identificado pelo CNPJ do próprio XML */}
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label>Fornecedor (gera a Conta a Pagar e aprende o de-para)</Label>
+                  <Select value={supplierId} onValueChange={setSupplierId}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Selecione..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none">Não vincular</SelectItem>
+                      {(suppliers || []).map((s: any) => (
+                        <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {supplierId === '__none' && (
+                    <div className="rounded border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-900">
+                      Sem fornecedor a importação <b>não gera conta a pagar</b> e <b>não memoriza</b> o
+                      vínculo dos códigos para as próximas notas.
+                      {(parsed as any).issuer?.document && (
+                        <Button
+                          type="button" size="sm" variant="outline" className="mt-2 w-full"
+                          onClick={handleCreateSupplierFromXml} disabled={creatingSupplier}
+                        >
+                          {creatingSupplier ? 'Cadastrando…' : `Cadastrar "${(parsed as any).issuer?.name}" a partir do XML`}
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Três vias: pedido × nota × recebimento */}
+                <div className="space-y-1">
+                  <Label>Ordem de compra (opcional)</Label>
+                  <Select value={purchaseOrderId} onValueChange={setPurchaseOrderId}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Selecione..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none">Não vincular</SelectItem>
+                      {(purchaseOrders || []).map((po: any) => (
+                        <SelectItem key={po.id} value={po.id}>
+                          {po.po_number || po.id.slice(0, 8)} — {po.supplier_name || po.suppliers?.name || 'sem fornecedor'}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-muted-foreground">
+                    Amarra a nota ao pedido, evitando receber a mesma mercadoria duas vezes.
+                  </p>
+                </div>
               </div>
+
+              {/* Conferência de totais: soma dos itens x total da nota */}
+              {preview && !preview.total_matches && (
+                <div className="rounded border border-destructive/40 bg-destructive/10 p-3 text-xs">
+                  <b>Atenção:</b> a soma dos itens ({formatCurrency(Number(preview.items_sum))}) é
+                  diferente do total da nota ({formatCurrency(Number(preview.note_total))}). Isso
+                  costuma ser frete, desconto ou despesas acessórias não distribuídos nos itens —
+                  confira antes de confirmar.
+                </div>
+              )}
 
               {/* Items table */}
               <Card>
@@ -352,17 +529,48 @@ export default function ImportFiscalXML() {
                     <TableBody>
                       {parsed.items.map((item) => {
                         const sku = item.sku_supplier || '';
-                        const manualId = manualMappings[sku];
-                        const match = (products || []).find(
-                          (p) => (manualId ? p.id === manualId : (p.sku === sku || p.name?.toLowerCase() === item.description?.toLowerCase()))
-                        );
-                        
+                        // O casamento vem do SERVIDOR (preview_nfe_import): a tela
+                        // mostra exatamente o que a confirmação fará, em vez de
+                        // recalcular no cliente com regra própria (que divergia).
+                        const pv = (preview?.items || []).find((p: any) => p.index === item.index);
+                        const match = pv?.product_id
+                          ? { id: pv.product_id, name: pv.product_name }
+                          : null;
+                        const motivo: Record<string, { txt: string; cls: string }> = {
+                          manual:    { txt: 'vínculo manual',      cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+                          barcode:   { txt: 'código de barras',    cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+                          de_para:   { txt: 'histórico do fornec.', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+                          sku:       { txt: 'código interno',      cls: 'bg-teal-50 text-teal-700 border-teal-200' },
+                          descricao: { txt: 'descrição',           cls: 'bg-amber-50 text-amber-800 border-amber-300' },
+                          novo:      { txt: 'produto novo',        cls: 'bg-amber-50 text-amber-800 border-amber-300' },
+                        };
+                        const sel = motivo[pv?.match_reason] || null;
+
                         return (
                           <TableRow key={item.index}>
                             <TableCell className="text-muted-foreground">{item.index}</TableCell>
                             <TableCell>
                               <p className="font-medium">{item.description}</p>
-                              <p className="text-[11px] text-muted-foreground">SKU: {sku || '—'}</p>
+                              <p className="text-[11px] text-muted-foreground">
+                                SKU: {sku || '—'}{item.barcode ? ` · EAN: ${item.barcode}` : ''}
+                              </p>
+                              {sel && (
+                                <span className={`inline-block mt-1 rounded border px-1.5 py-0.5 text-[10px] ${sel.cls}`}>
+                                  {sel.txt}
+                                </span>
+                              )}
+                              {/* Divergências que o conferente precisa ver ANTES de aceitar */}
+                              {pv?.cost_changed && (
+                                <p className="text-[10px] text-amber-700 mt-0.5">
+                                  Custo atual {formatCurrency(Number(pv.current_cost))} → {formatCurrency(item.unit_price)}
+                                </p>
+                              )}
+                              {pv?.unit_changed && (
+                                <p className="text-[10px] text-amber-700">Unidade difere do cadastro ({pv.product_unit})</p>
+                              )}
+                              {pv?.ncm_changed && (
+                                <p className="text-[10px] text-amber-700">NCM difere do cadastro ({pv.product_ncm})</p>
+                              )}
                             </TableCell>
                             <TableCell className="text-muted-foreground text-xs">{item.ncm || '—'}</TableCell>
                             <TableCell className="text-right">{item.quantity} {item.unit || 'un'}</TableCell>
@@ -373,10 +581,15 @@ export default function ImportFiscalXML() {
                                 value={match?.id || '__new'} 
                                 onValueChange={(val) => {
                                   if (sku) {
-                                    setManualMappings(prev => ({
-                                      ...prev,
-                                      [sku]: val === '__new' ? '' : val
-                                    }));
+                                    setManualMappings(prev => {
+                                      const next = { ...prev };
+                                      // Mandar '' faria o servidor tratar como "sem
+                                      // vínculo manual" e recair na cascata; remover
+                                      // a chave expressa a mesma intenção sem ruído.
+                                      if (val === '__new') delete next[sku];
+                                      else next[sku] = val;
+                                      return next;
+                                    });
                                   }
                                 }}
                               >
@@ -532,6 +745,27 @@ export default function ImportFiscalXML() {
                               ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
                               : <Undo2 className="h-3.5 w-3.5 mr-1" />}
                             Devolver ao fornecedor
+                          </Button>
+                          {/* Desfazer a ENTRADA (erro de conferência). Diferente da
+                              devolução, que é uma operação fiscal com o fornecedor. */}
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-xs text-destructive hover:text-destructive"
+                            disabled={revertingId === note.id}
+                            title="Estorna o estoque e remove a conta a pagar desta importação, devolvendo a nota para 'Pendente'. Não emite nada ao fisco."
+                            onClick={() => {
+                              if (confirm(
+                                'Desfazer a importação desta nota?\n\n' +
+                                'O estoque será estornado e a conta a pagar (se não houver pagamento) será removida. ' +
+                                'A nota volta para "Pendente" e pode ser conferida de novo.',
+                              )) handleRevert(note.id);
+                            }}
+                          >
+                            {revertingId === note.id
+                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              : <RefreshCw className="h-3.5 w-3.5 mr-1" />}
+                            Desfazer entrada
                           </Button>
                         </div>
                       )}

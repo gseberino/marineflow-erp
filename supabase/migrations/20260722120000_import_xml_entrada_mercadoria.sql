@@ -140,15 +140,20 @@ SECURITY DEFINER
 SET search_path = public, extensions
 AS $$
 DECLARE
-  v_items    jsonb;
-  v_status   text;
-  v_item     RECORD;
-  v_match    RECORD;
-  v_manual   uuid;
-  v_prod     RECORD;
-  v_out      jsonb := '[]'::jsonb;
-  v_soma     numeric := 0;
-  v_total    numeric;
+  v_items   jsonb;
+  v_status  text;
+  v_total   numeric;
+  v_item    RECORD;
+  v_match   RECORD;
+  v_manual  uuid;
+  v_pname   text;
+  v_psku    text;
+  v_punit   text;
+  v_pncm    text;
+  v_pcost   numeric;
+  v_pstock  numeric;
+  v_out     jsonb := '[]'::jsonb;
+  v_soma    numeric := 0;
 BEGIN
   SELECT items, status, total_amount INTO v_items, v_status, v_total
     FROM fiscal_notes WHERE id = p_note_id;
@@ -169,37 +174,38 @@ BEGIN
     SELECT * INTO v_match FROM match_nfe_item(
       p_supplier_id, v_item.barcode, v_item.sku_supplier, v_item.description, v_manual);
 
-    v_prod := NULL;
+    v_pname := NULL; v_psku := NULL; v_punit := NULL;
+    v_pncm := NULL; v_pcost := NULL; v_pstock := NULL;
     IF v_match.product_id IS NOT NULL THEN
-      SELECT id, name, sku, barcode, unit, cost_price, stock_quantity, ncm
-        INTO v_prod FROM products WHERE id = v_match.product_id;
+      SELECT name, sku, unit, ncm, cost_price, stock_quantity
+        INTO v_pname, v_psku, v_punit, v_pncm, v_pcost, v_pstock
+        FROM products WHERE id = v_match.product_id;
     END IF;
 
     v_soma := v_soma + coalesce(v_item.total_price, v_item.quantity * v_item.unit_price, 0);
 
     v_out := v_out || jsonb_build_object(
-      'index',          v_item.index,
-      'sku_supplier',   v_item.sku_supplier,
-      'description',    v_item.description,
-      'barcode',        v_item.barcode,
-      'quantity',       v_item.quantity,
-      'unit_price',     v_item.unit_price,
-      'match_reason',   v_match.match_reason,
-      'product_id',     v_match.product_id,
-      'product_name',   v_prod.name,
-      'product_sku',    v_prod.sku,
-      'product_unit',   v_prod.unit,
-      'product_ncm',    v_prod.ncm,
-      'current_cost',   v_prod.cost_price,
-      'current_stock',  v_prod.stock_quantity,
-      -- Divergências que o conferente precisa ver antes de aceitar
-      'cost_changed',   (v_prod.cost_price IS NOT NULL
-                          AND round(v_prod.cost_price, 2) <> round(coalesce(v_item.unit_price, 0), 2)),
-      'unit_changed',   (v_prod.unit IS NOT NULL AND coalesce(v_item.unit, '') <> ''
-                          AND upper(btrim(v_prod.unit)) <> upper(btrim(v_item.unit))),
-      'ncm_changed',    (coalesce(v_prod.ncm, '') <> '' AND coalesce(v_item.ncm, '') <> ''
-                          AND regexp_replace(v_prod.ncm, '\D', '', 'g')
-                              <> regexp_replace(v_item.ncm, '\D', '', 'g'))
+      'index',         v_item.index,
+      'sku_supplier',  v_item.sku_supplier,
+      'description',   v_item.description,
+      'barcode',       v_item.barcode,
+      'quantity',      v_item.quantity,
+      'unit_price',    v_item.unit_price,
+      'match_reason',  v_match.match_reason,
+      'product_id',    v_match.product_id,
+      'product_name',  v_pname,
+      'product_sku',   v_psku,
+      'product_unit',  v_punit,
+      'product_ncm',   v_pncm,
+      'current_cost',  v_pcost,
+      'current_stock', v_pstock,
+      'cost_changed',  (v_pcost IS NOT NULL
+                         AND round(v_pcost, 2) <> round(coalesce(v_item.unit_price, 0), 2)),
+      'unit_changed',  (v_punit IS NOT NULL AND coalesce(v_item.unit, '') <> ''
+                         AND upper(btrim(v_punit)) <> upper(btrim(v_item.unit))),
+      'ncm_changed',   (coalesce(v_pncm, '') <> '' AND coalesce(v_item.ncm, '') <> ''
+                         AND regexp_replace(v_pncm, '\D', '', 'g')
+                             <> regexp_replace(v_item.ncm, '\D', '', 'g'))
     );
   END LOOP;
 
@@ -209,16 +215,16 @@ BEGIN
     'items',         v_out,
     'items_sum',     round(v_soma, 2),
     'note_total',    round(coalesce(v_total, 0), 2),
-    -- Soma dos itens x total da nota: diferença aponta frete/desconto/despesas
-    -- não distribuídos, ou XML truncado.
     'total_matches', (round(v_soma, 2) = round(coalesce(v_total, 0), 2))
   );
 END;
 $$;
 
 -- ── 5. Confirmação ───────────────────────────────────────────────────────────
+-- A assinatura antiga (3 args) precisa sair antes: a nova tem 4 e o CREATE OR
+-- REPLACE não substitui uma função de aridade diferente, criaria uma sobrecarga.
 DROP FUNCTION IF EXISTS public.confirm_nfe_import(uuid, uuid, jsonb);
-CREATE FUNCTION public.confirm_nfe_import(
+CREATE OR REPLACE FUNCTION public.confirm_nfe_import(
   p_note_id           uuid,
   p_supplier_id       uuid  DEFAULT NULL,
   p_manual_mappings   jsonb DEFAULT '[]'::jsonb,
@@ -378,7 +384,10 @@ BEGIN
       p_supplier_id, v_issuer_name, v_total, v_total,
       'Compra ref. NF-e ' || coalesce(v_nfe_number, '') || ' - ' || coalesce(v_issuer_name, ''),
       now()::date, (now() + interval '28 days')::date,
-      'pending', 'Compras de Mercadorias', 'fiscal_import', p_note_id
+      -- 'fiscal_note' é o valor aceito por chk_payables_origin; a RPC antiga
+      -- usava 'fiscal_import', que a constraint rejeita (mais uma prova de que
+      -- ela nunca chegou a rodar).
+      'pending', 'Compras de Mercadorias', 'fiscal_note', p_note_id
     ) RETURNING id INTO v_payable_id;
   END IF;
 
