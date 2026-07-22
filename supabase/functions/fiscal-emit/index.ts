@@ -311,7 +311,23 @@ async function handlePreview(admin: any, body: any): Promise<Response> {
     state_code: c.state_code ?? null,
     postal_code: c.postal_code ?? null,
   };
-  return jr({ ok: true, payload: prep.payload, emitter, environment: readFiscalEnvironment() });
+  // Número PREVISTO (peek): lemos o próximo da sequência SEM consumir. Reservar
+  // já no espelho criaria LACUNA na numeração toda vez que uma pré-visualização
+  // fosse abandonada — e lacuna exige inutilização de numeração junto à SEFAZ.
+  // A reserva de verdade acontece só no handleCreate, na emissão.
+  const environment = readFiscalEnvironment();
+  const series = environment === "producao" ? (Number(c.nfe_series_producao ?? 1) || 1) : 2;
+  const { data: seqRow, error: seqErr } = await admin
+    .from("fiscal_document_sequences")
+    .select("last_number")
+    .eq("document_type", "nfe")
+    .eq("series", series)
+    .eq("environment", environment)
+    .maybeSingle();
+  if (seqErr) return jr({ error: "Falha ao consultar a numeração: " + seqErr.message }, 500);
+  const number = (Number(seqRow?.last_number ?? 0) || 0) + 1;
+
+  return jr({ ok: true, payload: prep.payload, emitter, environment, series, number });
 }
 
 // deno-lint-ignore no-explicit-any

@@ -459,8 +459,13 @@ describe("buildNfeDraftPayload — cobrança (cobr = fatura + duplicatas)", () =
 });
 
 describe("validateNfeDraftInput — parcelas (duplicatas)", () => {
-  const future = (days: number) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
-  const past = (days: number) => new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+  // A validação compara com "hoje" no fuso de Brasília (UTC-3). Os helpers
+  // precisam usar a MESMA referência, senão o teste vira uma bomba-relógio:
+  // calculando em UTC, "ontem" e "hoje" se cruzam entre 21h e 24h locais.
+  const brDate = (offsetDays: number) =>
+    new Date(Date.now() - 3 * 60 * 60 * 1000 + offsetDays * 86400000).toISOString().slice(0, 10);
+  const future = (days: number) => brDate(days);
+  const past = (days: number) => brDate(-days);
 
   it("aceita parcelas válidas (crescentes, futuras, valor > 0)", () => {
     const errors = validateNfeDraftInput(makeInput({

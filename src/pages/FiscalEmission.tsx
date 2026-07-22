@@ -360,6 +360,10 @@ export default function FiscalEmission() {
   const [showEmit, setShowEmit] = useState(false);
   const [emitting, setEmitting] = useState(false);
   const [generatingEspelho, setGeneratingEspelho] = useState(false);
+  // Espelho de conferência exibido antes de transmitir (fluxo Emitir → conferir → confirmar).
+  const [confirmEspelho, setConfirmEspelho] = useState<
+    { html: string; number?: number; series?: number } | null
+  >(null);
   const [emitIdempotencyKey, setEmitIdempotencyKey] = useState('');
   // Origem da emissão: 'manual' (avulsa) ou uma OS/orçamento sendo faturado.
   const [emitOrigin, setEmitOrigin] = useState<{ type: string; id: string | null }>({ type: 'manual', id: null });
@@ -1107,7 +1111,9 @@ export default function FiscalEmission() {
       const res = data as any;
       if (res?.error) throw new Error(res.error);
       if (!res?.payload) throw new Error('O servidor não devolveu os dados do espelho.');
-      const html = buildEspelhoHtml(res.payload, res.emitter ?? {}, { environment: res.environment });
+      const html = buildEspelhoHtml(res.payload, res.emitter ?? {}, {
+        environment: res.environment, number: res.number, series: res.series,
+      });
       const win = window.open('', '_blank');
       if (!win) throw new Error('O navegador bloqueou a janela do espelho. Libere os pop-ups para este site e tente de novo.');
       win.document.write(html);
@@ -1120,7 +1126,34 @@ export default function FiscalEmission() {
     }
   };
 
+  // "Emitir NF-e" NÃO transmite direto: gera o espelho (pré-DANFE, SEM VALOR
+  // FISCAL) já com o número previsto e abre a conferência. A nota só vai à
+  // SEFAZ depois do "Confirmar emissão" — mesmo fluxo dos ERPs de mercado.
   const handleEmit = async () => {
+    setEmitting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('fiscal-emit', {
+        body: { action: 'preview', ...buildEmissionBody() },
+      });
+      if (error) throw new Error(await extractInvokeErrorMessage(error));
+      const res = data as any;
+      if (res?.error) throw new Error(res.error);
+      if (!res?.payload) throw new Error('O servidor não devolveu os dados do espelho.');
+      setConfirmEspelho({
+        html: buildEspelhoHtml(res.payload, res.emitter ?? {}, {
+          environment: res.environment, number: res.number, series: res.series,
+        }),
+        number: res.number,
+        series: res.series,
+      });
+    } catch (err: any) {
+      toast.error('Erro ao gerar a conferência: ' + (err?.message || 'desconhecido'));
+    } finally {
+      setEmitting(false);
+    }
+  };
+
+  const handleConfirmEmit = async () => {
     setEmitting(true);
     try {
       const { data, error } = await supabase.functions.invoke('fiscal-emit', {
@@ -1144,6 +1177,7 @@ export default function FiscalEmission() {
           .eq('id', emitOrigin.id);
         qc.invalidateQueries({ queryKey: ['service-orders'] });
       }
+      setConfirmEspelho(null);
       setShowEmit(false);
       qc.invalidateQueries({ queryKey: ['issued_fiscal_documents'] });
     } catch (err: any) {
@@ -2382,9 +2416,59 @@ export default function FiscalEmission() {
               {generatingEspelho ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Eye className="h-4 w-4 mr-2" />}
               Pré-visualizar (espelho)
             </Button>
-            <Button onClick={handleEmit} disabled={emitting || generatingEspelho || includedItems.length === 0 || !preflightOk}>
+            <Button
+              onClick={handleEmit}
+              disabled={emitting || generatingEspelho || includedItems.length === 0 || !preflightOk}
+              title="Gera o espelho para conferência; a nota só vai à SEFAZ depois que você confirmar"
+            >
               {emitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FileText className="h-4 w-4 mr-2" />}
               {isReturn ? 'Emitir Devolução' : 'Emitir NF-e'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Conferência antes de transmitir: mostra o espelho (pré-DANFE, SEM VALOR
+          FISCAL) com o número previsto. Nada foi enviado à SEFAZ até aqui. */}
+      <Dialog open={!!confirmEspelho} onOpenChange={(o) => { if (!o) setConfirmEspelho(null); }}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Conferir antes de emitir</DialogTitle>
+            <DialogDescription>
+              Espelho SEM VALOR FISCAL{confirmEspelho?.number
+                ? ` da NF-e nº ${confirmEspelho.number}, série ${confirmEspelho.series} (número previsto)`
+                : ''}. Nada foi enviado à SEFAZ ainda —{' '}
+              {isProducao
+                ? 'ao confirmar, a nota é emitida de verdade em PRODUÇÃO.'
+                : 'ao confirmar, a nota é transmitida em homologação.'}
+            </DialogDescription>
+          </DialogHeader>
+          <iframe
+            title="Espelho da NF-e"
+            srcDoc={confirmEspelho?.html ?? ''}
+            className="w-full h-[58vh] rounded border bg-white"
+          />
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button variant="outline" onClick={() => setConfirmEspelho(null)} disabled={emitting}>
+              Voltar e corrigir
+            </Button>
+            <Button
+              variant="outline"
+              disabled={emitting}
+              onClick={() => {
+                const w = window.open('', '_blank');
+                if (!w) { toast.error('O navegador bloqueou a janela. Libere os pop-ups para este site.'); return; }
+                w.document.write(confirmEspelho?.html ?? '');
+                w.document.close();
+              }}
+              title="Abre o espelho numa aba para imprimir ou salvar como PDF (enviar ao cliente/fornecedor)"
+            >
+              <Eye className="h-4 w-4 mr-2" />
+              Abrir / Imprimir
+            </Button>
+            <Button onClick={handleConfirmEmit} disabled={emitting}>
+              {emitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FileText className="h-4 w-4 mr-2" />}
+              {isProducao ? 'Confirmar emissão (nota real)' : 'Confirmar emissão'}
             </Button>
           </DialogFooter>
         </DialogContent>

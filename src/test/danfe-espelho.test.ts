@@ -115,10 +115,27 @@ describe("buildEspelhoHtml", () => {
     expect(html).toContain("&lt;script&gt;");
   });
 
-  it("informa o ambiente de emissão e que nenhum número foi reservado", () => {
+  it("informa o ambiente de emissão", () => {
     const html = buildEspelhoHtml(makePayload(), emitter, { environment: "producao" });
     expect(html).toContain("PRODUÇÃO");
-    expect(html).toContain("sem número reservado");
+  });
+
+  it("mostra o número/série previstos quando informados", () => {
+    const html = buildEspelhoHtml(makePayload(), emitter, { number: 16, series: 2, environment: "producao" });
+    expect(html).toContain("NF-e nº 16");
+    expect(html).toContain("série 2");
+    expect(html).toContain("previsto"); // deixa claro que a reserva é na emissão
+  });
+
+  it("reproduz o rótulo 'Inf. Contribuinte:' que a DANFE imprime antes do infCpl", () => {
+    // A DANFE identifica de qual campo veio o texto (infCpl = contribuinte,
+    // infAdFisco = fisco). Sem o rótulo, o espelho divergia do documento final.
+    const html = buildEspelhoHtml(
+      makePayload({ additional_info: "Referente a Ordem de Compra N. 05447." }),
+      emitter,
+    );
+    expect(html).toContain("Inf. Contribuinte:");
+    expect(html).toContain("Referente a Ordem de Compra N. 05447.");
   });
 
   it("não quebra com payload mínimo (sem itens, sem impostos, sem endereço)", () => {

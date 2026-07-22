@@ -133,7 +133,13 @@ function paymentLabel(method: unknown): string {
 export function buildEspelhoHtml(
   payload: EspelhoPayload,
   emitter: EspelhoEmitter,
-  opts: { environment?: string | null; generatedAt?: Date } = {},
+  opts: {
+    environment?: string | null;
+    generatedAt?: Date;
+    /** Número/série PREVISTOS (a reserva só ocorre na emissão). */
+    number?: number | string | null;
+    series?: number | string | null;
+  } = {},
 ): string {
   const items: Record<string, any>[] = Array.isArray(payload?.items) ? payload.items : [];
   const totalProdutos = items.reduce((s, it) => s + itemTotal(it), 0);
@@ -198,10 +204,14 @@ export function buildEspelhoHtml(
     ? payments.map((p) => `${paymentLabel(p?.method)} — ${brl(p?.amount)}`).join('<br>')
     : '—';
 
+  // A DANFE imprime o conteúdo de infCpl precedido do rótulo "Inf. Contribuinte:"
+  // (e o de infAdFisco como "Inf. Fisco:") — é o renderizador da DANFE que
+  // identifica de qual campo veio o texto. Reproduzimos o mesmo rótulo aqui para
+  // o espelho não divergir do documento final.
   const infoAdicional = payload?.additional_info
     ? `<div class="box">
         <div class="box-title">Dados adicionais / Informações complementares</div>
-        <div class="infcpl">${esc(payload.additional_info)}</div>
+        <div class="infcpl"><span class="lbl-inline">Inf. Contribuinte:</span> ${esc(payload.additional_info)}</div>
       </div>`
     : '';
 
@@ -249,6 +259,7 @@ export function buildEspelhoHtml(
   .totais { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 14px; padding: 8px; }
   .total-nota { font-size: 15px; font-weight: 800; }
   .infcpl { padding: 8px; white-space: pre-wrap; line-height: 1.45; }
+  .lbl-inline { font-weight: 700; }
   .foot { margin-top: 14px; color: #64748b; font-size: 10px; line-height: 1.5; border-top: 1px solid #e2e8f0; padding-top: 8px; }
   @media print {
     body { background: #fff; padding: 0; font-size: 10.5px; }
@@ -274,7 +285,7 @@ export function buildEspelhoHtml(
     </div>
     <div class="meta">
       <span>Gerado em ${esc(when.toLocaleString('pt-BR'))}</span>
-      <span>${isProducao ? 'Ambiente de emissão: PRODUÇÃO' : 'Ambiente de emissão: homologação'} · sem número reservado</span>
+      <span>${opts.number ? `NF-e nº ${esc(opts.number)} · série ${esc(opts.series ?? '')} (previsto) · ` : ''}${isProducao ? 'emissão em PRODUÇÃO' : 'emissão em homologação'}</span>
     </div>
 
     <div class="box">
