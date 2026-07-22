@@ -427,47 +427,44 @@ export default function ImportFiscalXML() {
 
       {/* ── Confirmation dialog ── */}
       <Dialog open={showConfirm} onOpenChange={(o) => { if (!o) { setShowConfirm(false); setParsed(null); setFile(null); } }}>
-        {/* Largura maior: a tabela tem 7 colunas e descrições longas de
-            fornecedor (as da Kamell passam de 80 caracteres). Em max-w-4xl tudo
-            espremia e quebrava de forma irregular. */}
-        <DialogContent className="max-w-6xl w-[96vw] max-h-[92vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Confirmar Importação da NF-e</DialogTitle>
+        {/* Com os itens em lista (e não mais em tabela de largura fixa), o
+            conteúdo se adapta: dá para voltar a uma largura confortável de
+            leitura em vez de um diálogo gigante. A rolagem vertical é do CORPO,
+            não do diálogo inteiro — assim o título e os botões de ação ficam
+            sempre visíveis, sem precisar rolar para achar "Confirmar". */}
+        <DialogContent className="flex max-h-[88vh] max-w-3xl flex-col gap-0 overflow-hidden p-0">
+          <DialogHeader className="shrink-0 border-b px-5 py-4">
+            <DialogTitle>Conferir entrada de mercadoria</DialogTitle>
             <DialogDescription>
-              Revise os itens abaixo. Ao confirmar, o estoque será atualizado e um lançamento financeiro será criado.
+              Nada é gravado até você confirmar. Ao confirmar, o estoque entra e a conta a pagar é criada.
             </DialogDescription>
           </DialogHeader>
 
           {parsed && (
-            <div className="space-y-4 mt-2">
+            /* Só o CORPO rola: cabeçalho e rodapé ficam fixos. */
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
               {/* Cabeçalho da nota — uma faixa só, com alturas iguais. Antes eram
                   4 cards com tipografia disparatada (2xl ao lado de sm), o que
                   deixava a linha visualmente torta. */}
-              <div className="rounded-lg border bg-muted/30 p-3">
-                <div className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
-                  <div className="min-w-0">
-                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Fornecedor</p>
-                    <p className="truncate font-medium" title={parsed.issuerName || ''}>{parsed.issuerName || '—'}</p>
-                    <p className="text-xs text-muted-foreground">{parsed.issuerCNPJ || '—'}</p>
-                  </div>
-                  <div>
-                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Nota</p>
-                    <p className="font-medium">nº {parsed.nfeNumber || '—'}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {parsed.issueDate ? formatDate(parsed.issueDate) : '—'}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Itens</p>
-                    <p className="font-medium">{parsed.items.length}</p>
-                    <p className="text-xs text-muted-foreground">
-                      ICMS {formatCurrency(parsed.totalICMS)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Total da nota</p>
-                    <p className="text-xl font-semibold">{formatCurrency(parsed.totalNF)}</p>
-                  </div>
+              {/* Identificação da nota: nome do fornecedor e total são o que o
+                  conferente procura primeiro, então ficam nas pontas. Antes eram
+                  4 colunas rígidas — sem min-w-0 a do fornecedor esticava e
+                  empurrava o Total para fora do diálogo (ele aparecia cortado). */}
+              <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border bg-muted/30 p-3">
+                <div className="min-w-0">
+                  <p className="truncate font-medium" title={parsed.issuerName || ''}>
+                    {parsed.issuerName || '—'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    CNPJ {parsed.issuerCNPJ || '—'} · NF-e nº {parsed.nfeNumber || '—'}
+                    {parsed.issueDate ? ` · ${formatDate(parsed.issueDate)}` : ''}
+                  </p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="text-xl font-semibold leading-tight">{formatCurrency(parsed.totalNF)}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {parsed.items.length} {parsed.items.length === 1 ? 'item' : 'itens'}
+                  </p>
                 </div>
               </div>
 
@@ -510,7 +507,10 @@ export default function ImportFiscalXML() {
               {/* Fornecedor — identificado pelo CNPJ do próprio XML */}
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1">
-                  <Label>Fornecedor (gera a Conta a Pagar e aprende o de-para)</Label>
+                  {/* "aprende o de-para" era jargão: ninguém de fora do projeto
+                      sabe o que significa. O rótulo agora só nomeia o campo, e o
+                      efeito é explicado em português abaixo. */}
+                  <Label>Fornecedor desta compra</Label>
                   <Select value={supplierId} onValueChange={setSupplierId}>
                     <SelectTrigger className="w-full">
                       <SelectValue placeholder="Selecione..." />
@@ -522,10 +522,11 @@ export default function ImportFiscalXML() {
                       ))}
                     </SelectContent>
                   </Select>
-                  {supplierId === '__none' && (
-                    <div className="rounded border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-900">
-                      Sem fornecedor a importação <b>não gera conta a pagar</b> e <b>não memoriza</b> o
-                      vínculo dos códigos para as próximas notas.
+                  {supplierId === '__none' ? (
+                    <div className="rounded border border-amber-300 bg-amber-50 p-2 text-[11px] leading-relaxed text-amber-900">
+                      Sem informar o fornecedor, a importação <b>não cria a conta a pagar</b> desta
+                      compra e <b>não memoriza</b> quais produtos seus correspondem aos códigos dele —
+                      então na próxima nota você terá que vincular tudo de novo.
                       {(parsed as any).issuer?.document && (
                         <Button
                           type="button" size="sm" variant="outline" className="mt-2 w-full"
@@ -535,6 +536,11 @@ export default function ImportFiscalXML() {
                         </Button>
                       )}
                     </div>
+                  ) : (
+                    <p className="text-[11px] leading-relaxed text-muted-foreground">
+                      Cria a conta a pagar desta compra e memoriza a correspondência entre os códigos
+                      do fornecedor e os seus produtos — na próxima nota dele, os itens já vêm vinculados.
+                    </p>
                   )}
                 </div>
 
@@ -560,138 +566,162 @@ export default function ImportFiscalXML() {
                 </div>
               </div>
 
-              {/* Items table */}
-              <Card>
-                <CardHeader><CardTitle className="text-sm">Itens da Nota ({parsed.items.length})</CardTitle></CardHeader>
-                {/* Rolagem horizontal PRÓPRIA: sem isto, a tabela (7 colunas)
-                    empurrava o diálogo inteiro e desalinhava o restante da página. */}
-                <CardContent className="overflow-x-auto p-0">
-                  <Table className="min-w-[900px]">
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-10">#</TableHead>
-                        <TableHead className="min-w-[280px]">Descrição</TableHead>
-                        <TableHead className="w-24">NCM</TableHead>
-                        <TableHead className="w-24 text-right">Qtd</TableHead>
-                        <TableHead className="w-28 text-right">V. Unit.</TableHead>
-                        <TableHead className="w-28 text-right">Total</TableHead>
-                        <TableHead className="w-[260px]">No Sistema</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {parsed.items.map((item) => {
-                        const sku = item.sku_supplier || '';
-                        // O casamento vem do SERVIDOR (preview_nfe_import): a tela
-                        // mostra exatamente o que a confirmação fará, em vez de
-                        // recalcular no cliente com regra própria (que divergia).
-                        const pv = (preview?.items || []).find((p: any) => p.index === item.index);
-                        const match = pv?.product_id
-                          ? { id: pv.product_id, name: pv.product_name }
-                          : null;
-                        const motivo: Record<string, { txt: string; cls: string }> = {
-                          manual:    { txt: 'vínculo manual',      cls: 'bg-blue-50 text-blue-700 border-blue-200' },
-                          barcode:   { txt: 'código de barras',    cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-                          de_para:   { txt: 'histórico do fornec.', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-                          sku:       { txt: 'código interno',      cls: 'bg-teal-50 text-teal-700 border-teal-200' },
-                          descricao: { txt: 'descrição',           cls: 'bg-amber-50 text-amber-800 border-amber-300' },
-                          novo:      { txt: 'produto novo',        cls: 'bg-amber-50 text-amber-800 border-amber-300' },
-                        };
-                        const sel = motivo[pv?.match_reason] || null;
+              {/* Itens — LISTA, não tabela.
+                  A tabela tinha 7 colunas com largura mínima fixa (900px): ela
+                  empurrava o diálogo inteiro, cortava o "Total" do cabeçalho e
+                  criava a barra horizontal. Uma lista se adapta à largura
+                  disponível, dá espaço para a descrição (que é longa) e para o
+                  seletor de vínculo, e funciona igual no celular. */}
+              <div className="rounded-lg border">
+                <div className="flex items-center justify-between border-b bg-muted/30 px-3 py-2">
+                  <span className="text-sm font-medium">Itens da nota ({parsed.items.length})</span>
+                  {loadingPreview && (
+                    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Loader2 className="h-3 w-3 animate-spin" /> conferindo…
+                    </span>
+                  )}
+                </div>
 
-                        return (
-                          <TableRow key={item.index}>
-                            <TableCell className="align-top text-muted-foreground">{item.index}</TableCell>
-                            <TableCell className="align-top">
-                              {/* Fornecedores usam " - " como quebra de linha dentro
-                                  do xProd (a Kamell faz isso em todos os itens), o
-                                  que deixava a descrição truncando de forma
-                                  irregular. Normalizar e limitar a 2 linhas
-                                  uniformiza; o texto completo fica no title. */}
-                              <p
-                                className="font-medium leading-snug line-clamp-2"
-                                title={item.description || ''}
-                              >
-                                {(item.description || '').replace(/\s+-\s+/g, ' — ').replace(/\s{2,}/g, ' ')}
-                              </p>
-                              <p className="text-[11px] text-muted-foreground">
-                                SKU: {sku || '—'}{item.barcode ? ` · EAN: ${item.barcode}` : ''}
-                              </p>
-                              {sel && (
-                                <span className={`inline-block mt-1 rounded border px-1.5 py-0.5 text-[10px] ${sel.cls}`}>
-                                  {sel.txt}
-                                </span>
-                              )}
-                              {/* Divergências que o conferente precisa ver ANTES de aceitar */}
-                              {pv?.cost_changed && (
-                                <p className="text-[10px] text-amber-700 mt-0.5">
-                                  Custo atual {formatCurrency(Number(pv.current_cost))} → {formatCurrency(item.unit_price)}
-                                </p>
-                              )}
-                              {pv?.unit_changed && (
-                                <p className="text-[10px] text-amber-700">Unidade difere do cadastro ({pv.product_unit})</p>
-                              )}
-                              {pv?.ncm_changed && (
-                                <p className="text-[10px] text-amber-700">NCM difere do cadastro ({pv.product_ncm})</p>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-muted-foreground text-xs">{item.ncm || '—'}</TableCell>
-                            <TableCell className="text-right">{item.quantity} {item.unit || 'un'}</TableCell>
-                            <TableCell className="text-right">{formatCurrency(item.unit_price)}</TableCell>
-                            <TableCell className="text-right font-semibold">{formatCurrency(item.total_price)}</TableCell>
-                            <TableCell className="min-w-[200px]">
-                              <Select 
-                                value={match?.id || '__new'} 
-                                onValueChange={(val) => {
-                                  if (sku) {
-                                    setManualMappings(prev => {
-                                      const next = { ...prev };
-                                      // Mandar '' faria o servidor tratar como "sem
-                                      // vínculo manual" e recair na cascata; remover
-                                      // a chave expressa a mesma intenção sem ruído.
-                                      // '__new' é uma DECISÃO (forçar produto
-                                      // novo), não ausência de decisão: removendo
-                                      // a chave, a cascata rodaria e poderia
-                                      // vincular a um produto existente, ao
-                                      // contrário do que o usuário escolheu.
-                                      next[sku] = val;
-                                      return next;
-                                    });
-                                  }
-                                }}
-                              >
-                                <SelectTrigger className={`h-8 text-xs ${match ? 'text-success border-success/30 bg-success/5' : 'text-amber-600 border-amber-300 bg-amber-50'}`}>
-                                  <div className="flex items-center gap-1.5 truncate">
-                                    {match ? <CheckCircle2 className="h-3 w-3" /> : <AlertCircle className="h-3 w-3" />}
-                                    <SelectValue />
-                                  </div>
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="__new" className="text-amber-600 font-medium">✨ Criar como Novo Produto</SelectItem>
-                                  <div className="border-t my-1" />
-                                  {(products || []).filter(p => p.active).map(p => (
-                                    <SelectItem key={p.id} value={p.id} className="text-xs">
-                                      {p.name} {p.sku ? `(${p.sku})` : ''}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
+                <div className="divide-y">
+                  {parsed.items.map((item) => {
+                    const sku = item.sku_supplier || '';
+                    // O casamento vem do SERVIDOR (preview_nfe_import): a tela
+                    // mostra exatamente o que a confirmação fará, em vez de
+                    // recalcular no cliente com regra própria (que divergia).
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const pv = (preview?.items || []).find((p: any) => p.index === item.index);
+                    const vinculado = !!pv?.product_id;
+                    const motivo: Record<string, { txt: string; cls: string }> = {
+                      manual:    { txt: 'você escolheu',        cls: 'border-blue-200 bg-blue-50 text-blue-700' },
+                      barcode:   { txt: 'código de barras',     cls: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
+                      de_para:   { txt: 'compra anterior',      cls: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
+                      sku:       { txt: 'código do produto',    cls: 'border-teal-200 bg-teal-50 text-teal-700' },
+                      descricao: { txt: 'pela descrição',       cls: 'border-amber-300 bg-amber-50 text-amber-800' },
+                      novo:      { txt: 'será criado',          cls: 'border-amber-300 bg-amber-50 text-amber-800' },
+                    };
+                    const sel = motivo[pv?.match_reason] ?? null;
+                    const divergencias = [
+                      pv?.cost_changed
+                        && `Custo ${formatCurrency(Number(pv.current_cost))} → ${formatCurrency(item.unit_price)}`,
+                      pv?.unit_changed && `Unidade difere do cadastro (${pv.product_unit})`,
+                      pv?.ncm_changed && `NCM difere do cadastro (${pv.product_ncm})`,
+                    ].filter(Boolean) as string[];
 
-              <div className="flex justify-end gap-3">
+                    return (
+                      <div key={item.index} className="p-3">
+                        {/* Cabeçalho do item: descrição à esquerda, valores à
+                            direita. min-w-0 no bloco flexível é o que permite a
+                            descrição truncar em vez de esticar a linha. */}
+                        <div className="flex items-start gap-3">
+                          <span className="w-5 shrink-0 pt-0.5 text-xs text-muted-foreground">{item.index}</span>
+
+                          <div className="min-w-0 flex-1">
+                            {/* Fornecedores usam " - " como quebra dentro do xProd
+                                (a Kamell faz em todos os itens) — normalizar evita
+                                o truncamento irregular. Texto completo no title. */}
+                            <p className="truncate font-medium leading-snug" title={item.description || ''}>
+                              {(item.description || '').replace(/\s+-\s+/g, ' — ').replace(/\s{2,}/g, ' ')}
+                            </p>
+                            <p className="mt-0.5 text-xs text-muted-foreground">
+                              cód. fornecedor {sku || '—'}
+                              {item.ncm ? ` · NCM ${item.ncm}` : ''}
+                              {item.barcode ? ` · EAN ${item.barcode}` : ''}
+                            </p>
+                          </div>
+
+                          <div className="shrink-0 text-right">
+                            <p className="font-semibold tabular-nums">{formatCurrency(item.total_price)}</p>
+                            <p className="text-xs text-muted-foreground tabular-nums">
+                              {item.quantity} {item.unit || 'un'} × {formatCurrency(item.unit_price)}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Vínculo com o catálogo + por que casou */}
+                        <div className="mt-2 flex flex-wrap items-center gap-2 pl-8">
+                          {sel && (
+                            <span className={`rounded border px-1.5 py-0.5 text-[10px] ${sel.cls}`}>{sel.txt}</span>
+                          )}
+                          {divergencias.map((d) => (
+                            <span key={d} className="text-[11px] text-amber-700">{d}</span>
+                          ))}
+                        </div>
+
+                        <div className="mt-1.5 pl-8">
+                          <Select
+                            value={pv?.product_id || '__new'}
+                            onValueChange={(val) => {
+                              if (!sku) return;
+                              setManualMappings((prev) => ({
+                                // '__new' é uma DECISÃO (forçar produto novo), não
+                                // ausência de decisão: se removêssemos a chave, a
+                                // cascata rodaria e poderia vincular a um produto
+                                // existente, contrariando a escolha.
+                                ...prev,
+                                [sku]: val,
+                              }));
+                            }}
+                          >
+                            <SelectTrigger
+                              className={`h-9 text-xs ${
+                                vinculado
+                                  ? 'border-success/30 bg-success/5 text-success'
+                                  : 'border-amber-300 bg-amber-50 text-amber-700'
+                              }`}
+                            >
+                              <div className="flex min-w-0 items-center gap-1.5">
+                                {vinculado
+                                  ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                                  : <AlertCircle className="h-3.5 w-3.5 shrink-0" />}
+                                <span className="truncate"><SelectValue /></span>
+                              </div>
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__new" className="font-medium text-amber-700">
+                                Criar como produto novo
+                              </SelectItem>
+                              <div className="my-1 border-t" />
+                              {(products || []).filter((p) => p.active).map((p) => (
+                                <SelectItem key={p.id} value={p.id} className="text-xs">
+                                  {p.name}{p.sku ? ` (${p.sku})` : ''}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+            </div>
+          )}
+
+          {/* Rodapé FIXO: com 16 itens, os botões ficavam no fim de uma rolagem
+              longa. O resumo à esquerda evita ter que voltar para conferir
+              quantos produtos serão criados. */}
+          {parsed && (
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t bg-muted/20 px-5 py-3">
+              <p className="text-xs text-muted-foreground">
+                {(() => {
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  const novos = (preview?.items || []).filter((i: any) => !i.product_id).length;
+                  const total = parsed.items.length;
+                  return novos > 0
+                    ? `${total - novos} vinculado(s) ao catálogo · ${novos} será(ão) criado(s)`
+                    : `${total} item(ns) vinculado(s) ao catálogo`;
+                })()}
+              </p>
+              <div className="flex gap-2">
                 <Button variant="outline" onClick={() => { setShowConfirm(false); setParsed(null); setFile(null); }}>
                   Cancelar
                 </Button>
-                <Button onClick={handleConfirmImport} disabled={confirming} className="bg-success text-white hover:bg-success/90 px-8">
+                <Button onClick={handleConfirmImport} disabled={confirming || loadingPreview}
+                  className="bg-success text-white hover:bg-success/90">
                   {confirming
-                    ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Confirmando...</>
-                    : <><Package className="h-4 w-4 mr-2" />Confirmar Entrada no Estoque</>
+                    ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Confirmando…</>
+                    : <><Package className="h-4 w-4 mr-2" />Confirmar entrada</>
                   }
                 </Button>
               </div>
