@@ -253,6 +253,7 @@ Deno.serve(async (req) => {
     if (body.action === "diagnostics") return await handleDiagnostics();
     if (body.action === "artifact") return await handleArtifact(admin, body);
     if (body.action === "preview") return await handlePreview(admin, body);
+    if (body.action === "homolog") return await handleHomolog(admin, body);
     return await handleCreate(admin, body);
   } catch (err) {
     console.error("[fiscal-emit] erro:", err);
@@ -509,6 +510,85 @@ async function handlePreview(admin: any, body: any): Promise<Response> {
 
   // resumo_os: presente quando o espelho veio de uma OS (o que entrou e o que ficou de fora).
   return jr({ ok: true, payload: prep.payload, emitter, environment, series, number, resumo_os: body.__resumo_os ?? null });
+}
+
+// Frase EXIGIDA pela SEFAZ no destinatário de qualquer NF-e de homologação
+// (Rejeição 598 / NT 2011/002). Sem ela a nota de teste é rejeitada.
+const HOMOLOG_DEST = "NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL";
+
+// Espelho REAL: emite a nota DE VERDADE em homologação (draft → build → dispatch
+// → SEFAZ) e devolve a DANFE autorizada. Diferente do preview (que só simula), a
+// SEFAZ valida imposto/estrutura — pega rejeição ANTES da emissão de produção.
+// Só o nome do destinatário é mascarado (exigência da SEFAZ); valores, itens e
+// impostos são reais. Numeração de homologação (série 2) é sequência separada.
+// deno-lint-ignore no-explicit-any
+async function handleHomolog(admin: any, body: any): Promise<Response> {
+  const prep = await prepareNfePayload(admin, body);
+  if (!prep.ok) return jr({ error: prep.error }, prep.status);
+
+  const payload: Record<string, unknown> = { ...prep.payload };
+  const rec = { ...(payload.recipient as Record<string, unknown>) };
+  rec.name = HOMOLOG_DEST; // Rejeição 598
+  payload.recipient = rec;
+
+  const { data: number, error: seqErr } = await admin.rpc("next_fiscal_number", {
+    p_document_type: "nfe", p_series: 2, p_environment: "homologacao",
+  });
+  if (seqErr) return jr({ error: "Falha ao reservar numeração de homologação: " + seqErr.message }, 500);
+
+  const provider = createFiscalProvider();
+  const created = await provider.createDraft({
+    documentType: "nfe", environment: "homologacao", series: 2, number, payload,
+  });
+  if (!created.ok) return jr({ error: "Homologação: falha ao criar o rascunho — " + didaticize(created.error), details: created.details }, 422);
+  const id = created.data.providerDocumentId;
+  if (!id) return jr({ error: "Homologação: a Contora não retornou o identificador do rascunho." }, 502);
+
+  const built = await provider.build("nfe", id, true);
+  if (!built.ok) return jr({ error: "Homologação: falha no build — " + didaticize(built.error), details: built.details }, 422);
+
+  const disp = await provider.dispatch("nfe", id);
+  if (!disp.ok) return jr({ error: "Homologação: falha ao enviar à SEFAZ — " + didaticize(disp.error), details: disp.details }, 422);
+
+  // A autorização da SEFAZ é assíncrona — aguarda até ~24s (12 × 2s).
+  let status = "processing", msg = "", code = "";
+  for (let i = 0; i < 12; i++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    const st = await provider.getStatus("nfe", id);
+    if (st.ok) {
+      status = String(st.data.status ?? "processing");
+      msg = String(st.data.statusMessage ?? "");
+      code = String(st.data.statusCode ?? "");
+      if (["authorized", "rejected", "failed", "cancelled"].includes(status)) break;
+    }
+  }
+
+  if (status !== "authorized") {
+    const detalhe = msg || (code ? `código ${code}` : status);
+    return jr({
+      error: status === "processing"
+        ? "A SEFAZ de homologação ainda está processando. Tente gerar o espelho de novo em instantes."
+        : `A SEFAZ de homologação NÃO autorizou a nota: ${detalhe}. Corrija antes de emitir em produção.`,
+      status_code: code, status_result: status,
+    }, 422);
+  }
+
+  const arts = await provider.listArtifacts("nfe", id);
+  const pick = arts.ok
+    ? (arts.data.find((a) => a.type === "pdf_danfe" && a.available && a.downloadUrl)
+      ?? arts.data.find((a) => a.type === "xml_authorized" && a.available && a.downloadUrl))
+    : undefined;
+  if (!pick?.downloadUrl) {
+    return jr({ error: "Nota autorizada em homologação, mas a DANFE ainda não ficou pronta. Tente de novo em instantes." }, 502);
+  }
+  const fetched = await provider.fetchArtifact(pick.downloadUrl);
+  if (!fetched.ok) return jr({ error: "Falha ao baixar a DANFE de homologação: " + fetched.error }, 502);
+
+  const isPdf = pick.type === "pdf_danfe";
+  return new Response(new Blob([fetched.data.bytes], { type: isPdf ? "application/pdf" : "application/xml" }), {
+    status: 200,
+    headers: { ...corsHeaders, "Content-Type": isPdf ? "application/pdf" : "application/xml", "X-Artifact-Type": pick.type },
+  });
 }
 
 // deno-lint-ignore no-explicit-any
