@@ -1,0 +1,3 @@
+# Scripts DEVEM manter LF mesmo no Windows — bash/node quebram com CRLF no shebang.
+*.sh  text eol=lf
+*.cjs text eol=lf
