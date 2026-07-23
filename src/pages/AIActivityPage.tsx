@@ -6,6 +6,7 @@ import { useAppUsers } from '@/hooks/use-app-users';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import CommsPanel from '@/components/ai/CommsPanel';
 
 // Preços estimados por 1M tokens (US$) — OpenRouter cobra em créditos USD.
 // Ajuste conforme a fatura real; cache_read costuma custar ~10% do input.
@@ -196,6 +197,9 @@ export default function AIActivityPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Comunicação (Camada de Inteligência de Comunicação) */}
+      <CommsPanel />
 
       {/* Auditoria */}
       <Card>
