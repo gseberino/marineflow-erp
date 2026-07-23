@@ -123,7 +123,7 @@ export const whatsappTools: ToolDef[] = [
 
       const { data: comp } = await sb.from("app_settings").select("value").eq("key", "company_name").maybeSingle();
       const company = comp?.value || "nossa empresa";
-      const { data: suppliers } = await sb.from("suppliers").select("id, name, phone").in("id", supplierIds);
+      const { data: suppliers } = await sb.from("suppliers").select("id, name, trade_name, phone, opt_out_whatsapp").in("id", supplierIds);
       const byId: Record<string, any> = Object.fromEntries((suppliers || []).map((s: any) => [s.id, s]));
       // Itens NUMERADOS: é o que faz o fornecedor responder "1 - R$ 850 - 5 dias".
       const itemLines = items
@@ -135,7 +135,9 @@ export const whatsappTools: ToolDef[] = [
       for (const sid of supplierIds) {
         const sup = byId[sid];
         if (!sup) { resultados.push({ fornecedor: sid, status: "não encontrado" }); continue; }
-        if (!sup.phone) { resultados.push({ fornecedor: sup.name || sid, status: "sem WhatsApp cadastrado" }); continue; }
+        const nomeForn = sup.trade_name || sup.name || sid;
+        if (sup.opt_out_whatsapp) { resultados.push({ fornecedor: nomeForn, status: "opt-out (não receber)" }); continue; }
+        if (!sup.phone) { resultados.push({ fornecedor: nomeForn, status: "sem WhatsApp cadastrado" }); continue; }
         // Mensagem ENXUTA de propósito: saudação neutra (sem razão social, que às vezes é
         // genérica) + itens numerados. Sem descrever a aplicação, sem estipular prazo e sem
         // ensinar o fornecedor a responder — ele responde pela lista. (Ver feedback do dono.)
@@ -149,7 +151,7 @@ export const whatsappTools: ToolDef[] = [
         if (g.bloqueado) { resultados.push({ fornecedor: sup.name || sid, status: `bloqueado: ${g.motivo}` }); continue; }
         g.avisos.forEach((a) => avisos.add(a));
         const r = await sendWhatsapp(sup.phone, msg, jwt);
-        resultados.push({ fornecedor: sup.name || sid, status: r.ok ? "enviado" : `falhou: ${r.error}` });
+        resultados.push({ fornecedor: nomeForn, status: r.ok ? "enviado" : `falhou: ${r.error}` });
       }
       const enviados = resultados.filter((r) => r.status === "enviado").length;
       return { ok: true, cotacao: codigo || null, enviados, total: supplierIds.length, resultados, ...(avisos.size ? { avisos_estilo: [...avisos] } : {}) };
@@ -172,16 +174,20 @@ export const whatsappTools: ToolDef[] = [
         .eq("id", args.collection_id)
         .maybeSingle();
       if (error || !col) return { error: "Cobrança não encontrada" };
-      let phone = col.contact_whatsapp || col.phone;
-      if (!phone) {
-        const { data: c } = await sb.from("clients").select("whatsapp, phone").eq("id", col.client_id).maybeSingle();
-        phone = c?.whatsapp || c?.phone;
+      // Perfil do contato: nome usado (display_name) e opt-out.
+      let c: any = null;
+      if (col.client_id) {
+        const r = await sb.from("clients").select("whatsapp, phone, name, display_name, opt_out_whatsapp").eq("id", col.client_id).maybeSingle();
+        c = r.data;
       }
+      if (c?.opt_out_whatsapp) return { error: "Este cliente pediu para não receber mensagens no WhatsApp (opt-out). Cobre por outro canal." };
+      const phone = col.contact_whatsapp || col.phone || c?.whatsapp || c?.phone;
       if (!phone) return { error: "Sem telefone para enviar o lembrete." };
       const fmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(col.amount);
+      const nomeUsado = c?.display_name || col.contact_name || (c?.name ? String(c.name).trim().split(/\s+/)[0] : "");
       const msg =
         args.custom_message ||
-        `Olá${col.contact_name ? ` ${col.contact_name}` : ""}, lembrete amigável: você possui um valor de ${fmt} com vencimento em ${col.due_date}. Qualquer dúvida estamos à disposição.`;
+        `Olá${nomeUsado ? ` ${nomeUsado}` : ""}, lembrete amigável: você possui um valor de ${fmt} com vencimento em ${col.due_date}. Qualquer dúvida estamos à disposição.`;
       // Portão: conformidade (horário, número identificado) bloqueia; estilo (ameaça) avisa.
       const g = guardaDeEnvio(msg, { tipo: "cobranca", audiencia: "cliente", canal: "whatsapp", destinatarioIdentificado: !!col.client_id, texto: msg });
       if (g.bloqueado) return { error: g.motivo };
@@ -213,12 +219,14 @@ export const whatsappTools: ToolDef[] = [
       const { data: so, error: soErr } = await soQuery.maybeSingle();
       if (soErr || !so) return { error: `OS não encontrada. Verifique se o número ou ID está correto. Valor recebido: "${args.service_order_id}"` };
       if (!so.share_token) return { error: `A OS ${so.service_order_number} não possui link público ainda. Abra a OS no app, clique em "Compartilhar" para gerar o link, e tente novamente.` };
-      const { data: c } = await admin.from("clients").select("whatsapp, phone, name").eq("id", so.client_id).maybeSingle();
+      const { data: c } = await admin.from("clients").select("whatsapp, phone, name, display_name, opt_out_whatsapp").eq("id", so.client_id).maybeSingle();
+      if (c?.opt_out_whatsapp) return { error: "Este cliente pediu para não receber mensagens no WhatsApp (opt-out)." };
       const phone = c?.whatsapp || c?.phone;
       if (!phone) return { error: "Cliente sem WhatsApp/telefone cadastrado." };
       const origin = appOrigin || settings.app_public_url || "https://hbrmarine.online";
       const link = `${origin}/view/${so.share_token}`;
-      const msg = args.custom_message || `Olá${c?.name ? ` ${c.name}` : ""}, segue o link da OS ${so.service_order_number}: ${link}`;
+      const nomeUsado = c?.display_name || (c?.name ? String(c.name).trim().split(/\s+/)[0] : "");
+      const msg = args.custom_message || `Olá${nomeUsado ? ` ${nomeUsado}` : ""}, segue o link da OS ${so.service_order_number}: ${link}`;
       const g = guardaDeEnvio(msg, { tipo: "os_link", audiencia: "cliente", canal: "whatsapp", destinatarioIdentificado: !!so.client_id });
       if (g.bloqueado) return { error: g.motivo };
       const r = await sendWhatsapp(phone, msg, jwt);

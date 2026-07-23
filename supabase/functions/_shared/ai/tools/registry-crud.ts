@@ -131,6 +131,8 @@ export const registryCrudTools: ToolDef[] = [
         address_line_1: { type: "string" },
         payment_terms: { type: "string", description: "Condição de pagamento." },
         notes: { type: "string" },
+        communication_tone: { type: "string", description: "Tom preferido na comunicação." },
+        opt_out_whatsapp: { type: "boolean", description: "true = fornecedor NÃO quer receber WhatsApp (bloqueia envios de cotação)." },
         active: { type: "boolean" },
       },
       required: ["supplier_id"],

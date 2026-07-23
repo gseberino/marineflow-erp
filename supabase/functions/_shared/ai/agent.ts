@@ -254,12 +254,14 @@ async function buildPendingSummary(admin: any, toolName: string, args: Record<st
     if (ids.length) {
       let linhas: string[] = [`Enviar para ${ids.length} fornecedor(es):`];
       try {
-        const { data } = await admin.from("suppliers").select("id, name, phone").in("id", ids);
+        const { data } = await admin.from("suppliers").select("id, name, trade_name, phone, opt_out_whatsapp").in("id", ids);
         const byId: Record<string, any> = Object.fromEntries(((data as any[]) || []).map((s) => [s.id, s]));
         linhas = linhas.concat(ids.map((id) => {
           const s = byId[id];
           if (!s) return `- (fornecedor não encontrado: ${id})`;
-          return `- ${s.name || "sem nome"}${s.phone ? ` — ${s.phone}` : " — ⚠️ sem telefone cadastrado"}`;
+          const nome = s.trade_name || s.name || "sem nome";
+          const tel = s.phone ? ` — ${s.phone}` : " — ⚠️ sem telefone cadastrado";
+          return `- ${nome}${tel}${s.opt_out_whatsapp ? " · 🚫 opt-out" : ""}`;
         }));
       } catch { /* best-effort */ }
       partes.push(linhas.join("\n"));

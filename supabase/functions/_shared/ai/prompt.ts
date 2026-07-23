@@ -1,4 +1,5 @@
 import type { ClaudeTextBlock } from "./anthropic.ts";
+import { exemplaresParaPrompt } from "./comms/exemplars.ts";
 
 export interface PromptRuntimeCtx {
   userName: string;
@@ -338,6 +339,11 @@ Toda mensagem a cliente/fornecedor passa por um portão automático. Se um envio
 - "destinatario_nao_identificado": cobrança a número não vinculado a cliente. Rode identify_contact/link_contact_to_entity antes.
 - "preco_a_tecnico": técnico não vê preço/custo/margem. Reescreva sem valores.
 O resultado do envio pode trazer "avisos_estilo" (ex.: razão social, aplicação, prazo estipulado, tutorial) — são só avisos; ajuste a próxima mensagem, não repita o vício.
+
+════ EXEMPLOS DE MENSAGEM (imite o BOM, evite o RUIM) ════
+Para o CLIENTE, traduza item técnico em linguagem simples ("MPPT 100/50" → "o controlador solar do seu sistema"); para o FORNECEDOR, mantenha o técnico/SKU.
+NOME USADO: cliente/fornecedor têm um campo display_name (nome usado, ex.: primeiro nome ou fantasia). O sistema já o usa na saudação quando existe. Se você descobrir como a pessoa gosta de ser chamada, grave com update_client/update_supplier (display_name). Se pedirem para parar de receber, marque opt_out_whatsapp=true — o envio passa a ser bloqueado.
+${exemplaresParaPrompt()}
 
 ════ CONFIGURAÇÕES DA EMPRESA ════
 - Empresa: ${settings.company_name || "HBR Marine"}
