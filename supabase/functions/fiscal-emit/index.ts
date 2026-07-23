@@ -549,8 +549,19 @@ async function handleHomolog(admin: any, body: any): Promise<Response> {
   if (seqErr) return jr({ error: "Falha ao reservar numeração de homologação: " + seqErr.message }, 500);
 
   const provider = createFiscalProvider();
+  // Rota POR-EMPRESA é obrigatória para homologação: o allows_homologation é um
+  // flag por empresa, e a rota GLOBAL (/nfe/drafts) valida o ambiente do TOKEN
+  // (producao) e recusa. A rota /companies/{id}/nfe/drafts dá o contexto explícito
+  // da empresa, onde o flag é respeitado. Resolve o id da empresa que o token usa.
+  let companyId: string | undefined;
+  const companies = await provider.listCompanies();
+  if (companies.ok && companies.data[0]?.id) companyId = companies.data[0].id;
+  if (!companyId) {
+    return jr({ error: "Homologação: não consegui identificar a empresa na Contora (GET /companies não retornou id)." }, 502);
+  }
+
   const created = await provider.createDraft({
-    documentType: "nfe", environment: "homologacao", series: 2, number, payload,
+    documentType: "nfe", environment: "homologacao", series: 2, number, payload, companyId,
   });
   if (!created.ok) {
     // Registra o erro CRU da Contora (diagnóstico do espelho de homologação) —
@@ -570,17 +581,17 @@ async function handleHomolog(admin: any, body: any): Promise<Response> {
   const id = created.data.providerDocumentId;
   if (!id) return jr({ error: "Homologação: a Contora não retornou o identificador do rascunho." }, 502);
 
-  const built = await provider.build("nfe", id, true);
+  const built = await provider.build("nfe", id, true, companyId);
   if (!built.ok) return jr({ error: "Homologação: falha no build — " + didaticize(built.error), details: built.details }, 422);
 
-  const disp = await provider.dispatch("nfe", id);
+  const disp = await provider.dispatch("nfe", id, "authorize", companyId);
   if (!disp.ok) return jr({ error: "Homologação: falha ao enviar à SEFAZ — " + didaticize(disp.error), details: disp.details }, 422);
 
   // A autorização da SEFAZ é assíncrona — aguarda até ~24s (12 × 2s).
   let status = "processing", msg = "", code = "";
   for (let i = 0; i < 12; i++) {
     await new Promise((r) => setTimeout(r, 2000));
-    const st = await provider.getStatus("nfe", id);
+    const st = await provider.getStatus("nfe", id, companyId);
     if (st.ok) {
       status = String(st.data.status ?? "processing");
       msg = String(st.data.statusMessage ?? "");
@@ -599,7 +610,7 @@ async function handleHomolog(admin: any, body: any): Promise<Response> {
     }, 422);
   }
 
-  const arts = await provider.listArtifacts("nfe", id);
+  const arts = await provider.listArtifacts("nfe", id, companyId);
   const pick = arts.ok
     ? (arts.data.find((a) => a.type === "pdf_danfe" && a.available && a.downloadUrl)
       ?? arts.data.find((a) => a.type === "xml_authorized" && a.available && a.downloadUrl))

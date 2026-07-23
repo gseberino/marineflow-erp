@@ -281,9 +281,13 @@ export class ContoraProvider implements FiscalProvider {
     if (input.number !== undefined) body.number = input.number;
     if (fam === "nfe") body.document_type = input.documentType; // nfe | nfce
 
+    // Rota por-empresa (/companies/{id}/nfe/drafts) quando companyId presente —
+    // exigida para homologação numa empresa de produção (o flag allows_homologation
+    // é por-empresa; a rota global valida o ambiente do token e recusa).
+    const base = input.companyId ? `/companies/${input.companyId}/${fam}` : `/${fam}`;
     const r = await this.request<Record<string, unknown>>(
       "POST",
-      `/${fam}/drafts`,
+      `${base}/drafts`,
       body,
     );
     // Cast explícito (em vez de deixar o narrowing estrutural resolver): TS
@@ -310,10 +314,13 @@ export class ContoraProvider implements FiscalProvider {
     documentType: DocumentType,
     id: string,
     sign = true,
+    companyId?: string,
   ): Promise<FiscalResult<unknown>> {
+    const fam = family(documentType);
+    const base = companyId ? `/companies/${companyId}/${fam}` : `/${fam}`;
     return this.request(
       "POST",
-      `/${family(documentType)}/drafts/${id}/build`,
+      `${base}/drafts/${id}/build`,
       { sign },
     );
   }
@@ -322,20 +329,25 @@ export class ContoraProvider implements FiscalProvider {
     documentType: DocumentType,
     id: string,
     action = "authorize",
+    companyId?: string,
   ): Promise<FiscalResult<unknown>> {
     const fam = family(documentType);
+    const base = companyId ? `/companies/${companyId}/${fam}` : `/${fam}`;
     // NF-e expects { action: "authorize" }; NFS-e dispatch is the emission trigger.
     const body = fam === "nfe" ? { action } : {};
-    return this.request("POST", `/${fam}/drafts/${id}/dispatch`, body);
+    return this.request("POST", `${base}/drafts/${id}/dispatch`, body);
   }
 
   async getStatus(
     documentType: DocumentType,
     id: string,
+    companyId?: string,
   ): Promise<FiscalResult<DocumentStatusInfo>> {
+    const fam = family(documentType);
+    const base = companyId ? `/companies/${companyId}/${fam}` : `/${fam}`;
     const r = await this.request<Record<string, unknown>>(
       "GET",
-      `/${family(documentType)}/drafts/${id}/status`,
+      `${base}/drafts/${id}/status`,
     );
     if (!r.ok) return r as FiscalResult<DocumentStatusInfo>;
     const d = r.data ?? {};
@@ -379,10 +391,13 @@ export class ContoraProvider implements FiscalProvider {
   async listArtifacts(
     documentType: DocumentType,
     id: string,
+    companyId?: string,
   ): Promise<FiscalResult<FiscalArtifact[]>> {
+    const fam = family(documentType);
+    const base = companyId ? `/companies/${companyId}/${fam}` : `/${fam}`;
     const r = await this.request<unknown>(
       "GET",
-      `/${family(documentType)}/drafts/${id}/artifacts`,
+      `${base}/drafts/${id}/artifacts`,
     );
     if (!r.ok) return r as FiscalResult<FiscalArtifact[]>;
     // The list may come as an array or wrapped in { artifacts: [...] } / { data: [...] }.

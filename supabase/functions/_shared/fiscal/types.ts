@@ -34,6 +34,11 @@ export interface CreateDraftInput {
   environment?: FiscalEnvironment;
   series?: number;
   number?: number;
+  // Quando presente, usa a rota POR-EMPRESA (/companies/{id}/...) em vez da rota
+  // global. Necessário para homologação numa empresa de produção: o flag
+  // allows_homologation é por-empresa e só é respeitado quando a empresa é
+  // explícita na URL (a rota global valida o ambiente do TOKEN e recusa).
+  companyId?: string;
   // Provider document body. For NF-e this is the SEFAZ layout (or a template.apply
   // result); for NFS-e it is { service, taker, amounts, ... }.
   payload: Record<string, unknown>;
@@ -113,11 +118,12 @@ export interface FiscalProvider {
 
   createDraft(input: CreateDraftInput): Promise<FiscalResult<DraftCreated>>;
 
-  // NF-e/NFC-e only. NFS-e has no build step.
+  // NF-e/NFC-e only. NFS-e has no build step. companyId → rota por-empresa.
   build(
     documentType: DocumentType,
     providerDocumentId: string,
     sign?: boolean,
+    companyId?: string,
   ): Promise<FiscalResult<unknown>>;
 
   // Enqueue authorization (async). action defaults to "authorize".
@@ -125,17 +131,20 @@ export interface FiscalProvider {
     documentType: DocumentType,
     providerDocumentId: string,
     action?: string,
+    companyId?: string,
   ): Promise<FiscalResult<unknown>>;
 
   // Free of charge on Contora (does not consume fiscal-event quota).
   getStatus(
     documentType: DocumentType,
     providerDocumentId: string,
+    companyId?: string,
   ): Promise<FiscalResult<DocumentStatusInfo>>;
 
   listArtifacts(
     documentType: DocumentType,
     providerDocumentId: string,
+    companyId?: string,
   ): Promise<FiscalResult<FiscalArtifact[]>>;
 
   // Baixa os bytes de um artefato (XML/DANFE) autenticando com o token — as
