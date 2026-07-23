@@ -43,7 +43,8 @@ const densityCell: Record<Density, string> = {
 };
 
 const CHECKBOX_W = 40;
-const ACTIONS_W = 100;
+/* 3 botões de 32px + 2 gaps de 4px + padding horizontal 16px = 120px; folga de 8px. */
+const ACTIONS_W = 128;
 const EXPANDER_W = 24;
 
 /**

@@ -3,6 +3,7 @@ import type { StatusTone } from './components/StatusChip';
 /** Mapa único de status de OS → tom semântico (substitui os className soltos de statusConfig). */
 export const serviceOrderStatusTone: Record<string, StatusTone> = {
   draft: 'neutral',
+  approved: 'info',
   scheduled: 'info',
   open: 'info',
   in_progress: 'info',
