@@ -3,6 +3,33 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { createWhatsAppProvider } from "../_shared/whatsapp/factory.ts";
 import { EVOLUTION_STATUS_MAP } from "../_shared/whatsapp/evolution-provider.ts";
+import { classificarResposta } from "../_shared/ai/comms/reply-router.ts";
+
+// Manejo automático da resposta do cliente (Camada de Inteligência de Comunicação, módulo G):
+// fecha o loop no ai_comms_log (marca respondido + intenção) e HONRA OPT-OUT sozinho.
+// Best-effort: nunca derruba o webhook.
+async function manejarRespostaCliente(admin: any, clientId: string, texto: string): Promise<void> {
+  try {
+    if (!clientId || !texto?.trim()) return;
+    const r = classificarResposta(texto);
+    // Fecha o loop: marca o último envio a este cliente como respondido.
+    const { data: log } = await admin
+      .from("ai_comms_log")
+      .select("id")
+      .eq("entity_id", clientId)
+      .is("responded_at", null)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    const logId = (log as any[])?.[0]?.id;
+    if (logId) await admin.from("ai_comms_log").update({ responded_at: new Date().toISOString(), reply_intent: r.intencao }).eq("id", logId);
+    // Opt-out é ação segura e clara: honra na hora (bloqueia envios futuros).
+    if (r.intencao === "opt_out") {
+      await admin.from("clients").update({ opt_out_whatsapp: true }).eq("id", clientId);
+    }
+  } catch (_e) {
+    // best-effort — silencioso
+  }
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -338,6 +365,12 @@ Deno.serve(async (req) => {
 
     if (isNewLead && !event.fromMe) {
       notifyAssignedReminder(admin, phone, event.senderName, body).catch(console.error);
+    }
+
+    // Módulo G (inbound): resposta de cliente conhecido → fecha o loop de comunicação
+    // (marca respondido + intenção) e honra opt-out automaticamente. Best-effort, assíncrono.
+    if (!event.fromMe && clientId && body) {
+      manejarRespostaCliente(admin, clientId, body).catch(() => {});
     }
 
     if (leadId) {
