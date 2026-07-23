@@ -45,12 +45,24 @@ const mockOrders = [
   },
 ];
 
+const mutationMock = () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false });
 vi.mock('@/hooks/use-service-orders', () => ({
   useServiceOrders: () => ({ data: mockOrders, isLoading: false, error: null }),
+  useDuplicateServiceOrder: () => mutationMock(),
+  useUpdateServiceOrderStatus: () => mutationMock(),
+  useCancelServiceOrder: () => mutationMock(),
+  useReopenServiceOrder: () => mutationMock(),
+  STATUS_TRANSITIONS: {},
+  STATUS_BACKWARD_TRANSITIONS: {},
+}));
+
+vi.mock('@/hooks/use-agenda', () => ({
+  useTechnicians: () => ({ data: [], isLoading: false }),
 }));
 
 vi.mock('@/hooks/use-pdf', () => ({
   usePDFData: () => ({ data: null }),
+  fetchPDFData: vi.fn(),
 }));
 
 vi.mock('@/hooks/use-whatsapp-send-log', () => ({
@@ -97,7 +109,7 @@ vi.mock('@/components/WhatsAppSendHistoryDialog', () => ({
   WhatsAppSendHistoryDialog: () => null,
 }));
 
-vi.mock('@/components/SendViaZAPIDialog', () => ({
+vi.mock('@/components/SendViaWhatsAppDialog', () => ({
   SendViaWhatsAppDialog: () => null,
 }));
 
@@ -112,12 +124,12 @@ function renderList() {
   );
 }
 
-describe('ServiceOrderList — Envio via WhatsApp / Z-API', () => {
+describe('ServiceOrderList — Envio via WhatsApp (wa.me + Evolution)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('exibe os itens de envio (wa.me, OS Z-API, Orçamento Z-API) habilitados quando há share_token e desabilitados quando não há', async () => {
+  it('exibe os itens de envio (wa.me, OS WhatsApp, Orçamento WhatsApp) habilitados quando há share_token e desabilitados quando não há', async () => {
     const user = userEvent.setup();
     renderList();
 
@@ -130,22 +142,22 @@ describe('ServiceOrderList — Envio via WhatsApp / Z-API', () => {
       await user.click(trigger);
 
       const waItem = await screen.findByRole('menuitem', { name: /Enviar via wa\.me/i });
-      const osZapiItem = await screen.findByRole('menuitem', { name: /Enviar OS via Z-API/i });
-      const quoteZapiItem = await screen.findByRole('menuitem', { name: /Enviar Orçamento via Z-API/i });
+      const osWhatsItem = await screen.findByRole('menuitem', { name: /Enviar OS via WhatsApp/i });
+      const quoteWhatsItem = await screen.findByRole('menuitem', { name: /Enviar Orçamento via WhatsApp/i });
 
       if (so.share_token) {
         expect(waItem).not.toHaveAttribute('data-disabled');
-        expect(osZapiItem).not.toHaveAttribute('data-disabled');
-        expect(quoteZapiItem).not.toHaveAttribute('data-disabled');
+        expect(osWhatsItem).not.toHaveAttribute('data-disabled');
+        expect(quoteWhatsItem).not.toHaveAttribute('data-disabled');
       } else {
         expect(waItem).toHaveAttribute('data-disabled');
-        expect(osZapiItem).toHaveAttribute('data-disabled');
-        expect(quoteZapiItem).toHaveAttribute('data-disabled');
+        expect(osWhatsItem).toHaveAttribute('data-disabled');
+        expect(quoteWhatsItem).toHaveAttribute('data-disabled');
       }
 
       await user.keyboard('{Escape}');
       await waitFor(() =>
-        expect(screen.queryByRole('menuitem', { name: /Enviar OS via Z-API/i })).not.toBeInTheDocument()
+        expect(screen.queryByRole('menuitem', { name: /Enviar OS via WhatsApp/i })).not.toBeInTheDocument()
       );
     }
   });
