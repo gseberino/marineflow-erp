@@ -7,6 +7,19 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { runAgentLoop, type Proposal } from "../_shared/ai/agent.ts";
+import { filtrarTools } from "../_shared/ai/intent-router.ts";
+
+/** Roteador de intenção (Onda 5A), atrás do flag ai_intent_router=on. Filtra as tools ao
+ *  domínio da última mensagem; em qualquer dúvida, filtrarTools devolve null e mandamos tudo. */
+function aplicarRoteadorDeIntencao<T extends { name: string }>(
+  tools: T[],
+  ultimoTextoUsuario: string,
+  settings: Record<string, string>,
+): T[] {
+  if ((settings.ai_intent_router || "").trim().toLowerCase() !== "on") return tools;
+  const subset = filtrarTools(ultimoTextoUsuario || "", tools.map((t) => t.name));
+  return subset ? tools.filter((t) => subset.has(t.name)) : tools;
+}
 import { buildSystemBlocks } from "../_shared/ai/prompt.ts";
 import { callClaude, ClaudeApiError, type ClaudeContentBlock, type ClaudeMessage } from "../_shared/ai/anthropic.ts";
 import { MAX_ITERATIONS_WHATSAPP, MODEL_AGENT, MODEL_LITE } from "../_shared/ai/models.ts";
@@ -420,7 +433,11 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
     channel: "whatsapp",
   });
 
-  const toolsForRole = allTools.filter((t) => !t.roles || t.roles.includes((appUser.role as Role) || ("unknown" as Role)));
+  const toolsForRole = aplicarRoteadorDeIntencao(
+    allTools.filter((t) => !t.roles || t.roles.includes((appUser.role as Role) || ("unknown" as Role))),
+    effectiveText,
+    settings,
+  );
 
   const result = await runAgentLoop({
     system,
@@ -723,7 +740,15 @@ Deno.serve(async (req) => {
     // Filtra a lista de tools pelo cargo ANTES do modelo ver — technician não recebe
     // tools financeiras/compras/preço. Defesa em profundidade real fica em cada
     // execute() (blockTechnician), necessária pro canal WhatsApp futuro.
-    const toolsForRole = allTools.filter((t) => !t.roles || t.roles.includes(userRole as Role));
+    const ultimoTextoUsuario = ((): string => {
+      const m = [...historyMessages].reverse().find((x) => x.role === "user");
+      return typeof (m as { content?: unknown } | undefined)?.content === "string" ? (m as { content: string }).content : "";
+    })();
+    const toolsForRole = aplicarRoteadorDeIntencao(
+      allTools.filter((t) => !t.roles || t.roles.includes(userRole as Role)),
+      ultimoTextoUsuario,
+      settings,
+    );
 
     const result = await runAgentLoop({
       system,
