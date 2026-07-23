@@ -29,13 +29,49 @@ export function tokenizar(s: string): string[] {
   return normalizarTermo(s).split(/[^a-z0-9]+/i).filter((t) => t.length >= 2);
 }
 
-/** Pontua o candidato: nº de tokens do termo presentes no nome/sku; desempate por nome mais curto (mais específico). */
+/** Só os tokens NUMÉRICOS do termo (identificam o modelo: "100/50" -> ["100","50"]). */
+export function tokensNumericos(s: string): string[] {
+  return tokenizar(s).filter((t) => /\d/.test(t));
+}
+
+// Palavras que denunciam ACESSÓRIO (não o equipamento principal). Se o candidato tem uma
+// destas e o termo pedido NÃO, provavelmente casou um acessório no lugar do produto.
+const ACESSORIO_RE = /\b(cabo|cabos|sensor|sensores|suporte|adaptador|conector|conectores|kit|remoto|capa|terminal|terminais|borne|bornes|prensa|luva)\b/;
+
+/** Números do modelo pedido que NÃO aparecem como TOKEN no candidato. Comparação por token
+ *  (não substring): "50" pedido não pode casar dentro de "250" do candidato. */
+function numerosFaltando(termo: string, nome: string, sku: string | null): string[] {
+  const alvoTokens = new Set(tokenizar(`${nome} ${sku || ""}`));
+  return tokensNumericos(termo).filter((n) => !alvoTokens.has(n));
+}
+
+/**
+ * Match FRACO = provável produto ERRADO, mesmo com tokens sobrepostos:
+ *  - número de modelo do termo ausente no candidato ("100/50" pedido, "250/100" achado); ou
+ *  - candidato é acessório (cabo/sensor/suporte...) sem o termo pedir acessório.
+ * Nesses casos é mais honesto virar PROVISÓRIO (sem preço) do que assumir o preço de um item
+ * que não é o pedido — foi o que poluía o total e exigia correção manual depois.
+ */
+export function matchFraco(termo: string, nome: string, sku: string | null): { fraco: boolean; motivo: string } {
+  const alvo = normalizarTermo(`${nome} ${sku || ""}`);
+  const faltando = numerosFaltando(termo, nome, sku);
+  if (faltando.length > 0) return { fraco: true, motivo: `modelo diferente (falta ${faltando.join("/")})` };
+  if (ACESSORIO_RE.test(alvo) && !ACESSORIO_RE.test(normalizarTermo(termo))) return { fraco: true, motivo: "candidato é acessório, não o equipamento" };
+  return { fraco: false, motivo: "" };
+}
+
+/** Pontua o candidato: nº de tokens do termo presentes no nome/sku; desempate por nome mais
+ *  curto (mais específico). Penaliza número de modelo ausente e acessório no lugar do principal,
+ *  para o candidato CERTO vencer os parecidos-porém-errados. */
 export function pontuaCandidato(termo: string, nome: string, sku: string | null): number {
   const tokens = tokenizar(termo);
   const alvo = normalizarTermo(`${nome} ${sku || ""}`);
   let achou = 0;
   for (const t of tokens) if (alvo.includes(t)) achou++;
-  return achou * 1000 - String(nome).length;
+  let score = achou * 1000 - String(nome).length;
+  score -= 5000 * numerosFaltando(termo, nome, sku).length; // modelo errado (número ausente) perde
+  if (ACESSORIO_RE.test(alvo) && !ACESSORIO_RE.test(normalizarTermo(termo))) score -= 4000; // acessório perde
+  return score;
 }
 
 function origemDoHistorico(row: any): string {
@@ -102,6 +138,11 @@ export async function resolverItens(
       // 3) Escolha final pela sobreposição COMPLETA de tokens (spec incluída), desempate por nome curto.
       lista.sort((a, b) => pontuaCandidato(termo, b.name, b.sku) - pontuaCandidato(termo, a.name, a.sku));
       const p = lista[0];
+
+      // Match fraco (modelo diferente / acessório no lugar do principal) → PROVISÓRIO: melhor
+      // sinalizar "cote isto" do que colocar no total o preço de um item que não é o pedido.
+      const fraqueza = matchFraco(termo, p.name, p.sku);
+      if (fraqueza.fraco) return provisorio(`${fraqueza.motivo}; mais perto: "${p.name}" — aguardando cotação`);
 
       const toks = tokenizar(termo);
       const alvo = normalizarTermo(`${p.name} ${p.sku || ""}`);
