@@ -2,7 +2,7 @@
 // instruções verbais. Pares "ruim → bom" dos tipos de mensagem mais frequentes, com o porquê.
 // São a fonte da verdade (testável) e alimentam um bloco compacto injetado no prompt.
 
-export type TipoMensagem = "cotacao" | "cobranca" | "follow_up_orcamento";
+export type TipoMensagem = "cotacao" | "cobranca" | "follow_up_orcamento" | "agendamento" | "reativacao";
 
 export interface Exemplar {
   tipo: TipoMensagem;
@@ -33,6 +33,20 @@ export const EXEMPLARES: Record<TipoMensagem, Exemplar> = {
     ruim: "Olá, passando para saber se você viu o orçamento. Aguardo retorno. (idêntico a cada toque)",
     bom: "João, sobre o ORÇ-00042: consigo garantir o preço da bateria até sexta, antes do reajuste do fornecedor. Faz sentido fechar essa parte agora?",
     porque: "Cada toque traz um VALOR/gancho novo (não repete o mesmo pedido); um CTA claro.",
+  },
+  agendamento: {
+    tipo: "agendamento",
+    titulo: "Confirmação de agendamento",
+    ruim: "Prezado, seu serviço foi agendado para 28/04/2026 às 09:00. Compareça.",
+    bom: "Oi, João! Confirmado o atendimento no seu barco quinta (28/04) às 9h. Se precisar remarcar, é só me avisar. 👍",
+    porque: "Cordial, nome usado, contexto ('seu barco'), abre porta para remarcar (não é ordem).",
+  },
+  reativacao: {
+    tipo: "reativacao",
+    titulo: "Reativação de cliente",
+    ruim: "Olá, notamos que faz tempo que você não usa nossos serviços. Volte!",
+    bom: "Oi, João! Faz quase um ano da revisão do sistema do seu barco — costuma ser uma boa época pra checar as baterias antes da temporada. Quer que eu veja uma janela?",
+    porque: "Motivo concreto e útil (não 'sumiu'); ligado ao ativo dele; oferece um próximo passo leve.",
   },
 };
 

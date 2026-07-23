@@ -14,9 +14,10 @@ Deno.test("ação sensível pede confirmação por padrão (sem chave)", () => {
   assertEquals(isAutonomyGranted("send_whatsapp_message", "medium", {}), false);
 });
 
-Deno.test("ação sensível liberada com 'auto' executa direto", () => {
-  const s = { [autonomyKey("send_collection_reminder")]: "auto" };
-  assertEquals(isAutonomyGranted("send_collection_reminder", "high", s), true);
+Deno.test("ação sensível liberável com 'auto' executa direto", () => {
+  // send_service_order_link NÃO é trava permanente — o dono pode liberar (Confiança Graduada).
+  const s = { [autonomyKey("send_service_order_link")]: "auto" };
+  assertEquals(isAutonomyGranted("send_service_order_link", "high", s), true);
 });
 
 Deno.test("valor diferente de 'auto' mantém a confirmação", () => {
@@ -50,6 +51,9 @@ Deno.test("a lista de bloqueio cobre dinheiro e ações destrutivas", () => {
     "receive_purchase_order",
     "cancel_service_order",
     "reopen_service_order",
+    "send_collection_reminder", // cobrança individual nunca autônoma (Confiança Graduada)
+    "send_bulk_collection_reminders",
+    "approve_quote_full",
   ]) {
     assertEquals(NEVER_AUTONOMOUS.has(esperado), true, `${esperado} deveria estar bloqueado`);
   }

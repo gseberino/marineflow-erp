@@ -99,4 +99,46 @@ export const commsTools: ToolDef[] = [
       };
     },
   },
+  {
+    name: "get_comms_metrics",
+    description:
+      "MÉTRICAS de comunicação do período: quantas mensagens externas saíram, taxa de resposta, e o ATRITO do destinatário (bloqueios, disputas, opt-outs) — além do desempenho por tipo. Use para 'como está a comunicação?', 'a cobrança está funcionando?', 'teve muito opt-out?'.",
+    input_schema: {
+      type: "object",
+      properties: { days: { type: "number", description: "Janela em dias (padrão 30)." } },
+    },
+    risk: "low",
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { admin } = ctx;
+      const days = Number(args.days) || 30;
+      const desde = new Date(Date.now() - days * 86400000).toISOString();
+      const { data } = await admin.from("ai_comms_log").select("tipo, status, responded_at, reply_intent, block_code").gte("created_at", desde);
+      const rows = (data as any[]) || [];
+      const enviados = rows.filter((r) => r.status === "sent");
+      const responderam = enviados.filter((r) => r.responded_at);
+      const porTipo: Record<string, { enviados: number; responderam: number }> = {};
+      for (const r of enviados) {
+        const t = r.tipo || "?";
+        (porTipo[t] ||= { enviados: 0, responderam: 0 }).enviados++;
+        if (r.responded_at) porTipo[t].responderam++;
+      }
+      const intents: Record<string, number> = {};
+      for (const r of rows) if (r.reply_intent) intents[r.reply_intent] = (intents[r.reply_intent] || 0) + 1;
+      const bloqueios: Record<string, number> = {};
+      for (const r of rows) if (r.status === "blocked") { const c = r.block_code || "?"; bloqueios[c] = (bloqueios[c] || 0) + 1; }
+      return {
+        periodo_dias: days,
+        enviados: enviados.length,
+        responderam: responderam.length,
+        taxa_resposta_pct: enviados.length ? Math.round((responderam.length / enviados.length) * 100) : 0,
+        atrito: { bloqueios: rows.filter((r) => r.status === "blocked").length, disputas: intents["disputa"] || 0, opt_outs: intents["opt_out"] || 0 },
+        por_tipo: Object.fromEntries(Object.entries(porTipo).map(([t, v]) => [t, { enviados: v.enviados, taxa_resposta_pct: v.enviados ? Math.round((v.responderam / v.enviados) * 100) : 0 }])),
+        respostas_por_intencao: intents,
+        bloqueios_por_motivo: bloqueios,
+      };
+    },
+  },
 ];
