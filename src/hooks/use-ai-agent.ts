@@ -264,5 +264,30 @@ export function useAIAgent(context: AIContext) {
     try { localStorage.removeItem(SESSION_STORAGE_KEY); } catch { /* ignore */ }
   }, []);
 
-  return { display, loading, loadingMsg, error, activeProposal, activeOptions, sendMessage, confirmProposal, cancelProposal, selectOption, reset };
+  // Carrega uma conversa anterior pelo id (histórico navegável — Onda 4).
+  const loadSession = useCallback(async (id: string) => {
+    setActiveProposal(null);
+    setActiveOptions(null);
+    setError(null);
+    setSessionId(id);
+    try { localStorage.setItem(SESSION_STORAGE_KEY, id); } catch { /* ignore */ }
+    try {
+      const { data, error: histError } = await supabase.functions.invoke('ai-agent', {
+        body: { type: 'load_history', session_id: id },
+      });
+      if (histError) return;
+      const loaded = (data as any)?.messages as ChatMessage[] | undefined;
+      if (loaded) {
+        setMessages(loaded);
+        setDisplay(
+          loaded
+            .filter((m): m is Extract<ChatMessage, { role: 'user' | 'assistant' }> => m.role === 'user' || m.role === 'assistant')
+            .filter((m) => m.content)
+            .map((m) => ({ kind: 'message' as const, role: m.role, content: m.content }))
+        );
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  return { display, loading, loadingMsg, error, activeProposal, activeOptions, sessionId, sendMessage, confirmProposal, cancelProposal, selectOption, reset, loadSession };
 }

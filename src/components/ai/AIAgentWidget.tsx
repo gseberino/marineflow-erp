@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Sparkles, Send, Loader2, RotateCcw, X, Mic, MicOff } from 'lucide-react';
+import { Sparkles, Send, Loader2, RotateCcw, X, Mic, MicOff, Download, History } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/hooks/use-auth';
+import { supabase } from '@/integrations/supabase/client';
 import { useAIContext } from '@/lib/ai-context';
 import { useAIAgent } from '@/hooks/use-ai-agent';
 import { AIChatMessage } from './AIChatMessage';
@@ -93,8 +94,39 @@ export function AIAgentWidget() {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
   const context = useAIContext();
-  const { display, loading, loadingMsg, sendMessage, confirmProposal, cancelProposal, selectOption, reset, activeProposal, activeOptions } =
+  const { display, loading, loadingMsg, sendMessage, confirmProposal, cancelProposal, selectOption, reset, loadSession, activeProposal, activeOptions } =
     useAIAgent(context);
+  const [sessoes, setSessoes] = useState<Array<{ id: string; last_activity_at: string | null }>>([]);
+  const [showHist, setShowHist] = useState(false);
+
+  const carregarSessoes = useCallback(async () => {
+    let q = supabase
+      .from('ai_operator_sessions')
+      .select('id, last_activity_at')
+      .eq('channel', 'web')
+      .order('last_activity_at', { ascending: false })
+      .limit(15);
+    if (user?.id) q = q.eq('owner_user_id', user.id);
+    const { data } = await q;
+    setSessoes((data as Array<{ id: string; last_activity_at: string | null }>) || []);
+  }, [user?.id]);
+
+  const exportarConversa = useCallback(() => {
+    const linhas = display
+      .filter((it): it is { kind: 'message'; role: 'user' | 'assistant'; content: string } => it.kind === 'message')
+      .map((it) => `${it.role === 'user' ? 'Você' : 'Assistente'}:\n${it.content}\n`);
+    if (linhas.length === 0) return;
+    const texto = `Conversa com o Assistente IA — ${new Date().toLocaleString('pt-BR')}\n\n${linhas.join('\n')}`;
+    const blob = new Blob([texto], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `conversa-ia-${new Date().toISOString().slice(0, 10)}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [display]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const vpHeight = useVisualViewportHeight();
@@ -220,6 +252,38 @@ export function AIAgentWidget() {
             )}
           </div>
           <div className="flex items-center gap-1 shrink-0">
+            <div className="relative">
+              <Button
+                variant="ghost" size="icon" className="h-8 w-8"
+                onClick={() => { const n = !showHist; setShowHist(n); if (n) carregarSessoes(); }}
+                title="Conversas anteriores"
+              >
+                <History className="h-3.5 w-3.5" />
+              </Button>
+              {showHist && (
+                <div className="absolute right-0 top-9 z-10 w-64 rounded-lg border bg-popover shadow-lg p-1 max-h-72 overflow-y-auto">
+                  {sessoes.length === 0 ? (
+                    <p className="text-xs text-muted-foreground px-3 py-3 text-center">Nenhuma conversa anterior.</p>
+                  ) : (
+                    sessoes.map((s) => (
+                      <button
+                        key={s.id}
+                        onClick={() => { loadSession(s.id); setShowHist(false); }}
+                        className="w-full text-left px-3 py-2 rounded-md hover:bg-muted transition-colors"
+                      >
+                        <span className="block text-xs">Conversa</span>
+                        <span className="block text-[10px] text-muted-foreground">
+                          {s.last_activity_at ? new Date(s.last_activity_at).toLocaleString('pt-BR') : '—'}
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={exportarConversa} title="Exportar conversa" disabled={display.length === 0}>
+              <Download className="h-3.5 w-3.5" />
+            </Button>
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={reset} title="Nova conversa">
               <RotateCcw className="h-3.5 w-3.5" />
             </Button>
