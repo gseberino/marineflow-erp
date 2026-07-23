@@ -122,12 +122,16 @@ interface DiagnosticsResult {
   };
   company: {
     found: boolean;
+    id?: string | null;
     legal_name?: string | null;
     trade_name?: string | null;
     state_code?: string | null;
     city_code?: string | null;
     has_certificate?: boolean;
     default_environment?: string | null;
+    // Verdade da API: a empresa aceita espelho de homologação? null = a Contora
+    // não retornou o campo (recurso novo — pode não constar nesta conta ainda).
+    allows_homologation?: boolean | null;
   } | null;
   message?: string;
 }
@@ -326,6 +330,7 @@ export default function FiscalEmission() {
   const [savingSettings, setSavingSettings] = useState(false);
   const [runningDiag, setRunningDiag] = useState(false);
   const [diagResult, setDiagResult] = useState<DiagnosticsResult | null>(null);
+  const [enablingHomolog, setEnablingHomolog] = useState(false);
   const [settingsForm, setSettingsForm] = useState({
     legal_name: '', trade_name: '', cnpj: '', state_registration: '',
     municipal_registration: '', tax_regime: 'simples', crt: 1, state_code: '',
@@ -584,6 +589,33 @@ export default function FiscalEmission() {
       setDiagResult(null);
     } finally {
       setRunningDiag(false);
+    }
+  };
+
+  // Liga allows_homologation na empresa PELA API (com a mesma chave), na empresa
+  // exata que o token resolve — resolve o caso em que o painel foi ligado mas a
+  // API ainda recusa homologação ("A chave de API não permite operações neste
+  // ambiente"). Depois recarrega o diagnóstico para confirmar.
+  const handleEnableHomolog = async () => {
+    setEnablingHomolog(true);
+    const tId = toast.loading('Habilitando homologação na Contora…');
+    try {
+      const { data, error } = await supabase.functions.invoke('fiscal-emit', { body: { action: 'enable_homolog' } });
+      if (error) throw new Error(await extractInvokeErrorMessage(error));
+      if (data?.error) throw new Error(data.error);
+      const results = (data?.results ?? []) as Array<any>;
+      const okOnes = results.filter((r) => r.ok && r.after === true);
+      if (okOnes.length) {
+        toast.success(`Homologação habilitada na Contora (${okOnes.map((r) => r.company).join(', ')}). Agora gere o espelho de novo.`, { id: tId });
+      } else {
+        const errs = results.map((r) => r.error).filter(Boolean).join('; ');
+        toast.error('Não consegui habilitar via API: ' + (errs || 'resposta inesperada da Contora.'), { id: tId });
+      }
+      await handleRunDiagnostics();
+    } catch (err: any) {
+      toast.error('Erro ao habilitar homologação: ' + err.message, { id: tId });
+    } finally {
+      setEnablingHomolog(false);
     }
   };
 
@@ -2087,6 +2119,30 @@ export default function FiscalEmission() {
                     <li className="text-amber-700 mt-1">
                       ⚠ Corrija no <strong>console da Contora → Empresas → editar → Município</strong>. Esse campo não é
                       editável por aqui (a API não expõe update de empresa).
+                    </li>
+                  )}
+                  {/* Espelho de homologação: verdade da API (não do painel). Se
+                      bloqueado, liga allows_homologation pela API na empresa exata
+                      que o token resolve. */}
+                  {diagResult.company?.found && (
+                    <li className="mt-2 border-t pt-2 list-none">
+                      <div className={`flex items-center gap-2 ${diagResult.company.allows_homologation === true ? 'text-success' : 'text-amber-700'}`}>
+                        {diagResult.company.allows_homologation === true ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
+                        Espelho de homologação {diagResult.company.allows_homologation === true ? 'liberado' : diagResult.company.allows_homologation === false ? 'BLOQUEADO nesta empresa' : 'não informado pela Contora'}
+                        {diagResult.company.id ? <span className="text-muted-foreground font-mono ml-1">· {String(diagResult.company.id).slice(0, 8)}</span> : null}
+                      </div>
+                      {diagResult.company.allows_homologation !== true && (
+                        <div className="mt-1 space-y-1.5">
+                          <p className="text-muted-foreground">
+                            O botão “Gerar espelho” precisa disto para trazer a DANFE real de homologação (validada pela SEFAZ).
+                            Ligo o flag <strong>pela API, na empresa que a chave usa</strong> — sem depender do painel.
+                          </p>
+                          <Button size="sm" variant="outline" onClick={handleEnableHomolog} disabled={enablingHomolog}>
+                            {enablingHomolog ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                            Habilitar homologação na Contora
+                          </Button>
+                        </div>
+                      )}
                     </li>
                   )}
                   {/* Diagnóstico do verProc: o campo que a Contora usa como "versão do

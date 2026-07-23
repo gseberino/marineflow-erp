@@ -226,6 +226,25 @@ export class ContoraProvider implements FiscalProvider {
     return { ok: true, data: companies };
   }
 
+  // Liga/desliga allows_homologation na empresa (recurso novo da Contora: uma
+  // empresa de produção pode gerar espelhos de homologação com a MESMA chave se
+  // este flag estiver ligado). O endpoint aceita SOMENTE este campo (por
+  // segurança da Contora). Setar pela API garante que o flag vá para a empresa
+  // exata que o token resolve — sem depender do toggle do painel.
+  async setAllowsHomologation(
+    companyId: string,
+    allow: boolean,
+  ): Promise<FiscalResult<{ allows_homologation: boolean; raw: unknown }>> {
+    const r = await this.request<Record<string, unknown>>(
+      "PATCH",
+      `/companies/${companyId}`,
+      { allows_homologation: allow },
+    );
+    if (!r.ok) return r as FiscalResult<{ allows_homologation: boolean; raw: unknown }>;
+    const d = r.data ?? {};
+    return { ok: true, data: { allows_homologation: d["allows_homologation"] === true, raw: d } };
+  }
+
   async sefazStatus(): Promise<FiscalResult<SefazStatusInfo>> {
     const r = await this.request<Record<string, unknown>>("GET", "/sefaz/status");
     // ok:false aqui já significa SEFAZ indisponível / não pronta.

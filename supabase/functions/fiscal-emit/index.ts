@@ -251,6 +251,7 @@ Deno.serve(async (req) => {
     if (body.action === "cancel") return await handleCancel(admin, body);
     if (body.action === "correction") return await handleCorrection(admin, body);
     if (body.action === "diagnostics") return await handleDiagnostics();
+    if (body.action === "enable_homolog") return await handleEnableHomolog();
     if (body.action === "artifact") return await handleArtifact(admin, body);
     if (body.action === "preview") return await handlePreview(admin, body);
     if (body.action === "homolog") return await handleHomolog(admin, body);
@@ -869,6 +870,7 @@ async function handleDiagnostics(): Promise<Response> {
       company: firstCompany
         ? {
           found: true,
+          id: firstCompany.id ?? null,
           legal_name: legalName,
           trade_name: tradeName,
           state_code: firstCompany.stateCode ?? null,
@@ -876,6 +878,9 @@ async function handleDiagnostics(): Promise<Response> {
           has_certificate: firstCompany.hasCertificate ?? false,
           certificate_valid_until: firstCompany.certificateValidUntil ?? null,
           default_environment: firstCompany.defaultEnvironment ?? null,
+          // Verdade da API (não do painel): a empresa aceita espelho de
+          // homologação? undefined = a Contora não retornou o campo nesta conta.
+          allows_homologation: (firstCompany.raw as Record<string, unknown> | undefined)?.["allows_homologation"] ?? null,
         }
         : { found: false },
       message: !companies.ok
@@ -883,6 +888,40 @@ async function handleDiagnostics(): Promise<Response> {
         : undefined,
     },
   });
+}
+
+// Liga allows_homologation PELA API (com o token) na(s) empresa(s) da conta —
+// garante que o flag vá para a empresa EXATA que o token resolve, sem depender do
+// toggle do painel. Necessário quando o painel foi ligado mas a API ainda recusa
+// homologação ("A chave de API não permite operações neste ambiente").
+async function handleEnableHomolog(): Promise<Response> {
+  const provider = createFiscalProvider();
+  const companies = await provider.listCompanies();
+  if (!companies.ok) return jr({ error: "Falha ao consultar empresas na Contora: " + companies.error }, 502);
+  if (!companies.data.length) return jr({ error: "Nenhuma empresa encontrada na conta Contora." }, 404);
+
+  const results: Array<Record<string, unknown>> = [];
+  for (const c of companies.data) {
+    const nome = c.legalName ?? c.tradeName ?? c.id ?? "?";
+    if (!c.id) {
+      results.push({ company: nome, ok: false, error: "empresa sem id na resposta da Contora" });
+      continue;
+    }
+    const before = (c.raw as Record<string, unknown> | undefined)?.["allows_homologation"] ?? null;
+    // deno-lint-ignore no-explicit-any
+    const res = await (provider as any).setAllowsHomologation(c.id, true) as
+      { ok: true; data: { allows_homologation: boolean } } | { ok: false; error: string };
+    results.push({
+      company: nome,
+      id: c.id,
+      before,
+      ok: res.ok,
+      after: res.ok ? res.data.allows_homologation : null,
+      error: res.ok ? null : res.error,
+    });
+  }
+  const anyOk = results.some((r) => r.ok === true);
+  return jr({ ok: anyOk, results });
 }
 
 // deno-lint-ignore no-explicit-any
