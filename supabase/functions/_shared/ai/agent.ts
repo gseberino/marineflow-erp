@@ -240,6 +240,32 @@ async function buildPendingSummary(admin: any, toolName: string, args: Record<st
     }
     return partes.map((p) => `- ${p}`).join("\n");
   }
+  if (toolName === "send_supplier_quote_request") {
+    const partes: string[] = [];
+    // Código COT-XXXXX, nunca o UUID da cotação.
+    if (args?.quote_request_id) {
+      try {
+        const { data } = await admin.from("quote_requests").select("code").eq("id", String(args.quote_request_id)).maybeSingle();
+        if (data?.code) partes.push(`Cotação: *${data.code}*`);
+      } catch { /* best-effort */ }
+    }
+    // Fornecedores: NOME + TELEFONE (o dono confirma por aí, não por UUID). Avisa quem está sem telefone.
+    const ids: string[] = Array.isArray(args?.supplier_ids) ? (args.supplier_ids as string[]) : [];
+    if (ids.length) {
+      let linhas: string[] = [`Enviar para ${ids.length} fornecedor(es):`];
+      try {
+        const { data } = await admin.from("suppliers").select("id, name, phone").in("id", ids);
+        const byId: Record<string, any> = Object.fromEntries(((data as any[]) || []).map((s) => [s.id, s]));
+        linhas = linhas.concat(ids.map((id) => {
+          const s = byId[id];
+          if (!s) return `- (fornecedor não encontrado: ${id})`;
+          return `- ${s.name || "sem nome"}${s.phone ? ` — ${s.phone}` : " — ⚠️ sem telefone cadastrado"}`;
+        }));
+      } catch { /* best-effort */ }
+      partes.push(linhas.join("\n"));
+    }
+    return partes.length ? partes.join("\n") : "Enviar pedido de cotação.";
+  }
 
   const lines: string[] = [];
   for (const [k, v] of Object.entries(args || {})) {

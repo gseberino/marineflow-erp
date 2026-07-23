@@ -85,7 +85,7 @@ export const whatsappTools: ToolDef[] = [
             required: ["description"],
           },
         },
-        notes: { type: "string", description: "Observação opcional (prazo desejado, condições de pagamento)." },
+        notes: { type: "string", description: "Observação opcional que VAI na mensagem (ex.: condição de pagamento). NÃO use para prazo (quem define é o fornecedor, só se ele perguntar) nem para descrever a aplicação/'pra que serve' (confunde quem atende)." },
         quote_request_id: { type: "string", description: "UUID de uma cotação criada com create_quote_request. FORMA PREFERIDA: manda o código COT-XXXXX e os itens numerados, o que faz a resposta do fornecedor voltar interpretável." },
       },
     },
@@ -112,7 +112,9 @@ export const whatsappTools: ToolDef[] = [
         codigo = req.code;
         if (supplierIds.length === 0) supplierIds = (req.sent_supplier_ids as string[]) || [];
         items = (qItems || []).map((i: any) => ({ position: i.position, description: i.description, quantity: Number(i.quantity) }));
-        if (!args.notes && req.notes) args.notes = req.notes;
+        // req.notes fica INTERNO de propósito: aplicação ("pra que serve") e prazo NÃO vão na
+        // mensagem ao fornecedor — descrever a aplicação confunde quem atende, e o prazo quem
+        // define é o fornecedor. Só um args.notes explícito (ex.: condição de pagamento) é enviado.
       }
 
       if (supplierIds.length === 0) return { error: "Informe ao menos um fornecedor (supplier_ids) ou uma cotação com fornecedores." };
@@ -132,12 +134,14 @@ export const whatsappTools: ToolDef[] = [
         const sup = byId[sid];
         if (!sup) { resultados.push({ fornecedor: sid, status: "não encontrado" }); continue; }
         if (!sup.phone) { resultados.push({ fornecedor: sup.name || sid, status: "sem WhatsApp cadastrado" }); continue; }
-        // Pedir o formato de volta é o que torna a resposta interpretável sem erro.
+        // Mensagem ENXUTA de propósito: saudação neutra (sem razão social, que às vezes é
+        // genérica) + itens numerados. Sem descrever a aplicação, sem estipular prazo e sem
+        // ensinar o fornecedor a responder — ele responde pela lista. (Ver feedback do dono.)
         const msg =
-          `Olá${sup.name ? ` ${sup.name}` : ""}, tudo bem? Aqui é da ${company}.\n` +
+          `Olá, tudo bem? Aqui é da ${company}.\n` +
           `Gostaríamos de uma cotação${codigo ? ` (${codigo})` : ""}:\n${itemLines}` +
           `${args.notes ? `\n\n${args.notes}` : ""}\n\n` +
-          `Pode responder com o número do item, preço unitário e prazo? Ex.: "1 - R$ 850 - 5 dias". Obrigado!`;
+          `Obrigado!`;
         const r = await sendWhatsapp(sup.phone, msg, jwt);
         resultados.push({ fornecedor: sup.name || sid, status: r.ok ? "enviado" : `falhou: ${r.error}` });
       }
