@@ -72,6 +72,12 @@ por último faz o certo" — sem bookkeeping frágil, porque cada uma sempre par
 | `register` / `heartbeat` / `done` | entra / sinaliza vivo / sai do registro |
 | `lock` / `unlock` | adquire / libera o lock de integração (mkdir atômico; quebra lock stale > 45min) |
 
+## Automação (hooks) — `.claude/settings.json`
+Três hooks tornam o protocolo automático (não dependem de você lembrar):
+- **SessionStart** → `hooks/session-start.sh`: registra a sessão e, se houver outra ativa, **avisa para isolar** antes de editar.
+- **PostToolUse** (Edit/Write/Bash) → `guard.sh heartbeat`: mantém você "vivo" no registro sem esforço.
+- **PreToolUse** (Bash) → `hooks/precheck.sh` (Node, `precheck.cjs`): **bloqueia** `git add -A/.` sempre, e `reset --hard`/`checkout .`/`restore .`/`clean -f`/`stash`/`commit` na `main` **quando há outra sessão ativa**. É **fail-open**: qualquer erro no hook (node ausente etc.) libera — nunca trava as sessões por bug. Só um `exit 2` intencional bloqueia.
+
 ## Limitação (honesta)
 É **cooperativo**: protege plenamente entre sessões que rodam ESTA skill. Se a outra ferramenta
 (Codex, Gemini, Copilot…) não seguir, o worktree ainda **te isola** (você sai da pasta
