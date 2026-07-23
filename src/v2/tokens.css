@@ -1,0 +1,116 @@
+/* ── MarineFlow v2 — Tokens da direção aprovada (23/07/2026) ─────────────────
+   Light  = "Estaleiro Claro"  (C): superfícies frias quase brancas, sidebar
+            branca, gold como única cor de ação.
+   Dark   = "Ponte de Comando" (B): navy profundo, gold luminoso, alto contraste.
+   Escopo: .themev2 redefine as MESMAS variáveis do design system, então todos
+   os utilitários shadcn (bg-background, text-foreground, border-border, …)
+   funcionam dentro do escopo — e NENHUMA tela atual é afetada.
+   A estrutura é idêntica nos dois temas; só a paleta muda (decisão do portão).
+──────────────────────────────────────────────────────────────────────────── */
+
+.themev2 {
+  --background: 210 25% 98%;
+  --foreground: 210 45% 16%;
+
+  --card: 0 0% 100%;
+  --card-foreground: 210 45% 16%;
+
+  --popover: 0 0% 100%;
+  --popover-foreground: 210 45% 16%;
+
+  --primary: 36 48% 59%;            /* Gold HBR — única cor de ação */
+  --primary-foreground: 210 45% 16%;
+
+  --secondary: 210 25% 95%;
+  --secondary-foreground: 210 45% 16%;
+
+  --muted: 210 24% 96%;
+  --muted-foreground: 208 16% 47%;
+
+  --accent: 207 49% 34%;            /* Navy-info: links e realces informativos */
+  --accent-foreground: 0 0% 100%;
+
+  --destructive: 4 62% 44%;
+  --destructive-foreground: 0 0% 100%;
+
+  --border: 210 20% 93%;
+  --input: 210 20% 90%;
+  --ring: 36 48% 59%;
+
+  --radius: 0.5625rem;              /* 9px — decisão do portão */
+
+  --success: 151 56% 27%;
+  --success-foreground: 0 0% 100%;
+  --warning: 38 62% 33%;
+  --warning-foreground: 0 0% 100%;
+  --info: 207 49% 34%;
+  --info-foreground: 0 0% 100%;
+
+  /* Sidebar clara com ativo em gold sobre tint quente */
+  --sidebar-background: 0 0% 100%;
+  --sidebar-foreground: 208 26% 32%;
+  --sidebar-primary: 36 48% 59%;
+  --sidebar-primary-foreground: 210 45% 16%;
+  --sidebar-accent: 41 52% 92%;
+  --sidebar-accent-foreground: 38 62% 33%;
+  --sidebar-border: 210 20% 93%;
+  --sidebar-ring: 36 48% 59%;
+
+  --chart-1: 36 48% 59%;
+  --chart-2: 207 49% 34%;
+  --chart-3: 205 29% 61%;
+  --chart-4: 151 56% 27%;
+  --chart-5: 4 62% 44%;
+}
+
+.themev2[data-mode='dark'] {
+  --background: 213 52% 8%;
+  --foreground: 210 27% 93%;
+
+  --card: 212 48% 12%;
+  --card-foreground: 210 27% 93%;
+
+  --popover: 212 48% 12%;
+  --popover-foreground: 210 27% 93%;
+
+  --primary: 36 52% 64%;
+  --primary-foreground: 213 52% 8%;
+
+  --secondary: 210 45% 16%;
+  --secondary-foreground: 210 27% 93%;
+
+  --muted: 211 40% 15%;
+  --muted-foreground: 206 22% 63%;
+
+  --accent: 206 50% 71%;
+  --accent-foreground: 213 52% 8%;
+
+  --destructive: 7 61% 62%;
+  --destructive-foreground: 213 52% 8%;
+
+  --border: 211 39% 19%;
+  --input: 211 39% 19%;
+  --ring: 36 52% 64%;
+
+  --success: 143 39% 64%;
+  --success-foreground: 213 52% 8%;
+  --warning: 39 59% 63%;
+  --warning-foreground: 213 52% 8%;
+  --info: 206 50% 71%;
+  --info-foreground: 213 52% 8%;
+
+  --sidebar-background: 210 56% 6%;
+  --sidebar-foreground: 206 22% 63%;
+  --sidebar-primary: 36 52% 64%;
+  --sidebar-primary-foreground: 213 52% 8%;
+  --sidebar-accent: 212 35% 16%;
+  --sidebar-accent-foreground: 36 52% 64%;
+  --sidebar-border: 212 40% 12%;
+  --sidebar-ring: 36 52% 64%;
+
+  --chart-1: 36 52% 64%;
+  --chart-2: 206 50% 71%;
+  --chart-3: 205 29% 55%;
+  --chart-4: 143 39% 64%;
+  --chart-5: 7 61% 62%;
+}
