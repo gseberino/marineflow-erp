@@ -1235,10 +1235,12 @@ export default function FiscalEmission() {
       if (error) throw new Error(await extractInvokeErrorMessage(error));
       const res: any = data;
 
-      // Conta Contora sem homologação → espelho local (renderizado por nós).
+      // Homologação indisponível → espelho local (renderizado por nós). Mostra o
+      // motivo real devolvido pela Contora para o diagnóstico ficar visível.
       if (res && !(res instanceof Blob) && res.homolog_unavailable) {
         await openLocalEspelho();
-        toast.success('Espelho aberto em nova aba (versão local, SEM VALOR FISCAL). Sua conta Contora ainda não emite em homologação — assim que habilitarem, este botão passa a trazer a DANFE real da SEFAZ.', { id: tId });
+        const motivo = res.reason ? ` Motivo: ${res.reason}` : '';
+        toast('Espelho local aberto (SEM VALOR FISCAL). A homologação real na SEFAZ ficou indisponível.' + motivo, { id: tId, icon: '⚠️', duration: 9000 });
         return;
       }
       // Rejeição/falha real da SEFAZ volta como JSON { error }.

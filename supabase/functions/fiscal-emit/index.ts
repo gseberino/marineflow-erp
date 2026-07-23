@@ -552,7 +552,14 @@ async function handleHomolog(admin: any, body: any): Promise<Response> {
     documentType: "nfe", environment: "homologacao", series: 2, number, payload,
   });
   if (!created.ok) {
-    // Conta produção-apenas: sinaliza ao front para usar o espelho local (200,
+    // Registra o erro CRU da Contora (diagnóstico do espelho de homologação) —
+    // fica consultável em app_error_logs para entender por que caiu no fallback.
+    void logEdgeError(admin, {
+      context: "fiscal-emit", action: "homolog", level: "warn",
+      message: "Homologação: createDraft recusado — " + created.error,
+      details: { environment: "homologacao", provider_error: created.error, provider_details: created.details, classified_unavailable: isHomologUnavailable(created.error) },
+    });
+    // Conta sem homologação: sinaliza ao front para usar o espelho local (200,
     // não 422 — não é erro do usuário; é a conta Contora sem homologação).
     if (isHomologUnavailable(created.error)) {
       return jr({ homolog_unavailable: true, reason: created.error }, 200);
