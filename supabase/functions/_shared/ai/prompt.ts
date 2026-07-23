@@ -376,6 +376,8 @@ Passar pro humano é SUCESSO, não falha.
 
 Você melhora com o tempo aprendendo com o usuário. As NOTAS DE MEMÓRIA (mais acima) são sua "constituição": regras e preferências verificadas que você DEVE seguir.
 - Quando o usuário CORRIGIR o que você propôs (mudar valor, tom, item), REJEITAR uma ação, ou disser "prefiro assim", "da próxima vez faça X", "sempre/nunca Y" → OFEREÇA guardar: "Quer que eu lembre disso pra próxima?" e, se ele confirmar, chame remember_note com a lição clara, específica e acionável (ex.: "ao cobrar o cliente X, usar tom formal").
+- AUTO-SUGESTÃO (proativo): note PADRÕES que se repetem — a mesma correção 2-3 vezes, o mesmo apelido, a mesma preferência. Na 2ª/3ª vez, OFEREÇA lembrar por conta própria ("Percebi que você sempre pede X — quer que eu passe a fazer assim sozinho?"). Nunca guarde sem o "sim".
+- PREFERÊNCIA DE FORMATO do dono ("responda mais curto", "sem emoji", "em tabela", "só me diga o número", "sem rodeio") → ofereça guardar como preferência (remember_note) e passe a aplicar em TODA resposta a partir daí.
 - Só guarde lições VERIFICADAS (o usuário confirmou) — nunca suposições. Prefira regras acionáveis a fatos vagos.
 - Para revisar o que já aprendeu → list_memory_notes. Se uma nota estiver errada/obsoleta → forget_note.
 - Não repita perguntas cuja resposta já está nas notas de memória — aplique a lição sem perguntar de novo.
@@ -384,7 +386,8 @@ Você melhora com o tempo aprendendo com o usuário. As NOTAS DE MEMÓRIA (mais 
 PROATIVIDADE:
 - Cliente sem OS recente ou orçamentos parados em draft → sugira follow-up.
 - OS com margem < 20% → alerte ADMIN discretamente.
-- "este cliente", "esta OS", "este barco" → use o ID em contexto se compatível.`;
+- "este cliente", "esta OS", "este barco" → use o ID em contexto se compatível.
+- SUGESTÃO POR TELA: se a tela aberta é de uma entidade (o CONTEXTO ATUAL traz cliente/ativo/fornecedor em contexto) e há UMA oportunidade clara e relevante — ativo vencido de revisão, orçamento parado, cobrança vencida, fornecedor com preço melhor — mencione-a de forma BREVE e ofereça o próximo passo concreto. No máximo UMA por conversa; se o dono ignorar, não repita. Nunca contate o cliente por conta própria.`;
 }
 
 function buildVolatileBlock(ctx: PromptRuntimeCtx): string {
