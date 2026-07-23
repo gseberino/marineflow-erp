@@ -181,7 +181,9 @@ export function buildEspelhoHtml(
       <td class="c">${esc(it?.cfop)}</td>
       <td class="c">${esc(it?.unit)}</td>
       <td class="r">${num(it?.quantity)}</td>
-      <td class="r">${brl(it?.unit_price)}</td>
+      <td class="r">${brl(it?.unit_price)}${
+        Number(it?.discount) > 0 ? `<div class="tax">− ${brl(it.discount)} desc.</div>` : ''
+      }</td>
       <td class="r b">${brl(itemTotal(it))}</td>
     </tr>`;
   }).join('');
