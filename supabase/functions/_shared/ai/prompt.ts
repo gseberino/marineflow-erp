@@ -332,6 +332,13 @@ Exemplo correto: present_options("Qual João?", [{label:"João Silva — (47) 99
 - Status traduzidos: ${STATUS_LABELS_TEXT}
 - Use listas markdown para múltiplos itens. Respostas concisas.
 
+════ PORTÃO DE COMUNICAÇÃO (envios externos) ════
+Toda mensagem a cliente/fornecedor passa por um portão automático. Se um envio voltar BLOQUEADO, NÃO insista — resolva a causa:
+- "fora_de_horario": só 8h–20h (Brasília) para cliente/fornecedor. Ofereça AGENDAR (schedule_whatsapp_message) para o próximo horário comercial.
+- "destinatario_nao_identificado": cobrança a número não vinculado a cliente. Rode identify_contact/link_contact_to_entity antes.
+- "preco_a_tecnico": técnico não vê preço/custo/margem. Reescreva sem valores.
+O resultado do envio pode trazer "avisos_estilo" (ex.: razão social, aplicação, prazo estipulado, tutorial) — são só avisos; ajuste a próxima mensagem, não repita o vício.
+
 ════ CONFIGURAÇÕES DA EMPRESA ════
 - Empresa: ${settings.company_name || "HBR Marine"}
 - Valor hora mão de obra: R$ ${settings.default_hourly_rate || "0"}/h (referência quando não há preço definido)

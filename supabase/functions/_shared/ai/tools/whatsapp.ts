@@ -1,4 +1,5 @@
 import { NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
+import { guardaDeEnvio } from "../comms/send-guard.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -130,6 +131,7 @@ export const whatsappTools: ToolDef[] = [
         .join("\n");
 
       const resultados: Array<{ fornecedor: string; status: string }> = [];
+      const avisos = new Set<string>();
       for (const sid of supplierIds) {
         const sup = byId[sid];
         if (!sup) { resultados.push({ fornecedor: sid, status: "não encontrado" }); continue; }
@@ -142,11 +144,15 @@ export const whatsappTools: ToolDef[] = [
           `Gostaríamos de uma cotação${codigo ? ` (${codigo})` : ""}:\n${itemLines}` +
           `${args.notes ? `\n\n${args.notes}` : ""}\n\n` +
           `Obrigado!`;
+        // Portão de comunicação: conformidade (bloqueia) + estilo (avisa).
+        const g = guardaDeEnvio(msg, { tipo: "cotacao", audiencia: "fornecedor", canal: "whatsapp", destinatarioIdentificado: true });
+        if (g.bloqueado) { resultados.push({ fornecedor: sup.name || sid, status: `bloqueado: ${g.motivo}` }); continue; }
+        g.avisos.forEach((a) => avisos.add(a));
         const r = await sendWhatsapp(sup.phone, msg, jwt);
         resultados.push({ fornecedor: sup.name || sid, status: r.ok ? "enviado" : `falhou: ${r.error}` });
       }
       const enviados = resultados.filter((r) => r.status === "enviado").length;
-      return { ok: true, cotacao: codigo || null, enviados, total: supplierIds.length, resultados };
+      return { ok: true, cotacao: codigo || null, enviados, total: supplierIds.length, resultados, ...(avisos.size ? { avisos_estilo: [...avisos] } : {}) };
     },
   },
   {
@@ -176,11 +182,14 @@ export const whatsappTools: ToolDef[] = [
       const msg =
         args.custom_message ||
         `Olá${col.contact_name ? ` ${col.contact_name}` : ""}, lembrete amigável: você possui um valor de ${fmt} com vencimento em ${col.due_date}. Qualquer dúvida estamos à disposição.`;
+      // Portão: conformidade (horário, número identificado) bloqueia; estilo (ameaça) avisa.
+      const g = guardaDeEnvio(msg, { tipo: "cobranca", audiencia: "cliente", canal: "whatsapp", destinatarioIdentificado: !!col.client_id, texto: msg });
+      if (g.bloqueado) return { error: g.motivo };
       const r = await sendWhatsapp(phone, msg, jwt);
       if (r.ok) {
         await admin.from("collections").update({ last_auto_sent_at: new Date().toISOString() }).eq("id", col.id);
       }
-      return r;
+      return { ...r, ...(g.avisos.length ? { avisos_estilo: g.avisos } : {}) };
     },
   },
   {
@@ -210,7 +219,10 @@ export const whatsappTools: ToolDef[] = [
       const origin = appOrigin || settings.app_public_url || "https://hbrmarine.online";
       const link = `${origin}/view/${so.share_token}`;
       const msg = args.custom_message || `Olá${c?.name ? ` ${c.name}` : ""}, segue o link da OS ${so.service_order_number}: ${link}`;
-      return await sendWhatsapp(phone, msg, jwt);
+      const g = guardaDeEnvio(msg, { tipo: "os_link", audiencia: "cliente", canal: "whatsapp", destinatarioIdentificado: !!so.client_id });
+      if (g.bloqueado) return { error: g.motivo };
+      const r = await sendWhatsapp(phone, msg, jwt);
+      return { ...r, ...(g.avisos.length ? { avisos_estilo: g.avisos } : {}) };
     },
   },
   {
