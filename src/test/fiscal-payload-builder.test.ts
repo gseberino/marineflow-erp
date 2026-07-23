@@ -420,6 +420,24 @@ describe("buildNfeDraftPayload — cobrança (cobr = fatura + duplicatas)", () =
     expect(p.payments).toEqual([{ method: "14", indicator: 1, amount: 301 }]);
   });
 
+  it("fatura reflete o desconto por item: original = bruto+despesas, desconto = vDesc, líquido = vNF", () => {
+    // 1 item: 2 × 150.50 = 301 bruto; desconto 51 → vNF 250.
+    const p = buildNfeDraftPayload(makeInput({
+      items: [{ code: "SKU-1", name: "Produto A", ncm: "85176259", cfop: "5102", unit: "UN", quantity: 2, unitPrice: 150.5, discount: 51 }],
+      installments: [
+        { dueDate: future(30), amount: 125 },
+        { dueDate: future(60), amount: 125 },
+      ],
+    })) as any;
+    expect(p.billing.invoice).toEqual({ number: "1", original_amount: 301, discount_amount: 51, net_amount: 250 });
+    // Regra da Contora: net_amount = original_amount − discount_amount.
+    expect(p.billing.invoice.net_amount).toBe(p.billing.invoice.original_amount - p.billing.invoice.discount_amount);
+    // Soma das duplicatas e do pagamento (14) = net_amount.
+    const soma = p.billing.installments.reduce((s: number, d: any) => s + d.amount, 0);
+    expect(Math.round(soma * 100) / 100).toBe(250);
+    expect(p.payments).toEqual([{ method: "14", indicator: 1, amount: 250 }]);
+  });
+
   it("a soma das duplicatas bate EXATAMENTE com o net_amount (ajuste de centavos na última)", () => {
     // 301.00 / 3 = 100.333… → 100.33 + 100.33 + 100.34
     const p = buildNfeDraftPayload(makeInput({

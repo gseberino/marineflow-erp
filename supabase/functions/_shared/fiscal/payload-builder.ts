@@ -373,11 +373,19 @@ export function buildNfeDraftPayload(
       due_date: p.dueDate,
       amount: i === parcels.length - 1 ? round2(rounded[i] + drift) : rounded[i],
     }));
+    // Fatura FIEL ao desconto: valor original = bruto + despesas acessórias (antes
+    // do desconto), desconto = vDesc, líquido = vNF. A Contora exige net_amount =
+    // original_amount − discount_amount (satisfeito: net = (net+vDesc) − vDesc) e a
+    // soma das duplicatas = net (inalterado). Sem desconto, original = net e
+    // discount = 0 (comportamento anterior preservado). Assim o quadro "Fatura" do
+    // espelho/DANFE bate com o quadro "Totais" (mesmo desconto nos dois lugares).
+    const invoiceDiscount = totalDiscount;
+    const invoiceOriginal = round2(net + invoiceDiscount);
     payload.billing = {
       invoice: {
         number: cleanText(input.invoiceNumber, 60) || "1",
-        original_amount: net,
-        discount_amount: 0,
+        original_amount: invoiceOriginal,
+        discount_amount: invoiceDiscount,
         net_amount: net,
       },
       installments: duplicates,

@@ -1133,11 +1133,15 @@ export default function FiscalEmission() {
   const buildEmissionBody = () => ({
     client_id: clientId || null,
     nature_of_operation: natureOfOperation,
-    payment_method: paymentMethod,
+    // Venda a PRAZO (parcelada) → tPag = Duplicata Mercantil (14): a Contora/SEFAZ
+    // exige o método 14 quando há grupo de cobrança (fatura+duplicatas), então o
+    // método do seletor não se aplica ao parcelado. À vista → o método escolhido.
+    // Enviar o método REAL da nota faz o espelho mostrar o MESMO que será emitido.
+    payment_method: (selectedNature.hasPayment && payMode === 'parcelado' && payFirstDue) ? '14' : paymentMethod,
     // Plano de pagamento (à vista/parcelado) definido na emissão — só faz
     // sentido em naturezas com pagamento (venda); vira os recebíveis depois.
     payment_terms: (selectedNature.hasPayment && payMode === 'parcelado' && payFirstDue)
-      ? { mode: 'parcelado', method: paymentMethod, installments: buildSchedule(total, payN, payFirstDue, payInterval, paymentMethod) }
+      ? { mode: 'parcelado', method: '14', installments: buildSchedule(total, payN, payFirstDue, payInterval, '14') }
       : (selectedNature.hasPayment ? { mode: 'avista', method: paymentMethod, installments: null } : null),
     presence_indicator: presenceIndicator,
     consumer_final: consumerFinal,
@@ -2410,7 +2414,18 @@ export default function FiscalEmission() {
               <div className="flex items-center justify-between gap-4">
                 <div className="flex-1">
                   <Label>Forma de Pagamento</Label>
-                  {selectedNature.hasPayment ? (
+                  {!selectedNature.hasPayment ? (
+                    <div className="h-10 flex items-center px-3 rounded-md border bg-muted/40 text-sm text-muted-foreground">
+                      Sem Pagamento (devolução/remessa não têm transação financeira)
+                    </div>
+                  ) : payMode === 'parcelado' ? (
+                    // A prazo: a NF-e usa obrigatoriamente Duplicata Mercantil (14).
+                    // Mostrar fixo evita a divergência de o usuário escolher um método
+                    // que seria descartado — o espelho reflete exatamente isto.
+                    <div className="h-10 flex items-center px-3 rounded-md border bg-muted/40 text-sm">
+                      14 — Duplicata Mercantil <span className="text-muted-foreground ml-1">· a prazo (vencimentos abaixo)</span>
+                    </div>
+                  ) : (
                     <Select value={paymentMethod} onValueChange={setPaymentMethod}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
@@ -2419,10 +2434,6 @@ export default function FiscalEmission() {
                         ))}
                       </SelectContent>
                     </Select>
-                  ) : (
-                    <div className="h-10 flex items-center px-3 rounded-md border bg-muted/40 text-sm text-muted-foreground">
-                      Sem Pagamento (devolução/remessa não têm transação financeira)
-                    </div>
                   )}
                 </div>
                 <div className="text-right">

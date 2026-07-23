@@ -216,8 +216,13 @@ export function buildEspelhoHtml(
       </div>`
     : '';
 
+  // indicator (indPag): 0 = à vista, 1 = a prazo. Deixa explícito no espelho se a
+  // duplicata/pagamento é à vista ou parcelado, como no DANFE.
   const pagamentosLinha = payments.length
-    ? payments.map((p) => `${paymentLabel(p?.method)} — ${brl(p?.amount)}`).join('<br>')
+    ? payments.map((p) => {
+        const prazo = p?.indicator === 1 ? ' · a prazo' : p?.indicator === 0 ? ' · à vista' : '';
+        return `${paymentLabel(p?.method)}${prazo} — ${brl(p?.amount)}`;
+      }).join('<br>')
     : '—';
 
   // O quadro começa direto pelo conteúdo, igual ao DANFE. A Contora imprimia um
@@ -367,7 +372,7 @@ export function buildEspelhoHtml(
       <div class="box-title">Totais</div>
       <div class="totais">
         <div><span class="lbl">Total dos produtos</span>${brl(totalBruto)}</div>
-        <div><span class="lbl">Desconto</span>${brl(totalDescItens + Number(billing?.invoice?.discount_amount ?? 0))}</div>
+        <div><span class="lbl">Desconto</span>${brl(totalDescItens)}</div>
         ${totalOutroItens > 0 ? `<div><span class="lbl">Despesas acessórias</span>${brl(totalOutroItens)}</div>` : ''}
         <div><span class="lbl">Total da nota</span><span class="total-nota">${brl(billing?.invoice?.net_amount ?? totalProdutos)}</span></div>
       </div>

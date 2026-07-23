@@ -194,3 +194,32 @@ describe("buildEspelhoHtml — despesas acessórias (vOutro)", () => {
     expect(html).toContain("1.862,55");
   });
 });
+
+describe("buildEspelhoHtml — pagamento à vista / a prazo (indicator)", () => {
+  it("mostra 'a prazo' e Duplicata Mercantil no parcelado", () => {
+    const html = buildEspelhoHtml(makePayload(parcelado), emitter);
+    expect(html).toContain("14 — Duplicata Mercantil");
+    expect(html).toContain("a prazo");
+  });
+  it("mostra 'à vista' quando indicator = 0", () => {
+    const html = buildEspelhoHtml(makePayload({ payments: [{ method: "17", indicator: 0, amount: 301 }] }), emitter);
+    expect(html).toContain("17 — PIX");
+    expect(html).toContain("à vista");
+  });
+});
+
+describe("buildEspelhoHtml — desconto não é contado em dobro (Totais x Fatura)", () => {
+  it("o Desconto dos Totais reflete só o desconto dos itens, mesmo com discount_amount na fatura", () => {
+    const html = buildEspelhoHtml({
+      items: [{ code: "A", name: "Item", ncm: "1", cfop: "5102", quantity: 2, unit_price: 150.5, discount: 51 }],
+      payments: [{ method: "14", indicator: 1, amount: 250 }],
+      billing: {
+        invoice: { number: "1", original_amount: 301, discount_amount: 51, net_amount: 250 },
+        installments: [{ number: "001", due_date: "2026-08-20", amount: 250 }],
+      },
+    }, {});
+    expect(html).toContain("51,00");       // desconto uma vez
+    expect(html).not.toContain("102,00");  // NÃO dobrado (51 itens + 51 fatura)
+    expect(html).toContain("250,00");      // total da nota = net_amount
+  });
+});
