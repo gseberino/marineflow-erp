@@ -351,6 +351,9 @@ export default function FiscalEmission() {
   const [showEmit, setShowEmit] = useState(false);
   const [emitting, setEmitting] = useState(false);
   const [generatingEspelho, setGeneratingEspelho] = useState(false);
+  // Índice do item cujos detalhes fiscais estão abertos no diálogo secundário
+  // (mantém a linha do item compacta, sem estourar a largura do popup).
+  const [detailIndex, setDetailIndex] = useState<number | null>(null);
   // Espelho de conferência exibido antes de transmitir (fluxo Emitir → conferir → confirmar).
   const [confirmEspelho, setConfirmEspelho] = useState<
     { html: string; number?: number; series?: number } | null
@@ -1090,6 +1093,11 @@ export default function FiscalEmission() {
   const total = activeItems.reduce(
     (sum, it) => sum + Math.max(0, it.quantity * it.unit_price - (it.discount || 0)) + (it.other_expenses || 0), 0,
   );
+  // Composição do total, para explicar a diferença entre o subtotal dos produtos
+  // e o total da nota (vNF = vProd − vDesc + vOutro).
+  const subtotalProdutos = activeItems.reduce((s, it) => s + it.quantity * it.unit_price, 0);
+  const totalDesconto = activeItems.reduce((s, it) => s + (it.discount || 0), 0);
+  const totalDespesas = activeItems.reduce((s, it) => s + (it.other_expenses || 0), 0);
 
   // Dados adicionais da devolução ao fornecedor, calculados a partir dos itens
   // REALMENTE devolvidos: o crédito de ICMS/IPI é proporcional à quantidade
@@ -2088,7 +2096,7 @@ export default function FiscalEmission() {
 
       {/* ── Dialog: emitir NF-e ── */}
       <Dialog open={showEmit} onOpenChange={setShowEmit}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-3xl w-[96vw] max-h-[90vh] overflow-y-auto overflow-x-hidden">
           <DialogHeader>
             <DialogTitle>Emitir NF-e</DialogTitle>
             <DialogDescription>
@@ -2292,23 +2300,13 @@ export default function FiscalEmission() {
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <Input placeholder="Descrição" className="h-8 text-xs" maxLength={120} value={it.name} onChange={(e) => updateItem(index, { name: e.target.value })} />
-                      <Input placeholder="Código" className="h-8 text-xs" maxLength={60} value={it.code} onChange={(e) => updateItem(index, { code: e.target.value })} />
-                    </div>
-                    <div className="grid grid-cols-4 gap-2">
-                      <div>
-                        <Label className="text-[10px] text-muted-foreground">NCM</Label>
-                        <Input placeholder="NCM" className="h-8 text-xs" maxLength={8} value={it.ncm} onChange={(e) => updateItem(index, { ncm: e.target.value.replace(/\D/g, '') })} />
-                      </div>
-                      <div>
-                        <Label className="text-[10px] text-muted-foreground">CFOP</Label>
-                        <Input placeholder="CFOP" className="h-8 text-xs" maxLength={4} value={it.cfop} onChange={(e) => updateItem(index, { cfop: e.target.value.replace(/\D/g, '') })} />
-                      </div>
-                      <div>
-                        <Label className="text-[10px] text-muted-foreground">Unid.</Label>
-                        <Input placeholder="Unid." className="h-8 text-xs" maxLength={6} value={it.unit} onChange={(e) => updateItem(index, { unit: e.target.value })} />
-                      </div>
+                    <Input placeholder="Descrição do produto" className="h-8 text-xs" maxLength={120} value={it.name} onChange={(e) => updateItem(index, { name: e.target.value })} />
+
+                    {/* Linha compacta: qtd, valor unitário, desconto e total. Os
+                        demais campos fiscais (NCM/CFOP/CSOSN/origem/alíquotas/
+                        despesas) ficam no diálogo "Detalhes fiscais", para a linha
+                        não estourar a largura do popup. */}
+                    <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
                       <div>
                         <Label className="text-[10px] text-muted-foreground">Qtd{it.maxQuantity != null ? ` (máx ${it.maxQuantity})` : ''}</Label>
                         <Input
@@ -2319,8 +2317,7 @@ export default function FiscalEmission() {
                             // Devolução não pode exceder a quantidade vendida na nota original.
                             if (it.maxQuantity != null && q > it.maxQuantity) q = it.maxQuantity;
                             // Devolução parcial: desconto e despesas acessórias
-                            // (IPI) acompanham a quantidade (proporcionais), igual
-                            // ao ICMS/IPI por unidade dos dados adicionais.
+                            // (IPI) acompanham a quantidade (proporcionais).
                             const patch: Partial<DraftItem> = { quantity: q };
                             if (it.discountUnit != null) patch.discount = Math.round(it.discountUnit * q * 100) / 100;
                             if (it.otherExpensesUnit != null) patch.other_expenses = Math.round(it.otherExpensesUnit * q * 100) / 100;
@@ -2328,69 +2325,43 @@ export default function FiscalEmission() {
                           }}
                         />
                       </div>
-                    </div>
-                    {/* Impostos — auto-preenchidos do cadastro fiscal do produto, editáveis. */}
-                    <div className="grid grid-cols-2 gap-2">
                       <div>
-                        <Label className="text-[10px] text-muted-foreground">CSOSN (situação do ICMS)</Label>
-                        <Select value={it.csosn || '102'} onValueChange={(v) => updateItem(index, { csosn: v })}>
-                          <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            {CSOSN_OPTIONS.map((o) => (
-                              <SelectItem key={o.value} value={o.value} className="text-xs">{o.label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        {['101', '201', '202', '500'].includes(it.csosn) && (
-                          <p className="text-[10px] text-amber-700 mt-0.5">
-                            Este CSOSN exige campos extras (crédito/ICMS-ST) que ainda não enviamos — confirme com a contadora.
-                          </p>
-                        )}
+                        <Label className="text-[10px] text-muted-foreground">Valor unit.</Label>
+                        <Input type="number" min="0" step="0.01" className="h-8 text-xs" value={it.unit_price} onChange={(e) => updateItem(index, { unit_price: Math.max(0, parseFloat(e.target.value) || 0) })} />
                       </div>
                       <div>
-                        <Label className="text-[10px] text-muted-foreground">Origem da mercadoria</Label>
-                        <Select value={String(it.origin ?? 0)} onValueChange={(v) => updateItem(index, { origin: Number(v) })}>
-                          <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            {FISCAL_ORIGIN_OPTIONS.map((o) => (
-                              <SelectItem key={o.value} value={String(o.value)} className="text-xs">{o.label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <Label className="text-[10px] text-muted-foreground">Desconto</Label>
+                        <Input
+                          type="number" min="0" step="0.01" className="h-8 text-xs"
+                          value={it.discount ?? 0}
+                          onChange={(e) => {
+                            const bruto = (it.quantity || 0) * (it.unit_price || 0);
+                            const d = Math.min(Math.max(0, parseFloat(e.target.value) || 0), bruto);
+                            updateItem(index, { discount: d });
+                          }}
+                        />
+                      </div>
+                      <div className="text-right">
+                        <Label className="text-[10px] text-muted-foreground">Total do item</Label>
+                        <p className="h-8 flex items-center justify-end text-sm font-semibold">
+                          {formatCurrency(Math.max(0, it.quantity * it.unit_price - (it.discount || 0)) + (it.other_expenses || 0))}
+                        </p>
                       </div>
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
-                      <div>
-                        <Label className="text-[10px] text-muted-foreground">ICMS %</Label>
-                        <Input type="number" min="0" step="0.01" className="h-8 text-xs" value={it.icms_rate} onChange={(e) => updateItem(index, { icms_rate: Math.max(0, parseFloat(e.target.value) || 0) })} />
-                      </div>
-                      <div>
-                        <Label className="text-[10px] text-muted-foreground">PIS %</Label>
-                        <Input type="number" min="0" step="0.01" className="h-8 text-xs" value={it.pis_rate} onChange={(e) => updateItem(index, { pis_rate: Math.max(0, parseFloat(e.target.value) || 0) })} />
-                      </div>
-                      <div>
-                        <Label className="text-[10px] text-muted-foreground">COFINS %</Label>
-                        <Input type="number" min="0" step="0.01" className="h-8 text-xs" value={it.cofins_rate} onChange={(e) => updateItem(index, { cofins_rate: Math.max(0, parseFloat(e.target.value) || 0) })} />
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Label className="text-xs whitespace-nowrap">Valor unitário</Label>
-                      <Input type="number" min="0" step="0.01" className="h-8 w-28 text-xs" value={it.unit_price} onChange={(e) => updateItem(index, { unit_price: Math.max(0, parseFloat(e.target.value) || 0) })} />
-                      <Label className="text-xs whitespace-nowrap">Desconto</Label>
-                      <Input
-                        type="number" min="0" step="0.01" className="h-8 w-24 text-xs"
-                        value={it.discount ?? 0}
-                        onChange={(e) => {
-                          // Trava o desconto no valor bruto do item — evita vDesc > vProd.
-                          const bruto = (it.quantity || 0) * (it.unit_price || 0);
-                          const d = Math.min(Math.max(0, parseFloat(e.target.value) || 0), bruto);
-                          updateItem(index, { discount: d });
-                        }}
-                      />
-                      <span className="text-xs text-muted-foreground whitespace-nowrap ml-auto">
-                        Total: {formatCurrency(Math.max(0, it.quantity * it.unit_price - (it.discount || 0)) + (it.other_expenses || 0))}
-                        {(it.other_expenses || 0) > 0 && <span className="text-[10px] block">inclui {formatCurrency(it.other_expenses!)} desp. acessórias</span>}
+                    {(it.other_expenses || 0) > 0 && (
+                      <p className="text-[10px] text-muted-foreground">
+                        Inclui {formatCurrency(it.other_expenses!)} de despesas acessórias (IPI da nota de compra).
+                      </p>
+                    )}
+
+                    {/* Resumo fiscal + botão para os detalhes. */}
+                    <div className="flex items-center justify-between gap-2 border-t pt-2">
+                      <span className="text-[11px] text-muted-foreground truncate">
+                        NCM {it.ncm || '—'} · CFOP {it.cfop || '—'} · {it.unit || 'UN'} · CSOSN {it.csosn || '102'}
                       </span>
+                      <Button size="sm" variant="ghost" className="h-7 shrink-0 gap-1 text-xs" onClick={() => setDetailIndex(index)}>
+                        <Settings2 className="h-3.5 w-3.5" /> Detalhes fiscais
+                      </Button>
                     </div>
                   </div>
                 ))}
@@ -2423,6 +2394,15 @@ export default function FiscalEmission() {
                 <div className="text-right">
                   <p className="text-xs text-muted-foreground uppercase">Total da Nota</p>
                   <p className="text-2xl font-bold">{formatCurrency(total)}</p>
+                  {/* Explica a diferença entre o subtotal e o total: desconto e/ou
+                      despesas acessórias (o IPI da compra, na devolução). */}
+                  {(totalDesconto > 0 || totalDespesas > 0) && (
+                    <div className="text-[11px] text-muted-foreground">
+                      Produtos {formatCurrency(subtotalProdutos)}
+                      {totalDesconto > 0 && <> − desconto {formatCurrency(totalDesconto)}</>}
+                      {totalDespesas > 0 && <> + despesas acess. (IPI) {formatCurrency(totalDespesas)}</>}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -2619,6 +2599,101 @@ export default function FiscalEmission() {
               {isProducao ? 'Confirmar emissão (nota real)' : 'Confirmar emissão'}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Dialog: detalhes fiscais do item (aberto sob demanda) ── */}
+      <Dialog open={detailIndex != null} onOpenChange={(o) => { if (!o) setDetailIndex(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Detalhes fiscais do item</DialogTitle>
+            <DialogDescription>
+              {detailIndex != null && items[detailIndex]?.name
+                ? items[detailIndex].name
+                : 'Ajuste os campos fiscais deste item.'}
+            </DialogDescription>
+          </DialogHeader>
+          {detailIndex != null && items[detailIndex] && (() => {
+            const it = items[detailIndex];
+            const index = detailIndex;
+            return (
+              <div className="space-y-3">
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <Label className="text-[10px] text-muted-foreground">NCM</Label>
+                    <Input className="h-8 text-xs" maxLength={8} value={it.ncm} onChange={(e) => updateItem(index, { ncm: e.target.value.replace(/\D/g, '') })} />
+                  </div>
+                  <div>
+                    <Label className="text-[10px] text-muted-foreground">CFOP</Label>
+                    <Input className="h-8 text-xs" maxLength={4} value={it.cfop} onChange={(e) => updateItem(index, { cfop: e.target.value.replace(/\D/g, '') })} />
+                  </div>
+                  <div>
+                    <Label className="text-[10px] text-muted-foreground">Unidade</Label>
+                    <Input className="h-8 text-xs" maxLength={6} value={it.unit} onChange={(e) => updateItem(index, { unit: e.target.value })} />
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-[10px] text-muted-foreground">Código do produto</Label>
+                  <Input className="h-8 text-xs" maxLength={60} value={it.code} onChange={(e) => updateItem(index, { code: e.target.value })} />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <Label className="text-[10px] text-muted-foreground">CSOSN (situação do ICMS)</Label>
+                    <Select value={it.csosn || '102'} onValueChange={(v) => updateItem(index, { csosn: v })}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {CSOSN_OPTIONS.map((o) => (
+                          <SelectItem key={o.value} value={o.value} className="text-xs">{o.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {['101', '201', '202', '500'].includes(it.csosn) && (
+                      <p className="text-[10px] text-amber-700 mt-0.5">
+                        Exige campos extras (crédito/ICMS-ST) que ainda não enviamos — confirme com a contadora.
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <Label className="text-[10px] text-muted-foreground">Origem da mercadoria</Label>
+                    <Select value={String(it.origin ?? 0)} onValueChange={(v) => updateItem(index, { origin: Number(v) })}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {FISCAL_ORIGIN_OPTIONS.map((o) => (
+                          <SelectItem key={o.value} value={String(o.value)} className="text-xs">{o.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <Label className="text-[10px] text-muted-foreground">ICMS %</Label>
+                    <Input type="number" min="0" step="0.01" className="h-8 text-xs" value={it.icms_rate} onChange={(e) => updateItem(index, { icms_rate: Math.max(0, parseFloat(e.target.value) || 0) })} />
+                  </div>
+                  <div>
+                    <Label className="text-[10px] text-muted-foreground">PIS %</Label>
+                    <Input type="number" min="0" step="0.01" className="h-8 text-xs" value={it.pis_rate} onChange={(e) => updateItem(index, { pis_rate: Math.max(0, parseFloat(e.target.value) || 0) })} />
+                  </div>
+                  <div>
+                    <Label className="text-[10px] text-muted-foreground">COFINS %</Label>
+                    <Input type="number" min="0" step="0.01" className="h-8 text-xs" value={it.cofins_rate} onChange={(e) => updateItem(index, { cofins_rate: Math.max(0, parseFloat(e.target.value) || 0) })} />
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-[10px] text-muted-foreground">Despesas acessórias (vOutro — ex.: IPI da devolução)</Label>
+                  <Input
+                    type="number" min="0" step="0.01" className="h-8 text-xs"
+                    value={it.other_expenses ?? 0}
+                    onChange={(e) => updateItem(index, { other_expenses: Math.max(0, parseFloat(e.target.value) || 0) })}
+                  />
+                  <p className="text-[10px] text-muted-foreground mt-0.5">Soma ao total da nota (não é desconto).</p>
+                </div>
+                <div className="flex justify-end">
+                  <Button size="sm" onClick={() => setDetailIndex(null)}>Concluir</Button>
+                </div>
+              </div>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 
