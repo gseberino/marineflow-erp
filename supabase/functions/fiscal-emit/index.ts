@@ -424,6 +424,7 @@ async function prepareNfePayload(
         unit: it.unit ? String(it.unit) : undefined,
         quantity: Number(it.quantity),
         unitPrice: Number(it.unit_price),
+        discount: it.discount != null && it.discount !== "" ? Number(it.discount) : 0,
         barcode: it.barcode ? String(it.barcode) : (productBarcode ?? null),
         csosn: it.csosn ? String(it.csosn) : rf.csosn,
         origin: num(it.origin, rf.origin),

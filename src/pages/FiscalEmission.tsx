@@ -82,6 +82,7 @@ interface DraftItem {
   unit: string;
   quantity: number;
   unit_price: number;
+  discount?: number; // desconto do item (prod/vDesc); reduz o total da nota
   // Campos tributários (auto-preenchidos do produto, editáveis). Viram o bloco
   // `taxes` no servidor. O CST de PIS/COFINS vem do default global (não por item).
   csosn: string;
@@ -938,6 +939,9 @@ export default function FiscalEmission() {
         code: it.code || '', name: it.name || '', ncm: it.ncm || '',
         cfop: devCfop, unit: it.unit || 'UN',
         quantity: qty, unit_price: Number(it.unitPrice) || 0,
+        // Espelha o desconto da nota de compra (prod/vDesc) para o valor do item
+        // na devolução bater exatamente com o que o fornecedor faturou.
+        discount: Number(it.discount) || 0,
         // Simples em devolução de compra: CSOSN 900, sem destaque de ICMS. A
         // origem da mercadoria é preservada do XML da compra (intrínseca ao item).
         csosn: '900', origin: Number(it.origin ?? 0) || 0,
@@ -1150,6 +1154,7 @@ export default function FiscalEmission() {
       unit: it.unit,
       quantity: it.quantity,
       unit_price: it.unit_price,
+      discount: it.discount || 0, // vDesc por item (prod/vDesc)
       csosn: it.csosn || undefined,
       origin: it.origin,
       icms_rate: it.icms_rate,
@@ -2347,11 +2352,22 @@ export default function FiscalEmission() {
                         <Input type="number" min="0" step="0.01" className="h-8 text-xs" value={it.cofins_rate} onChange={(e) => updateItem(index, { cofins_rate: Math.max(0, parseFloat(e.target.value) || 0) })} />
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <Label className="text-xs whitespace-nowrap">Valor unitário</Label>
-                      <Input type="number" min="0" step="0.01" className="h-8 text-xs" value={it.unit_price} onChange={(e) => updateItem(index, { unit_price: Math.max(0, parseFloat(e.target.value) || 0) })} />
+                      <Input type="number" min="0" step="0.01" className="h-8 w-28 text-xs" value={it.unit_price} onChange={(e) => updateItem(index, { unit_price: Math.max(0, parseFloat(e.target.value) || 0) })} />
+                      <Label className="text-xs whitespace-nowrap">Desconto</Label>
+                      <Input
+                        type="number" min="0" step="0.01" className="h-8 w-24 text-xs"
+                        value={it.discount ?? 0}
+                        onChange={(e) => {
+                          // Trava o desconto no valor bruto do item — evita vDesc > vProd.
+                          const bruto = (it.quantity || 0) * (it.unit_price || 0);
+                          const d = Math.min(Math.max(0, parseFloat(e.target.value) || 0), bruto);
+                          updateItem(index, { discount: d });
+                        }}
+                      />
                       <span className="text-xs text-muted-foreground whitespace-nowrap ml-auto">
-                        Total: {formatCurrency(it.quantity * it.unit_price)}
+                        Total: {formatCurrency(Math.max(0, it.quantity * it.unit_price - (it.discount || 0)))}
                       </span>
                     </div>
                   </div>

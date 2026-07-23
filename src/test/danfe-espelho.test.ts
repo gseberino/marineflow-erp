@@ -169,3 +169,15 @@ describe("buildEspelhoHtml — infCpl igual ao DANFE", () => {
     expect(html).toContain("&lt;script&gt;");
   });
 });
+
+describe("buildEspelhoHtml — desconto por item", () => {
+  it("mostra o bruto, o desconto somado e o total líquido", () => {
+    const html = buildEspelhoHtml({
+      items: [{ code: "A", name: "Item", ncm: "1", cfop: "5102", quantity: 2, unit_price: 150.5, discount: 50.98 }],
+      payments: [{ method: "17", amount: 250.02 }],
+    }, {});
+    expect(html).toContain("301,00"); // total dos produtos (bruto)
+    expect(html).toContain("50,98");  // desconto
+    expect(html).toContain("250,02"); // total da nota (líquido)
+  });
+});

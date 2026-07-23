@@ -531,3 +531,39 @@ describe("buildNfeDraftPayload — pedido de compra do cliente (grupo compra)", 
     expect(p.purchase.order.length).toBe(60);
   });
 });
+
+describe("buildNfeDraftPayload — desconto por item (vDesc)", () => {
+  // makeInput padrão: 1 item, 2 × 150,50 = 301,00 bruto.
+  it("emite discount no item e abate do total (payment = líquido)", () => {
+    const p = buildNfeDraftPayload(makeInput({
+      items: [{ code: "A", name: "Item", ncm: "85176259", cfop: "5102", quantity: 2, unitPrice: 150.5, discount: 50.98 }],
+      paymentMethod: "17",
+    })) as any;
+    expect(p.items[0].discount).toBe(50.98);
+    // 301,00 − 50,98 = 250,02
+    expect(p.payments[0].amount).toBe(250.02);
+  });
+
+  it("desconto reflete no net_amount das duplicatas (parcelado)", () => {
+    const future = (d: number) => new Date(Date.now() - 3 * 3600e3 + d * 86400e3).toISOString().slice(0, 10);
+    const p = buildNfeDraftPayload(makeInput({
+      items: [{ code: "A", name: "Item", ncm: "85176259", cfop: "5102", quantity: 2, unitPrice: 150.5, discount: 50.98 }],
+      installments: [{ dueDate: future(30), amount: 125.01 }, { dueDate: future(60), amount: 125.01 }],
+    })) as any;
+    expect(p.billing.invoice.net_amount).toBe(250.02);
+    expect(p.payments[0].amount).toBe(250.02); // method 14 soma o líquido
+  });
+
+  it("não emite discount quando é zero/ausente", () => {
+    const p = buildNfeDraftPayload(makeInput()) as any;
+    expect(p.items[0].discount).toBeUndefined();
+    expect(p.payments[0].amount).toBe(301);
+  });
+
+  it("valida desconto maior que o valor do item", () => {
+    const errors = validateNfeDraftInput(makeInput({
+      items: [{ code: "A", name: "Item", ncm: "85176259", cfop: "5102", quantity: 1, unitPrice: 100, discount: 150 }],
+    }));
+    expect(errors.some((e) => e.includes("maior que o valor do item"))).toBe(true);
+  });
+});

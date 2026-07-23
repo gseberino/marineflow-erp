@@ -164,6 +164,10 @@ export interface NfeItemInput {
   unit?: string | null;
   quantity: number;
   unitPrice: number;
+  // Desconto do item (prod/vDesc). Reduz o valor do item e, portanto, o total
+  // da nota (vNF = vProd − vDesc). Campo `discount` confirmado no contrato da
+  // Contora (NfeItem.discount → det/prod/vDesc).
+  discount?: number | null;
   barcode?: string | null; // GTIN/EAN do produto → cEAN/cEANTrib ("SEM GTIN" se ausente)
   // Grupo tributário resolvido a partir do produto (ver product-fiscal.ts).
   // Quando csosn+origin vêm preenchidos, montamos o bloco `taxes` que a Contora
@@ -259,9 +263,16 @@ export function buildNfeDraftPayload(
   input: BuildNfePayloadInput,
 ): Record<string, unknown> {
   const documentDigits = onlyDigits(input.recipient.document);
-  const totalAmount = round2(
+  // vProd (bruto) = soma de qtd × preço. O desconto por item entra depois.
+  const grossAmount = round2(
     input.items.reduce((sum, it) => sum + it.quantity * it.unitPrice, 0),
   );
+  const totalDiscount = round2(
+    input.items.reduce((sum, it) => sum + Math.max(0, Number(it.discount) || 0), 0),
+  );
+  // vNF = vProd − vDesc (sem IPI/frete: Simples, e a Contora não tem vOutro).
+  // É o valor que precisa fechar com a soma dos pagamentos/duplicatas.
+  const totalAmount = round2(grossAmount - totalDiscount);
 
   // Indicador de IE do destinatário (indIEDest): 1=contribuinte, 2=isento, 9=não
   // contribuinte. Default 9 mantém o comportamento antigo; a UI passa a informar.
@@ -310,6 +321,8 @@ export function buildNfeDraftPayload(
         cean: gtin,
         cean_trib: gtin,
       };
+      const desc = round2(Math.max(0, Number(it.discount) || 0));
+      if (desc > 0) item.discount = desc; // → det/prod/vDesc
       const taxes = buildItemTaxes(it);
       if (taxes) item.taxes = taxes;
       // Referência por item à NF-e original (devolução). Nome exato do campo na
@@ -334,8 +347,8 @@ export function buildNfeDraftPayload(
   //   somando o net_amount; a soma das duplicatas = net_amount;
   //   net_amount = original_amount - discount_amount; parcelas numeradas
   //   001,002…; até 120; vencimentos YYYY-MM-DD, não anteriores à emissão e em
-  //   ordem crescente. Sem desconto por ora (desconto = vDesc por item, fase
-  //   futura), então net_amount = valor total dos produtos.
+  //   ordem crescente. net_amount = totalAmount, que já é o LÍQUIDO (vProd menos
+  //   os descontos por item).
   const parcels = (input.noPayment ? [] : (input.installments ?? []))
     .filter((p) => p && p.dueDate && p.amount > 0);
   if (parcels.length) {
@@ -433,6 +446,13 @@ export function validateNfeDraftInput(input: BuildNfePayloadInput): string[] {
       if (!isValidCfop(it.cfop)) errors.push(`Item ${n}: CFOP deve ter 4 dígitos.`);
       if (!(it.quantity > 0)) errors.push(`Item ${n}: quantidade deve ser maior que zero.`);
       if (!(it.unitPrice > 0)) errors.push(`Item ${n}: valor unitário deve ser maior que zero.`);
+      // Desconto não pode passar do valor bruto do item (senão vDesc > vProd,
+      // rejeição na SEFAZ e total negativo).
+      const desc = Number(it.discount) || 0;
+      if (desc < 0) errors.push(`Item ${n}: desconto não pode ser negativo.`);
+      else if (desc > round2(it.quantity * it.unitPrice) + 0.005) {
+        errors.push(`Item ${n}: desconto (${desc.toFixed(2)}) maior que o valor do item.`);
+      }
     });
   }
 

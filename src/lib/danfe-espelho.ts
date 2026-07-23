@@ -116,8 +116,14 @@ function addressLine(a: {
   return parts.join(' · ');
 }
 
-function itemTotal(it: Record<string, any>): number {
+// Bruto do item (qtd × preço), antes do desconto.
+function itemGross(it: Record<string, any>): number {
   return Number(it?.quantity ?? 0) * Number(it?.unit_price ?? 0);
+}
+
+// Líquido do item = bruto − desconto (prod/vDesc). É o que soma no total da nota.
+function itemTotal(it: Record<string, any>): number {
+  return itemGross(it) - Math.max(0, Number(it?.discount) || 0);
 }
 
 /** Rótulo da forma de pagamento de um item do grupo `payments`. */
@@ -142,7 +148,9 @@ export function buildEspelhoHtml(
   } = {},
 ): string {
   const items: Record<string, any>[] = Array.isArray(payload?.items) ? payload.items : [];
-  const totalProdutos = items.reduce((s, it) => s + itemTotal(it), 0);
+  const totalBruto = items.reduce((s, it) => s + itemGross(it), 0);
+  const totalDescItens = items.reduce((s, it) => s + Math.max(0, Number(it?.discount) || 0), 0);
+  const totalProdutos = totalBruto - totalDescItens; // líquido dos produtos
   const payments: Record<string, any>[] = Array.isArray(payload?.payments) ? payload.payments : [];
   const billing = payload?.billing ?? null;
   const duplicatas: Record<string, any>[] = Array.isArray(billing?.installments) ? billing.installments : [];
@@ -350,8 +358,8 @@ export function buildEspelhoHtml(
     <div class="box">
       <div class="box-title">Totais</div>
       <div class="totais">
-        <div><span class="lbl">Total dos produtos</span>${brl(totalProdutos)}</div>
-        <div><span class="lbl">Desconto</span>${brl(billing?.invoice?.discount_amount ?? 0)}</div>
+        <div><span class="lbl">Total dos produtos</span>${brl(totalBruto)}</div>
+        <div><span class="lbl">Desconto</span>${brl(totalDescItens + Number(billing?.invoice?.discount_amount ?? 0))}</div>
         <div><span class="lbl">Total da nota</span><span class="total-nota">${brl(billing?.invoice?.net_amount ?? totalProdutos)}</span></div>
       </div>
     </div>
