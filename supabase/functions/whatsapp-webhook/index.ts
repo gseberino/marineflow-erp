@@ -5,18 +5,18 @@ import { createWhatsAppProvider } from "../_shared/whatsapp/factory.ts";
 import { EVOLUTION_STATUS_MAP } from "../_shared/whatsapp/evolution-provider.ts";
 import { classificarResposta } from "../_shared/ai/comms/reply-router.ts";
 
-// Manejo automático da resposta do cliente (Camada de Inteligência de Comunicação, módulo G):
+// Manejo automático da resposta (Camada de Inteligência de Comunicação, módulo G):
 // fecha o loop no ai_comms_log (marca respondido + intenção) e HONRA OPT-OUT sozinho.
-// Best-effort: nunca derruba o webhook.
-async function manejarRespostaCliente(admin: any, clientId: string, texto: string): Promise<void> {
+// Serve cliente E fornecedor. Best-effort: nunca derruba o webhook.
+async function manejarRespostaAutomatica(admin: any, tabela: "clients" | "suppliers", entityId: string, texto: string): Promise<void> {
   try {
-    if (!clientId || !texto?.trim()) return;
+    if (!entityId || !texto?.trim()) return;
     const r = classificarResposta(texto);
-    // Fecha o loop: marca o último envio a este cliente como respondido.
+    // Fecha o loop: marca o último envio a esta entidade como respondido.
     const { data: log } = await admin
       .from("ai_comms_log")
       .select("id")
-      .eq("entity_id", clientId)
+      .eq("entity_id", entityId)
       .is("responded_at", null)
       .order("created_at", { ascending: false })
       .limit(1);
@@ -24,7 +24,7 @@ async function manejarRespostaCliente(admin: any, clientId: string, texto: strin
     if (logId) await admin.from("ai_comms_log").update({ responded_at: new Date().toISOString(), reply_intent: r.intencao }).eq("id", logId);
     // Opt-out é ação segura e clara: honra na hora (bloqueia envios futuros).
     if (r.intencao === "opt_out") {
-      await admin.from("clients").update({ opt_out_whatsapp: true }).eq("id", clientId);
+      await admin.from(tabela).update({ opt_out_whatsapp: true }).eq("id", entityId);
     }
   } catch (_e) {
     // best-effort — silencioso
@@ -367,10 +367,20 @@ Deno.serve(async (req) => {
       notifyAssignedReminder(admin, phone, event.senderName, body).catch(console.error);
     }
 
-    // Módulo G (inbound): resposta de cliente conhecido → fecha o loop de comunicação
+    // Módulo G (inbound): resposta de contato conhecido → fecha o loop de comunicação
     // (marca respondido + intenção) e honra opt-out automaticamente. Best-effort, assíncrono.
-    if (!event.fromMe && clientId && body) {
-      manejarRespostaCliente(admin, clientId, body).catch(() => {});
+    // Cliente tem prioridade; se não for cliente, tenta fornecedor (respostas de cotação).
+    if (!event.fromMe && body) {
+      if (clientId) {
+        manejarRespostaAutomatica(admin, "clients", clientId, body).catch(() => {});
+      } else {
+        (async () => {
+          try {
+            const { data: sup } = await admin.from("suppliers").select("id").ilike("phone", `%${phone}%`).eq("active", true).limit(1).maybeSingle();
+            if (sup?.id) await manejarRespostaAutomatica(admin, "suppliers", sup.id, body);
+          } catch { /* best-effort */ }
+        })();
+      }
     }
 
     if (leadId) {
