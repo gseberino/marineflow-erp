@@ -6,6 +6,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { createFiscalProvider, readFiscalEnvironment } from "../_shared/fiscal/factory.ts";
 import { applyStatusUpdate } from "../_shared/fiscal/apply-status.ts";
 import { resolveIbgeCityCode } from "../_shared/fiscal/ibge.ts";
+import { logEdgeError } from "../_shared/log-error.ts";
 import {
   buildNfeDraftPayload,
   computeCfop,
@@ -256,6 +257,12 @@ Deno.serve(async (req) => {
   } catch (err) {
     console.error("[fiscal-emit] erro:", err);
     const message = err instanceof Error ? err.message : String(err);
+    // 500 aqui = erro inesperado no servidor (não validação): é bug de verdade,
+    // registrar como 'error'. `body.action` dá o contexto (create/cancel/…).
+    void logEdgeError(admin, {
+      context: "fiscal-emit", action: String(body?.action ?? "create"),
+      message, error: err,
+    });
     return jr({ error: message }, 500);
   }
 });

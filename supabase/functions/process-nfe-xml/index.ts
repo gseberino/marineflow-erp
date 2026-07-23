@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { logEdgeError } from "../_shared/log-error.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -294,7 +295,15 @@ Deno.serve(async (req) => {
     });
     // A auditoria é acessória: não derruba a importação, mas precisa aparecer
     // em algum lugar — silenciar foi justamente o que escondeu o bug do nome.
-    if (auditErr) console.error("[process-nfe-xml] falha ao gravar audit_log:", auditErr.message);
+    if (auditErr) {
+      console.error("[process-nfe-xml] falha ao gravar audit_log:", auditErr.message);
+      // Falha silenciosa é exatamente a classe de bug que este log existe para
+      // pegar — registrar mesmo sem derrubar a importação.
+      void logEdgeError(supabase, {
+        context: "process-nfe-xml", action: "audit_log",
+        message: "Falha ao gravar audit_log: " + auditErr.message,
+      });
+    }
 
     // ── 8. Return parsed data (UI will confirm stock update) ──────────────
     return new Response(
@@ -326,6 +335,13 @@ Deno.serve(async (req) => {
 
   } catch (e: any) {
     console.error("[process-nfe-xml]", e.message);
+    // level 'warn': aqui caem quase sempre validações que o usuário provoca
+    // (arquivo não é NF-e, nota de outra empresa, duplicata). Ficam no registro
+    // para diagnóstico, mas sem se misturar aos erros de verdade.
+    void logEdgeError(supabase, {
+      context: "process-nfe-xml", action: "upload", level: "warn",
+      message: e?.message ?? String(e), error: e,
+    });
     return new Response(
       JSON.stringify({ error: e.message }),
       {
