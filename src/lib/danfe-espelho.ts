@@ -216,11 +216,16 @@ export function buildEspelhoHtml(
       </div>`
     : '';
 
-  // indicator (indPag): 0 = à vista, 1 = a prazo. Deixa explícito no espelho se a
-  // duplicata/pagamento é à vista ou parcelado, como no DANFE.
+  // indPag (à vista / a prazo), como no DANFE. A prazo quando indicator=1 ou
+  // quando há grupo de cobrança (parcelado — a API não manda indicator no
+  // pagamento único da venda à vista, por isso inferimos pela fatura). "Sem
+  // pagamento" (tPag 90, devolução/remessa) não é à vista nem a prazo.
   const pagamentosLinha = payments.length
     ? payments.map((p) => {
-        const prazo = p?.indicator === 1 ? ' · a prazo' : p?.indicator === 0 ? ' · à vista' : '';
+        const code = String(p?.method ?? '').padStart(2, '0');
+        const prazo = code === '90' ? ''
+          : (p?.indicator === 1 || !!billing) ? ' · a prazo'
+          : ' · à vista';
         return `${paymentLabel(p?.method)}${prazo} — ${brl(p?.amount)}`;
       }).join('<br>')
     : '—';

@@ -206,6 +206,17 @@ describe("buildEspelhoHtml — pagamento à vista / a prazo (indicator)", () => 
     expect(html).toContain("17 — PIX");
     expect(html).toContain("à vista");
   });
+  it("infere 'à vista' na venda sem fatura mesmo sem indicator (pagamento único da API)", () => {
+    const html = buildEspelhoHtml(makePayload({ payments: [{ method: "01", amount: 301 }] }), emitter);
+    expect(html).toContain("01 — Dinheiro");
+    expect(html).toContain("à vista");
+  });
+  it("devolução/remessa (tPag 90) não rotula à vista nem a prazo", () => {
+    const html = buildEspelhoHtml(makePayload({ payments: [{ method: "90", amount: 0 }] }), emitter);
+    expect(html).toContain("90 — Sem Pagamento");
+    expect(html).not.toContain("Sem Pagamento · à vista");
+    expect(html).not.toContain("Sem Pagamento · a prazo");
+  });
 });
 
 describe("buildEspelhoHtml — desconto não é contado em dobro (Totais x Fatura)", () => {
