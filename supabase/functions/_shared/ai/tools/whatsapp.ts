@@ -18,7 +18,7 @@ function prettyPreview(body?: string | null): string | null {
  * wa_test_mode/wa_test_number do app_settings. Lê env em tempo de chamada
  * (não no import do módulo) para não quebrar testes que nunca chamam isto.
  */
-async function sendWhatsapp(phone: string, message: string, jwt: string) {
+export async function sendWhatsapp(phone: string, message: string, jwt: string) {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   // No canal WhatsApp não há JWT de usuário (o toolCtx traz jwt=""), então usamos a
   // service-role key: o whatsapp-send tem um bypass explícito (isServiceRoleCall) para

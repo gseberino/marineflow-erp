@@ -23,6 +23,7 @@ import { whatsappTools } from "./whatsapp.ts";
 import { uiTools } from "./ui.ts";
 import { memoryTools } from "./memory.ts";
 import { overviewTools } from "./overview.ts";
+import { flowMacroTools } from "./flow-macros.ts";
 
 export type { ToolDef, ToolCtx, RiskLevel, Role } from "./registry.ts";
 
@@ -53,6 +54,7 @@ export const allTools: ToolDef[] = [
   ...uiTools,
   ...memoryTools,
   ...overviewTools,
+  ...flowMacroTools,
 ].sort((a, b) => a.name.localeCompare(b.name));
 
 export const toolsByName: Record<string, ToolDef> = Object.fromEntries(allTools.map((t) => [t.name, t]));

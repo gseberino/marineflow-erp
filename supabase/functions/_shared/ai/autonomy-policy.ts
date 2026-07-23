@@ -22,6 +22,10 @@ export const NEVER_AUTONOMOUS = new Set<string>([
   "receive_purchase_order",
   "cancel_service_order",
   "reopen_service_order",
+  // Macros de fluxo (Onda 2b): approve_quote_full move dinheiro (chama o convert); o batch de
+  // cobrança dispara muitos envios de uma vez — o dono escolheu SEMPRE confirmar o lote.
+  "approve_quote_full",
+  "send_bulk_collection_reminders",
 ]);
 
 /** Prefixo das chaves em app_settings. */

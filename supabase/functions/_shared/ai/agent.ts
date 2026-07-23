@@ -209,6 +209,38 @@ async function resolveIdLabel(admin: any, key: string, id: string): Promise<stri
  * para o modelo, não para o usuário) nem UUIDs crus quando dá pra resolver o nome real.
  */
 async function buildPendingSummary(admin: any, toolName: string, args: Record<string, unknown>): Promise<string> {
+  // Macros de fluxo: a confirmação PRECISA mostrar o que vai acontecer de verdade (a lista
+  // do lote, os passos da aprovação) — os args crus não bastam. Resolve o conteúdo real.
+  if (toolName === "send_bulk_collection_reminders") {
+    const ids: string[] = Array.isArray(args?.collection_ids) ? (args.collection_ids as string[]) : [];
+    if (ids.length === 0) return "Nenhuma cobrança selecionada.";
+    let rows: any[] = [];
+    try {
+      const { data } = await admin.from("collections").select("contact_name, amount, due_date").in("id", ids);
+      rows = (data as any[]) || [];
+    } catch { /* best-effort */ }
+    if (rows.length === 0) return `Enviar cobrança para ${ids.length} cliente(s) selecionado(s).`;
+    const hoje = Date.now();
+    const linhas = rows.map((r) => {
+      const dias = r.due_date ? Math.floor((hoje - new Date(`${r.due_date}T00:00:00`).getTime()) / 86400000) : 0;
+      const atraso = dias > 0 ? ` · ${dias}d de atraso` : "";
+      return `- ${r.contact_name || "cliente"}: ${fmtBRL.format(Number(r.amount) || 0)}${atraso}`;
+    });
+    const total = rows.reduce((a, r) => a + (Number(r.amount) || 0), 0);
+    return `Enviar cobrança por WhatsApp para *${rows.length}* cliente(s):\n${linhas.join("\n")}\nTotal: *${fmtBRL.format(total)}*`;
+  }
+  if (toolName === "approve_quote_full") {
+    const osLabel = args?.service_order_id ? await resolveIdLabel(admin, "service_order_id", String(args.service_order_id)) : "orçamento";
+    const dep = typeof args?.deposit_amount === "number" ? fmtBRL.format(args.deposit_amount) : String(args?.deposit_amount ?? "—");
+    const partes = [`Aprovar *${osLabel}*: registrar sinal de *${dep}* (${args?.payment_method || "forma não informada"}) e converter em OS`];
+    if (Number(args?.follow_up_in_days) > 0) partes.push(`agendar follow-up em ${args.follow_up_in_days} dia(s)`);
+    if (args?.scheduled_start_at) {
+      const d = new Date(String(args.scheduled_start_at));
+      partes.push(`agendar a OS para ${isNaN(d.getTime()) ? args.scheduled_start_at : d.toLocaleString("pt-BR")}`);
+    }
+    return partes.map((p) => `- ${p}`).join("\n");
+  }
+
   const lines: string[] = [];
   for (const [k, v] of Object.entries(args || {})) {
     const label = FIELD_LABELS_PT[k] || humanizeToolName(k);

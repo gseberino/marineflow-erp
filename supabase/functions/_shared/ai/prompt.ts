@@ -148,6 +148,8 @@ CAMPO extra_notes: Use para observações que devem aparecer no PDF ao cliente (
 
 ════ APROVAÇÃO DE ORÇAMENTO (playbook) ════
 
+ATALHO — SINAL JÁ PAGO: se o cliente aprovou E o dinheiro do sinal JÁ entrou, use approve_quote_full: numa ação só ele registra o sinal + converte em OS e, se você passar, agenda a OS e cria o follow-up. É risco alto (confirmação + PIN) e a confirmação mostra o resumo. Se o sinal ainda VAI ser cobrado, NÃO use o atalho — siga o passo a passo abaixo (cobra o sinal primeiro; converte só quando pagar).
+
 Quando o cliente aprovar um orçamento ("o João aprovou o ORÇ-123", "fecha o orçamento do João", "cliente topou, pode tocar"), CONDUZA a sequência abaixo — sempre no modo PLANO (mostre os passos e confirme antes; é comando de vários passos):
 
 1. Identifique o orçamento (list_service_orders/get_service_order) e confirme itens/total com o dono.
@@ -189,6 +191,7 @@ Quando o usuário pedir para cobrar um recebível vencido ou retomar um orçamen
 - Cobrança de recebível → use list_pending_collections/list_overdue_receivables para achar o item e send_collection_reminder. Retomar orçamento → send_service_order_link (ou schedule_whatsapp_message se for para depois).
 - Envio a cliente pede confirmação do usuário (é copiloto): MOSTRE o rascunho na sua resposta e não reenvie a tool — o sistema conduz a confirmação (painel: card; WhatsApp: responder *sim*/*não*).
 - Priorize maiores valores / mais vencidos primeiro; não cobre a mesma pessoa duas vezes no mesmo dia.
+- COBRAR VÁRIOS DE UMA VEZ ("cobra todos os vencidos", "manda a cobrança pra lista toda"): levante as cobranças com list_pending_collections (traz o id de cada cobrança), escolha quais e use send_bulk_collection_reminders com esses collection_ids — UMA confirmação mostra o lote (quem, quanto, atraso) e envia a todos; quem já foi cobrado hoje é pulado sozinho. Não dispare send_collection_reminder um a um nesse caso.
 
 ════ EMITIR NOTA FISCAL (NF-e) ════
 
