@@ -2127,7 +2127,10 @@ export default function FiscalEmission() {
 
       {/* ── Dialog: emitir NF-e ── */}
       <Dialog open={showEmit} onOpenChange={setShowEmit}>
-        <DialogContent className="max-w-3xl w-[96vw] max-h-[90vh] overflow-y-auto overflow-x-hidden">
+        {/* Largura generosa e adaptável: usa até 1200px, encolhendo para 97vw em
+            telas menores. overflow-x-hidden garante ZERO barra horizontal; com a
+            largura maior, nada mais fica cortado (o antigo cap de 768px cortava). */}
+        <DialogContent className="max-w-[1200px] w-[97vw] max-h-[92vh] overflow-y-auto overflow-x-hidden">
           <DialogHeader>
             <DialogTitle>Emitir NF-e</DialogTitle>
             <DialogDescription>
@@ -2337,7 +2340,7 @@ export default function FiscalEmission() {
                         demais campos fiscais (NCM/CFOP/CSOSN/origem/alíquotas/
                         despesas) ficam no diálogo "Detalhes fiscais", para a linha
                         não estourar a largura do popup. */}
-                    <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                       <div>
                         <Label className="text-[10px] text-muted-foreground">Qtd{it.maxQuantity != null ? ` (máx ${it.maxQuantity})` : ''}</Label>
                         <Input
