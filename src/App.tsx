@@ -43,6 +43,7 @@ import ImportFiscalXML from "./pages/ImportFiscalXML";
 import FiscalEmission from "./pages/FiscalEmission";
 import CommissionsPage from "./pages/CommissionsPage";
 import SmartPurchasePage from "./pages/SmartPurchasePage";
+import DesignPreviewV2 from "./pages/DesignPreviewV2";
 import QuoteList from "./pages/QuoteList";
 import NotFound from "./pages/NotFound";
 import EncodingFixerPage from "./pages/EncodingFixerPage";
@@ -71,6 +72,12 @@ const App = () => (
               <Route path="/portal" element={<ClientPortal />} />
               <Route path="/reset-password" element={<ResetPasswordPage />} />
               <Route path="/view/:token" element={<PublicServiceOrderView />} />
+              {/* Preview isolado do kit v2 (Fase 0) — read-only, fora do AppLayout v1 */}
+              <Route path="/design-preview" element={
+                <ProtectedRoute roles={['admin', 'financial']}>
+                  <DesignPreviewV2 />
+                </ProtectedRoute>
+              } />
               <Route path="/*" element={
                 <ProtectedRoute>
                   <QueryGate>
