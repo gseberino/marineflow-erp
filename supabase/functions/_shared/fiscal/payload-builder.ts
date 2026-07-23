@@ -168,6 +168,10 @@ export interface NfeItemInput {
   // da nota (vNF = vProd − vDesc). Campo `discount` confirmado no contrato da
   // Contora (NfeItem.discount → det/prod/vDesc).
   discount?: number | null;
+  // Outras despesas acessórias do item (prod/vOutro). SOMAM ao total
+  // (vNF = vProd − vDesc + vOutro). Campo `other_expenses` da Contora — usado na
+  // devolução ao fornecedor do Simples para repassar o IPI da nota de compra.
+  otherExpenses?: number | null;
   barcode?: string | null; // GTIN/EAN do produto → cEAN/cEANTrib ("SEM GTIN" se ausente)
   // Grupo tributário resolvido a partir do produto (ver product-fiscal.ts).
   // Quando csosn+origin vêm preenchidos, montamos o bloco `taxes` que a Contora
@@ -270,9 +274,14 @@ export function buildNfeDraftPayload(
   const totalDiscount = round2(
     input.items.reduce((sum, it) => sum + Math.max(0, Number(it.discount) || 0), 0),
   );
-  // vNF = vProd − vDesc (sem IPI/frete: Simples, e a Contora não tem vOutro).
-  // É o valor que precisa fechar com a soma dos pagamentos/duplicatas.
-  const totalAmount = round2(grossAmount - totalDiscount);
+  // Outras despesas acessórias (vOutro) somam ao total. Na devolução do Simples,
+  // carregam o IPI da nota de compra que precisa entrar no total sem destaque.
+  const totalOther = round2(
+    input.items.reduce((sum, it) => sum + Math.max(0, Number(it.otherExpenses) || 0), 0),
+  );
+  // vNF = vProd − vDesc + vOutro. É o valor que precisa fechar com a soma dos
+  // pagamentos/duplicatas (sem IPI destacado: Simples).
+  const totalAmount = round2(grossAmount - totalDiscount + totalOther);
 
   // Indicador de IE do destinatário (indIEDest): 1=contribuinte, 2=isento, 9=não
   // contribuinte. Default 9 mantém o comportamento antigo; a UI passa a informar.
@@ -323,6 +332,8 @@ export function buildNfeDraftPayload(
       };
       const desc = round2(Math.max(0, Number(it.discount) || 0));
       if (desc > 0) item.discount = desc; // → det/prod/vDesc
+      const outro = round2(Math.max(0, Number(it.otherExpenses) || 0));
+      if (outro > 0) item.other_expenses = outro; // → det/prod/vOutro
       const taxes = buildItemTaxes(it);
       if (taxes) item.taxes = taxes;
       // Referência por item à NF-e original (devolução). Nome exato do campo na
@@ -453,6 +464,7 @@ export function validateNfeDraftInput(input: BuildNfePayloadInput): string[] {
       else if (desc > round2(it.quantity * it.unitPrice) + 0.005) {
         errors.push(`Item ${n}: desconto (${desc.toFixed(2)}) maior que o valor do item.`);
       }
+      if ((Number(it.otherExpenses) || 0) < 0) errors.push(`Item ${n}: despesas acessórias não podem ser negativas.`);
     });
   }
 

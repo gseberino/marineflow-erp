@@ -121,9 +121,12 @@ function itemGross(it: Record<string, any>): number {
   return Number(it?.quantity ?? 0) * Number(it?.unit_price ?? 0);
 }
 
-// Líquido do item = bruto − desconto (prod/vDesc). É o que soma no total da nota.
+// Líquido do item = bruto − desconto + despesas acessórias (vProd − vDesc +
+// vOutro). É o que compõe o total da nota.
 function itemTotal(it: Record<string, any>): number {
-  return itemGross(it) - Math.max(0, Number(it?.discount) || 0);
+  return itemGross(it)
+    - Math.max(0, Number(it?.discount) || 0)
+    + Math.max(0, Number(it?.other_expenses) || 0);
 }
 
 /** Rótulo da forma de pagamento de um item do grupo `payments`. */
@@ -150,7 +153,8 @@ export function buildEspelhoHtml(
   const items: Record<string, any>[] = Array.isArray(payload?.items) ? payload.items : [];
   const totalBruto = items.reduce((s, it) => s + itemGross(it), 0);
   const totalDescItens = items.reduce((s, it) => s + Math.max(0, Number(it?.discount) || 0), 0);
-  const totalProdutos = totalBruto - totalDescItens; // líquido dos produtos
+  const totalOutroItens = items.reduce((s, it) => s + Math.max(0, Number(it?.other_expenses) || 0), 0);
+  const totalProdutos = totalBruto - totalDescItens + totalOutroItens; // líquido
   const payments: Record<string, any>[] = Array.isArray(payload?.payments) ? payload.payments : [];
   const billing = payload?.billing ?? null;
   const duplicatas: Record<string, any>[] = Array.isArray(billing?.installments) ? billing.installments : [];
@@ -183,6 +187,8 @@ export function buildEspelhoHtml(
       <td class="r">${num(it?.quantity)}</td>
       <td class="r">${brl(it?.unit_price)}${
         Number(it?.discount) > 0 ? `<div class="tax">− ${brl(it.discount)} desc.</div>` : ''
+      }${
+        Number(it?.other_expenses) > 0 ? `<div class="tax">+ ${brl(it.other_expenses)} desp. acess.</div>` : ''
       }</td>
       <td class="r b">${brl(itemTotal(it))}</td>
     </tr>`;
@@ -362,6 +368,7 @@ export function buildEspelhoHtml(
       <div class="totais">
         <div><span class="lbl">Total dos produtos</span>${brl(totalBruto)}</div>
         <div><span class="lbl">Desconto</span>${brl(totalDescItens + Number(billing?.invoice?.discount_amount ?? 0))}</div>
+        ${totalOutroItens > 0 ? `<div><span class="lbl">Despesas acessórias</span>${brl(totalOutroItens)}</div>` : ''}
         <div><span class="lbl">Total da nota</span><span class="total-nota">${brl(billing?.invoice?.net_amount ?? totalProdutos)}</span></div>
       </div>
     </div>

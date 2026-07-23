@@ -567,3 +567,50 @@ describe("buildNfeDraftPayload — desconto por item (vDesc)", () => {
     expect(errors.some((e) => e.includes("maior que o valor do item"))).toBe(true);
   });
 });
+
+describe("buildNfeDraftPayload — despesas acessórias (vOutro)", () => {
+  it("emite other_expenses e SOMA ao total (exemplo da Contora)", () => {
+    // Contora: vProd 1000, vOutro 50 -> vNF 1050 (devolução).
+    const p = buildNfeDraftPayload(makeInput({
+      natureOperation: "Devolução de compra", purpose: 4, noPayment: true,
+      items: [{ code: "LP-28", name: "TOMADA", ncm: "85369090", cfop: "5202",
+        quantity: 10, unitPrice: 100, otherExpenses: 50 }],
+    })) as any;
+    expect(p.items[0].other_expenses).toBe(50);
+    // noPayment (devolução) → tPag 90 amount 0; o vOutro entra no valor dos itens.
+    expect(p.payments).toEqual([{ method: "90", amount: 0 }]);
+  });
+
+  it("vNF = vProd − vDesc + vOutro no pagamento (venda com IPI em despesas)", () => {
+    const p = buildNfeDraftPayload(makeInput({
+      items: [{ code: "A", name: "Item", ncm: "85176259", cfop: "5102",
+        quantity: 1, unitPrice: 1000, discount: 100, otherExpenses: 80 }],
+      paymentMethod: "17",
+    })) as any;
+    // 1000 − 100 + 80 = 980
+    expect(p.payments[0].amount).toBe(980);
+  });
+
+  it("devolução Kamell: IPI da compra em other_expenses (NF 40.480 item 1)", () => {
+    // Item real: vProd 1699,25, vDesc 50,98, vIPI 214,28 → vNF = 1862,55.
+    const p = buildNfeDraftPayload(makeInput({
+      natureOperation: "Devolução de compra", purpose: 4, noPayment: true,
+      items: [{ code: "2391", name: "ECRA TOUCH", ncm: "85285900", cfop: "6202",
+        quantity: 1, unitPrice: 1699.25, discount: 50.98, otherExpenses: 214.28 }],
+    })) as any;
+    expect(p.items[0].discount).toBe(50.98);
+    expect(p.items[0].other_expenses).toBe(214.28);
+  });
+
+  it("não emite other_expenses quando é zero/ausente", () => {
+    const p = buildNfeDraftPayload(makeInput()) as any;
+    expect(p.items[0].other_expenses).toBeUndefined();
+  });
+
+  it("valida despesas acessórias negativas", () => {
+    const errors = validateNfeDraftInput(makeInput({
+      items: [{ code: "A", name: "Item", ncm: "85176259", cfop: "5102", quantity: 1, unitPrice: 100, otherExpenses: -5 }],
+    }));
+    expect(errors.some((e) => e.includes("despesas acessórias não podem ser negativas"))).toBe(true);
+  });
+});

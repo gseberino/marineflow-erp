@@ -84,6 +84,8 @@ interface DraftItem {
   unit_price: number;
   discount?: number; // desconto do item (prod/vDesc); reduz o total da nota
   discountUnit?: number; // desconto POR UNIDADE (devolução) — escala o desconto ao mudar a qtd
+  other_expenses?: number; // despesas acessórias (prod/vOutro); somam ao total (ex.: IPI na devolução)
+  otherExpensesUnit?: number; // despesas acessórias POR UNIDADE (devolução) — escalam com a qtd
   // Campos tributários (auto-preenchidos do produto, editáveis). Viram o bloco
   // `taxes` no servidor. O CST de PIS/COFINS vem do default global (não por item).
   csosn: string;
@@ -944,6 +946,11 @@ export default function FiscalEmission() {
         // UNIDADE para escalar na devolução parcial (ver onChange da quantidade).
         discount: Number(it.discount) || 0,
         discountUnit: qty > 0 ? (Number(it.discount) || 0) / qty : 0,
+        // IPI da nota de compra vai em despesas acessórias (prod/vOutro): repassa
+        // o crédito ao fornecedor e faz o total da devolução bater com a compra.
+        // Também por unidade, para escalar na devolução parcial.
+        other_expenses: Number(it.ipiValue) || 0,
+        otherExpensesUnit: qty > 0 ? (Number(it.ipiValue) || 0) / qty : 0,
         // Simples em devolução de compra: CSOSN 900, sem destaque de ICMS. A
         // origem da mercadoria é preservada do XML da compra (intrínseca ao item).
         csosn: '900', origin: Number(it.origin ?? 0) || 0,
@@ -1081,7 +1088,7 @@ export default function FiscalEmission() {
   // "Total da Nota" exibe e a base das parcelas — precisa bater com o net_amount
   // que o payload-builder calcula, senão a última duplicata absorveria o desconto.
   const total = activeItems.reduce(
-    (sum, it) => sum + Math.max(0, it.quantity * it.unit_price - (it.discount || 0)), 0,
+    (sum, it) => sum + Math.max(0, it.quantity * it.unit_price - (it.discount || 0)) + (it.other_expenses || 0), 0,
   );
 
   // Dados adicionais da devolução ao fornecedor, calculados a partir dos itens
@@ -1162,6 +1169,7 @@ export default function FiscalEmission() {
       quantity: it.quantity,
       unit_price: it.unit_price,
       discount: it.discount || 0, // vDesc por item (prod/vDesc)
+      other_expenses: it.otherExpenses || 0, // vOutro por item (despesas acessórias)
       csosn: it.csosn || undefined,
       origin: it.origin,
       icms_rate: it.icms_rate,
@@ -2310,10 +2318,12 @@ export default function FiscalEmission() {
                             let q = Math.max(0, parseFloat(e.target.value) || 0);
                             // Devolução não pode exceder a quantidade vendida na nota original.
                             if (it.maxQuantity != null && q > it.maxQuantity) q = it.maxQuantity;
-                            // Devolução parcial: o desconto do item acompanha a
-                            // quantidade (proporcional), igual ao ICMS/IPI por unidade.
+                            // Devolução parcial: desconto e despesas acessórias
+                            // (IPI) acompanham a quantidade (proporcionais), igual
+                            // ao ICMS/IPI por unidade dos dados adicionais.
                             const patch: Partial<DraftItem> = { quantity: q };
                             if (it.discountUnit != null) patch.discount = Math.round(it.discountUnit * q * 100) / 100;
+                            if (it.otherExpensesUnit != null) patch.other_expenses = Math.round(it.otherExpensesUnit * q * 100) / 100;
                             updateItem(index, patch);
                           }}
                         />
@@ -2378,7 +2388,8 @@ export default function FiscalEmission() {
                         }}
                       />
                       <span className="text-xs text-muted-foreground whitespace-nowrap ml-auto">
-                        Total: {formatCurrency(Math.max(0, it.quantity * it.unit_price - (it.discount || 0)))}
+                        Total: {formatCurrency(Math.max(0, it.quantity * it.unit_price - (it.discount || 0)) + (it.other_expenses || 0))}
+                        {(it.other_expenses || 0) > 0 && <span className="text-[10px] block">inclui {formatCurrency(it.other_expenses!)} desp. acessórias</span>}
                       </span>
                     </div>
                   </div>

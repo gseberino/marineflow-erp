@@ -181,3 +181,16 @@ describe("buildEspelhoHtml — desconto por item", () => {
     expect(html).toContain("250,02"); // total da nota (líquido)
   });
 });
+
+describe("buildEspelhoHtml — despesas acessórias (vOutro)", () => {
+  it("mostra as despesas acessórias e as soma no total", () => {
+    const html = buildEspelhoHtml({
+      items: [{ code: "A", name: "Item", ncm: "1", cfop: "6202", quantity: 1, unit_price: 1699.25, discount: 50.98, other_expenses: 214.28 }],
+      payments: [{ method: "90", amount: 0 }],
+    }, {});
+    expect(html).toContain("Despesas acessórias");
+    expect(html).toContain("214,28");
+    // total da nota = 1699,25 − 50,98 + 214,28 = 1862,55
+    expect(html).toContain("1.862,55");
+  });
+});
