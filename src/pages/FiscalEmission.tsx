@@ -1077,7 +1077,12 @@ export default function FiscalEmission() {
   // No modo devolução o usuário pode desmarcar itens (parcial) — só contam/vão
   // os incluídos (included !== false).
   const activeItems = items.filter((it) => it.included !== false);
-  const total = activeItems.reduce((sum, it) => sum + it.quantity * it.unit_price, 0);
+  // LÍQUIDO (já com o desconto por item). É o que o cliente paga, o que o
+  // "Total da Nota" exibe e a base das parcelas — precisa bater com o net_amount
+  // que o payload-builder calcula, senão a última duplicata absorveria o desconto.
+  const total = activeItems.reduce(
+    (sum, it) => sum + Math.max(0, it.quantity * it.unit_price - (it.discount || 0)), 0,
+  );
 
   // Dados adicionais da devolução ao fornecedor, calculados a partir dos itens
   // REALMENTE devolvidos: o crédito de ICMS/IPI é proporcional à quantidade
