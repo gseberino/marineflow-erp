@@ -116,6 +116,15 @@ export default function ImportFiscalXML() {
   const [purchaseOrderId, setPurchaseOrderId] = useState<string>('__none');
   const [creatingSupplier, setCreatingSupplier] = useState(false);
   const [revertingId, setRevertingId] = useState<string | null>(null);
+  // Numa nota com dezenas de itens, os que casaram com certeza são ruído. Este
+  // filtro deixa só o que merece um olhar: item que será criado, casado pela
+  // descrição (fuzzy, menos certo) ou com divergência de custo/unidade/NCM.
+  const [soAtencao, setSoAtencao] = useState(false);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const precisaAtencao = (pv: any) =>
+    !pv?.product_id || pv?.match_reason === 'novo' || pv?.match_reason === 'descricao'
+    || pv?.cost_changed || pv?.unit_changed || pv?.ncm_changed;
 
   // '__new' significa FORCAR produto novo; qualquer outro valor e um vinculo
   // manual a um produto existente. Traduzir num lugar so evita divergencia
@@ -126,6 +135,21 @@ export default function ImportFiscalXML() {
         ? { sku_supplier: sku, force_new: true }
         : { sku_supplier: sku, internal_product_id: prodId },
     );
+
+  // Zera TODO o estado da conferência. Sem isto, o fornecedor, as parcelas e os
+  // vínculos manuais (que são por SKU do fornecedor) de uma nota vazavam para a
+  // próxima — dois fornecedores podem usar o mesmo código para produtos
+  // diferentes, então o carryover casaria o item errado silenciosamente.
+  const resetConference = () => {
+    setShowConfirm(false);
+    setParsed(null);
+    setFile(null);
+    setSupplierId('__none');
+    setPurchaseOrderId('__none');
+    setManualMappings({});
+    setPreview(null);
+    setSoAtencao(false);
+  };
 
   const { data: fiscalNotes, isLoading: loadingNotes } = useFiscalNotes();
   const { data: suppliers } = useSuppliers();
@@ -308,13 +332,7 @@ export default function ImportFiscalXML() {
         reason: 'Confirmação manual de importação de NF-e pelo usuário',
       });
 
-      setParsed(null);
-      setFile(null);
-      setSupplierId('__none');
-      setPurchaseOrderId('__none');
-      setPreview(null);
-      setManualMappings({});
-      setShowConfirm(false);
+      resetConference();
       qc.invalidateQueries({ queryKey: ['fiscal_notes'] });
       qc.invalidateQueries({ queryKey: ['inventory'] });
       qc.invalidateQueries({ queryKey: ['products'] });
@@ -432,7 +450,7 @@ export default function ImportFiscalXML() {
         <div className="space-y-4">
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="sm" className="gap-1.5"
-              onClick={() => { setShowConfirm(false); setParsed(null); setFile(null); }}>
+              onClick={resetConference}>
               <ArrowLeft className="h-4 w-4" /> Voltar
             </Button>
             <div>
@@ -575,14 +593,34 @@ export default function ImportFiscalXML() {
                   disponível, dá espaço para a descrição (que é longa) e para o
                   seletor de vínculo, e funciona igual no celular. */}
               <div className="rounded-lg border">
-                <div className="flex items-center justify-between border-b bg-muted/30 px-3 py-2">
-                  <span className="text-sm font-medium">Itens da nota ({parsed.items.length})</span>
-                  {loadingPreview && (
-                    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <Loader2 className="h-3 w-3 animate-spin" /> conferindo…
-                    </span>
-                  )}
-                </div>
+                {(() => {
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  const qtdAtencao = (preview?.items || []).filter((p: any) => precisaAtencao(p)).length;
+                  return (
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/30 px-3 py-2">
+                      <span className="text-sm font-medium">
+                        Itens da nota ({parsed.items.length})
+                      </span>
+                      <div className="flex items-center gap-3">
+                        {loadingPreview && (
+                          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <Loader2 className="h-3 w-3 animate-spin" /> conferindo…
+                          </span>
+                        )}
+                        {preview && qtdAtencao > 0 && (
+                          <Button
+                            type="button" size="sm" variant={soAtencao ? 'default' : 'outline'}
+                            className="h-7 gap-1.5 text-xs"
+                            onClick={() => setSoAtencao((v) => !v)}
+                          >
+                            <AlertCircle className="h-3.5 w-3.5" />
+                            {soAtencao ? 'Mostrar todos' : `Só o que precisa de atenção (${qtdAtencao})`}
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 <div className="divide-y">
                   {parsed.items.map((item) => {
@@ -592,6 +630,9 @@ export default function ImportFiscalXML() {
                     // recalcular no cliente com regra própria (que divergia).
                     // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     const pv = (preview?.items || []).find((p: any) => p.index === item.index);
+                    // Filtro "só atenção": esconde os itens já resolvidos. Enquanto
+                    // o preview carrega (pv indefinido) mostramos tudo.
+                    if (soAtencao && preview && !precisaAtencao(pv)) return null;
                     const vinculado = !!pv?.product_id;
                     const motivo: Record<string, { txt: string; cls: string }> = {
                       manual:    { txt: 'você escolheu',        cls: 'border-blue-200 bg-blue-50 text-blue-700' },
@@ -715,7 +756,7 @@ export default function ImportFiscalXML() {
                 })()}
               </p>
               <div className="flex gap-2">
-                <Button variant="outline" onClick={() => { setShowConfirm(false); setParsed(null); setFile(null); }}>
+                <Button variant="outline" onClick={resetConference}>
                   Cancelar
                 </Button>
                 <Button onClick={handleConfirmImport} disabled={confirming || loadingPreview}
@@ -796,6 +837,9 @@ export default function ImportFiscalXML() {
                                 .single();
                               if (data) {
                                 const d = data as any;
+                                // Limpa o estado da nota anterior antes de abrir
+                                // outra (senão os vínculos manuais vazam por SKU).
+                                resetConference();
                                 setParsed({
                                   noteId:     d.id,
                                   nfeKey:     d.nfe_key,
@@ -810,6 +854,13 @@ export default function ImportFiscalXML() {
                                   totalCOFINS: d.tax_cofins,
                                   items:      d.items || [],
                                 });
+                                // Fornecedor já vinculado à nota, ou casado pelo
+                                // CNPJ do emitente — poupa reescolher a cada vez.
+                                const cnpj = String(d.issuer_cnpj || '').replace(/\D/g, '');
+                                const forn = d.supplier_id
+                                  || (cnpj && (suppliers || []).find((s: any) => String(s.cnpj_cpf || '').replace(/\D/g, '') === cnpj)?.id);
+                                if (forn) setSupplierId(forn);
+                                if (d.purchase_order_id) setPurchaseOrderId(d.purchase_order_id);
                                 setShowConfirm(true);
                               }
                             }}
