@@ -20,7 +20,7 @@ import { toast } from 'sonner';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useSuppliers } from '@/hooks/use-suppliers';
-import { usePurchaseOrders } from '@/hooks/use-purchase-orders';
+import { usePurchaseOrders, usePurchaseOrder } from '@/hooks/use-purchase-orders';
 import { useI18n } from '@/i18n';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { useProducts } from '@/hooks/use-products';
@@ -155,6 +155,38 @@ export default function ImportFiscalXML() {
   const { data: suppliers } = useSuppliers();
   const { data: purchaseOrders } = usePurchaseOrders();
   const { data: products } = useProducts();
+  // Três vias: quando um pedido é vinculado, carrega seus itens para confrontar
+  // com a nota (quantidade e preço), pegando divergência de recebimento.
+  const { data: linkedPO } = usePurchaseOrder(purchaseOrderId === '__none' ? undefined : purchaseOrderId);
+
+  // Confronto pedido × nota, por produto. Casa o item da nota (produto resolvido
+  // pelo preview do servidor) com o item do pedido (product_id). Só compara o que
+  // dá para casar com segurança — o resto vira aviso, não erro.
+  const poCompare = (() => {
+    if (!linkedPO?.purchase_order_items?.length || !preview?.items) return null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const poItems = linkedPO.purchase_order_items as any[];
+    const usados = new Set<string>();
+    const linhas = (preview.items as any[]).map((pv) => {
+      const po = pv.product_id ? poItems.find((p) => p.product_id === pv.product_id && !usados.has(p.id)) : null;
+      if (po) usados.add(po.id);
+      const notaQtd = Number(pv.quantity) || 0;
+      const notaPreco = Number(pv.unit_price) || 0;
+      return {
+        descricao: pv.description as string,
+        casou: !!po,
+        qtdDiverge: po ? Math.abs((Number(po.quantity) || 0) - notaQtd) > 0.001 : false,
+        precoDiverge: po ? Math.abs((Number(po.unit_cost) || 0) - notaPreco) > 0.005 : false,
+        poQtd: po ? Number(po.quantity) || 0 : null,
+        poPreco: po ? Number(po.unit_cost) || 0 : null,
+        notaQtd, notaPreco,
+      };
+    });
+    const naoCasados = poItems.filter((p) => !usados.has(p.id));
+    const divergentes = linhas.filter((l) => l.casou && (l.qtdDiverge || l.precoDiverge));
+    const semPedido = linhas.filter((l) => !l.casou);
+    return { linhas, divergentes, semPedido, naoCasados };
+  })();
 
   // ── Upload & parse XML ─────────────────────────────────────────────────
   const handleUpload = async () => {
@@ -585,6 +617,38 @@ export default function ImportFiscalXML() {
                   </p>
                 </div>
               </div>
+
+              {/* Confronto pedido × nota (três vias). Só aparece com um pedido
+                  vinculado; destaca o que diverge para conferir antes de aceitar. */}
+              {poCompare && (
+                <div className={`rounded-lg border p-3 text-sm ${
+                  poCompare.divergentes.length || poCompare.naoCasados.length
+                    ? 'border-amber-300 bg-amber-50' : 'border-success/40 bg-success/10'
+                }`}>
+                  <div className="mb-1 font-medium">
+                    {poCompare.divergentes.length || poCompare.naoCasados.length
+                      ? 'Confira as diferenças com o pedido de compra'
+                      : 'Nota confere com o pedido de compra'}
+                  </div>
+                  {poCompare.divergentes.map((l, i) => (
+                    <div key={i} className="text-[12px] text-amber-900">
+                      • <b>{l.descricao}</b>:
+                      {l.qtdDiverge && ` quantidade pedido ${l.poQtd} × nota ${l.notaQtd};`}
+                      {l.precoDiverge && ` preço pedido ${formatCurrency(l.poPreco!)} × nota ${formatCurrency(l.notaPreco)};`}
+                    </div>
+                  ))}
+                  {poCompare.semPedido.length > 0 && (
+                    <div className="text-[12px] text-amber-900">
+                      • {poCompare.semPedido.length} item(ns) da nota não estão no pedido.
+                    </div>
+                  )}
+                  {poCompare.naoCasados.length > 0 && (
+                    <div className="text-[12px] text-amber-900">
+                      • {poCompare.naoCasados.length} item(ns) do pedido não vieram nesta nota (recebimento parcial?).
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Itens — LISTA, não tabela.
                   A tabela tinha 7 colunas com largura mínima fixa (900px): ela
