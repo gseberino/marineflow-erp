@@ -1,5 +1,6 @@
 import { NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
 import { guardaDeEnvio } from "../comms/send-guard.ts";
+import { registrarEnvio } from "../comms/send-log.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -92,7 +93,7 @@ export const whatsappTools: ToolDef[] = [
     },
     risk: "high",
     roles: NON_TECHNICIAN_ROLES,
-    async execute(args, { sb, jwt }) {
+    async execute(args, { sb, admin, jwt }) {
       let supplierIds: string[] = Array.isArray(args.supplier_ids) ? args.supplier_ids : [];
       let items: any[] = Array.isArray(args.items) ? args.items : [];
       let codigo = "";
@@ -148,10 +149,15 @@ export const whatsappTools: ToolDef[] = [
           `Obrigado!`;
         // Portão de comunicação: conformidade (bloqueia) + estilo (avisa).
         const g = guardaDeEnvio(msg, { tipo: "cotacao", audiencia: "fornecedor", canal: "whatsapp", destinatarioIdentificado: true });
-        if (g.bloqueado) { resultados.push({ fornecedor: sup.name || sid, status: `bloqueado: ${g.motivo}` }); continue; }
+        if (g.bloqueado) {
+          resultados.push({ fornecedor: nomeForn, status: `bloqueado: ${g.motivo}` });
+          await registrarEnvio(admin, { tipo: "cotacao", audiencia: "fornecedor", entityKind: "supplier", entityId: sid, phone: sup.phone, preview: msg, status: "blocked", blockCode: g.codigoBloqueio });
+          continue;
+        }
         g.avisos.forEach((a) => avisos.add(a));
         const r = await sendWhatsapp(sup.phone, msg, jwt);
         resultados.push({ fornecedor: nomeForn, status: r.ok ? "enviado" : `falhou: ${r.error}` });
+        await registrarEnvio(admin, { tipo: "cotacao", audiencia: "fornecedor", entityKind: "supplier", entityId: sid, phone: sup.phone, preview: msg, status: r.ok ? "sent" : "failed" });
       }
       const enviados = resultados.filter((r) => r.status === "enviado").length;
       return { ok: true, cotacao: codigo || null, enviados, total: supplierIds.length, resultados, ...(avisos.size ? { avisos_estilo: [...avisos] } : {}) };
@@ -190,11 +196,15 @@ export const whatsappTools: ToolDef[] = [
         `Olá${nomeUsado ? ` ${nomeUsado}` : ""}, lembrete amigável: você possui um valor de ${fmt} com vencimento em ${col.due_date}. Qualquer dúvida estamos à disposição.`;
       // Portão: conformidade (horário, número identificado) bloqueia; estilo (ameaça) avisa.
       const g = guardaDeEnvio(msg, { tipo: "cobranca", audiencia: "cliente", canal: "whatsapp", destinatarioIdentificado: !!col.client_id, texto: msg });
-      if (g.bloqueado) return { error: g.motivo };
+      if (g.bloqueado) {
+        await registrarEnvio(admin, { tipo: "cobranca", audiencia: "cliente", entityKind: "client", entityId: col.client_id, phone, preview: msg, status: "blocked", blockCode: g.codigoBloqueio });
+        return { error: g.motivo };
+      }
       const r = await sendWhatsapp(phone, msg, jwt);
       if (r.ok) {
         await admin.from("collections").update({ last_auto_sent_at: new Date().toISOString() }).eq("id", col.id);
       }
+      await registrarEnvio(admin, { tipo: "cobranca", audiencia: "cliente", entityKind: "client", entityId: col.client_id, phone, preview: msg, status: r.ok ? "sent" : "failed" });
       return { ...r, ...(g.avisos.length ? { avisos_estilo: g.avisos } : {}) };
     },
   },
@@ -228,8 +238,12 @@ export const whatsappTools: ToolDef[] = [
       const nomeUsado = c?.display_name || (c?.name ? String(c.name).trim().split(/\s+/)[0] : "");
       const msg = args.custom_message || `Olá${nomeUsado ? ` ${nomeUsado}` : ""}, segue o link da OS ${so.service_order_number}: ${link}`;
       const g = guardaDeEnvio(msg, { tipo: "os_link", audiencia: "cliente", canal: "whatsapp", destinatarioIdentificado: !!so.client_id });
-      if (g.bloqueado) return { error: g.motivo };
+      if (g.bloqueado) {
+        await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: msg, status: "blocked", blockCode: g.codigoBloqueio });
+        return { error: g.motivo };
+      }
       const r = await sendWhatsapp(phone, msg, jwt);
+      await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: msg, status: r.ok ? "sent" : "failed" });
       return { ...r, ...(g.avisos.length ? { avisos_estilo: g.avisos } : {}) };
     },
   },
