@@ -83,6 +83,7 @@ interface DraftItem {
   quantity: number;
   unit_price: number;
   discount?: number; // desconto do item (prod/vDesc); reduz o total da nota
+  discountUnit?: number; // desconto POR UNIDADE (devolução) — escala o desconto ao mudar a qtd
   // Campos tributários (auto-preenchidos do produto, editáveis). Viram o bloco
   // `taxes` no servidor. O CST de PIS/COFINS vem do default global (não por item).
   csosn: string;
@@ -939,9 +940,10 @@ export default function FiscalEmission() {
         code: it.code || '', name: it.name || '', ncm: it.ncm || '',
         cfop: devCfop, unit: it.unit || 'UN',
         quantity: qty, unit_price: Number(it.unitPrice) || 0,
-        // Espelha o desconto da nota de compra (prod/vDesc) para o valor do item
-        // na devolução bater exatamente com o que o fornecedor faturou.
+        // Espelha o desconto da nota de compra (prod/vDesc). Guardado também por
+        // UNIDADE para escalar na devolução parcial (ver onChange da quantidade).
         discount: Number(it.discount) || 0,
+        discountUnit: qty > 0 ? (Number(it.discount) || 0) / qty : 0,
         // Simples em devolução de compra: CSOSN 900, sem destaque de ICMS. A
         // origem da mercadoria é preservada do XML da compra (intrínseca ao item).
         csosn: '900', origin: Number(it.origin ?? 0) || 0,
@@ -2303,7 +2305,11 @@ export default function FiscalEmission() {
                             let q = Math.max(0, parseFloat(e.target.value) || 0);
                             // Devolução não pode exceder a quantidade vendida na nota original.
                             if (it.maxQuantity != null && q > it.maxQuantity) q = it.maxQuantity;
-                            updateItem(index, { quantity: q });
+                            // Devolução parcial: o desconto do item acompanha a
+                            // quantidade (proporcional), igual ao ICMS/IPI por unidade.
+                            const patch: Partial<DraftItem> = { quantity: q };
+                            if (it.discountUnit != null) patch.discount = Math.round(it.discountUnit * q * 100) / 100;
+                            updateItem(index, patch);
                           }}
                         />
                       </div>
