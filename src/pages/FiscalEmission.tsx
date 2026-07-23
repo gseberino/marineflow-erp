@@ -1189,45 +1189,69 @@ export default function FiscalEmission() {
     })),
   });
 
-  // "Gerar espelho": emite a nota DE VERDADE em HOMOLOGAÇÃO (draft → build →
-  // dispatch → SEFAZ autoriza) e baixa a DANFE autorizada — a mesma que sairá
-  // em produção, sem valor fiscal. A SEFAZ valida imposto/estrutura, então
-  // rejeição aparece aqui, antes de queimar numeração de produção. Usa o mesmo
-  // buildEmissionBody() da emissão real.
+  // Espelho LOCAL (fallback): o servidor devolve o payload EXATO da emissão
+  // (impostos por item e CFOP já resolvidos) + dados do emitente; renderizamos o
+  // Pré-DANFE aqui, SEM tocar na SEFAZ. É o que usamos quando a conta Contora não
+  // permite homologação (produção-apenas). Marcado "SEM VALOR FISCAL".
+  const openLocalEspelho = async () => {
+    const { data, error } = await supabase.functions.invoke('fiscal-emit', {
+      body: { action: 'preview', ...buildEmissionBody() },
+    });
+    if (error) throw new Error(await extractInvokeErrorMessage(error));
+    const res = data as any;
+    if (res?.error) throw new Error(res.error);
+    if (!res?.payload) throw new Error('O servidor não devolveu os dados do espelho.');
+    const html = buildEspelhoHtml(res.payload, res.emitter ?? {}, {
+      environment: res.environment, number: res.number, series: res.series,
+    });
+    const win = window.open('', '_blank');
+    if (!win) throw new Error('O navegador bloqueou a janela do espelho. Libere os pop-ups para este site e tente de novo.');
+    win.document.write(html);
+    win.document.close();
+  };
+
+  // "Gerar espelho" (HÍBRIDO): TENTA emitir de verdade em HOMOLOGAÇÃO (draft →
+  // build → dispatch → SEFAZ) e abrir a DANFE autorizada. Se a conta Contora não
+  // permitir homologação (a empresa da HBR é produção-apenas → recusa com "a
+  // chave API não permite emissão neste ambiente"), o servidor devolve
+  // { homolog_unavailable } e caímos no espelho LOCAL, sem erro. Quando a Contora
+  // habilitar homologação para o CNPJ, o mesmo botão passa a entregar a DANFE
+  // real sozinho. Usa o mesmo buildEmissionBody() da emissão real.
   const handleGenerateEspelho = async () => {
     if (activeItems.length === 0 || !preflightOk) {
       toast.error('Complete os dados da nota (o checklist de pré-voo) antes de gerar o espelho.');
       return;
     }
     setGeneratingEspelho(true);
-    // Espelho REAL: emite a nota DE VERDADE em homologação na Contora/SEFAZ e
-    // devolve a DANFE autorizada — a mesma que sairá em produção, só que sem
-    // valor fiscal. A SEFAZ valida imposto/estrutura, então rejeição aparece
-    // AQUI, antes de queimar numeração de produção. Leva alguns segundos.
-    const tId = toast.loading('Emitindo o espelho em homologação na SEFAZ… isso leva alguns segundos.');
+    const tId = toast.loading('Gerando o espelho da nota…');
     try {
       const { data, error } = await supabase.functions.invoke('fiscal-emit', {
         body: { action: 'homolog', ...buildEmissionBody() },
       });
       if (error) throw new Error(await extractInvokeErrorMessage(error));
-      // Autorizada → o servidor devolve a DANFE (PDF) como blob. Erro/rejeição
-      // volta como JSON { error } (tratado no catch via invoke error, ou aqui).
       const res: any = data;
+
+      // Conta Contora sem homologação → espelho local (renderizado por nós).
+      if (res && !(res instanceof Blob) && res.homolog_unavailable) {
+        await openLocalEspelho();
+        toast.success('Espelho aberto em nova aba (versão local, SEM VALOR FISCAL). Sua conta Contora ainda não emite em homologação — assim que habilitarem, este botão passa a trazer a DANFE real da SEFAZ.', { id: tId });
+        return;
+      }
+      // Rejeição/falha real da SEFAZ volta como JSON { error }.
       if (res && !(res instanceof Blob) && res.error) throw new Error(res.error);
-      const blob = res instanceof Blob
-        ? res
-        : new Blob([res as BlobPart], { type: 'application/pdf' });
+
+      // Autorizada em homologação → DANFE (PDF) real como blob.
+      const blob = res instanceof Blob ? res : new Blob([res as BlobPart], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       const win = window.open(url, '_blank');
       if (!win) {
         URL.revokeObjectURL(url);
         throw new Error('O navegador bloqueou a janela do espelho. Libere os pop-ups para este site e tente de novo.');
       }
-      // Libera a URL depois que a aba carregou o PDF.
       setTimeout(() => URL.revokeObjectURL(url), 60000);
       toast.success('Espelho autorizado em homologação e aberto em nova aba. É a DANFE real (sem valor fiscal).', { id: tId });
     } catch (err: any) {
-      toast.error('Espelho (homologação): ' + (err?.message || 'erro desconhecido'), { id: tId });
+      toast.error('Espelho: ' + (err?.message || 'erro desconhecido'), { id: tId });
     } finally {
       setGeneratingEspelho(false);
     }
@@ -2546,10 +2570,10 @@ export default function FiscalEmission() {
               variant="outline"
               onClick={handleGenerateEspelho}
               disabled={generatingEspelho || emitting || includedItems.length === 0 || !preflightOk}
-              title="Emite a nota DE VERDADE em homologação na SEFAZ e abre a DANFE autorizada (a mesma de produção, SEM VALOR FISCAL). Valida imposto e estrutura de verdade — leva alguns segundos. Salve como PDF para conferir antes de emitir em produção."
+              title="Gera o espelho da nota (SEM VALOR FISCAL) para conferir antes de emitir. Se sua conta Contora permitir homologação, emite de verdade na SEFAZ e traz a DANFE autorizada; senão, abre a versão local. Salve como PDF para conferência."
             >
               {generatingEspelho ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Eye className="h-4 w-4 mr-2" />}
-              {generatingEspelho ? 'Emitindo em homologação…' : 'Espelho real (homologação)'}
+              {generatingEspelho ? 'Gerando espelho…' : 'Gerar espelho'}
             </Button>
             <Button
               onClick={handleEmit}

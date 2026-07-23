@@ -516,6 +516,17 @@ async function handlePreview(admin: any, body: any): Promise<Response> {
 // (Rejeição 598 / NT 2011/002). Sem ela a nota de teste é rejeitada.
 const HOMOLOG_DEST = "NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL";
 
+// A empresa da HBR está cadastrada em PRODUÇÃO na Contora, e a chave/empresa da
+// Contora só opera no ambiente em que a empresa está cadastrada — logo ela RECUSA
+// homologação com "a chave API não permite emissão neste ambiente". Detectamos
+// essa recusa específica para o front cair no espelho local (em vez de dar erro),
+// e para o botão passar a emitir de verdade sozinho SE a Contora habilitar
+// homologação para o CNPJ no futuro.
+function isHomologUnavailable(err: string): boolean {
+  const e = (err || "").toLowerCase();
+  return e.includes("ambiente") && (e.includes("permite") || e.includes("chave"));
+}
+
 // Espelho REAL: emite a nota DE VERDADE em homologação (draft → build → dispatch
 // → SEFAZ) e devolve a DANFE autorizada. Diferente do preview (que só simula), a
 // SEFAZ valida imposto/estrutura — pega rejeição ANTES da emissão de produção.
@@ -540,7 +551,14 @@ async function handleHomolog(admin: any, body: any): Promise<Response> {
   const created = await provider.createDraft({
     documentType: "nfe", environment: "homologacao", series: 2, number, payload,
   });
-  if (!created.ok) return jr({ error: "Homologação: falha ao criar o rascunho — " + didaticize(created.error), details: created.details }, 422);
+  if (!created.ok) {
+    // Conta produção-apenas: sinaliza ao front para usar o espelho local (200,
+    // não 422 — não é erro do usuário; é a conta Contora sem homologação).
+    if (isHomologUnavailable(created.error)) {
+      return jr({ homolog_unavailable: true, reason: created.error }, 200);
+    }
+    return jr({ error: "Homologação: falha ao criar o rascunho — " + didaticize(created.error), details: created.details }, 422);
+  }
   const id = created.data.providerDocumentId;
   if (!id) return jr({ error: "Homologação: a Contora não retornou o identificador do rascunho." }, 502);
 
