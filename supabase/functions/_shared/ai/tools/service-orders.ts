@@ -505,7 +505,7 @@ export const serviceOrderTools: ToolDef[] = [
   {
     name: "add_material_to_order",
     description:
-      "Adiciona um item de material/insumo livre a uma OS sem necessitar de produto cadastrado no catálogo. Use quando o usuário descreve materiais estimados (ex: 'R$ 4.500 em materiais elétricos') sem produto específico. O item fica registrado como serviço do tipo 'material'.",
+      "Adiciona uma linha de material/insumo de TEXTO LIVRE a uma OS (sem produto de catálogo). ATENÇÃO: esta linha aparece na seção SERVIÇOS da OS — a OS tem só duas seções, Serviços e Peças, NÃO existe uma seção 'Materiais' separada. Use para materiais ESTIMADOS em conjunto (ex.: 'R$ 4.500 em materiais elétricos'). Isto NÃO coloca o item na lista de PEÇAS/PRODUTOS — para levar um material à seção Peças, ele precisa virar produto de catálogo (create_product) e ser adicionado com add_service_order_item.",
     input_schema: {
       type: "object",
       properties: {
