@@ -602,6 +602,17 @@ async function handleHomolog(admin: any, body: any): Promise<Response> {
 
   if (status !== "authorized") {
     const detalhe = msg || (code ? `código ${code}` : status);
+    // Registra a recusa do SEFAZ (cStat + motivo + fatos do payload) para
+    // diagnóstico posterior sem precisar reproduzir.
+    void logEdgeError(admin, {
+      context: "fiscal-emit", action: "homolog", level: "warn",
+      message: `Homologação: SEFAZ ${status} (${code}) — ${msg}`,
+      details: {
+        status, code, msg,
+        purpose: (payload as Record<string, unknown>).purpose,
+        first_cfop: ((payload as Record<string, unknown>).items as Array<Record<string, unknown>> | undefined)?.[0]?.cfop ?? null,
+      },
+    });
     return jr({
       error: status === "processing"
         ? "A SEFAZ de homologação ainda está processando. Tente gerar o espelho de novo em instantes."
