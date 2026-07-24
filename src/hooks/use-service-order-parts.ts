@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { recalcTotals } from '@/hooks/use-service-orders';
+import { recalcTotals, isStockModelV2 } from '@/hooks/use-service-orders';
 
 /**
  * Update an existing service_order_parts row. Adjusts stock & inventory_movements
@@ -56,9 +56,13 @@ export function useUpdateServiceOrderPart() {
         .eq('id', values.id);
       if (error) throw error;
 
+      // Modelo v2: o banco gerencia estoque (reserva/baixa na conclusão); a edição de qty NÃO
+      // baixa estoque nem BLOQUEIA por falta — a restrição só aparece na efetivação. Com a flag
+      // OFF, mantém o comportamento de hoje (ajuste + bloqueio de estoque insuficiente).
+      const v2 = await isStockModelV2();
       const delta = values.quantity - values.previous_quantity;
       let stockBeforeAdjustment: number | null = null;
-      if (delta !== 0) {
+      if (!v2 && delta !== 0) {
         const { data: prod } = await supabase
           .from('products')
           .select('stock_quantity')

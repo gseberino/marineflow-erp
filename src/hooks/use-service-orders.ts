@@ -4,6 +4,14 @@ import { toast } from 'sonner';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { cancelServiceOrderCascade, reopenServiceOrder, updateReceivableFromSO } from '@/lib/cascade-updates';
 
+// Modelo de estoque v2 (flag app_settings.stock_model_v2='on'): o banco gerencia estoque
+// (reserva na OS comprometida, baixa física na conclusão). Quando ligado, o frontend NÃO baixa
+// estoque no add/remove — senão haveria dupla contagem. Com a flag OFF, comportamento de hoje.
+export async function isStockModelV2(): Promise<boolean> {
+  const { data } = await supabase.from('app_settings').select('value').eq('key', 'stock_model_v2').maybeSingle();
+  return String((data as any)?.value ?? '').toLowerCase() === 'on';
+}
+
 const SO_SELECT = `
   *,
   clients(name, phone, whatsapp),
@@ -409,24 +417,27 @@ export function useAddServiceOrderPart() {
       });
       if (error) throw error;
 
-      const { data: prod } = await supabase
-        .from('products')
-        .select('stock_quantity')
-        .eq('id', values.product_id)
-        .single();
-      await supabase
-        .from('products')
-        .update({ stock_quantity: (prod?.stock_quantity || 0) - values.quantity })
-        .eq('id', values.product_id);
+      // No modelo v2 o banco cuida do estoque (reserva/baixa na conclusão) — não baixamos aqui.
+      if (!(await isStockModelV2())) {
+        const { data: prod } = await supabase
+          .from('products')
+          .select('stock_quantity')
+          .eq('id', values.product_id)
+          .single();
+        await supabase
+          .from('products')
+          .update({ stock_quantity: (prod?.stock_quantity || 0) - values.quantity })
+          .eq('id', values.product_id);
 
-      await supabase.from('inventory_movements').insert({
-        product_id: values.product_id,
-        movement_type: 'service_order_usage',
-        quantity_delta: -values.quantity,
-        reference_type: 'service_order',
-        reference_id: values.service_order_id,
-        unit_cost_snapshot: values.unit_cost_snapshot,
-      });
+        await supabase.from('inventory_movements').insert({
+          product_id: values.product_id,
+          movement_type: 'service_order_usage',
+          quantity_delta: -values.quantity,
+          reference_type: 'service_order',
+          reference_id: values.service_order_id,
+          unit_cost_snapshot: values.unit_cost_snapshot,
+        });
+      }
 
       // Adicionar uma linha só aumenta o total (nunca reduz), então
       // recalcTotals nunca bloqueia aqui — a cascata de recebíveis já
@@ -467,35 +478,43 @@ export function useRemoveServiceOrderPart() {
         .eq('id', part.id);
       if (error) throw error;
 
-      const { data: prod } = await supabase
-        .from('products')
-        .select('stock_quantity')
-        .eq('id', part.product_id)
-        .single();
-      const stockBeforeReturn = prod?.stock_quantity || 0;
-      await supabase
-        .from('products')
-        .update({ stock_quantity: stockBeforeReturn + part.quantity })
-        .eq('id', part.product_id);
+      // No modelo v2 o banco cuida do estoque — não devolvemos aqui (a reserva é recomputada
+      // pelo trigger ao remover a peça). Com a flag OFF, comportamento de hoje.
+      const v2 = await isStockModelV2();
+      let stockBeforeReturn = 0;
+      if (!v2) {
+        const { data: prod } = await supabase
+          .from('products')
+          .select('stock_quantity')
+          .eq('id', part.product_id)
+          .single();
+        stockBeforeReturn = prod?.stock_quantity || 0;
+        await supabase
+          .from('products')
+          .update({ stock_quantity: stockBeforeReturn + part.quantity })
+          .eq('id', part.product_id);
 
-      await supabase.from('inventory_movements').insert({
-        product_id: part.product_id,
-        movement_type: 'return',
-        quantity_delta: part.quantity,
-        reference_type: 'service_order',
-        reference_id: part.service_order_id,
-        unit_cost_snapshot: part.unit_cost_snapshot,
-      });
+        await supabase.from('inventory_movements').insert({
+          product_id: part.product_id,
+          movement_type: 'return',
+          quantity_delta: part.quantity,
+          reference_type: 'service_order',
+          reference_id: part.service_order_id,
+          unit_cost_snapshot: part.unit_cost_snapshot,
+        });
+      }
 
       try {
         await recalcTotals(part.service_order_id);
       } catch (e) {
-        // Reverte: readiciona a linha removida e desfaz o ajuste de estoque.
+        // Reverte: readiciona a linha removida e desfaz o ajuste de estoque (só no modelo antigo).
         if (fullRow) {
           const { id: _oldId, ...reinsertData } = fullRow as any;
           await supabase.from('service_order_parts').insert(reinsertData);
         }
-        await supabase.from('products').update({ stock_quantity: stockBeforeReturn }).eq('id', part.product_id);
+        if (!v2) {
+          await supabase.from('products').update({ stock_quantity: stockBeforeReturn }).eq('id', part.product_id);
+        }
         await recalcTotals(part.service_order_id).catch(() => {});
         throw e;
       }

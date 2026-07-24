@@ -81,6 +81,12 @@ export async function applyStockDelta(
 ): Promise<void> {
   if (!productId || !delta) return;
   try {
+    // Modelo de estoque v2 (flag app_settings.stock_model_v2='on'): o banco gerencia estoque
+    // (reserva na OS comprometida, baixa física na conclusão). Aqui NÃO mexemos no físico —
+    // senão haveria dupla contagem. Com a flag OFF, comportamento idêntico ao de hoje.
+    const { data: flag } = await sb.from("app_settings").select("value").eq("key", "stock_model_v2").maybeSingle();
+    if (String(flag?.value ?? "").toLowerCase() === "on") return;
+
     const { data: prod } = await sb.from("products").select("stock_quantity").eq("id", productId).maybeSingle();
     const current = Number(prod?.stock_quantity) || 0;
     await sb.from("products").update({ stock_quantity: current + delta }).eq("id", productId);

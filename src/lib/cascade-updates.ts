@@ -98,33 +98,39 @@ export async function cancelServiceOrderCascade(serviceOrderId: string, reason: 
   let receivablesCancelled = 0;
   let paymentsCancelled = 0;
 
-  // 1. Restore parts stock
+  // 1. Restore parts stock — só no modelo antigo. No v2 o físico nunca foi baixado no add
+  // (só reservado); ao cancelar, a reserva é recomputada pelo trigger e nada volta ao físico.
+  const { data: stockFlag } = await supabase.from('app_settings').select('value').eq('key', 'stock_model_v2').maybeSingle();
+  const stockV2 = String((stockFlag as any)?.value ?? '').toLowerCase() === 'on';
+
   const { data: parts } = await supabase
     .from('service_order_parts')
     .select('*')
     .eq('service_order_id', serviceOrderId);
 
-  for (const part of parts || []) {
-    const { data: prod } = await supabase
-      .from('products')
-      .select('stock_quantity')
-      .eq('id', part.product_id)
-      .single();
+  if (!stockV2) {
+    for (const part of parts || []) {
+      const { data: prod } = await supabase
+        .from('products')
+        .select('stock_quantity')
+        .eq('id', part.product_id)
+        .single();
 
-    await supabase.from('products').update({
-      stock_quantity: (prod?.stock_quantity || 0) + part.quantity,
-    }).eq('id', part.product_id);
+      await supabase.from('products').update({
+        stock_quantity: (prod?.stock_quantity || 0) + part.quantity,
+      }).eq('id', part.product_id);
 
-    await supabase.from('inventory_movements').insert({
-      product_id: part.product_id,
-      movement_type: 'return',
-      quantity_delta: part.quantity,
-      reference_type: 'service_order_cancel',
-      reference_id: serviceOrderId,
-      unit_cost_snapshot: part.unit_cost_snapshot,
-    });
+      await supabase.from('inventory_movements').insert({
+        product_id: part.product_id,
+        movement_type: 'return',
+        quantity_delta: part.quantity,
+        reference_type: 'service_order_cancel',
+        reference_id: serviceOrderId,
+        unit_cost_snapshot: part.unit_cost_snapshot,
+      });
 
-    partsRestored++;
+      partsRestored++;
+    }
   }
 
   // 2. Cancel receivables and their payments

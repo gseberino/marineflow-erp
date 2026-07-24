@@ -18,6 +18,7 @@ import {
   useServiceOrderParts,
   useAddServiceOrderPart,
   useRemoveServiceOrderPart,
+  isStockModelV2,
   useServiceOrderServices,
   useAddServiceOrderService,
   useRemoveServiceOrderService,
@@ -1834,10 +1835,14 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       if (!isNew && orderId && draft.quantity > 0 && orderData?.status !== 'draft') {
         const { data: prodData } = await supabase
           .from('products')
-          .select('stock_quantity, minimum_stock, product_suppliers(supplier_id, suppliers(id, name)), product_suppliers!inner(lead_time_days)')
+          .select('stock_quantity, reserved_quantity, minimum_stock, product_suppliers(supplier_id, suppliers(id, name)), product_suppliers!inner(lead_time_days)')
           .eq('id', productId)
           .maybeSingle();
-        const available = prodData?.stock_quantity ?? 0;
+        // No modelo v2, disponível = físico − reservado (o físico não é pré-baixado por orçamentos).
+        const v2 = await isStockModelV2();
+        const available = v2
+          ? ((prodData?.stock_quantity ?? 0) - ((prodData as any)?.reserved_quantity ?? 0))
+          : (prodData?.stock_quantity ?? 0);
         if (available < draft.quantity) {
           const suppliers = ((prodData as any)?.product_suppliers ?? [])
             .map((ps: any) => ps.suppliers)
