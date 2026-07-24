@@ -1213,7 +1213,7 @@ export default function FiscalEmission() {
       quantity: it.quantity,
       unit_price: it.unit_price,
       discount: it.discount || 0, // vDesc por item (prod/vDesc)
-      other_expenses: it.otherExpenses || 0, // vOutro por item (despesas acessórias)
+      other_expenses: it.other_expenses || 0, // vOutro por item (despesas acessórias)
       csosn: it.csosn || undefined,
       origin: it.origin,
       icms_rate: it.icms_rate,
