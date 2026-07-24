@@ -344,10 +344,12 @@ Deno.serve(async (req) => {
       const dayEnd = new Date(new Date(dayStart).getTime() + 86400000).toISOString();
       const { data: liveTasks } = await admin
         .from("agenda_tasks")
-        .select("assignee_user_id, title, priority, due_at, scheduled_start_at, scheduled_end_at, kind")
+        .select("assignee_user_id, title, priority, due_at, scheduled_start_at, scheduled_end_at, kind, created_at")
         .in("status", ["pending", "in_progress"])
         .in("assignee_user_id", recIds)
         .limit(300);
+      // Segunda-feira (BRT): revisão semanal guiada (padrão OmniFocus weekly review)
+      const isMondayBRT = new Date(now.getTime() - 3 * 3600000).getUTCDay() === 1;
       const fmtHora = (iso: string) => new Date(iso).toLocaleTimeString("pt-BR", {
         hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo",
       });
@@ -379,6 +381,14 @@ Deno.serve(async (req) => {
         }, 0);
         if (amanha.length >= 3 || amanhaBusyH >= 6) {
           bloco.push(`   ⏳ Amanhã: ${amanha.length} item(ns)${amanhaBusyH > 0 ? ` · ~${amanhaBusyH.toFixed(1).replace(".0", "")}h ocupadas` : ""} — risco de aperto, antecipe o que der.`);
+        }
+        if (isMondayBRT) {
+          const paradas = mine.filter((t: any) =>
+            t.created_at && new Date(t.created_at) < new Date(now.getTime() - 7 * 86400000));
+          if (paradas.length > 0) {
+            bloco.push(`   🔁 Revisão semanal: *${paradas.length}* tarefa(s) aberta(s) há 7+ dias — decida: fazer, delegar ou descartar.`);
+            for (const t of paradas.slice(0, 3)) bloco.push(`      • ${t.title}`);
+          }
         }
         personalBlocks.set(uid, bloco.join("\n"));
       }

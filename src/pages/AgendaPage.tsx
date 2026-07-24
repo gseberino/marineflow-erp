@@ -28,6 +28,7 @@ import {
 import { TaskCard } from '@/components/agenda/TaskCard';
 import { AgendaTaskDialog, type ExistingTask } from '@/components/AgendaTaskDialog';
 import { FocusMode } from '@/components/agenda/FocusMode';
+import { OnMyWayButton } from '@/components/agenda/OnMyWayButton';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -652,6 +653,7 @@ function TodayView({
               <Briefcase className="h-4 w-4 shrink-0" />
               <span className="font-mono text-xs opacity-70">{o.service_order_number}</span>
               <span className="font-medium truncate flex-1">{o.clients?.name || '—'}</span>
+              <OnMyWayButton order={o} />
               {o.scheduled_start_at && <span className="text-xs font-semibold">{fmtTime(o.scheduled_start_at)}</span>}
             </div>
           ))}

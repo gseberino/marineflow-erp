@@ -21,6 +21,22 @@ import {
   type ReminderInput,
 } from '@/hooks/use-agenda';
 import { useClients } from '@/hooks/use-clients';
+import { useQuery } from '@tanstack/react-query';
+
+/** Modelos de checklist (app_settings.task_checklist_templates) — padrão ServiceM8/FieldPulse. */
+export function useChecklistTemplates() {
+  return useQuery({
+    queryKey: ['task-checklist-templates'],
+    queryFn: async () => {
+      const { data } = await supabase.from('app_settings')
+        .select('value').eq('key', 'task_checklist_templates').maybeSingle();
+      try {
+        const parsed = JSON.parse((data as any)?.value || '[]');
+        return Array.isArray(parsed) ? parsed as { name: string; items: string[] }[] : [];
+      } catch { return []; }
+    },
+  });
+}
 
 function toLocalDateInput(d: Date) {
   const y = d.getFullYear();
@@ -140,6 +156,7 @@ export function AgendaTaskDialog({
   const { data: users = [] } = useActiveUsers();
   const { data: clients = [] } = useClients();
   const { data: existingReminders = [] } = useTaskReminders(existing?.id);
+  const { data: templates = [] } = useChecklistTemplates();
 
   const [kind, setKind] = useState<'task' | 'appointment'>('task');
   const [title, setTitle] = useState('');
@@ -422,7 +439,24 @@ export function AgendaTaskDialog({
           </div>
 
           <div className="space-y-2">
-            <Label>Checklist</Label>
+            <div className="flex items-center justify-between">
+              <Label>Checklist</Label>
+              {templates.length > 0 && (
+                <Select value="" onValueChange={(name) => {
+                  const t = templates.find((x) => x.name === name);
+                  if (t) setChecklist((c) => [...c, ...t.items.map((text) => ({ text, done: false }))]);
+                }}>
+                  <SelectTrigger className="h-7 w-[170px] text-xs">
+                    <SelectValue placeholder="Aplicar modelo…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {templates.map((t) => (
+                      <SelectItem key={t.name} value={t.name}>{t.name} ({t.items.length})</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
             <div className="space-y-1.5">
               {checklist.map((item, i) => (
                 <div key={i} className="flex items-center gap-2">

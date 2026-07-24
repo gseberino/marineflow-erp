@@ -235,6 +235,43 @@ async function runClientReminders(db: Db, settings: Record<string, string>) {
   return { sent };
 }
 
+/** R13 — pesquisa de satisfação D+1 após concluir OS (nasce OFF; test-mode aware). */
+async function runPostServiceSurvey(db: Db, settings: Record<string, string>) {
+  if ((settings["task_rule_r13_enabled"] ?? "false") !== "true") return { sent: 0, skipped: "disabled" };
+
+  const testMode = (settings["wa_test_mode"] ?? settings["zapi_test_mode"]) === "true";
+  const testNumber = ((settings["wa_test_number"] ?? settings["zapi_test_number"]) || "").replace(/\D/g, "");
+  if (testMode && !testNumber) return { sent: 0, skipped: "test_mode_without_number" };
+
+  // OS concluídas entre D-2 e D-1 (janela de 1 dia, com margem p/ o cron não perder)
+  const from = new Date(Date.now() - 2 * 86400000).toISOString();
+  const to = new Date(Date.now() - 1 * 86400000).toISOString();
+  const { data: orders } = await db.from("service_orders")
+    .select("id, service_order_number, updated_at, clients(name, phone, whatsapp), vessels(name)")
+    .eq("status", "completed")
+    .gte("updated_at", from)
+    .lte("updated_at", to);
+
+  let sent = 0;
+  for (const o of (orders as any[]) || []) {
+    const phone = ((o.clients?.whatsapp || o.clients?.phone || "") as string).replace(/\D/g, "");
+    if (!phone || phone.length < 10) continue;
+    const { data: dup } = await db.from("whatsapp_send_queue")
+      .select("id").eq("source", "agenda-r13").eq("source_ref_id", o.id).limit(1);
+    if (dup && dup.length > 0) continue;
+    await db.from("whatsapp_send_queue").insert({
+      phone_normalized: testMode ? testNumber : phone,
+      message: `Olá${o.clients?.name ? `, ${o.clients.name}` : ""}! O serviço${o.vessels?.name ? ` na ${o.vessels.name}` : ""} foi concluído. ` +
+        `Como foi sua experiência, de 0 a 10? Sua resposta nos ajuda muito — e qualquer ajuste, é só falar por aqui. — HBR Marine`,
+      source: "agenda-r13",
+      source_ref_id: o.id,
+      priority: 5,
+    });
+    sent++;
+  }
+  return { sent };
+}
+
 /** Processa task_reminders vencidos → sino in-app + WhatsApp interno. */
 async function processReminders(db: Db) {
   const { data: due } = await db.from("task_reminders")
@@ -362,10 +399,11 @@ Deno.serve(async (req) => {
     const rules = await runRules(db, settings);
     const r10 = await runTechnicianReminders(db, settings);
     const r9 = await runClientReminders(db, settings);
+    const r13 = await runPostServiceSurvey(db, settings);
     const reminders = await processReminders(db);
     const recurrence = await materializeRecurrences(db);
 
-    const summary = { rules, r10, r9, reminders, recurrence };
+    const summary = { rules, r10, r9, r13, reminders, recurrence };
     if (rules.created.length || rules.resolved.length || recurrence.created) {
       await audit(db, "task_automations_run", summary);
     }

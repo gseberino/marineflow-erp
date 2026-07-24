@@ -379,7 +379,52 @@ const r12: Rule = {
   },
 };
 
-export const RULES: Rule[] = [r1, r2, r3, r4, r5, r6, r7, r8, r11, r12];
+// R14 (Fase 8): plano de manutenção entrou na janela → propor revisão
+const r14: Rule = {
+  id: 'r14',
+  label: 'Plano de manutenção vencendo',
+  defaultEnabled: true,
+  async find(db) {
+    const { data } = await db
+      .from('maintenance_plans')
+      .select('id, name, interval_months, advance_days, last_service_at, estimated_value, created_at, vessels(id, name, client_id, clients(name))')
+      .eq('active', true)
+      .limit(200);
+    const today = new Date();
+    return ((data as any[]) || [])
+      .filter((p) => {
+        const base = p.last_service_at ? new Date(p.last_service_at) : new Date(p.created_at);
+        const due = new Date(base);
+        due.setMonth(due.getMonth() + Number(p.interval_months));
+        due.setDate(due.getDate() - Number(p.advance_days || 0));
+        return due <= today;
+      })
+      .map((p) => ({
+        automation_key: keyOf('r14', 'plan', p.id, p.last_service_at || 'first'),
+        title: `Propor revisão: ${p.name} — ${p.vessels?.name || 'embarcação'} (${p.vessels?.clients?.name || 'cliente'})` +
+          (p.estimated_value ? ` · ~${fmtBRL(Number(p.estimated_value))}` : ''),
+        priority: 'high' as const,
+        assignee: 'admin' as const,
+        due_at: dueAt(todayISO()),
+        related_entity_type: 'vessel',
+        related_entity_id: p.vessels?.id || null,
+        client_id: p.vessels?.client_id || null,
+      }));
+  },
+  async isResolved(db, task) {
+    const id = entityIdFromKey(task.automation_key);
+    const bucket = task.automation_key.split(':')[3];
+    const { data } = await db.from('maintenance_plans')
+      .select('active, last_service_at').eq('id', id).maybeSingle();
+    if (!data) return 'Plano não existe mais';
+    if (!data.active) return 'Plano desativado';
+    // last_service_at mudou desde a criação da tarefa = serviço registrado
+    if ((data.last_service_at || 'first') !== bucket) return 'Serviço registrado no plano';
+    return null;
+  },
+};
+
+export const RULES: Rule[] = [r1, r2, r3, r4, r5, r6, r7, r8, r11, r12, r14];
 
 export function ruleById(id: string): Rule | undefined {
   return RULES.find((r) => r.id === id);

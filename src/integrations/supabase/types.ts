@@ -2759,6 +2759,62 @@ export type Database = {
           },
         ]
       }
+      maintenance_plans: {
+        Row: {
+          active: boolean
+          advance_days: number
+          created_at: string
+          created_by: string | null
+          estimated_value: number | null
+          id: string
+          interval_months: number
+          last_service_at: string | null
+          name: string
+          notes: string | null
+          scope: string | null
+          updated_at: string
+          vessel_id: string
+        }
+        Insert: {
+          active?: boolean
+          advance_days?: number
+          created_at?: string
+          created_by?: string | null
+          estimated_value?: number | null
+          id?: string
+          interval_months: number
+          last_service_at?: string | null
+          name: string
+          notes?: string | null
+          scope?: string | null
+          updated_at?: string
+          vessel_id: string
+        }
+        Update: {
+          active?: boolean
+          advance_days?: number
+          created_at?: string
+          created_by?: string | null
+          estimated_value?: number | null
+          id?: string
+          interval_months?: number
+          last_service_at?: string | null
+          name?: string
+          notes?: string | null
+          scope?: string | null
+          updated_at?: string
+          vessel_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "maintenance_plans_vessel_id_fkey"
+            columns: ["vessel_id"]
+            isOneToOne: false
+            referencedRelation: "vessels"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       marinas: {
         Row: {
           access_notes: string | null
