@@ -18,6 +18,7 @@ import {
   useActiveUsers,
   useLiveTasks,
   useCompleteTask,
+  useRescheduleTask,
   useSchedulableOrders,
   useQuickSchedule,
 } from '@/hooks/use-agenda';
@@ -119,6 +120,17 @@ export default function AgendaPage() {
   const { data: activeUsers = [] } = useActiveUsers();
   const { data: liveTasks = [], isLoading: loadingLive } = useLiveTasks();
   const completeTask = useCompleteTask();
+  const reschedule = useRescheduleTask();
+
+  const handleTaskDrop = (task: any, technicianId: string, dateKey: string) => {
+    reschedule.mutate(
+      { task, dateKey, assigneeId: technicianId === '__unassigned__' ? null : technicianId },
+      {
+        onSuccess: () => toast.success('Tarefa movida'),
+        onError: (e: any) => toast.error(e?.message || 'Erro ao mover tarefa'),
+      },
+    );
+  };
 
   const isLoading = view === 'today' ? (loadingOrders || loadingLive) : (loadingOrders || loadingTasks);
 
@@ -257,6 +269,7 @@ export default function AgendaPage() {
             onCardClick={(id) => navigate(`/service-orders/${id}`)}
             onCellClick={openTaskDialog}
             onTaskClick={(t) => openTaskDialog(undefined, undefined, t)}
+            onTaskDrop={handleTaskDrop}
           />
         ) : (
           <MonthView
@@ -397,7 +410,7 @@ function TodayView({
 // WEEK VIEW
 // ============================================================
 function WeekView({
-  weekStart, orders, tasks, technicians, onCardClick, onCellClick, onTaskClick,
+  weekStart, orders, tasks, technicians, onCardClick, onCellClick, onTaskClick, onTaskDrop,
 }: {
   weekStart: Date;
   orders: any[];
@@ -406,6 +419,7 @@ function WeekView({
   onCardClick: (id: string) => void;
   onCellClick: (technicianId: string, date: Date) => void;
   onTaskClick: (task: ExistingTask) => void;
+  onTaskDrop: (task: any, technicianId: string, dateKey: string) => void;
 }) {
   const { t } = useI18n();
   const ag = t.agenda as any;
@@ -555,6 +569,14 @@ function WeekView({
                       if (tech.id === '__unassigned__') return;
                       onCellClick(tech.id, d);
                     }}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      try {
+                        const payload = JSON.parse(e.dataTransfer.getData('application/x-agenda-task'));
+                        if (payload?.id) onTaskDrop(payload, tech.id, dayKey);
+                      } catch { /* drop de algo que não é tarefa */ }
+                    }}
                   >
                     {cellOrders.map((o) => (
                       <div
@@ -590,6 +612,11 @@ function WeekView({
                       <div
                         key={`t-${t.id}`}
                         data-card
+                        draggable={!!t.scheduled_start_at}
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('application/x-agenda-task', JSON.stringify(t));
+                          e.dataTransfer.effectAllowed = 'move';
+                        }}
                         onClick={(e) => { e.stopPropagation(); onTaskClick(t); }}
                         className={cn(
                           'rounded-md p-1.5 text-xs cursor-pointer hover:ring-1 hover:ring-primary transition-all',

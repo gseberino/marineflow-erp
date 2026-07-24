@@ -52,6 +52,8 @@ export type ExistingTask = {
   related_entity_type?: string | null;
   related_entity_id?: string | null;
   checklist?: { text: string; done: boolean }[];
+  rrule?: string | null;
+  source?: string;
 };
 
 type ChecklistItem = { text: string; done: boolean };
@@ -158,6 +160,8 @@ export function AgendaTaskDialog({
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
   const [newItem, setNewItem] = useState('');
   const [reminderKeys, setReminderKeys] = useState<string[]>([]);
+  const [repeat, setRepeat] = useState<'none' | 'DAILY' | 'WEEKLY' | 'MONTHLY'>('none');
+  const [repeatUntil, setRepeatUntil] = useState('');
 
   const entityOptions = useEntityOptions(entityType);
 
@@ -183,6 +187,10 @@ export function AgendaTaskDialog({
       setEntityId(existing.related_entity_id || '');
       setChecklist(Array.isArray(existing.checklist) ? existing.checklist : []);
       setReminderKeys([]); // presets não são re-derivados; lembretes existentes ficam
+      const freq = existing.rrule?.match(/FREQ=(DAILY|WEEKLY|MONTHLY)/)?.[1];
+      setRepeat((freq as any) || 'none');
+      const until = existing.rrule?.match(/UNTIL=(\d{4})(\d{2})(\d{2})/);
+      setRepeatUntil(until ? `${until[1]}-${until[2]}-${until[3]}` : '');
     } else {
       setKind('task');
       setTitle('');
@@ -202,6 +210,8 @@ export function AgendaTaskDialog({
       setEntityId(prefillEntity?.id || '');
       setChecklist([]);
       setReminderKeys([]);
+      setRepeat('none');
+      setRepeatUntil('');
     }
     setNewItem('');
   }, [open, existing, prefillTechnicianId, prefillDate, prefillEntity]);
@@ -234,6 +244,10 @@ export function AgendaTaskDialog({
         .filter((r) => new Date(r.remind_at) > new Date());
     }
 
+    const rrule = repeat === 'none'
+      ? null
+      : `FREQ=${repeat}${repeatUntil ? `;UNTIL=${repeatUntil.replace(/-/g, '')}` : ''}`;
+
     const payload: AgendaTaskInput = {
       id: existing?.id,
       title: title.trim(),
@@ -253,6 +267,7 @@ export function AgendaTaskDialog({
       related_entity_id: entityType && entityId ? entityId : null,
       checklist,
       reminders,
+      rrule,
     };
 
     try {
@@ -468,6 +483,29 @@ export function AgendaTaskDialog({
               {' '}Selecionar presets substitui os lembretes anteriores.
             </p>
           </div>
+
+          {(!existing || existing.source === 'manual' || existing.source === 'ai') && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Repetir</Label>
+                <Select value={repeat} onValueChange={(v) => setRepeat(v as any)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Não repete</SelectItem>
+                    <SelectItem value="DAILY">Todo dia</SelectItem>
+                    <SelectItem value="WEEKLY">Toda semana</SelectItem>
+                    <SelectItem value="MONTHLY">Todo mês</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {repeat !== 'none' && (
+                <div className="space-y-2">
+                  <Label>Repetir até (opcional)</Label>
+                  <Input type="date" value={repeatUntil} onChange={(e) => setRepeatUntil(e.target.value)} />
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="flex items-center justify-between rounded-md border px-3 py-2">
             <div>

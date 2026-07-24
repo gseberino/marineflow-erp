@@ -1,11 +1,15 @@
 import { useNavigate } from 'react-router-dom';
 import { Checkbox } from '@/components/ui/checkbox';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import {
   Bot, Cog, Briefcase, User, DollarSign, ShoppingCart, Package, FileText,
-  Anchor, Clock, CalendarDays, MapPin, AlarmClock,
+  Anchor, Clock, CalendarDays, MapPin, AlarmClock, Timer,
 } from 'lucide-react';
-import type { RelatedEntityType } from '@/hooks/use-agenda';
+import { toast } from 'sonner';
+import { useSnoozeTask, type RelatedEntityType } from '@/hooks/use-agenda';
 
 const ENTITY_CONFIG: Record<RelatedEntityType, { label: string; Icon: typeof Briefcase; route: (id: string) => string }> = {
   service_order:  { label: 'OS',         Icon: Briefcase,    route: (id) => `/service-orders/${id}` },
@@ -65,7 +69,22 @@ export function TaskCard({
   compact?: boolean;
 }) {
   const navigate = useNavigate();
+  const snooze = useSnoozeTask();
   const done = task.status === 'done';
+  const snoozed = task.snoozed_until && new Date(task.snoozed_until) > new Date();
+
+  const doSnooze = (until: string | null, label: string) => {
+    snooze.mutate({ id: task.id, until }, {
+      onSuccess: () => toast.success(label),
+      onError: (e: any) => toast.error(e?.message || 'Erro ao adiar'),
+    });
+  };
+  const tomorrow8 = () => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    d.setHours(8, 0, 0, 0);
+    return d.toISOString();
+  };
   const entity = task.related_entity_type
     ? ENTITY_CONFIG[task.related_entity_type as RelatedEntityType]
     : null;
@@ -133,8 +152,41 @@ export function TaskCard({
             <span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3" /> {task.location}</span>
           )}
           {!compact && task.clients?.name && <span>{task.clients.name}</span>}
+          {snoozed && (
+            <span className="inline-flex items-center gap-1 text-sky-600 dark:text-sky-400">
+              <Timer className="h-3 w-3" /> adiada
+            </span>
+          )}
         </div>
       </div>
+      {!done && onToggleDone && (
+        <span onClick={(e) => e.stopPropagation()}>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label="Adiar tarefa"
+                className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity rounded p-1 text-muted-foreground hover:bg-muted"
+              >
+                <Timer className="h-3.5 w-3.5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => doSnooze(new Date(Date.now() + 3600000).toISOString(), 'Adiada por 1 hora')}>
+                Adiar 1 hora
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => doSnooze(tomorrow8(), 'Adiada para amanhã 08:00')}>
+                Adiar para amanhã
+              </DropdownMenuItem>
+              {snoozed && (
+                <DropdownMenuItem onClick={() => doSnooze(null, 'Adiamento removido')}>
+                  Remover adiamento
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </span>
+      )}
     </div>
   );
 }

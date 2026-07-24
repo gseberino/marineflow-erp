@@ -102,4 +102,56 @@ export const biTools: ToolDef[] = [
       };
     },
   },
+  {
+    name: "get_task_metrics",
+    description:
+      "MÉTRICAS de TAREFAS da agenda — produtividade e disciplina de execução. Responde 'como está a execução das tarefas?', 'quantas tarefas atrasadas por pessoa?'. Traz: vivas/atrasadas/concluídas por pessoa no período, tempo médio de resolução e distribuição por origem (manual/IA/automação/recorrência).",
+    input_schema: {
+      type: "object",
+      properties: {
+        days: { type: "number", description: "Janela em dias para as concluídas (padrão 30)." },
+      },
+    },
+    risk: "low",
+    async execute(args, ctx) {
+      const days = Math.min(Math.max(Number(args.days) || 30, 7), 365);
+      const since = new Date(Date.now() - days * 86400000).toISOString();
+      const startToday = new Date(new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10) + "T00:00:00-03:00").toISOString();
+
+      const { data: live } = await ctx.admin.from("agenda_tasks")
+        .select("assignee_user_id, due_at, scheduled_start_at, source, app_users:assignee_user_id(full_name)")
+        .in("status", ["pending", "in_progress"]).limit(500);
+      const { data: done } = await ctx.admin.from("agenda_tasks")
+        .select("assignee_user_id, created_at, completed_at, source, app_users:assignee_user_id(full_name)")
+        .eq("status", "done").gte("completed_at", since).limit(500);
+
+      const anchor = (t: any) => t.due_at || t.scheduled_start_at;
+      const byPerson = new Map<string, { pessoa: string; vivas: number; atrasadas: number; concluidas: number }>();
+      const bump = (t: any, field: "vivas" | "atrasadas" | "concluidas") => {
+        const nome = t.app_users?.full_name || "(sem responsável)";
+        if (!byPerson.has(nome)) byPerson.set(nome, { pessoa: nome, vivas: 0, atrasadas: 0, concluidas: 0 });
+        byPerson.get(nome)![field]++;
+      };
+      for (const t of (live as any[]) || []) {
+        bump(t, "vivas");
+        if (anchor(t) && anchor(t) < startToday) bump(t, "atrasadas");
+      }
+      let resolutionSumH = 0, resolutionN = 0;
+      const bySource: Record<string, number> = {};
+      for (const t of (done as any[]) || []) {
+        bump(t, "concluidas");
+        bySource[t.source] = (bySource[t.source] || 0) + 1;
+        if (t.completed_at && t.created_at) {
+          resolutionSumH += (new Date(t.completed_at).getTime() - new Date(t.created_at).getTime()) / 3600000;
+          resolutionN++;
+        }
+      }
+      return {
+        janela_dias: days,
+        por_pessoa: Array.from(byPerson.values()).sort((a, b) => b.vivas - a.vivas),
+        concluidas_por_origem: bySource,
+        tempo_medio_resolucao_horas: resolutionN > 0 ? r2(resolutionSumH / resolutionN) : null,
+      };
+    },
+  },
 ];

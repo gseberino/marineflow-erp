@@ -345,6 +345,43 @@ export function useCompleteTask() {
   });
 }
 
+/** Drag-and-drop da semana: move a tarefa para outro dia/pessoa preservando o horário. */
+export function useRescheduleTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ task, dateKey, assigneeId }: {
+      task: any; dateKey: string; assigneeId: string | null;
+    }) => {
+      if (!task.scheduled_start_at) throw new Error('Tarefa sem horário não pode ser arrastada.');
+      const oldStart = new Date(task.scheduled_start_at);
+      const [y, m, d] = dateKey.split('-').map(Number);
+      const newStart = new Date(oldStart);
+      newStart.setFullYear(y, m - 1, d);
+      let newEnd: Date | null = null;
+      if (task.scheduled_end_at) {
+        const dur = new Date(task.scheduled_end_at).getTime() - oldStart.getTime();
+        newEnd = new Date(newStart.getTime() + dur);
+      }
+      if (task.kind === 'appointment' && assigneeId && newEnd) {
+        const conflicts = await fetchConflicts({
+          userId: assigneeId,
+          startISO: newStart.toISOString(),
+          endISO: newEnd.toISOString(),
+          excludeTask: task.id,
+        });
+        if (conflicts.length > 0) throw new Error(conflictMessage(conflicts));
+      }
+      const { error } = await supabase.from('agenda_tasks').update({
+        assignee_user_id: assigneeId,
+        scheduled_start_at: newStart.toISOString(),
+        scheduled_end_at: newEnd ? newEnd.toISOString() : null,
+      }).eq('id', task.id);
+      if (error) throw error;
+    },
+    onSuccess: () => invalidateTaskQueries(qc),
+  });
+}
+
 export function useSnoozeTask() {
   const qc = useQueryClient();
   return useMutation({
