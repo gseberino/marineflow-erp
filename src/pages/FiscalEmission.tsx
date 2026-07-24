@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/select';
 import {
   FileText, Loader2, Plus, Trash2, RefreshCw, Download, Ban, Pencil, Settings2, Upload,
-  Stethoscope, CheckCircle2, XCircle, Undo2, Send, FileDown, Copy, Boxes, Eye,
+  Stethoscope, CheckCircle2, XCircle, Undo2, Send, FileDown, Copy, Boxes, Eye, Mail,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -1528,6 +1528,36 @@ export default function FiscalEmission() {
     }
   };
 
+  // Envia a NF-e (DANFE em PDF + XML) ao cliente por E-MAIL, via SMTP do próprio
+  // domínio (fiscal-email). O e-mail do destinatário vem do cadastro do cliente /
+  // do payload; se faltar, pede para informar.
+  // deno-lint-ignore no-explicit-any
+  const handleSendEmail = async (doc: any) => {
+    const client = (clients || []).find((c: any) => c.id === doc.client_id);
+    const emailPadrao: string = client?.email || doc.request_payload?.recipient?.email || '';
+    const to = window.prompt('Enviar a NF-e (PDF + XML) para qual e-mail?', emailPadrao);
+    if (to === null) return; // cancelou
+    const dest = to.trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(dest)) {
+      toast.error('E-mail inválido.');
+      return;
+    }
+    markBusy(doc.id, true);
+    const tId = toast.loading('Enviando a NF-e por e-mail…');
+    try {
+      const { data, error } = await supabase.functions.invoke('fiscal-email', {
+        body: { document_id: doc.id, to: dest, include_xml: true },
+      });
+      if (error) throw new Error(await extractInvokeErrorMessage(error));
+      if ((data as any)?.error) throw new Error((data as any).error);
+      toast.success(`NF-e enviada por e-mail para ${dest} (PDF + XML).`, { id: tId });
+    } catch (err: any) {
+      toast.error('Erro ao enviar por e-mail: ' + (err?.message || 'desconhecido'), { id: tId });
+    } finally {
+      markBusy(doc.id, false);
+    }
+  };
+
   // Monta o cronograma de parcelas: divide o total em N (a última parcela recebe
   // o arredondamento para o somatório fechar exato) e distribui os vencimentos a
   // partir da 1ª data, de X em X dias.
@@ -1900,6 +1930,14 @@ export default function FiscalEmission() {
                                 <Send className="h-3.5 w-3.5 mr-1" />Enviar ao cliente
                               </Button>
                             )}
+                            <Button
+                              size="sm" variant="outline" className="text-xs"
+                              disabled={isBusy}
+                              title="Enviar a NF-e (DANFE em PDF + XML) ao cliente por e-mail"
+                              onClick={() => handleSendEmail(doc)}
+                            >
+                              <Mail className="h-3.5 w-3.5 mr-1" />E-mail
+                            </Button>
                             {doc.request_payload?.purpose !== 4 && doc.access_key && (
                               <Button
                                 size="sm" variant="outline" className="text-xs"
