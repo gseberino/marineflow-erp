@@ -100,6 +100,10 @@ interface DraftItem {
   maxQuantity?: number; // teto = qtd da nota original (só no modo devolução)
   referencedKey?: string | null; // chave da NF-e original
   referencedItemNumber?: number | null; // nItem na nota original
+  // ICMS/IPI que o fornecedor destacou, POR UNIDADE — usados só para calcular o
+  // crédito informado nos dados adicionais da devolução (não vão em campo fiscal).
+  icmsUnit?: number;
+  ipiUnit?: number;
 }
 
 // CSOSN padrão 102 (Tributada pelo Simples SEM permissão de crédito) — correto
