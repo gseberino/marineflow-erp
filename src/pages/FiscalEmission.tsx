@@ -38,6 +38,7 @@ import { parseLegacyAddress } from '@/lib/address-legacy';
 import { CSOSN_OPTIONS, FISCAL_ORIGIN_OPTIONS } from '@/lib/price-calculator';
 import { buildEspelhoHtml } from '@/lib/danfe-espelho';
 import { extractInvokeErrorMessage } from '@/lib/invoke-error';
+import { buildEmissionItem } from '@/lib/fiscal-emission-item';
 import { BLOCK_SEPARATOR, buildDevolucaoInfo, composeAdditionalInfo, stripManagedBlocks, stripPurchaseBlock } from '@/lib/nfe-info-complementar';
 // Reaproveita os mesmos módulos que a edge function fiscal-emit usa no
 // servidor — evita duplicar a lista de formas de pagamento, natureza de
@@ -1203,26 +1204,10 @@ export default function FiscalEmission() {
         postal_code: address.postal_code,
       },
     },
-    items: activeItems.map((it) => ({
-      product_id: it.productId || undefined,
-      code: it.code,
-      name: it.name,
-      ncm: it.ncm,
-      cfop: it.cfop,
-      unit: it.unit,
-      quantity: it.quantity,
-      unit_price: it.unit_price,
-      discount: it.discount || 0, // vDesc por item (prod/vDesc)
-      other_expenses: it.other_expenses || 0, // vOutro por item (despesas acessórias)
-      csosn: it.csosn || undefined,
-      origin: it.origin,
-      icms_rate: it.icms_rate,
-      pis_rate: it.pis_rate,
-      cofins_rate: it.cofins_rate,
-      ipi_rate: it.ipi_rate,
-      referenced_key: it.referencedKey || undefined,
-      referenced_item: it.referencedItemNumber || undefined,
-    })),
+    // Mapeamento extraído para função pura e TESTADA (src/lib/fiscal-emission-item):
+    // o projeto não roda type-check no build, então o teste é a rede que pega typo
+    // de campo (foi assim que other_expenses ia zerado).
+    items: activeItems.map(buildEmissionItem),
   });
 
   // Espelho LOCAL (fallback): o servidor devolve o payload EXATO da emissão
