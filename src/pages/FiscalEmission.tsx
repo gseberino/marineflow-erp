@@ -1259,6 +1259,25 @@ export default function FiscalEmission() {
       return;
     }
     setGeneratingEspelho(true);
+
+    // DEVOLUÇÃO: a SEFAZ Virtual do RS (SVRS, que autoriza SC/ES) NÃO valida NF-e
+    // referenciada em HOMOLOGAÇÃO — sempre retorna Rejeição 321, mesmo com o
+    // refNFe correto no XML. Então nem tentamos a homologação (evita ~15-25s de
+    // espera à toa) e vamos direto ao espelho LOCAL. A validação real (com a nota
+    // de origem na base da SEFAZ) só acontece na emissão em PRODUÇÃO.
+    if (isReturn) {
+      const tId = toast.loading('Gerando o espelho da devolução…');
+      try {
+        await openLocalEspelho();
+        toast.success('Espelho da devolução aberto (SEM VALOR FISCAL) — pronto para enviar ao fornecedor. A validação da SEFAZ só ocorre na emissão em produção.', { id: tId });
+      } catch (err: any) {
+        toast.error('Espelho: ' + (err?.message || 'erro desconhecido'), { id: tId });
+      } finally {
+        setGeneratingEspelho(false);
+      }
+      return;
+    }
+
     const tId = toast.loading('Emitindo o espelho em homologação na SEFAZ… (leva alguns segundos)');
     try {
       const { data, error } = await supabase.functions.invoke('fiscal-emit', {
