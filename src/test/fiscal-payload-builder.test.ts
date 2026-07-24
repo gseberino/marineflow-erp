@@ -257,10 +257,10 @@ describe("buildNfeDraftPayload — purpose / IE / infCpl / devolução", () => {
     expect(p.additional_info).toBe("Simples Nacional");
   });
 
-  it("envia referenced_access_keys só quando há chave (devolução)", () => {
-    expect((buildNfeDraftPayload(makeInput()) as any).referenced_access_keys).toBeUndefined();
+  it("envia referenced_documents só quando há chave (devolução, nível da nota)", () => {
+    expect((buildNfeDraftPayload(makeInput()) as any).referenced_documents).toBeUndefined();
     const p = buildNfeDraftPayload(makeInput({ referencedAccessKey: "4226 0550 0570 4900 0159 5500 1000 0001 1113 8202 6000" })) as any;
-    expect(p.referenced_access_keys).toEqual(["42260550057049000159550010000001111382026000"]);
+    expect(p.referenced_documents).toEqual([{ access_key: "42260550057049000159550010000001111382026000" }]);
   });
 
   it("monta taxes no item quando o item traz CSOSN", () => {
@@ -331,8 +331,8 @@ describe("NATURE_OF_OPERATION_OPTIONS — hasPayment", () => {
   });
 });
 
-describe("buildNfeDraftPayload — referência por item (devolução VC02-14)", () => {
-  it("monta referenced_document {access_key,item} por item quando informado", () => {
+describe("buildNfeDraftPayload — NF-e referenciada na devolução (ide/NFref/refNFe)", () => {
+  it("monta referenced_documents[].access_key (nível da nota) a partir da chave por item", () => {
     const p = buildNfeDraftPayload(makeInput({
       purpose: 4,
       items: [{
@@ -340,27 +340,32 @@ describe("buildNfeDraftPayload — referência por item (devolução VC02-14)", 
         referencedKey: "4226 0750 0570 4900 0159 5500 2000 0000 0117 3735 9835", referencedItemNumber: 1,
       }],
     })) as any;
-    expect(p.items[0].referenced_document).toEqual({
-      access_key: "42260750057049000159550020000000011737359835", item: 1,
-    });
+    // Campo confirmado pela Contora: nível da nota, array de { access_key } (44 díg.).
+    expect(p.referenced_documents).toEqual([
+      { access_key: "42260750057049000159550020000000011737359835" },
+    ]);
+    // Não há mais referência por item.
+    expect(p.items[0].referenced_document).toBeUndefined();
   });
 
-  it("agrega as chaves por item em referenced_access_keys (nível da nota)", () => {
+  it("deduplica chaves repetidas entre itens (uma nota original consolidada)", () => {
     const p = buildNfeDraftPayload(makeInput({
       items: [
         { code: "A", name: "A", ncm: "85369090", cfop: "1202", quantity: 1, unitPrice: 10, referencedKey: "42260750057049000159550020000000011737359835", referencedItemNumber: 1 },
         { code: "B", name: "B", ncm: "85369090", cfop: "1202", quantity: 1, unitPrice: 5, referencedKey: "42260750057049000159550020000000011737359835", referencedItemNumber: 2 },
       ],
     })) as any;
-    expect(p.referenced_access_keys).toEqual(["42260750057049000159550020000000011737359835"]);
+    expect(p.referenced_documents).toEqual([
+      { access_key: "42260750057049000159550020000000011737359835" },
+    ]);
   });
 
-  it("não inclui referenced_document quando falta chave ou nItem", () => {
-    const p = buildNfeDraftPayload(makeInput({
+  it("ignora chave com tamanho != 44 dígitos e omite o grupo quando não há chave", () => {
+    const curta = buildNfeDraftPayload(makeInput({
+      referencedAccessKey: "123",
       items: [{ code: "A", name: "Item", ncm: "85369090", cfop: "5102", quantity: 1, unitPrice: 10 }],
     })) as any;
-    expect(p.items[0].referenced_document).toBeUndefined();
-    expect(p.referenced_access_keys).toBeUndefined();
+    expect(curta.referenced_documents).toBeUndefined();
   });
 });
 

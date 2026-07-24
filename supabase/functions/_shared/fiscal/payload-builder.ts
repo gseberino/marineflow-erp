@@ -336,13 +336,10 @@ export function buildNfeDraftPayload(
       if (outro > 0) item.other_expenses = outro; // → det/prod/vOutro
       const taxes = buildItemTaxes(it);
       if (taxes) item.taxes = taxes;
-      // Referência por item à NF-e original (devolução). Nome exato do campo na
-      // Contora a confirmar — usamos `referenced_document: {access_key, item}`,
-      // que mapeia direto para DFeReferenciado (chaveAcesso + nItem).
-      const refKeyItem = onlyDigits(it.referencedKey);
-      if (refKeyItem && it.referencedItemNumber && it.referencedItemNumber > 0) {
-        item.referenced_document = { access_key: refKeyItem, item: it.referencedItemNumber };
-      }
+      // A referência à NF-e original é NÍVEL DA NOTA na Contora
+      // (payload.referenced_documents[].access_key → ide/NFref/refNFe), montada
+      // abaixo a partir das chaves por item. NÃO há referência por item no
+      // contrato — o refKeyItem daqui alimenta o grupo agregado da nota.
       return item;
     }),
     // Devolução/remessa não têm transação financeira → tPag=90 (Sem Pagamento)
@@ -394,17 +391,22 @@ export function buildNfeDraftPayload(
     payload.payments = [{ method: "14", indicator: 1, amount: net }];
   }
 
-  // refNFe (nota inteira): além da referência por item acima, mandamos também a
-  // lista de chaves no nível da nota — cobre o caso "total" e provedores que só
-  // leem a referência agregada. Reúne a chave informada + as chaves por item.
+  // Documentos referenciados (ide/NFref/refNFe) — NÍVEL DA NOTA. Campo confirmado
+  // pela Contora: payload.referenced_documents[].access_key (chave de 44 dígitos).
+  // Obrigatório na devolução (finNFe=4), senão a SEFAZ recusa com Rejeição 321.
+  // Aceita várias chaves (devolução que consolida mais de uma nota de compra).
+  // Reúne a chave informada no nível da nota + as chaves por item; só chaves com
+  // 44 dígitos (a Contora valida o tamanho no build).
   const noteKeys = new Set<string>();
   const topKey = onlyDigits(input.referencedAccessKey);
-  if (topKey) noteKeys.add(topKey);
+  if (topKey.length === 44) noteKeys.add(topKey);
   for (const it of input.items) {
     const k = onlyDigits(it.referencedKey);
-    if (k) noteKeys.add(k);
+    if (k.length === 44) noteKeys.add(k);
   }
-  if (noteKeys.size) payload.referenced_access_keys = [...noteKeys];
+  if (noteKeys.size) {
+    payload.referenced_documents = [...noteKeys].map((access_key) => ({ access_key }));
+  }
 
   // Grupo "compra" da NF-e: purchase.order -> compra/xPed (mapeamento confirmado
   // pela Contora). Fica só no XML — o layout padrão do DANFE não imprime esses
