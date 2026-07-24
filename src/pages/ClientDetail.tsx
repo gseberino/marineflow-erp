@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { ArrowLeft, Mail, Phone, MapPin, Ship, Edit } from 'lucide-react';
 import { ClientFormDialog } from '@/components/ClientFormDialog';
 import { RecordHistory } from '@/components/RecordHistory';
+import { EntityTasksPanel } from '@/components/agenda/EntityTasksPanel';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 
@@ -108,8 +109,12 @@ export default function ClientDetail() {
           <TabsTrigger value="vessels">{t.clients.vessels}</TabsTrigger>
           <TabsTrigger value="orders">{t.clients.serviceOrders}</TabsTrigger>
           <TabsTrigger value="financial">{t.clients.financial}</TabsTrigger>
+          <TabsTrigger value="tasks">Tarefas</TabsTrigger>
           <TabsTrigger value="history">Histórico</TabsTrigger>
         </TabsList>
+        <TabsContent value="tasks" className="mt-4">
+          <EntityTasksPanel entityType="client" entityId={id} title="Tarefas deste cliente" />
+        </TabsContent>
         <TabsContent value="vessels" className="mt-4">
           {(!vessels || vessels.length === 0) ? (
             <p className="py-8 text-center text-muted-foreground">{t.vessels.noVessels}</p>

@@ -10,6 +10,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { EntityTasksPanel } from '@/components/agenda/EntityTasksPanel';
 
 export default function ExternalQuoteDetailPage() {
   const { id } = useParams();
@@ -222,14 +223,16 @@ export default function ExternalQuoteDetailPage() {
           )}
 
           {quote.status === 'converted' && quote.converted_service_order_id && (
-            <Button 
-              className="w-full gap-2 border-green-200 text-green-700 bg-green-50" 
+            <Button
+              className="w-full gap-2 border-green-200 text-green-700 bg-green-50"
               variant="outline"
               onClick={() => navigate(`/service-orders/${quote.converted_service_order_id}`)}
             >
               <CheckCircle className="h-4 w-4" /> Ver OS Gerada
             </Button>
           )}
+
+          <EntityTasksPanel entityType="external_quote" entityId={id} title="Tarefas deste orçamento" />
         </div>
       </div>
     </div>

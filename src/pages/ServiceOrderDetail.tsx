@@ -7,9 +7,10 @@ import { useI18n } from '@/i18n';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useRecordHistory } from '@/hooks/use-audit-log';
 import { Badge } from '@/components/ui/badge';
-import { History, Link2, Check } from 'lucide-react';
+import { History, Link2, Check, ListChecks } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
+import { EntityTasksPanel } from '@/components/agenda/EntityTasksPanel';
 
 function TimelineTab({ id }: { id: string }) {
   const { data: history } = useRecordHistory('service_orders', id);
@@ -87,6 +88,9 @@ export default function ServiceOrderDetail() {
           {id && (
             <TimelineTab id={id} />
           )}
+          <TabsTrigger value="tasks" className="flex items-center gap-1.5">
+            <ListChecks className="h-3.5 w-3.5" /> Tarefas
+          </TabsTrigger>
         </TabsList>
         {order?.share_token && (
           <button
@@ -106,6 +110,12 @@ export default function ServiceOrderDetail() {
           orderData={order}
           isLoading={isLoading}
         />
+      </TabsContent>
+
+      <TabsContent value="tasks" className="mt-0 p-4 lg:p-6">
+        <div className="max-w-2xl">
+          <EntityTasksPanel entityType="service_order" entityId={id} title="Tarefas desta OS" />
+        </div>
       </TabsContent>
 
       <TabsContent value="timeline" className="mt-0 p-4 lg:p-6">

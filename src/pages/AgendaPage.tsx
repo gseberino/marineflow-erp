@@ -15,9 +15,13 @@ import {
   useAgendaOrders,
   useAgendaTasks,
   useTechnicians,
+  useActiveUsers,
+  useLiveTasks,
+  useCompleteTask,
   useSchedulableOrders,
   useQuickSchedule,
 } from '@/hooks/use-agenda';
+import { TaskCard } from '@/components/agenda/TaskCard';
 import { AgendaTaskDialog, type ExistingTask } from '@/components/AgendaTaskDialog';
 import {
   DropdownMenu,
@@ -30,7 +34,7 @@ import { useI18n } from '@/i18n';
 import { statusConfig } from '@/lib/constants';
 import { FilterPresets } from '@/components/FilterPresets';
 
-type ViewMode = 'week' | 'month';
+type ViewMode = 'today' | 'week' | 'month';
 
 function startOfWeek(d: Date): Date {
   const date = new Date(d);
@@ -77,7 +81,7 @@ const TASK_PRIORITY_CLASSES: Record<string, string> = {
 
 export default function AgendaPage() {
   const navigate = useNavigate();
-  const [view, setView] = useState<ViewMode>('week');
+  const [view, setView] = useState<ViewMode>('today');
   const [cursor, setCursor] = useState(() => new Date());
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
 
@@ -88,6 +92,11 @@ export default function AgendaPage() {
   const [techFilter, setTechFilter] = useState<string>('all');
 
   const range = useMemo(() => {
+    if (view === 'today') {
+      const from = new Date();
+      from.setHours(0, 0, 0, 0);
+      return { from, to: addDays(from, 1) };
+    }
     if (view === 'week') {
       const from = startOfWeek(cursor);
       const to = addDays(from, 7);
@@ -107,8 +116,11 @@ export default function AgendaPage() {
     range.to.toISOString(),
   );
   const { data: technicians = [] } = useTechnicians();
+  const { data: activeUsers = [] } = useActiveUsers();
+  const { data: liveTasks = [], isLoading: loadingLive } = useLiveTasks();
+  const completeTask = useCompleteTask();
 
-  const isLoading = loadingOrders || loadingTasks;
+  const isLoading = view === 'today' ? (loadingOrders || loadingLive) : (loadingOrders || loadingTasks);
 
   const filteredOrders = useMemo(() => (
     techFilter === 'all'
@@ -171,6 +183,9 @@ export default function AgendaPage() {
       <Card className="p-4 space-y-4 overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-1 rounded-md border p-1">
+            <Button size="sm" variant={view === 'today' ? 'default' : 'ghost'} onClick={() => setView('today')}>
+              Hoje
+            </Button>
             <Button size="sm" variant={view === 'week' ? 'default' : 'ghost'} onClick={() => setView('week')}>
               Semana
             </Button>
@@ -180,22 +195,26 @@ export default function AgendaPage() {
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            <Button size="sm" variant="outline" onClick={() => handleNav(-1)}>
-              <ChevronLeft className="h-4 w-4" />
-              <span className="hidden sm:inline">{view === 'week' ? 'Semana anterior' : 'Mês anterior'}</span>
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => setCursor(new Date())}>Hoje</Button>
-            <Button size="sm" variant="outline" onClick={() => handleNav(1)}>
-              <span className="hidden sm:inline">{view === 'week' ? 'Semana seguinte' : 'Mês seguinte'}</span>
-              <ChevronRight className="h-4 w-4" />
-            </Button>
+            {view !== 'today' && (
+              <>
+                <Button size="sm" variant="outline" onClick={() => handleNav(-1)}>
+                  <ChevronLeft className="h-4 w-4" />
+                  <span className="hidden sm:inline">{view === 'week' ? 'Semana anterior' : 'Mês anterior'}</span>
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setCursor(new Date())}>Hoje</Button>
+                <Button size="sm" variant="outline" onClick={() => handleNav(1)}>
+                  <span className="hidden sm:inline">{view === 'week' ? 'Semana seguinte' : 'Mês seguinte'}</span>
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </>
+            )}
             <Select value={techFilter} onValueChange={setTechFilter}>
               <SelectTrigger className="w-full sm:w-[180px]">
-                <SelectValue placeholder="Filtrar por técnico" />
+                <SelectValue placeholder="Filtrar por pessoa" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Todos os técnicos</SelectItem>
-                {technicians.map((tech) => (
+                <SelectItem value="all">{view === 'today' ? 'Todas as pessoas' : 'Todos os técnicos'}</SelectItem>
+                {(view === 'today' ? activeUsers : technicians).map((tech: any) => (
                   <SelectItem key={tech.id} value={tech.id}>{tech.full_name}</SelectItem>
                 ))}
               </SelectContent>
@@ -220,6 +239,15 @@ export default function AgendaPage() {
           <div className="flex items-center justify-center py-12 text-muted-foreground">
             <Loader2 className="h-5 w-5 animate-spin" />
           </div>
+        ) : view === 'today' ? (
+          <TodayView
+            orders={filteredOrders}
+            tasks={techFilter === 'all' ? liveTasks : (liveTasks || []).filter((t: any) => t.assignee_user_id === techFilter)}
+            onOrderClick={(id) => navigate(`/service-orders/${id}`)}
+            onTaskClick={(t) => openTaskDialog(undefined, undefined, t)}
+            onToggleDone={(id, done) =>
+              completeTask.mutate({ id, done }, { onError: (e: any) => toast.error(e?.message || 'Erro ao concluir') })}
+          />
         ) : view === 'week' ? (
           <WeekView
             weekStart={range.from}
@@ -259,6 +287,108 @@ export default function AgendaPage() {
         prefillDate={prefill.date}
         existing={editingTask}
       />
+    </div>
+  );
+}
+
+// ============================================================
+// TODAY VIEW — atrasadas / hoje / sem data (default da página)
+// ============================================================
+function TodayView({
+  orders, tasks, onOrderClick, onTaskClick, onToggleDone,
+}: {
+  orders: any[];
+  tasks: any[];
+  onOrderClick: (id: string) => void;
+  onTaskClick: (task: any) => void;
+  onToggleDone: (id: string, done: boolean) => void;
+}) {
+  const now = new Date();
+  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const endToday = addDays(startToday, 1);
+
+  const notSnoozed = (t: any) => !t.snoozed_until || new Date(t.snoozed_until) <= now;
+
+  const overdue = tasks.filter((t: any) => {
+    if (!notSnoozed(t)) return false;
+    const anchor = t.due_at || t.scheduled_start_at;
+    return anchor && new Date(anchor) < startToday;
+  });
+  const todayTasks = tasks.filter((t: any) => {
+    if (!notSnoozed(t) || overdue.includes(t)) return false;
+    const anchor = t.due_at || t.scheduled_start_at;
+    return anchor && new Date(anchor) >= startToday && new Date(anchor) < endToday;
+  }).sort((a: any, b: any) => {
+    const av = a.scheduled_start_at || a.due_at, bv = b.scheduled_start_at || b.due_at;
+    return new Date(av).getTime() - new Date(bv).getTime();
+  });
+  const noDate = tasks.filter((t: any) => !t.due_at && !t.scheduled_start_at && notSnoozed(t));
+  const snoozed = tasks.filter((t: any) => !notSnoozed(t));
+
+  const Section = ({ label, count, tone, children }: any) => (
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide">
+        <span className={tone}>{label}</span>
+        <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">{count}</span>
+      </div>
+      {children}
+    </div>
+  );
+
+  return (
+    <div className="space-y-5 max-w-3xl">
+      {orders.length > 0 && (
+        <Section label="OS de hoje" count={orders.length} tone="text-primary">
+          {orders.map((o: any) => (
+            <div
+              key={o.id}
+              onClick={() => onOrderClick(o.id)}
+              className={cn(
+                'flex items-center gap-3 rounded-md p-2 text-sm cursor-pointer hover:ring-1 hover:ring-primary transition-all',
+                statusConfig[o.status as keyof typeof statusConfig]?.className || 'bg-muted text-muted-foreground',
+              )}
+            >
+              <Briefcase className="h-4 w-4 shrink-0" />
+              <span className="font-mono text-xs opacity-70">{o.service_order_number}</span>
+              <span className="font-medium truncate flex-1">{o.clients?.name || '—'}</span>
+              {o.scheduled_start_at && <span className="text-xs font-semibold">{fmtTime(o.scheduled_start_at)}</span>}
+            </div>
+          ))}
+        </Section>
+      )}
+
+      {overdue.length > 0 && (
+        <Section label="Atrasadas" count={overdue.length} tone="text-destructive">
+          {overdue.map((t: any) => (
+            <TaskCard key={t.id} task={t} onOpen={onTaskClick} onToggleDone={onToggleDone} />
+          ))}
+        </Section>
+      )}
+
+      <Section label="Hoje" count={todayTasks.length} tone="text-foreground">
+        {todayTasks.length === 0 && (
+          <p className="text-xs text-muted-foreground py-1">Nada com prazo ou horário para hoje.</p>
+        )}
+        {todayTasks.map((t: any) => (
+          <TaskCard key={t.id} task={t} onOpen={onTaskClick} onToggleDone={onToggleDone} />
+        ))}
+      </Section>
+
+      {noDate.length > 0 && (
+        <Section label="Sem data" count={noDate.length} tone="text-muted-foreground">
+          {noDate.map((t: any) => (
+            <TaskCard key={t.id} task={t} onOpen={onTaskClick} onToggleDone={onToggleDone} />
+          ))}
+        </Section>
+      )}
+
+      {snoozed.length > 0 && (
+        <Section label="Adiadas" count={snoozed.length} tone="text-muted-foreground">
+          {snoozed.map((t: any) => (
+            <TaskCard key={t.id} task={t} onOpen={onTaskClick} onToggleDone={onToggleDone} />
+          ))}
+        </Section>
+      )}
     </div>
   );
 }
@@ -324,9 +454,71 @@ function WeekView({
     { id: '__unassigned__', full_name: 'Sem técnico atribuído' },
   ];
 
+  // Mobile (< lg): dias empilhados — zero scroll horizontal (Princípio 0)
+  const mobileDays = days.map((d) => {
+    const dayKey = toLocalDateInput(d);
+    const dayOrders: any[] = [];
+    const dayTasks: any[] = [];
+    for (const r of rows) {
+      dayOrders.push(...(ordersByTechAndDay.get(`${r.id}|${dayKey}`) || []));
+      dayTasks.push(...(tasksByTechAndDay.get(`${r.id}|${dayKey}`) || []));
+    }
+    return { date: d, orders: dayOrders, tasks: dayTasks };
+  });
+
   return (
-    <div className="-mx-4 px-4 overflow-x-auto">
-      <div className="min-w-[700px]">
+    <>
+    <div className="lg:hidden space-y-3">
+      {mobileDays.map(({ date, orders: dOrders, tasks: dTasks }, i) => (
+        <div key={i} className={cn('rounded-md border p-2.5 space-y-1.5', sameDay(date, today) && 'ring-1 ring-primary')}>
+          <div className="flex items-center justify-between text-xs font-semibold">
+            <span className={sameDay(date, today) ? 'text-primary' : 'text-muted-foreground'}>
+              {WEEKDAYS[i]} · {date.getDate()}/{date.getMonth() + 1}
+            </span>
+            <span className="text-[10px] text-muted-foreground">
+              {dOrders.length + dTasks.length > 0 ? `${dOrders.length + dTasks.length} item(ns)` : ''}
+            </span>
+          </div>
+          {dOrders.length === 0 && dTasks.length === 0 && (
+            <p className="text-[11px] text-muted-foreground">Livre</p>
+          )}
+          {dOrders.map((o) => (
+            <div
+              key={`mo-${o.id}`}
+              onClick={() => onCardClick(o.id)}
+              className={cn(
+                'rounded-md p-1.5 text-xs cursor-pointer',
+                statusConfig[o.status as keyof typeof statusConfig]?.className || 'bg-muted text-muted-foreground',
+              )}
+            >
+              <span className="font-mono text-[10px] opacity-70 mr-1.5">{o.service_order_number}</span>
+              <span className="font-medium">{o.clients?.name || '—'}</span>
+              {o.scheduled_start_at && <span className="float-right font-semibold text-[10px]">{fmtTime(o.scheduled_start_at)}</span>}
+            </div>
+          ))}
+          {dTasks.map((t) => (
+            <div
+              key={`mt-${t.id}`}
+              onClick={() => onTaskClick(t)}
+              className={cn(
+                'rounded-md p-1.5 text-xs cursor-pointer',
+                TASK_PRIORITY_CLASSES[t.priority] || TASK_PRIORITY_CLASSES.normal,
+                t.status === 'done' && 'opacity-60 line-through',
+              )}
+            >
+              <span className="font-medium">{t.title}</span>
+              <span className="float-right text-[10px]">
+                {t.app_users?.full_name ? t.app_users.full_name.split(' ')[0] : ''}
+                {t.scheduled_start_at ? ` · ${fmtTime(t.scheduled_start_at)}` : ''}
+              </span>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+
+    <div className="hidden lg:block">
+      <div>
         <div className="grid grid-cols-[160px_repeat(7,1fr)] gap-1">
           <div className="p-2 text-xs font-semibold text-muted-foreground">Técnico</div>
           {days.map((d, i) => (
@@ -429,6 +621,7 @@ function WeekView({
         </div>
       </div>
     </div>
+    </>
   );
 }
 

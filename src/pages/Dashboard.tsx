@@ -8,6 +8,7 @@ import { TrendingUp, TrendingDown, AlertTriangle, CheckCircle, DollarSign, Packa
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { DashboardTasksWidget } from '@/components/agenda/DashboardTasksWidget';
 import { statusConfig } from '@/lib/constants';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
@@ -213,6 +214,9 @@ export default function Dashboard() {
           <p className="text-xs text-muted-foreground">Nenhuma OS registrada.</p>
         )}
       </div>
+
+      {/* ROW 2.5 — Tarefas (Agenda & Tarefas 2.0) */}
+      <DashboardTasksWidget />
 
       {/* ROW 3 — Chart + Upcoming */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
