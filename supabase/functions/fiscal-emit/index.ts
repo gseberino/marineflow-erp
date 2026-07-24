@@ -613,6 +613,17 @@ async function handleHomolog(admin: any, body: any): Promise<Response> {
         first_cfop: ((payload as Record<string, unknown>).items as Array<Record<string, unknown>> | undefined)?.[0]?.cfop ?? null,
       },
     });
+    // Rejeição 321 na DEVOLUÇÃO: a SEFAZ Virtual do RS (SVRS, que autoriza SC/ES)
+    // NÃO mantém a nota referenciada na base de validação em HOMOLOGAÇÃO — então
+    // recusa mesmo com o refNFe correto no XML (confirmado: o grupo NFref é gerado
+    // e assinado). Em PRODUÇÃO a referência existe na base real e é aceita. Aqui o
+    // espelho não consegue validar de verdade → cai no espelho LOCAL com a explicação.
+    if (code === "321") {
+      return jr({
+        homolog_unavailable: true,
+        reason: "A homologação da SVRS (SEFAZ que atende SC/ES) não valida devolução com nota referenciada — é uma limitação do ambiente de TESTE, não da sua nota. A referência à nota original está correta no XML; em PRODUÇÃO a devolução é aceita normalmente.",
+      }, 200);
+    }
     return jr({
       error: status === "processing"
         ? "A SEFAZ de homologação ainda está processando. Tente gerar o espelho de novo em instantes."
