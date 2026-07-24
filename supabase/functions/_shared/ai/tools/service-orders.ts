@@ -663,6 +663,22 @@ export const serviceOrderTools: ToolDef[] = [
     },
     risk: "low",
     async execute(args, { sb }) {
+      // Conflito de agenda (tarefas + OS) via RPC única — mesma checagem da UI
+      if (args.technician_user_id && args.scheduled_end_at) {
+        const { data: confl } = await sb.rpc("get_agenda_conflicts", {
+          p_user_id: args.technician_user_id,
+          p_start: args.scheduled_start_at,
+          p_end: args.scheduled_end_at,
+          p_exclude_so: args.service_order_id,
+        });
+        if (confl && confl.length > 0) {
+          return {
+            conflito: true,
+            mensagem: "O técnico já tem compromisso nesse horário — OS NÃO foi agendada. Proponha outro horário ou confirme com o usuário.",
+            conflitos: confl.map((c: any) => ({ tipo: c.source, rotulo: c.label, inicio: c.starts_at, fim: c.ends_at })),
+          };
+        }
+      }
       const update: any = { scheduled_start_at: args.scheduled_start_at };
       if (args.scheduled_end_at) update.scheduled_end_at = args.scheduled_end_at;
       if (args.technician_user_id) update.status = "scheduled";

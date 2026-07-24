@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
     // Destinatários: quem usa a IA (canal habilitado) e está ativo, com número.
     const { data: recipients } = await admin
       .from("app_users")
-      .select("full_name, phone_normalized")
+      .select("id, full_name, phone_normalized")
       .eq("ai_whatsapp_enabled", true)
       .eq("active", true)
       .not("phone_normalized", "is", null);
@@ -334,15 +334,61 @@ Deno.serve(async (req) => {
     ];
     const message = linhas.join("\n");
 
+    // ── "📋 Sua agenda hoje" (Agenda & Tarefas 2.0): bloco PESSOAL por destinatário ──
+    // Tarefas vivas de todos os destinatários numa consulta só; agrupa por responsável.
+    const recIds = recipients.map((r: any) => r.id).filter(Boolean);
+    const personalBlocks = new Map<string, string>();
+    if (recIds.length > 0) {
+      const hoje = new Date(now.getTime() - 3 * 3600000).toISOString().slice(0, 10);
+      const dayStart = new Date(`${hoje}T00:00:00-03:00`).toISOString();
+      const dayEnd = new Date(new Date(dayStart).getTime() + 86400000).toISOString();
+      const { data: liveTasks } = await admin
+        .from("agenda_tasks")
+        .select("assignee_user_id, title, priority, due_at, scheduled_start_at, kind")
+        .in("status", ["pending", "in_progress"])
+        .in("assignee_user_id", recIds)
+        .limit(300);
+      const fmtHora = (iso: string) => new Date(iso).toLocaleTimeString("pt-BR", {
+        hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo",
+      });
+      for (const uid of recIds) {
+        const mine = (liveTasks || []).filter((t: any) => t.assignee_user_id === uid);
+        const anchor = (t: any) => t.due_at || t.scheduled_start_at;
+        const atrasadas = mine.filter((t: any) => anchor(t) && anchor(t) < dayStart);
+        const doDia = mine
+          .filter((t: any) => anchor(t) && anchor(t) >= dayStart && anchor(t) < dayEnd)
+          .sort((a: any, b: any) => String(anchor(a)).localeCompare(String(anchor(b))));
+        if (atrasadas.length === 0 && doDia.length === 0) continue;
+        const bloco: string[] = ["", "📋 *Sua agenda hoje*"];
+        if (atrasadas.length > 0) {
+          bloco.push(`   ⚠️ Atrasadas: *${atrasadas.length}*`);
+          for (const t of atrasadas.slice(0, 3)) bloco.push(`   • ${t.title}`);
+        }
+        for (const t of doDia.slice(0, 5)) {
+          const hora = t.scheduled_start_at ? `${fmtHora(t.scheduled_start_at)} ` : "";
+          bloco.push(`   • ${hora}${t.title}${t.priority === "urgent" ? " ‼️" : ""}`);
+        }
+        if (doDia.length > 5) bloco.push(`   …e mais ${doDia.length - 5}`);
+        personalBlocks.set(uid, bloco.join("\n"));
+      }
+    }
+    const messageFor = (rec: any) => {
+      const bloco = rec.id ? personalBlocks.get(rec.id) : undefined;
+      if (!bloco) return message;
+      // injeta o bloco pessoal antes do rodapé (última linha em itálico)
+      const idx = linhas.length - 2; // linha em branco + rodapé
+      return [...linhas.slice(0, idx), bloco, ...linhas.slice(idx)].join("\n");
+    };
+
     // Dry-run (?dry=1): monta a mensagem mas NÃO enfileira — para pré-visualizar com segurança.
     if (new URL(req.url).searchParams.get("dry") === "1") {
-      return jr({ ok: true, dry: true, recipients: recipients.length, preview: message });
+      return jr({ ok: true, dry: true, recipients: recipients.length, preview: messageFor(recipients[0] || {}) });
     }
 
     // Enfileira uma mensagem por destinatário. O whatsapp-queue-worker (cron de 1min) entrega.
     const rows = recipients.map((rec: any) => ({
       phone_normalized: String(rec.phone_normalized),
-      message,
+      message: messageFor(rec),
       source: "ai_briefing",
       priority: 4,
     }));
