@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { TaskAutomationSettings } from '@/components/agenda/TaskAutomationSettings';
 import { MapPin, DollarSign, Users, Globe, Banknote, CreditCard, FileText, Tag, Receipt, Package, Mail, Pencil, Loader2 } from 'lucide-react';
 import { LogoCropDialog } from '@/components/LogoCropDialog';
 import { AppUserEditDialog } from '@/components/AppUserEditDialog';
@@ -285,6 +286,7 @@ export default function SettingsPage() {
 
         <TabsContent value="system" className="mt-4 space-y-4">
           {languageContent}
+          <TaskAutomationSettings />
           <MasterDataPanel />
         </TabsContent>
       </Tabs>

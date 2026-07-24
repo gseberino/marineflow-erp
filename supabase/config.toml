@@ -56,3 +56,8 @@ verify_jwt = false
 # não-terminais e atualiza o banco. Ação idempotente e interna.
 [functions.fiscal-reconcile]
 verify_jwt = false
+
+# Motor da Agenda & Tarefas 2.0 (regras R1-R12, lembretes, recorrência): pg_cron
+# chama só com x-cron-secret (sem Authorization). Idempotente por automation_key.
+[functions.task-automations]
+verify_jwt = false
