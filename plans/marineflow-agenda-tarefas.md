@@ -414,6 +414,13 @@ Recorrência (subconjunto RRULE, materialização 30d no cron diário, editar s�
 
 **Total estimado: 4–6 sessões de trabalho.** Fases 0→3 formam o produto completo; Fase 4 é lapidação.
 
+> **ATUALIZAÇÃO 24/07/2026 — Fases 0-4 CONCLUÍDAS e em produção.** O roadmap continua nas
+> **Fases 5-8** definidas em `plans/marineflow-agenda-benchmark-mercado.md` (§10), fundamentadas
+> num benchmark profundo de 33 ferramentas + análise de sentimento de usuários: Fase 5 execução
+> direta (ação que resolve, quick-add, flag "sem próxima ação"), Fase 6 carga e risco (workload,
+> sobrecarga, fila de execução), Fase 7 ciclo do cliente (pesquisa pós-serviço, "estou a caminho",
+> templates de checklist, revisão semanal), Fase 8 planos de manutenção recorrente.
+
 ---
 
 ## 12. Não-objetivos (explícitos, para manter o "não complexo")
