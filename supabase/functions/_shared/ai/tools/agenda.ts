@@ -17,11 +17,13 @@ export const agendaTools: ToolDef[] = [
     async execute(args, { sb }) {
       let query = sb
         .from("agenda_tasks")
-        .select("id, title, scheduled_start_at, scheduled_end_at, status, priority, location, clients(name), app_users(full_name)")
+        // Embed qualificado por coluna: agenda_tasks tem 2 FKs para app_users
+        // (assignee_user_id e completed_by) — sem qualificar, o PostgREST rejeita.
+        .select("id, title, scheduled_start_at, scheduled_end_at, status, priority, location, clients(name), app_users:assignee_user_id(full_name)")
         .gte("scheduled_start_at", args.date_from)
         .lte("scheduled_start_at", args.date_to)
         .order("scheduled_start_at", { ascending: true });
-      if (args.technician_id) query = query.eq("technician_user_id", args.technician_id);
+      if (args.technician_id) query = query.eq("assignee_user_id", args.technician_id);
       const { data, error } = await query;
       if (error) throw error;
       const mapped = (data || []).map((t: any) => ({
@@ -63,13 +65,13 @@ export const agendaTools: ToolDef[] = [
         title: { type: "string" },
         scheduled_start_at: { type: "string" },
         scheduled_end_at: { type: "string" },
-        technician_user_id: { type: "string" },
+        assignee_user_id: { type: "string", description: "Responsável (app_users.id — use list_technicians)." },
         client_id: { type: "string" },
         location: { type: "string" },
         notes: { type: "string" },
         priority: { type: "string" },
       },
-      required: ["title", "scheduled_start_at", "technician_user_id"],
+      required: ["title", "scheduled_start_at", "assignee_user_id"],
     },
     risk: "low",
     async execute(args, { sb, userId }) {

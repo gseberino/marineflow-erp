@@ -31,7 +31,7 @@ export type ExistingTask = {
   id: string;
   title: string;
   description?: string | null;
-  technician_user_id: string;
+  assignee_user_id: string;
   scheduled_start_at: string;
   scheduled_end_at: string | null;
   priority: string;
@@ -77,7 +77,7 @@ export function AgendaTaskDialog({
     if (existing) {
       setTitle(existing.title);
       setDescription(existing.description || '');
-      setTechnicianId(existing.technician_user_id);
+      setTechnicianId(existing.assignee_user_id);
       const startDate = new Date(existing.scheduled_start_at);
       setDate(toLocalDateInput(startDate));
       setStartTime(toLocalTime(existing.scheduled_start_at, '09:00'));
@@ -122,7 +122,7 @@ export function AgendaTaskDialog({
       id: existing?.id,
       title: title.trim(),
       description: description.trim() || null,
-      technician_user_id: technicianId,
+      assignee_user_id: technicianId,
       scheduled_start_at: startISO,
       scheduled_end_at: endISO,
       priority,

@@ -30,9 +30,9 @@ export function useAgendaTasks(dateFrom: string, dateTo: string) {
       const { data, error } = await supabase
         .from('agenda_tasks')
         .select(`
-          id, title, description, technician_user_id, scheduled_start_at, scheduled_end_at,
+          id, title, description, assignee_user_id, scheduled_start_at, scheduled_end_at,
           priority, status, location, client_id, notes,
-          app_users:technician_user_id(id, full_name),
+          app_users:assignee_user_id(id, full_name),
           clients:client_id(id, name)
         `)
         .gte('scheduled_start_at', dateFrom)
@@ -156,7 +156,7 @@ export type AgendaTaskInput = {
   id?: string;
   title: string;
   description?: string | null;
-  technician_user_id: string;
+  assignee_user_id: string;
   scheduled_start_at: string;
   scheduled_end_at: string | null;
   priority?: string;
@@ -170,12 +170,12 @@ export function useSaveAgendaTask() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: AgendaTaskInput) => {
-      // Guard: check for technician scheduling conflicts in agenda_tasks before saving
-      if (input.scheduled_end_at && input.technician_user_id) {
+      // Guard: check for assignee scheduling conflicts in agenda_tasks before saving
+      if (input.scheduled_end_at && input.assignee_user_id) {
         let conflictQuery = supabase
           .from('agenda_tasks')
           .select('id, title, scheduled_start_at')
-          .eq('technician_user_id', input.technician_user_id)
+          .eq('assignee_user_id', input.assignee_user_id)
           .neq('status', 'cancelled')
           .lt('scheduled_start_at', input.scheduled_end_at)
           .gt('scheduled_end_at', input.scheduled_start_at);
@@ -197,7 +197,7 @@ export function useSaveAgendaTask() {
           .update({
             title: input.title,
             description: input.description ?? null,
-            technician_user_id: input.technician_user_id,
+            assignee_user_id: input.assignee_user_id,
             scheduled_start_at: input.scheduled_start_at,
             scheduled_end_at: input.scheduled_end_at,
             priority: input.priority ?? 'normal',
@@ -213,7 +213,7 @@ export function useSaveAgendaTask() {
         const { error } = await supabase.from('agenda_tasks').insert({
           title: input.title,
           description: input.description ?? null,
-          technician_user_id: input.technician_user_id,
+          assignee_user_id: input.assignee_user_id,
           scheduled_start_at: input.scheduled_start_at,
           scheduled_end_at: input.scheduled_end_at,
           priority: input.priority ?? 'normal',

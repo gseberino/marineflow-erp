@@ -114,13 +114,13 @@ export default function AgendaPage() {
     techFilter === 'all'
       ? orders
       : (orders || []).filter((o: any) =>
-          (o.service_order_technicians || []).some((t: any) => t.user_id === techFilter || t.technician_user_id === techFilter)
+          (o.service_order_technicians || []).some((t: any) => t.user_id === techFilter)
         )
   ), [orders, techFilter]);
   const filteredTasks = useMemo(() => (
     techFilter === 'all'
       ? tasks
-      : (tasks || []).filter((t: any) => t.technician_user_id === techFilter)
+      : (tasks || []).filter((t: any) => t.assignee_user_id === techFilter)
   ), [tasks, techFilter]);
 
   const handleNav = (delta: number) => {
@@ -312,7 +312,7 @@ function WeekView({
     for (const t of tasks) {
       if (!t.scheduled_start_at) continue;
       const dayKey = toLocalDateInput(new Date(t.scheduled_start_at));
-      const k = `${t.technician_user_id}|${dayKey}`;
+      const k = `${t.assignee_user_id}|${dayKey}`;
       if (!map.has(k)) map.set(k, []);
       map.get(k)!.push(t);
     }

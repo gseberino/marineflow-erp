@@ -16,50 +16,95 @@ export type Database = {
     Tables: {
       agenda_tasks: {
         Row: {
+          all_day: boolean
+          assignee_user_id: string | null
+          automation_key: string | null
+          checklist: Json
           client_id: string | null
+          completed_at: string | null
+          completed_by: string | null
           created_at: string
           created_by: string | null
           description: string | null
+          due_at: string | null
           id: string
+          is_private: boolean
+          kind: string
           location: string | null
           notes: string | null
+          origin_session_id: string | null
           priority: string
+          recurrence_parent_id: string | null
+          related_entity_id: string | null
+          related_entity_type: string | null
+          rrule: string | null
           scheduled_end_at: string | null
-          scheduled_start_at: string
+          scheduled_start_at: string | null
+          snoozed_until: string | null
+          source: string
           status: string
-          technician_user_id: string
           title: string
           updated_at: string
         }
         Insert: {
+          all_day?: boolean
+          assignee_user_id?: string | null
+          automation_key?: string | null
+          checklist?: Json
           client_id?: string | null
+          completed_at?: string | null
+          completed_by?: string | null
           created_at?: string
           created_by?: string | null
           description?: string | null
+          due_at?: string | null
           id?: string
+          is_private?: boolean
+          kind?: string
           location?: string | null
           notes?: string | null
+          origin_session_id?: string | null
           priority?: string
+          recurrence_parent_id?: string | null
+          related_entity_id?: string | null
+          related_entity_type?: string | null
+          rrule?: string | null
           scheduled_end_at?: string | null
-          scheduled_start_at: string
+          scheduled_start_at?: string | null
+          snoozed_until?: string | null
+          source?: string
           status?: string
-          technician_user_id: string
           title: string
           updated_at?: string
         }
         Update: {
+          all_day?: boolean
+          assignee_user_id?: string | null
+          automation_key?: string | null
+          checklist?: Json
           client_id?: string | null
+          completed_at?: string | null
+          completed_by?: string | null
           created_at?: string
           created_by?: string | null
           description?: string | null
+          due_at?: string | null
           id?: string
+          is_private?: boolean
+          kind?: string
           location?: string | null
           notes?: string | null
+          origin_session_id?: string | null
           priority?: string
+          recurrence_parent_id?: string | null
+          related_entity_id?: string | null
+          related_entity_type?: string | null
+          rrule?: string | null
           scheduled_end_at?: string | null
-          scheduled_start_at?: string
+          scheduled_start_at?: string | null
+          snoozed_until?: string | null
+          source?: string
           status?: string
-          technician_user_id?: string
           title?: string
           updated_at?: string
         }
@@ -72,10 +117,24 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "agenda_tasks_technician_user_id_fkey"
-            columns: ["technician_user_id"]
+            foreignKeyName: "agenda_tasks_assignee_user_id_fkey"
+            columns: ["assignee_user_id"]
             isOneToOne: false
             referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agenda_tasks_completed_by_fkey"
+            columns: ["completed_by"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agenda_tasks_recurrence_parent_id_fkey"
+            columns: ["recurrence_parent_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_tasks"
             referencedColumns: ["id"]
           },
         ]
@@ -1201,6 +1260,47 @@ export type Database = {
           updated_at?: string | null
         }
         Relationships: []
+      }
+      app_notifications: {
+        Row: {
+          body: string | null
+          created_at: string
+          id: string
+          navigate_to: string | null
+          read_at: string | null
+          title: string
+          type: string
+          user_id: string
+        }
+        Insert: {
+          body?: string | null
+          created_at?: string
+          id?: string
+          navigate_to?: string | null
+          read_at?: string | null
+          title: string
+          type: string
+          user_id: string
+        }
+        Update: {
+          body?: string | null
+          created_at?: string
+          id?: string
+          navigate_to?: string | null
+          read_at?: string | null
+          title?: string
+          type?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "app_notifications_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       app_settings: {
         Row: {
@@ -4492,6 +4592,41 @@ export type Database = {
         }
         Relationships: []
       }
+      task_reminders: {
+        Row: {
+          channel: string
+          created_at: string
+          id: string
+          remind_at: string
+          sent_at: string | null
+          task_id: string
+        }
+        Insert: {
+          channel?: string
+          created_at?: string
+          id?: string
+          remind_at: string
+          sent_at?: string | null
+          task_id: string
+        }
+        Update: {
+          channel?: string
+          created_at?: string
+          id?: string
+          remind_at?: string
+          sent_at?: string | null
+          task_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_reminders_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       time_entries: {
         Row: {
           billable: boolean | null
@@ -5287,6 +5422,22 @@ export type Database = {
       convert_external_quote_to_so: {
         Args: { _quote_id: string }
         Returns: string
+      }
+      get_agenda_conflicts: {
+        Args: {
+          p_end: string
+          p_exclude_so?: string
+          p_exclude_task?: string
+          p_start: string
+          p_user_id: string
+        }
+        Returns: {
+          source: string
+          ref_id: string
+          label: string
+          starts_at: string
+          ends_at: string
+        }[]
       }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
       is_admin_or_financial: { Args: { _user_id: string }; Returns: boolean }

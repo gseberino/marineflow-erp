@@ -184,7 +184,7 @@ export const fieldOpsTools: ToolDef[] = [
       const { data: tarefas } = await sb
         .from("agenda_tasks")
         .select("id, title, scheduled_start_at, scheduled_end_at, status, location")
-        .eq("technician_user_id", args.technician_user_id)
+        .eq("assignee_user_id", args.technician_user_id)
         .gte("scheduled_start_at", ini)
         .lte("scheduled_start_at", fim);
 
