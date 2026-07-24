@@ -150,6 +150,30 @@ export const overviewTools: ToolDef[] = [
         };
       } catch (e) { contas_a_pagar = { erro: (e as Error).message }; }
 
+      // "Sem próxima ação" (padrão Pipedrive): OS ativas sem tarefa viva vinculada
+      let sem_proxima_acao: unknown = null;
+      try {
+        const { data: activeSos } = await admin
+          .from("service_orders")
+          .select("id, service_order_number, status, clients(name)")
+          .in("status", ["approved", "scheduled", "in_progress", "waiting_parts", "waiting_approval", "reopened"])
+          .limit(100);
+        const { data: liveTasks } = await admin
+          .from("agenda_tasks")
+          .select("related_entity_id")
+          .eq("related_entity_type", "service_order")
+          .in("status", ["pending", "in_progress"]);
+        const covered = new Set(((liveTasks as any[]) || []).map((t) => t.related_entity_id));
+        const orphans = ((activeSos as any[]) || []).filter((o) => !covered.has(o.id));
+        sem_proxima_acao = {
+          quantidade: orphans.length,
+          amostra: orphans.slice(0, 5).map((o) => ({
+            os: o.service_order_number, status: o.status, cliente: o.clients?.name || null,
+          })),
+          nota_interna: "OS ativa sem próximo passo agendado — sugira criar a tarefa que destrava.",
+        };
+      } catch (e) { sem_proxima_acao = { erro: (e as Error).message }; }
+
       return {
         data: hojeIso,
         cobrancas_vencidas: cobrancas,
@@ -157,6 +181,7 @@ export const overviewTools: ToolDef[] = [
         mensagens_esperando: mensagens,
         agenda_hoje: agenda,
         contas_a_pagar_7d: contas_a_pagar,
+        sem_proxima_acao,
         nota: "Amostra do topo de cada frente. Para a lista completa, use a tool específica (get_delinquency_plan, list_service_orders, list_unanswered_messages, list_tasks).",
       };
     },

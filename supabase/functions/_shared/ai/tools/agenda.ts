@@ -65,6 +65,27 @@ async function getConflicts(sb: any, userId: string, startISO: string, endISO: s
 
 export { getConflicts };
 
+/** Sobrecarga do dia (não bloqueia — informa): horas ocupadas + novo item > 8h. */
+export async function dayOverloadNotice(
+  sb: any, userId: string, startISO: string, endISO: string,
+  excl?: { excludeTask?: string; excludeSo?: string },
+): Promise<string | null> {
+  const day = new Date(startISO).toISOString().slice(0, 10);
+  const from = `${day}T00:00:00Z`;
+  const to = new Date(new Date(from).getTime() + 86400000).toISOString();
+  const { data } = await sb.rpc("get_agenda_conflicts", {
+    p_user_id: userId, p_start: from, p_end: to,
+    p_exclude_task: excl?.excludeTask ?? null, p_exclude_so: excl?.excludeSo ?? null,
+  });
+  const busyMs = ((data as any[]) || []).reduce((s, c) => {
+    return s + Math.max(0, new Date(c.ends_at).getTime() - new Date(c.starts_at).getTime());
+  }, 0);
+  const totalH = (busyMs + (new Date(endISO).getTime() - new Date(startISO).getTime())) / 3600000;
+  return totalH > 8
+    ? `Aviso: com este item o dia do responsável fica com ${totalH.toFixed(1)}h ocupadas — considere outro dia ou avise o usuário.`
+    : null;
+}
+
 export const agendaTools: ToolDef[] = [
   {
     name: "list_tasks",
@@ -251,6 +272,11 @@ export const agendaTools: ToolDef[] = [
       }).select("id, title").single();
       if (error) throw error;
 
+      let aviso_carga: string | null = null;
+      if (kind === "appointment" && args.assignee_user_id && args.scheduled_start_at && args.scheduled_end_at) {
+        aviso_carga = await dayOverloadNotice(sb, args.assignee_user_id, args.scheduled_start_at, args.scheduled_end_at, { excludeTask: data.id });
+      }
+
       const anchorISO = args.scheduled_start_at || args.due_at;
       if (anchorISO && Array.isArray(args.reminder_offsets_minutes)) {
         const rows = args.reminder_offsets_minutes
@@ -259,7 +285,7 @@ export const agendaTools: ToolDef[] = [
           .map((iso: string) => ({ task_id: data.id, remind_at: iso, channel: "app" }));
         if (rows.length) await sb.from("task_reminders").insert(rows);
       }
-      return { ok: true, task: { id: data.id, titulo: data.title } };
+      return { ok: true, task: { id: data.id, titulo: data.title }, ...(aviso_carga ? { aviso_carga } : {}) };
     },
   },
   {

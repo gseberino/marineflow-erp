@@ -344,7 +344,7 @@ Deno.serve(async (req) => {
       const dayEnd = new Date(new Date(dayStart).getTime() + 86400000).toISOString();
       const { data: liveTasks } = await admin
         .from("agenda_tasks")
-        .select("assignee_user_id, title, priority, due_at, scheduled_start_at, kind")
+        .select("assignee_user_id, title, priority, due_at, scheduled_start_at, scheduled_end_at, kind")
         .in("status", ["pending", "in_progress"])
         .in("assignee_user_id", recIds)
         .limit(300);
@@ -369,6 +369,17 @@ Deno.serve(async (req) => {
           bloco.push(`   • ${hora}${t.title}${t.priority === "urgent" ? " ‼️" : ""}`);
         }
         if (doDia.length > 5) bloco.push(`   …e mais ${doDia.length - 5}`);
+        // Risco de prazo (padrão Motion, sem o auto-scheduling): amanhã apertado?
+        const d2Start = new Date(new Date(dayStart).getTime() + 86400000).toISOString();
+        const d2End = new Date(new Date(dayStart).getTime() + 2 * 86400000).toISOString();
+        const amanha = mine.filter((t: any) => anchor(t) && anchor(t) >= d2Start && anchor(t) < d2End);
+        const amanhaBusyH = amanha.reduce((s: number, t: any) => {
+          if (!t.scheduled_start_at || !t.scheduled_end_at) return s;
+          return s + Math.max(0, (new Date(t.scheduled_end_at).getTime() - new Date(t.scheduled_start_at).getTime()) / 3600000);
+        }, 0);
+        if (amanha.length >= 3 || amanhaBusyH >= 6) {
+          bloco.push(`   ⏳ Amanhã: ${amanha.length} item(ns)${amanhaBusyH > 0 ? ` · ~${amanhaBusyH.toFixed(1).replace(".0", "")}h ocupadas` : ""} — risco de aperto, antecipe o que der.`);
+        }
         personalBlocks.set(uid, bloco.join("\n"));
       }
     }

@@ -1,4 +1,5 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
+import { dayOverloadNotice } from "./agenda.ts";
 
 /**
  * Recalcula os totais da OS após inserir/alterar item — best-effort, não deve derrubar a
@@ -690,7 +691,11 @@ export const serviceOrderTools: ToolDef[] = [
           .upsert({ service_order_id: args.service_order_id, user_id: args.technician_user_id }, { onConflict: "service_order_id,user_id" })
           .catch(() => null);
       }
-      return { ok: true, service_order: data };
+      let aviso_carga: string | null = null;
+      if (args.technician_user_id && args.scheduled_end_at) {
+        aviso_carga = await dayOverloadNotice(sb, args.technician_user_id, args.scheduled_start_at, args.scheduled_end_at, { excludeSo: args.service_order_id });
+      }
+      return { ok: true, service_order: data, ...(aviso_carga ? { aviso_carga } : {}) };
     },
   },
   {

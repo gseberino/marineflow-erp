@@ -9,7 +9,8 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { EntityCombobox } from '@/components/EntityCombobox';
-import { ChevronLeft, ChevronRight, CalendarDays, Plus, Loader2, ListChecks, Briefcase } from 'lucide-react';
+import { ChevronLeft, ChevronRight, CalendarDays, Plus, Loader2, ListChecks, Briefcase, Download, Zap } from 'lucide-react';
+import { parseQuickTask } from '@/lib/quick-task-parser';
 import { cn } from '@/lib/utils';
 import {
   useAgendaOrders,
@@ -22,9 +23,11 @@ import {
   useRescheduleTask,
   useSchedulableOrders,
   useQuickSchedule,
+  useSaveAgendaTask,
 } from '@/hooks/use-agenda';
 import { TaskCard } from '@/components/agenda/TaskCard';
 import { AgendaTaskDialog, type ExistingTask } from '@/components/AgendaTaskDialog';
+import { FocusMode } from '@/components/agenda/FocusMode';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -126,6 +129,77 @@ export default function AgendaPage() {
   const { data: doneTasks = [], isLoading: loadingDone } = useCompletedTasks(doneDays);
   const completeTask = useCompleteTask();
   const reschedule = useRescheduleTask();
+  const saveTask = useSaveAgendaTask();
+  const [quickText, setQuickText] = useState('');
+  const [scheduleOsId, setScheduleOsId] = useState<string | undefined>(undefined);
+  const [focusOpen, setFocusOpen] = useState(false);
+
+  // Fila do modo foco: atrasadas → hoje → sem data; prioridade dentro de cada grupo
+  const focusQueue = useMemo(() => {
+    const now = new Date();
+    const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const endToday = new Date(startToday.getTime() + 86400000);
+    const prioRank: Record<string, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
+    const anchor = (t: any) => t.due_at || t.scheduled_start_at;
+    const group = (t: any) => {
+      const a = anchor(t);
+      if (a && new Date(a) < startToday) return 0;
+      if (a && new Date(a) < endToday) return 1;
+      if (!a) return 2;
+      return 3; // futuras ficam fora
+    };
+    return applyTaskFilters(liveTasks || [])
+      .filter((t: any) => group(t) < 3 && (!t.snoozed_until || new Date(t.snoozed_until) <= now))
+      .sort((a: any, b: any) => group(a) - group(b)
+        || (prioRank[a.priority] ?? 2) - (prioRank[b.priority] ?? 2));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveTasks, techFilter, prioFilter, sourceFilter]);
+
+  // Captura em 3 segundos (padrão Todoist): "amanhã 14h ligar pro João"
+  const handleQuickAdd = async () => {
+    const parsed = parseQuickTask(quickText);
+    if (!parsed.title) { toast.error('Escreva o que precisa ser feito'); return; }
+    const dateStr = parsed.date ? toLocalDateInput(parsed.date) : null;
+    try {
+      const res: any = await saveTask.mutateAsync({
+        title: parsed.title,
+        kind: parsed.time ? 'appointment' : 'task',
+        priority: parsed.priority ?? 'normal',
+        scheduled_start_at: parsed.time && dateStr ? new Date(`${dateStr}T${parsed.time}:00`).toISOString() : null,
+        scheduled_end_at: parsed.time && dateStr
+          ? new Date(new Date(`${dateStr}T${parsed.time}:00`).getTime() + 3600000).toISOString() : null,
+        due_at: !parsed.time && dateStr ? new Date(`${dateStr}T08:00:00`).toISOString() : null,
+        assignee_user_id: null,
+      });
+      toast.success(parsed.date
+        ? `Criada: "${parsed.title}" — ${parsed.date.toLocaleDateString('pt-BR')}${parsed.time ? ` ${parsed.time}` : ''}`
+        : `Criada: "${parsed.title}" (sem data)`);
+      if (res?.warning) toast.warning(res.warning);
+      setQuickText('');
+    } catch (e: any) {
+      toast.error(e?.message || 'Erro ao criar tarefa');
+    }
+  };
+
+  // Export CSV da visão atual (Hoje = vivas filtradas; Concluídas = período filtrado)
+  const handleExportCsv = () => {
+    const rows = view === 'done' ? applyTaskFilters(doneTasks || []) : applyTaskFilters(liveTasks || []);
+    const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const csv = [
+      ['titulo', 'tipo', 'status', 'prioridade', 'responsavel', 'prazo', 'inicio', 'fim', 'origem', 'vinculo', 'concluida_em', 'cliente'].join(';'),
+      ...rows.map((t: any) => [
+        esc(t.title), esc(t.kind), esc(t.status), esc(t.priority),
+        esc(t.app_users?.full_name), esc(t.due_at), esc(t.scheduled_start_at), esc(t.scheduled_end_at),
+        esc(t.source), esc(t.related_entity_type), esc(t.completed_at), esc(t.clients?.name),
+      ].join(';')),
+    ].join('\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `tarefas-${view}-${toLocalDateInput(new Date())}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
 
   const handleTaskDrop = (task: any, technicianId: string, dateKey: string) => {
     reschedule.mutate(
@@ -206,6 +280,27 @@ export default function AgendaPage() {
       </PageHeader>
 
       <Card className="p-4 space-y-4 overflow-hidden">
+        <div className="flex items-center gap-2">
+          <Zap className="h-4 w-4 text-primary shrink-0" />
+          <Input
+            value={quickText}
+            onChange={(e) => setQuickText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !saveTask.isPending) handleQuickAdd(); }}
+            placeholder='Tarefa rápida: "amanhã 14h ligar pro João", "sexta cobrar marina", "urgente revisar orçamento"…'
+            className="h-9"
+          />
+          <Button size="sm" onClick={handleQuickAdd} disabled={saveTask.isPending || !quickText.trim()}>
+            {saveTask.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Criar'}
+          </Button>
+          <Button size="sm" variant="outline" onClick={handleExportCsv} title="Exportar CSV da visão atual">
+            <Download className="h-4 w-4" />
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setFocusOpen(true)}
+            disabled={focusQueue.length === 0} title="Uma tarefa por vez, em sequência">
+            🎯 Foco{focusQueue.length > 0 ? ` (${focusQueue.length})` : ''}
+          </Button>
+        </div>
+
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-1 rounded-md border p-1">
             <Button size="sm" variant={view === 'today' ? 'default' : 'ghost'} onClick={() => setView('today')}>
@@ -315,6 +410,7 @@ export default function AgendaPage() {
             onTaskClick={(t) => openTaskDialog(undefined, undefined, t)}
             onToggleDone={(id, done) =>
               completeTask.mutate({ id, done }, { onError: (e: any) => toast.error(e?.message || 'Erro ao concluir') })}
+            onScheduleOs={(t) => { setScheduleOsId(t.related_entity_id); setOsDialogOpen(true); }}
           />
         ) : view === 'done' ? (
           <DoneView
@@ -350,11 +446,14 @@ export default function AgendaPage() {
 
       <QuickScheduleDialog
         open={osDialogOpen}
-        onOpenChange={setOsDialogOpen}
+        onOpenChange={(v) => { setOsDialogOpen(v); if (!v) setScheduleOsId(undefined); }}
         technicians={technicians}
         prefillTechnicianId={prefill.technicianId}
         prefillDate={prefill.date}
+        prefillOrderId={scheduleOsId}
       />
+
+      <FocusMode open={focusOpen} onOpenChange={setFocusOpen} tasks={focusQueue} />
 
       <AgendaTaskDialog
         open={taskDialogOpen}
@@ -496,13 +595,14 @@ function DoneView({
 // TODAY VIEW — atrasadas / hoje / sem data (default da página)
 // ============================================================
 function TodayView({
-  orders, tasks, onOrderClick, onTaskClick, onToggleDone,
+  orders, tasks, onOrderClick, onTaskClick, onToggleDone, onScheduleOs,
 }: {
   orders: any[];
   tasks: any[];
   onOrderClick: (id: string) => void;
   onTaskClick: (task: any) => void;
   onToggleDone: (id: string, done: boolean) => void;
+  onScheduleOs?: (task: any) => void;
 }) {
   const now = new Date();
   const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -561,7 +661,7 @@ function TodayView({
       {overdue.length > 0 && (
         <Section label="Atrasadas" count={overdue.length} tone="text-destructive">
           {overdue.map((t: any) => (
-            <TaskCard key={t.id} task={t} onOpen={onTaskClick} onToggleDone={onToggleDone} />
+            <TaskCard key={t.id} task={t} onOpen={onTaskClick} onToggleDone={onToggleDone} onScheduleOs={onScheduleOs} />
           ))}
         </Section>
       )}
@@ -571,14 +671,14 @@ function TodayView({
           <p className="text-xs text-muted-foreground py-1">Nada com prazo ou horário para hoje.</p>
         )}
         {todayTasks.map((t: any) => (
-          <TaskCard key={t.id} task={t} onOpen={onTaskClick} onToggleDone={onToggleDone} />
+          <TaskCard key={t.id} task={t} onOpen={onTaskClick} onToggleDone={onToggleDone} onScheduleOs={onScheduleOs} />
         ))}
       </Section>
 
       {noDate.length > 0 && (
         <Section label="Sem data" count={noDate.length} tone="text-muted-foreground">
           {noDate.map((t: any) => (
-            <TaskCard key={t.id} task={t} onOpen={onTaskClick} onToggleDone={onToggleDone} />
+            <TaskCard key={t.id} task={t} onOpen={onTaskClick} onToggleDone={onToggleDone} onScheduleOs={onScheduleOs} />
           ))}
         </Section>
       )}
@@ -586,7 +686,7 @@ function TodayView({
       {snoozed.length > 0 && (
         <Section label="Adiadas" count={snoozed.length} tone="text-muted-foreground">
           {snoozed.map((t: any) => (
-            <TaskCard key={t.id} task={t} onOpen={onTaskClick} onToggleDone={onToggleDone} />
+            <TaskCard key={t.id} task={t} onOpen={onTaskClick} onToggleDone={onToggleDone} onScheduleOs={onScheduleOs} />
           ))}
         </Section>
       )}
@@ -756,6 +856,12 @@ function WeekView({
                 const dayKey = toLocalDateInput(d);
                 const cellOrders = ordersByTechAndDay.get(`${tech.id}|${dayKey}`) || [];
                 const cellTasks = tasksByTechAndDay.get(`${tech.id}|${dayKey}`) || [];
+                // Workload (padrão Asana/Sunsama): horas ocupadas no dia da pessoa
+                const loadH = [...cellOrders, ...cellTasks].reduce((s: number, it: any) => {
+                  const st = it.scheduled_start_at ? new Date(it.scheduled_start_at).getTime() : 0;
+                  const en = it.scheduled_end_at ? new Date(it.scheduled_end_at).getTime() : 0;
+                  return s + (st && en && en > st ? (en - st) / 3600000 : 0);
+                }, 0);
                 return (
                   <div
                     key={`${tech.id}-${i}`}
@@ -777,6 +883,14 @@ function WeekView({
                       } catch { /* drop de algo que não é tarefa */ }
                     }}
                   >
+                    {loadH > 0 && (
+                      <div className={cn(
+                        'text-[10px] font-semibold text-right pr-1 tabular-nums',
+                        loadH >= 8 ? 'text-destructive' : loadH >= 6 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground',
+                      )}>
+                        {Number.isInteger(loadH) ? loadH : loadH.toFixed(1)}h{loadH >= 8 ? ' ⚠' : ''}
+                      </div>
+                    )}
                     {cellOrders.map((o) => (
                       <div
                         key={`o-${o.id}`}
@@ -1031,13 +1145,14 @@ function MonthView({
 // QUICK SCHEDULE DIALOG (OS)
 // ============================================================
 function QuickScheduleDialog({
-  open, onOpenChange, technicians, prefillTechnicianId, prefillDate,
+  open, onOpenChange, technicians, prefillTechnicianId, prefillDate, prefillOrderId,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   technicians: { id: string; full_name: string }[];
   prefillTechnicianId?: string;
   prefillDate?: string;
+  prefillOrderId?: string;
 }) {
   const { data: schedulable = [] } = useSchedulableOrders();
   const quickSchedule = useQuickSchedule();
@@ -1053,14 +1168,14 @@ function QuickScheduleDialog({
 
   useEffect(() => {
     if (open) {
-      setOrderId('');
+      setOrderId(prefillOrderId || '');
       setTechnicianId(prefillTechnicianId || '');
       setDate(prefillDate || toLocalDateInput(new Date()));
       setStartTime('09:00');
       setEndTime('11:00');
       setSubmitting(false);
     }
-  }, [open, prefillTechnicianId, prefillDate]);
+  }, [open, prefillTechnicianId, prefillDate, prefillOrderId]);
 
   const handleSave = async () => {
     if (submitting || quickSchedule.isPending) return;
@@ -1073,7 +1188,7 @@ function QuickScheduleDialog({
 
     setSubmitting(true);
     try {
-      await quickSchedule.mutateAsync({
+      const res: any = await quickSchedule.mutateAsync({
         service_order_id: orderId,
         technician_user_id: technicianId,
         scheduled_start_at: startISO,
@@ -1081,6 +1196,7 @@ function QuickScheduleDialog({
       });
       // Success: only reached if mutateAsync resolves without throwing
       toast.success('OS agendada com sucesso');
+      if (res?.warning) toast.warning(res.warning);
       onOpenChange(false);
     } catch (err: any) {
       // Error: only reached if mutateAsync throws (mutationFn threw)

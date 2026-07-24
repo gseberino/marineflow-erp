@@ -9,6 +9,10 @@ import {
   Anchor, Clock, CalendarDays, MapPin, AlarmClock, Timer,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { PaymentDialog } from '@/components/PaymentDialog';
+import { supabase } from '@/integrations/supabase/client';
 import { useSnoozeTask, type RelatedEntityType } from '@/hooks/use-agenda';
 
 const ENTITY_CONFIG: Record<RelatedEntityType, { label: string; Icon: typeof Briefcase; route: (id: string) => string }> = {
@@ -60,13 +64,68 @@ function fmtWhen(t: any): { text: string; overdue: boolean } | null {
   return null;
 }
 
+/** Botão "que resolve": a ação do fluxo que encerra a tarefa, direto no card (padrão Pipedrive/HubSpot). */
+function TaskActionButton({ task, onScheduleOs }: { task: any; onScheduleOs?: (task: any) => void }) {
+  const navigate = useNavigate();
+  const [payOpen, setPayOpen] = useState(false);
+  const [payRecord, setPayRecord] = useState<any>(null);
+  const et = task.related_entity_type as RelatedEntityType | null;
+  if (!et || task.status === 'done') return null;
+
+  const openPayment = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const table = et === 'receivable' ? 'receivables' : 'payables';
+    const { data, error } = await supabase.from(table).select('*, clients(name)').eq('id', task.related_entity_id).maybeSingle();
+    if (error || !data) { toast.error('Registro financeiro não encontrado'); return; }
+    if ((data as any).status === 'paid') { toast.info('Este título já está pago — a tarefa se resolve no próximo ciclo.'); return; }
+    setPayRecord(data);
+    setPayOpen(true);
+  };
+
+  const actions: Partial<Record<RelatedEntityType, { label: string; onClick: (e: React.MouseEvent) => void }>> = {
+    receivable: { label: 'Registrar pagamento', onClick: openPayment },
+    payable: { label: 'Registrar pagamento', onClick: openPayment },
+    purchase_order: { label: 'Receber OC', onClick: (e) => { e.stopPropagation(); navigate('/purchase-orders'); } },
+    stock_item: { label: 'Repor', onClick: (e) => { e.stopPropagation(); navigate('/inventory/smart-purchase'); } },
+    service_order: task.automation_key?.startsWith('r1:') && onScheduleOs
+      ? { label: 'Agendar OS', onClick: (e) => { e.stopPropagation(); onScheduleOs(task); } }
+      : undefined,
+  };
+  const action = actions[et];
+  if (!action) return null;
+
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-6 px-2 text-[11px] border-primary/40 text-primary hover:bg-primary/10"
+        onClick={action.onClick}
+      >
+        {action.label}
+      </Button>
+      {payRecord && (
+        <span onClick={(e) => e.stopPropagation()}>
+          <PaymentDialog
+            open={payOpen}
+            onOpenChange={(v: boolean) => { setPayOpen(v); if (!v) setPayRecord(null); }}
+            receivable={et === 'receivable' ? payRecord : undefined}
+            payable={et === 'payable' ? payRecord : undefined}
+          />
+        </span>
+      )}
+    </>
+  );
+}
+
 export function TaskCard({
-  task, onOpen, onToggleDone, compact = false,
+  task, onOpen, onToggleDone, compact = false, onScheduleOs,
 }: {
   task: any;
   onOpen?: (task: any) => void;
   onToggleDone?: (id: string, done: boolean) => void;
   compact?: boolean;
+  onScheduleOs?: (task: any) => void;
 }) {
   const navigate = useNavigate();
   const snooze = useSnoozeTask();
@@ -157,6 +216,7 @@ export function TaskCard({
               <Timer className="h-3 w-3" /> adiada
             </span>
           )}
+          <TaskActionButton task={task} onScheduleOs={onScheduleOs} />
         </div>
       </div>
       {!done && onToggleDone && (

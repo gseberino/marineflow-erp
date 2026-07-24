@@ -43,8 +43,10 @@ export function EntityTasksPanel({
         </Button>
       </div>
 
-      {live.length === 0 && doneRecent.length === 0 && (
-        <p className="text-xs text-muted-foreground">Nenhuma tarefa vinculada.</p>
+      {live.length === 0 && (
+        <p className="text-xs font-medium text-amber-700 dark:text-amber-400">
+          ⚠ Sem próxima ação definida — todo item ativo merece um próximo passo. Crie a tarefa acima.
+        </p>
       )}
 
       <div className="space-y-1.5">

@@ -189,6 +189,28 @@ function conflictMessage(conflicts: any[]): string {
   return `Conflito de agenda: o responsável já tem ${labels} nesse horário.`;
 }
 
+/** Sobrecarga (não bloqueia — avisa): total de horas do dia após o novo item > 8h. */
+async function overloadWarning(
+  userId: string, startISO: string, endISO: string,
+  excl?: { excludeTask?: string; excludeSo?: string },
+): Promise<string | null> {
+  const d = new Date(startISO);
+  const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const dayEnd = new Date(dayStart.getTime() + 86400000);
+  const items = await fetchConflicts({
+    userId, startISO: dayStart.toISOString(), endISO: dayEnd.toISOString(), ...excl,
+  });
+  const busyMs = items.reduce((s: number, c: any) => {
+    const st = new Date(c.starts_at).getTime();
+    const en = new Date(c.ends_at).getTime();
+    return s + Math.max(0, en - st);
+  }, 0);
+  const totalH = (busyMs + (new Date(endISO).getTime() - new Date(startISO).getTime())) / 3600000;
+  return totalH > 8
+    ? `Atenção: com este agendamento o dia fica com ${totalH.toFixed(1).replace('.0', '')}h ocupadas.`
+    : null;
+}
+
 export function useQuickSchedule() {
   const qc = useQueryClient();
   return useMutation({
@@ -198,6 +220,7 @@ export function useQuickSchedule() {
       scheduled_start_at: string;
       scheduled_end_at: string | null;
     }) => {
+      let warning: string | null = null;
       if (input.scheduled_end_at) {
         const conflicts = await fetchConflicts({
           userId: input.technician_user_id,
@@ -206,6 +229,10 @@ export function useQuickSchedule() {
           excludeSo: input.service_order_id,
         });
         if (conflicts.length > 0) throw new Error(conflictMessage(conflicts));
+        warning = await overloadWarning(
+          input.technician_user_id, input.scheduled_start_at, input.scheduled_end_at,
+          { excludeSo: input.service_order_id },
+        );
       }
 
       const { data: current, error: getErr } = await supabase
@@ -241,6 +268,7 @@ export function useQuickSchedule() {
           { onConflict: 'service_order_id,user_id', ignoreDuplicates: true }
         );
       if (techErr) throw techErr;
+      return { warning };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['agenda-orders'] });
@@ -277,6 +305,9 @@ function invalidateTaskQueries(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ['agenda-tasks'] });
   qc.invalidateQueries({ queryKey: ['agenda-live-tasks'] });
   qc.invalidateQueries({ queryKey: ['agenda-entity-tasks'] });
+  // Sem esta invalidação, desmarcar na aba Concluídas atualizava o banco mas a
+  // tela não refletia (bug reportado 24/07)
+  qc.invalidateQueries({ queryKey: ['agenda-completed-tasks'] });
 }
 
 export function useSaveAgendaTask() {
@@ -286,6 +317,7 @@ export function useSaveAgendaTask() {
       const kind = input.kind ?? (input.scheduled_start_at ? 'appointment' : 'task');
 
       // Compromisso com início+fim: checar conflito (tarefas + OS) antes de salvar
+      let warning: string | null = null;
       if (kind === 'appointment' && input.assignee_user_id
           && input.scheduled_start_at && input.scheduled_end_at) {
         const conflicts = await fetchConflicts({
@@ -295,6 +327,10 @@ export function useSaveAgendaTask() {
           excludeTask: input.id,
         });
         if (conflicts.length > 0) throw new Error(conflictMessage(conflicts));
+        warning = await overloadWarning(
+          input.assignee_user_id, input.scheduled_start_at, input.scheduled_end_at,
+          { excludeTask: input.id },
+        );
       }
 
       const row = {
@@ -342,7 +378,7 @@ export function useSaveAgendaTask() {
           if (remErr) throw remErr;
         }
       }
-      return taskId;
+      return { id: taskId, warning };
     },
     onSuccess: () => invalidateTaskQueries(qc),
   });

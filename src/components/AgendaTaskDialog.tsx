@@ -271,8 +271,9 @@ export function AgendaTaskDialog({
     };
 
     try {
-      await save.mutateAsync(payload);
+      const res: any = await save.mutateAsync(payload);
       toast.success(existing ? 'Tarefa atualizada' : 'Tarefa criada');
+      if (res?.warning) toast.warning(res.warning);
       onOpenChange(false);
     } catch (e: any) {
       toast.error(e?.message || 'Erro ao salvar tarefa');
