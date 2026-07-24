@@ -17,6 +17,7 @@ import {
   useTechnicians,
   useActiveUsers,
   useLiveTasks,
+  useCompletedTasks,
   useCompleteTask,
   useRescheduleTask,
   useSchedulableOrders,
@@ -35,7 +36,7 @@ import { useI18n } from '@/i18n';
 import { statusConfig } from '@/lib/constants';
 import { FilterPresets } from '@/components/FilterPresets';
 
-type ViewMode = 'today' | 'week' | 'month';
+type ViewMode = 'today' | 'week' | 'month' | 'done';
 
 function startOfWeek(d: Date): Date {
   const date = new Date(d);
@@ -91,6 +92,9 @@ export default function AgendaPage() {
   const [editingTask, setEditingTask] = useState<ExistingTask | null>(null);
   const [prefill, setPrefill] = useState<{ technicianId?: string; date?: string }>({});
   const [techFilter, setTechFilter] = useState<string>('all');
+  const [prioFilter, setPrioFilter] = useState<string>('all');
+  const [sourceFilter, setSourceFilter] = useState<string>('all');
+  const [doneDays, setDoneDays] = useState<number>(30);
 
   const range = useMemo(() => {
     if (view === 'today') {
@@ -119,6 +123,7 @@ export default function AgendaPage() {
   const { data: technicians = [] } = useTechnicians();
   const { data: activeUsers = [] } = useActiveUsers();
   const { data: liveTasks = [], isLoading: loadingLive } = useLiveTasks();
+  const { data: doneTasks = [], isLoading: loadingDone } = useCompletedTasks(doneDays);
   const completeTask = useCompleteTask();
   const reschedule = useRescheduleTask();
 
@@ -132,7 +137,18 @@ export default function AgendaPage() {
     );
   };
 
-  const isLoading = view === 'today' ? (loadingOrders || loadingLive) : (loadingOrders || loadingTasks);
+  const isLoading = view === 'today' ? (loadingOrders || loadingLive)
+    : view === 'done' ? loadingDone
+    : (loadingOrders || loadingTasks);
+
+  // Filtro de pessoa/prioridade/origem aplicável a qualquer lista de tarefas
+  const applyTaskFilters = (list: any[]) => list.filter((t: any) => {
+    if (techFilter === '__none__' && t.assignee_user_id) return false;
+    if (techFilter !== 'all' && techFilter !== '__none__' && t.assignee_user_id !== techFilter) return false;
+    if (prioFilter !== 'all' && t.priority !== prioFilter) return false;
+    if (sourceFilter !== 'all' && t.source !== sourceFilter) return false;
+    return true;
+  });
 
   const filteredOrders = useMemo(() => (
     techFilter === 'all'
@@ -141,11 +157,8 @@ export default function AgendaPage() {
           (o.service_order_technicians || []).some((t: any) => t.user_id === techFilter)
         )
   ), [orders, techFilter]);
-  const filteredTasks = useMemo(() => (
-    techFilter === 'all'
-      ? tasks
-      : (tasks || []).filter((t: any) => t.assignee_user_id === techFilter)
-  ), [tasks, techFilter]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const filteredTasks = useMemo(() => applyTaskFilters(tasks || []), [tasks, techFilter, prioFilter, sourceFilter]);
 
   const handleNav = (delta: number) => {
     if (view === 'week') setCursor(addDays(cursor, delta * 7));
@@ -204,10 +217,25 @@ export default function AgendaPage() {
             <Button size="sm" variant={view === 'month' ? 'default' : 'ghost'} onClick={() => setView('month')}>
               Mês
             </Button>
+            <Button size="sm" variant={view === 'done' ? 'default' : 'ghost'} onClick={() => setView('done')}>
+              Concluídas
+            </Button>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            {view !== 'today' && (
+            {view === 'done' && (
+              <Select value={String(doneDays)} onValueChange={(v) => setDoneDays(Number(v))}>
+                <SelectTrigger className="w-[130px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="7">Últimos 7 dias</SelectItem>
+                  <SelectItem value="30">Últimos 30 dias</SelectItem>
+                  <SelectItem value="90">Últimos 90 dias</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+            {view !== 'today' && view !== 'done' && (
               <>
                 <Button size="sm" variant="outline" onClick={() => handleNav(-1)}>
                   <ChevronLeft className="h-4 w-4" />
@@ -221,23 +249,51 @@ export default function AgendaPage() {
               </>
             )}
             <Select value={techFilter} onValueChange={setTechFilter}>
-              <SelectTrigger className="w-full sm:w-[180px]">
+              <SelectTrigger className="w-full sm:w-[170px]">
                 <SelectValue placeholder="Filtrar por pessoa" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">{view === 'today' ? 'Todas as pessoas' : 'Todos os técnicos'}</SelectItem>
-                {(view === 'today' ? activeUsers : technicians).map((tech: any) => (
-                  <SelectItem key={tech.id} value={tech.id}>{tech.full_name}</SelectItem>
+                <SelectItem value="all">Todas as pessoas</SelectItem>
+                <SelectItem value="__none__">Sem responsável</SelectItem>
+                {activeUsers.map((u: any) => (
+                  <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+            <Select value={prioFilter} onValueChange={setPrioFilter}>
+              <SelectTrigger className="w-[130px]">
+                <SelectValue placeholder="Prioridade" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Prioridade: todas</SelectItem>
+                <SelectItem value="urgent">Urgente</SelectItem>
+                <SelectItem value="high">Alta</SelectItem>
+                <SelectItem value="normal">Normal</SelectItem>
+                <SelectItem value="low">Baixa</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={sourceFilter} onValueChange={setSourceFilter}>
+              <SelectTrigger className="w-[130px]">
+                <SelectValue placeholder="Origem" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Origem: todas</SelectItem>
+                <SelectItem value="manual">Manual</SelectItem>
+                <SelectItem value="ai">IA</SelectItem>
+                <SelectItem value="automation">Automação</SelectItem>
+                <SelectItem value="recurrence">Recorrência</SelectItem>
               </SelectContent>
             </Select>
             <FilterPresets
               filterType="agenda"
-              currentConfig={{ view, techFilter }}
-              hasActiveFilters={techFilter !== 'all' || view !== 'week'}
+              currentConfig={{ view, techFilter, prioFilter, sourceFilter, doneDays }}
+              hasActiveFilters={techFilter !== 'all' || prioFilter !== 'all' || sourceFilter !== 'all' || view !== 'today'}
               onApply={(c: any) => {
                 if (c.view) setView(c.view);
                 setTechFilter(c.techFilter ?? 'all');
+                setPrioFilter(c.prioFilter ?? 'all');
+                setSourceFilter(c.sourceFilter ?? 'all');
+                if (c.doneDays) setDoneDays(c.doneDays);
               }}
             />
           </div>
@@ -254,11 +310,19 @@ export default function AgendaPage() {
         ) : view === 'today' ? (
           <TodayView
             orders={filteredOrders}
-            tasks={techFilter === 'all' ? liveTasks : (liveTasks || []).filter((t: any) => t.assignee_user_id === techFilter)}
+            tasks={applyTaskFilters(liveTasks || [])}
             onOrderClick={(id) => navigate(`/service-orders/${id}`)}
             onTaskClick={(t) => openTaskDialog(undefined, undefined, t)}
             onToggleDone={(id, done) =>
               completeTask.mutate({ id, done }, { onError: (e: any) => toast.error(e?.message || 'Erro ao concluir') })}
+          />
+        ) : view === 'done' ? (
+          <DoneView
+            tasks={applyTaskFilters(doneTasks || [])}
+            days={doneDays}
+            onTaskClick={(t) => openTaskDialog(undefined, undefined, t)}
+            onToggleDone={(id, done) =>
+              completeTask.mutate({ id, done }, { onError: (e: any) => toast.error(e?.message || 'Erro') })}
           />
         ) : view === 'week' ? (
           <WeekView
@@ -300,6 +364,130 @@ export default function AgendaPage() {
         prefillDate={prefill.date}
         existing={editingTask}
       />
+    </div>
+  );
+}
+
+// ============================================================
+// DONE VIEW — o que foi feito no período (estatística e análise)
+// ============================================================
+function DoneView({
+  tasks, days, onTaskClick, onToggleDone,
+}: {
+  tasks: any[];
+  days: number;
+  onTaskClick: (task: any) => void;
+  onToggleDone: (id: string, done: boolean) => void;
+}) {
+  const auto = tasks.filter((t: any) => !t.completed_by);
+  const manual = tasks.filter((t: any) => t.completed_by);
+
+  const byPerson = new Map<string, number>();
+  for (const t of manual) {
+    const nome = t.completed_by_user?.full_name || 'Alguém';
+    byPerson.set(nome, (byPerson.get(nome) || 0) + 1);
+  }
+  const bySource = new Map<string, number>();
+  for (const t of tasks) bySource.set(t.source, (bySource.get(t.source) || 0) + 1);
+
+  let avgHours: number | null = null;
+  const withTimes = tasks.filter((t: any) => t.completed_at && t.created_at);
+  if (withTimes.length > 0) {
+    const sum = withTimes.reduce((s: number, t: any) =>
+      s + (new Date(t.completed_at).getTime() - new Date(t.created_at).getTime()) / 3600000, 0);
+    avgHours = Math.round((sum / withTimes.length) * 10) / 10;
+  }
+
+  const SOURCE_LABEL: Record<string, string> = {
+    manual: 'Manual', ai: 'IA', automation: 'Automação', recurrence: 'Recorrência',
+  };
+
+  const fmtDone = (iso: string) =>
+    new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+
+  // Agrupar por dia de conclusão
+  const byDay = new Map<string, any[]>();
+  for (const t of tasks) {
+    const k = new Date(t.completed_at).toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
+    if (!byDay.has(k)) byDay.set(k, []);
+    byDay.get(k)!.push(t);
+  }
+
+  return (
+    <div className="space-y-5 max-w-3xl">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <Card className="p-3">
+          <p className="text-2xl font-bold tabular-nums">{tasks.length}</p>
+          <p className="text-xs text-muted-foreground">concluídas em {days} dias</p>
+        </Card>
+        <Card className="p-3">
+          <p className="text-2xl font-bold tabular-nums">{auto.length}</p>
+          <p className="text-xs text-muted-foreground">resolvidas sozinhas (auto)</p>
+        </Card>
+        <Card className="p-3">
+          <p className="text-2xl font-bold tabular-nums">{manual.length}</p>
+          <p className="text-xs text-muted-foreground">concluídas por pessoas</p>
+        </Card>
+        <Card className="p-3">
+          <p className="text-2xl font-bold tabular-nums">{avgHours ?? '—'}</p>
+          <p className="text-xs text-muted-foreground">horas médias até concluir</p>
+        </Card>
+      </div>
+
+      {(byPerson.size > 0 || bySource.size > 0) && (
+        <div className="flex flex-wrap gap-2 text-xs">
+          {Array.from(byPerson.entries()).map(([nome, n]) => (
+            <span key={nome} className="rounded-full bg-primary/10 text-primary px-2.5 py-1 font-medium">
+              {nome}: {n}
+            </span>
+          ))}
+          {Array.from(bySource.entries()).map(([s, n]) => (
+            <span key={s} className="rounded-full bg-secondary text-secondary-foreground px-2.5 py-1">
+              {SOURCE_LABEL[s] || s}: {n}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {tasks.length === 0 && (
+        <p className="text-sm text-muted-foreground py-6 text-center">
+          Nada concluído no período selecionado.
+        </p>
+      )}
+
+      {Array.from(byDay.entries()).map(([dia, dayTasks]) => (
+        <div key={dia} className="space-y-1.5">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{dia}</p>
+          {dayTasks.map((t: any) => (
+            <div
+              key={t.id}
+              onClick={() => onTaskClick(t)}
+              className="group flex items-start gap-2.5 rounded-md border bg-card px-3 py-2 cursor-pointer hover:bg-muted/40 transition-colors"
+            >
+              <span onClick={(e) => e.stopPropagation()} className="pt-0.5">
+                <input
+                  type="checkbox"
+                  checked
+                  onChange={() => onToggleDone(t.id, false)}
+                  className="h-4 w-4 accent-primary cursor-pointer"
+                  title="Reabrir tarefa"
+                />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium leading-snug line-through opacity-70">{t.title}</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  {fmtDone(t.completed_at)}
+                  {t.completed_by_user?.full_name
+                    ? ` · por ${t.completed_by_user.full_name.split(' ')[0]}`
+                    : ' · resolvida automaticamente'}
+                  {' · '}{SOURCE_LABEL[t.source] || t.source}
+                  {t.app_users?.full_name ? ` · resp.: ${t.app_users.full_name.split(' ')[0]}` : ''}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
     </div>
   );
 }
@@ -456,17 +644,28 @@ function WeekView({
     for (const t of tasks) {
       if (!t.scheduled_start_at) continue;
       const dayKey = toLocalDateInput(new Date(t.scheduled_start_at));
-      const k = `${t.assignee_user_id}|${dayKey}`;
+      const k = `${t.assignee_user_id || '__unassigned__'}|${dayKey}`;
       if (!map.has(k)) map.set(k, []);
       map.get(k)!.push(t);
     }
     return map;
   }, [tasks]);
 
-  const rows = [
-    ...technicians,
-    { id: '__unassigned__', full_name: 'Sem técnico atribuído' },
-  ];
+  // Linhas = técnicos + qualquer pessoa com tarefa na semana (admin/financeiro/vendas)
+  const rows = useMemo(() => {
+    const extra = new Map<string, string>();
+    for (const t of tasks) {
+      if (t.assignee_user_id && t.app_users?.full_name
+          && !technicians.some((x) => x.id === t.assignee_user_id)) {
+        extra.set(t.assignee_user_id, t.app_users.full_name);
+      }
+    }
+    return [
+      ...technicians,
+      ...Array.from(extra.entries()).map(([id, full_name]) => ({ id, full_name })),
+      { id: '__unassigned__', full_name: 'Sem responsável' },
+    ];
+  }, [technicians, tasks]);
 
   // Mobile (< lg): dias empilhados — zero scroll horizontal (Princípio 0)
   const mobileDays = days.map((d) => {

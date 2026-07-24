@@ -72,6 +72,26 @@ export function useLiveTasks() {
   });
 }
 
+/** Tarefas CONCLUÍDAS no período — visão Concluídas / relatório de desempenho. */
+export function useCompletedTasks(days: number) {
+  return useQuery({
+    queryKey: ['agenda-completed-tasks', days],
+    queryFn: async () => {
+      const since = new Date(Date.now() - days * 86400000).toISOString();
+      const { data, error } = await supabase
+        .from('agenda_tasks')
+        .select(`${TASK_SELECT}, completed_by, created_at,
+          completed_by_user:completed_by(id, full_name)`)
+        .eq('status', 'done')
+        .gte('completed_at', since)
+        .order('completed_at', { ascending: false })
+        .limit(500);
+      if (error) throw error;
+      return data || [];
+    },
+  });
+}
+
 /** Tarefas de uma entidade do ERP (vivas + concluídas recentes) — EntityTasksPanel. */
 export function useEntityTasks(entityType: RelatedEntityType, entityId: string | undefined) {
   return useQuery({

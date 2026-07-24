@@ -1,7 +1,34 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   RULES, isRuleEnabled, ruleById, ruleIdFromKey, entityIdFromKey, keyOf, fmtBRL, fmtDate, dueAt,
+  isManualDismissal, dismissCooldownDays,
 } from "./rules.ts";
+
+Deno.test("isManualDismissal: conclusão MANUAL recente bloqueia recriação", () => {
+  const cutoff = "2026-07-17T00:00:00Z";
+  // humano concluiu ontem → bloqueia
+  assertEquals(isManualDismissal(
+    { status: "done", completed_by: "user-1", completed_at: "2026-07-23T10:00:00Z", updated_at: null }, cutoff), true);
+  // auto-resolução (completed_by null) → NÃO bloqueia (condição sumiu; se voltar é novo)
+  assertEquals(isManualDismissal(
+    { status: "done", completed_by: null, completed_at: "2026-07-23T10:00:00Z", updated_at: null }, cutoff), false);
+  // conclusão manual ANTIGA (antes do cutoff) → não bloqueia mais
+  assertEquals(isManualDismissal(
+    { status: "done", completed_by: "user-1", completed_at: "2026-07-10T10:00:00Z", updated_at: null }, cutoff), false);
+  // cancelada recentemente → bloqueia (dispensa explícita)
+  assertEquals(isManualDismissal(
+    { status: "cancelled", completed_by: null, completed_at: null, updated_at: "2026-07-23T10:00:00Z" }, cutoff), true);
+  // viva não entra (função só recebe done/cancelled, mas por segurança)
+  assertEquals(isManualDismissal(
+    { status: "pending", completed_by: null, completed_at: null, updated_at: "2026-07-23T10:00:00Z" }, cutoff), false);
+});
+
+Deno.test("dismissCooldownDays: default 7, override por setting", () => {
+  assertEquals(dismissCooldownDays({}), 7);
+  assertEquals(dismissCooldownDays({ task_rule_dismiss_cooldown_days: "3" }), 3);
+  assertEquals(dismissCooldownDays({ task_rule_dismiss_cooldown_days: "0" }), 0);
+  assertEquals(dismissCooldownDays({ task_rule_dismiss_cooldown_days: "lixo" }), 7);
+});
 
 Deno.test("keyOf/entityIdFromKey/ruleIdFromKey: ida e volta", () => {
   const k = keyOf("r3", "recv", "abc-123");

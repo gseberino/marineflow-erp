@@ -9,7 +9,10 @@
 //   5. Materializa recorrências (rrule) para os próximos 30 dias.
 // Plano: plans/marineflow-agenda-tarefas.md §6-§7.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { RULES, isRuleEnabled, ruleById, ruleIdFromKey, type RuleCandidate } from "./rules.ts";
+import {
+  RULES, isRuleEnabled, ruleById, ruleIdFromKey, isManualDismissal, dismissCooldownDays,
+  type RuleCandidate,
+} from "./rules.ts";
 import { expandOccurrences } from "../_shared/recurrence.ts";
 
 const corsHeaders = {
@@ -75,10 +78,30 @@ async function runRules(db: Db, settings: Record<string, string>) {
   const resolved: string[] = [];
   const assigneeCache = new Map<string, string | null>();
 
+  const cooldownDays = dismissCooldownDays(settings);
+  const cutoffISO = new Date(Date.now() - cooldownDays * 86400000).toISOString();
+
   for (const rule of RULES) {
     if (!isRuleEnabled(settings, rule)) continue;
     try {
-      const candidates = await rule.find(db);
+      let candidates = await rule.find(db);
+
+      // Dispensa manual: não recriar o que um humano concluiu/cancelou há pouco
+      // com a condição ainda de pé (senão a tarefa "volta do nada" a cada 15min).
+      if (candidates.length > 0 && cooldownDays > 0) {
+        const keys = candidates.map((c) => c.automation_key);
+        const { data: closed } = await db.from("agenda_tasks")
+          .select("automation_key, status, completed_by, completed_at, updated_at")
+          .in("automation_key", keys)
+          .in("status", ["done", "cancelled"]);
+        const dismissed = new Set(
+          ((closed as any[]) || [])
+            .filter((r) => isManualDismissal(r, cutoffISO))
+            .map((r) => r.automation_key),
+        );
+        candidates = candidates.filter((c) => !dismissed.has(c.automation_key));
+      }
+
       for (const c of candidates) {
         const assigneeId = await resolveAssignee(db, c.assignee, assigneeCache);
         const inserted = await createTaskFromCandidate(db, c, assigneeId);

@@ -395,3 +395,24 @@ export function isRuleEnabled(settings: Record<string, string>, rule: Rule): boo
   if (v === undefined || v === null || v === '') return rule.defaultEnabled;
   return v === 'true';
 }
+
+/**
+ * Dispensa manual: se um humano concluiu (completed_by preenchido) ou cancelou uma
+ * tarefa de automação e a CONDIÇÃO ainda vale, o motor NÃO recria dentro do cooldown —
+ * concluir na mão significa "já tratei disso". Auto-resolução (completed_by null) não
+ * bloqueia: ali a condição sumiu, então se voltar é uma ocorrência genuinamente nova.
+ */
+export function isManualDismissal(
+  row: { status: string; completed_by: string | null; completed_at: string | null; updated_at: string | null },
+  cutoffISO: string,
+): boolean {
+  const when = row.completed_at || row.updated_at;
+  if (!when || when < cutoffISO) return false;
+  if (row.status === 'cancelled') return true;
+  return row.status === 'done' && row.completed_by !== null;
+}
+
+export function dismissCooldownDays(settings: Record<string, string>): number {
+  const n = parseInt(settings['task_rule_dismiss_cooldown_days'] || '', 10);
+  return Number.isFinite(n) && n >= 0 ? n : 7;
+}
