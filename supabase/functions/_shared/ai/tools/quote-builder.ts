@@ -107,7 +107,7 @@ export const quoteBuilderTools: ToolDef[] = [
       // 2. Resolve os itens contra o catálogo (paralelo).
       const itens = Array.isArray(args.items) ? args.items : [];
       if (itens.length === 0) return { error: "Informe ao menos um item em items." };
-      const resolvidos = await resolverItens(sb, itens);
+      const resolvidos = await resolverItens(sb, itens, cli.id);
 
       // 3. Cria a OS (orçamento).
       let num: string;

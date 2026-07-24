@@ -163,6 +163,66 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: "Cancelado", invoiced: "Faturado", reopened: "Reaberto",
 };
 
+/**
+ * Adiciona um PRODUTO (do catálogo, incl. pendente ou kit/composto) como linha de PEÇA de uma
+ * OS/orçamento. Fonte ÚNICA usada por add_service_order_item e add_kit_to_order — para que a
+ * regra de preço praticado e a baixa de estoque existam num lugar só.
+ * Preço: unit_price explícito → último praticado a este cliente → global → catálogo.
+ */
+export async function adicionarPecaNaOS(
+  sb: any,
+  args: { service_order_id: string; product_id: string; quantity: number; unit_price?: number },
+): Promise<{ ok: true; part: any; preco_unitario: number; preco_origem: string; preco_data: string | null } | { error: string }> {
+  const { data: prod } = await sb
+    .from("products")
+    .select("cost_price, sale_price, cost_currency")
+    .eq("id", args.product_id)
+    .maybeSingle();
+  if (!prod) return { error: "Produto não encontrado" };
+
+  const { data: so } = await sb.from("service_orders").select("client_id").eq("id", args.service_order_id).maybeSingle();
+  let precoUnit = Number(prod.sale_price) || 0;
+  let precoOrigem = "catálogo";
+  let precoData: string | null = null;
+  const precoExplicito = args.unit_price != null && Number(args.unit_price) > 0;
+  if (precoExplicito) {
+    precoUnit = Number(args.unit_price);
+    precoOrigem = "informado agora";
+  } else {
+    const { data: pr } = await sb.rpc("resolve_practiced_price", {
+      p_product_id: args.product_id,
+      p_client_id: so?.client_id ?? null,
+    });
+    const linha = Array.isArray(pr) ? pr[0] : pr;
+    if (linha && linha.price != null) {
+      precoUnit = Number(linha.price);
+      precoOrigem = String(linha.source || "catálogo");
+      precoData = linha.ref_date || null;
+    }
+  }
+
+  const qty = Number(args.quantity);
+  const { data, error } = await sb
+    .from("service_order_parts")
+    .insert({
+      service_order_id: args.service_order_id,
+      product_id: args.product_id,
+      quantity: qty,
+      unit_cost_snapshot: prod.cost_price || 0,
+      unit_sale_snapshot: precoUnit,
+      currency_snapshot: prod.cost_currency || "BRL",
+      line_total_cost: (prod.cost_price || 0) * qty,
+      line_total_sale: precoUnit * qty,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  // Baixa de estoque — espelha o frontend (baixa no add-da-peça).
+  await applyStockDelta(sb, args.product_id, -qty, args.service_order_id, prod.cost_price || 0);
+  await recalcSoTotals(sb, args.service_order_id);
+  return { ok: true, part: data, preco_unitario: precoUnit, preco_origem: precoOrigem, preco_data: precoData };
+}
+
 export const serviceOrderTools: ToolDef[] = [
   {
     name: "list_service_orders",
@@ -420,43 +480,34 @@ export const serviceOrderTools: ToolDef[] = [
   },
   {
     name: "add_service_order_item",
-    description: "Adiciona um produto a uma OS.",
+    description:
+      "Adiciona um produto (do catálogo, incl. PENDENTE) a uma OS/orçamento. O preço é sugerido pelo ÚLTIMO praticado a este cliente → último praticado (global) → catálogo; a resposta diz a origem e a data. Passe unit_price só se quiser SOBREPOR essa sugestão.",
     input_schema: {
       type: "object",
       properties: {
         service_order_id: { type: "string" },
         product_id: { type: "string" },
         quantity: { type: "number" },
+        unit_price: { type: "number", description: "Opcional: sobrepõe o preço sugerido (praticado/catálogo)." },
       },
       required: ["service_order_id", "product_id", "quantity"],
     },
     risk: "low",
     async execute(args, { sb }) {
-      const { data: prod } = await sb
-        .from("products")
-        .select("cost_price, sale_price, cost_currency")
-        .eq("id", args.product_id)
-        .maybeSingle();
-      if (!prod) return { error: "Produto não encontrado" };
-      const { data, error } = await sb
-        .from("service_order_parts")
-        .insert({
-          service_order_id: args.service_order_id,
-          product_id: args.product_id,
-          quantity: args.quantity,
-          unit_cost_snapshot: prod.cost_price || 0,
-          unit_sale_snapshot: prod.sale_price || 0,
-          currency_snapshot: prod.cost_currency || "BRL",
-          line_total_cost: (prod.cost_price || 0) * args.quantity,
-          line_total_sale: (prod.sale_price || 0) * args.quantity,
-        })
-        .select()
-        .single();
-      if (error) throw error;
-      // Baixa de estoque — espelha o frontend (baixa no add-da-peça).
-      await applyStockDelta(sb, args.product_id, -Number(args.quantity), args.service_order_id, prod.cost_price || 0);
-      await recalcSoTotals(sb, args.service_order_id || args.id);
-      return { ok: true, part: data };
+      const r = await adicionarPecaNaOS(sb, {
+        service_order_id: args.service_order_id,
+        product_id: args.product_id,
+        quantity: args.quantity,
+        unit_price: args.unit_price,
+      });
+      if ("error" in r) return r;
+      const explicito = args.unit_price != null && Number(args.unit_price) > 0;
+      return {
+        ...r,
+        instrucao_preco: explicito
+          ? null
+          : `Preço sugerido de R$ ${r.preco_unitario.toFixed(2)} (${r.preco_origem}${r.preco_data ? ", " + new Date(r.preco_data).toLocaleDateString("pt-BR") : ""}). Se quiser outro valor, ajuste com edit_service_order_item.`,
+      };
     },
   },
   {

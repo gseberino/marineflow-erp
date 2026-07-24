@@ -1,5 +1,6 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
 import { normalizarTermo } from "../keyword-resolver.ts";
+import { produtoFiscalPendencias } from "../product-fiscal.ts";
 
 export const productTools: ToolDef[] = [
   {
@@ -280,15 +281,82 @@ export const productTools: ToolDef[] = [
     async execute(args, { sb }) {
       const { data, error } = await sb.from("products").insert(args).select().single();
       if (error) throw error;
-      // Aviso em cadeia: produto sem NCM trava a NF-e lá na frente — melhor dizer agora.
-      const faltando: string[] = [];
-      if (!data.ncm) faltando.push("NCM");
-      if (data.sale_price == null) faltando.push("preço de venda");
+      // fiscal_complete é calculado por trigger no banco — reflete a realidade fiscal do registro.
+      // As pendências abaixo dizem exatamente o que falta para o produto poder entrar numa NF-e.
+      const pendenciasFiscais = produtoFiscalPendencias(data);
+      const faltando = [...pendenciasFiscais];
+      if (data.sale_price == null || Number(data.sale_price) === 0) faltando.push("preço de venda");
       return {
         ok: true,
         product: data,
-        pronto_para_nota_fiscal: faltando.length === 0,
-        aviso: faltando.length ? `Cadastrado, mas falta ${faltando.join(" e ")} — sem isso ele não entra em NF-e.` : null,
+        pendente: !data.fiscal_complete,
+        pronto_para_nota_fiscal: !!data.fiscal_complete,
+        pendencias_fiscais: pendenciasFiscais,
+        aviso: pendenciasFiscais.length
+          ? `Produto cadastrado como PENDENTE — já pode ir ao orçamento, mas falta para NF-e: ${pendenciasFiscais.join(", ")}. Sugira/pergunte o NCM e complete depois.`
+          : (faltando.length ? `Cadastrado. Falta ${faltando.join(" e ")}.` : null),
+      };
+    },
+  },
+  {
+    name: "list_pending_fiscal_products",
+    description:
+      "Lista os produtos com CADASTRO FISCAL PENDENTE (não podem entrar em NF-e ainda: falta NCM, CFOP, etc.). Use ANTES de tentar emitir nota — para completar tudo de uma vez — ou quando o usuário perguntar o que falta para faturar. Passe service_order_id para checar só os itens daquele orçamento/OS; sem ele, lista o catálogo. Devolve, por produto, exatamente o que falta.",
+    input_schema: {
+      type: "object",
+      properties: {
+        service_order_id: { type: "string", description: "Opcional: UUID do orçamento/OS — lista só os produtos usados nele que estão pendentes." },
+        limit: { type: "number", description: "Máximo de produtos (padrão 30, teto 100)." },
+      },
+    },
+    risk: "low",
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { sb } = ctx;
+      const limite = Math.min(Number(args.limit) || 30, 100);
+      const campos = "id, name, sku, ncm, cfop, csosn, fiscal_origin, use_global_fiscal, fiscal_complete";
+
+      let produtos: any[] = [];
+      if (args.service_order_id) {
+        // Só os produtos que aparecem como PEÇA neste orçamento/OS.
+        const { data: parts, error } = await sb
+          .from("service_order_parts")
+          .select(`product_id, products(${campos})`)
+          .eq("service_order_id", args.service_order_id);
+        if (error) throw error;
+        const vistos = new Set<string>();
+        for (const p of (parts as any[]) || []) {
+          const prod = Array.isArray(p.products) ? p.products[0] : p.products;
+          if (prod && !vistos.has(prod.id)) { vistos.add(prod.id); produtos.push(prod); }
+        }
+        produtos = produtos.filter((p) => !p.fiscal_complete);
+      } else {
+        const { data, error } = await sb
+          .from("products")
+          .select(campos)
+          .eq("active", true)
+          .eq("fiscal_complete", false)
+          .order("name")
+          .limit(limite);
+        if (error) throw error;
+        produtos = (data as any[]) || [];
+      }
+
+      const lista = produtos.slice(0, limite).map((p) => ({
+        product_id: p.id,
+        nome: p.name,
+        sku: p.sku || null,
+        falta: produtoFiscalPendencias(p),
+      }));
+      return {
+        total_pendentes: lista.length,
+        escopo: args.service_order_id ? "orçamento/OS" : "catálogo",
+        produtos: lista,
+        instrucao: lista.length
+          ? "Para cada produto, complete o que está em 'falta' (use update_product; sugira um NCM plausível pelo tipo do produto e CONFIRME com o usuário antes de gravar)."
+          : "Nenhum produto pendente neste escopo — pode seguir para a emissão.",
       };
     },
   },

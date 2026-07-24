@@ -84,7 +84,24 @@ function origemDoHistorico(row: any): string {
 }
 
 /** Preço já praticado deste produto (fonte da verdade de "valor já usado"). */
-async function ultimoPreco(sb: any, productId: string): Promise<{ preco: number | null; origem: string }> {
+// Preferência de preço: último praticado a ESTE cliente → último praticado (global) → catálogo.
+// Mesma precedência da RPC resolve_practiced_price (fonte de verdade), mantida aqui em TS só para
+// preservar o número da OS na origem (que a RPC não devolve). Se mudar a regra, mude nos dois.
+async function ultimoPreco(sb: any, productId: string, clientId?: string | null): Promise<{ preco: number | null; origem: string }> {
+  // 1) Último praticado a ESTE cliente.
+  if (clientId) {
+    const { data: h1 } = await sb
+      .from("service_order_parts")
+      .select("unit_sale_snapshot, created_at, service_orders!inner(service_order_number, created_at, client_id)")
+      .eq("product_id", productId)
+      .eq("service_orders.client_id", clientId)
+      .not("unit_sale_snapshot", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    const hh = ((h1 as any[]) || [])[0];
+    if (hh?.unit_sale_snapshot != null) return { preco: Number(hh.unit_sale_snapshot), origem: origemDoHistorico(hh) };
+  }
+  // 2) Último praticado a qualquer cliente.
   const { data: hist } = await sb
     .from("service_order_parts")
     .select("unit_sale_snapshot, created_at, service_orders(service_order_number, created_at)")
@@ -94,6 +111,7 @@ async function ultimoPreco(sb: any, productId: string): Promise<{ preco: number 
     .limit(1);
   const h = ((hist as any[]) || [])[0];
   if (h?.unit_sale_snapshot != null) return { preco: Number(h.unit_sale_snapshot), origem: origemDoHistorico(h) };
+  // 3) Catálogo (o caller preenche com sale_price).
   return { preco: null, origem: "cadastro atual do catálogo" };
 }
 
@@ -103,6 +121,7 @@ async function ultimoPreco(sb: any, productId: string): Promise<{ preco: number 
 export async function resolverItens(
   sb: any,
   itens: Array<{ keyword: string; quantity?: number; unit_price?: number }>,
+  clientId?: string | null,
 ): Promise<ItemResolvido[]> {
   return await Promise.all(
     itens.map(async (it): Promise<ItemResolvido> => {
@@ -119,7 +138,7 @@ export async function resolverItens(
       if (alias?.product_id) {
         const { data: p } = await sb.from("products").select("id, name, cost_price, sale_price").eq("id", alias.product_id).maybeSingle();
         if (p) {
-          const preco = await ultimoPreco(sb, p.id);
+          const preco = await ultimoPreco(sb, p.id, clientId);
           return {
             keyword: termo, quantidade: qtd, status: "resolvido", product_id: p.id, nome: p.name,
             preco_venda: precoInformado ?? preco.preco ?? (p.sale_price != null ? Number(p.sale_price) : 0),
@@ -150,7 +169,7 @@ export async function resolverItens(
       // Casou todos os tokens = alta confiança; parcial = assumido (o dono confirma).
       const status: ItemResolvido["status"] = toks.length > 0 && casados === toks.length ? "resolvido" : "assumido";
 
-      const preco = await ultimoPreco(sb, p.id);
+      const preco = await ultimoPreco(sb, p.id, clientId);
       return {
         keyword: termo, quantidade: qtd, status, product_id: p.id, nome: p.name,
         preco_venda: precoInformado ?? preco.preco ?? (p.sale_price != null ? Number(p.sale_price) : 0),
