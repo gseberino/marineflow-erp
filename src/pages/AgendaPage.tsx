@@ -135,6 +135,16 @@ export default function AgendaPage() {
   const [scheduleOsId, setScheduleOsId] = useState<string | undefined>(undefined);
   const [focusOpen, setFocusOpen] = useState(false);
 
+  // DEVE vir antes de qualquer uso em useMemo/render (TDZ: 'Cannot access before
+  // initialization' derrubou a página em produção em 24/07 — declaração ficava abaixo)
+  const applyTaskFilters = (list: any[]) => list.filter((t: any) => {
+    if (techFilter === '__none__' && t.assignee_user_id) return false;
+    if (techFilter !== 'all' && techFilter !== '__none__' && t.assignee_user_id !== techFilter) return false;
+    if (prioFilter !== 'all' && t.priority !== prioFilter) return false;
+    if (sourceFilter !== 'all' && t.source !== sourceFilter) return false;
+    return true;
+  });
+
   // Fila do modo foco: atrasadas → hoje → sem data; prioridade dentro de cada grupo
   const focusQueue = useMemo(() => {
     const now = new Date();
@@ -216,14 +226,6 @@ export default function AgendaPage() {
     : view === 'done' ? loadingDone
     : (loadingOrders || loadingTasks);
 
-  // Filtro de pessoa/prioridade/origem aplicável a qualquer lista de tarefas
-  const applyTaskFilters = (list: any[]) => list.filter((t: any) => {
-    if (techFilter === '__none__' && t.assignee_user_id) return false;
-    if (techFilter !== 'all' && techFilter !== '__none__' && t.assignee_user_id !== techFilter) return false;
-    if (prioFilter !== 'all' && t.priority !== prioFilter) return false;
-    if (sourceFilter !== 'all' && t.source !== sourceFilter) return false;
-    return true;
-  });
 
   const filteredOrders = useMemo(() => (
     techFilter === 'all'
