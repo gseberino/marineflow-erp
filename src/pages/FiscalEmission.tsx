@@ -1466,6 +1466,19 @@ export default function FiscalEmission() {
       setConfirmEspelho(null);
       setShowEmit(false);
       qc.invalidateQueries({ queryKey: ['issued_fiscal_documents'] });
+      // O rascunho (auto-salvo no espelho ou salvo à mão) virou nota real:
+      // arquiva para sair da lista ativa, mas fica de registro. Best-effort —
+      // a nota já foi emitida; falhar aqui não pode virar erro de emissão.
+      if (currentDraftId) {
+        try {
+          await (supabase as any)
+            .from('fiscal_emission_drafts')
+            .update({ status: 'archived' })
+            .eq('id', currentDraftId);
+        } catch { /* rascunho segue na lista; sem impacto na nota emitida */ }
+        setCurrentDraftId(null);
+        void loadDrafts();
+      }
     } catch (err: any) {
       toast.error('Erro ao emitir NF-e: ' + err.message);
       // Ataque concluído (com erro): a próxima tentativa deliberada do
