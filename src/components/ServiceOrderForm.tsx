@@ -513,6 +513,7 @@ interface PartCardFormProps {
   onOpenPriceCalc: () => void;
   confirmDisabled?: boolean;
   supabase: typeof supabase;
+  clientId?: string;
 }
 
 function PartCardFormComponent({
@@ -525,6 +526,7 @@ function PartCardFormComponent({
   onOpenPriceCalc,
   confirmDisabled,
   supabase: sb,
+  clientId,
 }: PartCardFormProps) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -624,6 +626,9 @@ function PartCardFormComponent({
                   type="button"
                   className="w-full text-left px-3 py-2 text-sm hover:bg-accent"
                   onClick={() => {
+                    // Preço do catálogo imediato (resposta instantânea); em seguida busca o
+                    // PRATICADO (este cliente → global → catálogo) e ajusta o unit_sale se houver
+                    // histórico. Falha na busca mantém o catálogo — nunca trava a seleção.
                     onUpdate({
                       product_id: p.id,
                       name: p.name,
@@ -634,6 +639,15 @@ function PartCardFormComponent({
                       warranty_days: p.default_warranty_days || 0,
                     });
                     setShowSuggestions(false);
+                    void (async () => {
+                      try {
+                        const { data } = await (sb as any).rpc('resolve_practiced_price', { p_product_id: p.id, p_client_id: clientId ?? null });
+                        const row = Array.isArray(data) ? data[0] : data;
+                        if (row && row.price != null && Number(row.price) > 0) {
+                          onUpdate({ unit_sale: Number(row.price) });
+                        }
+                      } catch { /* mantém o preço do catálogo */ }
+                    })();
                   }}
                 >
                   <div className="font-medium">{p.name}</div>
@@ -1833,7 +1847,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       // the OS doesn't exist yet, so creating a PO at this point makes no sense —
       // the PO flow is triggered later at the moment of conversion (StockConfirmationDialog).
       if (!isNew && orderId && draft.quantity > 0 && orderData?.status !== 'draft') {
-        const { data: prodData } = await supabase
+        const { data: prodData } = await (supabase as any)
           .from('products')
           .select('stock_quantity, reserved_quantity, minimum_stock, product_suppliers(supplier_id, suppliers(id, name)), product_suppliers!inner(lead_time_days)')
           .eq('id', productId)
@@ -3546,6 +3560,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                         onOpenPriceCalc={() => setPriceCalcCardKey(p.id)}
                         confirmDisabled={updatePartLine.isPending}
                         supabase={supabase}
+                        clientId={orderData?.client_id}
                       />
                     </div>
                   );
@@ -3632,6 +3647,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                     onOpenPriceCalc={() => setPriceCalcCardKey(key)}
                     confirmDisabled={addPart.isPending}
                     supabase={supabase}
+                    clientId={orderData?.client_id}
                   />
                 </div>
               ))}
