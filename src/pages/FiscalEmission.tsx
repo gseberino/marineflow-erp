@@ -22,6 +22,7 @@ import {
 import {
   FileText, Loader2, Plus, Trash2, RefreshCw, Download, Ban, Pencil, Settings2, Upload,
   Stethoscope, CheckCircle2, XCircle, Undo2, Send, FileDown, Copy, Boxes, Eye, Mail,
+  Save, FolderClock,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -39,6 +40,7 @@ import { CSOSN_OPTIONS, FISCAL_ORIGIN_OPTIONS } from '@/lib/price-calculator';
 import { buildEspelhoHtml } from '@/lib/danfe-espelho';
 import { extractInvokeErrorMessage } from '@/lib/invoke-error';
 import { buildEmissionItem } from '@/lib/fiscal-emission-item';
+import { computeDraftMeta, normalizeDraftState, natureLabel, type FiscalDraftState } from '@/lib/fiscal-draft-state';
 import { BLOCK_SEPARATOR, buildDevolucaoInfo, composeAdditionalInfo, stripManagedBlocks, stripPurchaseBlock } from '@/lib/nfe-info-complementar';
 // Reaproveita os mesmos módulos que a edge function fiscal-emit usa no
 // servidor — evita duplicar a lista de formas de pagamento, natureza de
@@ -401,6 +403,14 @@ export default function FiscalEmission() {
   const [items, setItems] = useState<DraftItem[]>([]);
   const xmlInputRef = useRef<HTMLInputElement>(null);
 
+  // Rascunhos: salvar o formulário de emissão em andamento e retomar depois
+  // (mesma ideia do rascunho de OS/Orçamento). currentDraftId != null = estamos
+  // editando um rascunho já salvo → salvar/auto-salvar ATUALIZA em vez de duplicar.
+  const [showDrafts, setShowDrafts] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<any[]>([]);
+
   const selectedNature = useMemo(() => findNatureOfOperation(natureOfOperation), [natureOfOperation]);
   // Prévia do CFOP que será aplicado a itens novos — a mesma regra que o
   // backend usa (intra vs. interestadual conforme UF emitente x destinatário),
@@ -425,6 +435,11 @@ export default function FiscalEmission() {
     }
     prevDefaultCfopRef.current = defaultItemCfop;
   }, [defaultItemCfop]);
+
+  // Carrega os rascunhos salvos ao montar (para o contador do botão "Rascunhos").
+  // Degrada em silêncio se a tabela ainda não existir (loadDrafts ignora erro).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { void loadDrafts(); }, []);
 
   const productOptions: EntityOption[] = useMemo(() => (products || [])
     .filter((p) => p.active)
@@ -653,7 +668,139 @@ export default function FiscalEmission() {
     // sem isso o fluxo manual (o único hoje na UI) não tinha proteção alguma
     // contra emitir duas NF-e reais para a mesma venda.
     setEmitIdempotencyKey(crypto.randomUUID());
+    setCurrentDraftId(null); // emissão nova = não está editando um rascunho salvo
     setShowEmit(true);
+  };
+
+  // ── Rascunhos de emissão ────────────────────────────────────────────────────
+  // Junta TODO o estado do formulário num objeto persistível (form_state).
+  const collectDraftState = (): FiscalDraftState => ({
+    version: 1,
+    emitOrigin,
+    natureOfOperation,
+    clientId,
+    recipientName,
+    recipientDocument,
+    recipientEmail,
+    recipientIeIndicator,
+    recipientIe,
+    address,
+    paymentMethod,
+    payMode,
+    payN,
+    payInterval,
+    payFirstDue,
+    presenceIndicator,
+    consumerFinal,
+    additionalInfo,
+    purchaseOrder,
+    buyerName,
+    returnSource,
+    referencedAccessKey,
+    items: items as unknown as FiscalDraftState['items'],
+    emitIdempotencyKey,
+  });
+
+  // Restaura o formulário a partir de um form_state salvo. normalizeDraftState
+  // preenche defaults, então rascunhos antigos (schema divergente) não quebram.
+  const applyDraftState = (raw: unknown) => {
+    const s = normalizeDraftState(raw);
+    setEmitOrigin(s.emitOrigin);
+    setNatureOfOperation(s.natureOfOperation);
+    setClientId(s.clientId);
+    setRecipientName(s.recipientName);
+    setRecipientDocument(s.recipientDocument);
+    setRecipientEmail(s.recipientEmail);
+    setRecipientIeIndicator(s.recipientIeIndicator);
+    setRecipientIe(s.recipientIe);
+    setAddress((s.address as typeof EMPTY_ADDRESS) ?? EMPTY_ADDRESS);
+    setPaymentMethod(s.paymentMethod);
+    setPayMode(s.payMode);
+    setPayN(s.payN);
+    setPayInterval(s.payInterval);
+    setPayFirstDue(s.payFirstDue);
+    setPresenceIndicator(s.presenceIndicator);
+    setConsumerFinal(s.consumerFinal);
+    setAdditionalInfo(s.additionalInfo);
+    setPurchaseOrder(s.purchaseOrder);
+    setBuyerName(s.buyerName);
+    setReturnSource(s.returnSource as any);
+    setReferencedAccessKey(s.referencedAccessKey);
+    setItems((s.items as unknown as DraftItem[]) ?? []);
+    // Sem chave salva (rascunho antigo) gera uma nova, senão a emissão perde a
+    // proteção de idempotência.
+    setEmitIdempotencyKey(s.emitIdempotencyKey || crypto.randomUUID());
+  };
+
+  const loadDrafts = async () => {
+    // (supabase as any): a tabela é nova e ainda não está nos tipos gerados —
+    // remover o cast quando os tipos forem regerados após aplicar a migration.
+    const { data, error } = await (supabase as any)
+      .from('fiscal_emission_drafts')
+      .select('id, label, nature_of_operation, recipient_name, total_amount, updated_at, form_state')
+      .eq('status', 'draft')
+      .order('updated_at', { ascending: false })
+      .limit(50);
+    if (!error) setDrafts((data as any[]) ?? []);
+  };
+
+  // Salva/atualiza o rascunho. silent = auto-save (sem toast, sem travar botão).
+  const handleSaveDraft = async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent;
+    if (items.length === 0) {
+      if (!silent) toast.error('Adicione ao menos um item antes de salvar o rascunho.');
+      return;
+    }
+    if (!silent) setSavingDraft(true);
+    const tId = silent ? undefined : toast.loading('Salvando rascunho…');
+    try {
+      const st = collectDraftState();
+      const meta = computeDraftMeta(st);
+      const row = {
+        label: meta.label,
+        nature_of_operation: meta.nature_of_operation,
+        recipient_name: meta.recipient_name,
+        total_amount: meta.total_amount,
+        form_state: st as any,
+        status: 'draft',
+      };
+      if (currentDraftId) {
+        const { error } = await (supabase as any).from('fiscal_emission_drafts').update(row).eq('id', currentDraftId);
+        if (error) throw error;
+      } else {
+        const { data, error } = await (supabase as any)
+          .from('fiscal_emission_drafts')
+          .insert(row)
+          .select('id')
+          .single();
+        if (error) throw error;
+        setCurrentDraftId((data as any)?.id ?? null);
+      }
+      if (!silent) toast.success('Rascunho salvo. Você pode fechar e retomar depois em "Rascunhos".', { id: tId });
+      void loadDrafts();
+    } catch (err: any) {
+      if (!silent) toast.error('Não consegui salvar o rascunho: ' + (err?.message || 'erro'), { id: tId });
+    } finally {
+      if (!silent) setSavingDraft(false);
+    }
+  };
+
+  const restoreDraft = (d: any) => {
+    applyDraftState(d.form_state);
+    setCurrentDraftId(d.id);
+    setShowDrafts(false);
+    setShowEmit(true);
+  };
+
+  const deleteDraft = async (id: string) => {
+    const { error } = await (supabase as any).from('fiscal_emission_drafts').delete().eq('id', id);
+    if (error) {
+      toast.error('Não consegui excluir o rascunho: ' + error.message);
+      return;
+    }
+    if (currentDraftId === id) setCurrentDraftId(null);
+    toast.success('Rascunho excluído.');
+    void loadDrafts();
   };
 
   // Preenche o destinatário a partir de um registro de cliente. Extraído para
@@ -785,6 +932,7 @@ export default function FiscalEmission() {
         included: true,
       };
     }));
+    setCurrentDraftId(null); // veio de reemissão/faturamento/devolução — não é um rascunho salvo
     setShowEmit(true);
   };
 
@@ -851,6 +999,7 @@ export default function FiscalEmission() {
         referencedItemNumber: i + 1, // nItem na nota original
       };
     }));
+    setCurrentDraftId(null); // veio de reemissão/faturamento/devolução — não é um rascunho salvo
     setShowEmit(true);
   };
 
@@ -904,6 +1053,7 @@ export default function FiscalEmission() {
         included: true,
       };
     }));
+    setCurrentDraftId(null); // veio de reemissão/faturamento/devolução — não é um rascunho salvo
     setShowEmit(true);
   };
 
@@ -1006,6 +1156,7 @@ export default function FiscalEmission() {
         ipiUnit: qty > 0 ? (Number(it.ipiValue) || 0) / qty : 0,
       };
     }));
+    setCurrentDraftId(null); // veio de reemissão/faturamento/devolução — não é um rascunho salvo
     setShowEmit(true);
   };
 
@@ -1250,6 +1401,9 @@ export default function FiscalEmission() {
     const tId = toast.loading('Gerando o espelho da nota…');
     try {
       await openLocalEspelho();
+      // Auto-save: ao gerar o espelho, guarda o rascunho silenciosamente para o
+      // usuário poder sair da página e retomar sem perder o que montou.
+      void handleSaveDraft({ silent: true });
       toast.success('Espelho aberto em nova aba (SEM VALOR FISCAL). Confira e use Imprimir → Salvar como PDF para enviar.', { id: tId });
     } catch (err: any) {
       toast.error('Espelho: ' + (err?.message || 'erro desconhecido'), { id: tId });
@@ -1697,6 +1851,14 @@ export default function FiscalEmission() {
         <Button variant="outline" onClick={() => setShowExport(true)} title="Baixar os XMLs autorizados de um período + resumo CSV para a contadora">
           <FileDown className="h-4 w-4 mr-2" />
           Exportar XMLs
+        </Button>
+        <Button
+          variant="outline"
+          onClick={() => { void loadDrafts(); setShowDrafts(true); }}
+          title="Notas começadas e salvas como rascunho (não emitidas) — retome de onde parou"
+        >
+          <FolderClock className="h-4 w-4 mr-2" />
+          Rascunhos{drafts.length > 0 ? ` (${drafts.length})` : ''}
         </Button>
         <Button onClick={openEmitDialog} disabled={!company}>
           <FileText className="h-4 w-4 mr-2" />
@@ -2661,6 +2823,15 @@ export default function FiscalEmission() {
             <Button variant="outline" onClick={() => setShowEmit(false)}>Cancelar</Button>
             <Button
               variant="outline"
+              onClick={() => handleSaveDraft()}
+              disabled={savingDraft || emitting || includedItems.length === 0}
+              title="Salva o que você montou (sem emitir). Retome depois em 'Rascunhos'. Não reserva número fiscal."
+            >
+              {savingDraft ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+              {currentDraftId ? 'Atualizar rascunho' : 'Salvar rascunho'}
+            </Button>
+            <Button
+              variant="outline"
               onClick={handleGenerateEspelho}
               disabled={generatingEspelho || emitting || includedItems.length === 0 || !preflightOk}
               title="Abre o espelho (pré-DANFE) da nota numa nova aba, SEM VALOR FISCAL e SEM enviar à SEFAZ — para conferir antes de emitir e enviar ao cliente/fornecedor. Salve como PDF (Imprimir → Salvar como PDF)."
@@ -2676,6 +2847,67 @@ export default function FiscalEmission() {
               {emitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FileText className="h-4 w-4 mr-2" />}
               {isReturn ? 'Emitir Devolução' : 'Emitir NF-e'}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Rascunhos de emissão: notas começadas e salvas (não emitidas). Retomar/excluir. */}
+      <Dialog open={showDrafts} onOpenChange={setShowDrafts}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Rascunhos de NF-e</DialogTitle>
+            <DialogDescription>
+              Notas que você começou e salvou sem emitir. Clique em “Abrir” para retomar de onde parou.
+              Não reservam número fiscal; rascunhos parados por mais de 30 dias são arquivados automaticamente.
+            </DialogDescription>
+          </DialogHeader>
+          {drafts.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-6 text-center">
+              Nenhum rascunho salvo. Ao montar uma nota, use “Salvar rascunho” — ou gere o espelho, que salva sozinho.
+            </p>
+          ) : (
+            <div className="max-h-[60vh] overflow-y-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Rascunho</TableHead>
+                    <TableHead>Natureza</TableHead>
+                    <TableHead className="text-right">Total</TableHead>
+                    <TableHead>Atualizado</TableHead>
+                    <TableHead className="text-right">Ações</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {drafts.map((d) => (
+                    <TableRow key={d.id}>
+                      <TableCell className="font-medium">{d.label || d.recipient_name || 'Sem destinatário'}</TableCell>
+                      <TableCell>{natureLabel(d.nature_of_operation)}</TableCell>
+                      <TableCell className="text-right">
+                        {(Number(d.total_amount) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {d.updated_at ? new Date(d.updated_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '—'}
+                      </TableCell>
+                      <TableCell className="text-right whitespace-nowrap">
+                        <Button size="sm" variant="outline" onClick={() => restoreDraft(d)}>Abrir</Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-destructive ml-1"
+                          onClick={() => deleteDraft(d.id)}
+                          title="Excluir rascunho"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDrafts(false)}>Fechar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
