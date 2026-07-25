@@ -198,6 +198,8 @@ export default function ProductList() {
               <tbody>
                 {paginated.map(p => {
                   const lowStock = (p.stock_quantity ?? 0) <= (p.minimum_stock ?? 0);
+                  const reserved = Number((p as any).reserved_quantity) || 0;
+                  const available = (p.stock_quantity ?? 0) - reserved;
                   return (
                     <tr key={p.id} className={`border-b last:border-0 hover:bg-muted/30 transition-colors ${lowStock ? 'bg-warning/5' : ''}`}>
                       <td className="px-4 py-3">
@@ -241,6 +243,11 @@ export default function ProductList() {
                         <span className={lowStock ? 'text-destructive font-semibold' : ''}>{p.stock_quantity ?? 0}</span>
                         {lowStock && <AlertTriangle className="h-3 w-3 text-destructive inline ml-1" />}
                         <span className="text-xs text-muted-foreground block">{t.products.min}: {p.minimum_stock ?? 0}</span>
+                        {reserved > 0 && (
+                          <span className={`block text-[10px] ${available < 0 ? 'text-destructive font-medium' : 'text-muted-foreground'}`}>
+                            {reserved} reserv. · {available} disp.
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right hidden md:table-cell text-muted-foreground">{formatCurrency(p.cost_price ?? 0, p.cost_currency ?? 'BRL')}</td>
                       <td className="px-4 py-3 text-right font-medium">{formatCurrency(p.sale_price ?? 0, p.sale_currency ?? 'BRL')}</td>
