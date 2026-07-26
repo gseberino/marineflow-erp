@@ -1,5 +1,6 @@
 import { ReactNode, useState } from 'react';
-import { Moon, Sun } from 'lucide-react';
+import { Moon, Search, Sun } from 'lucide-react';
+import { V2CommandPalette } from './V2CommandPalette';
 
 type Mode = 'light' | 'dark';
 const STORAGE_KEY = 'mf-v2-theme';
@@ -33,15 +34,27 @@ export function V2Shell({ children, standalone = false }: { children: ReactNode;
       data-mode={mode}
     >
       {children}
-      <button
-        type="button"
-        onClick={toggle}
-        aria-label={mode === 'light' ? 'Mudar para tema escuro' : 'Mudar para tema claro'}
-        title={mode === 'light' ? 'Tema escuro (Ponte de Comando)' : 'Tema claro (Estaleiro Claro)'}
-        className="fixed bottom-5 left-5 z-40 flex h-11 w-11 items-center justify-center rounded-full border bg-card text-muted-foreground shadow-lg transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        {mode === 'light' ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
-      </button>
+      <div className="fixed bottom-5 left-5 z-40 flex flex-col gap-2">
+        <button
+          type="button"
+          onClick={() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }))}
+          aria-label="Abrir busca e navegação (Ctrl+K)"
+          title="Buscar e navegar (Ctrl+K)"
+          className="flex h-11 w-11 items-center justify-center rounded-full border bg-card text-muted-foreground shadow-lg transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <Search className="h-5 w-5" />
+        </button>
+        <button
+          type="button"
+          onClick={toggle}
+          aria-label={mode === 'light' ? 'Mudar para tema escuro' : 'Mudar para tema claro'}
+          title={mode === 'light' ? 'Tema escuro (Ponte de Comando)' : 'Tema claro (Estaleiro Claro)'}
+          className="flex h-11 w-11 items-center justify-center rounded-full border bg-card text-muted-foreground shadow-lg transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {mode === 'light' ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
+        </button>
+      </div>
+      <V2CommandPalette onToggleTheme={toggle} mode={mode} />
     </div>
   );
 }
