@@ -11,7 +11,7 @@ const STORAGE_KEY = 'mf-v2-theme';
  * Limitação conhecida: diálogos v1 portalizados (Radix) ficam fora do escopo
  * e seguem o tema v1 até a migração global.
  */
-export function V2Shell({ children }: { children: ReactNode }) {
+export function V2Shell({ children, standalone = false }: { children: ReactNode; standalone?: boolean }) {
   const [mode, setMode] = useState<Mode>(() =>
     typeof localStorage !== 'undefined' && localStorage.getItem(STORAGE_KEY) === 'dark' ? 'dark' : 'light',
   );
@@ -24,7 +24,14 @@ export function V2Shell({ children }: { children: ReactNode }) {
     });
 
   return (
-    <div className="themev2 -m-4 min-h-full bg-background p-4 text-foreground transition-colors lg:-m-6 lg:p-6" data-mode={mode}>
+    <div
+      className={
+        standalone
+          ? 'themev2 min-h-screen bg-background p-4 text-foreground transition-colors lg:p-6'
+          : 'themev2 -m-4 min-h-full bg-background p-4 text-foreground transition-colors lg:-m-6 lg:p-6'
+      }
+      data-mode={mode}
+    >
       {children}
       <button
         type="button"

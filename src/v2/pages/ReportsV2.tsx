@@ -192,7 +192,7 @@ function PerformanceTab() {
           rowKey={(o) => o.id}
           columns={staleCols}
           density="compact"
-          onRowClick={(o) => navigate(`/service-orders/${o.id}`)}
+          onRowClick={(o) => navigate(`/v2/service-orders/${o.id}`)}
           emptyMessage="Nenhuma OS parada 🎉"
         />
       </ChartCard>
@@ -367,7 +367,7 @@ function ProfitabilityTab() {
               rowKey={(r) => r.id}
               columns={cols}
               density="compact"
-              onRowClick={(r) => navigate(`/service-orders/${r.id}`)}
+              onRowClick={(r) => navigate(`/v2/service-orders/${r.id}`)}
               emptyMessage="Sem dados no período"
             />
           </ChartCard>

@@ -126,7 +126,7 @@ export default function CollectionsV2() {
           <History className="h-4 w-4" /> Ver histórico
         </DropdownMenuItem>
         {c.service_order_id && (
-          <DropdownMenuItem onClick={() => window.open(`/service-orders/${c.service_order_id}`, '_blank')} className="gap-2">
+          <DropdownMenuItem onClick={() => window.open(`/v2/service-orders/${c.service_order_id}`, '_blank')} className="gap-2">
             <FileText className="h-4 w-4" /> Ver OS
           </DropdownMenuItem>
         )}

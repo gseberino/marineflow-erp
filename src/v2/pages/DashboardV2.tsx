@@ -181,7 +181,7 @@ function AdminHome({
         </>
       ),
       actionLabel: 'Abrir',
-      onAction: () => navigate(`/service-orders/${urgentToday.id}`),
+      onAction: () => navigate(`/v2/service-orders/${urgentToday.id}`),
     });
   }
 
@@ -318,7 +318,7 @@ function AdminHome({
               <button
                 key={so.id}
                 type="button"
-                onClick={() => navigate(`/service-orders/${so.id}`)}
+                onClick={() => navigate(`/v2/service-orders/${so.id}`)}
                 className="flex w-full items-center justify-between gap-2 border-b px-4 py-2.5 text-left text-sm transition-colors last:border-0 hover:bg-muted/40"
               >
                 <span className="min-w-0 truncate">
@@ -350,7 +350,7 @@ function AdminHome({
             rowKey={(so) => so.id}
             columns={openColumns}
             density="compact"
-            onRowClick={(so) => navigate(`/service-orders/${so.id}`)}
+            onRowClick={(so) => navigate(`/v2/service-orders/${so.id}`)}
             emptyMessage="Nenhuma OS em aberto"
           />
         </div>
@@ -363,7 +363,7 @@ function AdminHome({
               badge={<StatusChip tone={serviceOrderStatusTone[so.status] ?? 'neutral'}>{statusLabels[so.status] ?? so.status}</StatusChip>}
               title={so.clients?.name || '—'}
               lines={[so.vessels?.name || '—', formatCurrency(so.grand_total || 0)]}
-              onClick={() => navigate(`/service-orders/${so.id}`)}
+              onClick={() => navigate(`/v2/service-orders/${so.id}`)}
             />
           ))}
         </div>
@@ -416,7 +416,7 @@ function TechnicianHome() {
           ? new Date(so.scheduled_start_at).toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
           : `Sem agendamento · ${formatCurrency(so.grand_total || 0)}`,
       ]}
-      actions={<Button className="flex-1" onClick={() => navigate(`/service-orders/${so.id}`)}>Abrir OS</Button>}
+      actions={<Button className="flex-1" onClick={() => navigate(`/v2/service-orders/${so.id}`)}>Abrir OS</Button>}
     />
   );
 

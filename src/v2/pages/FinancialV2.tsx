@@ -207,7 +207,7 @@ export default function FinancialV2() {
           <button
             type="button"
             className="font-semibold text-accent underline-offset-2 hover:underline"
-            onClick={(e) => { e.stopPropagation(); if (p.linked_service_order_id) navigate(`/service-orders/${p.linked_service_order_id}`); }}
+            onClick={(e) => { e.stopPropagation(); if (p.linked_service_order_id) navigate(`/v2/service-orders/${p.linked_service_order_id}`); }}
           >
             {p.service_orders.service_order_number}
           </button>

@@ -282,7 +282,7 @@ export default function PurchaseOrdersV2() {
       key: 'os', header: 'OS vinculada', minWidth: 116, priority: 4, detailLabel: 'OS vinculada',
       render: (po) =>
         po.service_order_id && po.service_orders?.service_order_number ? (
-          <Link to={`/service-orders/${po.service_order_id}`} className="font-medium text-accent hover:underline" onClick={(e) => e.stopPropagation()}>
+          <Link to={`/v2/service-orders/${po.service_order_id}`} className="font-medium text-accent hover:underline" onClick={(e) => e.stopPropagation()}>
             {po.service_orders.service_order_number}
           </Link>
         ) : (

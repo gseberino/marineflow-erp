@@ -272,7 +272,7 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
     try {
       const newSO = await duplicate.mutateAsync({ sourceId: soId, mode: dupMode });
       toast.success(dupMode === 'quote' ? 'Duplicado como Orçamento!' : 'Duplicado como nova OS!');
-      navigate(`/service-orders/${(newSO as { id: string }).id}`);
+      navigate(`/v2/service-orders/${(newSO as { id: string }).id}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Erro ao duplicar');
     }
@@ -397,7 +397,7 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
     {
       key: 'number', header: isOrders ? 'OS' : 'Número', minWidth: 116, priority: 0, sortable: true,
       render: (so) => (
-        <Link to={`/service-orders/${so.id}`} className="font-bold text-accent hover:underline" onClick={(e) => e.stopPropagation()}>
+        <Link to={`/v2/service-orders/${so.id}`} className="font-bold text-accent hover:underline" onClick={(e) => e.stopPropagation()}>
           {so.service_order_number}
         </Link>
       ),
@@ -611,7 +611,7 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
             <Button variant="outline" size="sm" onClick={csvExport} className="hidden gap-1.5 sm:inline-flex">
               <Download className="h-4 w-4" /> Exportar CSV
             </Button>
-            <Link to="/service-orders/new">
+            <Link to="/v2/service-orders/new">
               <Button className="gap-1.5">
                 <Plus className="h-4 w-4" /> {isOrders ? 'Nova OS' : 'Novo Orçamento'}
               </Button>
@@ -672,7 +672,7 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
             <p className="text-muted-foreground">
               {isOrders ? 'Nenhuma ordem de serviço cadastrada ainda.' : 'Nenhum orçamento cadastrado ainda.'}
             </p>
-            <Link to="/service-orders/new">
+            <Link to="/v2/service-orders/new">
               <Button className="gap-1.5"><Plus className="h-4 w-4" /> {isOrders ? 'Nova OS' : 'Novo Orçamento'}</Button>
             </Link>
           </div>
@@ -687,7 +687,7 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
                 selectable
                 sort={sort}
                 onSort={handleSort}
-                onRowClick={(so) => navigate(`/service-orders/${so.id}`)}
+                onRowClick={(so) => navigate(`/v2/service-orders/${so.id}`)}
                 emptyMessage={t.common.noResults}
                 rowActions={(so) => (
                   <>
@@ -702,7 +702,7 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
                     <Button
                       variant="ghost" size="icon" className="h-8 w-8"
                       aria-label="Abrir" title="Abrir"
-                      onClick={() => navigate(`/service-orders/${so.id}`)}
+                      onClick={() => navigate(`/v2/service-orders/${so.id}`)}
                     >
                       <ExternalLink className="h-4 w-4" />
                     </Button>
@@ -744,10 +744,10 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
                     [so.vessels?.name, so.service_type ? (t.serviceType as Record<string, string>)[so.service_type] : null].filter(Boolean).join(' · ') || '—',
                     `${isOrders && so.scheduled_start_at ? formatDate(so.scheduled_start_at) + ' · ' : ''}${formatCurrency(so.grand_total || 0)}`,
                   ]}
-                  onClick={() => navigate(`/service-orders/${so.id}`)}
+                  onClick={() => navigate(`/v2/service-orders/${so.id}`)}
                   actions={
                     <>
-                      <Button className="flex-1" onClick={() => navigate(`/service-orders/${so.id}`)}>
+                      <Button className="flex-1" onClick={() => navigate(`/v2/service-orders/${so.id}`)}>
                         Abrir {isOrders ? 'OS' : 'Orçamento'}
                       </Button>
                       <Button
@@ -763,7 +763,7 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
                 />
               ))}
               <Link
-                to="/service-orders/new"
+                to="/v2/service-orders/new"
                 aria-label={isOrders ? 'Nova OS' : 'Novo Orçamento'}
                 className="fixed bottom-24 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform active:scale-95"
               >

@@ -45,6 +45,8 @@ const PAGES = [
   { path: '/v2/inventory', modes: ['light', 'dark'], slug: 'inventory', themeVia: 'storage' },
   { path: '/v2/inventory?tab=movements', modes: ['light', 'dark'], slug: 'movements', themeVia: 'storage' },
   { path: '/v2/purchase-orders', modes: ['light', 'dark'], slug: 'po', themeVia: 'storage' },
+  { path: '/v2/crm', modes: ['light', 'dark'], slug: 'crm', themeVia: 'storage' },
+  { path: '/v2/external-quotes/catalog', modes: ['light', 'dark'], slug: 'catalog', themeVia: 'storage' },
 ];
 
 if (!EMAIL || !PASSWORD) {

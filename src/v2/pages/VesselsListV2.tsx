@@ -92,7 +92,7 @@ export default function VesselsListV2() {
         <span className="flex items-center gap-2">
           <Ship className="h-4 w-4 shrink-0 text-accent" />
           <span className="min-w-0 leading-tight">
-            <Link to={`/vessels/${v.id}`} className="block truncate font-semibold text-accent hover:underline" onClick={(e) => e.stopPropagation()}>
+            <Link to={`/v2/vessels/${v.id}`} className="block truncate font-semibold text-accent hover:underline" onClick={(e) => e.stopPropagation()}>
               {v.name}
             </Link>
             <span className="block truncate text-xs text-muted-foreground">
@@ -106,7 +106,7 @@ export default function VesselsListV2() {
       key: 'owner', header: t.vessels.owner, minWidth: 170, priority: 1, sortable: true, detailLabel: 'Proprietário',
       render: (v) => (
         v.client_id ? (
-          <Link to={`/clients/${v.client_id}`} className="truncate text-muted-foreground hover:text-foreground hover:underline" onClick={(e) => e.stopPropagation()}>
+          <Link to={`/v2/clients/${v.client_id}`} className="truncate text-muted-foreground hover:text-foreground hover:underline" onClick={(e) => e.stopPropagation()}>
             {v.clients?.name ?? '—'}
           </Link>
         ) : (
@@ -216,7 +216,7 @@ export default function VesselsListV2() {
                 columns={columns}
                 sort={sort}
                 onSort={handleSort}
-                onRowClick={(v) => navigate(`/vessels/${v.id}`)}
+                onRowClick={(v) => navigate(`/v2/vessels/${v.id}`)}
                 emptyMessage={t.common.noResults}
               />
             </div>
@@ -229,7 +229,7 @@ export default function VesselsListV2() {
                     `${v.asset_type || 'Lancha'} · ${[v.manufacturer, v.model].filter(Boolean).join(' ') || '—'}`,
                     [v.clients?.name, v.marinas?.name, v.length_feet ? `${v.length_feet} ft` : null, v.year].filter(Boolean).join(' · ') || '—',
                   ]}
-                  onClick={() => navigate(`/vessels/${v.id}`)}
+                  onClick={() => navigate(`/v2/vessels/${v.id}`)}
                 />
               ))}
               <button

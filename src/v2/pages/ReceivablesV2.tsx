@@ -215,7 +215,7 @@ export default function ReceivablesV2() {
           <button
             type="button"
             className="font-semibold text-accent underline-offset-2 hover:underline"
-            onClick={(e) => { e.stopPropagation(); if (r.service_orders?.id) navigate(`/service-orders/${r.service_orders.id}`); }}
+            onClick={(e) => { e.stopPropagation(); if (r.service_orders?.id) navigate(`/v2/service-orders/${r.service_orders.id}`); }}
           >
             {r.service_orders.service_order_number}
           </button>

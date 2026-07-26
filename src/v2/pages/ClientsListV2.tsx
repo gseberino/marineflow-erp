@@ -93,7 +93,7 @@ export default function ClientsListV2() {
       key: 'name', header: 'Nome', minWidth: 210, priority: 0, sortable: true,
       render: (c) => (
         <span className="block leading-tight">
-          <Link to={`/clients/${c.id}`} className="block truncate font-semibold text-accent hover:underline" onClick={(e) => e.stopPropagation()}>
+          <Link to={`/v2/clients/${c.id}`} className="block truncate font-semibold text-accent hover:underline" onClick={(e) => e.stopPropagation()}>
             {c.name}
           </Link>
           <span className="block truncate text-xs text-muted-foreground">
@@ -188,7 +188,7 @@ export default function ClientsListV2() {
                 columns={columns}
                 sort={sort}
                 onSort={handleSort}
-                onRowClick={(c) => navigate(`/clients/${c.id}`)}
+                onRowClick={(c) => navigate(`/v2/clients/${c.id}`)}
                 emptyMessage={clients.length === 0 ? t.clients.noClients : t.common.noResults}
               />
             </div>
@@ -203,7 +203,7 @@ export default function ClientsListV2() {
                     [c.email, c.phone].filter(Boolean).join(' · ') || '—',
                     `${c.type === 'company' ? t.common.company : t.common.individual}${c.city ? ` · ${c.city}` : ''} · ${vesselCounts?.[c.id] ?? 0} emb.`,
                   ]}
-                  onClick={() => navigate(`/clients/${c.id}`)}
+                  onClick={() => navigate(`/v2/clients/${c.id}`)}
                 />
               ))}
               <button
