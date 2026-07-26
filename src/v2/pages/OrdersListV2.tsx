@@ -17,6 +17,7 @@ import { normalizePhoneE164 } from '@/lib/masks';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { recordWhatsAppEvent } from '@/lib/diagnostics';
 import { statusConfig } from '@/lib/constants';
+import type { ServiceOrderStatus } from '@/types/domain';
 import { useTechnicians } from '@/hooks/use-agenda';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -416,7 +417,7 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
       render: (so) => (
         <span className="inline-flex flex-wrap items-center gap-1" onClick={(e) => e.stopPropagation()}>
           {isOrders ? (
-            <StatusQuickChange orderId={so.id} currentStatus={so.status} />
+            <StatusQuickChange orderId={so.id} currentStatus={so.status as ServiceOrderStatus} />
           ) : (
             <QuoteStatusQuickChange
               orderId={so.id}
