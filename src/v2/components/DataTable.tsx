@@ -46,6 +46,12 @@ interface DataTableProps<T> {
   onSort?: (key: string) => void;
   /** Classe extra por linha (ex.: destaque de vencido). */
   rowClassName?: (row: T) => string | undefined;
+  /**
+   * Conteúdo customizado da linha expansível (ex.: diff de auditoria).
+   * Quando presente, o chevron aparece mesmo sem colunas escondidas; as
+   * colunas escondidas continuam listadas acima do conteúdo customizado.
+   */
+  renderExpanded?: (row: T) => ReactNode;
 }
 
 const densityCell: Record<Density, string> = {
@@ -83,6 +89,7 @@ export function DataTable<T>({
   sort,
   onSort,
   rowClassName,
+  renderExpanded,
 }: DataTableProps<T>) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState<number | null>(null);
@@ -236,6 +243,7 @@ export function DataTable<T>({
                   rowActions={rowActions}
                   onRowClick={onRowClick}
                   extraClassName={rowClassName?.(row)}
+                  renderExpanded={renderExpanded}
                 />
               );
             })
@@ -265,15 +273,16 @@ interface RowGroupProps<T> {
   rowActions?: (row: T) => ReactNode;
   onRowClick?: (row: T) => void;
   extraClassName?: string;
+  renderExpanded?: (row: T) => ReactNode;
 }
 
 function RowGroup<T>({
   row, rowKeyValue, visible, hidden, density, selectable,
-  isSelected, onToggleSelect, isExpanded, onToggleExpand, rowActions, onRowClick, extraClassName,
+  isSelected, onToggleSelect, isExpanded, onToggleExpand, rowActions, onRowClick, extraClassName, renderExpanded,
 }: RowGroupProps<T>) {
   const pad = densityCell[density];
   const colSpan = visible.length + (selectable ? 1 : 0) + (rowActions ? 1 : 0);
-  const hasDetails = hidden.length > 0;
+  const hasDetails = hidden.length > 0 || !!renderExpanded;
   const Chevron = isExpanded ? ChevronDown : ChevronRight;
 
   return (
@@ -332,14 +341,17 @@ function RowGroup<T>({
       {isExpanded && hasDetails && (
         <tr className="border-b bg-primary/5 last:border-0">
           <td colSpan={colSpan} className="px-3 pb-2.5 pt-0">
-            <dl className="flex flex-wrap gap-x-6 gap-y-1 pl-6 text-xs text-muted-foreground">
-              {hidden.map((c) => (
-                <div key={c.key} className="flex items-baseline gap-1.5">
-                  <dt className="font-semibold uppercase tracking-wide">{c.detailLabel ?? c.key}:</dt>
-                  <dd className="text-foreground">{c.render(row)}</dd>
-                </div>
-              ))}
-            </dl>
+            {hidden.length > 0 && (
+              <dl className="flex flex-wrap gap-x-6 gap-y-1 pl-6 text-xs text-muted-foreground">
+                {hidden.map((c) => (
+                  <div key={c.key} className="flex items-baseline gap-1.5">
+                    <dt className="font-semibold uppercase tracking-wide">{c.detailLabel ?? c.key}:</dt>
+                    <dd className="text-foreground">{c.render(row)}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+            {renderExpanded && <div className="pl-6 pt-2">{renderExpanded(row)}</div>}
           </td>
         </tr>
       )}

@@ -48,6 +48,9 @@ import OrdersListV2 from "./v2/pages/OrdersListV2";
 import DashboardV2 from "./v2/pages/DashboardV2";
 import ReceivablesV2 from "./v2/pages/ReceivablesV2";
 import FinancialV2 from "./v2/pages/FinancialV2";
+import CollectionsV2 from "./v2/pages/CollectionsV2";
+import CommissionsV2 from "./v2/pages/CommissionsV2";
+import AuditLogV2 from "./v2/pages/AuditLogV2";
 import ClientsListV2 from "./v2/pages/ClientsListV2";
 import VesselsListV2 from "./v2/pages/VesselsListV2";
 import MarinasListV2 from "./v2/pages/MarinasListV2";
@@ -107,6 +110,9 @@ const App = () => (
                         <Route path="/v2/dashboard" element={<ProtectedRoute roles={['admin','financial','technician','seller']}><DashboardV2 /></ProtectedRoute>} />
                         <Route path="/v2/receivables" element={<ProtectedRoute roles={['admin','financial']}><ReceivablesV2 /></ProtectedRoute>} />
                         <Route path="/v2/financial" element={<ProtectedRoute roles={['admin','financial']}><FinancialV2 /></ProtectedRoute>} />
+                        <Route path="/v2/collections" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><CollectionsV2 /></ProtectedRoute>} />
+                        <Route path="/v2/commissions" element={<ProtectedRoute roles={['admin','financial']}><CommissionsV2 /></ProtectedRoute>} />
+                        <Route path="/v2/audit-log" element={<ProtectedRoute roles={['admin']}><AuditLogV2 /></ProtectedRoute>} />
                         <Route path="/v2/clients" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><ClientsListV2 /></ProtectedRoute>} />
                         <Route path="/v2/vessels" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><VesselsListV2 /></ProtectedRoute>} />
                         <Route path="/v2/marinas" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><MarinasListV2 /></ProtectedRoute>} />

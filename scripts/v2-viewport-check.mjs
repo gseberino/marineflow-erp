@@ -38,6 +38,8 @@ const PAGES = [
   { path: '/v2/suppliers', modes: ['light', 'dark'], slug: 'suppliers', themeVia: 'storage' },
   { path: '/v2/financial', modes: ['light', 'dark'], slug: 'financial', themeVia: 'storage' },
   { path: '/v2/financial?tab=payables', modes: ['light', 'dark'], slug: 'payables', themeVia: 'storage' },
+  { path: '/v2/collections', modes: ['light', 'dark'], slug: 'collections', themeVia: 'storage' },
+  { path: '/v2/commissions', modes: ['light', 'dark'], slug: 'commissions', themeVia: 'storage' },
 ];
 
 if (!EMAIL || !PASSWORD) {
