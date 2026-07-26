@@ -22,6 +22,7 @@ import { referenceDataTools } from "./reference-data.ts";
 import { whatsappTools } from "./whatsapp.ts";
 import { uiTools } from "./ui.ts";
 import { memoryTools } from "./memory.ts";
+import { learningTools } from "./learning.ts";
 import { overviewTools } from "./overview.ts";
 import { flowMacroTools } from "./flow-macros.ts";
 import { commsTools } from "./comms-tools.ts";
@@ -56,6 +57,7 @@ export const allTools: ToolDef[] = [
   ...whatsappTools,
   ...uiTools,
   ...memoryTools,
+  ...learningTools,
   ...overviewTools,
   ...flowMacroTools,
   ...commsTools,

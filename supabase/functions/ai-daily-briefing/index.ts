@@ -403,6 +403,21 @@ Deno.serve(async (req) => {
           personalBlocks.set(uid, `${atual}\n   📥 *${pendingSuggestions}* sugestão(ões) na caixa de entrada esperando sua decisão.`);
         }
       }
+      // Rotina madura para virar automação: oferece UMA por vez, sem insistir
+      const { data: maduras } = await admin
+        .from("ai_learned_routines")
+        .select("title, observations, suggested_automation")
+        .eq("status", "observed").gte("observations", 3)
+        .not("suggested_automation", "is", null)
+        .order("observations", { ascending: false }).limit(1);
+      const madura = ((maduras as any[]) || [])[0];
+      if (madura) {
+        for (const uid of recIds) {
+          const atual = personalBlocks.get(uid) || "\n📋 *Sua agenda hoje*";
+          personalBlocks.set(uid,
+            `${atual}\n   🤖 Já reparei ${madura.observations}x: _${String(madura.title).toLowerCase()}_. Quer que eu passe a fazer sozinho? Responda *automatizar*.`);
+        }
+      }
     }
     const messageFor = (rec: any) => {
       const bloco = rec.id ? personalBlocks.get(rec.id) : undefined;
