@@ -44,6 +44,8 @@ interface DataTableProps<T> {
   /** Estado de ordenação controlado (colunas com sortable). */
   sort?: SortState;
   onSort?: (key: string) => void;
+  /** Classe extra por linha (ex.: destaque de vencido). */
+  rowClassName?: (row: T) => string | undefined;
 }
 
 const densityCell: Record<Density, string> = {
@@ -80,6 +82,7 @@ export function DataTable<T>({
   className,
   sort,
   onSort,
+  rowClassName,
 }: DataTableProps<T>) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState<number | null>(null);
@@ -232,6 +235,7 @@ export function DataTable<T>({
                   onToggleExpand={() => setExpanded(isExpanded ? null : key)}
                   rowActions={rowActions}
                   onRowClick={onRowClick}
+                  extraClassName={rowClassName?.(row)}
                 />
               );
             })
@@ -260,11 +264,12 @@ interface RowGroupProps<T> {
   onToggleExpand: () => void;
   rowActions?: (row: T) => ReactNode;
   onRowClick?: (row: T) => void;
+  extraClassName?: string;
 }
 
 function RowGroup<T>({
   row, rowKeyValue, visible, hidden, density, selectable,
-  isSelected, onToggleSelect, isExpanded, onToggleExpand, rowActions, onRowClick,
+  isSelected, onToggleSelect, isExpanded, onToggleExpand, rowActions, onRowClick, extraClassName,
 }: RowGroupProps<T>) {
   const pad = densityCell[density];
   const colSpan = visible.length + (selectable ? 1 : 0) + (rowActions ? 1 : 0);
@@ -278,6 +283,7 @@ function RowGroup<T>({
           'group border-b transition-colors last:border-0',
           isExpanded ? 'bg-primary/5' : 'hover:bg-muted/40',
           onRowClick && 'cursor-pointer',
+          extraClassName,
         )}
         onClick={onRowClick ? () => onRowClick(row) : undefined}
       >

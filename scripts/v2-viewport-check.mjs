@@ -25,6 +25,8 @@ const PAGES = [
   { path: '/design-preview', modes: ['light', 'dark'], slug: 'preview' },
   { path: '/v2/service-orders', modes: ['light'], slug: 'os' },
   { path: '/v2/quotes', modes: ['light'], slug: 'quotes' },
+  { path: '/v2/dashboard', modes: ['light'], slug: 'dash' },
+  { path: '/v2/receivables', modes: ['light'], slug: 'rec' },
 ];
 
 if (!EMAIL || !PASSWORD) {
