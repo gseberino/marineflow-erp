@@ -40,6 +40,8 @@ const PAGES = [
   { path: '/v2/financial?tab=payables', modes: ['light', 'dark'], slug: 'payables', themeVia: 'storage' },
   { path: '/v2/collections', modes: ['light', 'dark'], slug: 'collections', themeVia: 'storage' },
   { path: '/v2/commissions', modes: ['light', 'dark'], slug: 'commissions', themeVia: 'storage' },
+  { path: '/v2/reports', modes: ['light', 'dark'], slug: 'reports', themeVia: 'storage' },
+  { path: '/v2/inventory/smart-purchase', modes: ['light', 'dark'], slug: 'smartbuy', themeVia: 'storage' },
 ];
 
 if (!EMAIL || !PASSWORD) {
