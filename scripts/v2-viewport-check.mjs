@@ -32,6 +32,10 @@ const PAGES = [
   { path: '/v2/receivables', modes: ['light', 'dark'], slug: 'rec', themeVia: 'storage' },
   { path: '/v2/clients', modes: ['light', 'dark'], slug: 'clients', themeVia: 'storage' },
   { path: '/v2/vessels', modes: ['light', 'dark'], slug: 'vessels', themeVia: 'storage' },
+  { path: '/v2/marinas', modes: ['light', 'dark'], slug: 'marinas', themeVia: 'storage' },
+  { path: '/v2/products', modes: ['light', 'dark'], slug: 'products', themeVia: 'storage' },
+  { path: '/v2/services', modes: ['light', 'dark'], slug: 'services', themeVia: 'storage' },
+  { path: '/v2/suppliers', modes: ['light', 'dark'], slug: 'suppliers', themeVia: 'storage' },
 ];
 
 if (!EMAIL || !PASSWORD) {
@@ -55,8 +59,10 @@ console.log('login ok');
 
 for (const pg of PAGES) {
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.goto(`${BASE}${pg.path}`, { waitUntil: 'networkidle' });
-  await page.waitForSelector('.themev2', { timeout: 20000 });
+  // Primeira visita usa timeout largo: o Vite compila a página sob demanda
+  // no dev server e a transformação fria pode passar de 20s.
+  await page.goto(`${BASE}${pg.path}`, { waitUntil: 'networkidle', timeout: 60000 });
+  await page.waitForSelector('.themev2', { timeout: 60000 });
 
   for (const mode of pg.modes) {
     if (pg.themeVia === 'buttons') {

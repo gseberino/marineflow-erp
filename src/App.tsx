@@ -49,6 +49,10 @@ import DashboardV2 from "./v2/pages/DashboardV2";
 import ReceivablesV2 from "./v2/pages/ReceivablesV2";
 import ClientsListV2 from "./v2/pages/ClientsListV2";
 import VesselsListV2 from "./v2/pages/VesselsListV2";
+import MarinasListV2 from "./v2/pages/MarinasListV2";
+import ProductsListV2 from "./v2/pages/ProductsListV2";
+import ServicesListV2 from "./v2/pages/ServicesListV2";
+import SuppliersListV2 from "./v2/pages/SuppliersListV2";
 import QuoteList from "./pages/QuoteList";
 import NotFound from "./pages/NotFound";
 import EncodingFixerPage from "./pages/EncodingFixerPage";
@@ -103,6 +107,10 @@ const App = () => (
                         <Route path="/v2/receivables" element={<ProtectedRoute roles={['admin','financial']}><ReceivablesV2 /></ProtectedRoute>} />
                         <Route path="/v2/clients" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><ClientsListV2 /></ProtectedRoute>} />
                         <Route path="/v2/vessels" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><VesselsListV2 /></ProtectedRoute>} />
+                        <Route path="/v2/marinas" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><MarinasListV2 /></ProtectedRoute>} />
+                        <Route path="/v2/products" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><ProductsListV2 /></ProtectedRoute>} />
+                        <Route path="/v2/services" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><ServicesListV2 /></ProtectedRoute>} />
+                        <Route path="/v2/suppliers" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><SuppliersListV2 /></ProtectedRoute>} />
                         <Route path="/purchase-orders" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><PurchaseOrdersPage /></ProtectedRoute>} />
                         <Route path="/service-orders/new" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><ServiceOrderDetail /></ProtectedRoute>} />
                         <Route path="/service-orders/:id" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><ServiceOrderDetail /></ProtectedRoute>} />
