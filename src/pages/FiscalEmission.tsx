@@ -1662,9 +1662,9 @@ export default function FiscalEmission() {
   // domínio (fiscal-email). O e-mail do destinatário vem do cadastro do cliente /
   // do payload; se faltar, pede para informar.
   // deno-lint-ignore no-explicit-any
-  const handleSendEmail = async (doc: any) => {
+  const handleSendEmail = async (doc: any, defaultTo?: string) => {
     const client = (clients || []).find((c: any) => c.id === doc.client_id);
-    const emailPadrao: string = client?.email || doc.request_payload?.recipient?.email || '';
+    const emailPadrao: string = defaultTo || client?.email || doc.request_payload?.recipient?.email || '';
     const to = window.prompt('Enviar a NF-e (PDF + XML) para qual e-mail?', emailPadrao);
     if (to === null) return; // cancelou
     const dest = to.trim();
@@ -1686,6 +1686,24 @@ export default function FiscalEmission() {
     } finally {
       markBusy(doc.id, false);
     }
+  };
+
+  // Teste de envio: reaproveita a ÚLTIMA nota autorizada (PDF+XML reais da
+  // Contora) e manda para um e-mail que você escolhe — por padrão, o seu e-mail
+  // de login. Serve para validar a configuração SMTP sem emitir nada novo.
+  const handleTestEmail = async () => {
+    const doc = (documents || []).find((d: any) => d.status === 'authorized' && d.provider_document_id);
+    if (!doc) {
+      toast.error('Não há nenhuma NF-e autorizada para testar o envio. É preciso ao menos uma nota já autorizada.');
+      return;
+    }
+    let def = '';
+    try {
+      const { data } = await supabase.auth.getUser();
+      def = data?.user?.email || '';
+    } catch { /* sem e-mail padrão; o prompt abre em branco */ }
+    // Mesmo fluxo do envio normal, só com o destinatário pré-preenchido.
+    await handleSendEmail(doc, def);
   };
 
   // Monta o cronograma de parcelas: divide o total em N (a última parcela recebe
@@ -2351,6 +2369,25 @@ export default function FiscalEmission() {
                   })()}
                 </ul>
               )}
+            </div>
+
+            {/* Testar envio de e-mail: valida a config SMTP reusando a última nota
+                autorizada (PDF+XML reais), sem emitir nada novo. */}
+            <div className="rounded-lg border p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold flex items-center gap-1.5">
+                  <Mail className="h-4 w-4" /> Testar envio de e-mail
+                </p>
+                <Button type="button" size="sm" variant="outline" onClick={handleTestEmail}>
+                  <Send className="h-3.5 w-3.5 mr-1" />
+                  Enviar teste
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Envia o PDF + XML da <strong>última NF-e autorizada</strong> para um e-mail que você escolhe
+                (por padrão, o seu e-mail de login) — confere se o SMTP está funcionando, <strong>sem emitir nenhuma
+                nota nova</strong>.
+              </p>
             </div>
           </div>
           <DialogFooter>
