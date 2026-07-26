@@ -2156,7 +2156,11 @@ export default function FiscalEmission() {
 
       {/* ── Dialog: configurar empresa emissora ── */}
       <Dialog open={showSettings} onOpenChange={setShowSettings}>
-        <DialogContent className="max-w-lg">
+        {/* w-[95vw] + max-h/overflow: com muito conteúdo (empresa, endereço,
+            numeração, certificado, diagnóstico, teste de e-mail) o diálogo passava
+            da altura da tela e o topo/rodapé saíam do enquadramento. overflow-x-hidden
+            garante zero scroll horizontal. */}
+        <DialogContent className="max-w-lg w-[95vw] max-h-[90vh] overflow-y-auto overflow-x-hidden">
           <DialogHeader>
             <DialogTitle>Dados Fiscais da Empresa</DialogTitle>
             <DialogDescription>Registro local para controle interno.</DialogDescription>
