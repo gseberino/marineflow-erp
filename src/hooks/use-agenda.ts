@@ -357,6 +357,14 @@ export function useSaveAgendaTask() {
       if (input.id) {
         const { error } = await supabase.from('agenda_tasks').update(row).eq('id', input.id);
         if (error) throw error;
+        // Edição de SÉRIE: apaga ocorrências futuras ainda pendentes — o motor
+        // rematerializa em ≤15min com os dados novos (a chave rec:{pai}:{dia}
+        // fica livre ao apagar). Ocorrências já concluídas/passadas ficam intactas.
+        const nowISO = new Date().toISOString();
+        await supabase.from('agenda_tasks').delete()
+          .eq('recurrence_parent_id', input.id)
+          .eq('status', 'pending')
+          .or(`scheduled_start_at.gte.${nowISO},due_at.gte.${nowISO}`);
       } else {
         const { data: u } = await supabase.auth.getUser();
         const { data, error } = await supabase

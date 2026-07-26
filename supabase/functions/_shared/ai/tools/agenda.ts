@@ -324,9 +324,17 @@ export const agendaTools: ToolDef[] = [
         }
       }
       const { data, error } = await sb.from("agenda_tasks").update(rest).eq("id", id)
-        .select("id, title, status").single();
+        .select("id, title, status, rrule, recurrence_parent_id").single();
       if (error) throw error;
-      return { ok: true, task: data };
+      // Série editada: ocorrências futuras pendentes são recriadas pelo motor com os dados novos
+      if (data.rrule && !data.recurrence_parent_id) {
+        const nowISO = new Date().toISOString();
+        await sb.from("agenda_tasks").delete()
+          .eq("recurrence_parent_id", id)
+          .eq("status", "pending")
+          .or(`scheduled_start_at.gte.${nowISO},due_at.gte.${nowISO}`);
+      }
+      return { ok: true, task: { id: data.id, title: data.title, status: data.status } };
     },
   },
   {

@@ -154,12 +154,24 @@ async function runRules(db: Db, settings: Record<string, string>) {
   return { created, resolved };
 }
 
-/** R10 — lembrete interno de OS agendada para amanhã (equipe, nunca cliente). */
+/** R10 — lembrete interno de OS (equipe, nunca cliente) em DUAS janelas BRT:
+ *  véspera 17:00-18:59 ("amanhã às X") e manhã do dia 07:00-08:59 ("hoje às X").
+ *  Fora das janelas não envia — sem mensagem interna de madrugada. */
 async function runTechnicianReminders(db: Db, settings: Record<string, string>) {
   if ((settings["task_rule_r10_enabled"] ?? "true") !== "true") return { sent: 0 };
-  const start = new Date(); start.setUTCHours(0, 0, 0, 0);
-  const from = new Date(start.getTime() + 86400000);
-  const to = new Date(start.getTime() + 2 * 86400000);
+
+  const nowBRT = new Date(Date.now() - 3 * 3600000); // relógio deslocado p/ ler hora BRT em UTC
+  const brtHour = nowBRT.getUTCHours();
+  const todayBRT = nowBRT.toISOString().slice(0, 10);
+  const dayStartISO = new Date(`${todayBRT}T00:00:00-03:00`).toISOString();
+
+  let offsetDays: number; let quando: string;
+  if (brtHour >= 17 && brtHour < 19) { offsetDays = 1; quando = "amanhã"; }
+  else if (brtHour >= 7 && brtHour < 9) { offsetDays = 0; quando = "hoje"; }
+  else return { sent: 0, skipped: "outside_window" };
+
+  const from = new Date(new Date(dayStartISO).getTime() + offsetDays * 86400000);
+  const to = new Date(from.getTime() + 86400000);
 
   const { data: orders } = await db.from("service_orders")
     .select("id, service_order_number, scheduled_start_at, clients(name), vessels(name), service_order_technicians(user_id, app_users(id, full_name, phone_normalized, ai_whatsapp_enabled))")
@@ -172,18 +184,18 @@ async function runTechnicianReminders(db: Db, settings: Record<string, string>) 
     for (const t of o.service_order_technicians || []) {
       const u = t.app_users;
       if (!u?.ai_whatsapp_enabled || !u?.phone_normalized) continue;
-      // dedupe: 1 lembrete interno por OS+dia (source_ref_id = OS)
+      // dedupe: 1 lembrete por OS+telefone+dia (a janela da manhã é de outro dia → passa)
       const { data: dup } = await db.from("whatsapp_send_queue")
         .select("id").eq("source", "agenda-r10").eq("source_ref_id", o.id)
         .eq("phone_normalized", u.phone_normalized)
-        .gte("created_at", start.toISOString()).limit(1);
+        .gte("created_at", dayStartISO).limit(1);
       if (dup && dup.length > 0) continue;
       const hora = new Date(o.scheduled_start_at).toLocaleTimeString("pt-BR", {
         hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo",
       });
       await db.from("whatsapp_send_queue").insert({
         phone_normalized: u.phone_normalized,
-        message: `🔧 Lembrete: amanhã às ${hora} você tem a OS ${o.service_order_number}` +
+        message: `🔧 Lembrete: ${quando} às ${hora} você tem a OS ${o.service_order_number}` +
           ` — ${o.clients?.name || "cliente"}${o.vessels?.name ? ` (${o.vessels.name})` : ""}.`,
         source: "agenda-r10",
         source_ref_id: o.id,
@@ -192,7 +204,7 @@ async function runTechnicianReminders(db: Db, settings: Record<string, string>) 
       sent++;
     }
   }
-  return { sent };
+  return { sent, janela: quando };
 }
 
 /** R9 — lembrete de agendamento ao CLIENTE (OFF por padrão; test-mode preservado). */
