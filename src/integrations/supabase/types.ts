@@ -14,6 +14,133 @@ export type Database = {
   }
   public: {
     Tables: {
+      agenda_detector_exclusions: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          label: string | null
+          phone_normalized: string
+          reason: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          label?: string | null
+          phone_normalized: string
+          reason?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          label?: string | null
+          phone_normalized?: string
+          reason?: string | null
+        }
+        Relationships: []
+      }
+      agenda_suggestions: {
+        Row: {
+          client_id: string | null
+          confidence: number
+          contact_label: string | null
+          created_at: string
+          created_task_id: string | null
+          detector: string
+          dismiss_reason: string | null
+          evidence: string
+          evidence_at: string | null
+          id: string
+          kind: string
+          origin: string
+          priority: string
+          related_entity_id: string | null
+          related_entity_type: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+          source_message_id: string | null
+          source_phone: string | null
+          status: string
+          suggested_due_at: string | null
+          suggested_start_at: string | null
+          target_user_id: string | null
+          title: string
+        }
+        Insert: {
+          client_id?: string | null
+          confidence: number
+          contact_label?: string | null
+          created_at?: string
+          created_task_id?: string | null
+          detector: string
+          dismiss_reason?: string | null
+          evidence: string
+          evidence_at?: string | null
+          id?: string
+          kind?: string
+          origin?: string
+          priority?: string
+          related_entity_id?: string | null
+          related_entity_type?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          source_message_id?: string | null
+          source_phone?: string | null
+          status?: string
+          suggested_due_at?: string | null
+          suggested_start_at?: string | null
+          target_user_id?: string | null
+          title: string
+        }
+        Update: {
+          client_id?: string | null
+          confidence?: number
+          contact_label?: string | null
+          created_at?: string
+          created_task_id?: string | null
+          detector?: string
+          dismiss_reason?: string | null
+          evidence?: string
+          evidence_at?: string | null
+          id?: string
+          kind?: string
+          origin?: string
+          priority?: string
+          related_entity_id?: string | null
+          related_entity_type?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          source_message_id?: string | null
+          source_phone?: string | null
+          status?: string
+          suggested_due_at?: string | null
+          suggested_start_at?: string | null
+          target_user_id?: string | null
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agenda_suggestions_created_task_id_fkey"
+            columns: ["created_task_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agenda_suggestions_source_message_id_fkey"
+            columns: ["source_message_id"]
+            isOneToOne: false
+            referencedRelation: "whatsapp_messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agenda_suggestions_target_user_id_fkey"
+            columns: ["target_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       agenda_tasks: {
         Row: {
           all_day: boolean

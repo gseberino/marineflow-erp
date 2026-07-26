@@ -44,6 +44,10 @@ vi.mock('@/integrations/supabase/client', () => ({
   },
 }));
 vi.mock('@/hooks/use-agenda', () => ({
+  useSuggestions: () => q([]),
+  useAcceptSuggestion: mut,
+  useDismissSuggestion: mut,
+  useVoiceCapture: mut,
   useLiveTasks: () => q(liveTasks),
   useEntityTasks: () => q(liveTasks),
   useActiveUsers: () => q([{ id: 'u1', full_name: 'Gustavo', role: 'admin' }]),

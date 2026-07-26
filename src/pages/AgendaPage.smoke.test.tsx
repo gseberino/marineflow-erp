@@ -11,7 +11,7 @@ import { I18nProvider } from '@/i18n';
 import AgendaPage from './AgendaPage';
 
 // vi.mock é içado para o topo do módulo — helpers/fixtures precisam de vi.hoisted
-const { queryBuilder, q, mut, liveTasks, doneTasks } = vi.hoisted(() => {
+const { queryBuilder, q, mut, liveTasks, doneTasks, suggestions } = vi.hoisted(() => {
   const queryBuilder = (): any => {
     const o: any = {};
     for (const k of ['select', 'eq', 'neq', 'in', 'gte', 'lte', 'lt', 'gt', 'order',
@@ -49,7 +49,20 @@ const { queryBuilder, q, mut, liveTasks, doneTasks } = vi.hoisted(() => {
     completed_at: new Date().toISOString(), completed_by: 'u1', created_at: new Date().toISOString(),
     completed_by_user: { id: 'u1', full_name: 'Gustavo' },
   }];
-  return { queryBuilder, q, mut, liveTasks, doneTasks };
+  const suggestions = [{
+    id: 's1', title: 'Enviar orçamento do motor para o Carlos', kind: 'task',
+    status: 'pending', priority: 'normal', detector: 'promise', origin: 'whatsapp',
+    evidence: 'Vou te mandar o orçamento amanhã de manhã', evidence_at: new Date().toISOString(),
+    confidence: 0.9, contact_label: 'Carlos Silva', suggested_due_at: new Date().toISOString(),
+    suggested_start_at: null, client_id: null, target_user_id: 'u1',
+  }, {
+    id: 's2', title: 'Cobrar a marina sexta', kind: 'task', status: 'pending',
+    priority: 'high', detector: 'voice_note', origin: 'voice_app',
+    evidence: 'lembra de cobrar a marina sexta e agendar a revisão do Pedro',
+    confidence: 0.95, contact_label: null, suggested_due_at: null,
+    suggested_start_at: null, client_id: null, target_user_id: 'u1',
+  }];
+  return { queryBuilder, q, mut, liveTasks, doneTasks, suggestions };
 });
 
 vi.mock('@/integrations/supabase/client', () => ({
@@ -63,6 +76,10 @@ vi.mock('@/integrations/supabase/client', () => ({
 }));
 
 vi.mock('@/hooks/use-agenda', () => ({
+  useSuggestions: () => q(suggestions),
+  useAcceptSuggestion: mut,
+  useDismissSuggestion: mut,
+  useVoiceCapture: mut,
   useAgendaOrders: () => q([{
     id: 'so-1', service_order_number: 'OS-100', status: 'scheduled',
     scheduled_start_at: new Date().toISOString(), scheduled_end_at: new Date(Date.now() + 3600000).toISOString(),
@@ -117,5 +134,18 @@ describe('AgendaPage — smoke de render (todas as visões)', () => {
     await user.click(screen.getByRole('button', { name: 'Mês' }));
     await user.click(screen.getByRole('button', { name: 'Concluídas' }));
     expect(screen.getByText('Tarefa concluída de teste')).toBeTruthy();
+  });
+
+  it('renderiza a Caixa de entrada com evidência e ações (Fase 9)', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByRole('button', { name: /Caixa de entrada/ }));
+    // sugestão de conversa + de voz, cada uma com sua evidência literal
+    expect(screen.getByText('Enviar orçamento do motor para o Carlos')).toBeTruthy();
+    expect(screen.getByText(/Vou te mandar o orçamento amanhã de manhã/)).toBeTruthy();
+    expect(screen.getByText('Cobrar a marina sexta')).toBeTruthy();
+    expect(screen.getAllByText('Aceitar').length).toBe(2);
+    expect(screen.getByText('Seus recados (1)')).toBeTruthy();
+    expect(screen.getByText('Detectado nas conversas (1)')).toBeTruthy();
   });
 });

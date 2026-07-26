@@ -479,6 +479,105 @@ export function useDeleteAgendaTask() {
   });
 }
 
+// ============================================================
+// CAIXA DE ENTRADA (Agenda Autônoma — Fase 9)
+// Sugestões nunca viram tarefa sozinhas: o humano aceita, ajusta ou descarta.
+// ============================================================
+
+export function useSuggestions() {
+  return useQuery({
+    queryKey: ['agenda-suggestions'],
+    refetchInterval: 2 * 60 * 1000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('agenda_suggestions')
+        .select('*')
+        .eq('status', 'pending')
+        .order('confidence', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(100);
+      if (error) throw error;
+      return data || [];
+    },
+  });
+}
+
+function invalidateSuggestions(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: ['agenda-suggestions'] });
+}
+
+/** Aceitar: cria a tarefa de verdade (source='ai') e marca a sugestão como aceita. */
+export function useAcceptSuggestion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ suggestion, overrides }: { suggestion: any; overrides?: Partial<AgendaTaskInput> }) => {
+      const { data: u } = await supabase.auth.getUser();
+      const me = u?.user?.id ?? null;
+      const row = {
+        title: overrides?.title ?? suggestion.title,
+        kind: overrides?.kind ?? suggestion.kind,
+        status: 'pending',
+        priority: overrides?.priority ?? suggestion.priority ?? 'normal',
+        assignee_user_id: overrides?.assignee_user_id ?? suggestion.target_user_id ?? me,
+        due_at: overrides?.due_at !== undefined ? overrides.due_at : suggestion.suggested_due_at,
+        scheduled_start_at: overrides?.scheduled_start_at !== undefined
+          ? overrides.scheduled_start_at : suggestion.suggested_start_at,
+        scheduled_end_at: overrides?.scheduled_end_at ?? null,
+        client_id: suggestion.client_id ?? null,
+        related_entity_type: suggestion.related_entity_type ?? null,
+        related_entity_id: suggestion.related_entity_id ?? null,
+        notes: `Origem: ${suggestion.origin === 'whatsapp' ? `conversa com ${suggestion.contact_label || 'contato'}` : 'recado de voz'}\n"${suggestion.evidence}"`,
+        source: 'ai',
+        created_by: me,
+      };
+      const { data: task, error } = await supabase.from('agenda_tasks').insert(row).select('id').single();
+      if (error) throw error;
+      const { error: updErr } = await supabase.from('agenda_suggestions').update({
+        status: 'accepted', resolved_at: new Date().toISOString(),
+        resolved_by: me, created_task_id: task.id,
+      }).eq('id', suggestion.id);
+      if (updErr) throw updErr;
+      return task.id as string;
+    },
+    onSuccess: () => { invalidateSuggestions(qc); invalidateTaskQueries(qc); },
+  });
+}
+
+export function useDismissSuggestion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, reason }: { id: string; reason?: string }) => {
+      const { data: u } = await supabase.auth.getUser();
+      const { error } = await supabase.from('agenda_suggestions').update({
+        status: 'dismissed', resolved_at: new Date().toISOString(),
+        resolved_by: u?.user?.id ?? null, dismiss_reason: reason ?? null,
+      }).eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => invalidateSuggestions(qc),
+  });
+}
+
+/** Recado de voz/texto → sugestões (chama a edge function agenda-voice-capture). */
+export function useVoiceCapture() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { audioBase64?: string; mimetype?: string; text?: string }) => {
+      const { data, error } = await supabase.functions.invoke('agenda-voice-capture', {
+        body: {
+          audio_base64: input.audioBase64,
+          mimetype: input.mimetype,
+          text: input.text,
+        },
+      });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      return data as { transcript: string; sugestoes: number; itens: string[]; mensagem?: string };
+    },
+    onSuccess: () => invalidateSuggestions(qc),
+  });
+}
+
 /** Lembretes pendentes de uma tarefa (para edição no dialog). */
 export function useTaskReminders(taskId: string | undefined) {
   return useQuery({

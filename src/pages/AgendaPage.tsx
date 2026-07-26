@@ -24,11 +24,14 @@ import {
   useSchedulableOrders,
   useQuickSchedule,
   useSaveAgendaTask,
+  useSuggestions,
 } from '@/hooks/use-agenda';
 import { TaskCard } from '@/components/agenda/TaskCard';
 import { AgendaTaskDialog, type ExistingTask } from '@/components/AgendaTaskDialog';
 import { FocusMode } from '@/components/agenda/FocusMode';
 import { OnMyWayButton } from '@/components/agenda/OnMyWayButton';
+import { SuggestionCard } from '@/components/agenda/SuggestionCard';
+import { VoiceCaptureButton } from '@/components/agenda/VoiceCaptureButton';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -40,7 +43,7 @@ import { useI18n } from '@/i18n';
 import { statusConfig } from '@/lib/constants';
 import { FilterPresets } from '@/components/FilterPresets';
 
-type ViewMode = 'today' | 'week' | 'month' | 'done';
+type ViewMode = 'today' | 'week' | 'month' | 'done' | 'inbox';
 
 function startOfWeek(d: Date): Date {
   const date = new Date(d);
@@ -128,6 +131,7 @@ export default function AgendaPage() {
   const { data: activeUsers = [] } = useActiveUsers();
   const { data: liveTasks = [], isLoading: loadingLive } = useLiveTasks();
   const { data: doneTasks = [], isLoading: loadingDone } = useCompletedTasks(doneDays);
+  const { data: suggestions = [], isLoading: loadingSuggestions } = useSuggestions();
   const completeTask = useCompleteTask();
   const reschedule = useRescheduleTask();
   const saveTask = useSaveAgendaTask();
@@ -224,6 +228,7 @@ export default function AgendaPage() {
 
   const isLoading = view === 'today' ? (loadingOrders || loadingLive)
     : view === 'done' ? loadingDone
+    : view === 'inbox' ? loadingSuggestions
     : (loadingOrders || loadingTasks);
 
 
@@ -295,6 +300,7 @@ export default function AgendaPage() {
           <Button size="sm" onClick={handleQuickAdd} disabled={saveTask.isPending || !quickText.trim()}>
             {saveTask.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Criar'}
           </Button>
+          <VoiceCaptureButton />
           <Button size="sm" variant="outline" onClick={handleExportCsv} title="Exportar CSV da visão atual">
             <Download className="h-4 w-4" />
           </Button>
@@ -317,6 +323,15 @@ export default function AgendaPage() {
             </Button>
             <Button size="sm" variant={view === 'done' ? 'default' : 'ghost'} onClick={() => setView('done')}>
               Concluídas
+            </Button>
+            <Button size="sm" variant={view === 'inbox' ? 'default' : 'ghost'} onClick={() => setView('inbox')}
+              className="relative">
+              Caixa de entrada
+              {suggestions.length > 0 && (
+                <span className="ml-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground">
+                  {suggestions.length}
+                </span>
+              )}
             </Button>
           </div>
 
@@ -415,6 +430,8 @@ export default function AgendaPage() {
               completeTask.mutate({ id, done }, { onError: (e: any) => toast.error(e?.message || 'Erro ao concluir') })}
             onScheduleOs={(t) => { setScheduleOsId(t.related_entity_id); setOsDialogOpen(true); }}
           />
+        ) : view === 'inbox' ? (
+          <InboxView suggestions={suggestions} />
         ) : view === 'done' ? (
           <DoneView
             tasks={applyTaskFilters(doneTasks || [])}
@@ -466,6 +483,47 @@ export default function AgendaPage() {
         prefillDate={prefill.date}
         existing={editingTask}
       />
+    </div>
+  );
+}
+
+// ============================================================
+// INBOX VIEW — sugestões extraídas de conversas e recados (Fase 9)
+// A IA propõe; quem decide é você. Nada aqui virou tarefa ainda.
+// ============================================================
+function InboxView({ suggestions }: { suggestions: any[] }) {
+  const fromChat = suggestions.filter((s: any) => s.origin === 'whatsapp');
+  const fromVoice = suggestions.filter((s: any) => s.origin !== 'whatsapp');
+
+  return (
+    <div className="space-y-5 max-w-2xl">
+      {suggestions.length === 0 && (
+        <div className="py-10 text-center space-y-2">
+          <p className="text-sm font-medium">Caixa de entrada vazia</p>
+          <p className="text-xs text-muted-foreground max-w-md mx-auto">
+            Quando alguém pedir algo nas conversas — ou quando você ditar um recado no
+            microfone acima — as sugestões aparecem aqui para você aceitar com um toque.
+          </p>
+        </div>
+      )}
+
+      {fromVoice.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Seus recados ({fromVoice.length})
+          </p>
+          {fromVoice.map((s: any) => <SuggestionCard key={s.id} suggestion={s} />)}
+        </div>
+      )}
+
+      {fromChat.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Detectado nas conversas ({fromChat.length})
+          </p>
+          {fromChat.map((s: any) => <SuggestionCard key={s.id} suggestion={s} />)}
+        </div>
+      )}
     </div>
   );
 }

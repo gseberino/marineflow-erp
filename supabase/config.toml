@@ -61,3 +61,8 @@ verify_jwt = false
 # chama só com x-cron-secret (sem Authorization). Idempotente por automation_key.
 [functions.task-automations]
 verify_jwt = false
+
+# Detector da Caixa de Entrada (Fase 9): pg_cron chama só com x-cron-secret.
+# Só LÊ conversas e grava sugestões — nunca cria tarefa nem envia mensagem.
+[functions.agenda-inbox-detector]
+verify_jwt = false

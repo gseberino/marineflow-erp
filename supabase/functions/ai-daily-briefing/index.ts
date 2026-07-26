@@ -392,6 +392,17 @@ Deno.serve(async (req) => {
         }
         personalBlocks.set(uid, bloco.join("\n"));
       }
+      // Caixa de entrada (Fase 9): sugestões esperando decisão — 1 linha, sem interromper
+      const { count: pendingSuggestions } = await admin
+        .from("agenda_suggestions")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "pending");
+      if ((pendingSuggestions ?? 0) > 0) {
+        for (const uid of recIds) {
+          const atual = personalBlocks.get(uid) || "\n📋 *Sua agenda hoje*";
+          personalBlocks.set(uid, `${atual}\n   📥 *${pendingSuggestions}* sugestão(ões) na caixa de entrada esperando sua decisão.`);
+        }
+      }
     }
     const messageFor = (rec: any) => {
       const bloco = rec.id ? personalBlocks.get(rec.id) : undefined;
