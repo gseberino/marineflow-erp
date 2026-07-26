@@ -36,6 +36,8 @@ const PAGES = [
   { path: '/v2/products', modes: ['light', 'dark'], slug: 'products', themeVia: 'storage' },
   { path: '/v2/services', modes: ['light', 'dark'], slug: 'services', themeVia: 'storage' },
   { path: '/v2/suppliers', modes: ['light', 'dark'], slug: 'suppliers', themeVia: 'storage' },
+  { path: '/v2/financial', modes: ['light', 'dark'], slug: 'financial', themeVia: 'storage' },
+  { path: '/v2/financial?tab=payables', modes: ['light', 'dark'], slug: 'payables', themeVia: 'storage' },
 ];
 
 if (!EMAIL || !PASSWORD) {
@@ -80,9 +82,18 @@ for (const pg of PAGES) {
       const report = await page.evaluate(() => {
         const doc = document.documentElement;
         const pageOverflow = doc.scrollWidth - doc.clientWidth;
+        // Elemento com overflow interno só é ofensor se NENHUM ancestral (até
+        // .themev2) o clipa: conteúdo clipado por overflow-x hidden não gera
+        // barra de rolagem — é decisão deliberada de corte, não vazamento.
+        const clippedByAncestor = (el) => {
+          for (let n = el; n && n !== document.body; n = n.parentElement) {
+            if (getComputedStyle(n).overflowX === 'hidden') return true;
+          }
+          return false;
+        };
         const offenders = [];
         for (const el of document.querySelectorAll('.themev2 *')) {
-          if (el.scrollWidth > el.clientWidth + 1 && getComputedStyle(el).overflowX !== 'hidden') {
+          if (el.scrollWidth > el.clientWidth + 1 && !clippedByAncestor(el)) {
             offenders.push(
               `${el.tagName.toLowerCase()}.${String(el.className).split(' ').slice(0, 3).join('.')} ` +
               `(${el.scrollWidth}>${el.clientWidth})`,
