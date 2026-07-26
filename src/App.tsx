@@ -53,6 +53,8 @@ import CommissionsV2 from "./v2/pages/CommissionsV2";
 import AuditLogV2 from "./v2/pages/AuditLogV2";
 import ReportsV2 from "./v2/pages/ReportsV2";
 import SmartPurchaseV2 from "./v2/pages/SmartPurchaseV2";
+import InventoryV2 from "./v2/pages/InventoryV2";
+import PurchaseOrdersV2 from "./v2/pages/PurchaseOrdersV2";
 import ClientsListV2 from "./v2/pages/ClientsListV2";
 import VesselsListV2 from "./v2/pages/VesselsListV2";
 import MarinasListV2 from "./v2/pages/MarinasListV2";
@@ -117,6 +119,8 @@ const App = () => (
                         <Route path="/v2/audit-log" element={<ProtectedRoute roles={['admin']}><AuditLogV2 /></ProtectedRoute>} />
                         <Route path="/v2/reports" element={<ProtectedRoute roles={['admin','financial']}><ReportsV2 /></ProtectedRoute>} />
                         <Route path="/v2/inventory/smart-purchase" element={<ProtectedRoute roles={['admin','financial']}><SmartPurchaseV2 /></ProtectedRoute>} />
+                        <Route path="/v2/inventory" element={<ProtectedRoute roles={['admin','financial']}><InventoryV2 /></ProtectedRoute>} />
+                        <Route path="/v2/purchase-orders" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><PurchaseOrdersV2 /></ProtectedRoute>} />
                         <Route path="/v2/clients" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><ClientsListV2 /></ProtectedRoute>} />
                         <Route path="/v2/vessels" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><VesselsListV2 /></ProtectedRoute>} />
                         <Route path="/v2/marinas" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><MarinasListV2 /></ProtectedRoute>} />

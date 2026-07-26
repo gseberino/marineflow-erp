@@ -42,6 +42,9 @@ const PAGES = [
   { path: '/v2/commissions', modes: ['light', 'dark'], slug: 'commissions', themeVia: 'storage' },
   { path: '/v2/reports', modes: ['light', 'dark'], slug: 'reports', themeVia: 'storage' },
   { path: '/v2/inventory/smart-purchase', modes: ['light', 'dark'], slug: 'smartbuy', themeVia: 'storage' },
+  { path: '/v2/inventory', modes: ['light', 'dark'], slug: 'inventory', themeVia: 'storage' },
+  { path: '/v2/inventory?tab=movements', modes: ['light', 'dark'], slug: 'movements', themeVia: 'storage' },
+  { path: '/v2/purchase-orders', modes: ['light', 'dark'], slug: 'po', themeVia: 'storage' },
 ];
 
 if (!EMAIL || !PASSWORD) {
