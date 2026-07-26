@@ -163,6 +163,19 @@ Se você não quiser decidir tudo agora, **o mínimo que eu preciso é a respost
 
 ---
 
+## 6.1 DECISÕES TOMADAS (26/07/2026)
+
+| # | Decisão | Consequência no desenho |
+|---|---|---|
+| 1 | **Detector lê TODAS as conversas do número da HBR** (clientes, fornecedores, equipe, incluindo grupos) | Cobertura máxima das 1.856 msgs/mês. Contrapartida obrigatória: sugestão SEMPRE cita a frase-evidência; nada é enviado a ninguém; conversas ficam onde estão (só leitura). Vou incluir uma lista de exclusão por contato (silenciar detector para X) desde a v1. |
+| 2 | **Captura por voz nos DOIS caminhos**: áudio pelo canal WhatsApp atual + botão de gravar no app | Backend único: ambos caem no mesmo endpoint de transcrição → mesma caixa de entrada. No app, `MediaRecorder` → upload → transcrição (Groq, já em uso). |
+| 3 | **Piloto só com você** no canal IA | A caixa de entrada da Fase 9 é pessoal (dono). Estrutura já preparada para multiusuário (Felipe/financeiro entram na Fase 11, quando os limiares estiverem calibrados). |
+| 4 | **Transcrição de ligações: AVALIAR** | Vira um documento próprio (pesquisa dedicada: caminho técnico, consentimento/LGPD, custo, provedores) — **não** entra na Fase 9. Entrego a avaliação separada. |
+
+**Impacto no escopo da Fase 9 (revisado):** detector sobre todas as conversas + lista de exclusão por contato; captura por voz WhatsApp **e** app; caixa de entrada pessoal; briefing avisando o que está esperando.
+
+---
+
 ## 7. Fontes (principais, por frente)
 
 **Agentes e frameworks:** [Awesome AI Agents](https://github.com/Jenqyang/Awesome-AI-Agents) · [awesome-ai-agents-2026](https://github.com/caramaschiHG/awesome-ai-agents-2026) · [melhores frameworks open source](https://www.firecrawl.dev/blog/best-open-source-agent-frameworks) · [OpenClaw](https://en.wikipedia.org/wiki/OpenClaw) · [personal AI agents self-hosted](https://www.oneclaw.net/blog/personal-ai-agent-github) · [8 assistentes open-source](https://www.vellum.ai/blog/best-open-source-personal-ai-assistants)
