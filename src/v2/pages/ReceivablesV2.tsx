@@ -22,6 +22,7 @@ import { StatusChip, type StatusTone } from '@/v2/components/StatusChip';
 import { EntityCard } from '@/v2/components/EntityCard';
 import { DataTable, type DataColumn, type SortState } from '@/v2/components/DataTable';
 import { generateReceivableReceipt, type ReceivableRow } from '@/v2/lib/receipt';
+import { V2Shell } from '@/v2/components/V2Shell';
 import '@/v2/tokens.css';
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -246,7 +247,7 @@ export default function ReceivablesV2() {
     ] as never);
 
   return (
-    <div className="themev2 -m-4 min-h-full bg-background p-4 text-foreground lg:-m-6 lg:p-6">
+    <V2Shell>
       <PageShell
         breadcrumb={[{ label: 'Financeiro', to: '/financial' }, { label: 'Recebíveis' }]}
         title="Recebíveis"
@@ -413,6 +414,6 @@ export default function ReceivablesV2() {
         onOpenChange={(v) => { if (!v) setWhatsAppTarget(null); }}
         target={whatsAppTarget}
       />
-    </div>
+    </V2Shell>
   );
 }

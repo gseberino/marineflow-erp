@@ -21,12 +21,17 @@ const PASSWORD = process.env.DEMO_PASSWORD;
 const VIEWPORTS = [360, 390, 768, 1024, 1440];
 /* Cada página verificada: /design-preview tem alternador de tema (2 modos);
    as rotas piloto v2 rodam no tema claro padrão por enquanto. */
+/* Páginas v2 usam o V2Shell: o tema vem de localStorage('mf-v2-theme'), então
+   o verificador seta a chave e recarrega para testar claro E escuro. O preview
+   tem alternador próprio (botões Claro/Escuro). */
 const PAGES = [
-  { path: '/design-preview', modes: ['light', 'dark'], slug: 'preview' },
-  { path: '/v2/service-orders', modes: ['light'], slug: 'os' },
-  { path: '/v2/quotes', modes: ['light'], slug: 'quotes' },
-  { path: '/v2/dashboard', modes: ['light'], slug: 'dash' },
-  { path: '/v2/receivables', modes: ['light'], slug: 'rec' },
+  { path: '/design-preview', modes: ['light', 'dark'], slug: 'preview', themeVia: 'buttons' },
+  { path: '/v2/service-orders', modes: ['light', 'dark'], slug: 'os', themeVia: 'storage' },
+  { path: '/v2/quotes', modes: ['light', 'dark'], slug: 'quotes', themeVia: 'storage' },
+  { path: '/v2/dashboard', modes: ['light', 'dark'], slug: 'dash', themeVia: 'storage' },
+  { path: '/v2/receivables', modes: ['light', 'dark'], slug: 'rec', themeVia: 'storage' },
+  { path: '/v2/clients', modes: ['light', 'dark'], slug: 'clients', themeVia: 'storage' },
+  { path: '/v2/vessels', modes: ['light', 'dark'], slug: 'vessels', themeVia: 'storage' },
 ];
 
 if (!EMAIL || !PASSWORD) {
@@ -54,9 +59,13 @@ for (const pg of PAGES) {
   await page.waitForSelector('.themev2', { timeout: 20000 });
 
   for (const mode of pg.modes) {
-    if (pg.modes.length > 1) {
+    if (pg.themeVia === 'buttons') {
       await page.click(mode === 'light' ? 'button:has-text("Claro")' : 'button:has-text("Escuro")');
       await page.waitForTimeout(250);
+    } else {
+      await page.evaluate((m) => localStorage.setItem('mf-v2-theme', m), mode);
+      await page.reload({ waitUntil: 'networkidle' });
+      await page.waitForSelector('.themev2', { timeout: 20000 });
     }
     for (const width of VIEWPORTS) {
       await page.setViewportSize({ width, height: 900 });

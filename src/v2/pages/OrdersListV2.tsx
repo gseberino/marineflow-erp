@@ -38,6 +38,7 @@ import { PageShell } from '@/v2/components/PageShell';
 import { StatusChip } from '@/v2/components/StatusChip';
 import { EntityCard } from '@/v2/components/EntityCard';
 import { DataTable, type DataColumn, type SortState } from '@/v2/components/DataTable';
+import { V2Shell } from '@/v2/components/V2Shell';
 import { priorityTone, serviceOrderStatusTone, quoteStatusTone, paymentTone } from '@/v2/status-map';
 import '@/v2/tokens.css';
 
@@ -600,7 +601,7 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
         : (quoteStatusTone[so.quote_status ?? 'draft'] ?? 'neutral');
 
   return (
-    <div className="themev2 -m-4 min-h-full bg-background p-4 text-foreground lg:-m-6 lg:p-6">
+    <V2Shell>
       <PageShell
         breadcrumb={[{ label: 'Operacional', to: '/' }, { label: isOrders ? 'Ordens de Serviço' : 'Orçamentos' }]}
         title={isOrders ? 'Ordens de Serviço' : 'Orçamentos'}
@@ -848,7 +849,7 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </V2Shell>
   );
 }
 

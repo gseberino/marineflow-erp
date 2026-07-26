@@ -14,6 +14,7 @@ import { StatusChip, type StatusTone } from '@/v2/components/StatusChip';
 import { EntityCard } from '@/v2/components/EntityCard';
 import { DataTable, type DataColumn } from '@/v2/components/DataTable';
 import { serviceOrderStatusTone } from '@/v2/status-map';
+import { V2Shell } from '@/v2/components/V2Shell';
 import '@/v2/tokens.css';
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -76,18 +77,20 @@ export default function DashboardV2() {
 
   if (error) {
     return (
-      <div className="themev2 -m-4 flex min-h-full flex-col items-center justify-center gap-4 bg-background p-4 py-20 text-foreground lg:-m-6">
-        <AlertTriangle className="h-10 w-10 text-destructive" />
-        <p className="text-sm text-muted-foreground">Erro ao carregar dados. Tente novamente.</p>
-        <Button onClick={() => refetch()} variant="outline" size="sm" className="gap-1.5">
-          <RefreshCw className="h-4 w-4" /> Tentar novamente
-        </Button>
-      </div>
+      <V2Shell>
+        <div className="flex flex-col items-center justify-center gap-4 py-20">
+          <AlertTriangle className="h-10 w-10 text-destructive" />
+          <p className="text-sm text-muted-foreground">Erro ao carregar dados. Tente novamente.</p>
+          <Button onClick={() => refetch()} variant="outline" size="sm" className="gap-1.5">
+            <RefreshCw className="h-4 w-4" /> Tentar novamente
+          </Button>
+        </div>
+      </V2Shell>
     );
   }
 
   return (
-    <div className="themev2 -m-4 min-h-full bg-background p-4 text-foreground lg:-m-6 lg:p-6">
+    <V2Shell>
       <PageShell
         title={`${greeting}${user?.full_name ? `, ${user.full_name.split(' ')[0]}` : ''}!`}
         description={dateStr}
@@ -111,7 +114,7 @@ export default function DashboardV2() {
           <AdminHome data={data} navigate={navigate} formatCurrency={formatCurrency} statusLabels={statusLabels} />
         )}
       </PageShell>
-    </div>
+    </V2Shell>
   );
 }
 
