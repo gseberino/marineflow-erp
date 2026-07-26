@@ -10,10 +10,17 @@
 //   SMTP_PASS      a senha (ou senha de aplicativo)
 //   SMTP_FROM      opcional; remetente (default = SMTP_USER)
 //   SMTP_FROM_NAME opcional; nome exibido (default = "HBR Marine")
+//
+// SMTP via Nodemailer (não denomailer): servidores rígidos como o GoDaddy
+// (smtpout.secureserver.net) rejeitam mensagens com "bare LF" (quebras \n sem
+// \r) — erro 552 "violating 822.bis section 2.3". O denomailer 1.6.0 deixa o \n
+// do corpo passar sem virar \r\n e ainda manda o base64 do anexo numa linha só
+// (>998 chars). O Nodemailer normaliza o corpo para CRLF e quebra o base64 em
+// linhas de 76 — mensagem conforme a RFC 5322.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { createFiscalProvider } from "../_shared/fiscal/factory.ts";
 import { logEdgeError } from "../_shared/log-error.ts";
-import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
+import nodemailer from "npm:nodemailer@6.9.10";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -152,21 +159,22 @@ Deno.serve(async (req) => {
     const extra = String(body.message ?? "").trim();
     const temXml = attachments.some((a) => a.filename.endsWith(".xml"));
 
-    const client = new SMTPClient({
-      connection: {
-        hostname: host,
-        port,
-        tls: port === 465, // 465 = TLS implícito; 587 = STARTTLS (tls:false)
-        auth: { username: user, password: pass },
-      },
+    const transporter = nodemailer.createTransport({
+      host,
+      port,
+      secure: port === 465, // 465 = TLS implícito; 587 = STARTTLS
+      auth: { user, pass },
+      connectionTimeout: 15000,
+      greetingTimeout: 10000,
     });
 
     try {
-      await client.send({
+      await transporter.sendMail({
         from: `${fromName} <${fromEmail}>`,
         to,
         subject: `NF-e nº ${numero} — ${fromName}`,
-        content:
+        // \n aqui é seguro: o Nodemailer normaliza para \r\n (CRLF) no MIME.
+        text:
           `Olá,\n\nSegue em anexo a Nota Fiscal Eletrônica nº ${numero} (DANFE em PDF${temXml ? " e o arquivo XML" : ""}).` +
           (extra ? `\n\n${extra}` : "") +
           `\n\nAtenciosamente,\n${fromName}`,
@@ -177,7 +185,7 @@ Deno.serve(async (req) => {
       void logEdgeError(admin, { context: "fiscal-email", action: "send", message: "Falha no envio SMTP: " + msg, error: e, details: { host, port, to } });
       return jr({ error: "Falha ao enviar pelo SMTP (" + host + ":" + port + "): " + msg }, 502);
     } finally {
-      try { await client.close(); } catch { /* ignore */ }
+      try { transporter.close(); } catch { /* ignore */ }
     }
 
     return jr({ ok: true, to, attachments: attachments.map((a) => a.filename) });
