@@ -44,6 +44,7 @@ import FiscalEmission from "./pages/FiscalEmission";
 import CommissionsPage from "./pages/CommissionsPage";
 import SmartPurchasePage from "./pages/SmartPurchasePage";
 import DesignPreviewV2 from "./pages/DesignPreviewV2";
+import OrdersListV2 from "./v2/pages/OrdersListV2";
 import QuoteList from "./pages/QuoteList";
 import NotFound from "./pages/NotFound";
 import EncodingFixerPage from "./pages/EncodingFixerPage";
@@ -91,6 +92,9 @@ const App = () => (
                         <Route path="/crm" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><CRMKanbanPage /></ProtectedRoute>} />
                         <Route path="/service-orders" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><ServiceOrderList /></ProtectedRoute>} />
                         <Route path="/quotes" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><QuoteList /></ProtectedRoute>} />
+                        {/* Fase 1 UI v2 — telas gêmeas em rota paralela; as v1 acima permanecem intactas */}
+                        <Route path="/v2/service-orders" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><OrdersListV2 mode="orders" /></ProtectedRoute>} />
+                        <Route path="/v2/quotes" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><OrdersListV2 mode="quotes" /></ProtectedRoute>} />
                         <Route path="/purchase-orders" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><PurchaseOrdersPage /></ProtectedRoute>} />
                         <Route path="/service-orders/new" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><ServiceOrderDetail /></ProtectedRoute>} />
                         <Route path="/service-orders/:id" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><ServiceOrderDetail /></ProtectedRoute>} />

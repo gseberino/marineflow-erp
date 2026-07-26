@@ -1,5 +1,5 @@
 import { ReactNode, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export type Density = 'compact' | 'regular' | 'relaxed';
@@ -18,6 +18,13 @@ export interface DataColumn<T> {
   render: (row: T) => ReactNode;
   /** Rótulo usado quando a coluna aparece na linha expansível. */
   detailLabel?: string;
+  /** Habilita ordenação por esta coluna (requer sort/onSort na tabela). */
+  sortable?: boolean;
+}
+
+export interface SortState {
+  key: string;
+  dir: 'asc' | 'desc';
 }
 
 interface DataTableProps<T> {
@@ -34,6 +41,9 @@ interface DataTableProps<T> {
   emptyMessage?: string;
   isLoading?: boolean;
   className?: string;
+  /** Estado de ordenação controlado (colunas com sortable). */
+  sort?: SortState;
+  onSort?: (key: string) => void;
 }
 
 const densityCell: Record<Density, string> = {
@@ -68,6 +78,8 @@ export function DataTable<T>({
   emptyMessage = 'Nenhum registro encontrado.',
   isLoading = false,
   className,
+  sort,
+  onSort,
 }: DataTableProps<T>) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState<number | null>(null);
@@ -155,17 +167,36 @@ export function DataTable<T>({
                 />
               </th>
             )}
-            {visible.map((c) => (
-              <th
-                key={c.key}
-                className={cn(
-                  'truncate px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground',
-                  c.align === 'right' ? 'text-right' : 'text-left',
-                )}
-              >
-                {c.header}
-              </th>
-            ))}
+            {visible.map((c) => {
+              const isSorted = sort?.key === c.key;
+              const SortIcon = !isSorted ? ArrowUpDown : sort?.dir === 'asc' ? ArrowUp : ArrowDown;
+              return (
+                <th
+                  key={c.key}
+                  className={cn(
+                    'truncate px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground',
+                    c.align === 'right' ? 'text-right' : 'text-left',
+                  )}
+                >
+                  {c.sortable && onSort ? (
+                    <button
+                      type="button"
+                      onClick={() => onSort(c.key)}
+                      className={cn(
+                        'inline-flex items-center gap-1 uppercase tracking-wide transition-colors hover:text-foreground',
+                        isSorted && 'text-foreground',
+                        c.align === 'right' && 'flex-row-reverse',
+                      )}
+                    >
+                      {c.header}
+                      <SortIcon className={cn('h-3 w-3 shrink-0', !isSorted && 'opacity-40')} />
+                    </button>
+                  ) : (
+                    c.header
+                  )}
+                </th>
+              );
+            })}
             {rowActions && <th aria-label="Ações" />}
           </tr>
         </thead>

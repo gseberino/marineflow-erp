@@ -19,7 +19,13 @@ const OUT = process.argv[3] || './v2-screenshots';
 const EMAIL = process.env.DEMO_EMAIL;
 const PASSWORD = process.env.DEMO_PASSWORD;
 const VIEWPORTS = [360, 390, 768, 1024, 1440];
-const MODES = ['light', 'dark'];
+/* Cada página verificada: /design-preview tem alternador de tema (2 modos);
+   as rotas piloto v2 rodam no tema claro padrão por enquanto. */
+const PAGES = [
+  { path: '/design-preview', modes: ['light', 'dark'], slug: 'preview' },
+  { path: '/v2/service-orders', modes: ['light'], slug: 'os' },
+  { path: '/v2/quotes', modes: ['light'], slug: 'quotes' },
+];
 
 if (!EMAIL || !PASSWORD) {
   console.error('Defina DEMO_EMAIL e DEMO_PASSWORD no ambiente.');
@@ -40,43 +46,48 @@ await page.click('button[type="submit"]');
 await page.waitForURL((u) => !u.pathname.includes('/login'), { timeout: 20000 });
 console.log('login ok');
 
-await page.goto(`${BASE}/design-preview`, { waitUntil: 'networkidle' });
-await page.waitForSelector('.themev2', { timeout: 20000 });
+for (const pg of PAGES) {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto(`${BASE}${pg.path}`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('.themev2', { timeout: 20000 });
 
-for (const mode of MODES) {
-  await page.click(mode === 'light' ? 'button:has-text("Claro")' : 'button:has-text("Escuro")');
-  await page.waitForTimeout(250);
-  for (const width of VIEWPORTS) {
-    await page.setViewportSize({ width, height: 900 });
-    await page.waitForTimeout(400); // ResizeObserver do DataTable reagir
+  for (const mode of pg.modes) {
+    if (pg.modes.length > 1) {
+      await page.click(mode === 'light' ? 'button:has-text("Claro")' : 'button:has-text("Escuro")');
+      await page.waitForTimeout(250);
+    }
+    for (const width of VIEWPORTS) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.waitForTimeout(400); // ResizeObserver do DataTable reagir
 
-    const report = await page.evaluate(() => {
-      const doc = document.documentElement;
-      const pageOverflow = doc.scrollWidth - doc.clientWidth;
-      const offenders = [];
-      for (const el of document.querySelectorAll('.themev2 *')) {
-        if (el.scrollWidth > el.clientWidth + 1 && getComputedStyle(el).overflowX !== 'hidden') {
-          offenders.push(
-            `${el.tagName.toLowerCase()}.${String(el.className).split(' ').slice(0, 3).join('.')} ` +
-            `(${el.scrollWidth}>${el.clientWidth})`,
-          );
+      const report = await page.evaluate(() => {
+        const doc = document.documentElement;
+        const pageOverflow = doc.scrollWidth - doc.clientWidth;
+        const offenders = [];
+        for (const el of document.querySelectorAll('.themev2 *')) {
+          if (el.scrollWidth > el.clientWidth + 1 && getComputedStyle(el).overflowX !== 'hidden') {
+            offenders.push(
+              `${el.tagName.toLowerCase()}.${String(el.className).split(' ').slice(0, 3).join('.')} ` +
+              `(${el.scrollWidth}>${el.clientWidth})`,
+            );
+          }
         }
-      }
-      return { pageOverflow, offenders: offenders.slice(0, 5) };
-    });
+        return { pageOverflow, offenders: offenders.slice(0, 5) };
+      });
 
-    const ok = report.pageOverflow <= 0 && report.offenders.length === 0;
-    if (!ok) failures++;
-    console.log(
-      `${ok ? 'PASS' : 'FAIL'}  ${mode.padEnd(5)} ${String(width).padStart(4)}px` +
-      (report.pageOverflow > 0 ? `  página estoura ${report.pageOverflow}px` : '') +
-      (report.offenders.length ? `  elementos: ${report.offenders.join(' | ')}` : ''),
-    );
+      const ok = report.pageOverflow <= 0 && report.offenders.length === 0;
+      if (!ok) failures++;
+      console.log(
+        `${ok ? 'PASS' : 'FAIL'}  ${pg.slug.padEnd(7)} ${mode.padEnd(5)} ${String(width).padStart(4)}px` +
+        (report.pageOverflow > 0 ? `  página estoura ${report.pageOverflow}px` : '') +
+        (report.offenders.length ? `  elementos: ${report.offenders.join(' | ')}` : ''),
+      );
 
-    await page.screenshot({
-      path: join(OUT, `preview-${mode}-${width}.png`),
-      fullPage: width >= 768,
-    });
+      await page.screenshot({
+        path: join(OUT, `${pg.slug}-${mode}-${width}.png`),
+        fullPage: width >= 768,
+      });
+    }
   }
 }
 

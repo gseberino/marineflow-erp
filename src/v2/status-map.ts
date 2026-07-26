@@ -20,3 +20,21 @@ export const priorityTone: Record<string, StatusTone> = {
   high: 'warning',
   urgent: 'critical',
 };
+
+export const quoteStatusTone: Record<string, StatusTone> = {
+  draft: 'neutral',
+  sent: 'info',
+  awaiting_approval: 'warning',
+  awaiting_deposit: 'warning',
+  approved: 'success',
+  rejected: 'critical',
+};
+
+export const paymentTone: Record<string, StatusTone> = {
+  unpaid: 'neutral',
+  pending: 'neutral',
+  partial: 'warning',
+  paid: 'success',
+  overdue: 'critical',
+  refunded: 'info',
+};
