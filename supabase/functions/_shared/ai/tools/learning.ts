@@ -148,6 +148,85 @@ export const learningTools: ToolDef[] = [
     },
   },
   {
+    name: "list_unidentified_contacts",
+    description:
+      "Lista os telefones que conversam com a HBR mas NÃO estão ligados a nenhum cliente, fornecedor ou lead cadastrado. Enquanto um contato não tem identidade, as tarefas que nascem dele aparecem só com o número e não se ligam a OS nem ao histórico. Use para perguntar ao dono quem são os principais — uma pergunta resolve para sempre.",
+    input_schema: {
+      type: "object",
+      properties: { limit: { type: "number", description: "Quantos trazer (padrão 5, teto 20)." } },
+    },
+    risk: "low",
+    async execute(args, { sb }) {
+      const limit = Math.min(Math.max(Number(args.limit) || 5, 1), 20);
+      const { data, error } = await sb.from("unidentified_contacts")
+        .select("phone_normalized, mensagens, ultima_mensagem, ultima_frase").limit(limit);
+      if (error) throw error;
+      return {
+        total: ((data as any[]) || []).length,
+        contatos: ((data as any[]) || []).map((c) => ({
+          telefone: c.phone_normalized,
+          mensagens: c.mensagens,
+          ultima_conversa: c.ultima_mensagem,
+          ultima_frase: String(c.ultima_frase || "").slice(0, 120),
+        })),
+        nota: "Pergunte ao dono quem é cada um. Depois use link_contact_identity para gravar.",
+      };
+    },
+  },
+  {
+    name: "link_contact_identity",
+    description:
+      "Liga um telefone a um cliente, fornecedor ou lead JÁ CADASTRADO, depois que o dono disser quem é. Grava o número no cadastro (campo whatsapp) e vincula retroativamente todas as mensagens e sugestões daquele telefone — o histórico inteiro passa a fazer sentido de uma vez.",
+    input_schema: {
+      type: "object",
+      properties: {
+        phone: { type: "string", description: "Telefone como aparece nas mensagens." },
+        entity_type: { type: "string", enum: ["client", "supplier", "lead"] },
+        entity_id: { type: "string", description: "UUID do cadastro (use search_clients/search_suppliers antes)." },
+      },
+      required: ["phone", "entity_type", "entity_id"],
+    },
+    risk: "low",
+    async execute(args, { sb }) {
+      const phone = String(args.phone).replace(/\D/g, "");
+      if (phone.length < 8) return { error: "Telefone inválido." };
+
+      // 1) Grava o número no cadastro, para o casamento passar a funcionar sozinho
+      const table = args.entity_type === "client" ? "clients"
+        : args.entity_type === "supplier" ? "suppliers" : "external_quote_leads";
+      const campo = args.entity_type === "supplier" ? "phone" : "whatsapp";
+      const { data: ent, error: entErr } = await sb.from(table)
+        .select(`id, name, ${campo}`).eq("id", args.entity_id).maybeSingle();
+      if (entErr) throw entErr;
+      if (!ent) return { error: "Cadastro não encontrado." };
+      if (!(ent as any)[campo]) {
+        await sb.from(table).update({ [campo]: phone }).eq("id", args.entity_id);
+      }
+
+      // 2) Vincula retroativamente mensagens e sugestões daquele telefone
+      const col = args.entity_type === "client" ? "client_id"
+        : args.entity_type === "supplier" ? "supplier_id" : "lead_id";
+      const { data: msgs } = await sb.from("whatsapp_messages")
+        .update({ [col]: args.entity_id })
+        .eq("phone_normalized", phone).is(col, null).select("id");
+      const { data: suggs } = await sb.from("agenda_suggestions")
+        .update({
+          contact_label: (ent as any).name,
+          ...(args.entity_type === "client"
+            ? { client_id: args.entity_id, related_entity_type: "client", related_entity_id: args.entity_id }
+            : {}),
+        })
+        .eq("source_phone", phone).eq("status", "pending").select("id");
+
+      return {
+        ok: true,
+        contato: (ent as any).name,
+        mensagens_vinculadas: ((msgs as any[]) || []).length,
+        sugestoes_atualizadas: ((suggs as any[]) || []).length,
+      };
+    },
+  },
+  {
     name: "get_autonomy_report",
     description:
       "Relatório de como está a parceria: quantas sugestões da caixa de entrada foram aceitas vs descartadas (por tipo de detector), tarefas por origem, rotinas aprendidas e o que já está maduro para virar automático. Use quando o dono perguntar 'como você está indo?', 'o que já dá pra automatizar?' ou no resumo semanal.",

@@ -199,11 +199,18 @@ export function buildDateTable(now: Date): string {
   return linhas.join("\n");
 }
 
-export function buildDetectorPrompt(hojeBRT: string, contactLabel: string, dateTable = ""): string {
+export function buildDetectorPrompt(
+  hojeBRT: string, contactLabel: string, dateTable = "", erpContext = "",
+): string {
   return `Você analisa uma conversa de WhatsApp de uma empresa de manutenção náutica (HBR Marine) e extrai APENAS compromissos concretos que geram trabalho para a EQUIPE DA HBR.
 
 Hoje é ${hojeBRT} (America/Sao_Paulo). Conversa com: ${contactLabel}.
 ${dateTable ? `\nCONVERSÃO DE DATAS (use exatamente estes valores em due_date — não calcule por conta própria):\n${dateTable}\n` : ""}
+${erpContext ? `\nCONTEXTO JÁ REGISTRADO NO SISTEMA sobre este contato:\n${erpContext}\n
+Use este contexto para:
+- Escrever no NÍVEL CERTO: se a conversa cita um item de uma entrega maior, fale do conjunto e da OS ("Acompanhar entrega dos materiais da OS-1042"), não só do item ("acompanhar baterias").
+- Citar o número da OS no título quando a conversa for claramente sobre ela.
+- NÃO duplicar: se já existe tarefa cobrindo o assunto, não proponha outra igual.\n` : ""}
 
 O que É compromisso (proponha):
 - promise: alguém da HBR prometeu algo ("vou te mandar o orçamento amanhã", "te ligo segunda").
@@ -244,13 +251,14 @@ export async function detectInConversation(
   msgs: ConversationMessage[],
   contactLabel: string,
   now: Date = new Date(),
+  erpContext = "",
 ): Promise<Proposal[]> {
   if (!isWorthAnalyzing(msgs)) return [];
 
   const hojeBRT = new Date(now.getTime() - 3 * 3600000).toISOString().slice(0, 10);
   const result = await callClaude({
     model: MODEL_LITE,
-    system: [{ type: "text", text: buildDetectorPrompt(hojeBRT, contactLabel, buildDateTable(now)) }],
+    system: [{ type: "text", text: buildDetectorPrompt(hojeBRT, contactLabel, buildDateTable(now), erpContext) }],
     messages: [{ role: "user", content: [{ type: "text", text: formatConversation(msgs) }] }],
     tools: [PROPOSE_TOOL],
     maxTokens: 1500,

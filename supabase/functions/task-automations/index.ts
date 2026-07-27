@@ -408,6 +408,15 @@ Deno.serve(async (req) => {
 
   try {
     const settings = await loadSettings(db);
+    // Identidade dos contatos (Fase 12): liga telefone→cliente/fornecedor/lead nas
+    // mensagens que chegaram desde o último ciclo. Barato e idempotente — sem isso o
+    // detector volta a falar de "5544991777856" em vez de "Vanderlei".
+    let identidade: unknown = null;
+    try {
+      const { data } = await db.rpc("backfill_message_identity", { p_limit: 500 });
+      identidade = ((data as any[]) || [])[0] ?? null;
+    } catch (e) { console.error("backfill identity:", e); }
+
     const rules = await runRules(db, settings);
     const r10 = await runTechnicianReminders(db, settings);
     const r9 = await runClientReminders(db, settings);
@@ -415,7 +424,7 @@ Deno.serve(async (req) => {
     const reminders = await processReminders(db);
     const recurrence = await materializeRecurrences(db);
 
-    const summary = { rules, r10, r9, r13, reminders, recurrence };
+    const summary = { identidade, rules, r10, r9, r13, reminders, recurrence };
     if (rules.created.length || rules.resolved.length || recurrence.created) {
       await audit(db, "task_automations_run", summary);
     }

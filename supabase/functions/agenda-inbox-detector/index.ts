@@ -102,14 +102,52 @@ Deno.serve(async (req) => {
 
     for (const [phone, convMsgs] of conversations) {
       try {
-        // Rótulo do contato: cliente cadastrado > telefone
+        // Identidade do contato (Fase 12): resolve telefone → cliente/fornecedor/lead
+        // pela RPC, não só pelo que a mensagem já trazia. Sem isso o detector escrevia
+        // "acompanhar entrega das baterias" sem saber de quem nem de qual OS.
         let contactLabel = phone;
         let clientId: string | null = null;
-        const withClient = convMsgs.find((m: any) => m.client_id);
-        if (withClient) {
-          clientId = withClient.client_id;
-          const { data: c } = await db.from("clients").select("name").eq("id", clientId).maybeSingle();
-          if ((c as any)?.name) contactLabel = (c as any).name;
+        let supplierId: string | null = null;
+        let identityKind: string | null = null;
+        const { data: ident } = await db.rpc("resolve_contact_identity", { p_phone: phone });
+        const id0 = ((ident as any[]) || [])[0];
+        if (id0) {
+          identityKind = id0.kind;
+          contactLabel = id0.entity_name || phone;
+          if (id0.kind === "client") clientId = id0.entity_id;
+          else if (id0.kind === "supplier") supplierId = id0.entity_id;
+        } else {
+          const withClient = convMsgs.find((m: any) => m.client_id);
+          if (withClient) {
+            clientId = withClient.client_id;
+            const { data: c } = await db.from("clients").select("name").eq("id", clientId).maybeSingle();
+            if ((c as any)?.name) { contactLabel = (c as any).name; identityKind = "client"; }
+          }
+        }
+
+        // Contexto do ERP: o que já está aberto com este contato. É o que permite ao
+        // detector falar do CONJUNTO ("materiais da OS-1042") em vez de um item solto.
+        let erpContext = "";
+        if (clientId) {
+          const { data: openSos } = await db.from("service_orders")
+            .select("id, service_order_number, status, problem_description")
+            .eq("client_id", clientId)
+            .in("status", ["approved", "scheduled", "in_progress", "waiting_parts", "waiting_approval", "reopened"])
+            .order("created_at", { ascending: false }).limit(5);
+          const { data: openTasks } = await db.from("agenda_tasks")
+            .select("title").eq("client_id", clientId)
+            .in("status", ["pending", "in_progress"]).limit(8);
+          const partes: string[] = [];
+          if (openSos && openSos.length) {
+            partes.push("OS abertas deste cliente:\n" + (openSos as any[]).map((o) =>
+              `- ${o.service_order_number} (${o.status})${o.problem_description ? `: ${String(o.problem_description).slice(0, 90)}` : ""}`,
+            ).join("\n"));
+          }
+          if (openTasks && openTasks.length) {
+            partes.push("Tarefas JÁ existentes para este cliente (não duplique):\n" +
+              (openTasks as any[]).map((t) => `- ${t.title}`).join("\n"));
+          }
+          erpContext = partes.join("\n\n");
         }
 
         // Contexto: inclui até 10 mensagens anteriores da MESMA conversa (fora da janela),
@@ -125,7 +163,7 @@ Deno.serve(async (req) => {
           ...convMsgs,
         ].filter((m, i, arr) => arr.findIndex((x) => x.id === m.id) === i);
 
-        const proposals = await detectInConversation(contextMsgs, contactLabel);
+        const proposals = await detectInConversation(contextMsgs, contactLabel, new Date(), erpContext);
 
         for (const p of proposals) {
           const auto = shouldAutoCreate(p, statsByDetector, autonomyEnabled);
@@ -145,7 +183,7 @@ Deno.serve(async (req) => {
             contact_label: contactLabel,
             client_id: clientId,
             related_entity_type: clientId ? "client" : null,
-            related_entity_id: clientId,
+            related_entity_id: clientId ?? supplierId,
             target_user_id: targetUserId,
           }).select("id").single();
           // 23505 = já existe sugestão viva idêntica para a mesma mensagem
