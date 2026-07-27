@@ -1,51 +1,51 @@
-// Passo 6 — sobe as fotos aprovadas para o bucket product-images e grava
-// products.image_url.
+// Passo 6 — sobe as fotos aprovadas para o bucket product-images.
 //
 //   node scripts/catalogo-fotos/6-subir.mjs <pastaDeDados> [opções]
 //
-//   --rejeitar 2763,2775   não sobe nem grava esses SKUs (o que você vetou na conferência)
-//   --so-subir             sobe os arquivos mas NÃO toca em products.image_url
 //   --seco                 não escreve nada: só lista o que faria
+//   --rejeitar 2763,2775   pula esses SKUs (o que foi vetado na conferência)
+//   --gravar-url           também grava products.image_url (por padrão NÃO grava:
+//                          o passo de banco costuma ser feito por SQL revisado)
 //
-// Credenciais vêm do ambiente e nunca são impressas:
-//   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+// Credenciais pelo ambiente, nunca impressas nem gravadas:
+//   SUPABASE_URL                 ex.: https://<ref>.supabase.co
+//   SUPABASE_SERVICE_ROLE_KEY
 //
-// Idempotente: o caminho no bucket é derivado do SKU, então rodar de novo
-// substitui o arquivo em vez de criar cópia. Só grava image_url de produto que
-// ainda está sem foto — nunca sobrescreve foto existente sem --forcar.
+// Sem dependência de pacote — fala HTTP direto com a API de Storage. Assim roda
+// de qualquer pasta, inclusive worktree sem node_modules. (A CLI do Supabase não
+// serve aqui: este projeto usa o storage legado, que a CLI atual não escreve.)
+//
+// Idempotente: o caminho é derivado do SKU e sobe com x-upsert, então rodar de
+// novo substitui o arquivo em vez de criar cópia.
 
 import fs from 'node:fs';
 import path from 'node:path';
 
 const args = process.argv.slice(2);
-const dados = args[0] && !args[0].startsWith('--') ? args[0] : path.join(process.cwd(), '.catalogo-fotos');
+const dados =
+  args[0] && !args[0].startsWith('--') ? args[0] : path.join(process.cwd(), '.catalogo-fotos');
 const opcao = (nome) => {
   const i = args.indexOf(`--${nome}`);
   return i === -1 ? null : args[i + 1];
 };
 const tem = (nome) => args.includes(`--${nome}`);
 
-const rejeitados = new Set((opcao('rejeitar') || '').split(',').map((s) => s.trim()).filter(Boolean));
-const soSubir = tem('so-subir');
+const rejeitados = new Set(
+  (opcao('rejeitar') || '').split(',').map((s) => s.trim()).filter(Boolean),
+);
 const seco = tem('seco');
-const forcar = tem('forcar');
+const gravarUrl = tem('gravar-url');
 
 const BUCKET = 'product-images';
 const PREFIXO = 'catalogo/victron';
 
-const url = process.env.SUPABASE_URL;
+const base = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
 const chave = process.env.SUPABASE_SERVICE_ROLE_KEY;
-if (!seco && (!url || !chave)) {
+if (!seco && (!base || !chave)) {
   console.error('faltam SUPABASE_URL e/ou SUPABASE_SERVICE_ROLE_KEY no ambiente.');
-  console.error('(rode com --seco para ver o que o script faria sem credencial)');
+  console.error('(use --seco para ver o que o script faria, sem credencial)');
   process.exit(1);
 }
-// import tardio: o ensaio (--seco) roda sem o SDK, útil em worktree sem node_modules
-const sb = seco
-  ? null
-  : (await import('@supabase/supabase-js')).createClient(url, chave, {
-      auth: { persistSession: false },
-    });
 
 const casamento = JSON.parse(fs.readFileSync(path.join(dados, 'casamento.json'), 'utf8'));
 const pasta = path.join(dados, 'normalizadas');
@@ -59,10 +59,14 @@ const fila = casamento
   .filter((c) => !rejeitados.has(c.chave))
   .filter((c) => fs.existsSync(path.join(pasta, `${c.chave}.jpg`)));
 
-console.log(`na fila: ${fila.length}  ·  vetados: ${rejeitados.size}  ·  modo: ${
-  seco ? 'seco' : soSubir ? 'só subir' : 'subir + gravar'
-}`);
+console.log(
+  `na fila: ${fila.length}  ·  vetados: ${rejeitados.size}  ·  modo: ${
+    seco ? 'seco' : gravarUrl ? 'subir + gravar image_url' : 'só subir'
+  }`,
+);
 
+const urlPublica = (destino) => `${base}/storage/v1/object/public/${BUCKET}/${destino}`;
+const mapa = [];
 let subidas = 0;
 let gravadas = 0;
 const falhas = [];
@@ -70,49 +74,66 @@ const falhas = [];
 for (const item of fila) {
   const arquivo = path.join(pasta, `${item.chave}.jpg`);
   const destino = `${PREFIXO}/${item.chave}.jpg`;
+  mapa.push({ sku: item.sku, name: item.name, chave: item.chave, url: urlPublica(destino) });
 
   if (seco) {
     console.log(`  [seco] ${item.chave} -> ${BUCKET}/${destino}`);
     continue;
   }
 
-  const { error: erroUpload } = await sb.storage
-    .from(BUCKET)
-    .upload(destino, fs.readFileSync(arquivo), {
-      contentType: 'image/jpeg',
-      cacheControl: '31536000',
-      upsert: true,
-    });
+  const corpo = fs.readFileSync(arquivo);
+  const res = await fetch(`${base}/storage/v1/object/${BUCKET}/${destino}`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${chave}`,
+      'content-type': 'image/jpeg',
+      'cache-control': 'max-age=31536000',
+      'x-upsert': 'true',
+    },
+    body: corpo,
+  });
 
-  if (erroUpload) {
-    falhas.push({ chave: item.chave, etapa: 'upload', erro: erroUpload.message });
-    console.error(`  ${item.chave}: upload falhou — ${erroUpload.message}`);
+  if (!res.ok) {
+    const detalhe = await res.text().catch(() => '');
+    falhas.push({ chave: item.chave, etapa: 'upload', status: res.status, detalhe: detalhe.slice(0, 200) });
+    console.error(`  ${item.chave}: upload falhou (${res.status})`);
     continue;
   }
   subidas++;
+  console.log(`  ${item.chave} subiu`);
 
-  if (soSubir) continue;
+  if (!gravarUrl) continue;
 
-  const { data: publica } = sb.storage.from(BUCKET).getPublicUrl(destino);
+  // só onde ainda não há foto: o lote não atropela trabalho manual do dono
+  const filtro = item.sku
+    ? `sku=eq.${encodeURIComponent(item.sku)}`
+    : `name=eq.${encodeURIComponent(item.name)}`;
+  const resDb = await fetch(`${base}/rest/v1/products?${filtro}&image_url=is.null`, {
+    method: 'PATCH',
+    headers: {
+      authorization: `Bearer ${chave}`,
+      apikey: chave,
+      'content-type': 'application/json',
+      prefer: 'return=representation',
+    },
+    body: JSON.stringify({ image_url: urlPublica(destino) }),
+  });
 
-  // grava só onde ainda não há foto: o piloto não sobrescreve trabalho manual
-  let q = sb.from('products').update({ image_url: publica.publicUrl });
-  q = item.sku ? q.eq('sku', item.sku) : q.eq('name', item.name);
-  if (!forcar) q = q.is('image_url', null);
-
-  const { data, error: erroUpdate } = await q.select('id');
-  if (erroUpdate) {
-    falhas.push({ chave: item.chave, etapa: 'update', erro: erroUpdate.message });
-    console.error(`  ${item.chave}: update falhou — ${erroUpdate.message}`);
+  if (!resDb.ok) {
+    const detalhe = await resDb.text().catch(() => '');
+    falhas.push({ chave: item.chave, etapa: 'update', status: resDb.status, detalhe: detalhe.slice(0, 200) });
+    console.error(`  ${item.chave}: update falhou (${resDb.status})`);
     continue;
   }
-  if (!data?.length) {
+  const linhas = await resDb.json().catch(() => []);
+  if (!linhas.length) {
     console.warn(`  ${item.chave}: nenhuma linha atualizada (já tinha foto? SKU mudou?)`);
     continue;
   }
   gravadas++;
-  console.log(`  ${item.chave} ok`);
 }
 
+fs.writeFileSync(path.join(dados, 'urls-publicas.json'), JSON.stringify(mapa, null, 2));
 console.log(`\nsubidas: ${subidas}  ·  image_url gravados: ${gravadas}  ·  falhas: ${falhas.length}`);
+console.log(`mapa sku -> url público: ${path.join(dados, 'urls-publicas.json')}`);
 if (falhas.length) console.log(JSON.stringify(falhas, null, 2));
