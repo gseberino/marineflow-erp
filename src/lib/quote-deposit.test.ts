@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeDeposit, depositBaseFromOrder, depositAmountFromPcts, computeSchedule } from './quote-deposit';
+import { computeDeposit, depositBaseFromOrder, depositAmountFromPcts, computeSchedule, computeAllInstallments } from './quote-deposit';
 
 // Dados REAIS do ORÇ-00060 (Charline): peças 16.450,67 + serviços 4.110,00 = 20.560,67 bruto,
 // desconto 560,67 → grand_total 20.000,00. Condição "100% peças + 50% serviços" no sinal.
@@ -128,5 +128,35 @@ describe("classificação por tipo — parcela 'na entrega' (days=0) NÃO é sin
     const r = computeDeposit(ORDER_ENTREGA, COND_ENTREGA);
     expect(r.signal).toEqual({ servicesPct: 50, partsPct: 100, expensesPct: 100 });
     expect(r.amount).toBeCloseTo(2000, 2);
+  });
+});
+
+describe('computeAllInstallments — plano inteiro (conclusão sem sinal)', () => {
+  it('ORÇ-00060: entrada + saldo, ambos > 0, somam o líquido', () => {
+    const b = depositBaseFromOrder(ORC_00060);
+    const rows = computeAllInstallments(b.laborCost, b.partsCost, b.expensesTotal, b.discountRatio, COND_00060_COMPLETA);
+    expect(rows).toHaveLength(2);
+    expect(rows[0].isSignal).toBe(true);
+    expect(rows[0].amount).toBeCloseTo(18001.04, 2);
+    expect(rows[1].isSignal).toBe(false);
+    expect(rows[1].amount).toBeCloseTo(1998.96, 2);
+    expect(rows.reduce((s, r) => s + r.amount, 0)).toBeCloseTo(20000, 2);
+  });
+
+  it("marca dueBasis='delivery' na parcela de entrega", () => {
+    const b = depositBaseFromOrder(ORDER_ENTREGA);
+    const rows = computeAllInstallments(b.laborCost, b.partsCost, b.expensesTotal, b.discountRatio, COND_ENTREGA);
+    expect(rows).toHaveLength(2);
+    expect(rows.find(r => r.isSignal)?.dueBasis).toBe('days');
+    expect(rows.find(r => !r.isSignal)?.dueBasis).toBe('delivery');
+  });
+
+  it('descarta parcelas de valor zero', () => {
+    const b = depositBaseFromOrder(ORC_00060);
+    const rows = computeAllInstallments(b.laborCost, b.partsCost, b.expensesTotal, b.discountRatio, [
+      { tipo: 'aprovacao', services_pct: 50, parts_pct: 100, days_after_approval: 0 },
+      { tipo: 'prazo', services_pct: 0, parts_pct: 0, days_after_approval: 30 },
+    ]);
+    expect(rows).toHaveLength(1);
   });
 });
