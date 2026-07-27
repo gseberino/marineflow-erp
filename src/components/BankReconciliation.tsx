@@ -60,6 +60,9 @@ export function BankReconciliation() {
   );
 
   const [tab, setTab] = useState<TabType>('pending');
+  const [search, setSearch] = useState('');
+  const [matchFilter, setMatchFilter] = useState<'all' | 'with' | 'without'>('all');
+  const [sortBy, setSortBy] = useState<'date' | 'amount'>('date');
   const [preview, setPreview] = useState<BankTransaction[] | null>(null);
   const [previewSource, setPreviewSource] = useState<'bank' | 'credit_card'>('bank');
   const [filter, setFilter] = useState<'all' | 'credit' | 'debit'>('all');
@@ -80,9 +83,36 @@ export function BankReconciliation() {
   const reconciledTx = allTx.filter(t => t.reconciled && t.reconciled_payment_id);
   const ignoredTx = allTx.filter(t => t.reconciled && !t.reconciled_payment_id);
 
+  const bestMatch = (txId: string): ReconcileSuggestion | undefined =>
+    (suggestionsByTx.get(txId) || [])[0];
+
   const filtered = pending
     .filter(t => filter === 'all' || t.transaction_type === filter)
-    .filter(t => sourceFilter === 'all' || t.source_type === sourceFilter);
+    .filter(t => sourceFilter === 'all' || t.source_type === sourceFilter)
+    .filter(t => {
+      if (matchFilter === 'all') return true;
+      const tem = !!bestMatch(t.id) || (groupsByTx.get(t.id) || []).length > 0;
+      return matchFilter === 'with' ? tem : !tem;
+    })
+    .filter(t => {
+      if (!search.trim()) return true;
+      const alvo = `${t.description} ${bestMatch(t.id)?.candidate.label ?? ''} ${bestMatch(t.id)?.candidate.clientName ?? ''}`;
+      return alvo.toLowerCase().includes(search.trim().toLowerCase());
+    })
+    .slice()
+    .sort((a, b) => sortBy === 'amount'
+      ? Number(b.amount) - Number(a.amount)
+      : (a.transaction_date < b.transaction_date ? 1 : -1));
+
+  // Números do topo: o operador precisa saber o tamanho da fila e quanto dela o sistema
+  // já sabe explicar, antes de abrir transação por transação.
+  const resumo = {
+    total: pending.length,
+    valorEntradas: pending.filter(t => t.transaction_type === 'credit')
+      .reduce((s, t) => s + Number(t.amount), 0),
+    comSugestao: pending.filter(t => !!bestMatch(t.id)).length,
+    semCandidato: pending.filter(t => !bestMatch(t.id) && (groupsByTx.get(t.id) || []).length === 0).length,
+  };
 
   const handleFile = useCallback((file: File) => {
     const reader = new FileReader();
@@ -294,11 +324,20 @@ export function BankReconciliation() {
       const { conciliadas, sugeridas, sem_candidato } = r.summary;
       if (conciliadas === 0 && sugeridas === 0) {
         toast.info('Nenhuma correspondência encontrada para as transações pendentes');
+      } else if (conciliadas === 0) {
+        // Sem identificador Pix nem documento do pagador no extrato, nada atinge o grau
+        // de certeza exigido para conciliar sozinho — e dizer só "0 conciliadas" faz
+        // parecer que o motor não achou nada, quando ele achou e está pedindo conferência.
+        toast.success(
+          `${sugeridas} transações com correspondência para você conferir na lista · ${sem_candidato} sem candidato. ` +
+          `Nada foi conciliado sozinho porque este extrato não traz identificador do Pix nem CPF/CNPJ do pagador.`,
+        );
       } else {
         toast.success(
-          `${conciliadas} conciliada(s) automaticamente · ${sugeridas} com sugestão para revisar · ${sem_candidato} sem candidato`,
+          `${conciliadas} conciliada(s) automaticamente · ${sugeridas} com sugestão para conferir · ${sem_candidato} sem candidato`,
         );
       }
+      setMatchFilter(sugeridas > 0 ? 'with' : 'all');
       invalidateAll();
     } catch (e: any) {
       toast.error(e?.message || 'Erro ao conciliar');
@@ -438,54 +477,163 @@ export function BankReconciliation() {
       {/* === PENDING TAB === */}
       {tab === 'pending' && (
         <div>
-          <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+          {/* Painel de situação: quanto está pendente, quanto disso o sistema já sabe
+              explicar e quanto vai exigir análise. Sem isto, "13 sugestões" era um número
+              sem lugar nenhum para olhar. */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-3">
+            {[
+              { label: 'Pendentes', valor: String(resumo.total), tom: '' },
+              { label: 'Entradas a identificar', valor: formatCurrency(resumo.valorEntradas), tom: 'text-success' },
+              { label: 'Com correspondência', valor: String(resumo.comSugestao), tom: 'text-warning' },
+              { label: 'Sem candidato', valor: String(resumo.semCandidato), tom: 'text-muted-foreground' },
+            ].map(k => (
+              <div key={k.label} className="rounded-lg border bg-card px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{k.label}</p>
+                <p className={`text-lg font-semibold tabular-nums ${k.tom}`}>{k.valor}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="rounded-lg border bg-card p-3 mb-3 space-y-2">
             <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="font-semibold">{t.financial.unreconciledTransactions} ({pending.length})</h3>
-              {pending.length > 0 && (
-                <Button size="sm" onClick={handleAutoReconcile} disabled={autoReconcile.isPending}>
-                  <Sparkles className="h-3.5 w-3.5 mr-1.5" />
-                  {autoReconcile.isPending ? 'Analisando...' : 'Conciliar tudo'}
-                </Button>
-              )}
+              <Input
+                placeholder="Buscar por histórico, cliente ou documento..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="h-8 max-w-xs"
+              />
+              <Button size="sm" onClick={handleAutoReconcile} disabled={autoReconcile.isPending || pending.length === 0}>
+                <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+                {autoReconcile.isPending ? 'Analisando...' : 'Analisar tudo'}
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => refetchEngine()} disabled={engineLoading}>
+                {engineLoading ? 'Atualizando...' : 'Atualizar análise'}
+              </Button>
             </div>
-            <div className="flex gap-1 flex-wrap">
-              {(['all', 'credit', 'debit'] as const).map(f => (
-                <Button key={f} size="sm" variant={filter === f ? 'default' : 'outline'} onClick={() => setFilter(f)}>
-                  {f === 'all' ? t.common.all : f === 'credit' ? t.financial.inflow : t.financial.outflow}
-                </Button>
-              ))}
-              <span className="mx-1 border-l" />
-              {([
-                { v: 'all' as const, l: t.financial.sourceAll },
-                { v: 'bank' as const, l: t.financial.sourceBank },
-                { v: 'credit_card' as const, l: t.financial.sourceCard },
-              ]).map(({ v, l }) => (
-                <Button key={v} size="sm" variant={sourceFilter === v ? 'default' : 'outline'} onClick={() => setSourceFilter(v)}>
-                  {l}
-                </Button>
-              ))}
+
+            <div className="flex items-center gap-3 flex-wrap text-sm">
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-muted-foreground mr-1">Tipo</span>
+                {(['all', 'credit', 'debit'] as const).map(f => (
+                  <Button key={f} size="sm" variant={filter === f ? 'default' : 'outline'}
+                    className="h-7 px-2 text-xs" onClick={() => setFilter(f)}>
+                    {f === 'all' ? t.common.all : f === 'credit' ? t.financial.inflow : t.financial.outflow}
+                  </Button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-muted-foreground mr-1">Análise</span>
+                {([
+                  { v: 'all' as const, l: 'Todas' },
+                  { v: 'with' as const, l: 'Com correspondência' },
+                  { v: 'without' as const, l: 'Sem candidato' },
+                ]).map(({ v, l }) => (
+                  <Button key={v} size="sm" variant={matchFilter === v ? 'default' : 'outline'}
+                    className="h-7 px-2 text-xs" onClick={() => setMatchFilter(v)}>
+                    {l}
+                  </Button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-muted-foreground mr-1">Origem</span>
+                {([
+                  { v: 'all' as const, l: t.financial.sourceAll },
+                  { v: 'bank' as const, l: t.financial.sourceBank },
+                  { v: 'credit_card' as const, l: t.financial.sourceCard },
+                ]).map(({ v, l }) => (
+                  <Button key={v} size="sm" variant={sourceFilter === v ? 'default' : 'outline'}
+                    className="h-7 px-2 text-xs" onClick={() => setSourceFilter(v)}>
+                    {l}
+                  </Button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-muted-foreground mr-1">Ordenar</span>
+                {([
+                  { v: 'date' as const, l: 'Data' },
+                  { v: 'amount' as const, l: 'Valor' },
+                ]).map(({ v, l }) => (
+                  <Button key={v} size="sm" variant={sortBy === v ? 'default' : 'outline'}
+                    className="h-7 px-2 text-xs" onClick={() => setSortBy(v)}>
+                    {l}
+                  </Button>
+                ))}
+              </div>
             </div>
           </div>
+
+          <p className="text-sm text-muted-foreground mb-2">
+            Mostrando {filtered.length} de {pending.length} transações
+          </p>
 
           {filtered.length === 0 && <p className="text-sm text-muted-foreground py-4 text-center">{t.common.noResults}</p>}
 
           <div className="space-y-2">
-            {filtered.map(tx => (
-              <div key={tx.id} className="rounded-lg border bg-card">
-                <div className="flex items-center justify-between p-3">
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm text-muted-foreground">{formatDate(tx.transaction_date)}</span>
-                    <span className="text-sm truncate max-w-[300px]">{tx.description}</span>
-                    {tx.source_type === 'credit_card' && (
-                      <StatusBadge className="bg-accent/15 text-accent">{t.financial.sourceCard}</StatusBadge>
+            {filtered.map(tx => {
+              const melhor = bestMatch(tx.id);
+              const temGrupo = (groupsByTx.get(tx.id) || []).length > 0;
+              return (
+              <div
+                key={tx.id}
+                className={`rounded-lg border bg-card ${
+                  melhor?.tier === 'certain' ? 'border-l-4 border-l-success'
+                    : melhor?.tier === 'probable' ? 'border-l-4 border-l-warning' : ''
+                }`}
+              >
+                <div className="flex items-start justify-between p-3 gap-3 flex-wrap">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm text-muted-foreground tabular-nums">{formatDate(tx.transaction_date)}</span>
+                      <span className="text-sm truncate max-w-[320px]">{tx.description}</span>
+                      {tx.source_type === 'credit_card' && (
+                        <StatusBadge className="bg-accent/15 text-accent">{t.financial.sourceCard}</StatusBadge>
+                      )}
+                    </div>
+                    {/* A correspondência aparece aqui, na linha fechada: antes ela só existia
+                        depois de abrir a transação, e o resumo "N sugestões" não levava a lugar nenhum. */}
+                    {melhor ? (
+                      <p className="text-xs mt-1 flex items-center gap-1.5 flex-wrap">
+                        <Sparkles className="h-3 w-3 text-primary shrink-0" />
+                        <span className="font-medium">{melhor.candidate.label}</span>
+                        {melhor.candidate.clientName && (
+                          <span className="text-muted-foreground">· {melhor.candidate.clientName}</span>
+                        )}
+                        <StatusBadge className={
+                          melhor.tier === 'certain' ? 'bg-success/15 text-success'
+                            : melhor.tier === 'probable' ? 'bg-warning/15 text-warning'
+                            : 'bg-muted text-muted-foreground'
+                        }>
+                          {melhor.score}%
+                        </StatusBadge>
+                      </p>
+                    ) : temGrupo ? (
+                      <p className="text-xs mt-1 text-muted-foreground flex items-center gap-1.5">
+                        <Sparkles className="h-3 w-3 shrink-0" />
+                        Pode ser um pagamento agrupado
+                      </p>
+                    ) : !engineLoading && (
+                      <p className="text-xs mt-1 text-muted-foreground">Sem correspondência encontrada</p>
                     )}
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className={`font-semibold ${tx.transaction_type === 'credit' ? 'text-success' : 'text-destructive'}`}>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className={`font-semibold tabular-nums ${tx.transaction_type === 'credit' ? 'text-success' : 'text-destructive'}`}>
                       {tx.transaction_type === 'credit' ? '+' : '-'}{formatCurrency(Number(tx.amount))}
                     </span>
+                    {melhor && reconcileId !== tx.id && (
+                      <Button
+                        size="sm"
+                        onClick={() => handleApplySuggestion(tx, melhor)}
+                        disabled={applySuggestion.isPending}
+                        title={melhor.reasons.map(r => r.detail).join(' · ')}
+                      >
+                        <Check className="h-3 w-3 mr-1" />Confirmar
+                      </Button>
+                    )}
                     <Button size="sm" variant="outline" onClick={() => openReconcile(tx.id, tx)}>
-                      {t.financial.reconcile}
+                      {reconcileId === tx.id ? 'Fechar' : melhor ? 'Ver opções' : t.financial.reconcile}
                     </Button>
                   </div>
                 </div>
@@ -821,7 +969,8 @@ export function BankReconciliation() {
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

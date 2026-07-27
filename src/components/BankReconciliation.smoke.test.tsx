@@ -115,14 +115,42 @@ describe('BankReconciliation — render', () => {
     expect(screen.getByText(/TARIFA BANCARIA/)).toBeInTheDocument();
   });
 
-  it('mostra o botão de conciliação em lote quando há pendências', async () => {
+  it('mostra o botão de análise em lote quando há pendências', async () => {
     renderTela();
-    expect(await screen.findByRole('button', { name: /Conciliar tudo/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Analisar tudo/i })).toBeInTheDocument();
   });
 
-  it('exibe a área de importação de extrato', async () => {
+  it('resume a situação da fila no topo', async () => {
     renderTela();
-    expect(await screen.findByText(/transações pendentes|Transações não conciliadas|não conciliadas/i)).toBeInTheDocument();
+    // "Com correspondência" aparece no indicador e no filtro — ambos de propósito.
+    expect((await screen.findAllByText(/Com correspondência/i)).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Sem candidato/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Entradas a identificar/i)).toBeInTheDocument();
+  });
+
+  // O motivo desta tela ter sido refeita: a correspondência só aparecia depois de abrir
+  // a transação, então o resumo "N sugestões" não levava a lugar nenhum.
+  it('mostra a correspondência na própria linha, sem precisar abrir', async () => {
+    renderTela();
+    expect(await screen.findByText(/Sinal do ORÇ-00070/)).toBeInTheDocument();
+    expect(screen.getByText('82%')).toBeInTheDocument();
+    // Transação sem candidato precisa dizer isso, em vez de ficar muda.
+    expect(screen.getByText(/Sem correspondência encontrada/)).toBeInTheDocument();
+  });
+
+  it('permite confirmar a melhor correspondência direto na linha', async () => {
+    renderTela();
+    await screen.findByText(/Sinal do ORÇ-00070/);
+    expect(screen.getByRole('button', { name: /^Confirmar$/ })).toBeInTheDocument();
+  });
+
+  it('filtra por transações sem candidato', async () => {
+    const user = userEvent.setup();
+    renderTela();
+    await screen.findByText(/PIX RECEBIDO RODRIGO/);
+    await user.click(screen.getByRole('button', { name: /^Sem candidato$/ }));
+    expect(screen.queryByText(/PIX RECEBIDO RODRIGO/)).not.toBeInTheDocument();
+    expect(screen.getByText(/TARIFA BANCARIA/)).toBeInTheDocument();
   });
 
   // O painel de sugestões é o código novo e o de maior risco: monta JSX a partir de um
@@ -131,11 +159,13 @@ describe('BankReconciliation — render', () => {
     const user = userEvent.setup();
     renderTela();
 
-    const linha = await screen.findByText(/PIX RECEBIDO RODRIGO/);
-    const card = linha.closest('div.rounded-lg') as HTMLElement;
-    await user.click(within(card).getByRole('button', { name: /conciliar/i }));
+    // Espera a análise chegar (é assíncrona): antes dela, a linha ainda não sabe que há
+    // correspondência e o botão continua sendo "Conciliar".
+    await screen.findByText(/Sinal do ORÇ-00070/);
+    await user.click(screen.getByRole('button', { name: /ver opções/i }));
 
-    expect(await screen.findByText(/Sinal do ORÇ-00070/)).toBeInTheDocument();
+    // Agora aparece duas vezes: resumido na linha e detalhado no painel aberto.
+    expect((await screen.findAllByText(/Sinal do ORÇ-00070/)).length).toBeGreaterThan(1);
     expect(screen.getByText(/82% de confiança/)).toBeInTheDocument();
     expect(screen.getByText(/Sinal de orçamento/)).toBeInTheDocument();
     // Aviso do efeito colateral: conciliar o sinal aprova e converte o orçamento.
