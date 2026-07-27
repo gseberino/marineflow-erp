@@ -12,7 +12,7 @@ import { TaskAutomationSettings } from './TaskAutomationSettings';
 import { FocusMode } from './FocusMode';
 import { OpenLoopsPanel } from './OpenLoopsPanel';
 
-const { queryBuilder, q, mut, liveTasks, openLoops, loopsRef } = vi.hoisted(() => {
+const { queryBuilder, q, mut, liveTasks, openLoops, loopsRef, roleRef } = vi.hoisted(() => {
   const queryBuilder = (): any => {
     const o: any = {};
     for (const k of ['select', 'eq', 'neq', 'in', 'gte', 'lte', 'lt', 'gt', 'order',
@@ -52,10 +52,19 @@ const { queryBuilder, q, mut, liveTasks, openLoops, loopsRef } = vi.hoisted(() =
       evidence: 'as baterias chegam quarta', opened_at: new Date().toISOString(),
       last_seen_at: new Date().toISOString(), atrasado: false,
     },
+    {
+      id: 'l3', kind: 'receivable', source: 'erp',
+      title: 'Título VENCIDO R$ 1.710,00', detail: null,
+      due_at: new Date(Date.now() - 86400000).toISOString(), priority: 'urgent',
+      service_order_id: null, service_order_number: null, mentions: 1,
+      evidence: null, opened_at: new Date().toISOString(),
+      last_seen_at: new Date().toISOString(), atrasado: true,
+    },
   ];
-  // Mutável para o teste do estado vazio poder trocar o retorno do hook.
+  // Mutáveis para os testes trocarem o retorno dos hooks (estado vazio, cargo do usuário).
   const loopsRef = { current: openLoops as any[] };
-  return { queryBuilder, q, mut, liveTasks, openLoops, loopsRef };
+  const roleRef = { current: { id: 'u1', role: 'admin' } as any };
+  return { queryBuilder, q, mut, liveTasks, openLoops, loopsRef, roleRef };
 });
 
 vi.mock('@/integrations/supabase/client', () => ({
@@ -81,6 +90,7 @@ vi.mock('@/hooks/use-agenda', () => ({
   useEntityOpenLoops: () => q(loopsRef.current),
 }));
 vi.mock('@/hooks/use-clients', () => ({ useClients: () => ({ data: [] }) }));
+vi.mock('@/hooks/use-auth', () => ({ useAuth: () => ({ user: roleRef.current }) }));
 vi.mock('@/components/PaymentDialog', () => ({ PaymentDialog: () => null }));
 
 function wrap(ui: React.ReactElement) {
@@ -123,10 +133,24 @@ describe('componentes da Agenda 2.0 — smoke de render', () => {
     expect(screen.getByText('Acompanhar entrega dos materiais da OS-1042')).toBeTruthy();
     // O que veio da conversa é marcado — é o que ainda não virou fato no ERP.
     expect(screen.getByText('combinado na conversa')).toBeTruthy();
-    expect(screen.getByText('atrasado')).toBeTruthy();
+    // Dois fios do fixture estão atrasados (a OS e o título), então há dois selos.
+    expect(screen.getAllByText('atrasado').length).toBe(2);
     expect(screen.getByText('cobrado 3×')).toBeTruthy();
     // A frase literal precisa aparecer para conferir sem abrir a conversa.
     expect(screen.getByText(/as baterias chegam quarta/)).toBeTruthy();
+  });
+
+  it('OpenLoopsPanel esconde fio de dinheiro do técnico', () => {
+    const anterior = roleRef.current;
+    roleRef.current = { id: 'u9', role: 'technician' };
+    try {
+      wrap(<OpenLoopsPanel entityType="client" entityId="c-1" />);
+      // O trabalho ele vê; o valor do título, não.
+      expect(screen.getByText('OS OS-1042 — aguardando peças')).toBeTruthy();
+      expect(screen.queryByText('Título VENCIDO R$ 1.710,00')).toBeNull();
+    } finally {
+      roleRef.current = anterior;
+    }
   });
 
   it('OpenLoopsPanel some quando não há nada em aberto', () => {

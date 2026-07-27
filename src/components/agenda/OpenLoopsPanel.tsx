@@ -1,6 +1,7 @@
 import { Card } from '@/components/ui/card';
 import { AlertTriangle, CircleDot, MessageSquareQuote, Wrench, Package, FileText, DollarSign, ShoppingCart } from 'lucide-react';
 import { useEntityOpenLoops, type OpenLoop } from '@/hooks/use-agenda';
+import { useAuth } from '@/hooks/use-auth';
 
 /**
  * "O que está em aberto com este contato agora" — os fios soltos (Fase 13).
@@ -12,6 +13,9 @@ import { useEntityOpenLoops, type OpenLoop } from '@/hooks/use-agenda';
  * O painel é somente leitura: nada aqui fecha um fio à mão. Quem fecha é o ERP, no motor de
  * 15 min. Um botão de "resolver" aqui só criaria divergência com o banco.
  */
+
+/** Técnico não vê dinheiro — mesma regra do get_client_360 e do resto do sistema. */
+const FIOS_FINANCEIROS = new Set(['receivable', 'payable']);
 
 const ICONE: Record<string, typeof Wrench> = {
   service_order: Wrench,
@@ -94,7 +98,12 @@ export function OpenLoopsPanel({
   title?: string;
   hideWhenEmpty?: boolean;
 }) {
-  const { data: fios = [], isLoading } = useEntityOpenLoops(entityType, entityId);
+  const { data: todos = [], isLoading } = useEntityOpenLoops(entityType, entityId);
+  const { user } = useAuth();
+
+  const fios = user?.role === 'technician'
+    ? todos.filter((f) => !FIOS_FINANCEIROS.has(f.kind))
+    : todos;
 
   if (!entityId) return null;
   if (hideWhenEmpty && !isLoading && fios.length === 0) return null;

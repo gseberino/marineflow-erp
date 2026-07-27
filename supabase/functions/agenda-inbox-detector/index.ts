@@ -260,21 +260,33 @@ Deno.serve(async (req) => {
           // Abre (ou reforça) o fio solto correspondente. A chave vem do título normalizado:
           // é a rede de segurança para quando o modelo não apontar updates_open_loop mas
           // repetir um assunto equivalente.
+          let loopId: string | null = null;
           if (loopEntityId) {
-            await db.rpc("record_conversation_loop", {
-              p_entity_type: loopEntityType,
-              p_entity_id: loopEntityId,
-              p_loop_key: loopKeyFromTitle(p.title),
-              p_kind: p.detector === "client_request" ? "request" : "promise",
-              p_title: p.title,
-              p_detail: null,
-              p_service_order_id: osId,
-              p_due_at: p.suggested_due_at ?? p.suggested_start_at,
-              p_priority: p.priority || "normal",
-              p_evidence: p.evidence,
-              p_evidence_at: p.evidence_at,
-              p_source_message_id: p.source_message_id,
-            }).then(() => {}, (e: unknown) => console.error("record loop:", e));
+            try {
+              const { data: loop } = await db.rpc("record_conversation_loop", {
+                p_entity_type: loopEntityType,
+                p_entity_id: loopEntityId,
+                p_loop_key: loopKeyFromTitle(p.title),
+                p_kind: p.detector === "client_request" ? "request" : "promise",
+                p_title: p.title,
+                p_detail: null,
+                p_service_order_id: osId,
+                p_due_at: p.suggested_due_at ?? p.suggested_start_at,
+                p_priority: p.priority || "normal",
+                p_evidence: p.evidence,
+                p_evidence_at: p.evidence_at,
+                p_source_message_id: p.source_message_id,
+              });
+              loopId = ((loop as any[]) || [])[0]?.loop_id ?? null;
+            } catch (e) { console.error("record loop:", e); }
+
+            // Guarda o vínculo NA SUGESTÃO. É por aqui que o fio fecha quando você conclui a
+            // tarefa: sugestão → created_task_id → tarefa concluída. Serve tanto para o
+            // aceite manual na caixa de entrada quanto para a criação automática abaixo.
+            if (loopId) {
+              await db.from("agenda_suggestions")
+                .update({ open_loop_id: loopId }).eq("id", (sugg as any).id);
+            }
           }
 
           // Autonomia conquistada: cria a tarefa direto e marca a sugestão como aceita.
@@ -289,12 +301,21 @@ Deno.serve(async (req) => {
               due_at: p.suggested_due_at,
               scheduled_start_at: p.suggested_start_at,
               client_id: clientId,
-              related_entity_type: clientId ? "client" : null,
-              related_entity_id: clientId,
+              // Mesmo vínculo da sugestão: se a conversa era sobre uma OS, a tarefa abre na
+              // OS. Antes a sugestão apontava para a OS e a tarefa para o cliente — aceitar
+              // o card e deixar a autonomia agir levavam a lugares diferentes.
+              related_entity_type: osId ? "service_order" : (clientId ? "client" : null),
+              related_entity_id: osId ?? clientId,
               notes: `Criada automaticamente da conversa com ${contactLabel}\n"${p.evidence}"`,
               source: "ai",
             }).select("id").single();
             if (task) {
+              // Vínculo direto fio→tarefa, além do caminho pela sugestão: aqui a tarefa é
+              // criada sem passar pelo aceite, então vale fechar as duas pontas.
+              if (loopId) {
+                await db.from("entity_open_loops")
+                  .update({ task_id: (task as any).id }).eq("id", loopId);
+              }
               await db.from("agenda_suggestions").update({
                 status: "accepted",
                 resolved_at: new Date().toISOString(),
