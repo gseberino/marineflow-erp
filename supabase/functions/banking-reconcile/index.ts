@@ -387,7 +387,48 @@ async function buildCandidates(admin: ReturnType<typeof createClient>): Promise<
     });
   }
 
-  // 5. Saldo de OS ativa ainda não lançado como conta a receber.
+  // 5. Pagamentos já registrados no ERP e ainda não ligados a nenhuma linha do extrato.
+  //    Sem isto, quem lança o recebimento na hora e importa o extrato depois fica sem
+  //    candidato nenhum — a conta já está quitada, então ela não aparece como "em aberto".
+  //    Janela de 120 dias: extrato antigo demais raramente vira conciliação útil.
+  const desde = new Date(Date.now() - 120 * 86_400_000).toISOString().slice(0, 10);
+  const { data: pagamentos } = await admin
+    .from("payments")
+    .select(`id, amount, payment_date, receivable_id, payable_id, notes,
+             receivables(description, client_id, service_order_id, clients(name, cpf_cnpj), service_orders(service_order_number))`)
+    .eq("status", "confirmed")
+    .gte("payment_date", desde)
+    .limit(300);
+
+  const { data: jaVinculados } = await admin
+    .from("bank_transactions")
+    .select("reconciled_payment_id")
+    .not("reconciled_payment_id", "is", null);
+  const vinculados = new Set((jaVinculados || []).map((r: any) => r.reconciled_payment_id));
+
+  for (const p of pagamentos || []) {
+    if (vinculados.has(p.id)) continue;
+    const rec = (p as any).receivables;
+    const cliente = rec?.clients;
+    candidates.push({
+      kind: "existing_payment",
+      id: p.id as string,
+      label: rec?.description
+        ? `Pagamento já lançado: ${rec.description}`
+        : "Pagamento já lançado",
+      amount: Number(p.amount),
+      // Pagamento de conta a receber é dinheiro entrando; de conta a pagar, saindo.
+      direction: p.receivable_id ? "credit" : "debit",
+      dueDate: p.payment_date as string,
+      clientId: rec?.client_id ?? null,
+      clientName: cliente?.name ?? null,
+      clientDocument: cliente?.cpf_cnpj ?? null,
+      documentNumber: rec?.service_orders?.service_order_number ?? null,
+      serviceOrderId: rec?.service_order_id ?? null,
+    });
+  }
+
+  // 6. Saldo de OS ativa ainda não lançado como conta a receber.
   const { data: orders } = await admin
     .from("service_orders")
     .select("id, service_order_number, grand_total, created_at, client_id, clients(name, cpf_cnpj)")
@@ -439,6 +480,14 @@ async function applySuggestion(
   const hoje = tx.transaction_date;
 
   try {
+    // Pagamento já existente: apenas amarra a transação a ele. Criar lançamento aqui
+    // dobraria a receita, porque o dinheiro já está registrado no financeiro.
+    if (candidate.kind === "existing_payment") {
+      await marcarConciliada(admin, tx.id, candidate.id, candidate.serviceOrderId ?? null);
+      await aprender(admin, tx, candidate);
+      return { ok: true, message: `Vinculado ao pagamento já registrado (${candidate.label})` };
+    }
+
     if (candidate.kind === "receivable" || candidate.kind === "payable") {
       const { data, error } = await admin.rpc("register_payment_and_update_balance", {
         p_receivable_id: candidate.kind === "receivable" ? candidate.id : null,

@@ -3,7 +3,8 @@ import { supabase } from '@/integrations/supabase/client';
 
 /** Espelha os tipos de `supabase/functions/_shared/banking/types.ts`. */
 export type CandidateKind =
-  | 'receivable' | 'payable' | 'collection' | 'quote_deposit' | 'service_order_balance';
+  | 'receivable' | 'payable' | 'collection' | 'quote_deposit'
+  | 'service_order_balance' | 'existing_payment';
 
 export interface ReconcileCandidate {
   kind: CandidateKind;
@@ -186,4 +187,5 @@ export const CANDIDATE_LABELS: Record<CandidateKind, string> = {
   collection: 'Cobrança',
   quote_deposit: 'Sinal de orçamento',
   service_order_balance: 'Saldo de OS',
+  existing_payment: 'Pagamento já registrado',
 };

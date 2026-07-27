@@ -26,7 +26,14 @@ export type CandidateKind =
   | "payable"
   | "collection"
   | "quote_deposit"
-  | "service_order_balance";
+  | "service_order_balance"
+  /**
+   * Pagamento que JÁ foi registrado no ERP e ainda não foi ligado a nenhuma linha do
+   * extrato. É o fluxo real de quem lança o recebimento na hora e importa o extrato
+   * depois: o dinheiro não precisa de baixa nova, precisa de vínculo. Conciliar este
+   * tipo não cria lançamento nenhum — só amarra a transação ao pagamento existente.
+   */
+  | "existing_payment";
 
 export interface Candidate {
   kind: CandidateKind;

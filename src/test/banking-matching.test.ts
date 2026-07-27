@@ -220,6 +220,37 @@ describe("cenário real do sistema (orçamentos em produção em 27/07/2026)", (
   });
 });
 
+describe("pagamento já registrado (caso real: lançado na hora, extrato importado depois)", () => {
+  // Encontrado com dados de produção: 6 das 19 entradas pendentes correspondiam a
+  // pagamentos que já estavam no financeiro. Sem este tipo de candidato elas ficavam
+  // órfãs, porque a conta correspondente já estava quitada e não entrava como "em aberto".
+  const pagamentoLancado: Candidate = {
+    kind: "existing_payment", id: "pay-1", label: "Pagamento já lançado: Sinal — OS-00060",
+    amount: 18001.04, direction: "credit", dueDate: "2026-07-20",
+    clientId: "cli-charline", clientName: "Charline Martins", clientDocument: "06150839940",
+    documentNumber: "OS-00060", serviceOrderId: "so-60",
+  };
+
+  it("casa o pagamento já registrado pelo valor e pela data", () => {
+    const out = suggestMatches(
+      tx({ amount: 18001.04, transaction_date: "2026-07-20", description: "79973019920-LUCENIRA MARIA DE MELO" }),
+      [pagamentoLancado],
+    );
+    expect(out[0].candidate.kind).toBe("existing_payment");
+    expect(out[0].difference).toBe(0);
+  });
+
+  it("não vira certeza quando quem pagou é um terceiro", () => {
+    // Lucenira pagou pela Charline: o CPF do extrato não é o do cadastro, então o
+    // casamento continua sendo sugestão para conferência, não conciliação automática.
+    const out = suggestMatches(
+      tx({ amount: 18001.04, transaction_date: "2026-07-20", counterparty_document: "79973019920" }),
+      [pagamentoLancado],
+    );
+    expect(pickAutoApply(out)).toBeNull();
+  });
+});
+
 describe("memória de conciliação", () => {
   it("gera a mesma assinatura para históricos que variam só no ruído bancário", () => {
     const a = statementSignature('PIX RECEBIDO MARINA DO SOL LTDA', null);

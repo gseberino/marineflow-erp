@@ -582,6 +582,13 @@ export function BankReconciliation() {
                                 </p>
                               )}
 
+                              {s.candidate.kind === 'existing_payment' && (
+                                <p className="text-xs text-muted-foreground">
+                                  Este recebimento já está lançado no financeiro. Confirmar apenas
+                                  liga esta linha do extrato a ele — nenhum valor novo é registrado.
+                                </p>
+                              )}
+
                               {s.candidate.convertsQuote && (
                                 <p className="text-xs flex items-center gap-1.5 text-muted-foreground">
                                   <AlertTriangle className="h-3 w-3 shrink-0" />
