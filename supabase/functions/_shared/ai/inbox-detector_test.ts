@@ -1,8 +1,47 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
-  isWorthAnalyzing, normalizeProposal, formatConversation, CONFIDENCE_FLOOR,
+  isWorthAnalyzing, normalizeProposal, formatConversation, CONFIDENCE_FLOOR, buildDateTable,
+  isDetectorAutonomous, shouldAutoCreate, AUTONOMY_MIN_SAMPLE,
   type ConversationMessage, type RawProposal,
 } from "./inbox-detector.ts";
+
+Deno.test("isDetectorAutonomous: exige amostra mínima E taxa alta", () => {
+  // amostra insuficiente, mesmo com 100% de aceite
+  assertEquals(isDetectorAutonomous({ accepted: 5, dismissed: 0 }), false);
+  // amostra ok mas taxa baixa (7/10 = 70%)
+  assertEquals(isDetectorAutonomous({ accepted: 7, dismissed: 3 }), false);
+  // amostra ok e taxa no limite (8/10 = 80%)
+  assertEquals(isDetectorAutonomous({ accepted: 8, dismissed: 2 }), true);
+  assertEquals(isDetectorAutonomous(undefined), false);
+  assertEquals(AUTONOMY_MIN_SAMPLE, 8);
+});
+
+Deno.test("shouldAutoCreate: só cria sozinho com detector provado, confiança alta e flag ligada", () => {
+  const provado = { promise: { accepted: 9, dismissed: 1 } };
+  const alta = { detector: "promise" as const, confidence: 0.9 };
+  const media = { detector: "promise" as const, confidence: 0.7 };
+
+  assertEquals(shouldAutoCreate(alta, provado, true), true);
+  // confiança abaixo do piso de auto-criação, mesmo com detector provado
+  assertEquals(shouldAutoCreate(media, provado, true), false);
+  // flag global desligada trava tudo
+  assertEquals(shouldAutoCreate(alta, provado, false), false);
+  // detector sem histórico nunca cria sozinho
+  assertEquals(shouldAutoCreate({ detector: "followup", confidence: 0.99 }, provado, true), false);
+  // detector com histórico ruim nunca cria sozinho
+  assertEquals(shouldAutoCreate(alta, { promise: { accepted: 4, dismissed: 6 } }, true), false);
+});
+
+Deno.test("buildDateTable: converte dia relativo na data certa (domingo 26/07/2026)", () => {
+  // 2026-07-26T15:00Z = domingo 26/07 12:00 BRT
+  const t = buildDateTable(new Date("2026-07-26T15:00:00Z"));
+  assertEquals(t.includes("hoje = 2026-07-26 (domingo)"), true);
+  assertEquals(t.includes("amanhã = 2026-07-27 (segunda-feira)"), true);
+  assertEquals(t.includes("segunda-feira (a próxima) = 2026-07-27"), true);
+  assertEquals(t.includes("sexta-feira (a próxima) = 2026-07-31"), true);
+  // dia citado que é HOJE aponta para a próxima semana (nunca para o passado)
+  assertEquals(t.includes("domingo (a próxima) = 2026-08-02"), true);
+});
 
 const NOW = new Date("2026-07-26T15:00:00Z"); // 12:00 BRT
 

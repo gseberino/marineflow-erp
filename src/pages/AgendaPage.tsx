@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { PageHeader } from '@/components/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -25,6 +25,8 @@ import {
   useQuickSchedule,
   useSaveAgendaTask,
   useSuggestions,
+  useAutoCreated,
+  useUndoAutoCreated,
 } from '@/hooks/use-agenda';
 import { TaskCard } from '@/components/agenda/TaskCard';
 import { AgendaTaskDialog, type ExistingTask } from '@/components/AgendaTaskDialog';
@@ -90,7 +92,12 @@ const TASK_PRIORITY_CLASSES: Record<string, string> = {
 
 export default function AgendaPage() {
   const navigate = useNavigate();
-  const [view, setView] = useState<ViewMode>('today');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [view, setView] = useState<ViewMode>(() => {
+    const v = searchParams.get('view');
+    return (['today', 'week', 'month', 'done', 'inbox'] as const).includes(v as any)
+      ? (v as ViewMode) : 'today';
+  });
   const [cursor, setCursor] = useState(() => new Date());
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
 
@@ -135,7 +142,11 @@ export default function AgendaPage() {
   const completeTask = useCompleteTask();
   const reschedule = useRescheduleTask();
   const saveTask = useSaveAgendaTask();
-  const [quickText, setQuickText] = useState('');
+  const [quickText, setQuickText] = useState(() =>
+    // Share Target (Android): texto compartilhado de qualquer app cai aqui pronto
+    [searchParams.get('share_title'), searchParams.get('share_text'), searchParams.get('share_url')]
+      .filter(Boolean).join(' ').trim());
+  const voiceTriggerRef = useRef<HTMLDivElement>(null);
   const [scheduleOsId, setScheduleOsId] = useState<string | undefined>(undefined);
   const [focusOpen, setFocusOpen] = useState(false);
 
@@ -215,6 +226,20 @@ export default function AgendaPage() {
     a.click();
     URL.revokeObjectURL(a.href);
   };
+
+  // Atalhos do PWA e Share Target: consome os parâmetros e limpa a URL,
+  // para um F5 não repetir a ação (ex.: reabrir o gravador).
+  useEffect(() => {
+    if (searchParams.get('action') === 'voice') {
+      voiceTriggerRef.current?.querySelector('button')?.click();
+    }
+    if (searchParams.has('view') || searchParams.has('action')
+        || searchParams.has('share_text') || searchParams.has('share_title')
+        || searchParams.has('share_url')) {
+      setSearchParams({}, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleTaskDrop = (task: any, technicianId: string, dateKey: string) => {
     reschedule.mutate(
@@ -300,7 +325,7 @@ export default function AgendaPage() {
           <Button size="sm" onClick={handleQuickAdd} disabled={saveTask.isPending || !quickText.trim()}>
             {saveTask.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Criar'}
           </Button>
-          <VoiceCaptureButton />
+          <div ref={voiceTriggerRef} className="contents"><VoiceCaptureButton /></div>
           <Button size="sm" variant="outline" onClick={handleExportCsv} title="Exportar CSV da visão atual">
             <Download className="h-4 w-4" />
           </Button>
@@ -494,10 +519,36 @@ export default function AgendaPage() {
 function InboxView({ suggestions }: { suggestions: any[] }) {
   const fromChat = suggestions.filter((s: any) => s.origin === 'whatsapp');
   const fromVoice = suggestions.filter((s: any) => s.origin !== 'whatsapp');
+  const { data: autoCreated = [] } = useAutoCreated();
+  const undo = useUndoAutoCreated();
 
   return (
     <div className="space-y-5 max-w-2xl">
-      {suggestions.length === 0 && (
+      {autoCreated.length > 0 && (
+        <div className="rounded-md border border-primary/30 bg-primary/5 p-3 space-y-2">
+          <p className="text-xs font-semibold text-primary">
+            Criei sozinho nas últimas 24h ({autoCreated.length})
+          </p>
+          <p className="text-[11px] text-muted-foreground">
+            Estes tipos de sugestão você aceitou o suficiente para eu passar a criar direto.
+            Se algum estiver errado, é só desfazer — e eu volto a perguntar.
+          </p>
+          {autoCreated.map((s: any) => (
+            <div key={s.id} className="flex items-center gap-2 text-sm">
+              <span className="flex-1 truncate">{s.title}</span>
+              <Button size="sm" variant="ghost" className="h-6 text-xs"
+                onClick={() => undo.mutate(s, {
+                  onSuccess: () => toast.success('Desfeito — voltou para decisão'),
+                  onError: (e: any) => toast.error(e?.message || 'Erro ao desfazer'),
+                })}>
+                Desfazer
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {suggestions.length === 0 && autoCreated.length === 0 && (
         <div className="py-10 text-center space-y-2">
           <p className="text-sm font-medium">Caixa de entrada vazia</p>
           <p className="text-xs text-muted-foreground max-w-md mx-auto">

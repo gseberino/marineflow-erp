@@ -502,6 +502,48 @@ export function useSuggestions() {
   });
 }
 
+/** Tarefas que o sistema criou SOZINHO nas últimas 24h (Fase 11) — sempre desfazíveis. */
+export function useAutoCreated() {
+  return useQuery({
+    queryKey: ['agenda-auto-created'],
+    refetchInterval: 5 * 60 * 1000,
+    queryFn: async () => {
+      const since = new Date(Date.now() - 24 * 3600000).toISOString();
+      const { data, error } = await supabase
+        .from('agenda_suggestions')
+        .select('*, agenda_tasks:created_task_id(id, title, status)')
+        .eq('status', 'accepted')
+        .eq('dismiss_reason', 'auto:autonomia')
+        .gte('resolved_at', since)
+        .order('resolved_at', { ascending: false })
+        .limit(20);
+      if (error) throw error;
+      return data || [];
+    },
+  });
+}
+
+/** Desfaz uma criação automática: apaga a tarefa e devolve o card para decisão. */
+export function useUndoAutoCreated() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (suggestion: any) => {
+      if (suggestion.created_task_id) {
+        await supabase.from('agenda_tasks').delete().eq('id', suggestion.created_task_id);
+      }
+      const { error } = await supabase.from('agenda_suggestions').update({
+        status: 'pending', resolved_at: null, created_task_id: null, dismiss_reason: null,
+      }).eq('id', suggestion.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['agenda-suggestions'] });
+      qc.invalidateQueries({ queryKey: ['agenda-auto-created'] });
+      invalidateTaskQueries(qc);
+    },
+  });
+}
+
 function invalidateSuggestions(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ['agenda-suggestions'] });
 }

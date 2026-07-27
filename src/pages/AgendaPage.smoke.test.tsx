@@ -80,6 +80,8 @@ vi.mock('@/hooks/use-agenda', () => ({
   useAcceptSuggestion: mut,
   useDismissSuggestion: mut,
   useVoiceCapture: mut,
+  useAutoCreated: () => q([]),
+  useUndoAutoCreated: mut,
   useAgendaOrders: () => q([{
     id: 'so-1', service_order_number: 'OS-100', status: 'scheduled',
     scheduled_start_at: new Date().toISOString(), scheduled_end_at: new Date(Date.now() + 3600000).toISOString(),

@@ -5,7 +5,10 @@
 // com lista de exclusão por contato (agenda_detector_exclusions).
 // Cursor em app_settings.agenda_detector_cursor evita reprocessar e limita custo.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { detectInConversation, type ConversationMessage } from "../_shared/ai/inbox-detector.ts";
+import {
+  detectInConversation, shouldAutoCreate,
+  type ConversationMessage, type DetectorStats,
+} from "../_shared/ai/inbox-detector.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -31,11 +34,24 @@ Deno.serve(async (req) => {
 
   try {
     const { data: settingsRows } = await db.from("app_settings").select("key, value")
-      .in("key", [CURSOR_KEY, "agenda_detector_enabled"]);
+      .in("key", [CURSOR_KEY, "agenda_detector_enabled", "agenda_autonomy_enabled"]);
     const settings = Object.fromEntries((settingsRows || []).map((s: any) => [s.key, s.value]));
 
     if ((settings["agenda_detector_enabled"] ?? "true") !== "true") {
       return jr({ ok: true, skipped: "disabled" });
+    }
+    // Autonomia graduada (Fase 11): nasce LIGADA, mas só age em detector que já provou
+    // acerto (≥8 decisões e ≥80% de aceite). Até lá, tudo continua indo para a caixa.
+    const autonomyEnabled = (settings["agenda_autonomy_enabled"] ?? "true") === "true";
+
+    // Histórico de decisões por detector — a evidência que libera (ou não) a autonomia
+    const { data: hist } = await db.from("agenda_suggestions")
+      .select("detector, status").in("status", ["accepted", "dismissed"]).limit(1000);
+    const statsByDetector: Record<string, DetectorStats> = {};
+    for (const s of ((hist as any[]) || [])) {
+      statsByDetector[s.detector] = statsByDetector[s.detector] || { accepted: 0, dismissed: 0 };
+      if (s.status === "accepted") statsByDetector[s.detector].accepted++;
+      else statsByDetector[s.detector].dismissed++;
     }
 
     // Janela: do cursor até agora (com piso de 24h para não varrer histórico inteiro)
@@ -81,6 +97,7 @@ Deno.serve(async (req) => {
       .slice(0, MAX_CONVERSATIONS_PER_RUN);
 
     let created = 0;
+    let autoCreated = 0;
     const detalhes: any[] = [];
 
     for (const [phone, convMsgs] of conversations) {
@@ -111,7 +128,8 @@ Deno.serve(async (req) => {
         const proposals = await detectInConversation(contextMsgs, contactLabel);
 
         for (const p of proposals) {
-          const { error } = await db.from("agenda_suggestions").insert({
+          const auto = shouldAutoCreate(p, statsByDetector, autonomyEnabled);
+          const { data: sugg, error } = await db.from("agenda_suggestions").insert({
             title: p.title,
             kind: p.kind,
             suggested_due_at: p.suggested_due_at,
@@ -129,10 +147,41 @@ Deno.serve(async (req) => {
             related_entity_type: clientId ? "client" : null,
             related_entity_id: clientId,
             target_user_id: targetUserId,
-          });
+          }).select("id").single();
           // 23505 = já existe sugestão viva idêntica para a mesma mensagem
-          if (!error) created++;
-          else if ((error as any).code !== "23505") console.error("insert suggestion:", error);
+          if (error) {
+            if ((error as any).code !== "23505") console.error("insert suggestion:", error);
+            continue;
+          }
+          created++;
+
+          // Autonomia conquistada: cria a tarefa direto e marca a sugestão como aceita.
+          // O card continua existindo (com o vínculo), então desfazer é 1 clique.
+          if (auto) {
+            const { data: task } = await db.from("agenda_tasks").insert({
+              title: p.title,
+              kind: p.kind,
+              status: "pending",
+              priority: p.priority || "normal",
+              assignee_user_id: targetUserId,
+              due_at: p.suggested_due_at,
+              scheduled_start_at: p.suggested_start_at,
+              client_id: clientId,
+              related_entity_type: clientId ? "client" : null,
+              related_entity_id: clientId,
+              notes: `Criada automaticamente da conversa com ${contactLabel}\n"${p.evidence}"`,
+              source: "ai",
+            }).select("id").single();
+            if (task) {
+              await db.from("agenda_suggestions").update({
+                status: "accepted",
+                resolved_at: new Date().toISOString(),
+                created_task_id: (task as any).id,
+                dismiss_reason: "auto:autonomia",
+              }).eq("id", (sugg as any).id);
+              autoCreated++;
+            }
+          }
         }
         if (proposals.length > 0) {
           detalhes.push({ contato: contactLabel, propostas: proposals.length });
@@ -156,6 +205,10 @@ Deno.serve(async (req) => {
       novas_mensagens: rows.length,
       conversas_analisadas: conversations.length,
       sugestoes: created,
+      criadas_automaticamente: autoCreated,
+      autonomia: Object.fromEntries(Object.entries(statsByDetector).map(([k, v]) => [
+        k, `${v.accepted}/${v.accepted + v.dismissed}`,
+      ])),
       detalhes,
     });
   } catch (e) {

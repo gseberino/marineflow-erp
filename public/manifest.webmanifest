@@ -12,5 +12,37 @@
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
     { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
-  ]
+  ],
+  "shortcuts": [
+    {
+      "name": "Minha agenda hoje",
+      "short_name": "Hoje",
+      "description": "O que fazer agora: atrasadas, do dia e sem data",
+      "url": "/agenda?view=today",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Ditar um recado",
+      "short_name": "Ditar",
+      "description": "Fale e vire tarefa na caixa de entrada",
+      "url": "/agenda?action=voice",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Caixa de entrada",
+      "short_name": "Sugestões",
+      "description": "Sugestões esperando sua decisão",
+      "url": "/agenda?view=inbox",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    }
+  ],
+  "share_target": {
+    "action": "/agenda",
+    "method": "GET",
+    "params": {
+      "title": "share_title",
+      "text": "share_text",
+      "url": "share_url"
+    }
+  }
 }

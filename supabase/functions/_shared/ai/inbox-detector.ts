@@ -43,6 +43,37 @@ export const CONFIDENCE_FLOOR: Record<DetectorKind, number> = {
   followup: 0.75,
 };
 
+export interface DetectorStats { accepted: number; dismissed: number }
+
+/**
+ * Autonomia graduada (Fase 11): um detector só passa a criar tarefa DIRETO depois de
+ * provar que acerta — mínimo de amostra + taxa de aceite alta. Enquanto não provar,
+ * continua propondo na caixa de entrada. Regra deliberadamente conservadora: um único
+ * detector ruim que crie tarefa sozinho destrói a confiança na agenda inteira.
+ */
+export const AUTONOMY_MIN_SAMPLE = 8;
+export const AUTONOMY_MIN_RATE = 0.8;
+
+export function isDetectorAutonomous(stats: DetectorStats | undefined): boolean {
+  if (!stats) return false;
+  const total = stats.accepted + stats.dismissed;
+  if (total < AUTONOMY_MIN_SAMPLE) return false;
+  return stats.accepted / total >= AUTONOMY_MIN_RATE;
+}
+
+/** Confiança extra exigida para criar direto (além do limiar normal do detector). */
+export const AUTO_CREATE_CONFIDENCE = 0.85;
+
+export function shouldAutoCreate(
+  p: { detector: DetectorKind; confidence: number },
+  statsByDetector: Record<string, DetectorStats>,
+  enabled: boolean,
+): boolean {
+  if (!enabled) return false;
+  if (p.confidence < AUTO_CREATE_CONFIDENCE) return false;
+  return isDetectorAutonomous(statsByDetector[p.detector]);
+}
+
 /** Mensagens curtas/sem conteúdo não geram compromisso — filtra antes de gastar LLM. */
 export function isWorthAnalyzing(msgs: ConversationMessage[]): boolean {
   const texts = msgs
@@ -141,10 +172,38 @@ const PROPOSE_TOOL: ClaudeToolSchema = {
   },
 };
 
-export function buildDetectorPrompt(hojeBRT: string, contactLabel: string): string {
+/** Nomes dos dias, para o prompt saber converter "segunda" na data certa. */
+const WEEKDAY_PT = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"];
+
+/** Tabela de conversão de dia relativo → data ISO, calculada no servidor (o modelo erra aritmética de calendário). */
+export function buildDateTable(now: Date): string {
+  const todayBRT = new Date(now.getTime() - 3 * 3600000);
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  const plus = (n: number) => {
+    const d = new Date(todayBRT);
+    d.setUTCDate(d.getUTCDate() + n);
+    return d;
+  };
+  const linhas: string[] = [
+    `- hoje = ${iso(todayBRT)} (${WEEKDAY_PT[todayBRT.getUTCDay()]})`,
+    `- amanhã = ${iso(plus(1))} (${WEEKDAY_PT[plus(1).getUTCDay()]})`,
+    `- depois de amanhã = ${iso(plus(2))}`,
+  ];
+  // Próxima ocorrência de cada dia da semana (1..7 dias à frente)
+  for (let dow = 0; dow < 7; dow++) {
+    let delta = (dow - todayBRT.getUTCDay() + 7) % 7;
+    if (delta === 0) delta = 7; // "segunda" dita numa segunda = a próxima
+    linhas.push(`- ${WEEKDAY_PT[dow]} (a próxima) = ${iso(plus(delta))}`);
+  }
+  linhas.push(`- semana que vem = a partir de ${iso(plus(7))}`);
+  return linhas.join("\n");
+}
+
+export function buildDetectorPrompt(hojeBRT: string, contactLabel: string, dateTable = ""): string {
   return `Você analisa uma conversa de WhatsApp de uma empresa de manutenção náutica (HBR Marine) e extrai APENAS compromissos concretos que geram trabalho para a EQUIPE DA HBR.
 
 Hoje é ${hojeBRT} (America/Sao_Paulo). Conversa com: ${contactLabel}.
+${dateTable ? `\nCONVERSÃO DE DATAS (use exatamente estes valores em due_date — não calcule por conta própria):\n${dateTable}\n` : ""}
 
 O que É compromisso (proponha):
 - promise: alguém da HBR prometeu algo ("vou te mandar o orçamento amanhã", "te ligo segunda").
@@ -163,7 +222,9 @@ Regras invioláveis:
 1. Toda proposta precisa de "evidence": um TRECHO LITERAL copiado da conversa. Se você não consegue copiar uma frase que prove, NÃO proponha.
 2. Prefira NÃO propor a propor errado. Uma caixa de entrada com lixo é pior que vazia.
 3. Título no imperativo, específico e curto (máx. ~70 caracteres), com o nome de quem/o quê.
-4. Só coloque data/hora se a conversa disser. Nunca invente prazo.
+4. Só coloque data/hora se a conversa disser. Nunca invente prazo. Quando a conversa citar
+   um dia ("segunda", "amanhã", "dia 12", "essa semana"), CONVERTA para due_date usando a
+   tabela acima — uma tarefa com dia dito e sem due_date é um erro seu.
 5. No máximo 3 propostas por conversa — as mais importantes.`;
 }
 
@@ -189,7 +250,7 @@ export async function detectInConversation(
   const hojeBRT = new Date(now.getTime() - 3 * 3600000).toISOString().slice(0, 10);
   const result = await callClaude({
     model: MODEL_LITE,
-    system: [{ type: "text", text: buildDetectorPrompt(hojeBRT, contactLabel) }],
+    system: [{ type: "text", text: buildDetectorPrompt(hojeBRT, contactLabel, buildDateTable(now)) }],
     messages: [{ role: "user", content: [{ type: "text", text: formatConversation(msgs) }] }],
     tools: [PROPOSE_TOOL],
     maxTokens: 1500,
