@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeDeposit, depositBaseFromOrder, depositAmountFromPcts } from './quote-deposit';
+import { computeDeposit, depositBaseFromOrder, depositAmountFromPcts, computeSchedule } from './quote-deposit';
 
 // Dados REAIS do ORÇ-00060 (Charline): peças 16.450,67 + serviços 4.110,00 = 20.560,67 bruto,
 // desconto 560,67 → grand_total 20.000,00. Condição "100% peças + 50% serviços" no sinal.
@@ -58,5 +58,44 @@ describe('computeDeposit — sinal com desconto (fonte única)', () => {
     const b = depositBaseFromOrder(ORC_00060);
     const v = depositAmountFromPcts(b.laborCost, b.partsCost, b.expensesTotal, b.discountRatio, 50, 100, 0);
     expect(v).toBeCloseTo(18001.04, 2);
+  });
+});
+
+// Condição completa do ORÇ-00060: entrada (100% peças + 50% serviços) na aprovação e o restante
+// (50% serviços) em 30 dias. Base para a prévia do saldo (diálogo) e para gerar as cobranças.
+const COND_00060_COMPLETA = [
+  { tipo: 'aprovacao' as const, services_pct: 50, parts_pct: 100, days_after_approval: 0 },
+  { tipo: 'prazo' as const, services_pct: 50, parts_pct: 0, days_after_approval: 30 },
+];
+
+describe('computeSchedule — sinal + saldo (com desconto)', () => {
+  it('ORÇ-00060: sinal 18.001,04 + saldo 1.998,96 fecham o líquido (20.000)', () => {
+    const s = computeSchedule(ORC_00060, COND_00060_COMPLETA);
+    expect(s.signalAmount).toBeCloseTo(18001.04, 2);
+    expect(s.balance).toHaveLength(1);
+    expect(s.balance[0].amount).toBeCloseTo(1998.96, 2);
+    expect(s.balance[0].days).toBe(30);
+    expect(s.signalAmount + s.balanceTotal).toBeCloseTo(20000.0, 2);
+  });
+
+  it('exclui a parcela de entrada do saldo (só as parcelas futuras)', () => {
+    const s = computeSchedule(ORC_00060, COND_00060_COMPLETA);
+    // nenhuma linha do saldo pode ter days=0 (essas são entrada)
+    expect(s.balance.every((r) => r.days > 0)).toBe(true);
+  });
+
+  it('condição só com entrada → saldo vazio', () => {
+    const s = computeSchedule(ORC_00060, SINAL_100P_50S);
+    expect(s.balance).toHaveLength(0);
+    expect(s.balanceTotal).toBe(0);
+    expect(s.signalAmount).toBeCloseTo(18001.04, 2);
+  });
+
+  it('parcelas de saldo com valor zero são descartadas', () => {
+    const s = computeSchedule(ORC_00060, [
+      { tipo: 'aprovacao', services_pct: 50, parts_pct: 100, days_after_approval: 0 },
+      { tipo: 'prazo', services_pct: 0, parts_pct: 0, days_after_approval: 30 }, // 0 → descartada
+    ]);
+    expect(s.balance).toHaveLength(0);
   });
 });

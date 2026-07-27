@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, DollarSign, Info, Percent, Tag, Hash } from 'lucide-react';
+import { Loader2, DollarSign, Info, Percent, Tag, Hash, Paperclip, X, CalendarClock } from 'lucide-react';
 import { StockConfirmationDialog } from '@/components/StockConfirmationDialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -13,7 +13,7 @@ import { useAppSettings } from '@/hooks/use-app-settings';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
-import { depositAmountFromPcts, signalPctsFromInstallments } from '@/lib/quote-deposit';
+import { depositAmountFromPcts, signalPctsFromInstallments, computeScheduleFromParts, type DepositInstallment } from '@/lib/quote-deposit';
 import { usePaymentConditionPresets } from '@/hooks/use-payment-conditions';
 
 const PAYMENT_METHODS = [
@@ -48,6 +48,8 @@ interface Props {
   presetExpensesPct?: number;
   /** Rótulo da condição de pagamento já definida no orçamento — para o seletor já vir marcado. */
   appliedConditionLabel?: string;
+  /** Parcelas da condição — usadas na prévia do saldo quando não é um preset nomeado (custom). */
+  installments?: DepositInstallment[];
 }
 
 const fmt = (v: number) =>
@@ -68,6 +70,7 @@ export function RegisterDepositDialog({
   expensesTotal = 0,
   presetExpensesPct = 0,
   appliedConditionLabel = '',
+  installments,
 }: Props) {
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -96,6 +99,10 @@ export function RegisterDepositDialog({
   const [notes, setNotes]             = useState('');
   const [loading, setLoading]         = useState(false);
   const [stockConfirmOpen, setStockConfirmOpen] = useState(false);
+  const [receiptUrl, setReceiptUrl]   = useState('');
+  const [receiptPath, setReceiptPath] = useState('');
+  const [uploadingReceipt, setUploadingReceipt] = useState(false);
+  const receiptInputRef = useRef<HTMLInputElement>(null);
 
   // Reset geral ao abrir (não depende dos presets, que podem chegar depois via fetch).
   useEffect(() => {
@@ -107,6 +114,8 @@ export function RegisterDepositDialog({
     setDate(new Date().toISOString().split('T')[0]);
     setNotes('');
     setPresetLabel('');
+    setReceiptUrl('');
+    setReceiptPath('');
   }, [open]);
 
   // Sincroniza os % com o preset do orçamento — inclusive quando ele chega ASSÍNCRONO (a lista
@@ -154,6 +163,22 @@ export function RegisterDepositDialog({
   const partsNet = partsCost * ratio;
   const expensesComponent = Math.round((expensesTotal * expensesPct / 100) * ratio * 100) / 100;
 
+  // (D) Quanto de desconto do orçamento já está embutido nos valores exibidos.
+  const discountApplied = Math.round((laborCost + partsCost + expensesTotal) * (1 - ratio) * 100) / 100;
+
+  // (C) Prévia do saldo: parcelas da condição selecionada (preset nomeado ou custom do orçamento),
+  // fora a entrada, com a mesma conta do sinal. Reage à condição escolhida no seletor.
+  const activeInstallments = useMemo<DepositInstallment[]>(() => {
+    const p = (paymentPresets || []).find((x: any) => x.label === presetLabel);
+    if (p && Array.isArray((p as any).installments)) return (p as any).installments as DepositInstallment[];
+    return Array.isArray(installments) ? installments : [];
+  }, [presetLabel, paymentPresets, installments]);
+
+  const schedule = useMemo(
+    () => computeScheduleFromParts(laborCost, partsCost, expensesTotal, ratio, activeInstallments),
+    [laborCost, partsCost, expensesTotal, ratio, activeInstallments],
+  );
+
   // Calculate deposit amount from current mode
   const calcAmount = (): number => {
     if (mode === 'category') {
@@ -173,11 +198,42 @@ export function RegisterDepositDialog({
   const netAmt        = depositAmount - feeAmt;
   const isValid       = depositAmount > 0 && date;
 
+  // (E) Anexa o comprovante do pagamento — mesmo bucket/padrão dos comprovantes de despesa.
+  const handleReceiptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingReceipt(true);
+    try {
+      const ext = file.name.split('.').pop() || 'bin';
+      const uuid = (crypto as any).randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const path = `deposits/${serviceOrderId}/${uuid}.${ext}`;
+      const { error: upErr } = await supabase.storage.from('expense-receipts').upload(path, file, { contentType: file.type, upsert: false });
+      if (upErr) throw upErr;
+      const { data: urlData } = supabase.storage.from('expense-receipts').getPublicUrl(path);
+      setReceiptUrl(urlData.publicUrl);
+      setReceiptPath(path);
+      toast({ title: 'Comprovante anexado' });
+    } catch (err: any) {
+      toast({ title: 'Erro ao anexar comprovante', description: err.message, variant: 'destructive' });
+    } finally {
+      setUploadingReceipt(false);
+      if (receiptInputRef.current) receiptInputRef.current.value = '';
+    }
+  };
+
+  const handleRemoveReceipt = async () => {
+    if (receiptPath) {
+      try { await supabase.storage.from('expense-receipts').remove([receiptPath]); } catch { /* segue limpando o form */ }
+    }
+    setReceiptUrl('');
+    setReceiptPath('');
+  };
+
   const handleConfirm = async () => {
     if (!isValid) return;
     setLoading(true);
     try {
-      const { error } = await supabase.rpc('register_deposit_and_convert', {
+      const { data, error } = await supabase.rpc('register_deposit_and_convert', {
         p_service_order_id:  serviceOrderId,
         p_amount:            depositAmount,
         p_payment_date:      date,
@@ -186,13 +242,50 @@ export function RegisterDepositDialog({
         p_notes:             notes.trim() || null,
       });
       if (error) throw error;
+      const paymentId = (data as any)?.payment_id as string | undefined;
+
+      // (B) Se o usuário trocou a condição no diálogo, grava-a no orçamento para PDF/saldo baterem.
+      if (presetLabel && presetLabel !== appliedConditionLabel) {
+        const preset = (paymentPresets || []).find((p: any) => p.label === presetLabel);
+        if (preset) {
+          await supabase.from('service_orders').update({
+            payment_condition_preset_id: (preset as any).id,
+            payment_conditions: (preset as any).label,
+          } as never).eq('id', serviceOrderId);
+        }
+      }
+
+      // (E) Vincula o comprovante ao pagamento recém-criado.
+      if (receiptUrl && paymentId) {
+        await supabase.from('payments').update({
+          receipt_url: receiptUrl,
+          receipt_storage_path: receiptPath,
+        } as never).eq('id', paymentId);
+      }
+
+      // (F) Gera as cobranças do SALDO (sem WhatsApp). Só quando o sinal veio da condição
+      // (modo "por categoria"); em %/valor fixo o sinal é ad-hoc e não reconcilia com o saldo.
+      // Não-fatal: falha aqui não desfaz o sinal.
+      let balanceCreated = 0;
+      if (mode === 'category') {
+        try {
+          const { generateBalanceCollections } = await import('@/lib/generate-collections');
+          const res = await generateBalanceCollections({ serviceOrderId, approvalDate: date });
+          balanceCreated = res.created;
+        } catch (genErr) {
+          console.error('Falha ao gerar cobranças do saldo', genErr);
+        }
+      }
 
       toast({
         title: 'Sinal registrado!',
-        description: `${serviceOrderNumber} convertido em OS. Confirme o estoque das peças.`,
+        description: balanceCreated > 0
+          ? `${serviceOrderNumber} convertido em OS · ${balanceCreated} cobrança(s) do saldo criada(s). Confirme o estoque.`
+          : `${serviceOrderNumber} convertido em OS. Confirme o estoque das peças.`,
       });
       qc.invalidateQueries({ queryKey: ['service-orders'] });
       qc.invalidateQueries({ queryKey: ['receivables'] });
+      qc.invalidateQueries({ queryKey: ['collections'] });
       onOpenChange(false);
       // Open stock confirmation step
       setStockConfirmOpen(true);
@@ -271,6 +364,13 @@ export function RegisterDepositDialog({
             </div>
           </div>
 
+          {/* (D) Desconto do orçamento já embutido — dá confiança de que o valor está sincronizado */}
+          {mode === 'category' && discountApplied > 0 && (
+            <p className="text-xs text-muted-foreground -mt-1">
+              Valores já com o desconto do orçamento aplicado (−{fmt(discountApplied)}).
+            </p>
+          )}
+
           {/* Mode: category */}
           {mode === 'category' && (
             <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
@@ -342,6 +442,29 @@ export function RegisterDepositDialog({
             </div>
           )}
 
+          {/* (C) Prévia do saldo — as parcelas que vêm depois da entrada, com a mesma conta do sinal.
+              Só no modo "por categoria": nos modos %/valor fixo o sinal é ad-hoc e não gera saldo. */}
+          {mode === 'category' && schedule.balance.length > 0 && (
+            <div className="rounded-lg border bg-muted/20 p-3 space-y-1.5 text-sm">
+              <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                <CalendarClock className="h-3.5 w-3.5" /> Saldo após o sinal
+              </div>
+              {schedule.balance.map((r, i) => (
+                <div key={i} className="flex items-center justify-between">
+                  <span className="text-muted-foreground">{r.label} · {r.days} dia{r.days === 1 ? '' : 's'}</span>
+                  <span>{fmt(r.amount)}</span>
+                </div>
+              ))}
+              <div className="flex items-center justify-between pt-1.5 border-t font-medium">
+                <span>Total do saldo</span>
+                <span>{fmt(schedule.balanceTotal)}</span>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Ao confirmar, essas cobranças são criadas automaticamente (sem envio de WhatsApp).
+              </p>
+            </div>
+          )}
+
           {/* Payment method */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
@@ -390,6 +513,42 @@ export function RegisterDepositDialog({
               className="resize-none"
               placeholder="Comprovante, referência..."
             />
+          </div>
+
+          {/* (E) Comprovante do pagamento (opcional) */}
+          <div className="space-y-1.5">
+            <Label>Comprovante <span className="text-muted-foreground font-normal">(opcional)</span></Label>
+            {receiptUrl ? (
+              <div className="flex items-center gap-2 text-sm">
+                <a href={receiptUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-blue-600 underline">
+                  <Paperclip className="h-3.5 w-3.5" /> Comprovante anexado
+                </a>
+                <Button type="button" variant="ghost" size="sm" onClick={handleRemoveReceipt} className="h-6 px-2 text-muted-foreground">
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ) : (
+              <div>
+                <input
+                  ref={receiptInputRef}
+                  type="file"
+                  accept="image/*,application/pdf"
+                  className="hidden"
+                  onChange={handleReceiptUpload}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={uploadingReceipt}
+                  onClick={() => receiptInputRef.current?.click()}
+                  className="gap-1.5"
+                >
+                  {uploadingReceipt ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}
+                  Anexar comprovante
+                </Button>
+              </div>
+            )}
           </div>
 
           {/* Warning */}
