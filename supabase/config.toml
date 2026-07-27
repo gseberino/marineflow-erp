@@ -66,3 +66,11 @@ verify_jwt = false
 # Só LÊ conversas e grava sugestões — nunca cria tarefa nem envia mensagem.
 [functions.agenda-inbox-detector]
 verify_jwt = false
+
+# Integração bancária (Open Finance via Pluggy): receptor de webhooks do Pluggy.
+# Chega SEM Authorization — a autenticação é o token secreto na query string
+# (?token=), validado internamente contra PLUGGY_WEBHOOK_TOKEN (timing-safe).
+# A pluggy-connect-token NÃO entra aqui: mantém verify_jwt=true (default),
+# só usuário logado no ERP pode pedir Connect Token.
+[functions.pluggy-webhook]
+verify_jwt = false
