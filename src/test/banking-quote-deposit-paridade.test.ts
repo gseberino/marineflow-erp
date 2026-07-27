@@ -1,0 +1,113 @@
+// Guarda de paridade entre as duas implementações do cálculo de sinal.
+//
+// O frontend usa `src/lib/quote-deposit.ts` e as edge functions usam o espelho em
+// `_shared/banking/quote-deposit.ts`, porque Vite e Deno não compartilham módulos aqui.
+// Espelho que diverge em silêncio já causou um bug real neste sistema (o PDF e o botão
+// "Receber sinal" mostravam valores diferentes para a mesma condição). Este teste roda as
+// duas implementações com as mesmas entradas e falha se elas discordarem.
+
+import { describe, it, expect } from "vitest";
+import {
+  depositBaseFromOrder as baseFront,
+  depositAmountFromPcts as amountFront,
+  signalPctsFromInstallments as pctsFront,
+  type DepositInstallment,
+  type DepositOrderLike,
+} from "@/lib/quote-deposit";
+import {
+  depositBaseFromOrder as baseEdge,
+  depositAmountFromPcts as amountEdge,
+  signalPctsFromInstallments as pctsEdge,
+  expectedDepositAmount,
+} from "../../supabase/functions/_shared/banking/quote-deposit";
+
+const ordens: DepositOrderLike[] = [
+  // Orçamento real do sistema (ORÇ-00069): tem imposto, sem desconto.
+  { labor_cost_total: 5600, parts_cost_total: 2005.40, tax_amount: 1403.59 },
+  // Real (ORÇ-00061): tem desconto, só mão de obra.
+  { labor_cost_total: 5860, parts_cost_total: 0, discount_amount: 220 },
+  // Real (ORÇ-00070): mão de obra + peças, sem desconto nem imposto.
+  { labor_cost_total: 1685, parts_cost_total: 3636.36 },
+  // Com despesas e deslocamento não faturável.
+  {
+    labor_cost_total: 1000, parts_cost_total: 500, operational_cost_total: 200,
+    travel_cost_total: 300, is_travel_billable: false, subcontract_cost_total: 100,
+    discount_amount: 150, tax_amount: 50,
+  },
+  // Orçamento zerado (divisão por zero no discountRatio).
+  { labor_cost_total: 0, parts_cost_total: 0 },
+];
+
+const condicoes: (DepositInstallment[] | null)[] = [
+  null,
+  [{ tipo: "aprovacao", services_pct: 50, parts_pct: 100, expenses_pct: 0 }],
+  [{ days_after_approval: 0, percent: 30 }],
+  [{ tipo: "entrega", services_pct: 100, parts_pct: 100 }], // sem parcela de sinal
+  [{ tipo: "aprovacao", services_pct: 0, parts_pct: 0, expenses_pct: 0 }], // sinal zerado
+];
+
+describe("paridade frontend × edge function", () => {
+  it("deriva a mesma base e o mesmo discountRatio", () => {
+    for (const ordem of ordens) {
+      expect(baseEdge(ordem)).toEqual(baseFront(ordem));
+    }
+  });
+
+  it("calcula o mesmo valor de parcela", () => {
+    for (const ordem of ordens) {
+      const b = baseFront(ordem);
+      for (const [svc, parts, exp] of [[50, 100, 0], [30, 30, 30], [100, 0, 50]]) {
+        expect(amountEdge(b.laborCost, b.partsCost, b.expensesTotal, b.discountRatio, svc, parts, exp))
+          .toBe(amountFront(b.laborCost, b.partsCost, b.expensesTotal, b.discountRatio, svc, parts, exp));
+      }
+    }
+  });
+
+  it("extrai a mesma parcela de sinal das condições de pagamento", () => {
+    for (const cond of condicoes) {
+      expect(pctsEdge(cond)).toEqual(pctsFront(cond));
+    }
+  });
+});
+
+describe("sinal esperado (usado pela conciliação)", () => {
+  it("prefere a condição de pagamento quando ela define entrada", () => {
+    const r = expectedDepositAmount(
+      { labor_cost_total: 1000, parts_cost_total: 1000, grand_total: 2000 },
+      [{ tipo: "aprovacao", services_pct: 50, parts_pct: 50 }],
+      30,
+    );
+    expect(r).toEqual({ amount: 1000, source: "condicao" });
+  });
+
+  it("cai no percentual global quando não há condição", () => {
+    const r = expectedDepositAmount({ labor_cost_total: 1000, grand_total: 5321.36 }, null, 30);
+    expect(r).toEqual({ amount: 1596.41, source: "percentual" });
+  });
+
+  it("usa o percentual quando todas as parcelas são a prazo", () => {
+    const r = expectedDepositAmount(
+      { labor_cost_total: 1000, grand_total: 1000 },
+      [{ tipo: "prazo", days_after_approval: 30, services_pct: 100, parts_pct: 100 }],
+      30,
+    );
+    expect(r?.source).toBe("percentual");
+  });
+
+  it("trata parcela sem prazo definido como entrada, igual ao diálogo de sinal", () => {
+    // Peculiaridade herdada da regra do frontend: `days_after_approval` ausente vira 0,
+    // e dia 0 é entrada. Vale para qualquer tipo, inclusive 'entrega'. Documentado aqui
+    // porque afeta o valor que a conciliação vai esperar — se um dia isso for corrigido,
+    // precisa ser corrigido nos dois lados ao mesmo tempo.
+    const r = expectedDepositAmount(
+      { labor_cost_total: 1000, grand_total: 1000 },
+      [{ tipo: "entrega", services_pct: 100, parts_pct: 100 }],
+      30,
+    );
+    expect(r?.source).toBe("condicao");
+  });
+
+  it("devolve nulo quando não há como estimar", () => {
+    expect(expectedDepositAmount({ grand_total: 0 }, null, 30)).toBeNull();
+  });
+});

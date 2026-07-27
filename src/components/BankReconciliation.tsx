@@ -14,8 +14,12 @@ import { useClients } from '@/hooks/use-clients';
 import { useSuppliers } from '@/hooks/use-suppliers';
 import { OPERATIONAL_EXPENSE_CATEGORIES } from '@/lib/expense-categories';
 import { parseFile, decodeStatementFile, type BankTransaction } from '@/lib/bank-parser';
+import {
+  useReconcileSuggestions, useAutoReconcile, useApplySuggestion,
+  CANDIDATE_LABELS, type ReconcileSuggestion,
+} from '@/hooks/use-reconciliation';
 import { toast } from 'sonner';
-import { Upload, Check, X, Undo2 } from 'lucide-react';
+import { Upload, Check, X, Undo2, Sparkles, AlertTriangle } from 'lucide-react';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase } from '@/integrations/supabase/client';
@@ -39,6 +43,15 @@ export function BankReconciliation() {
   const createReceivable = useCreateReceivable();
   const createPayable = useCreatePayable();
   const registerPayment = useRegisterPayment();
+
+  // Motor de conciliação: sugestões pontuadas vindas do backend, que enxerga candidatos
+  // que a tela não tinha — sinal de orçamento, saldo de OS e cobranças avulsas.
+  const { data: engine, isLoading: engineLoading, refetch: refetchEngine } = useReconcileSuggestions();
+  const autoReconcile = useAutoReconcile();
+  const applySuggestion = useApplySuggestion();
+  const suggestionsByTx = new Map<string, ReconcileSuggestion[]>(
+    (engine?.transactions || []).map(t => [t.transaction.id, t.suggestions]),
+  );
 
   const [tab, setTab] = useState<TabType>('pending');
   const [preview, setPreview] = useState<BankTransaction[] | null>(null);
@@ -269,6 +282,45 @@ export function BankReconciliation() {
     } catch { toast.error('Erro'); }
   };
 
+  const handleAutoReconcile = async () => {
+    try {
+      const r = await autoReconcile.mutateAsync(false);
+      const { conciliadas, sugeridas, sem_candidato } = r.summary;
+      if (conciliadas === 0 && sugeridas === 0) {
+        toast.info('Nenhuma correspondência encontrada para as transações pendentes');
+      } else {
+        toast.success(
+          `${conciliadas} conciliada(s) automaticamente · ${sugeridas} com sugestão para revisar · ${sem_candidato} sem candidato`,
+        );
+      }
+      invalidateAll();
+    } catch (e: any) {
+      toast.error(e?.message || 'Erro ao conciliar');
+    }
+  };
+
+  const handleApplySuggestion = async (tx: any, s: ReconcileSuggestion) => {
+    try {
+      await applySuggestion.mutateAsync({
+        transactionId: tx.id,
+        amount: Number(tx.amount),
+        date: tx.transaction_date,
+        description: tx.description,
+        candidate: s.candidate,
+      });
+      toast.success(
+        s.candidate.convertsQuote
+          ? `Sinal registrado — ${s.candidate.documentNumber} aprovado e convertido em OS`
+          : `Conciliado com ${s.candidate.label}`,
+      );
+      setReconcileId(null);
+      invalidateAll();
+      refetchEngine();
+    } catch (e: any) {
+      toast.error(e?.message || 'Erro ao aplicar sugestão');
+    }
+  };
+
   const handleUnignore = async (id: string) => {
     try {
       await unignore.mutateAsync(id);
@@ -356,8 +408,16 @@ export function BankReconciliation() {
       {/* === PENDING TAB === */}
       {tab === 'pending' && (
         <div>
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold">{t.financial.unreconciledTransactions} ({pending.length})</h3>
+          <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="font-semibold">{t.financial.unreconciledTransactions} ({pending.length})</h3>
+              {pending.length > 0 && (
+                <Button size="sm" onClick={handleAutoReconcile} disabled={autoReconcile.isPending}>
+                  <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+                  {autoReconcile.isPending ? 'Analisando...' : 'Conciliar tudo'}
+                </Button>
+              )}
+            </div>
             <div className="flex gap-1 flex-wrap">
               {(['all', 'credit', 'debit'] as const).map(f => (
                 <Button key={f} size="sm" variant={filter === f ? 'default' : 'outline'} onClick={() => setFilter(f)}>
@@ -402,6 +462,84 @@ export function BankReconciliation() {
 
                 {reconcileId === tx.id && (
                   <div className="border-t p-4 bg-muted/30 space-y-4">
+                    {/* Sugestões do motor: já consideram sinal de orçamento, saldo de OS e
+                        cobranças — candidatos que as opções manuais abaixo não alcançam. */}
+                    {(() => {
+                      const smart = suggestionsByTx.get(tx.id) || [];
+                      if (engineLoading) {
+                        return <p className="text-sm text-muted-foreground">Analisando correspondências...</p>;
+                      }
+                      if (smart.length === 0) return null;
+                      return (
+                        <div className="space-y-2">
+                          <p className="text-sm font-medium flex items-center gap-1.5">
+                            <Sparkles className="h-3.5 w-3.5 text-primary" />
+                            Correspondências encontradas
+                          </p>
+                          {smart.map(s => (
+                            <div
+                              key={`${s.candidate.kind}-${s.candidate.id}`}
+                              className={`rounded-lg border p-3 space-y-2 ${
+                                s.tier === 'certain' ? 'border-success bg-success/5'
+                                  : s.tier === 'probable' ? 'border-warning bg-warning/5' : ''
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-3 flex-wrap">
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-medium">{s.candidate.label}</span>
+                                    <StatusBadge className="bg-muted text-muted-foreground">
+                                      {CANDIDATE_LABELS[s.candidate.kind]}
+                                    </StatusBadge>
+                                    <StatusBadge className={
+                                      s.tier === 'certain' ? 'bg-success/15 text-success'
+                                        : s.tier === 'probable' ? 'bg-warning/15 text-warning'
+                                        : 'bg-muted text-muted-foreground'
+                                    }>
+                                      {s.score}% de confiança
+                                    </StatusBadge>
+                                  </div>
+                                  {s.candidate.clientName && (
+                                    <p className="text-sm text-muted-foreground">{s.candidate.clientName}</p>
+                                  )}
+                                  <p className="text-xs text-muted-foreground mt-1">
+                                    {s.reasons.map(r => r.detail).join(' · ')}
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium">{formatCurrency(s.candidate.amount)}</span>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleApplySuggestion(tx, s)}
+                                    disabled={applySuggestion.isPending}
+                                  >
+                                    <Check className="h-3 w-3 mr-1" />{t.financial.confirmReconciliation}
+                                  </Button>
+                                </div>
+                              </div>
+
+                              {Math.abs(s.difference) >= 0.01 && (
+                                <p className="text-xs flex items-center gap-1.5 text-warning">
+                                  <AlertTriangle className="h-3 w-3 shrink-0" />
+                                  {s.difference > 0
+                                    ? `Entrou ${formatCurrency(Math.abs(s.difference))} a mais que o esperado`
+                                    : `Entrou ${formatCurrency(Math.abs(s.difference))} a menos que o esperado`}
+                                  {' — confirme se é juros, tarifa ou valor negociado.'}
+                                </p>
+                              )}
+
+                              {s.candidate.convertsQuote && (
+                                <p className="text-xs flex items-center gap-1.5 text-muted-foreground">
+                                  <AlertTriangle className="h-3 w-3 shrink-0" />
+                                  Confirmar vai aprovar o {s.candidate.documentNumber} e convertê-lo em OS.
+                                </p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+
                     <div className="flex flex-wrap gap-1.5">
                       {modeButtons.map(({ mode, label }) => (
                         <Button key={mode} size="sm" variant={reconcileMode === mode ? 'default' : 'outline'} onClick={() => setReconcileMode(mode)}>
