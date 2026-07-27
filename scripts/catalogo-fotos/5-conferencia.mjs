@@ -215,7 +215,7 @@ const html = `<title>Fotos do catálogo Victron — conferência do piloto</titl
 <div class="env">
   <header>
     <span class="marca">MarineFlow · Vendedor autônomo · Piloto Victron</span>
-    <h1>44 equipamentos Victron ganharam foto oficial. Confira antes de gravar.</h1>
+    <h1>${cartoes.filter((c) => c.b64).length} produtos ganharam foto oficial. Confira antes de gravar.</h1>
     <p class="sub">
       Cada foto veio do site do fabricante, casada com o modelo pelo nome. Nada foi gravado no
       catálogo ainda — esta página é só para você vetar o que estiver errado.
@@ -226,8 +226,7 @@ const html = `<title>Fotos do catálogo Victron — conferência do piloto</titl
     <div class="tile ok"><div class="n">${conta('ok')}</div><div class="r">variante casada</div></div>
     <div class="tile conferir"><div class="n">${conta('conferir')}</div><div class="r">foto da linha</div></div>
     <div class="tile pendente"><div class="n">${conta('pendente') + semFoto}</div><div class="r">sem candidato</div></div>
-    <div class="tile"><div class="n">296</div><div class="r">equipamentos sem foto hoje</div></div>
-    <div class="tile"><div class="n">2</div><div class="r">produtos com foto hoje</div></div>
+    <div class="tile"><div class="n">${cartoes.length}</div><div class="r">produtos nesta leva</div></div>
   </div>
 
   <div class="aviso">
