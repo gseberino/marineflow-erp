@@ -81,3 +81,19 @@ export function buildEmissionItem(it: EmissionDraftItem): EmissionBodyItem {
     referenced_item: it.referencedItemNumber || undefined,
   };
 }
+
+// Alíquota de ICMS reproduzida da nota de compra na devolução: a NF de devolução
+// deve destacar o ICMS original (base = vProd − vDesc) para o fornecedor creditar-se
+// (SEFAZ-SC Consulta 69/2018). aliq = vICMS / base × 100. Invariante à quantidade
+// (é percentual), então o destaque escala sozinho na devolução parcial. Pura +
+// testada de propósito: é cálculo fiscal e o build não checa tipos.
+export function computeReturnIcmsRate(
+  unitPrice: number,
+  quantity: number,
+  discount: number,
+  icmsValue: number,
+): number {
+  const base = (Number(unitPrice) || 0) * (Number(quantity) || 0) - (Number(discount) || 0);
+  if (base <= 0) return 0;
+  return Math.round(((Number(icmsValue) || 0) / base) * 10000) / 100;
+}

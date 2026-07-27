@@ -100,6 +100,21 @@ function chaveFmt(chave: unknown): string {
   return d.replace(/(\d{4})(?=\d)/g, '$1 ').trim();
 }
 
+// tPag do leiaute NF-e 4.00 (inclui o 14 = Duplicata Mercantil, usado quando a
+// nota tem grupo de cobrança).
+const TPAG_LABELS: Record<string, string> = {
+  '01': 'Dinheiro', '02': 'Cheque', '03': 'Cartão de Crédito', '04': 'Cartão de Débito',
+  '05': 'Crédito Loja', '10': 'Vale Alimentação', '11': 'Vale Refeição', '12': 'Vale Presente',
+  '13': 'Vale Combustível', '14': 'Duplicata Mercantil', '15': 'Boleto Bancário',
+  '16': 'Depósito Bancário', '17': 'PIX', '18': 'Transferência bancária / Carteira digital',
+  '19': 'Programa de fidelidade / Cashback', '90': 'Sem Pagamento', '99': 'Outros',
+};
+
+function paymentLabel(method: unknown): string {
+  const code = String(method ?? '').padStart(2, '0');
+  return TPAG_LABELS[code] ? `${code} — ${TPAG_LABELS[code]}` : (code || '—');
+}
+
 /**
  * Monta o documento HTML do espelho no layout oficial da DANFE. Autocontido:
  * sem CSS/JS externo, pronto para abrir numa aba e salvar como PDF.
@@ -153,10 +168,26 @@ export function buildEspelhoHtml(
 
   // Fatura (à vista / a prazo) na linha de FATURA/DUPLICATA da DANFE.
   const faturaLinha = billing?.invoice
-    ? `A prazo · Fatura ${esc(billing.invoice.number)} · Valor Original ${brl(billing.invoice.original_amount)} · Desconto ${brl(billing.invoice.discount_amount)} · Valor Líquido ${brl(billing.invoice.net_amount)}`
+    ? `Fatura ${esc(billing.invoice.number)} · Valor Original ${brl(billing.invoice.original_amount)} · Desconto ${brl(billing.invoice.discount_amount)} · Valor Líquido ${brl(billing.invoice.net_amount)}`
     : (payload?.payments?.some((p: any) => String(p?.method) === '90')
         ? 'Sem pagamento (devolução / remessa)'
         : `À vista · Valor ${brl(totalNota)}`);
+
+  const payments: Record<string, any>[] = Array.isArray(payload?.payments) ? payload.payments : [];
+  const duplicatas: Record<string, any>[] = Array.isArray(billing?.installments) ? billing.installments : [];
+  // Forma de pagamento com à vista/a prazo (a API não manda indicator no pagamento
+  // único da venda à vista → inferimos pela existência de fatura). tPag 90
+  // (devolução/remessa) não é à vista nem a prazo.
+  const pagamentosLinha = payments.length
+    ? payments.map((p) => {
+        const code = String(p?.method ?? '').padStart(2, '0');
+        const prazo = code === '90' ? '' : (p?.indicator === 1 || !!billing) ? ' · a prazo' : ' · à vista';
+        return `${paymentLabel(p?.method)}${prazo} — ${brl(p?.amount)}`;
+      }).join('<br>')
+    : '—';
+  const duplicatasLinha = duplicatas.length
+    ? duplicatas.map((d) => `${esc(d?.number)} · venc. ${dateBR(d?.due_date)} · ${brl(d?.amount)}`).join(' &nbsp;|&nbsp; ')
+    : '';
 
   // Informações complementares: o ";" vira quebra de linha (o DANFE converte;
   // confirmado pela Contora). Dividir ANTES de escapar (entidades HTML terminam
@@ -308,6 +339,7 @@ export function buildEspelhoHtml(
         </div>
         <div class="s bold">Nº ${esc(numeroFmt)}</div>
         <div class="s">Série ${esc(serieFmt)} · Folha 1/1</div>
+        <div class="s" style="font-size:6px">(nº/série previstos — reserva na emissão)</div>
       </div>
       <div class="chave">
         <div class="barcode"></div>
@@ -349,7 +381,9 @@ export function buildEspelhoHtml(
 
     <!-- Fatura / Duplicata -->
     <div class="cell b" style="background:#f0f0f0;font-weight:700;text-transform:uppercase;font-size:7px;padding:2px 4px">Fatura / Duplicata</div>
-    <div class="cell b" style="font-size:9px;padding:3px 5px">${esc(faturaLinha)}</div>
+    <div class="cell b" style="font-size:9px;padding:3px 5px">${faturaLinha}</div>
+    ${duplicatasLinha ? `<div class="cell b" style="font-size:9px;padding:3px 5px"><span class="cap">Duplicatas</span>${duplicatasLinha}</div>` : ''}
+    <div class="cell b" style="font-size:9px;padding:3px 5px"><span class="cap">Forma de pagamento</span>${pagamentosLinha}</div>
 
     <!-- Cálculo do imposto -->
     <div class="cell b" style="background:#f0f0f0;font-weight:700;text-transform:uppercase;font-size:7px;padding:2px 4px">Cálculo do imposto</div>

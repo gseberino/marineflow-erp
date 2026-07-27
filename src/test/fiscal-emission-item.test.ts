@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildEmissionItem, type EmissionDraftItem } from "../lib/fiscal-emission-item";
+import { buildEmissionItem, computeReturnIcmsRate, type EmissionDraftItem } from "../lib/fiscal-emission-item";
 
 const base: EmissionDraftItem = {
   code: "CERBO", name: "CENTRAL CERBO GX", ncm: "85176900", cfop: "6202", unit: "PC",
@@ -52,5 +52,27 @@ describe("buildEmissionItem", () => {
     expect(r.origin).toBe(2);
     expect(r.unit_price).toBe(100);
     expect(r.quantity).toBe(3);
+  });
+});
+
+describe("computeReturnIcmsRate", () => {
+  // Devolução destaca o ICMS da nota de compra: base = vProd − vDesc.
+  it("reproduz a alíquota da nota original (Kamell: 65,93 sobre base 1.648,27 = 4%)", () => {
+    // vProd 1.699,25 − vDesc 50,98 = base 1.648,27; ICMS 65,93 → 4,00%
+    expect(computeReturnIcmsRate(1699.25, 1, 50.98, 65.93)).toBe(4);
+  });
+
+  it("é invariante à quantidade (destaque escala sozinho na devolução parcial)", () => {
+    // mesma alíquota comprando 1 ou 10 unidades (valores × 10)
+    const a1 = computeReturnIcmsRate(100, 1, 0, 12);
+    const a10 = computeReturnIcmsRate(100, 10, 0, 120);
+    expect(a1).toBe(12);
+    expect(a10).toBe(12);
+  });
+
+  it("retorna 0 quando não há ICMS na origem (fornecedor sem destaque) ou base inválida", () => {
+    expect(computeReturnIcmsRate(100, 1, 0, 0)).toBe(0);
+    expect(computeReturnIcmsRate(0, 0, 0, 0)).toBe(0);
+    expect(computeReturnIcmsRate(100, 1, 100, 5)).toBe(0); // desconto zera a base
   });
 });

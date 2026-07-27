@@ -2376,8 +2376,11 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           grandTotal={grandTotal}
           laborCost={laborCost}
           partsCost={partsCost}
+          discountRatio={discountRatio}
+          expensesTotal={expensesTotal}
           presetServicesPct={depositFromFinancial && signalRow ? signalRow.services_pct : undefined}
           presetPartsPct={depositFromFinancial && signalRow ? signalRow.parts_pct : undefined}
+          presetExpensesPct={depositFromFinancial && signalRow ? signalRow.expenses_pct : undefined}
         />
       )}
 

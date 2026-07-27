@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ChevronDown, Loader2, RotateCcw, DollarSign, XCircle } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
@@ -7,6 +7,9 @@ import { useUpdateQuoteStatus, QUOTE_STATUS_TRANSITIONS } from '@/hooks/use-serv
 import { quoteStatusConfig } from '@/lib/constants';
 import { RegisterDepositDialog } from '@/components/RegisterDepositDialog';
 import { cn } from '@/lib/utils';
+import { supabase } from '@/integrations/supabase/client';
+import { usePaymentConditionPresets } from '@/hooks/use-payment-conditions';
+import { computeDeposit, type DepositComputation } from '@/lib/quote-deposit';
 
 interface Props {
   orderId: string;
@@ -20,9 +23,37 @@ interface Props {
 export function QuoteStatusQuickChange({ orderId, currentQuoteStatus, serviceOrderNumber = '', grandTotal = 0, laborCost = 0, partsCost = 0 }: Props) {
   const { toast } = useToast();
   const updateQuoteStatus = useUpdateQuoteStatus();
+  const { data: paymentPresets } = usePaymentConditionPresets();
   const [depositOpen, setDepositOpen] = useState(false);
   const [abandoning, setAbandoning] = useState(false);
+  const [deposit, setDeposit] = useState<DepositComputation | null>(null);
   const isBusy = updateQuoteStatus.isPending || abandoning;
+
+  // Ao abrir "Receber sinal": carrega os dados do orçamento + a condição de pagamento e computa
+  // o sinal pela MESMA lib que o orçamento usa — para a janela bater exatamente com o orçamento
+  // (com desconto e com o preset já definido), sem precisar abrir o orçamento.
+  useEffect(() => {
+    if (!depositOpen) return;
+    let cancelled = false;
+    (async () => {
+      const { data: so } = await supabase
+        .from('service_orders')
+        .select('labor_cost_total, parts_cost_total, operational_cost_total, travel_cost_total, subcontract_cost_total, is_travel_billable, discount_amount, tax_amount, payment_condition_preset_id, payment_conditions, custom_payment_installments')
+        .eq('id', orderId)
+        .maybeSingle();
+      if (cancelled || !so) return;
+      const o = so as any;
+      const preset = (paymentPresets || []).find(
+        (p: any) => p.id === o.payment_condition_preset_id ||
+          (p.label === o.payment_conditions && !o.payment_condition_preset_id),
+      );
+      const installments = Array.isArray(preset?.installments)
+        ? preset!.installments
+        : (Array.isArray(o.custom_payment_installments) ? o.custom_payment_installments : null);
+      setDeposit(computeDeposit(o, installments));
+    })();
+    return () => { cancelled = true; };
+  }, [depositOpen, orderId, paymentPresets]);
 
   const cfg = quoteStatusConfig[currentQuoteStatus];
   const validTransitions = QUOTE_STATUS_TRANSITIONS[currentQuoteStatus] ?? [];
@@ -83,12 +114,17 @@ export function QuoteStatusQuickChange({ orderId, currentQuoteStatus, serviceOrd
         </div>
         <RegisterDepositDialog
           open={depositOpen}
-          onOpenChange={setDepositOpen}
+          onOpenChange={v => { setDepositOpen(v); if (!v) setDeposit(null); }}
           serviceOrderId={orderId}
           serviceOrderNumber={serviceOrderNumber}
           grandTotal={grandTotal}
           laborCost={laborCost}
           partsCost={partsCost}
+          discountRatio={deposit?.discountRatio ?? 1}
+          expensesTotal={deposit?.expensesTotal ?? 0}
+          presetServicesPct={deposit?.signal?.servicesPct}
+          presetPartsPct={deposit?.signal?.partsPct}
+          presetExpensesPct={deposit?.signal?.expensesPct}
         />
       </>
     );

@@ -13,6 +13,8 @@ import { useAppSettings } from '@/hooks/use-app-settings';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
+import { depositAmountFromPcts, signalPctsFromInstallments } from '@/lib/quote-deposit';
+import { usePaymentConditionPresets } from '@/hooks/use-payment-conditions';
 
 const PAYMENT_METHODS = [
   { value: 'pix',           label: 'PIX' },
@@ -38,6 +40,12 @@ interface Props {
   presetPartsPct?: number;
   laborCost?: number;
   partsCost?: number;
+  // Sincronização com o orçamento: o sinal por categoria é sobre valores COM desconto.
+  // discountRatio = base(líquido)/subtotal(bruto); expensesTotal e presetExpensesPct entram
+  // na parcela como o orçamento faz. Padrões (1/0) preservam o comportamento antigo.
+  discountRatio?: number;
+  expensesTotal?: number;
+  presetExpensesPct?: number;
 }
 
 const fmt = (v: number) =>
@@ -54,11 +62,15 @@ export function RegisterDepositDialog({
   presetPartsPct,
   laborCost = 0,
   partsCost = 0,
+  discountRatio = 1,
+  expensesTotal = 0,
+  presetExpensesPct = 0,
 }: Props) {
   const { toast } = useToast();
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { data: settingsMap } = useAppSettings();
+  const { data: paymentPresets } = usePaymentConditionPresets();
 
   const depositPctGlobal = Number(settingsMap?.['quote_deposit_percentage'] ?? 30);
   const defaultMethod    = settingsMap?.['default_payment_method'] ?? 'pix';
@@ -71,6 +83,8 @@ export function RegisterDepositDialog({
   const [mode, setMode]             = useState<DepositMode>(hasPresetPcts ? 'category' : 'percent');
   const [servicesPct, setServicesPct] = useState(presetServicesPct ?? 0);
   const [partsPct, setPartsPct]       = useState(presetPartsPct ?? 0);
+  const [expensesPct, setExpensesPct] = useState(presetExpensesPct);
+  const [presetLabel, setPresetLabel] = useState('');
   const [globalPct, setGlobalPct]     = useState(depositPctGlobal);
   const [fixedValue, setFixedValue]   = useState('');
   const [method, setMethod]           = useState(defaultMethod);
@@ -80,28 +94,57 @@ export function RegisterDepositDialog({
   const [loading, setLoading]         = useState(false);
   const [stockConfirmOpen, setStockConfirmOpen] = useState(false);
 
+  // Reset geral ao abrir (não depende dos presets, que podem chegar depois via fetch).
   useEffect(() => {
     if (!open) return;
-    const initMode: DepositMode = hasPresetPcts ? 'category' : 'percent';
-    setMode(initMode);
-    setServicesPct(presetServicesPct ?? 0);
-    setPartsPct(presetPartsPct ?? 0);
     setGlobalPct(depositPctGlobal);
     setFixedValue('');
     setMethod(defaultMethod);
     setCardFee(String(defaultFee));
     setDate(new Date().toISOString().split('T')[0]);
     setNotes('');
+    setPresetLabel('');
   }, [open]);
+
+  // Sincroniza os % com o preset do orçamento — inclusive quando ele chega ASSÍNCRONO (a lista
+  // busca a condição ao abrir). Só mexe nos %/modo, sem resetar método/data/observações.
+  useEffect(() => {
+    if (!open) return;
+    setServicesPct(presetServicesPct ?? 0);
+    setPartsPct(presetPartsPct ?? 0);
+    setExpensesPct(presetExpensesPct ?? 0);
+    if ((presetServicesPct ?? 0) > 0 || (presetPartsPct ?? 0) > 0) setMode('category');
+  }, [open, presetServicesPct, presetPartsPct, presetExpensesPct]);
+
+  // Escolha de uma condição de pagamento pré-cadastrada direto no diálogo (agiliza o lançamento
+  // sem abrir o orçamento). Preenche serviços/peças/despesas % com a parcela de SINAL do preset.
+  const applyPreset = (label: string) => {
+    setPresetLabel(label);
+    const preset = (paymentPresets || []).find((p: any) => p.label === label);
+    const pcts = preset ? signalPctsFromInstallments((preset as any).installments) : null;
+    if (pcts) {
+      setServicesPct(pcts.servicesPct);
+      setPartsPct(pcts.partsPct);
+      setExpensesPct(pcts.expensesPct);
+      setMode('category');
+    }
+  };
+
+  // Valores COM desconto (o mesmo discountRatio que o orçamento aplica). Padrão ratio=1
+  // mantém o comportamento antigo quando o caller não passa o desconto.
+  const ratio = discountRatio && discountRatio > 0 ? discountRatio : 1;
+  const laborNet = laborCost * ratio;
+  const partsNet = partsCost * ratio;
+  const expensesComponent = Math.round((expensesTotal * expensesPct / 100) * ratio * 100) / 100;
 
   // Calculate deposit amount from current mode
   const calcAmount = (): number => {
     if (mode === 'category') {
-      return Math.round(
-        (laborCost * servicesPct / 100 + partsCost * partsPct / 100) * 100
-      ) / 100;
+      // Fonte única (mesma conta do orçamento): (labor·svc% + parts·parts% + desp·exp%) × ratio.
+      return depositAmountFromPcts(laborCost, partsCost, expensesTotal, ratio, servicesPct, partsPct, expensesPct);
     }
     if (mode === 'percent') {
+      // grandTotal já é o valor líquido (com desconto) — não reaplicar ratio.
       return Math.round(grandTotal * globalPct / 100 * 100) / 100;
     }
     return parseFloat(fixedValue.replace(',', '.')) || 0;
@@ -184,6 +227,23 @@ export function RegisterDepositDialog({
         </DialogHeader>
 
         <div className="space-y-4 py-1">
+          {/* Condição de pagamento pré-cadastrada — preenche os % do sinal na hora */}
+          {(paymentPresets || []).length > 0 && (
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Condição de pagamento</Label>
+              <Select value={presetLabel} onValueChange={applyPreset}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Escolher condição pré-cadastrada…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(paymentPresets || []).map((p: any) => (
+                    <SelectItem key={p.id} value={p.label}>{p.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
           {/* Mode selector */}
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground">Modo de cálculo</Label>
@@ -198,7 +258,7 @@ export function RegisterDepositDialog({
           {mode === 'category' && (
             <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
               <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Serviços ({fmt(laborCost)})</span>
+                <span className="text-muted-foreground">Serviços ({fmt(laborNet)})</span>
                 <div className="flex items-center gap-2">
                   <Input
                     type="number" min="0" max="100" step="5"
@@ -207,12 +267,12 @@ export function RegisterDepositDialog({
                     onChange={e => setServicesPct(Math.min(100, parseFloat(e.target.value) || 0))}
                   />
                   <span className="text-xs text-muted-foreground w-24 text-right">
-                    = {fmt(laborCost * servicesPct / 100)}
+                    = {fmt(laborNet * servicesPct / 100)}
                   </span>
                 </div>
               </div>
               <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Peças ({fmt(partsCost)})</span>
+                <span className="text-muted-foreground">Peças ({fmt(partsNet)})</span>
                 <div className="flex items-center gap-2">
                   <Input
                     type="number" min="0" max="100" step="5"
@@ -221,10 +281,16 @@ export function RegisterDepositDialog({
                     onChange={e => setPartsPct(Math.min(100, parseFloat(e.target.value) || 0))}
                   />
                   <span className="text-xs text-muted-foreground w-24 text-right">
-                    = {fmt(partsCost * partsPct / 100)}
+                    = {fmt(partsNet * partsPct / 100)}
                   </span>
                 </div>
               </div>
+              {expensesComponent > 0 && (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Despesas ({expensesPct}%)</span>
+                  <span className="text-xs text-muted-foreground w-24 text-right">= {fmt(expensesComponent)}</span>
+                </div>
+              )}
               <div className="flex items-center justify-between pt-2 border-t font-medium text-sm">
                 <span>Total do sinal</span>
                 <span className="text-lg font-bold text-orange-600">{fmt(depositAmount)}</span>
