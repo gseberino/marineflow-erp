@@ -1429,6 +1429,7 @@ export default function FiscalEmission() {
         const filename = buildDanfeFilename({
           nature: (selectedNature as any)?.label,
           number: res.number,
+          reference: (returnSource as any)?.number, // nº da NF de compra (devolução)
           recipient: recipientName,
           extension: res.is_pdf ? 'pdf' : 'xml',
         });
