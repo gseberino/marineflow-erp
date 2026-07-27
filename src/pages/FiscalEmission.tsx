@@ -1127,6 +1127,14 @@ export default function FiscalEmission() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     setItems((ret?.items || []).map((it: any, i: number) => {
       const qty = Number(it.quantity) || 0;
+      // Alíquota de ICMS REPRODUZIDA da nota de compra: a devolução deve destacar
+      // o ICMS original (base = vProd − vDesc) para o fornecedor creditar-se
+      // (princípio de anular os efeitos da operação; SEFAZ-SC Consulta 69/2018).
+      // Invariante à quantidade, então o destaque escala sozinho na parcial.
+      const baseIcmsItem = (Number(it.unitPrice) || 0) * qty - (Number(it.discount) || 0);
+      const icmsAliq = baseIcmsItem > 0
+        ? Math.round(((Number(it.icmsValue) || 0) / baseIcmsItem) * 10000) / 100
+        : 0;
       return {
         productId: null,
         code: it.code || '', name: it.name || '', ncm: it.ncm || '',
@@ -1143,10 +1151,12 @@ export default function FiscalEmission() {
         // buildEmissionItem), escalando sozinho na devolução parcial.
         other_expenses: 0,
         otherExpensesUnit: 0,
-        // Simples em devolução de compra: CSOSN 900, sem destaque de ICMS. A
-        // origem da mercadoria é preservada do XML da compra (intrínseca ao item).
+        // Simples em devolução de compra: CSOSN 900 COM destaque do ICMS,
+        // reproduzindo a alíquota da nota de compra (icmsAliq) — o grupo ICMSSN900
+        // aceita vBC/pICMS/vICMS. Assim o fornecedor (Regime Normal) recupera o
+        // crédito. A origem da mercadoria é preservada do XML da compra.
         csosn: '900', origin: Number(it.origin ?? 0) || 0,
-        icms_rate: 0, pis_rate: 0, cofins_rate: 0, ipi_rate: 0,
+        icms_rate: icmsAliq, pis_rate: 0, cofins_rate: 0, ipi_rate: 0,
         included: true,
         maxQuantity: qty, // não permite devolver mais do que foi comprado
         referencedKey: key,
