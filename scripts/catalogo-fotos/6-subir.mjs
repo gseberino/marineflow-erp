@@ -47,6 +47,26 @@ if (!seco && (!base || !chave)) {
   process.exit(1);
 }
 
+// Antes de tentar 44 uploads, um teste de credencial. Sem isto o erro aparece 44
+// vezes seguidas e a causa (chave inválida) fica escondida no meio do barulho.
+if (!seco) {
+  if (/^[<"']|placeholder|service_role,|cole aqui/i.test(chave) || chave.length < 40) {
+    console.error('a chave não parece uma service_role — o texto de exemplo foi copiado literalmente?');
+    process.exit(1);
+  }
+  const teste = await fetch(`${base}/storage/v1/bucket/${BUCKET}`, {
+    headers: { authorization: `Bearer ${chave}`, apikey: chave },
+  });
+  if (!teste.ok) {
+    console.error(
+      `credencial recusada pelo Storage (${teste.status}). ` +
+        'Confira SUPABASE_SERVICE_ROLE_KEY — nada foi enviado.',
+    );
+    process.exit(1);
+  }
+  console.log(`credencial ok · bucket ${BUCKET} acessível`);
+}
+
 const casamento = JSON.parse(fs.readFileSync(path.join(dados, 'casamento.json'), 'utf8'));
 const pasta = path.join(dados, 'normalizadas');
 
@@ -74,7 +94,14 @@ const falhas = [];
 for (const item of fila) {
   const arquivo = path.join(pasta, `${item.chave}.jpg`);
   const destino = `${PREFIXO}/${item.chave}.jpg`;
-  mapa.push({ sku: item.sku, name: item.name, chave: item.chave, url: urlPublica(destino) });
+  const registro = {
+    sku: item.sku,
+    name: item.name,
+    chave: item.chave,
+    url: urlPublica(destino),
+    subiu: false,
+  };
+  mapa.push(registro);
 
   if (seco) {
     console.log(`  [seco] ${item.chave} -> ${BUCKET}/${destino}`);
@@ -100,6 +127,7 @@ for (const item of fila) {
     continue;
   }
   subidas++;
+  registro.subiu = true;
   console.log(`  ${item.chave} subiu`);
 
   if (!gravarUrl) continue;
