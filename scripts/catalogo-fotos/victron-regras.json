@@ -49,6 +49,7 @@
     { "padrao": "suporte de parede gx touch", "slug": "gx-touch-50-wall-mount", "conf": "alta" },
     { "padrao": "tela gx touch 50|gx touch 50", "slug": "gx-touch-50", "conf": "alta" },
     { "padrao": "gx tank", "slug": "gx-tank-140", "conf": "alta" },
+    { "padrao": "io-?extender", "slug": "gx-io-extender-150", "conf": "alta" },
     { "padrao": "gx lte|lte 4g", "slug": "gx-lte-4g", "conf": "alta" },
     { "padrao": "ekrano", "slug": "ekrano-gx", "conf": "alta" },
     { "padrao": "cerbo", "slug": "cerbo-gx", "conf": "alta" },
@@ -75,6 +76,7 @@
 
     { "padrao": "l[ií]tio.*superpack|superpack", "slug": "12,8v-lithium-superpack", "conf": "alta" },
     { "padrao": "l[ií]tio.*\\bng\\b|lifepo4.*\\bng\\b", "slug": "lithium-ng-batteries", "conf": "alta" },
+    { "padrao": "(51[.,]?2|25[.,]?6|48)\\s*v.*(l[ií]tio|lifepo4)|(l[ií]tio|lifepo4).*(51[.,]?2|25[.,]?6)\\s*v", "slug": "lithium-ng-batteries", "conf": "media" },
     { "padrao": "lifepo4|bateria de l[ií]tio", "slug": "lithium-battery-12-8v", "conf": "alta" },
     { "padrao": "agm super cycle", "slug": "agm-super-cycle-battery", "conf": "alta" },
     { "padrao": "\\bagm\\b|\\bgel\\b", "slug": "gel-and-agm-batteries", "conf": "alta" },
