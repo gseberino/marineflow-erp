@@ -62,7 +62,7 @@ describe("buildEspelhoHtml", () => {
   it("marca claramente que é pré-visualização SEM VALOR FISCAL", () => {
     const html = buildEspelhoHtml(makePayload(), emitter);
     expect(html).toContain("SEM VALOR FISCAL");
-    expect(html).toContain("ESPELHO");
+    expect(html).toContain("PRÉ-VISUALIZAÇÃO");
     // Deixa explícito que só a autorização da SEFAZ dá valor fiscal.
     expect(html).toMatch(/autorizada pela SEFAZ/i);
   });
@@ -76,13 +76,13 @@ describe("buildEspelhoHtml", () => {
     expect(html).toContain("Produto A");
     expect(html).toContain("85176259"); // NCM
     expect(html).toContain("5102"); // CFOP
-    expect(html).toContain("CSOSN 102");
-    expect(html).toContain("301,00"); // total do item (2 × 150,50)
+    expect(html).toContain("0102"); // O/CST (origem 0 + CSOSN 102), como na DANFE
+    expect(html).toContain("301,00"); // valor total do item (2 × 150,50)
   });
 
-  it("mostra o quadro Fatura/Duplicatas quando a venda é parcelada", () => {
+  it("mostra o quadro Fatura/Duplicata quando a venda é parcelada", () => {
     const html = buildEspelhoHtml(makePayload(parcelado), emitter);
-    expect(html).toContain("Fatura / Duplicatas");
+    expect(html).toContain("Fatura / Duplicata");
     expect(html).toContain("001");
     expect(html).toContain("002");
     expect(html).toContain("14 — Duplicata Mercantil");
@@ -95,10 +95,11 @@ describe("buildEspelhoHtml", () => {
     expect(html).not.toContain("19/08/2026");
   });
 
-  it("não mostra o quadro de cobrança quando é à vista (sem billing)", () => {
+  it("à vista (sem billing): mostra a forma de pagamento mas nenhuma duplicata", () => {
     const html = buildEspelhoHtml(makePayload(), emitter);
-    expect(html).not.toContain("Fatura / Duplicatas");
+    expect(html).not.toContain("Duplicatas"); // sem parcelas
     expect(html).toContain("01 — Dinheiro");
+    expect(html).toContain("à vista");
   });
 
   it("escapa HTML dos dados (a página é aberta numa aba — nada de injeção)", () => {
@@ -122,8 +123,8 @@ describe("buildEspelhoHtml", () => {
 
   it("mostra o número/série previstos quando informados", () => {
     const html = buildEspelhoHtml(makePayload(), emitter, { number: 16, series: 2, environment: "producao" });
-    expect(html).toContain("NF-e nº 16");
-    expect(html).toContain("série 2");
+    expect(html).toContain("000.000.016"); // número formatado como na DANFE
+    expect(html).toContain("002"); // série
     expect(html).toContain("previsto"); // deixa claro que a reserva é na emissão
   });
 
@@ -188,7 +189,7 @@ describe("buildEspelhoHtml — despesas acessórias (vOutro)", () => {
       items: [{ code: "A", name: "Item", ncm: "1", cfop: "6202", quantity: 1, unit_price: 1699.25, discount: 50.98, other_expenses: 214.28 }],
       payments: [{ method: "90", amount: 0 }],
     }, {});
-    expect(html).toContain("Despesas acessórias");
+    expect(html).toContain("Outras despesas"); // rótulo do quadro Cálculo do imposto (DANFE)
     expect(html).toContain("214,28");
     // total da nota = 1699,25 − 50,98 + 214,28 = 1862,55
     expect(html).toContain("1.862,55");
@@ -232,5 +233,41 @@ describe("buildEspelhoHtml — desconto não é contado em dobro (Totais x Fatur
     expect(html).toContain("51,00");       // desconto uma vez
     expect(html).not.toContain("102,00");  // NÃO dobrado (51 itens + 51 fatura)
     expect(html).toContain("250,00");      // total da nota = net_amount
+  });
+});
+
+describe("buildEspelhoHtml — devolução: ICMS destacado + IPI devolvido", () => {
+  // Caso real Kamell: ICMS 4% destacado (base 1.648,27 → 65,93) + IPI devolvido
+  // 220,90 (impostoDevol) + total 1.869,17. Reproduz a nota de compra original.
+  const devol = {
+    nature_operation: "Devolução de compra",
+    operation_type: "saida",
+    purpose: 4,
+    items: [{
+      code: "2391", name: "ECRA TOUCH", ncm: "85285900", cfop: "6202", unit: "UN",
+      quantity: 1, unit_price: 1699.25, discount: 50.98,
+      returned_ipi: { value: 220.90 },
+      taxes: { icms: { code: "900", origin: 0, aliquot: 4 } },
+    }],
+    payments: [{ method: "90", amount: 0 }],
+  };
+
+  it("destaca o ICMS reproduzido da nota original (base 1.648,27 · valor 65,93)", () => {
+    const html = buildEspelhoHtml(devol, {});
+    expect(html).toContain("1.648,27"); // base de cálculo do ICMS (vProd − vDesc)
+    expect(html).toContain("65,93");    // valor do ICMS (4% da base)
+  });
+
+  it("mostra o IPI devolvido (220,90) no campo Valor Total do IPI e soma no total", () => {
+    const html = buildEspelhoHtml(devol, {});
+    expect(html).toContain("220,90");   // vIPIDevol
+    expect(html).toContain("1.869,17"); // vNF = 1699,25 − 50,98 + 220,90 (IPI 'por fora')
+  });
+
+  it("não quebra sem returned_ipi nem ICMS (devolução sem impostos a devolver)", () => {
+    expect(() => buildEspelhoHtml({
+      ...devol,
+      items: [{ ...devol.items[0], returned_ipi: undefined, taxes: { icms: { code: "900", origin: 0, aliquot: 0 } } }],
+    }, {})).not.toThrow();
   });
 });

@@ -39,7 +39,7 @@ import { parseLegacyAddress } from '@/lib/address-legacy';
 import { CSOSN_OPTIONS, FISCAL_ORIGIN_OPTIONS } from '@/lib/price-calculator';
 import { buildEspelhoHtml } from '@/lib/danfe-espelho';
 import { extractInvokeErrorMessage } from '@/lib/invoke-error';
-import { buildEmissionItem } from '@/lib/fiscal-emission-item';
+import { buildEmissionItem, computeReturnIcmsRate } from '@/lib/fiscal-emission-item';
 import { computeDraftMeta, normalizeDraftState, natureLabel, type FiscalDraftState } from '@/lib/fiscal-draft-state';
 import { BLOCK_SEPARATOR, buildDevolucaoInfo, composeAdditionalInfo, stripManagedBlocks, stripPurchaseBlock } from '@/lib/nfe-info-complementar';
 // Reaproveita os mesmos módulos que a edge function fiscal-emit usa no
@@ -1127,14 +1127,10 @@ export default function FiscalEmission() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     setItems((ret?.items || []).map((it: any, i: number) => {
       const qty = Number(it.quantity) || 0;
-      // Alíquota de ICMS REPRODUZIDA da nota de compra: a devolução deve destacar
-      // o ICMS original (base = vProd − vDesc) para o fornecedor creditar-se
-      // (princípio de anular os efeitos da operação; SEFAZ-SC Consulta 69/2018).
-      // Invariante à quantidade, então o destaque escala sozinho na parcial.
-      const baseIcmsItem = (Number(it.unitPrice) || 0) * qty - (Number(it.discount) || 0);
-      const icmsAliq = baseIcmsItem > 0
-        ? Math.round(((Number(it.icmsValue) || 0) / baseIcmsItem) * 10000) / 100
-        : 0;
+      // Alíquota de ICMS REPRODUZIDA da nota de compra (ver computeReturnIcmsRate):
+      // a devolução destaca o ICMS original p/ o fornecedor creditar-se. Função pura
+      // e testada — o build não checa tipos.
+      const icmsAliq = computeReturnIcmsRate(Number(it.unitPrice) || 0, qty, Number(it.discount) || 0, Number(it.icmsValue) || 0);
       return {
         productId: null,
         code: it.code || '', name: it.name || '', ncm: it.ncm || '',
