@@ -1558,5 +1558,4156 @@
         "arquivo": "Smart IP43 Charger 12V 30A 1+1 outputs (front-angle).png"
       }
     ]
+  },
+  {
+    "sku": "2513",
+    "name": "Adaptador De Trilho DIN35 - 2 Peças - 80cm - Victron Energy",
+    "estoque": 0,
+    "preco": 354.97,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "din35-adapter-small",
+    "pagina": "https://www.victronenergy.com/accessories/din35-adapter-small",
+    "conf_familia": "media",
+    "imagem": "https://www.victronenergy.com/upload/products/441_587_20200117072540.png",
+    "arquivo": "441_587_20200117072540.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        35,
+        2,
+        80
+      ],
+      "sobrando": [
+        441,
+        587
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/DIN35 adapter small.png",
+        "arquivo": "DIN35 adapter small.png"
+      }
+    ]
+  },
+  {
+    "sku": "2734",
+    "name": "Balanceador de Bateria - Victron Energy",
+    "estoque": 0,
+    "preco": 692.19,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "battery-balancer",
+    "pagina": "https://www.victronenergy.com/accessories/battery-balancer",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/250_897_20180705170552.png",
+    "arquivo": "250_897_20180705170552.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [],
+      "sobrando": [
+        250,
+        897
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Battery-Balancer_front-angle.jpg",
+        "arquivo": "Battery-Balancer_front-angle.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Battery-Balancer_top.jpg",
+        "arquivo": "Battery-Balancer_top.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Battery-Balancer_left.jpg",
+        "arquivo": "Battery-Balancer_left.jpg"
+      }
+    ]
+  },
+  {
+    "sku": "2662",
+    "name": "Barramento 150A 6 polos + tampa - Victron Energy",
+    "estoque": 0,
+    "preco": 0,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "busbars",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/busbars",
+    "conf_familia": "media",
+    "imagem": "https://www.victronenergy.com/upload/documents/Busbar 150A 6P + PC cover (left-cover).png",
+    "arquivo": "Busbar 150A 6P + PC cover (left-cover).png",
+    "numeros_casados": [
+      150,
+      6
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Busbar 150A 6P + PC cover (top).png",
+        "arquivo": "Busbar 150A 6P + PC cover (top).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Busbar 150A 6P + PC cover (left).png",
+        "arquivo": "Busbar 150A 6P + PC cover (left).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/VBB125050620_Busbar 250A 2P with 6 screws +cover (front).png",
+        "arquivo": "VBB125050620_Busbar 250A 2P with 6 screws +cover (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2512",
+    "name": "Barramento 600A 8 polos + Tampa - Victron Energy",
+    "estoque": 0,
+    "preco": 5789.18,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "busbars",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/busbars",
+    "conf_familia": "media",
+    "imagem": "https://www.victronenergy.com/upload/documents/Busbar 600A 8P + ABS cover (front).png",
+    "arquivo": "Busbar 600A 8P + ABS cover (front).png",
+    "numeros_casados": [
+      600,
+      8
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Busbar 600A 8P + ABS cover (cover).png",
+        "arquivo": "Busbar 600A 8P + ABS cover (cover).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Busbar 600A 8P + ABS cover (left-cover).png",
+        "arquivo": "Busbar 600A 8P + ABS cover (left-cover).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Busbar 600A 8P + ABS cover (front-cover).png",
+        "arquivo": "Busbar 600A 8P + ABS cover (front-cover).png"
+      }
+    ]
+  },
+  {
+    "sku": "2757",
+    "name": "Barramento Lynx Entrada (M8) - Victron Energy",
+    "estoque": 0,
+    "preco": 1856.86,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "lynx-power-in",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/lynx-power-in",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/lynx.png",
+    "arquivo": "lynx.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        8
+      ],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Lynx_Power_in_front_LYN020102000.jpg",
+        "arquivo": "Lynx_Power_in_front_LYN020102000.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Lynx Power in (M10) (front).png",
+        "arquivo": "Lynx Power in (M10) (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Lynx power in (top_open).png",
+        "arquivo": "Lynx power in (top_open).png"
+      }
+    ]
+  },
+  {
+    "sku": "2740",
+    "name": "Barramento para conectar 5 CIP100200100 - Victron Energy",
+    "estoque": 0,
+    "preco": 511.95,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "busbars",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/busbars",
+    "conf_familia": "media",
+    "imagem": "https://www.victronenergy.com/upload/products/459_902_20200907155057.png",
+    "arquivo": "459_902_20200907155057.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        5
+      ],
+      "sobrando": [
+        459,
+        902
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Busbar 600A 8P + ABS cover (front).png",
+        "arquivo": "Busbar 600A 8P + ABS cover (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/VBB125050620_Busbar 250A 2P with 6 screws +cover (front).png",
+        "arquivo": "VBB125050620_Busbar 250A 2P with 6 screws +cover (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/VBB125050620_Busbar 250A 2P with 6 screws +cover (with cover_frontside).png",
+        "arquivo": "VBB125050620_Busbar 250A 2P with 6 screws +cover (with cover_frontside).png"
+      }
+    ]
+  },
+  {
+    "sku": "2784",
+    "name": "Barramento para conectar 6 CIP100200100 - Victron Energy",
+    "estoque": 0,
+    "preco": 595.21,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "busbars",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/busbars",
+    "conf_familia": "media",
+    "imagem": "https://www.victronenergy.com/upload/products/459_902_20200907155057.png",
+    "arquivo": "459_902_20200907155057.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        6
+      ],
+      "sobrando": [
+        459,
+        902
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/VBB125050620_Busbar 250A 2P with 6 screws +cover (front).png",
+        "arquivo": "VBB125050620_Busbar 250A 2P with 6 screws +cover (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/VBB125050620_Busbar 250A 2P with 6 screws +cover (with cover_frontside).png",
+        "arquivo": "VBB125050620_Busbar 250A 2P with 6 screws +cover (with cover_frontside).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Busbar 150A 6P + PC cover (left-cover).png",
+        "arquivo": "Busbar 150A 6P + PC cover (left-cover).png"
+      }
+    ]
+  },
+  {
+    "sku": "2732",
+    "name": "Bateria de Lítio (LiFePO4) Smart 12,8V/160Ah - Victron Energy",
+    "estoque": 0,
+    "preco": 0,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "lithium-battery-12-8v",
+    "pagina": "https://www.victronenergy.com/batteries/lithium-battery-12-8v",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/Lithium battery 12,8V Smart.png",
+    "arquivo": "Lithium battery 12,8V Smart.png",
+    "numeros_casados": [
+      12
+    ],
+    "numeros_conflitantes": {
+      "faltando": [
+        4,
+        160
+      ],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/LiFePO4 Battery 12,8V-180Ah Smart (front).png",
+        "arquivo": "LiFePO4 Battery 12,8V-180Ah Smart (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/BAT512110610 LiFePO4 Battery 12,8V-100Ah Smart (front).png",
+        "arquivo": "BAT512110610 LiFePO4 Battery 12,8V-100Ah Smart (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/BAT512120610 LiFePO4 Battery 12,8V-200Ah Smart (front).png",
+        "arquivo": "BAT512120610 LiFePO4 Battery 12,8V-200Ah Smart (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2650",
+    "name": "Bateria de Lítio (LiFePO4) Smart 12,8V/50Ah - Victron Energy",
+    "estoque": 0,
+    "preco": 0,
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "lithium-battery-12-8v",
+    "pagina": "https://www.victronenergy.com/batteries/lithium-battery-12-8v",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/12V 50Ah Lithium battery (front).png",
+    "arquivo": "12V 50Ah Lithium battery (front).png",
+    "numeros_casados": [
+      12,
+      50
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/LiFePO4 Battery 12,8V-180Ah Smart (front).png",
+        "arquivo": "LiFePO4 Battery 12,8V-180Ah Smart (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/BAT512110610 LiFePO4 Battery 12,8V-100Ah Smart (front).png",
+        "arquivo": "BAT512110610 LiFePO4 Battery 12,8V-100Ah Smart (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/BAT512120610 LiFePO4 Battery 12,8V-200Ah Smart (front).png",
+        "arquivo": "BAT512120610 LiFePO4 Battery 12,8V-200Ah Smart (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2733",
+    "name": "Bateria de Lítio (LiFePO4) Smart 25,6V/200Ah - Victron Energy",
+    "estoque": 0,
+    "preco": 0,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "lithium-battery-12-8v",
+    "pagina": "https://www.victronenergy.com/batteries/lithium-battery-12-8v",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/BAT524120610 LiFePO4 Battery 25,6V-200Ah Smart (front).png",
+    "arquivo": "BAT524120610 LiFePO4 Battery 25,6V-200Ah Smart (front).png",
+    "numeros_casados": [
+      4,
+      25,
+      200
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/BAT524120610 LiFePO4 Battery 25,6V-200Ah Smart (front-top).png",
+        "arquivo": "BAT524120610 LiFePO4 Battery 25,6V-200Ah Smart (front-top).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/BAT512120610 LiFePO4 Battery 12,8V-200Ah Smart (front).png",
+        "arquivo": "BAT512120610 LiFePO4 Battery 12,8V-200Ah Smart (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/BAT524110610 LiFePO4 Battery 25,6V-100Ah Smart (front).png",
+        "arquivo": "BAT524110610 LiFePO4 Battery 25,6V-100Ah Smart (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2968",
+    "name": "Bateria de Lítio (LiFePO4) Smart 25,6V/300Ah NG SMART - Victron Energy",
+    "estoque": 0,
+    "preco": 0,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "lithium-ng-batteries",
+    "pagina": "https://www.victronenergy.com/batteries/lithium-ng-batteries",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/LiFePO4 Battery 25.6V 300Ah NG (front).png",
+    "arquivo": "LiFePO4 Battery 25.6V 300Ah NG (front).png",
+    "numeros_casados": [
+      4,
+      25,
+      300
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/LiFePO4 Battery 25.6V 300Ah NG (front-angle).png",
+        "arquivo": "LiFePO4 Battery 25.6V 300Ah NG (front-angle).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/LiFePO4 Battery 12.8V 300Ah NG (front).png",
+        "arquivo": "LiFePO4 Battery 12.8V 300Ah NG (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/LiFePO4 Battery 25.6V 100Ah NG (front).png",
+        "arquivo": "LiFePO4 Battery 25.6V 100Ah NG (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2815",
+    "name": "Cabo liga-desliga remoto sem inversão VE.Direct - Victron Energy",
+    "estoque": 0,
+    "preco": 280.4,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "ve-direct-non-inverting-remote-on-off-cable",
+    "pagina": "https://www.victronenergy.com/accessories/ve-direct-non-inverting-remote-on-off-cable",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/284_989_20180709103910.png",
+    "arquivo": "284_989_20180709103910.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [],
+      "sobrando": [
+        284,
+        989
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/VE%20Direct%20non-inverting%20remote%20on-off%20cable.jpg",
+        "arquivo": "VE Direct non-inverting remote on-off cable.jpg"
+      }
+    ]
+  },
+  {
+    "sku": "2816",
+    "name": "Cabo remoto do carregador DC-DC isolado Orion-Tr - Victron Energy",
+    "estoque": 0,
+    "preco": 263.87,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "orion-tr_isolated_dc-dc_charger_remote_cable",
+    "pagina": "https://www.victronenergy.com/accessories/orion-tr_isolated_dc-dc_charger_remote_cable",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/454_298_20200710125730.png",
+    "arquivo": "454_298_20200710125730.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [],
+      "sobrando": [
+        454,
+        298
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion-Tr Isolated DC-DC Charger remote cable.png",
+        "arquivo": "Orion-Tr Isolated DC-DC Charger remote cable.png"
+      }
+    ]
+  },
+  {
+    "sku": "2930",
+    "name": "Cabo VE.Direct de 10m com ângulo 90° - Victron Energy",
+    "estoque": 0,
+    "preco": 0,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "ve.direct.cable",
+    "pagina": "https://www.victronenergy.com/cables/ve.direct.cable",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/357_295_20170712115218.png",
+    "arquivo": "357_295_20170712115218.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        10,
+        90
+      ],
+      "sobrando": [
+        357,
+        295
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/VE.Direct cable 0.9m.png",
+        "arquivo": "VE.Direct cable 0.9m.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/VE.Direct-cable-0.9m_one-side-right-angle.png",
+        "arquivo": "VE.Direct-cable-0.9m_one-side-right-angle.png"
+      }
+    ]
+  },
+  {
+    "sku": "2730",
+    "name": "Cabo VE.Direct de 5m - Victron Energy",
+    "estoque": 0,
+    "preco": 0,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "ve.direct.cable",
+    "pagina": "https://www.victronenergy.com/cables/ve.direct.cable",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/357_295_20170712115218.png",
+    "arquivo": "357_295_20170712115218.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        5
+      ],
+      "sobrando": [
+        357,
+        295
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/VE.Direct cable 0.9m.png",
+        "arquivo": "VE.Direct cable 0.9m.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/VE.Direct-cable-0.9m_one-side-right-angle.png",
+        "arquivo": "VE.Direct-cable-0.9m_one-side-right-angle.png"
+      }
+    ]
+  },
+  {
+    "sku": "2885",
+    "name": "Cabo VE.Direct de 5m com ângulo 90° - Victron Energy",
+    "estoque": 0,
+    "preco": 0,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "ve.direct.cable",
+    "pagina": "https://www.victronenergy.com/cables/ve.direct.cable",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/357_295_20170712115218.png",
+    "arquivo": "357_295_20170712115218.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        5,
+        90
+      ],
+      "sobrando": [
+        357,
+        295
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/VE.Direct cable 0.9m.png",
+        "arquivo": "VE.Direct cable 0.9m.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/VE.Direct-cable-0.9m_one-side-right-angle.png",
+        "arquivo": "VE.Direct-cable-0.9m_one-side-right-angle.png"
+      }
+    ]
+  },
+  {
+    "sku": "1844",
+    "name": "Carregador de Bateria Blue Smart IP22 12/20 (3) - 220v - Victron Energy",
+    "estoque": 0,
+    "preco": 2092.76,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "blue-smart-ip22-charger",
+    "pagina": "https://www.victronenergy.com/chargers/blue-smart-ip22-charger",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Blue Smart IP22 Charger 12V 20A (3) 230V.png",
+    "arquivo": "Blue Smart IP22 Charger 12V 20A (3) 230V.png",
+    "numeros_casados": [
+      12,
+      20,
+      3,
+      230
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Blue Smart IP22 Charger 12V 30A (3) 230V (front).png",
+        "arquivo": "Blue Smart IP22 Charger 12V 30A (3) 230V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Blue Smart IP22 Charger 12V 20A (1) 230V.png",
+        "arquivo": "Blue Smart IP22 Charger 12V 20A (1) 230V.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Blue Smart IP22 Charger 12V 20A (3) 120V.png",
+        "arquivo": "Blue Smart IP22 Charger 12V 20A (3) 120V.png"
+      }
+    ]
+  },
+  {
+    "sku": "2570",
+    "name": "Carregador de Bateria Blue Smart IP22 12/30 (3) - 120v - Victron Energy",
+    "estoque": 0,
+    "preco": 2632.54,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "blue-smart-ip22-charger",
+    "pagina": "https://www.victronenergy.com/chargers/blue-smart-ip22-charger",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/362_287_20200706153156.png",
+    "arquivo": "362_287_20200706153156.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        12,
+        30,
+        3,
+        120
+      ],
+      "sobrando": [
+        362,
+        287
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Blue Smart IP22 Charger 12V 30A (3) 230V (front).png",
+        "arquivo": "Blue Smart IP22 Charger 12V 30A (3) 230V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Blue Smart IP22 Charger 12V 30A (3) 120V (left).png",
+        "arquivo": "Blue Smart IP22 Charger 12V 30A (3) 120V (left).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Blue Smart IP22 Charger 12V 15A (3) 120V.png",
+        "arquivo": "Blue Smart IP22 Charger 12V 15A (3) 120V.png"
+      }
+    ]
+  },
+  {
+    "sku": "1845",
+    "name": "Carregador de Bateria Blue Smart IP22 12/30 (3) - 220v - Victron Energy",
+    "estoque": 0,
+    "preco": 2698.99,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "blue-smart-ip22-charger",
+    "pagina": "https://www.victronenergy.com/chargers/blue-smart-ip22-charger",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Blue Smart IP22 Charger 12V 30A (3) 230V (front).png",
+    "arquivo": "Blue Smart IP22 Charger 12V 30A (3) 230V (front).png",
+    "numeros_casados": [
+      12,
+      30,
+      3,
+      230
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Blue Smart IP22 Charger 12V 20A (3) 230V.png",
+        "arquivo": "Blue Smart IP22 Charger 12V 20A (3) 230V.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Blue Smart IP22 Charger 12V 30A (1) 230V (left-cable).png",
+        "arquivo": "Blue Smart IP22 Charger 12V 30A (1) 230V (left-cable).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Blue Smart IP22 Charger 12V 15A (1) 230V (front).png",
+        "arquivo": "Blue Smart IP22 Charger 12V 15A (1) 230V (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2895",
+    "name": "Carregador de Bateria Blue Smart IP22 24/16 (1) - 220v - Victron Energy",
+    "estoque": 0,
+    "preco": 2556.28,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "blue-smart-ip22-charger",
+    "pagina": "https://www.victronenergy.com/chargers/blue-smart-ip22-charger",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/362_287_20200706153156.png",
+    "arquivo": "362_287_20200706153156.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        24,
+        16,
+        1,
+        230
+      ],
+      "sobrando": [
+        362,
+        287
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Blue Smart IP22 Charger 24V 8A (1) 230V (left-cable).png",
+        "arquivo": "Blue Smart IP22 Charger 24V 8A (1) 230V (left-cable).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Blue Smart IP22 Charger 24V 12A (1) 230V (left-cable).png",
+        "arquivo": "Blue Smart IP22 Charger 24V 12A (1) 230V (left-cable).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Blue Smart IP22 Charger 12V 15A (1) 230V (front).png",
+        "arquivo": "Blue Smart IP22 Charger 12V 15A (1) 230V (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2737",
+    "name": "Carregador de Bateria Blue Smart IP22 24/16(3) - 120v - Victron Energy",
+    "estoque": 0,
+    "preco": 2663.79,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "blue-smart-ip22-charger",
+    "pagina": "https://www.victronenergy.com/chargers/blue-smart-ip22-charger",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/362_287_20200706153156.png",
+    "arquivo": "362_287_20200706153156.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        24,
+        16,
+        3,
+        120
+      ],
+      "sobrando": [
+        362,
+        287
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Blue Smart IP22 Charger 24V 8A (1) 120V.png",
+        "arquivo": "Blue Smart IP22 Charger 24V 8A (1) 120V.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Blue Smart IP22 Charger 12V 15A (3) 120V.png",
+        "arquivo": "Blue Smart IP22 Charger 12V 15A (3) 120V.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Blue Smart IP22 Charger 12V 20A (3) 120V.png",
+        "arquivo": "Blue Smart IP22 Charger 12V 20A (3) 120V.png"
+      }
+    ]
+  },
+  {
+    "sku": "2736",
+    "name": "Carregador de Bateria Blue Smart IP65 12/10 - 220V - Victron Energy",
+    "estoque": 0,
+    "preco": 1412.94,
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "blue-smart-ip65-charger",
+    "pagina": "https://www.victronenergy.com/chargers/blue-smart-ip65-charger",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Blue-Smart-Charger-12V-10A_top.png",
+    "arquivo": "Blue-Smart-Charger-12V-10A_top.png",
+    "numeros_casados": [
+      12,
+      10
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Blue Smart IP65 Charger 12V 10A (total).png",
+        "arquivo": "Blue Smart IP65 Charger 12V 10A (total).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/products/Smart BatteryProtect.png",
+        "arquivo": "Smart BatteryProtect.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Blue Smart IP65s 12V 5A.png",
+        "arquivo": "Blue Smart IP65s 12V 5A.png"
+      }
+    ]
+  },
+  {
+    "sku": "1847",
+    "name": "Carregador de Bateria Blue Smart IP65 12/25 - 220v - Victron Energy",
+    "estoque": 0,
+    "preco": 0,
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "blue-smart-ip65-charger",
+    "pagina": "https://www.victronenergy.com/chargers/blue-smart-ip65-charger",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Blue Smart IP65 charger 12V 25A (top).png",
+    "arquivo": "Blue Smart IP65 charger 12V 25A (top).png",
+    "numeros_casados": [
+      12,
+      25
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/products/Smart BatteryProtect.png",
+        "arquivo": "Smart BatteryProtect.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Blue Smart IP65s 12V 5A.png",
+        "arquivo": "Blue Smart IP65s 12V 5A.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Blue-Smart-Charger-12V-7A_top.png",
+        "arquivo": "Blue-Smart-Charger-12V-7A_top.png"
+      }
+    ]
+  },
+  {
+    "sku": "2817",
+    "name": "Carregador de Bateria Blue Smart IP65 24/8 - 220v - Victron Energy",
+    "estoque": 0,
+    "preco": 2072.06,
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "blue-smart-ip65-charger",
+    "pagina": "https://www.victronenergy.com/chargers/blue-smart-ip65-charger",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Blue-Smart-Charger-24V-8A_top.png",
+    "arquivo": "Blue-Smart-Charger-24V-8A_top.png",
+    "numeros_casados": [
+      24,
+      8
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Blue Smart IP65 Charger 24V 8A (total).png",
+        "arquivo": "Blue Smart IP65 Charger 24V 8A (total).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/products/Smart BatteryProtect.png",
+        "arquivo": "Smart BatteryProtect.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Blue-Smart-Charger-24V-5A_top.png",
+        "arquivo": "Blue-Smart-Charger-24V-5A_top.png"
+      }
+    ]
+  },
+  {
+    "sku": "3028",
+    "name": "Carregador de Bateria Centaur 12/100(3) - 120/230v - Victron Energy",
+    "estoque": 0,
+    "preco": 0,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "centaur-charger-12v-24v",
+    "pagina": "https://www.victronenergy.com/chargers/centaur-charger-12v-24v",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/151_831_20180705150216.png",
+    "arquivo": "151_831_20180705150216.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        12,
+        100,
+        3,
+        120,
+        230
+      ],
+      "sobrando": [
+        151,
+        831
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CCH012100000_Centaur Charger 12-100(3) 120-240V (front).png",
+        "arquivo": "CCH012100000_Centaur Charger 12-100(3) 120-240V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CCH012100000_Centaur Charger 12-100(3) 120-240V (conn).png",
+        "arquivo": "CCH012100000_Centaur Charger 12-100(3) 120-240V (conn).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CCH012100000_Centaur Charger 12-100(3) 120-240V (pcb conn).png",
+        "arquivo": "CCH012100000_Centaur Charger 12-100(3) 120-240V (pcb conn).png"
+      }
+    ]
+  },
+  {
+    "sku": "2597",
+    "name": "Carregador de Bateria Inteligente Orion-Tr Smart 12/12-18A - Victron Energy",
+    "estoque": 0,
+    "preco": 1881.37,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "orion-tr-smart",
+    "pagina": "https://www.victronenergy.com/dc-dc-converters/orion-tr-smart",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/Orion-Tr isolated_24 12.png",
+    "arquivo": "Orion-Tr isolated_24 12.png",
+    "numeros_casados": [
+      12
+    ],
+    "numeros_conflitantes": {
+      "faltando": [
+        18
+      ],
+      "sobrando": [
+        24
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ORI121222110_Orion-Tr Smart charger 12-12_18 (220W) (front).png",
+        "arquivo": "ORI121222110_Orion-Tr Smart charger 12-12_18 (220W) (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion-Tr Smart 12-12-30 (front).png",
+        "arquivo": "Orion-Tr Smart 12-12-30 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion-Tr Smart 24-24-12 (front).png",
+        "arquivo": "Orion-Tr Smart 24-24-12 (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2583",
+    "name": "Carregador de Bateria Inteligente Orion-Tr Smart 12/12-30A - NO ISO - Victron Energy",
+    "estoque": 0,
+    "preco": 0,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "orion-tr-smart-non-isolated",
+    "pagina": "https://www.victronenergy.com/dc-dc-converters/orion-tr-smart-non-isolated",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/Orion-Tr non-isolated.png",
+    "arquivo": "Orion-Tr non-isolated.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        12,
+        30
+      ],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ORI241236140_Orion-Tr Smart 24-12-30A (360W) Non-isol (front).png",
+        "arquivo": "ORI241236140_Orion-Tr Smart 24-12-30A (360W) Non-isol (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ORI121236140_Orion-Tr Smart 12-12-30A (360W) Non-isolated DC-DC charger (front-angle).png",
+        "arquivo": "ORI121236140_Orion-Tr Smart 12-12-30A (360W) Non-isolated DC-DC charger (front-angle).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ORI241236140_Orion-Tr Smart 24-12-30A (360W) Non-isol (conn side).png",
+        "arquivo": "ORI241236140_Orion-Tr Smart 24-12-30A (360W) Non-isol (conn side).png"
+      }
+    ]
+  },
+  {
+    "sku": "2514",
+    "name": "Carregador de Bateria Inteligente Orion-Tr Smart 12/24-10A - Victron Energy",
+    "estoque": 0,
+    "preco": 1970.6,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "orion-tr-smart",
+    "pagina": "https://www.victronenergy.com/dc-dc-converters/orion-tr-smart",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Orion-Tr Smart 12-24-10 (front).png",
+    "arquivo": "Orion-Tr Smart 12-24-10 (front).png",
+    "numeros_casados": [
+      12,
+      24,
+      10
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion-Tr Smart 24-24-12 (front).png",
+        "arquivo": "Orion-Tr Smart 24-24-12 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/products/Orion-Tr isolated_24 12.png",
+        "arquivo": "Orion-Tr isolated_24 12.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion-Tr Smart 12-24-15 (front).png",
+        "arquivo": "Orion-Tr Smart 12-24-15 (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2655",
+    "name": "Carregador de Bateria Inteligente Orion-Tr Smart 12/24-15A - Victron Energy",
+    "estoque": 0,
+    "preco": 3001.82,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "orion-tr-smart",
+    "pagina": "https://www.victronenergy.com/dc-dc-converters/orion-tr-smart",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Orion-Tr Smart 12-24-15 (front).png",
+    "arquivo": "Orion-Tr Smart 12-24-15 (front).png",
+    "numeros_casados": [
+      12,
+      24,
+      15
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion-Tr Smart 24-24-12 (front).png",
+        "arquivo": "Orion-Tr Smart 24-24-12 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/products/Orion-Tr isolated_24 12.png",
+        "arquivo": "Orion-Tr isolated_24 12.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion-Tr Smart 12-24-10 (front).png",
+        "arquivo": "Orion-Tr Smart 12-24-10 (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2963",
+    "name": "Carregador de Bateria Inteligente Orion-Tr Smart 12/48 - 8A Isolado Victron Energy",
+    "estoque": 0,
+    "preco": 3026.17,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "orion-tr-smart",
+    "pagina": "https://www.victronenergy.com/dc-dc-converters/orion-tr-smart",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Orion-Tr Smart 12-48-8 (front).png",
+    "arquivo": "Orion-Tr Smart 12-48-8 (front).png",
+    "numeros_casados": [
+      12,
+      48,
+      8
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion-Tr Smart 48-48-8 (front).png",
+        "arquivo": "Orion-Tr Smart 48-48-8 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion-Tr Smart 48-12-30 (front).png",
+        "arquivo": "Orion-Tr Smart 48-12-30 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion-Tr Smart 12-48-8 (top).png",
+        "arquivo": "Orion-Tr Smart 12-48-8 (top).png"
+      }
+    ]
+  },
+  {
+    "sku": "2762",
+    "name": "Carregador de Bateria Inteligente Orion-Tr Smart 24/12-20A - Victron Energy",
+    "estoque": 0,
+    "preco": 0,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "orion-tr-smart",
+    "pagina": "https://www.victronenergy.com/dc-dc-converters/orion-tr-smart",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Orion-Tr Smart 24-12-20 (front).png",
+    "arquivo": "Orion-Tr Smart 24-12-20 (front).png",
+    "numeros_casados": [
+      24,
+      12,
+      20
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion-Tr Smart 24-24-12 (front).png",
+        "arquivo": "Orion-Tr Smart 24-24-12 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/products/Orion-Tr isolated_24 12.png",
+        "arquivo": "Orion-Tr isolated_24 12.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion-Tr Smart 12-24-10 (front).png",
+        "arquivo": "Orion-Tr Smart 12-24-10 (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2599",
+    "name": "Carregador de Bateria Inteligente Orion-Tr Smart 24/12-30A - Victron Energy",
+    "estoque": 0,
+    "preco": 2820.18,
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "orion-tr-smart",
+    "pagina": "https://www.victronenergy.com/dc-dc-converters/orion-tr-smart",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Orion-Tr Smart 12-12-30 (front).png",
+    "arquivo": "Orion-Tr Smart 12-12-30 (front).png",
+    "numeros_casados": [
+      12,
+      30
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion-Tr Smart 24-24-12 (front).png",
+        "arquivo": "Orion-Tr Smart 24-24-12 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/products/Orion-Tr isolated_24 12.png",
+        "arquivo": "Orion-Tr isolated_24 12.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion-Tr Smart 12-24-10 (front).png",
+        "arquivo": "Orion-Tr Smart 12-24-10 (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2964",
+    "name": "Carregador de Bateria Inteligente Orion-Tr Smart 24/48 - 8,5A Isolado Victron Energy",
+    "estoque": 0,
+    "preco": 3026.17,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "orion-tr-smart",
+    "pagina": "https://www.victronenergy.com/dc-dc-converters/orion-tr-smart",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Orion-Tr Smart 24-48-8.5 (front).png",
+    "arquivo": "Orion-Tr Smart 24-48-8.5 (front).png",
+    "numeros_casados": [
+      24,
+      48,
+      8,
+      5
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion-Tr Smart 24-48-8.5 (top).png",
+        "arquivo": "Orion-Tr Smart 24-48-8.5 (top).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion-Tr Smart 48-48-8 (front).png",
+        "arquivo": "Orion-Tr Smart 48-48-8 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion-Tr Smart 24-48-8.5 (left).png",
+        "arquivo": "Orion-Tr Smart 24-48-8.5 (left).png"
+      }
+    ]
+  },
+  {
+    "sku": "2887",
+    "name": "Carregador de Bateria Inteligente Orion-Tr XS Smart 12/12-50A - Victron Energy",
+    "estoque": 0,
+    "preco": 4232.29,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "orion-xs-dc-dc-battery-chargers",
+    "pagina": "https://www.victronenergy.com/dc-dc-converters/orion-xs-dc-dc-battery-chargers",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Orion XS 12_12-50A Non-isolated DC-DC charger (front).png",
+    "arquivo": "Orion XS 12_12-50A Non-isolated DC-DC charger (front).png",
+    "numeros_casados": [
+      12,
+      50
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion XS 12-12-50A DC-DC battery charger (conn.top).png",
+        "arquivo": "Orion XS 12-12-50A DC-DC battery charger (conn.top).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion XS 12-12-50A DC-DC battery charger (conn.open).png",
+        "arquivo": "Orion XS 12-12-50A DC-DC battery charger (conn.open).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion XS 12-12-50A DC-DC battery charger (conn.right).png",
+        "arquivo": "Orion XS 12-12-50A DC-DC battery charger (conn.right).png"
+      }
+    ]
+  },
+  {
+    "sku": "2889",
+    "name": "Carregador de Bateria Phoenix Smart IP43 12/50 (3) - 120/220v - Victron Energy",
+    "estoque": 0,
+    "preco": 0,
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "phoenix-smart-ip43-charger",
+    "pagina": "https://www.victronenergy.com/chargers/phoenix-smart-ip43-charger",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Smart IP43 Charger 12V 50A 3 outputs (front-angle).png",
+    "arquivo": "Smart IP43 Charger 12V 50A 3 outputs (front-angle).png",
+    "numeros_casados": [
+      12,
+      50,
+      3
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PSC125053095_Smart IP43 Charger 12-50 (3) 120-240V (right).png",
+        "arquivo": "PSC125053095_Smart IP43 Charger 12-50 (3) 120-240V (right).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Smart IP43 Charger 12V 50A 3 outputs (top).png",
+        "arquivo": "Smart IP43 Charger 12V 50A 3 outputs (top).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Smart IP43 Charger 12V 30A 3 outputs (front-angle).png",
+        "arquivo": "Smart IP43 Charger 12V 30A 3 outputs (front-angle).png"
+      }
+    ]
+  },
+  {
+    "sku": "3001",
+    "name": "Carregador de Bateria Phoenix Smart IP43 24/16(1+1) 120-240v - Victron Energy",
+    "estoque": 0,
+    "preco": 4291.29,
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "phoenix-smart-ip43-charger",
+    "pagina": "https://www.victronenergy.com/chargers/phoenix-smart-ip43-charger",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Smart IP43 Charger 24V 16A 1+1 outputs (front).png",
+    "arquivo": "Smart IP43 Charger 24V 16A 1+1 outputs (front).png",
+    "numeros_casados": [
+      24,
+      16,
+      1
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Smart IP43 Charger 24V 25A 1+1 outputs (front).png",
+        "arquivo": "Smart IP43 Charger 24V 25A 1+1 outputs (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Smart IP43 Charger 24V 16A 1+1 outputs (top).png",
+        "arquivo": "Smart IP43 Charger 24V 16A 1+1 outputs (top).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/products/Smart IP43.png",
+        "arquivo": "Smart IP43.png"
+      }
+    ]
+  },
+  {
+    "sku": "2896",
+    "name": "Central de controle GX Tank 140 - Victron Energy",
+    "estoque": 0,
+    "preco": 1537.23,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "gx-tank-140",
+    "pagina": "https://www.victronenergy.com/communication-centres/gx-tank-140",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/BPP920140100_GX Tank 140 (top no cable).png",
+    "arquivo": "BPP920140100_GX Tank 140 (top no cable).png",
+    "numeros_casados": [
+      140
+    ],
+    "numeros_conflitantes": {
+      "faltando": [],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/BPP920140100_GX Tank 140 (front).png",
+        "arquivo": "BPP920140100_GX Tank 140 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/BPP920140100_GX Tank 140 (front-angle).png",
+        "arquivo": "BPP920140100_GX Tank 140 (front-angle).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/BPP920140100_GX Tank 140 (top).png",
+        "arquivo": "BPP920140100_GX Tank 140 (top).png"
+      }
+    ]
+  },
+  {
+    "sku": "2643",
+    "name": "Centro de Monitoramento Cerbo-S GX - Victron Energy",
+    "estoque": -1,
+    "preco": 3000.56,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "cerbo-gx",
+    "pagina": "https://www.victronenergy.com/communication-centres/cerbo-gx",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/Cerbo GX nw.png",
+    "arquivo": "Cerbo GX nw.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Cerbo GX (front).png",
+        "arquivo": "Cerbo GX (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Cerbo GX MK2 (front).png",
+        "arquivo": "Cerbo GX MK2 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Cerbo GX (top_conn).png",
+        "arquivo": "Cerbo GX (top_conn).png"
+      }
+    ]
+  },
+  {
+    "sku": "2931",
+    "name": "Controlador de Carga Solar Blue MPPT 150/60 TR - Victron Energy",
+    "estoque": 0,
+    "preco": 4270,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "smartsolar-150-35",
+    "pagina": "https://www.victronenergy.com/solar-charge-controllers/smartsolar-150-35",
+    "conf_familia": "media",
+    "imagem": "https://www.victronenergy.com/upload/products/SmartSolar MPPT 150-35 (top).png",
+    "arquivo": "SmartSolar MPPT 150-35 (top).png",
+    "numeros_casados": [
+      150
+    ],
+    "numeros_conflitantes": {
+      "faltando": [
+        60
+      ],
+      "sobrando": [
+        35
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 150-35 (front).png",
+        "arquivo": "SmartSolar MPPT 150-35 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 150-45 (front).png",
+        "arquivo": "SmartSolar MPPT 150-45 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 150-35 (conn).png",
+        "arquivo": "SmartSolar MPPT 150-35 (conn).png"
+      }
+    ]
+  },
+  {
+    "sku": "2572",
+    "name": "Controlador de Carga Solar Blue MPPT 75/15 - Victron Energy",
+    "estoque": 0,
+    "preco": 746.69,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "smartsolar-mppt-75-10-75-15-100-15-100-20",
+    "pagina": "https://www.victronenergy.com/solar-charge-controllers/smartsolar-mppt-75-10-75-15-100-15-100-20",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 75-15 (front).png",
+    "arquivo": "SmartSolar MPPT 75-15 (front).png",
+    "numeros_casados": [
+      75,
+      15
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/products/smartsolar MPPT 75 15.png",
+        "arquivo": "smartsolar MPPT 75 15.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/_SmartSolar MPPT 75-10 (front).png",
+        "arquivo": "_SmartSolar MPPT 75-10 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 100-15 (front).png",
+        "arquivo": "SmartSolar MPPT 100-15 (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2825",
+    "name": "Controlador de Carga Solar Smart MPPT 100/20 - Victron Energy",
+    "estoque": 0,
+    "preco": 0,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "smartsolar-mppt-75-10-75-15-100-15-100-20",
+    "pagina": "https://www.victronenergy.com/solar-charge-controllers/smartsolar-mppt-75-10-75-15-100-15-100-20",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 100-20 (front).png",
+    "arquivo": "SmartSolar MPPT 100-20 (front).png",
+    "numeros_casados": [
+      100,
+      20
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 100-20 (conn).png",
+        "arquivo": "SmartSolar MPPT 100-20 (conn).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 100-15 (front).png",
+        "arquivo": "SmartSolar MPPT 100-15 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 100-20 (top).png",
+        "arquivo": "SmartSolar MPPT 100-20 (top).png"
+      }
+    ]
+  },
+  {
+    "sku": "2659",
+    "name": "Controlador de Carga Solar Smart MPPT 100/30 - Victron Energy",
+    "estoque": 0,
+    "preco": 1547.14,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "smartsolar-100-30-100-50",
+    "pagina": "https://www.victronenergy.com/solar-charge-controllers/smartsolar-100-30-100-50",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 100-30 (front).png",
+    "arquivo": "SmartSolar MPPT 100-30 (front).png",
+    "numeros_casados": [
+      100,
+      30
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 100-30 (conn).png",
+        "arquivo": "SmartSolar MPPT 100-30 (conn).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 100-50 (front).png",
+        "arquivo": "SmartSolar MPPT 100-50 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 100-30 (top).png",
+        "arquivo": "SmartSolar MPPT 100-30 (top).png"
+      }
+    ]
+  },
+  {
+    "sku": "2776",
+    "name": "Controlador de Carga Solar Smart MPPT 150/35 - Victron Energy",
+    "estoque": 0,
+    "preco": 2416.62,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "smartsolar-150-35",
+    "pagina": "https://www.victronenergy.com/solar-charge-controllers/smartsolar-150-35",
+    "conf_familia": "media",
+    "imagem": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 150-35 (front).png",
+    "arquivo": "SmartSolar MPPT 150-35 (front).png",
+    "numeros_casados": [
+      150,
+      35
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 150-35 (conn).png",
+        "arquivo": "SmartSolar MPPT 150-35 (conn).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/products/SmartSolar MPPT 150-35 (top).png",
+        "arquivo": "SmartSolar MPPT 150-35 (top).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 150-45 (front).png",
+        "arquivo": "SmartSolar MPPT 150-45 (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2684",
+    "name": "Controlador de Carga Solar Smart MPPT 150/70 - Victron Energy",
+    "estoque": 0,
+    "preco": 4510.9,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "smartsolar-150-35",
+    "pagina": "https://www.victronenergy.com/solar-charge-controllers/smartsolar-150-35",
+    "conf_familia": "media",
+    "imagem": "https://www.victronenergy.com/upload/products/SmartSolar MPPT 150-35 (top).png",
+    "arquivo": "SmartSolar MPPT 150-35 (top).png",
+    "numeros_casados": [
+      150
+    ],
+    "numeros_conflitantes": {
+      "faltando": [
+        70
+      ],
+      "sobrando": [
+        35
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 150-35 (front).png",
+        "arquivo": "SmartSolar MPPT 150-35 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 150-45 (front).png",
+        "arquivo": "SmartSolar MPPT 150-45 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 150-35 (conn).png",
+        "arquivo": "SmartSolar MPPT 150-35 (conn).png"
+      }
+    ]
+  },
+  {
+    "sku": "2779",
+    "name": "Controlador de Carga Solar Smart MPPT 250/100-MC4 VE.Can - Victron Energy",
+    "estoque": 0,
+    "preco": 0,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "smartsolar-250-85-250-100",
+    "pagina": "https://www.victronenergy.com/solar-charge-controllers/smartsolar-250-85-250-100",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/MPPT 250 70 MC4.png",
+    "arquivo": "MPPT 250 70 MC4.png",
+    "numeros_casados": [
+      250,
+      4
+    ],
+    "numeros_conflitantes": {
+      "faltando": [
+        100
+      ],
+      "sobrando": [
+        70
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 250-70-MC4 (front).png",
+        "arquivo": "SmartSolar MPPT 250-70-MC4 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 250-70-Tr (front).png",
+        "arquivo": "SmartSolar MPPT 250-70-Tr (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 150-70-MC4 (front).png",
+        "arquivo": "SmartSolar MPPT 150-70-MC4 (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2824",
+    "name": "Controlador de Carga Solar Smart MPPT 75/15 - Victron Energy",
+    "estoque": 0,
+    "preco": 1099.17,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "smartsolar-mppt-75-10-75-15-100-15-100-20",
+    "pagina": "https://www.victronenergy.com/solar-charge-controllers/smartsolar-mppt-75-10-75-15-100-15-100-20",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 75-15 (front).png",
+    "arquivo": "SmartSolar MPPT 75-15 (front).png",
+    "numeros_casados": [
+      75,
+      15
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/products/smartsolar MPPT 75 15.png",
+        "arquivo": "smartsolar MPPT 75 15.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/_SmartSolar MPPT 75-10 (front).png",
+        "arquivo": "_SmartSolar MPPT 75-10 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 100-15 (front).png",
+        "arquivo": "SmartSolar MPPT 100-15 (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2595",
+    "name": "Conversor Orion IP67 24/12-10A (120W) - Victron Energy",
+    "estoque": 0,
+    "preco": 548.59,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "orion-ip67-24-12-dc-dc-converters",
+    "pagina": "https://www.victronenergy.com/dc-dc-converters/orion-ip67-24-12-dc-dc-converters",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/ORI241210260_Orion IP67 24-12_10A (120W) (top-angle).png",
+    "arquivo": "ORI241210260_Orion IP67 24-12_10A (120W) (top-angle).png",
+    "numeros_casados": [
+      24,
+      12,
+      10,
+      120
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ORI241210260_Orion IP67 24-12_10A (120W) (top-close).png",
+        "arquivo": "ORI241210260_Orion IP67 24-12_10A (120W) (top-close).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ORI241210260_Orion IP67 24-12_10A (120W) (top).png",
+        "arquivo": "ORI241210260_Orion IP67 24-12_10A (120W) (top).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ORI241220260_Orion IP67 24_12-20A (front).png",
+        "arquivo": "ORI241220260_Orion IP67 24_12-20A (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2594",
+    "name": "Conversor Orion IP67 24/12-5A (100W) - Victron Energy",
+    "estoque": 0,
+    "preco": 369.9,
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "orion-ip67-24-12-dc-dc-converters",
+    "pagina": "https://www.victronenergy.com/dc-dc-converters/orion-ip67-24-12-dc-dc-converters",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/ORI241221226_Orion IP67 24-12-100A (front).png",
+    "arquivo": "ORI241221226_Orion IP67 24-12-100A (front).png",
+    "numeros_casados": [
+      24,
+      12,
+      100
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ORI241221226_Orion IP67 24-12-100A (frontal).png",
+        "arquivo": "ORI241221226_Orion IP67 24-12-100A (frontal).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ORI241221226_Orion IP67 24-12-100A (label).png",
+        "arquivo": "ORI241221226_Orion IP67 24-12-100A (label).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ORI241220260_Orion IP67 24_12-20A (front).png",
+        "arquivo": "ORI241220260_Orion IP67 24_12-20A (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2760",
+    "name": "Conversor Orion-Tr 12/24-10A (240W) - Victron Energy",
+    "estoque": 0,
+    "preco": 1607.22,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "orion-tr-dc-dc-converters-isolated",
+    "pagina": "https://www.victronenergy.com/dc-dc-converters/orion-tr-dc-dc-converters-isolated",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/Orion-Tr DC-DC Converters Isolated.png",
+    "arquivo": "Orion-Tr DC-DC Converters Isolated.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        12,
+        24,
+        10,
+        240
+      ],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ORI241220200_Orion-Tr 24-12_20 (240W) (front).jpg",
+        "arquivo": "ORI241220200_Orion-Tr 24-12_20 (240W) (front).jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion-Tr 24-12 20A (240W) Isolated DC-DC converter (front).png",
+        "arquivo": "Orion-Tr 24-12 20A (240W) Isolated DC-DC converter (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ORI122424110_Orion-Tr 12_24-10A (240W) Isolated DC-DC converter (front2).png",
+        "arquivo": "ORI122424110_Orion-Tr 12_24-10A (240W) Isolated DC-DC converter (front2).png"
+      }
+    ]
+  },
+  {
+    "sku": "2761",
+    "name": "Conversor Orion-Tr 24/12-20A (240W) - Victron Energy",
+    "estoque": 0,
+    "preco": 1607.22,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "orion-tr-dc-dc-converters-isolated",
+    "pagina": "https://www.victronenergy.com/dc-dc-converters/orion-tr-dc-dc-converters-isolated",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/ORI241220200_Orion-Tr 24-12_20 (240W) (front).jpg",
+    "arquivo": "ORI241220200_Orion-Tr 24-12_20 (240W) (front).jpg",
+    "numeros_casados": [
+      24,
+      12,
+      20,
+      240
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion-Tr 24-12 20A (240W) Isolated DC-DC converter (front).png",
+        "arquivo": "Orion-Tr 24-12 20A (240W) Isolated DC-DC converter (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ORI241220200_Orion-Tr 24-12_20 (240W) (top-angle).png",
+        "arquivo": "ORI241220200_Orion-Tr 24-12_20 (240W) (top-angle).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ORI241220200_Orion-Tr-24-12_20-(240W)-(top).png",
+        "arquivo": "ORI241220200_Orion-Tr-24-12_20-(240W)-(top).png"
+      }
+    ]
+  },
+  {
+    "sku": "2897",
+    "name": "Conversor Orion-Tr 48/12-20A (240W) - Victron Energy",
+    "estoque": 0,
+    "preco": 1675.71,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "orion-tr-dc-dc-converters-isolated",
+    "pagina": "https://www.victronenergy.com/dc-dc-converters/orion-tr-dc-dc-converters-isolated",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/Orion-Tr DC-DC Converters Isolated.png",
+    "arquivo": "Orion-Tr DC-DC Converters Isolated.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        48,
+        12,
+        20,
+        240
+      ],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ORI241220200_Orion-Tr 24-12_20 (240W) (front).jpg",
+        "arquivo": "ORI241220200_Orion-Tr 24-12_20 (240W) (front).jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion-Tr 24-12 20A (240W) Isolated DC-DC converter (front).png",
+        "arquivo": "Orion-Tr 24-12 20A (240W) Isolated DC-DC converter (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ORI481224110_Orion-Tr 48_12-20A (240W) Isolated DC-DC converter (front2).png",
+        "arquivo": "ORI481224110_Orion-Tr 48_12-20A (240W) Isolated DC-DC converter (front2).png"
+      }
+    ]
+  },
+  {
+    "sku": "2898",
+    "name": "Conversor Orion-Tr 48/24-12A (280W) - Victron Energy",
+    "estoque": 0,
+    "preco": 1890.34,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "orion-tr-dc-dc-converters-isolated",
+    "pagina": "https://www.victronenergy.com/dc-dc-converters/orion-tr-dc-dc-converters-isolated",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/Orion-Tr DC-DC Converters Isolated.png",
+    "arquivo": "Orion-Tr DC-DC Converters Isolated.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        48,
+        24,
+        12,
+        280
+      ],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ORI482428110_Orion-Tr 48_24-12A (280W) Isolated DC-DC converter (front2).png",
+        "arquivo": "ORI482428110_Orion-Tr 48_24-12A (280W) Isolated DC-DC converter (front2).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ORI482428110_Orion-Tr 48_24-12A (280W) Isolated DC-DC converter (top).png",
+        "arquivo": "ORI482428110_Orion-Tr 48_24-12A (280W) Isolated DC-DC converter (top).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ORI482428110_Orion-Tr 48_24-12A (280W) Isolated DC-DC converter (left).png",
+        "arquivo": "ORI482428110_Orion-Tr 48_24-12A (280W) Isolated DC-DC converter (left).png"
+      }
+    ]
+  },
+  {
+    "sku": "2899",
+    "name": "Conversor Orion-Tr 48/24-16A (280W) - Victron Energy",
+    "estoque": 0,
+    "preco": 2945.57,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "orion-tr-dc-dc-converters-isolated",
+    "pagina": "https://www.victronenergy.com/dc-dc-converters/orion-tr-dc-dc-converters-isolated",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/Orion-Tr DC-DC Converters Isolated.png",
+    "arquivo": "Orion-Tr DC-DC Converters Isolated.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        48,
+        24,
+        16,
+        280
+      ],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ORI244828110_Orion-Tr 24_48-6A (280W) Isolated DC-DC converter (front2).png",
+        "arquivo": "ORI244828110_Orion-Tr 24_48-6A (280W) Isolated DC-DC converter (front2).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ORI482428110_Orion-Tr 48_24-12A (280W) Isolated DC-DC converter (front2).png",
+        "arquivo": "ORI482428110_Orion-Tr 48_24-12A (280W) Isolated DC-DC converter (front2).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ORI244828110_Orion-Tr 24_48-6A (280W) Isolated DC-DC converter (top).png",
+        "arquivo": "ORI244828110_Orion-Tr 24_48-6A (280W) Isolated DC-DC converter (top).png"
+      }
+    ]
+  },
+  {
+    "sku": "2781",
+    "name": "Estação de Energia - Carregador Veicular NS - Azul - Victron Energy EVC200300200",
+    "estoque": 0,
+    "preco": 12142.05,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "ev-charging-station-ns",
+    "pagina": "https://www.victronenergy.com/ev-charging/ev-charging-station-ns",
+    "conf_familia": "media",
+    "imagem": "https://www.victronenergy.com/upload/products/EV Charging Station NS.png",
+    "arquivo": "EV Charging Station NS.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/EVC200300200 - EV Charging station NS – Blue (top-green LED).png",
+        "arquivo": "EVC200300200 - EV Charging station NS – Blue (top-green LED).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/EVC200300200 - EV Charging station NS – Blue (mounting plate).png",
+        "arquivo": "EVC200300200 - EV Charging station NS – Blue (mounting plate).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/EVC200300310 - Black front for EV Charging station NS (top-on).png",
+        "arquivo": "EVC200300310 - Black front for EV Charging station NS (top-on).png"
+      }
+    ]
+  },
+  {
+    "sku": "3044",
+    "name": "Extensor M8 3 polos para Bateria BMS 2 Metros (Par) - Victron Energy",
+    "estoque": 0,
+    "preco": 493.47,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "m8-circular-connector-male-female-3-pole-cable-2m",
+    "pagina": "https://www.victronenergy.com/accessories/m8-circular-connector-male-female-3-pole-cable-2m",
+    "conf_familia": "media",
+    "imagem": "https://www.victronenergy.com/upload/documents/M8 circular connector MaleFemale 3 pole cable 2m (front).png",
+    "arquivo": "M8 circular connector MaleFemale 3 pole cable 2m (front).png",
+    "numeros_casados": [
+      8,
+      3,
+      2
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/M8 circular connector MaleFemale 3 pole cable 2m (front2).png",
+        "arquivo": "M8 circular connector MaleFemale 3 pole cable 2m (front2).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/M8 circular connector MaleFemale 3 pole cable 2m (both cables).png",
+        "arquivo": "M8 circular connector MaleFemale 3 pole cable 2m (both cables).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/products/405_273_20180816122901.png",
+        "arquivo": "405_273_20180816122901.png"
+      }
+    ]
+  },
+  {
+    "sku": "2832",
+    "name": "Extensor M8 3 polos para Bateria BMS 5 Metros (Par) - Victron Energy",
+    "estoque": 0,
+    "preco": 593.61,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "m8-circular-connector-male-female-3-pole-cable-2m",
+    "pagina": "https://www.victronenergy.com/accessories/m8-circular-connector-male-female-3-pole-cable-2m",
+    "conf_familia": "media",
+    "imagem": "https://www.victronenergy.com/upload/products/405_273_20180816122901.png",
+    "arquivo": "405_273_20180816122901.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        8,
+        3,
+        5
+      ],
+      "sobrando": [
+        405,
+        273
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/M8 circular connector MaleFemale 3 pole cable 2m (front).png",
+        "arquivo": "M8 circular connector MaleFemale 3 pole cable 2m (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/M8 circular connector MaleFemale 3 pole cable 2m (front2).png",
+        "arquivo": "M8 circular connector MaleFemale 3 pole cable 2m (front2).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/M8 circular connector MaleFemale 3 pole cable 2m (both cables).png",
+        "arquivo": "M8 circular connector MaleFemale 3 pole cable 2m (both cables).png"
+      }
+    ]
+  },
+  {
+    "sku": "2820",
+    "name": "Fusível CNN 325A/80V - Victron Energy",
+    "estoque": 0,
+    "preco": 839.5,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/328_562_20200424091343.png",
+    "arquivo": "328_562_20200424091343.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        325,
+        80
+      ],
+      "sobrando": [
+        328,
+        562
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA fuse 40A-80V (front).png",
+        "arquivo": "MEGA fuse 40A-80V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CIP106100000 - Fuse holder for ANL-fuse (front).png",
+        "arquivo": "CIP106100000 - Fuse holder for ANL-fuse (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Fuse 60A80V.png",
+        "arquivo": "Fuse 60A80V.png"
+      }
+    ]
+  },
+  {
+    "sku": "2742",
+    "name": "Fusível Mega 100A/32V - 5 unidades - Victron Energy",
+    "estoque": 0,
+    "preco": 216.13,
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/CIP132100000 MIDI fuse 100A-32V.jpg",
+    "arquivo": "CIP132100000 MIDI fuse 100A-32V.jpg",
+    "numeros_casados": [
+      100,
+      32
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CIP106100000 - Fuse holder for ANL-fuse (front).png",
+        "arquivo": "CIP106100000 - Fuse holder for ANL-fuse (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA-Fuse 225A 32V.png",
+        "arquivo": "MEGA-Fuse 225A 32V.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MIDI-Fuse 200A 32V foil.png",
+        "arquivo": "MIDI-Fuse 200A 32V foil.png"
+      }
+    ]
+  },
+  {
+    "sku": "2935",
+    "name": "Fusível Mega 100A/80V - 5 unidades - Victron Energy",
+    "estoque": 0,
+    "preco": 595.08,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/328_562_20200424091343.png",
+    "arquivo": "328_562_20200424091343.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        100,
+        80,
+        5
+      ],
+      "sobrando": [
+        328,
+        562
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA fuse 40A-80V (front).png",
+        "arquivo": "MEGA fuse 40A-80V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CIP106100000 - Fuse holder for ANL-fuse (front).png",
+        "arquivo": "CIP106100000 - Fuse holder for ANL-fuse (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Fuse 60A80V.png",
+        "arquivo": "Fuse 60A80V.png"
+      }
+    ]
+  },
+  {
+    "sku": "2592",
+    "name": "Fusível Mega 125A/32V - 5 unidades - Victron Energy",
+    "estoque": 0,
+    "preco": 216.36,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/328_562_20200424091343.png",
+    "arquivo": "328_562_20200424091343.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        125,
+        32,
+        5
+      ],
+      "sobrando": [
+        328,
+        562
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CIP106100000 - Fuse holder for ANL-fuse (front).png",
+        "arquivo": "CIP106100000 - Fuse holder for ANL-fuse (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA-Fuse 225A 32V.png",
+        "arquivo": "MEGA-Fuse 225A 32V.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MIDI-Fuse 200A 32V foil.png",
+        "arquivo": "MIDI-Fuse 200A 32V foil.png"
+      }
+    ]
+  },
+  {
+    "sku": "2749",
+    "name": "Fusível Mega 125A/58V para produtos 48V - Victron Energy",
+    "estoque": 0,
+    "preco": 419.97,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/328_562_20200424091343.png",
+    "arquivo": "328_562_20200424091343.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        125,
+        58,
+        48
+      ],
+      "sobrando": [
+        328,
+        562
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CIP106100000 - Fuse holder for ANL-fuse (front).png",
+        "arquivo": "CIP106100000 - Fuse holder for ANL-fuse (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA-fuse 300A58V for 48V products_2.png",
+        "arquivo": "MEGA-fuse 300A58V for 48V products_2.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA-fuse 300A58V for 48V products (1 pc).png",
+        "arquivo": "MEGA-fuse 300A58V for 48V products (1 pc).png"
+      }
+    ]
+  },
+  {
+    "sku": "2936",
+    "name": "Fusível Mega 125A/80V - 5 unidades - Victron Energy",
+    "estoque": 0,
+    "preco": 595.08,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/328_562_20200424091343.png",
+    "arquivo": "328_562_20200424091343.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        125,
+        80,
+        5
+      ],
+      "sobrando": [
+        328,
+        562
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA fuse 40A-80V (front).png",
+        "arquivo": "MEGA fuse 40A-80V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CIP106100000 - Fuse holder for ANL-fuse (front).png",
+        "arquivo": "CIP106100000 - Fuse holder for ANL-fuse (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Fuse 60A80V.png",
+        "arquivo": "Fuse 60A80V.png"
+      }
+    ]
+  },
+  {
+    "sku": "2743",
+    "name": "Fusível Mega 150A/32V - 5 unidades - Victron Energy",
+    "estoque": 0,
+    "preco": 216.36,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/328_562_20200424091343.png",
+    "arquivo": "328_562_20200424091343.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        150,
+        32,
+        5
+      ],
+      "sobrando": [
+        328,
+        562
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CIP106100000 - Fuse holder for ANL-fuse (front).png",
+        "arquivo": "CIP106100000 - Fuse holder for ANL-fuse (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA-Fuse 225A 32V.png",
+        "arquivo": "MEGA-Fuse 225A 32V.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MIDI-Fuse 200A 32V foil.png",
+        "arquivo": "MIDI-Fuse 200A 32V foil.png"
+      }
+    ]
+  },
+  {
+    "sku": "2970",
+    "name": "Fusível Mega 150A/80V - 5 unidades - Victron Energy",
+    "estoque": 0,
+    "preco": 674.45,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/328_562_20200424091343.png",
+    "arquivo": "328_562_20200424091343.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        150,
+        80,
+        5
+      ],
+      "sobrando": [
+        328,
+        562
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA fuse 40A-80V (front).png",
+        "arquivo": "MEGA fuse 40A-80V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CIP106100000 - Fuse holder for ANL-fuse (front).png",
+        "arquivo": "CIP106100000 - Fuse holder for ANL-fuse (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Fuse 60A80V.png",
+        "arquivo": "Fuse 60A80V.png"
+      }
+    ]
+  },
+  {
+    "sku": "2744",
+    "name": "Fusível Mega 175A/32V - 5 unidades - Victron Energy",
+    "estoque": 0,
+    "preco": 216.36,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/328_562_20200424091343.png",
+    "arquivo": "328_562_20200424091343.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        175,
+        32,
+        5
+      ],
+      "sobrando": [
+        328,
+        562
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CIP106100000 - Fuse holder for ANL-fuse (front).png",
+        "arquivo": "CIP106100000 - Fuse holder for ANL-fuse (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA-Fuse 225A 32V.png",
+        "arquivo": "MEGA-Fuse 225A 32V.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MIDI-Fuse 200A 32V foil.png",
+        "arquivo": "MIDI-Fuse 200A 32V foil.png"
+      }
+    ]
+  },
+  {
+    "sku": "2995",
+    "name": "Fusível Mega 175A/80V - 5 unidades - Victron Energy",
+    "estoque": 0,
+    "preco": 595.08,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/328_562_20200424091343.png",
+    "arquivo": "328_562_20200424091343.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        175,
+        80,
+        5
+      ],
+      "sobrando": [
+        328,
+        562
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA fuse 40A-80V (front).png",
+        "arquivo": "MEGA fuse 40A-80V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CIP106100000 - Fuse holder for ANL-fuse (front).png",
+        "arquivo": "CIP106100000 - Fuse holder for ANL-fuse (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Fuse 60A80V.png",
+        "arquivo": "Fuse 60A80V.png"
+      }
+    ]
+  },
+  {
+    "sku": "2745",
+    "name": "Fusível Mega 200A/32V - 5 unidades - Victron Energy",
+    "estoque": 0,
+    "preco": 271.58,
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/MIDI-Fuse 200A 32V foil.png",
+    "arquivo": "MIDI-Fuse 200A 32V foil.png",
+    "numeros_casados": [
+      200,
+      32
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MIDI-Fuse 200A 32V Front Rear.png",
+        "arquivo": "MIDI-Fuse 200A 32V Front Rear.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Fuse 200A MIdi (Bag).png",
+        "arquivo": "Fuse 200A MIdi (Bag).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CIP106100000 - Fuse holder for ANL-fuse (front).png",
+        "arquivo": "CIP106100000 - Fuse holder for ANL-fuse (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2750",
+    "name": "Fusível Mega 200A/58V para produtos 48V - Victron Energy",
+    "estoque": 0,
+    "preco": 505.97,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/328_562_20200424091343.png",
+    "arquivo": "328_562_20200424091343.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        200,
+        58,
+        48
+      ],
+      "sobrando": [
+        328,
+        562
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Fuse 200A MIdi (Bag).png",
+        "arquivo": "Fuse 200A MIdi (Bag).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CIP106100000 - Fuse holder for ANL-fuse (front).png",
+        "arquivo": "CIP106100000 - Fuse holder for ANL-fuse (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA-fuse 300A58V for 48V products_2.png",
+        "arquivo": "MEGA-fuse 300A58V for 48V products_2.png"
+      }
+    ]
+  },
+  {
+    "sku": "2937",
+    "name": "FUSIVEL MEGA 200A/80V (PACKAGE OF 5 PCS) VICTRON ENERGY",
+    "estoque": 0,
+    "preco": 601.96,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/328_562_20200424091343.png",
+    "arquivo": "328_562_20200424091343.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        200,
+        80,
+        5
+      ],
+      "sobrando": [
+        328,
+        562
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA fuse 40A-80V (front).png",
+        "arquivo": "MEGA fuse 40A-80V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Fuse 200A MIdi (Bag).png",
+        "arquivo": "Fuse 200A MIdi (Bag).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CIP106100000 - Fuse holder for ANL-fuse (front).png",
+        "arquivo": "CIP106100000 - Fuse holder for ANL-fuse (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2746",
+    "name": "Fusível Mega 225A/32V - 5 unidades - Victron Energy",
+    "estoque": 0,
+    "preco": 216.36,
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/MEGA-Fuse 225A 32V.png",
+    "arquivo": "MEGA-Fuse 225A 32V.png",
+    "numeros_casados": [
+      225,
+      32
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA-Fuse 225A 32V foil.png",
+        "arquivo": "MEGA-Fuse 225A 32V foil.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CIP106100000 - Fuse holder for ANL-fuse (front).png",
+        "arquivo": "CIP106100000 - Fuse holder for ANL-fuse (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MIDI-Fuse 200A 32V foil.png",
+        "arquivo": "MIDI-Fuse 200A 32V foil.png"
+      }
+    ]
+  },
+  {
+    "sku": "2996",
+    "name": "FUSIVEL MEGA 225A/80V (PACKAGE OF 5 PCS) VICTRON ENERGY",
+    "estoque": 0,
+    "preco": 614.59,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/328_562_20200424091343.png",
+    "arquivo": "328_562_20200424091343.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        225,
+        80,
+        5
+      ],
+      "sobrando": [
+        328,
+        562
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA fuse 40A-80V (front).png",
+        "arquivo": "MEGA fuse 40A-80V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CIP106100000 - Fuse holder for ANL-fuse (front).png",
+        "arquivo": "CIP106100000 - Fuse holder for ANL-fuse (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Fuse 60A80V.png",
+        "arquivo": "Fuse 60A80V.png"
+      }
+    ]
+  },
+  {
+    "sku": "2747",
+    "name": "Fusível Mega 250A/32V - 5 unidades - Victron Energy",
+    "estoque": 0,
+    "preco": 216.36,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/328_562_20200424091343.png",
+    "arquivo": "328_562_20200424091343.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        250,
+        32,
+        5
+      ],
+      "sobrando": [
+        328,
+        562
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CIP106100000 - Fuse holder for ANL-fuse (front).png",
+        "arquivo": "CIP106100000 - Fuse holder for ANL-fuse (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA-Fuse 225A 32V.png",
+        "arquivo": "MEGA-Fuse 225A 32V.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MIDI-Fuse 200A 32V foil.png",
+        "arquivo": "MIDI-Fuse 200A 32V foil.png"
+      }
+    ]
+  },
+  {
+    "sku": "2997",
+    "name": "FUSIVEL MEGA 250A/80V (PACKAGE OF 5 PCS) VICTRON ENERGY",
+    "estoque": 0,
+    "preco": 619.18,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/328_562_20200424091343.png",
+    "arquivo": "328_562_20200424091343.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        250,
+        80,
+        5
+      ],
+      "sobrando": [
+        328,
+        562
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA fuse 40A-80V (front).png",
+        "arquivo": "MEGA fuse 40A-80V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CIP106100000 - Fuse holder for ANL-fuse (front).png",
+        "arquivo": "CIP106100000 - Fuse holder for ANL-fuse (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Fuse 60A80V.png",
+        "arquivo": "Fuse 60A80V.png"
+      }
+    ]
+  },
+  {
+    "sku": "2748",
+    "name": "Fusível Mega 300A/32V - 5 unidades - Victron Energy",
+    "estoque": 0,
+    "preco": 216.13,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/328_562_20200424091343.png",
+    "arquivo": "328_562_20200424091343.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        300,
+        32,
+        5
+      ],
+      "sobrando": [
+        328,
+        562
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CIP106100000 - Fuse holder for ANL-fuse (front).png",
+        "arquivo": "CIP106100000 - Fuse holder for ANL-fuse (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA-Fuse 225A 32V.png",
+        "arquivo": "MEGA-Fuse 225A 32V.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MIDI-Fuse 200A 32V foil.png",
+        "arquivo": "MIDI-Fuse 200A 32V foil.png"
+      }
+    ]
+  },
+  {
+    "sku": "2751",
+    "name": "Fusível Mega 300A/58V para produtos 48V - Victron Energy",
+    "estoque": 0,
+    "preco": 419.97,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/328_562_20200424091343.png",
+    "arquivo": "328_562_20200424091343.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        300,
+        58,
+        48
+      ],
+      "sobrando": [
+        328,
+        562
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA-fuse 300A58V for 48V products_2.png",
+        "arquivo": "MEGA-fuse 300A58V for 48V products_2.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA-fuse 300A58V for 48V products (1 pc).png",
+        "arquivo": "MEGA-fuse 300A58V for 48V products (1 pc).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CIP106100000 - Fuse holder for ANL-fuse (front).png",
+        "arquivo": "CIP106100000 - Fuse holder for ANL-fuse (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2938",
+    "name": "Fusível Mega 300A/80V - 5 unidades - Victron Energy",
+    "estoque": 0,
+    "preco": 595.08,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/328_562_20200424091343.png",
+    "arquivo": "328_562_20200424091343.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        300,
+        80,
+        5
+      ],
+      "sobrando": [
+        328,
+        562
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA fuse 40A-80V (front).png",
+        "arquivo": "MEGA fuse 40A-80V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CIP106100000 - Fuse holder for ANL-fuse (front).png",
+        "arquivo": "CIP106100000 - Fuse holder for ANL-fuse (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Fuse 60A80V.png",
+        "arquivo": "Fuse 60A80V.png"
+      }
+    ]
+  },
+  {
+    "sku": "2932",
+    "name": "Fusível Mega 40A/80V - 5 unidades - Victron Energy",
+    "estoque": 0,
+    "preco": 595.08,
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/MEGA fuse 40A-80V (front).png",
+    "arquivo": "MEGA fuse 40A-80V (front).png",
+    "numeros_casados": [
+      40,
+      80
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA fuse 40A-80V (Package).png",
+        "arquivo": "MEGA fuse 40A-80V (Package).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA fuse 40A-80V (single in pagckage).png",
+        "arquivo": "MEGA fuse 40A-80V (single in pagckage).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA fuse 40A-80V (top).png",
+        "arquivo": "MEGA fuse 40A-80V (top).png"
+      }
+    ]
+  },
+  {
+    "sku": "2654",
+    "name": "Fusível Mega 60A/32V - 5 unidades - Victron Energy",
+    "estoque": 0,
+    "preco": 0,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/328_562_20200424091343.png",
+    "arquivo": "328_562_20200424091343.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        60,
+        32,
+        5
+      ],
+      "sobrando": [
+        328,
+        562
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CIP106100000 - Fuse holder for ANL-fuse (front).png",
+        "arquivo": "CIP106100000 - Fuse holder for ANL-fuse (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Fuse 60A80V.png",
+        "arquivo": "Fuse 60A80V.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA-Fuse 225A 32V.png",
+        "arquivo": "MEGA-Fuse 225A 32V.png"
+      }
+    ]
+  },
+  {
+    "sku": "2933",
+    "name": "Fusível Mega 60A/80V - 5 unidades - Victron Energy",
+    "estoque": 0,
+    "preco": 595.08,
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Fuse 60A80V.png",
+    "arquivo": "Fuse 60A80V.png",
+    "numeros_casados": [
+      60,
+      80
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA fuse 40A-80V (front).png",
+        "arquivo": "MEGA fuse 40A-80V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CIP106100000 - Fuse holder for ANL-fuse (front).png",
+        "arquivo": "CIP106100000 - Fuse holder for ANL-fuse (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA fuse 40A-80V (Package).png",
+        "arquivo": "MEGA fuse 40A-80V (Package).png"
+      }
+    ]
+  },
+  {
+    "sku": "2741",
+    "name": "Fusível Mega 80A/32V - 5 unidades - Victron Energy",
+    "estoque": 0,
+    "preco": 216.36,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/328_562_20200424091343.png",
+    "arquivo": "328_562_20200424091343.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        80,
+        32,
+        5
+      ],
+      "sobrando": [
+        328,
+        562
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA fuse 40A-80V (front).png",
+        "arquivo": "MEGA fuse 40A-80V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CIP106100000 - Fuse holder for ANL-fuse (front).png",
+        "arquivo": "CIP106100000 - Fuse holder for ANL-fuse (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Fuse 60A80V.png",
+        "arquivo": "Fuse 60A80V.png"
+      }
+    ]
+  },
+  {
+    "sku": "2934",
+    "name": "Fusível Mega 80A/80V - 5 unidades - Victron Energy",
+    "estoque": 0,
+    "preco": 595.08,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/328_562_20200424091343.png",
+    "arquivo": "328_562_20200424091343.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        80,
+        5
+      ],
+      "sobrando": [
+        328,
+        562
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA fuse 40A-80V (front).png",
+        "arquivo": "MEGA fuse 40A-80V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CIP106100000 - Fuse holder for ANL-fuse (front).png",
+        "arquivo": "CIP106100000 - Fuse holder for ANL-fuse (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Fuse 60A80V.png",
+        "arquivo": "Fuse 60A80V.png"
+      }
+    ]
+  },
+  {
+    "sku": "2786",
+    "name": "Fusível MIDI 100A/58V para produtos 48V - Victron Energy",
+    "estoque": 0,
+    "preco": 186.45,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/328_562_20200424091343.png",
+    "arquivo": "328_562_20200424091343.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        100,
+        58,
+        48
+      ],
+      "sobrando": [
+        328,
+        562
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MIDI-Fuse100A-58V-M6.png",
+        "arquivo": "MIDI-Fuse100A-58V-M6.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CIP106100000 - Fuse holder for ANL-fuse (front).png",
+        "arquivo": "CIP106100000 - Fuse holder for ANL-fuse (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA-fuse 300A58V for 48V products_2.png",
+        "arquivo": "MEGA-fuse 300A58V for 48V products_2.png"
+      }
+    ]
+  },
+  {
+    "sku": "2785",
+    "name": "Fusível MIDI 40A/58V para produtos 48V - Victron Energy",
+    "estoque": 0,
+    "preco": 159.77,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/328_562_20200424091343.png",
+    "arquivo": "328_562_20200424091343.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        40,
+        58,
+        48
+      ],
+      "sobrando": [
+        328,
+        562
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA fuse 40A-80V (front).png",
+        "arquivo": "MEGA fuse 40A-80V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CIP106100000 - Fuse holder for ANL-fuse (front).png",
+        "arquivo": "CIP106100000 - Fuse holder for ANL-fuse (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MEGA-fuse 300A58V for 48V products_2.png",
+        "arquivo": "MEGA-fuse 300A58V for 48V products_2.png"
+      }
+    ]
+  },
+  {
+    "sku": "2393",
+    "name": "Interruptor da bateria ON/OFF 275A - Victron Energy",
+    "estoque": 0,
+    "preco": 439.22,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "battery-switch-on-off",
+    "pagina": "https://www.victronenergy.com/battery-isolators-and-combiners/battery-switch-on-off",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/Battery switch ON-OFF 48V (top).png",
+    "arquivo": "Battery switch ON-OFF 48V (top).png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        275
+      ],
+      "sobrando": [
+        48
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Battery switch ON-OFF 48V (front).png",
+        "arquivo": "Battery switch ON-OFF 48V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/BatterySwitch (stickers).png",
+        "arquivo": "BatterySwitch (stickers).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Battery switch ON-OFF 48V (accessories).png",
+        "arquivo": "Battery switch ON-OFF 48V (accessories).png"
+      }
+    ]
+  },
+  {
+    "sku": "2831",
+    "name": "Inversor Phoenix 12/500 - 230V - Victron Energy",
+    "estoque": 0,
+    "preco": 2336.99,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "phoenix-inverter-vedirect-250va-800va",
+    "pagina": "https://www.victronenergy.com/inverters/phoenix-inverter-vedirect-250va-800va",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/PIN121501400 Inverter 12-500 230V VE.Direct UK.jpg",
+    "arquivo": "PIN121501400 Inverter 12-500 230V VE.Direct UK.jpg",
+    "numeros_casados": [
+      12,
+      500,
+      230
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Inverter 12V 1200VA VE.Direct 230V (front).png",
+        "arquivo": "Inverter 12V 1200VA VE.Direct 230V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Inverter 12V 375VA VE.Direct (front).png",
+        "arquivo": "Inverter 12V 375VA VE.Direct (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PIN125010510_Inverter 12V 500VA 120V (conn).png",
+        "arquivo": "PIN125010510_Inverter 12V 500VA 120V (conn).png"
+      }
+    ]
+  },
+  {
+    "sku": "2764",
+    "name": "Inversor Phoenix 12/800 - 230V - Victron Energy",
+    "estoque": 0,
+    "preco": 0,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "phoenix-inverter-vedirect-250va-800va",
+    "pagina": "https://www.victronenergy.com/inverters/phoenix-inverter-vedirect-250va-800va",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/Inverter VE.Direct.png",
+    "arquivo": "Inverter VE.Direct.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        12,
+        800,
+        230
+      ],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Inverter 12V 1200VA VE.Direct 230V (front).png",
+        "arquivo": "Inverter 12V 1200VA VE.Direct 230V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Inverter 12V 375VA VE.Direct (front).png",
+        "arquivo": "Inverter 12V 375VA VE.Direct (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PIN121501400 Inverter 12-500 230V VE.Direct UK.jpg",
+        "arquivo": "PIN121501400 Inverter 12-500 230V VE.Direct UK.jpg"
+      }
+    ]
+  },
+  {
+    "sku": "2657",
+    "name": "Inversor Phoenix 24/3000 - 230V VE.Bus - Victron Energy",
+    "estoque": 0,
+    "preco": 0,
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "phoenix-inverter-12v-24v-48v-800va-3kva",
+    "pagina": "https://www.victronenergy.com/inverters/phoenix-inverter-12v-24v-48v-800va-3kva",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Inverter 24V 3000VA (front).png",
+    "arquivo": "Inverter 24V 3000VA (front).png",
+    "numeros_casados": [
+      24,
+      3000
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PIN243020100_Inverter 24-3000 120V VE Bus (front).png",
+        "arquivo": "PIN243020100_Inverter 24-3000 120V VE Bus (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Inverter 24V 3000VA (conn).png",
+        "arquivo": "Inverter 24V 3000VA (conn).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Inverter 24V 5000VA (front).png",
+        "arquivo": "Inverter 24V 5000VA (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2633",
+    "name": "Inversor Phoenix 24/375 - 120V - Victron Energy",
+    "estoque": 0,
+    "preco": 3418.07,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "phoenix-inverter-vedirect-250va-800va",
+    "pagina": "https://www.victronenergy.com/inverters/phoenix-inverter-vedirect-250va-800va",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/PIN243750510_Inverter 24-375 120V (conn).png",
+    "arquivo": "PIN243750510_Inverter 24-375 120V (conn).png",
+    "numeros_casados": [
+      24,
+      375,
+      120
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PIN243750510_Inverter 24-375 120V (output).png",
+        "arquivo": "PIN243750510_Inverter 24-375 120V (output).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PIN243750510_Inverter 24-375 120V (sidetop).png",
+        "arquivo": "PIN243750510_Inverter 24-375 120V (sidetop).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PIN243750500_Inverter 24-375 120V VE.Direct NEMA 5-15R (front).png",
+        "arquivo": "PIN243750500_Inverter 24-375 120V VE.Direct NEMA 5-15R (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2900",
+    "name": "Inversor Phoenix 24/800 - 120V - Victron Energy",
+    "estoque": 0,
+    "preco": 3186.11,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "phoenix-inverter-vedirect-250va-800va",
+    "pagina": "https://www.victronenergy.com/inverters/phoenix-inverter-vedirect-250va-800va",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/Inverter VE.Direct.png",
+    "arquivo": "Inverter VE.Direct.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        24,
+        800,
+        120
+      ],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PIN241800500_Inverter 24-800 120V VE.Direct NEMA 5-15R (front).png",
+        "arquivo": "PIN241800500_Inverter 24-800 120V VE.Direct NEMA 5-15R (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PIN242120500_Inverter 24-1200 120V VE.Direct NEMA (front).png",
+        "arquivo": "PIN242120500_Inverter 24-1200 120V VE.Direct NEMA (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PIN242122510_Inverter 24-1200 120V VE.Direct NEMA GFCI (front).png",
+        "arquivo": "PIN242122510_Inverter 24-1200 120V VE.Direct NEMA GFCI (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2821",
+    "name": "Inversor Phoenix 24/800 - 230V - Victron Energy",
+    "estoque": 0,
+    "preco": 0,
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "phoenix-inverter-vedirect-250va-800va",
+    "pagina": "https://www.victronenergy.com/inverters/phoenix-inverter-vedirect-250va-800va",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Inverter 24V 800VA VE.Direct (conn).png",
+    "arquivo": "Inverter 24V 800VA VE.Direct (conn).png",
+    "numeros_casados": [
+      24,
+      800
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Inverter 24V 800VA VE.Direct (output).png",
+        "arquivo": "Inverter 24V 800VA VE.Direct (output).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Inverter 24V 1200 (front).png",
+        "arquivo": "Inverter 24V 1200 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Inverter 24V 800VA VE.Direct (top).png",
+        "arquivo": "Inverter 24V 800VA VE.Direct (top).png"
+      }
+    ]
+  },
+  {
+    "sku": "1852",
+    "name": "Inversor Phoenix Smart 12/2000 - 220V - Victron Energy",
+    "estoque": 0,
+    "preco": 0,
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "phoenix-inverter-smart",
+    "pagina": "https://www.victronenergy.com/inverters/phoenix-inverter-smart",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Inverter 12V 2000VA Smart (front).png",
+    "arquivo": "Inverter 12V 2000VA Smart (front).png",
+    "numeros_casados": [
+      12,
+      2000
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Inverter 12V 2000VA Smart (wall mounting).png",
+        "arquivo": "Inverter 12V 2000VA Smart (wall mounting).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Inverter 12V 1600VA Smart (front).png",
+        "arquivo": "Inverter 12V 1600VA Smart (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Inverter Smart 12V 3000VA (front).png",
+        "arquivo": "Inverter Smart 12V 3000VA (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2596",
+    "name": "Isolador de Bateria Argodiode 100 - 3 baterias - Victron Energy",
+    "estoque": 0,
+    "preco": 0,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "argo-diode-battery-isolators",
+    "pagina": "https://www.victronenergy.com/battery-isolators-and-combiners/argo-diode-battery-isolators",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/158_410_20170712114447.png",
+    "arquivo": "158_410_20170712114447.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        100,
+        3
+      ],
+      "sobrando": [
+        158,
+        410
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/argo-diode-isolator-2bat-120-3D-72dpi.jpg",
+        "arquivo": "argo-diode-isolator-2bat-120-3D-72dpi.jpg"
+      }
+    ]
+  },
+  {
+    "sku": "2571",
+    "name": "Isolador de Bateria Argodiode 160 - 2 Baterias - Victron Energy",
+    "estoque": 0,
+    "preco": 0,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "argo-diode-battery-isolators",
+    "pagina": "https://www.victronenergy.com/battery-isolators-and-combiners/argo-diode-battery-isolators",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/158_410_20170712114447.png",
+    "arquivo": "158_410_20170712114447.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        160,
+        2
+      ],
+      "sobrando": [
+        158,
+        410
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/argo-diode-isolator-2bat-120-3D-72dpi.jpg",
+        "arquivo": "argo-diode-isolator-2bat-120-3D-72dpi.jpg"
+      }
+    ]
+  },
+  {
+    "sku": "2993",
+    "name": "Isolador de Bateria Argofet 140A - 3 baterias - Victron Energy",
+    "estoque": 0,
+    "preco": 1344.13,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "argo-fet-battery-isolators",
+    "pagina": "https://www.victronenergy.com/battery-isolators-and-combiners/argo-fet-battery-isolators",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/159_142_20180709121045.png",
+    "arquivo": "159_142_20180709121045.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        140,
+        3
+      ],
+      "sobrando": [
+        159,
+        142
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/argo-fet-isolator-3bat-100A_front_300dpi.jpg",
+        "arquivo": "argo-fet-isolator-3bat-100A_front_300dpi.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ARG100301020_Argofet 100-3 Three batteries 100A (front).png",
+        "arquivo": "ARG100301020_Argofet 100-3 Three batteries 100A (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ARG200301020_Argofet 200-3 Three batteries 200A (front).png",
+        "arquivo": "ARG200301020_Argofet 200-3 Three batteries 200A (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2861",
+    "name": "Isolador de Bateria Argofet 200A - 3 baterias - Victron Energy",
+    "estoque": 0,
+    "preco": 1867.58,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "argo-fet-battery-isolators",
+    "pagina": "https://www.victronenergy.com/battery-isolators-and-combiners/argo-fet-battery-isolators",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/ARG200301020_Argofet 200-3 Three batteries 200A (front).png",
+    "arquivo": "ARG200301020_Argofet 200-3 Three batteries 200A (front).png",
+    "numeros_casados": [
+      200,
+      3
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ARG200301020_Argofet 200-3 Three batteries 200A (front-low).png",
+        "arquivo": "ARG200301020_Argofet 200-3 Three batteries 200A (front-low).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/argo-fet-isolator-3bat-100A_front_300dpi.jpg",
+        "arquivo": "argo-fet-isolator-3bat-100A_front_300dpi.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ARG200201020_Argofet 200-2 Two batteries 200A (front).png",
+        "arquivo": "ARG200201020_Argofet 200-2 Two batteries 200A (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2753",
+    "name": "Isolador Galvânico VDI-16A - Victron Energy",
+    "estoque": 0,
+    "preco": 1569.94,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "galvanic-isolator",
+    "pagina": "https://www.victronenergy.com/isolation-transformers/galvanic-isolator",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/339_583_20180713112314.png",
+    "arquivo": "339_583_20180713112314.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        16
+      ],
+      "sobrando": [
+        339,
+        583
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Galvanic Isolator VDI 16_top.jpg",
+        "arquivo": "Galvanic Isolator VDI 16_top.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Galvanic Isolator VDI 16_side.jpg",
+        "arquivo": "Galvanic Isolator VDI 16_side.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Galvanic Isolator VDI 32_top.jpg",
+        "arquivo": "Galvanic Isolator VDI 32_top.jpg"
+      }
+    ]
+  },
+  {
+    "sku": "2754",
+    "name": "Isolador Galvânico VDI-32A - Victron Energy",
+    "estoque": 0,
+    "preco": 3705.94,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "galvanic-isolator",
+    "pagina": "https://www.victronenergy.com/isolation-transformers/galvanic-isolator",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/339_583_20180713112314.png",
+    "arquivo": "339_583_20180713112314.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        32
+      ],
+      "sobrando": [
+        339,
+        583
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Galvanic Isolator VDI 32_top.jpg",
+        "arquivo": "Galvanic Isolator VDI 32_top.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Galvanic Isolator VDI 32_side.jpg",
+        "arquivo": "Galvanic Isolator VDI 32_side.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Galvanic Isolator VDI 16_top.jpg",
+        "arquivo": "Galvanic Isolator VDI 16_top.jpg"
+      }
+    ]
+  },
+  {
+    "sku": "2755",
+    "name": "Isolador Galvânico VDI-64A - Victron Energy",
+    "estoque": 0,
+    "preco": 4258.8,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "galvanic-isolator",
+    "pagina": "https://www.victronenergy.com/isolation-transformers/galvanic-isolator",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/339_583_20180713112314.png",
+    "arquivo": "339_583_20180713112314.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        64
+      ],
+      "sobrando": [
+        339,
+        583
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Galvanic Isolator VDI 16_top.jpg",
+        "arquivo": "Galvanic Isolator VDI 16_top.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Galvanic Isolator VDI 32_top.jpg",
+        "arquivo": "Galvanic Isolator VDI 32_top.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Galvanic Isolator VDI 16_side.jpg",
+        "arquivo": "Galvanic Isolator VDI 16_side.jpg"
+      }
+    ]
+  },
+  {
+    "sku": "2865",
+    "name": "Medidor de Energia VM-3P75CT - Victron Energy",
+    "estoque": 0,
+    "preco": 2544.33,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "energy-meter",
+    "pagina": "https://www.victronenergy.com/meters-and-sensors/energy-meter",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/Energy Meter nw.png",
+    "arquivo": "Energy Meter nw.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        3,
+        75
+      ],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Energy meter (connectors3).png",
+        "arquivo": "Energy meter (connectors3).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Energiemeter-_top_.png",
+        "arquivo": "Energiemeter-_top_.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Energy Meter (front-angle).png",
+        "arquivo": "Energy Meter (front-angle).png"
+      }
+    ]
+  },
+  {
+    "sku": "2675",
+    "name": "Modem para dispositivos GXs GX LTE 4G-AS - Victron Energy",
+    "estoque": 0,
+    "preco": 2973.36,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "gx-lte-4g",
+    "pagina": "https://www.victronenergy.com/communication-centres/gx-lte-4g",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/452_679_20200625105343.png",
+    "arquivo": "452_679_20200625105343.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        4
+      ],
+      "sobrando": [
+        452,
+        679
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/GX LTE 4G-E (top-cables).png",
+        "arquivo": "GX LTE 4G-E (top-cables).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/GX LTE 4G-E (top).png",
+        "arquivo": "GX LTE 4G-E (top).png"
+      }
+    ]
+  },
+  {
+    "sku": "2758",
+    "name": "Monitor de Bateria Lynx VE.Can (M8) - Victron Energy",
+    "estoque": 0,
+    "preco": 4463.09,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "lynx-shunt-ve-can",
+    "pagina": "https://www.victronenergy.com/battery-monitors/lynx-shunt-ve-can",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/230_588_20180706090107.png",
+    "arquivo": "230_588_20180706090107.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        8
+      ],
+      "sobrando": [
+        230,
+        588
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Lynx shunt VE.Can (top-open).png",
+        "arquivo": "Lynx shunt VE.Can (top-open).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Lynx shunt VE.Can (left_open).png",
+        "arquivo": "Lynx shunt VE.Can (left_open).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Lynx shunt VE.Can (front_open).png",
+        "arquivo": "Lynx shunt VE.Can (front_open).png"
+      }
+    ]
+  },
+  {
+    "sku": "2395",
+    "name": "Monitor de Bateria Smart BMV - 712 Cinza - Victron Energy",
+    "estoque": 0,
+    "preco": 0,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "bmv-712-smart",
+    "pagina": "https://www.victronenergy.com/battery-monitors/bmv-712-smart",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/BMV-712 Smart_SOC.png",
+    "arquivo": "BMV-712 Smart_SOC.png",
+    "numeros_casados": [
+      712
+    ],
+    "numeros_conflitantes": {
+      "faltando": [],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/BMV-712 Smart.png",
+        "arquivo": "BMV-712 Smart.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/BMV-712 Smart_left.png",
+        "arquivo": "BMV-712 Smart_left.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/BMV-712 Smart Battery Monitor (parts top).png",
+        "arquivo": "BMV-712 Smart Battery Monitor (parts top).png"
+      }
+    ]
+  },
+  {
+    "sku": "2731",
+    "name": "Monitor de Bateria Smart BMV - 712 Preto - Victron Energy",
+    "estoque": 0,
+    "preco": 2115.18,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "bmv-712-smart",
+    "pagina": "https://www.victronenergy.com/battery-monitors/bmv-712-smart",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/BMV-712 Smart_SOC.png",
+    "arquivo": "BMV-712 Smart_SOC.png",
+    "numeros_casados": [
+      712
+    ],
+    "numeros_conflitantes": {
+      "faltando": [],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/BMV-712 Smart.png",
+        "arquivo": "BMV-712 Smart.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/BMV-712 Smart_left.png",
+        "arquivo": "BMV-712 Smart_left.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/BMV-712 Smart Battery Monitor (parts top).png",
+        "arquivo": "BMV-712 Smart Battery Monitor (parts top).png"
+      }
+    ]
+  },
+  {
+    "sku": "2661",
+    "name": "Monitor de Bateria SmartShunt 1000A/50mV IP65 - Victron Energy",
+    "estoque": 0,
+    "preco": 0,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "smart-battery-shunt",
+    "pagina": "https://www.victronenergy.com/battery-monitors/smart-battery-shunt",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/SmartShunt 1000A-50mV (front).png",
+    "arquivo": "SmartShunt 1000A-50mV (front).png",
+    "numeros_casados": [
+      1000,
+      50
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SHU067210050 SmartShunt 1000A-50mV IP65  (front).png",
+        "arquivo": "SHU067210050 SmartShunt 1000A-50mV IP65  (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartShunt 300A-50mV (front).png",
+        "arquivo": "SmartShunt 300A-50mV (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartShunt 500A-50mV (front).png",
+        "arquivo": "SmartShunt 500A-50mV (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "3002",
+    "name": "Monitor de Bateria SmartShunt 300A/50mV IP65 - Victron Energy",
+    "estoque": -1,
+    "preco": 0,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "smart-battery-shunt",
+    "pagina": "https://www.victronenergy.com/battery-monitors/smart-battery-shunt",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/SmartShunt 300A-50mV (front).png",
+    "arquivo": "SmartShunt 300A-50mV (front).png",
+    "numeros_casados": [
+      300,
+      50
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartShunt 300A-50mV IP65 (front).png",
+        "arquivo": "SmartShunt 300A-50mV IP65 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartShunt 300A-50mV (front-angle).png",
+        "arquivo": "SmartShunt 300A-50mV (front-angle).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartShunt 300A-50mV IP65 (long cables).png",
+        "arquivo": "SmartShunt 300A-50mV IP65 (long cables).png"
+      }
+    ]
+  },
+  {
+    "sku": "2819",
+    "name": "Porta Fusível Modular para Fusível Mega - Victron Energy",
+    "estoque": 0,
+    "preco": 541.6,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/328_562_20200424091343.png",
+    "arquivo": "328_562_20200424091343.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [],
+      "sobrando": [
+        328,
+        562
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CIP106100000 - Fuse holder for ANL-fuse (front).png",
+        "arquivo": "CIP106100000 - Fuse holder for ANL-fuse (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Mega Fuse holder_CIP000100001.jpg",
+        "arquivo": "Mega Fuse holder_CIP000100001.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Mega fuse holder and midi fuse holder.jpg",
+        "arquivo": "Mega fuse holder and midi fuse holder.jpg"
+      }
+    ]
+  },
+  {
+    "sku": "2593",
+    "name": "Porta Fusível para Fusível Mega - Victron Energy",
+    "estoque": 0,
+    "preco": 154.72,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/328_562_20200424091343.png",
+    "arquivo": "328_562_20200424091343.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [],
+      "sobrando": [
+        328,
+        562
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CIP106100000 - Fuse holder for ANL-fuse (front).png",
+        "arquivo": "CIP106100000 - Fuse holder for ANL-fuse (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Mega Fuse holder_CIP000100001.jpg",
+        "arquivo": "Mega Fuse holder_CIP000100001.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Mega fuse holder and midi fuse holder.jpg",
+        "arquivo": "Mega fuse holder and midi fuse holder.jpg"
+      }
+    ]
+  },
+  {
+    "sku": "2783",
+    "name": "Porta Fusível para Fusível MIDI - Victron Energy",
+    "estoque": 0,
+    "preco": 131.33,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "fuses-and-fuse-holders",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/fuses-and-fuse-holders",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/328_562_20200424091343.png",
+    "arquivo": "328_562_20200424091343.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [],
+      "sobrando": [
+        328,
+        562
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CIP106100000 - Fuse holder for ANL-fuse (front).png",
+        "arquivo": "CIP106100000 - Fuse holder for ANL-fuse (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Mega Fuse holder_CIP000100001.jpg",
+        "arquivo": "Mega Fuse holder_CIP000100001.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Mega fuse holder and midi fuse holder.jpg",
+        "arquivo": "Mega fuse holder and midi fuse holder.jpg"
+      }
+    ]
+  },
+  {
+    "sku": "2586",
+    "name": "Protetor de Bateria 12v/24v - 100A - Victron Energy",
+    "estoque": 0,
+    "preco": 814.87,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "battery-protect",
+    "pagina": "https://www.victronenergy.com/battery_protect/battery-protect",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/BPR000100400_BatteryProtect 12-24V-100A (front).png",
+    "arquivo": "BPR000100400_BatteryProtect 12-24V-100A (front).png",
+    "numeros_casados": [
+      12,
+      24,
+      100
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/BPR000100400_BatteryProtect 12-24V-100A (front-low).png",
+        "arquivo": "BPR000100400_BatteryProtect 12-24V-100A (front-low).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/BatteryProtect 12-24V 65A (front).png",
+        "arquivo": "BatteryProtect 12-24V 65A (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/BatteryProtect 12-24V 220A (front).png",
+        "arquivo": "BatteryProtect 12-24V 220A (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2704",
+    "name": "Protetor de Bateria Smart 12/24V-100A - Victron Energy",
+    "estoque": 0,
+    "preco": 921.27,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "smart-battery-protect",
+    "pagina": "https://www.victronenergy.com/battery_protect/smart-battery-protect",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Smart BatteryProtect 12-24V 100A (front).png",
+    "arquivo": "Smart BatteryProtect 12-24V 100A (front).png",
+    "numeros_casados": [
+      12,
+      24,
+      100
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Smart BatteryProtect 12-24V 100A (front-angle).png",
+        "arquivo": "Smart BatteryProtect 12-24V 100A (front-angle).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Smart BatteryProtect 12-24V 65A (front).png",
+        "arquivo": "Smart BatteryProtect 12-24V 65A (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Smart BatteryProtect 12-24V 100A (top).png",
+        "arquivo": "Smart BatteryProtect 12-24V 100A (top).png"
+      }
+    ]
+  },
+  {
+    "sku": "2738",
+    "name": "Protetor de Bateria Smart 12/24V-65A - Victron Energy",
+    "estoque": 0,
+    "preco": 641.07,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "smart-battery-protect",
+    "pagina": "https://www.victronenergy.com/battery_protect/smart-battery-protect",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Smart BatteryProtect 12-24V 65A (front).png",
+    "arquivo": "Smart BatteryProtect 12-24V 65A (front).png",
+    "numeros_casados": [
+      12,
+      24,
+      65
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Smart BatteryProtect 12-24V 65A (front-angle).png",
+        "arquivo": "Smart BatteryProtect 12-24V 65A (front-angle).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Smart BatteryProtect 12-24V 100A (front).png",
+        "arquivo": "Smart BatteryProtect 12-24V 100A (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Smart BatteryProtect 12-24V 65A (top).png",
+        "arquivo": "Smart BatteryProtect 12-24V 65A (top).png"
+      }
+    ]
+  },
+  {
+    "sku": "2739",
+    "name": "Protetor de Bateria Smart 48V-100A - Victron Energy",
+    "estoque": 0,
+    "preco": 2056.48,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "smart-battery-protect",
+    "pagina": "https://www.victronenergy.com/battery_protect/smart-battery-protect",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Smart BatteryProtect 48V 100A (front-angle).png",
+    "arquivo": "Smart BatteryProtect 48V 100A (front-angle).png",
+    "numeros_casados": [
+      48,
+      100
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Smart BatteryProtect 48V 100A (top).png",
+        "arquivo": "Smart BatteryProtect 48V 100A (top).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Smart BatteryProtect 48V 100A (left).png",
+        "arquivo": "Smart BatteryProtect 48V 100A (left).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Smart BatteryProtect 48V 100A (side).png",
+        "arquivo": "Smart BatteryProtect 48V 100A (side).png"
+      }
+    ]
+  },
+  {
+    "sku": "2392",
+    "name": "Relé Combinador de Bateria Inteligente Cyrix - ct 12v e 24v - 120A - Victron Energy",
+    "estoque": 0,
+    "preco": 625.6,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "cyrix-battery-combiners",
+    "pagina": "https://www.victronenergy.com/battery-isolators-and-combiners/cyrix-battery-combiners",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Cyrix-Li-ct 12-24_120A (front).png",
+    "arquivo": "Cyrix-Li-ct 12-24_120A (front).png",
+    "numeros_casados": [
+      12,
+      24,
+      120
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Cyrix-Li-Load 24-48V_120A (front).png",
+        "arquivo": "Cyrix-Li-Load 24-48V_120A (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Cyrix Li charge 24-48_120A (front).png",
+        "arquivo": "Cyrix Li charge 24-48_120A (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Cyrix-Li-ct 12-24_120A (left).png",
+        "arquivo": "Cyrix-Li-ct 12-24_120A (left).png"
+      }
+    ]
+  },
+  {
+    "sku": "2676",
+    "name": "Relé Combinador de Bateria Inteligente Cyrix - ct 12v e 24v - 230A - Victron Energy",
+    "estoque": 0,
+    "preco": 1461.83,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "cyrix-battery-combiners",
+    "pagina": "https://www.victronenergy.com/battery-isolators-and-combiners/cyrix-battery-combiners",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/157_181_20180709121436.png",
+    "arquivo": "157_181_20180709121436.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        12,
+        24,
+        230
+      ],
+      "sobrando": [
+        157,
+        181
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Cyrix-Li-ct 12-24_120A (front).png",
+        "arquivo": "Cyrix-Li-ct 12-24_120A (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CYR010230450 = Cyrix-Li-load 1224V-230A intelligent load relay _front.jpg",
+        "arquivo": "CYR010230450 = Cyrix-Li-load 1224V-230A intelligent load relay _front.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CYR010230010R-=-Cyrix-ct-1224V-230A-intelligent-battery-combiner_front.jpg",
+        "arquivo": "CYR010230010R-=-Cyrix-ct-1224V-230A-intelligent-battery-combiner_front.jpg"
+      }
+    ]
+  },
+  {
+    "sku": "2686",
+    "name": "Sistema de Gerenciamento da Bateria - VE.Bus - Victron Energy",
+    "estoque": 0,
+    "preco": 1522,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "ve-bus-bms",
+    "pagina": "https://www.victronenergy.com/battery-management-systems/ve-bus-bms",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/VE.Bus BMS V2.png",
+    "arquivo": "VE.Bus BMS V2.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [],
+      "sobrando": [
+        2
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/VE.Bus BMS (front-angle).png",
+        "arquivo": "VE.Bus BMS (front-angle).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/VE.Bus BMS Mains detector.png",
+        "arquivo": "VE.Bus BMS Mains detector.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/VE.bus BMS V2 (side2).png",
+        "arquivo": "VE.bus BMS V2 (side2).png"
+      }
+    ]
+  },
+  {
+    "sku": "2735",
+    "name": "Sistema de Gerenciamento da Bateria - VE.Bus V2 - Victron Energy",
+    "estoque": 0,
+    "preco": 2188.89,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "ve-bus-bms",
+    "pagina": "https://www.victronenergy.com/battery-management-systems/ve-bus-bms",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/VE.Bus BMS V2.png",
+    "arquivo": "VE.Bus BMS V2.png",
+    "numeros_casados": [
+      2
+    ],
+    "numeros_conflitantes": {
+      "faltando": [],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/VE.bus BMS V2 (side2).png",
+        "arquivo": "VE.bus BMS V2 (side2).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/VE.bus BMS V2 (front-angle).png",
+        "arquivo": "VE.bus BMS V2 (front-angle).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/VE.bus BMS V2 (top).png",
+        "arquivo": "VE.bus BMS V2 (top).png"
+      }
+    ]
+  },
+  {
+    "sku": "2677",
+    "name": "Sistema de Gerenciamento da Bateria Small - Victron Energy",
+    "estoque": 0,
+    "preco": 676.61,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "smallbms",
+    "pagina": "https://www.victronenergy.com/battery-management-systems/smallbms",
+    "conf_familia": "media",
+    "imagem": "https://www.victronenergy.com/upload/products/smallBMS.png",
+    "arquivo": "smallBMS.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/smallBMS (front) - 2.png",
+        "arquivo": "smallBMS (front) - 2.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/smallBMS (molex) - 2.png",
+        "arquivo": "smallBMS (molex) - 2.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/smallBMS (top) - 2.png",
+        "arquivo": "smallBMS (top) - 2.png"
+      }
+    ]
+  },
+  {
+    "sku": "2653",
+    "name": "Suporte de Parede GX Touch 50 (5”) - Victron Energy",
+    "estoque": 0,
+    "preco": 239.25,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "gx-touch-50-wall-mount",
+    "pagina": "https://www.victronenergy.com/accessories/gx-touch-50-wall-mount",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/GX Touch 50 Wall Mount_mounted (on)nw.png",
+    "arquivo": "GX Touch 50 Wall Mount_mounted (on)nw.png",
+    "numeros_casados": [
+      50
+    ],
+    "numeros_conflitantes": {
+      "faltando": [
+        5
+      ],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/BPP900465050_GX Touch 50 Wall Mount (front).png",
+        "arquivo": "BPP900465050_GX Touch 50 Wall Mount (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/GX Touch 50 Wall Mount_mounted (5 of 9).png",
+        "arquivo": "GX Touch 50 Wall Mount_mounted (5 of 9).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/GX Touch 50 Wall Mount_mounted (on)nw.png",
+        "arquivo": "GX Touch 50 Wall Mount_mounted (on)nw.png"
+      }
+    ]
+  },
+  {
+    "sku": "3042",
+    "name": "SUPORTE DE PAREDE GX TOUCH 70 (7”) COMPOSTO EM PLASTICO - VICTRON ENERGY",
+    "estoque": 0,
+    "preco": 323.87,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "gx-touch-50-wall-mount",
+    "pagina": "https://www.victronenergy.com/accessories/gx-touch-50-wall-mount",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/GX Touch 50 Wall Mount_mounted (on)nw.png",
+    "arquivo": "GX Touch 50 Wall Mount_mounted (on)nw.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        70,
+        7
+      ],
+      "sobrando": [
+        50
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/BPP900465050_GX Touch 50 Wall Mount (front).png",
+        "arquivo": "BPP900465050_GX Touch 50 Wall Mount (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/GX Touch 50 Wall Mount_mounted (on)nw.png",
+        "arquivo": "GX Touch 50 Wall Mount_mounted (on)nw.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/BPP900465050_GX Touch 50 Wall Mount (back-angle).png",
+        "arquivo": "BPP900465050_GX Touch 50 Wall Mount (back-angle).png"
+      }
+    ]
+  },
+  {
+    "sku": "2652",
+    "name": "Tela GX Touch 70 (7”) - Victron Energy",
+    "estoque": 0,
+    "preco": 4337.2,
+    "status": "sem-regra",
+    "motivo": "nenhuma regra de família casou"
+  },
+  {
+    "sku": "2782",
+    "name": "Terminador VE.Can RJ45 (2 unidades) - Victron Energy",
+    "estoque": 0,
+    "preco": 140.07,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "ve-can-rj45-terminator",
+    "pagina": "https://www.victronenergy.com/accessories/ve-can-rj45-terminator",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/RJ45 terminator.png",
+    "arquivo": "RJ45 terminator.png",
+    "numeros_casados": [
+      45
+    ],
+    "numeros_conflitantes": {
+      "faltando": [
+        2
+      ],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/RJ45_terminator_right_ASS030700000.jpg",
+        "arquivo": "RJ45_terminator_right_ASS030700000.jpg"
+      }
+    ]
   }
 ]

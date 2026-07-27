@@ -1,11 +1,12 @@
 {
-  "_doc": "Regra = padrão (regex, case-insensitive) sobre products.name -> slug da página oficial Victron (do sitemap). A primeira regra que casar vence, então as mais específicas vêm primeiro. 'conf' é a confiança declarada: alta = modelo inequívoco; media = família certa, variante a conferir.",
+  "_doc": "Regra = padrão (regex, case-insensitive) sobre products.name -> slug da página oficial Victron (do sitemap). A PRIMEIRA regra que casar vence, então as mais específicas vêm primeiro. 'conf' é a confiança declarada: alta = modelo inequívoco; media = família certa, variante a conferir.",
   "regras": [
     { "padrao": "multiplus[ -]*(ii|2)\\b.*\\b120v", "slug": "multiplus-ii-2x-120v", "conf": "media" },
     { "padrao": "multiplus[ -]*(ii|2)\\b", "slug": "multiplus-ii", "conf": "alta" },
     { "padrao": "multiplus", "slug": "multiplus-12v-24v-48v-800va-3kva", "conf": "alta" },
     { "padrao": "quattro", "slug": "quattro", "conf": "alta" },
 
+    { "padrao": "inversor phoenix (smart )?(12|24|48)/(250|375|500|800)\\b", "slug": "phoenix-inverter-vedirect-250va-800va", "conf": "alta" },
     { "padrao": "inversor phoenix smart|phoenix smart \\d+/\\d+", "slug": "phoenix-inverter-smart", "conf": "alta" },
     { "padrao": "inversor phoenix", "slug": "phoenix-inverter-12v-24v-48v-800va-3kva", "conf": "alta" },
     { "padrao": "phoenix smart ip43", "slug": "phoenix-smart-ip43-charger", "conf": "alta" },
@@ -19,14 +20,17 @@
     { "padrao": "blue smart ip65", "slug": "blue-smart-ip65-charger", "conf": "alta" },
     { "padrao": "blue smart ip67", "slug": "blue-smart-ip67-charger-waterproof", "conf": "alta" },
 
-    { "padrao": "orion-?tr smart", "slug": "orion-tr-smart", "conf": "alta" },
-    { "padrao": "orion-?xs", "slug": "orion-xs-dc-dc-battery-chargers", "conf": "alta" },
+    { "padrao": "cabo remoto do carregador dc-dc isolado orion", "slug": "orion-tr_isolated_dc-dc_charger_remote_cable", "conf": "alta" },
+    { "padrao": "orion-?tr xs|orion-?xs", "slug": "orion-xs-dc-dc-battery-chargers", "conf": "alta" },
     { "padrao": "orion.*ip67", "slug": "orion-ip67-24-12-dc-dc-converters", "conf": "alta" },
+    { "padrao": "orion-?tr smart.*no iso|orion.*n[ãa]o isolado", "slug": "orion-tr-smart-non-isolated", "conf": "alta" },
+    { "padrao": "orion-?tr smart", "slug": "orion-tr-smart", "conf": "alta" },
+    { "padrao": "conversor orion-?tr", "slug": "orion-tr-dc-dc-converters-isolated", "conf": "alta" },
     { "padrao": "orion.*(ip20|conversor orion|orion \\d+/\\d+)", "slug": "orion-dc-dc-converters-12v-24v-48v-110v", "conf": "media" },
 
     { "padrao": "smartshunt", "slug": "smart-battery-shunt", "conf": "alta" },
-    { "padrao": "bmv-?712", "slug": "bmv-712-smart", "conf": "alta" },
-    { "padrao": "bmv-?702", "slug": "bmv-702", "conf": "alta" },
+    { "padrao": "bmv\\s*-?\\s*712", "slug": "bmv-712-smart", "conf": "alta" },
+    { "padrao": "bmv\\s*-?\\s*702", "slug": "bmv-702", "conf": "alta" },
     { "padrao": "sensor de temperatura para bmv", "slug": "temperature-sensor-for-bmv-702", "conf": "alta" },
     { "padrao": "sensor de temperatura para qua|temperatura.*cerbo", "slug": "temperature-sensor-qua-pmp-venus-gx", "conf": "alta" },
     { "padrao": "sensor de bateria inteligente", "slug": "smart-battery-sense", "conf": "alta" },
@@ -39,19 +43,24 @@
     { "padrao": "isolador galv", "slug": "galvanic-isolator", "conf": "alta" },
     { "padrao": "interruptor da bateria", "slug": "battery-switch-on-off", "conf": "alta" },
 
+    { "padrao": "suporte de parede gx touch", "slug": "gx-touch-50-wall-mount", "conf": "alta" },
     { "padrao": "tela gx touch 50|gx touch 50", "slug": "gx-touch-50", "conf": "alta" },
+    { "padrao": "gx tank", "slug": "gx-tank-140", "conf": "alta" },
+    { "padrao": "gx lte|lte 4g", "slug": "gx-lte-4g", "conf": "alta" },
     { "padrao": "ekrano", "slug": "ekrano-gx", "conf": "alta" },
-    { "padrao": "cerbo gx", "slug": "cerbo-gx", "conf": "alta" },
+    { "padrao": "cerbo", "slug": "cerbo-gx", "conf": "alta" },
     { "padrao": "venus gx", "slug": "venus-gx", "conf": "alta" },
     { "padrao": "multicontrole digital.*gx", "slug": "digital-multi-control-panel-gx", "conf": "media" },
     { "padrao": "multicontrole digital", "slug": "digital-multi-control-200-200a", "conf": "alta" },
 
+    { "padrao": "monitor de bateria lynx", "slug": "lynx-shunt-ve-can", "conf": "alta" },
     { "padrao": "lynx smart bms.*ng|lynx.*bms 500 ng", "slug": "lynx-smart-bms-ng", "conf": "alta" },
     { "padrao": "lynx smart bms", "slug": "lynx-smart-bms", "conf": "alta" },
-    { "padrao": "lynx distributor", "slug": "lynx-distributor", "conf": "alta" },
-    { "padrao": "lynx power in", "slug": "lynx-power-in", "conf": "alta" },
+    { "padrao": "lynx distributor|lynx distribuidor", "slug": "lynx-distributor", "conf": "alta" },
+    { "padrao": "lynx entrada|lynx power in", "slug": "lynx-power-in", "conf": "alta" },
     { "padrao": "lynx shunt", "slug": "lynx-shunt-ve-can", "conf": "alta" },
     { "padrao": "gerenciamento da bateria small|smallbms", "slug": "smallbms", "conf": "media" },
+    { "padrao": "gerenciamento da bateria.*ve\\.?bus", "slug": "ve-bus-bms", "conf": "alta" },
 
     { "padrao": "mppt rs", "slug": "smartsolar-mppt-rs-450-tr", "conf": "media" },
     { "padrao": "mppt (250/85|250/100)", "slug": "smartsolar-250-85-250-100", "conf": "alta" },
@@ -61,18 +70,25 @@
     { "padrao": "mppt (75/10|75/15|100/15|100/20)", "slug": "smartsolar-mppt-75-10-75-15-100-15-100-20", "conf": "alta" },
 
     { "padrao": "l[ií]tio.*superpack|superpack", "slug": "12,8v-lithium-superpack", "conf": "alta" },
+    { "padrao": "l[ií]tio.*\\bng\\b|lifepo4.*\\bng\\b", "slug": "lithium-ng-batteries", "conf": "alta" },
     { "padrao": "lifepo4|bateria de l[ií]tio", "slug": "lithium-battery-12-8v", "conf": "alta" },
     { "padrao": "agm super cycle", "slug": "agm-super-cycle-battery", "conf": "alta" },
     { "padrao": "\\bagm\\b|\\bgel\\b", "slug": "gel-and-agm-batteries", "conf": "alta" },
 
+    { "padrao": "fus[ií]vel|porta fus[ií]vel", "slug": "fuses-and-fuse-holders", "conf": "alta" },
+    { "padrao": "barramento.*(polos|busbar|cip\\d+)", "slug": "busbars", "conf": "media" },
+
     { "padrao": "mk3-?usb", "slug": "interface-mk3-usb", "conf": "alta" },
+    { "padrao": "terminador ve\\.?can", "slug": "ve-can-rj45-terminator", "conf": "alta" },
     { "padrao": "ve\\.?can para nmea2000|ve\\.?can.*nmea", "slug": "ve-can-to-nmea2000-micro-c-male", "conf": "alta" },
     { "padrao": "ve\\.?bus.*nmea", "slug": "ve-bus-to-nmea2000-interface", "conf": "alta" },
     { "padrao": "ve\\.?direct.*bluetooth", "slug": "ve-direct-bluetooth-smart-dongle", "conf": "alta" },
     { "padrao": "ve\\.?bus smart dongle", "slug": "ve-bus-smart-dongle", "conf": "alta" },
-    { "padrao": "barramento.*(polos|busbar)", "slug": "busbars", "conf": "media" },
+    { "padrao": "cabo liga-desliga remoto sem invers", "slug": "ve-direct-non-inverting-remote-on-off-cable", "conf": "alta" },
+    { "padrao": "^cabo ve\\.?direct", "slug": "ve.direct.cable", "conf": "alta" },
+    { "padrao": "extensor m8", "slug": "m8-circular-connector-male-female-3-pole-cable-2m", "conf": "media" },
     { "padrao": "medidor de energia", "slug": "energy-meter", "conf": "alta" },
-    { "padrao": "estação de energia.*carregador veicular|ev charging", "slug": "ev-charging-station-ns", "conf": "media" },
+    { "padrao": "estacao de energia|carregador veicular|ev charging", "slug": "ev-charging-station-ns", "conf": "media" },
     { "padrao": "adaptador de trilho din", "slug": "din35-adapter-small", "conf": "media" }
   ]
 }
