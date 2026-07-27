@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -11,76 +12,95 @@ import { AppLayout } from "@/components/AppLayout";
 import { DiagnosticFallback } from "@/components/DiagnosticFallback";
 import { GlobalErrorBoundary } from "@/components/GlobalErrorBoundary";
 import { queryClient } from "@/lib/query-client";
-import Dashboard from "./pages/Dashboard";
-import ServiceOrderList from "./pages/ServiceOrderList";
-import ServiceOrderDetail from "./pages/ServiceOrderDetail";
-import ClientList from "./pages/ClientList";
-import ClientDetail from "./pages/ClientDetail";
-import VesselList from "./pages/VesselList";
-import VesselDetail from "./pages/VesselDetail";
-import MarinaList from "./pages/MarinaList";
-import ProductList from "./pages/ProductList";
-import InventoryPage from "./pages/InventoryPage";
-import AgendaPage from "./pages/AgendaPage";
-import FinancialPage from "./pages/FinancialPage";
-import ReportsPage from "./pages/ReportsPage";
-import CollectionsPage from "./pages/CollectionsPage";
-import SettingsPage from "./pages/SettingsPage";
-import SupplierList from "./pages/SupplierList";
-import ServiceList from "./pages/ServiceList";
-import AuditLogPage from "./pages/AuditLogPage";
-import WhatsAppLeadsPage from "./pages/WhatsAppLeadsPage";
-import WhatsAppLogsPage from "./pages/WhatsAppLogsPage";
-import WhatsAppStatusPage from "./pages/WhatsAppStatusPage";
-import WhatsAppScheduledPage from "./pages/WhatsAppScheduledPage";
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const ServiceOrderList = lazy(() => import("./pages/ServiceOrderList"));
+const ServiceOrderDetail = lazy(() => import("./pages/ServiceOrderDetail"));
+const ClientList = lazy(() => import("./pages/ClientList"));
+const ClientDetail = lazy(() => import("./pages/ClientDetail"));
+const VesselList = lazy(() => import("./pages/VesselList"));
+const VesselDetail = lazy(() => import("./pages/VesselDetail"));
+const MarinaList = lazy(() => import("./pages/MarinaList"));
+const ProductList = lazy(() => import("./pages/ProductList"));
+const InventoryPage = lazy(() => import("./pages/InventoryPage"));
+const AgendaPage = lazy(() => import("./pages/AgendaPage"));
+const FinancialPage = lazy(() => import("./pages/FinancialPage"));
+const ReportsPage = lazy(() => import("./pages/ReportsPage"));
+const CollectionsPage = lazy(() => import("./pages/CollectionsPage"));
+const SettingsPage = lazy(() => import("./pages/SettingsPage"));
+const SupplierList = lazy(() => import("./pages/SupplierList"));
+const ServiceList = lazy(() => import("./pages/ServiceList"));
+const AuditLogPage = lazy(() => import("./pages/AuditLogPage"));
+const WhatsAppLeadsPage = lazy(() => import("./pages/WhatsAppLeadsPage"));
+const WhatsAppLogsPage = lazy(() => import("./pages/WhatsAppLogsPage"));
+const WhatsAppStatusPage = lazy(() => import("./pages/WhatsAppStatusPage"));
+const WhatsAppScheduledPage = lazy(() => import("./pages/WhatsAppScheduledPage"));
 import LoginPage from "./pages/LoginPage";
-import ResetPasswordPage from "./pages/ResetPasswordPage";
-import PublicServiceOrderView from "./pages/PublicServiceOrderView";
-import ClientPortal from "./pages/ClientPortal";
-import ActiveProspectingPage from "./pages/ActiveProspectingPage";
-import ProspectingPage from "./pages/ProspectingPage";
-import ImportFiscalXML from "./pages/ImportFiscalXML";
-import FiscalEmission from "./pages/FiscalEmission";
-import CommissionsPage from "./pages/CommissionsPage";
-import SmartPurchasePage from "./pages/SmartPurchasePage";
-import DesignPreviewV2 from "./pages/DesignPreviewV2";
-import OrdersListV2 from "./v2/pages/OrdersListV2";
-import DashboardV2 from "./v2/pages/DashboardV2";
-import ReceivablesV2 from "./v2/pages/ReceivablesV2";
-import FinancialV2 from "./v2/pages/FinancialV2";
-import CollectionsV2 from "./v2/pages/CollectionsV2";
-import CommissionsV2 from "./v2/pages/CommissionsV2";
-import AuditLogV2 from "./v2/pages/AuditLogV2";
-import ReportsV2 from "./v2/pages/ReportsV2";
-import SmartPurchaseV2 from "./v2/pages/SmartPurchaseV2";
-import InventoryV2 from "./v2/pages/InventoryV2";
-import PurchaseOrdersV2 from "./v2/pages/PurchaseOrdersV2";
-import ClientDetailV2 from "./v2/pages/ClientDetailV2";
-import CRMKanbanV2 from "./v2/pages/CRMKanbanV2";
+const ResetPasswordPage = lazy(() => import("./pages/ResetPasswordPage"));
+const PublicServiceOrderView = lazy(() => import("./pages/PublicServiceOrderView"));
+const ClientPortal = lazy(() => import("./pages/ClientPortal"));
+const ActiveProspectingPage = lazy(() => import("./pages/ActiveProspectingPage"));
+const ProspectingPage = lazy(() => import("./pages/ProspectingPage"));
+const ImportFiscalXML = lazy(() => import("./pages/ImportFiscalXML"));
+const FiscalEmission = lazy(() => import("./pages/FiscalEmission"));
+const CommissionsPage = lazy(() => import("./pages/CommissionsPage"));
+const SmartPurchasePage = lazy(() => import("./pages/SmartPurchasePage"));
+const DesignPreviewV2 = lazy(() => import("./pages/DesignPreviewV2"));
+const OrdersListV2 = lazy(() => import("./v2/pages/OrdersListV2"));
+const DashboardV2 = lazy(() => import("./v2/pages/DashboardV2"));
+const ReceivablesV2 = lazy(() => import("./v2/pages/ReceivablesV2"));
+const FinancialV2 = lazy(() => import("./v2/pages/FinancialV2"));
+const CollectionsV2 = lazy(() => import("./v2/pages/CollectionsV2"));
+const CommissionsV2 = lazy(() => import("./v2/pages/CommissionsV2"));
+const AuditLogV2 = lazy(() => import("./v2/pages/AuditLogV2"));
+const ReportsV2 = lazy(() => import("./v2/pages/ReportsV2"));
+const SmartPurchaseV2 = lazy(() => import("./v2/pages/SmartPurchaseV2"));
+const InventoryV2 = lazy(() => import("./v2/pages/InventoryV2"));
+const PurchaseOrdersV2 = lazy(() => import("./v2/pages/PurchaseOrdersV2"));
+const ClientDetailV2 = lazy(() => import("./v2/pages/ClientDetailV2"));
+const CRMKanbanV2 = lazy(() => import("./v2/pages/CRMKanbanV2"));
 import {
   VesselDetailV2, ServiceOrderDetailV2, FiscalEmissionV2, SettingsV2, ImportFiscalXMLV2,
   WhatsAppLeadsV2, WhatsAppLogsV2, WhatsAppScheduledV2, WhatsAppStatusV2,
   ActiveProspectingV2, ExternalQuoteListV2, ExternalQuoteNewV2, ExternalQuoteApprovalV2,
   ExternalSellerLeadsV2, ExternalProductCatalogV2, ExternalQuoteDetailV2,
 } from "./v2/pages/wrapped";
-import ClientsListV2 from "./v2/pages/ClientsListV2";
-import VesselsListV2 from "./v2/pages/VesselsListV2";
-import MarinasListV2 from "./v2/pages/MarinasListV2";
-import ProductsListV2 from "./v2/pages/ProductsListV2";
-import ServicesListV2 from "./v2/pages/ServicesListV2";
-import SuppliersListV2 from "./v2/pages/SuppliersListV2";
-import QuoteList from "./pages/QuoteList";
+const ClientsListV2 = lazy(() => import("./v2/pages/ClientsListV2"));
+const VesselsListV2 = lazy(() => import("./v2/pages/VesselsListV2"));
+const MarinasListV2 = lazy(() => import("./v2/pages/MarinasListV2"));
+const ProductsListV2 = lazy(() => import("./v2/pages/ProductsListV2"));
+const ServicesListV2 = lazy(() => import("./v2/pages/ServicesListV2"));
+const SuppliersListV2 = lazy(() => import("./v2/pages/SuppliersListV2"));
+const QuoteList = lazy(() => import("./pages/QuoteList"));
 import NotFound from "./pages/NotFound";
-import EncodingFixerPage from "./pages/EncodingFixerPage";
-import CRMKanbanPage from "./pages/CRMKanbanPage";
-import ExternalQuoteListPage from "./pages/ExternalQuoteListPage";
-import ExternalQuoteNewPage from "./pages/ExternalQuoteNewPage";
-import ExternalQuoteApprovalPage from "./pages/ExternalQuoteApprovalPage";
-import ExternalQuoteDetailPage from "./pages/ExternalQuoteDetailPage";
-import ExternalSellerLeadsPage from "./pages/ExternalSellerLeadsPage";
-import ExternalProductCatalogPage from "./pages/ExternalProductCatalogPage";
-import PurchaseOrdersPage from "./pages/PurchaseOrdersPage";
-import AIActivityPage from "./pages/AIActivityPage";
+const EncodingFixerPage = lazy(() => import("./pages/EncodingFixerPage"));
+const CRMKanbanPage = lazy(() => import("./pages/CRMKanbanPage"));
+const ExternalQuoteListPage = lazy(() => import("./pages/ExternalQuoteListPage"));
+const ExternalQuoteNewPage = lazy(() => import("./pages/ExternalQuoteNewPage"));
+const ExternalQuoteApprovalPage = lazy(() => import("./pages/ExternalQuoteApprovalPage"));
+const ExternalQuoteDetailPage = lazy(() => import("./pages/ExternalQuoteDetailPage"));
+const ExternalSellerLeadsPage = lazy(() => import("./pages/ExternalSellerLeadsPage"));
+const ExternalProductCatalogPage = lazy(() => import("./pages/ExternalProductCatalogPage"));
+const PurchaseOrdersPage = lazy(() => import("./pages/PurchaseOrdersPage"));
+const AIActivityPage = lazy(() => import("./pages/AIActivityPage"));
+
+/**
+ * Fallback do carregamento sob demanda: as páginas viram chunks separados, então
+ * abrir a Agenda não baixa mais o ERP inteiro (fiscal, PDF, relatórios, telas v2…).
+ * Barra fina no topo em vez de tela em branco — a troca costuma ser imperceptível.
+ */
+function RouteLoading() {
+  return (
+    <div
+      role="status"
+      aria-label="Carregando"
+      className="fixed inset-x-0 top-0 z-50 h-0.5 overflow-hidden bg-primary/20"
+    >
+      <div className="h-full w-1/3 animate-[loading_1s_ease-in-out_infinite] bg-primary" />
+      <style>{`@keyframes loading{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}
+        @media (prefers-reduced-motion: reduce){[role="status"] > div{animation:none;width:100%}}`}</style>
+    </div>
+  );
+}
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -92,6 +112,7 @@ const App = () => (
           <BrowserRouter>
           <AuthProvider>
             <DiagnosticFallback />
+            <Suspense fallback={<RouteLoading />}>
             <Routes>
               <Route path="/login" element={<LoginPage />} />
               <Route path="/portal" element={<ClientPortal />} />
@@ -264,6 +285,7 @@ const App = () => (
                 </ProtectedRoute>
               } />
             </Routes>
+            </Suspense>
           </AuthProvider>
         </BrowserRouter>
       </GlobalErrorBoundary>

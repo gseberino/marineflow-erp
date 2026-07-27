@@ -1,0 +1,47 @@
+{
+  "id": "/agenda",
+  "name": "Agenda HBR",
+  "short_name": "Agenda",
+  "description": "Suas tarefas, compromissos e sugestões do dia — MarineFlow",
+  "theme_color": "#0D7A84",
+  "background_color": "#F5F8F8",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "start_url": "/agenda?view=today&src=pwa",
+  "scope": "/",
+  "icons": [
+    { "src": "/icon-agenda.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icon-agenda.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" },
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ],
+  "shortcuts": [
+    {
+      "name": "Ditar um recado",
+      "short_name": "Ditar",
+      "description": "Fale e vire tarefa na caixa de entrada",
+      "url": "/agenda?action=voice"
+    },
+    {
+      "name": "Caixa de entrada",
+      "short_name": "Sugestões",
+      "description": "Sugestões esperando sua decisão",
+      "url": "/agenda?view=inbox"
+    },
+    {
+      "name": "Modo foco",
+      "short_name": "Foco",
+      "description": "Uma tarefa por vez, em sequência",
+      "url": "/agenda?action=focus"
+    }
+  ],
+  "share_target": {
+    "action": "/agenda",
+    "method": "GET",
+    "params": {
+      "title": "share_title",
+      "text": "share_text",
+      "url": "share_url"
+    }
+  }
+}
