@@ -258,6 +258,8 @@ export function RegisterDepositDialog({
             description: `${r.label} — ${serviceOrderNumber}`,
             amount: r.amount,
             due_date: resolveDueDate(r),
+            // "na entrega" → o vencimento se reajusta para a conclusão real da OS (trigger no banco).
+            due_on_completion: r.dueBasis === 'delivery',
           }))
         : [];
 

@@ -4,6 +4,9 @@ interface GenerateInput {
   serviceOrderId: string;
   approvalDate: string; // ISO date YYYY-MM-DD
   trigger: 'signature' | 'status_change' | 'invoice';
+  /** Dispara o WhatsApp de cobrança automaticamente (default true). Na CONCLUSÃO passamos false:
+   * o aviso ao cliente é opt-in (CompletionSendDialog), não automático. */
+  autoSend?: boolean;
 }
 
 interface Installment {
@@ -105,8 +108,8 @@ export async function generateCollectionsFromOS(
     if (!collErr && coll) created.push((coll as any).id);
   }
 
-  // 6. Auto-send WhatsApp (fire-and-forget)
-  if (created.length > 0) {
+  // 6. Auto-send WhatsApp (fire-and-forget) — só quando autoSend !== false.
+  if (created.length > 0 && input.autoSend !== false) {
     void autoSendCollectionWhatsApp(created);
   }
 
