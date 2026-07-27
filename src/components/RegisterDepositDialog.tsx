@@ -13,6 +13,7 @@ import { useAppSettings } from '@/hooks/use-app-settings';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
+import { depositAmountFromPcts } from '@/lib/quote-deposit';
 
 const PAYMENT_METHODS = [
   { value: 'pix',           label: 'PIX' },
@@ -38,6 +39,12 @@ interface Props {
   presetPartsPct?: number;
   laborCost?: number;
   partsCost?: number;
+  // Sincronização com o orçamento: o sinal por categoria é sobre valores COM desconto.
+  // discountRatio = base(líquido)/subtotal(bruto); expensesTotal e presetExpensesPct entram
+  // na parcela como o orçamento faz. Padrões (1/0) preservam o comportamento antigo.
+  discountRatio?: number;
+  expensesTotal?: number;
+  presetExpensesPct?: number;
 }
 
 const fmt = (v: number) =>
@@ -54,6 +61,9 @@ export function RegisterDepositDialog({
   presetPartsPct,
   laborCost = 0,
   partsCost = 0,
+  discountRatio = 1,
+  expensesTotal = 0,
+  presetExpensesPct = 0,
 }: Props) {
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -94,14 +104,21 @@ export function RegisterDepositDialog({
     setNotes('');
   }, [open]);
 
+  // Valores COM desconto (o mesmo discountRatio que o orçamento aplica). Padrão ratio=1
+  // mantém o comportamento antigo quando o caller não passa o desconto.
+  const ratio = discountRatio && discountRatio > 0 ? discountRatio : 1;
+  const laborNet = laborCost * ratio;
+  const partsNet = partsCost * ratio;
+  const expensesComponent = Math.round((expensesTotal * presetExpensesPct / 100) * ratio * 100) / 100;
+
   // Calculate deposit amount from current mode
   const calcAmount = (): number => {
     if (mode === 'category') {
-      return Math.round(
-        (laborCost * servicesPct / 100 + partsCost * partsPct / 100) * 100
-      ) / 100;
+      // Fonte única (mesma conta do orçamento): (labor·svc% + parts·parts% + desp·exp%) × ratio.
+      return depositAmountFromPcts(laborCost, partsCost, expensesTotal, ratio, servicesPct, partsPct, presetExpensesPct);
     }
     if (mode === 'percent') {
+      // grandTotal já é o valor líquido (com desconto) — não reaplicar ratio.
       return Math.round(grandTotal * globalPct / 100 * 100) / 100;
     }
     return parseFloat(fixedValue.replace(',', '.')) || 0;
@@ -198,7 +215,7 @@ export function RegisterDepositDialog({
           {mode === 'category' && (
             <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
               <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Serviços ({fmt(laborCost)})</span>
+                <span className="text-muted-foreground">Serviços ({fmt(laborNet)})</span>
                 <div className="flex items-center gap-2">
                   <Input
                     type="number" min="0" max="100" step="5"
@@ -207,12 +224,12 @@ export function RegisterDepositDialog({
                     onChange={e => setServicesPct(Math.min(100, parseFloat(e.target.value) || 0))}
                   />
                   <span className="text-xs text-muted-foreground w-24 text-right">
-                    = {fmt(laborCost * servicesPct / 100)}
+                    = {fmt(laborNet * servicesPct / 100)}
                   </span>
                 </div>
               </div>
               <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Peças ({fmt(partsCost)})</span>
+                <span className="text-muted-foreground">Peças ({fmt(partsNet)})</span>
                 <div className="flex items-center gap-2">
                   <Input
                     type="number" min="0" max="100" step="5"
@@ -221,10 +238,16 @@ export function RegisterDepositDialog({
                     onChange={e => setPartsPct(Math.min(100, parseFloat(e.target.value) || 0))}
                   />
                   <span className="text-xs text-muted-foreground w-24 text-right">
-                    = {fmt(partsCost * partsPct / 100)}
+                    = {fmt(partsNet * partsPct / 100)}
                   </span>
                 </div>
               </div>
+              {expensesComponent > 0 && (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Despesas ({presetExpensesPct}%)</span>
+                  <span className="text-xs text-muted-foreground w-24 text-right">= {fmt(expensesComponent)}</span>
+                </div>
+              )}
               <div className="flex items-center justify-between pt-2 border-t font-medium text-sm">
                 <span>Total do sinal</span>
                 <span className="text-lg font-bold text-orange-600">{fmt(depositAmount)}</span>
