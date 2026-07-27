@@ -103,3 +103,15 @@ export function computeDeposit(
     : null;
   return { ...b, signal, amount };
 }
+
+/**
+ * Extrai os % da parcela de SINAL das parcelas de uma condição de pagamento — sem precisar dos
+ * valores do orçamento. Usado pelo seletor de condição no diálogo "Receber sinal".
+ */
+export function signalPctsFromInstallments(
+  installments: DepositInstallment[] | null | undefined,
+): { servicesPct: number; partsPct: number; expensesPct: number } | null {
+  const rows = Array.isArray(installments) ? installments.map(normalizeInstallment) : [];
+  const s = rows.find((r) => r.tipo === "aprovacao" || r.days === 0);
+  return s ? { servicesPct: s.servicesPct, partsPct: s.partsPct, expensesPct: s.expensesPct } : null;
+}
