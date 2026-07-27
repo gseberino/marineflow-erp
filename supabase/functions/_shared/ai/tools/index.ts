@@ -28,6 +28,7 @@ import { flowMacroTools } from "./flow-macros.ts";
 import { commsTools } from "./comms-tools.ts";
 import { biTools } from "./bi.ts";
 import { bomTools } from "./bom.ts";
+import { statusTools } from "./status-tools.ts";
 
 export type { ToolDef, ToolCtx, RiskLevel, Role } from "./registry.ts";
 
@@ -63,6 +64,7 @@ export const allTools: ToolDef[] = [
   ...commsTools,
   ...biTools,
   ...bomTools,
+  ...statusTools,
 ].sort((a, b) => a.name.localeCompare(b.name));
 
 export const toolsByName: Record<string, ToolDef> = Object.fromEntries(allTools.map((t) => [t.name, t]));

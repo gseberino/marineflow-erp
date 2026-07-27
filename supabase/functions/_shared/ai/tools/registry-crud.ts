@@ -65,6 +65,7 @@ export const registryCrudTools: ToolDef[] = [
         barcode: { type: "string" },
         notes: { type: "string" },
         active: { type: "boolean" },
+        image_url: { type: "string", description: "URL da foto do produto (usada na vitrine no chat e nos status de promoção)." },
         ncm: { type: "string", description: "NCM — necessário para emitir NF-e." },
         cfop: { type: "string" },
         csosn: { type: "string" },
