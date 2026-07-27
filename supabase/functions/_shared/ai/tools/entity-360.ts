@@ -27,7 +27,69 @@ function previa(body: string | null | undefined): string {
   return b.slice(0, 90);
 }
 
+/** Rótulo humano do tipo de fio solto. */
+const ROTULO_FIO: Record<string, string> = {
+  service_order: "ordem de serviço",
+  delivery: "entrega de materiais",
+  quote: "orçamento",
+  receivable: "a receber",
+  payable: "a pagar",
+  purchase_order: "compra",
+  promise: "promessa feita na conversa",
+  request: "pedido do contato",
+};
+
+/** Fios de dinheiro ficam fora do alcance de quem não vê financeiro. */
+const FIOS_FINANCEIROS = new Set(["receivable", "payable"]);
+
 export const entity360Tools: ToolDef[] = [
+  {
+    name: "get_open_loops",
+    description:
+      "O QUE ESTÁ EM ABERTO AGORA com um cliente ou fornecedor — os 'fios soltos': OS em andamento, materiais a receber, orçamento aguardando resposta, título vencido, e o que foi prometido na conversa e ainda não virou fato. Use ANTES de responder a um contato, para saber o que já está pendente com ele e não prometer de novo nem duplicar. Já vem ordenado por urgência (atrasado primeiro). Técnico não recebe os fios de dinheiro.",
+    input_schema: {
+      type: "object",
+      properties: {
+        entity_type: { type: "string", enum: ["client", "supplier"], description: "Se o fio é de um cliente ou de um fornecedor." },
+        entity_id: { type: "string", description: "UUID do cliente ou fornecedor." },
+      },
+      required: ["entity_type", "entity_id"],
+    },
+    risk: "low",
+    async execute(args, ctx) {
+      const { sb } = ctx;
+      const { data, error } = await sb.rpc("get_entity_open_loops", {
+        p_entity_type: args.entity_type,
+        p_entity_id: args.entity_id,
+        p_limit: 20,
+      });
+      if (error) return { error: `Não consegui ler os fios em aberto: ${error.message}` };
+
+      const financeiroOk = podeVerFinanceiro(ctx);
+      const linhas = ((data as any[]) || []).filter((l) => financeiroOk || !FIOS_FINANCEIROS.has(l.kind));
+
+      if (linhas.length === 0) {
+        return { em_aberto: [], resumo: "Nada em aberto com este contato." };
+      }
+      const atrasados = linhas.filter((l) => l.atrasado).length;
+      return {
+        resumo: `${linhas.length} item(ns) em aberto` + (atrasados ? `, ${atrasados} atrasado(s)` : ""),
+        em_aberto: linhas.map((l) => ({
+          tipo: ROTULO_FIO[l.kind] || l.kind,
+          o_que: l.title,
+          detalhe: l.detail || null,
+          prazo: l.due_at,
+          atrasado: l.atrasado,
+          prioridade: l.priority,
+          os: l.service_order_number || null,
+          // 'conversa' = ainda não virou fato no ERP; é o que mais pede confirmação.
+          origem: l.source === "erp" ? "sistema" : "conversa",
+          vezes_mencionado: l.mentions,
+          frase_de_origem: l.evidence || null,
+        })),
+      };
+    },
+  },
   {
     name: "get_client_360",
     description:

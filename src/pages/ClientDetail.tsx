@@ -12,6 +12,7 @@ import { ArrowLeft, Mail, Phone, MapPin, Ship, Edit } from 'lucide-react';
 import { ClientFormDialog } from '@/components/ClientFormDialog';
 import { RecordHistory } from '@/components/RecordHistory';
 import { EntityTasksPanel } from '@/components/agenda/EntityTasksPanel';
+import { OpenLoopsPanel } from '@/components/agenda/OpenLoopsPanel';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 
@@ -103,6 +104,10 @@ export default function ClientDetail() {
           <p className="text-sm text-muted-foreground">{t.clients.serviceOrders}</p>
         </div>
       </div>
+
+      {/* Fica ACIMA das abas de propósito: o que está pendente com o cliente tem de aparecer
+          ao abrir a tela, sem exigir um clique. Ele mesmo se esconde quando não há nada. */}
+      <OpenLoopsPanel entityType="client" entityId={id} title="Em aberto com este cliente" />
 
       <Tabs defaultValue="vessels">
         <TabsList>

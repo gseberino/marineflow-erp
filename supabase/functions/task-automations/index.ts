@@ -417,6 +417,15 @@ Deno.serve(async (req) => {
       identidade = ((data as any[]) || [])[0] ?? null;
     } catch (e) { console.error("backfill identity:", e); }
 
+    // Fios soltos (Fase 13): reconcilia "o que está em aberto agora" com o ERP. Abre o que
+    // passou a existir e FECHA o que o banco provou que acabou — a mesma mecânica de
+    // auto-resolução das regras. SQL puro, sem IA.
+    let fios: unknown = null;
+    try {
+      const { data } = await db.rpc("refresh_entity_open_loops");
+      fios = ((data as any[]) || [])[0] ?? null;
+    } catch (e) { console.error("refresh open loops:", e); }
+
     const rules = await runRules(db, settings);
     const r10 = await runTechnicianReminders(db, settings);
     const r9 = await runClientReminders(db, settings);
@@ -424,7 +433,7 @@ Deno.serve(async (req) => {
     const reminders = await processReminders(db);
     const recurrence = await materializeRecurrences(db);
 
-    const summary = { identidade, rules, r10, r9, r13, reminders, recurrence };
+    const summary = { identidade, fios, rules, r10, r9, r13, reminders, recurrence };
     if (rules.created.length || rules.resolved.length || recurrence.created) {
       await audit(db, "task_automations_run", summary);
     }
