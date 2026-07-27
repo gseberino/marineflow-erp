@@ -1347,6 +1347,7 @@ export default function FiscalEmission() {
     additional_info: composeAdditionalInfo({
       purchaseOrder, buyer: buyerName,
       freeText: [devolucaoInfo, additionalInfo].filter(Boolean).join(BLOCK_SEPARATOR),
+      isReturn, // devolução: omite a frase de crédito de IPI (ver composeAdditionalInfo)
     }) || undefined,
     // Guardados tambem em colunas proprias (restaura ao duplicar; nota pesquisavel).
     customer_po_number: purchaseOrder.trim() || undefined,

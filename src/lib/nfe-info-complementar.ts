@@ -15,9 +15,20 @@
 // reemitir uma nota reaproveita o texto da nota anterior, o erro se propagaria
 // para notas novas — por isso a normalização abaixo.
 
+// Declaração OBRIGATÓRIA do Simples (art. 26 LC 123/2006) — vai em TODA nota.
+export const SIMPLES_INFO_NOTE_BASE =
+  'Documento emitido por ME ou EPP optante pelo Simples Nacional.';
+
+// A frase "Não gera direito a crédito fiscal de IPI" é do contexto de VENDA para
+// comercialização/industrialização (art. 60 Res. CGSN 140/2018, o mesmo grupo da
+// frase de crédito de ICMS). Numa DEVOLUÇÃO de compra ela é OMITIDA (ver
+// composeAdditionalInfo, param isReturn): (1) devolução não é venda p/
+// comercialização, então o art. 60 não se aplica; (2) o vIPIDevol (impostoDevol)
+// não é a HBR "gerando" crédito de IPI — é o ESTORNO do IPI que o fornecedor
+// destacou na venda original (ele reverte o débito dele). Manter a frase junto do
+// vIPIDevol só confundiria (parece negar o que o vIPIDevol concede).
 export const SIMPLES_INFO_NOTE =
-  'Documento emitido por ME ou EPP optante pelo Simples Nacional. ' +
-  'Não gera direito a crédito fiscal de IPI.';
+  SIMPLES_INFO_NOTE_BASE + ' Não gera direito a crédito fiscal de IPI.';
 
 // Frase legada (e variações): termina na referência à LC 123/2006, que pode vir
 // entre parênteses. O ponto de "art. 23" impede um corte ingênuo por sentença.
@@ -127,6 +138,10 @@ export function composeAdditionalInfo(input: {
   purchaseOrder?: string | null;
   buyer?: string | null;
   freeText?: string | null;
+  // Devolução: usa só a declaração obrigatória do Simples, SEM a frase de crédito
+  // de IPI (que é do art. 60 = venda p/ comercialização) — ela contradiria o
+  // vIPIDevol (estorno do IPI do fornecedor). Ver SIMPLES_INFO_NOTE acima.
+  isReturn?: boolean;
 }): string {
   const purchase = [
     input.purchaseOrder?.trim() ? `Pedido de Compra: ${input.purchaseOrder.trim()}` : '',
@@ -138,7 +153,8 @@ export function composeAdditionalInfo(input: {
   // livre legado que contenha "Comprador: ..." não é apagado à toa.
   const free = purchase ? stripPurchaseBlock(managed) : managed;
 
-  const corpo = [purchase, free, SIMPLES_INFO_NOTE].filter(Boolean).join(BLOCK_SEPARATOR);
+  const nota = input.isReturn ? SIMPLES_INFO_NOTE_BASE : SIMPLES_INFO_NOTE;
+  const corpo = [purchase, free, nota].filter(Boolean).join(BLOCK_SEPARATOR);
   return START_CONTENT_ON_NEW_LINE ? `${BLOCK_SEPARATOR}${corpo}` : corpo;
 }
 
