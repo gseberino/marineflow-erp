@@ -170,11 +170,12 @@ function dataBR(iso: string): string {
 /**
  * Texto de dados adicionais de uma DEVOLUÇÃO AO FORNECEDOR.
  *
- * Reproduz o que o fornecedor precisa para se creditar (formato pedido pela
- * Kamell): referência à nota de compra original e os valores de ICMS e IPI
- * destacados nela. Emitente do Simples Nacional não destaca ICMS/IPI na nota —
- * por isso os valores vão informados aqui, e o IPI entra em "despesas
- * acessórias" (outras despesas) para o total da devolução fechar com a compra.
+ * Reproduz o que o fornecedor precisa para se creditar: referência à nota de
+ * compra original e os valores de ICMS e IPI. O ICMS é DESTACADO no campo próprio
+ * (CSOSN 900, grupo ICMSSN900) e reforçado aqui. O IPI, num emitente do Simples
+ * (não contribuinte de IPI), vai no grupo impostoDevol (tag vIPIDevol) — que NÃO
+ * aparece no campo "Valor do IPI" da DANFE, mas integra o total da nota; por isso
+ * o valor é informado aqui, como manda a orientação para NF-e finNFe=4.
  *
  * Cada bloco é separado por ";" → vira uma linha no DANFE.
  */
@@ -209,8 +210,9 @@ export function buildDevolucaoInfo(input: {
     partes.push(`Valor do ICMS para crédito do destinatário: ${brl(input.icmsValue)}`);
   }
   if (input.ipiValue != null && input.ipiValue > 0) {
+    // Sem ";" no meio: o ";" é o separador de blocos (vira quebra de linha no DANFE).
     partes.push(
-      `Valor do IPI para crédito do destinatário (informado no campo despesas acessórias): ${brl(input.ipiValue)}`,
+      `Valor do IPI devolvido ao fornecedor (grupo impostoDevol / tag vIPIDevol da NF-e, integra o total da nota): ${brl(input.ipiValue)}`,
     );
   }
 

@@ -539,6 +539,17 @@ function isHomologUnavailable(err: string): boolean {
   return e.includes("ambiente") && (e.includes("permite") || e.includes("chave"));
 }
 
+// bytes → base64 em blocos (não estoura a pilha em PDFs grandes).
+function bytesToBase64(buf: ArrayBuffer | Uint8Array): string {
+  const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  let bin = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(bin);
+}
+
 // Espelho REAL: emite a nota DE VERDADE em homologação (draft → build → dispatch
 // → SEFAZ) e devolve a DANFE autorizada. Diferente do preview (que só simula), a
 // SEFAZ valida imposto/estrutura — pega rejeição ANTES da emissão de produção.
@@ -654,11 +665,18 @@ async function handleHomolog(admin: any, body: any): Promise<Response> {
   const fetched = await provider.fetchArtifact(pick.downloadUrl);
   if (!fetched.ok) return jr({ error: "Falha ao baixar a DANFE de homologação: " + fetched.error }, 502);
 
+  // Devolve JSON com o NÚMERO + a DANFE em base64 (não um Blob cru): o front
+  // precisa do número/série da homologação para nomear o arquivo de forma
+  // padronizada (o supabase-js não expõe headers da resposta do invoke).
   const isPdf = pick.type === "pdf_danfe";
-  return new Response(new Blob([fetched.data.bytes], { type: isPdf ? "application/pdf" : "application/xml" }), {
-    status: 200,
-    headers: { ...corsHeaders, "Content-Type": isPdf ? "application/pdf" : "application/xml", "X-Artifact-Type": pick.type },
-  });
+  return jr({
+    ok: true,
+    number,
+    series: 2,
+    environment: "homologacao",
+    is_pdf: isPdf,
+    danfe_base64: bytesToBase64(fetched.data.bytes),
+  }, 200);
 }
 
 // deno-lint-ignore no-explicit-any

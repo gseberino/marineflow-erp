@@ -246,7 +246,7 @@ describe("buildDevolucaoInfo — dados adicionais da devolução ao fornecedor",
     const out = buildDevolucaoInfo(base);
     expect(out).toContain("Devolução Parcial Ref. NF-e nº 40.480, série 1, de 11/09/2025");
     expect(out).toContain("Valor do ICMS para crédito do destinatário: R$ 197,79");
-    expect(out).toContain("Valor do IPI para crédito do destinatário (informado no campo despesas acessórias): R$ 84,96");
+    expect(out).toContain("Valor do IPI devolvido ao fornecedor (grupo impostoDevol / tag vIPIDevol da NF-e, integra o total da nota): R$ 84,96");
     expect(out).toContain("Chave de acesso da NF-e de origem: " + base.accessKey);
   });
 
