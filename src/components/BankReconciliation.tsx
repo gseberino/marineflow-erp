@@ -58,6 +58,9 @@ export function BankReconciliation() {
   const groupsByTx = new Map<string, ReconcileGroup[]>(
     (engine?.transactions || []).map(t => [t.transaction.id, t.groups || []]),
   );
+  const internalTransferTx = new Set(
+    (engine?.transactions || []).filter(t => t.internalTransfer).map(t => t.transaction.id),
+  );
 
   const [tab, setTab] = useState<TabType>('pending');
   const [search, setSearch] = useState('');
@@ -609,6 +612,10 @@ export function BankReconciliation() {
                           {melhor.score}%
                         </StatusBadge>
                       </p>
+                    ) : internalTransferTx.has(tx.id) ? (
+                      <p className="text-xs mt-1 text-muted-foreground">
+                        Parece transferência entre contas da empresa — não é receita nem despesa
+                      </p>
                     ) : temGrupo ? (
                       <p className="text-xs mt-1 text-muted-foreground flex items-center gap-1.5">
                         <Sparkles className="h-3 w-3 shrink-0" />
@@ -630,6 +637,11 @@ export function BankReconciliation() {
                         title={melhor.reasons.map(r => r.detail).join(' · ')}
                       >
                         <Check className="h-3 w-3 mr-1" />Confirmar
+                      </Button>
+                    )}
+                    {internalTransferTx.has(tx.id) && reconcileId !== tx.id && (
+                      <Button size="sm" variant="outline" onClick={() => handleDismiss(tx)} disabled={dismiss.isPending}>
+                        Marcar como transferência
                       </Button>
                     )}
                     <Button size="sm" variant="outline" onClick={() => openReconcile(tx.id, tx)}>

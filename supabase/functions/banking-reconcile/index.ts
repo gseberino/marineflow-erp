@@ -15,6 +15,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
   suggestMatches, pickAutoApply, suggestCombinations, statementSignature,
+  looksLikeInternalTransfer,
 } from "../_shared/banking/matching.ts";
 import { expectedDepositAmount } from "../_shared/banking/quote-deposit.ts";
 import type { BankTx, Candidate, Suggestion } from "../_shared/banking/types.ts";
@@ -181,14 +182,28 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Nome da empresa para reconhecer dinheiro circulando entre contas próprias.
+    const { data: cfgEmpresa } = await admin
+      .from("app_settings")
+      .select("value")
+      .eq("key", "company_name")
+      .maybeSingle();
+    const companyName = (cfgEmpresa as any)?.value ?? null;
+
     // ── Pontuação ────────────────────────────────────────────────────────────
     const perTransaction = transactions.map((tx) => {
+      const internalTransfer = looksLikeInternalTransfer(tx.description, tx.counterparty_name, companyName);
+      // Transferência entre contas próprias não tem candidato a procurar: não é receita
+      // nem despesa, é o mesmo dinheiro mudando de lugar.
+      if (internalTransfer) {
+        return { transaction: tx, suggestions: [], groups: [], internalTransfer: true };
+      }
       const suggestions = suggestMatches(tx, candidates, {}, 5, memoriaPorTx.get(tx.id));
       // Pagamento agrupado só interessa quando nenhuma conta sozinha explica o valor.
       const grupos = suggestions.some((s) => Math.abs(s.difference) < 0.01)
         ? []
         : suggestCombinations(tx, candidates);
-      return { transaction: tx, suggestions, groups: grupos };
+      return { transaction: tx, suggestions, groups: grupos, internalTransfer: false };
     });
 
     // ── Camada de certeza: aplica sozinha ────────────────────────────────────
@@ -217,6 +232,7 @@ Deno.serve(async (req) => {
         transaction: p.transaction,
         suggestions: p.suggestions,
         groups: p.groups,
+        internalTransfer: p.internalTransfer,
       })),
       applied,
       summary: {

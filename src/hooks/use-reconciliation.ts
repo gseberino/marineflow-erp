@@ -51,6 +51,8 @@ export interface ReconcileResponse {
     transaction: { id: string };
     suggestions: ReconcileSuggestion[];
     groups?: ReconcileGroup[];
+    /** Dinheiro circulando entre contas da própria empresa: não é receita nem despesa. */
+    internalTransfer?: boolean;
   }[];
   applied: { transaction_id: string; candidate: ReconcileCandidate; message: string }[];
   summary: {

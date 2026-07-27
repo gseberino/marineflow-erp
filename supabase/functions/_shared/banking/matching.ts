@@ -100,6 +100,25 @@ export function statementSignature(description: string, counterpartyName?: strin
   return Array.from(new Set(tokens)).sort().join(" ").slice(0, 200);
 }
 
+/**
+ * A transação parece ser dinheiro seu circulando entre contas próprias.
+ *
+ * No extrato real aparece como "Pix recebido de Hbr Boats": não é receita de cliente, é
+ * transferência interna. Sem reconhecer isso, essas linhas ficam para sempre na fila de
+ * conciliação pedindo um candidato que não existe — e ainda inflam o total "a identificar".
+ */
+export function looksLikeInternalTransfer(
+  description: string,
+  counterpartyName: string | null | undefined,
+  companyName: string | null | undefined,
+): boolean {
+  const empresa = significantTokens(companyName || "", NAME_NOISE);
+  if (empresa.length === 0) return false;
+  const texto = ` ${normalizeText(`${description} ${counterpartyName || ""}`)} `;
+  // Exige TODOS os tokens do nome da empresa: "Boats" sozinho casaria com outra empresa.
+  return empresa.every((t) => texto.includes(` ${t} `) || texto.includes(t));
+}
+
 /** Tolerância efetiva: a menor entre o percentual e o teto absoluto. */
 export function effectiveTolerance(expected: number, opts: MatchOptions): number {
   const pct = Math.abs(expected) * (opts.amountTolerancePct / 100);

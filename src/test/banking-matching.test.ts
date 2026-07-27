@@ -4,6 +4,7 @@ import {
   suggestMatches,
   suggestCombinations,
   statementSignature,
+  looksLikeInternalTransfer,
   pickAutoApply,
   effectiveTolerance,
   nameOverlap,
@@ -248,6 +249,24 @@ describe("pagamento já registrado (caso real: lançado na hora, extrato importa
       [pagamentoLancado],
     );
     expect(pickAutoApply(out)).toBeNull();
+  });
+});
+
+describe("transferência entre contas próprias", () => {
+  // Caso real do extrato: "Pix recebido de Hbr Boats" é o mesmo dinheiro mudando de conta,
+  // não receita de cliente — sem reconhecer isso essas linhas ficam eternamente na fila.
+  it("reconhece o nome da empresa no histórico", () => {
+    expect(looksLikeInternalTransfer("Pix recebido de Hbr Boats", null, "HBR Boats")).toBe(true);
+    expect(looksLikeInternalTransfer("TED HBR BOATS LTDA", null, "HBR Boats")).toBe(true);
+  });
+
+  it("não confunde com cliente que compartilha uma palavra do nome", () => {
+    expect(looksLikeInternalTransfer("Pix recebido de Boats do Sul", null, "HBR Boats")).toBe(false);
+    expect(looksLikeInternalTransfer("Pix recebido de MARCELO", null, "HBR Boats")).toBe(false);
+  });
+
+  it("fica desligado quando a empresa não tem nome configurado", () => {
+    expect(looksLikeInternalTransfer("Pix recebido de Hbr Boats", null, null)).toBe(false);
   });
 });
 
