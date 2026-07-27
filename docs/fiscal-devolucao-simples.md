@@ -15,6 +15,15 @@ operação original, inclusive os tributários**. Por isso a nota de devolução
 voltando** — a HBR (Simples) não se credita de nada (vedação do art. 24 da LC
 123/2006).
 
+> ⚠️ **Reproduzir os ELEMENTOS ≠ usar os mesmos CAMPOS.** A regra é reproduzir os
+> **valores** (base, alíquota, imposto) para anular a operação — **não** os mesmos
+> campos do XML. **Onde** cada imposto é lançado depende do que o **regime da HBR
+> permite**: ela **pode** destacar o ICMS (via CSOSN 900), mas **não pode** destacar
+> o IPI no campo próprio (não é contribuinte de IPI) — por isso o IPI vai no
+> `vIPIDevol`. Fonte literal: *"a devolução deve reproduzir todos os elementos
+> constantes da NF anterior, porém isso **não significa reproduzir os mesmos
+> campos**"*.
+
 ---
 
 ## ICMS — destacado no campo próprio ✅
