@@ -395,3 +395,96 @@ Deno.test("parseIncomingWebhook: missing message object returns null", () => {
   };
   assertEquals(provider.parseIncomingWebhook(payload), null);
 });
+
+// ─── capacidades aditivas ────────────────────────────────────────────────────
+
+Deno.test("sendImage: hits sendMedia with mediatype image + caption", async () => {
+  const { fetchStub, calls } = mockFetch({ key: { id: "IMG" } });
+  const r = await withFetch(fetchStub, () =>
+    provider.sendImage("5547999999999", "https://cdn/x.jpg", "MultiPlus 3000W — R$ 6.900"),
+  );
+  assertEquals(r, { ok: true, providerMessageId: "IMG" });
+  assertEquals(calls[0].url, `${BASE}/message/sendMedia/marineflow`);
+  const body = JSON.parse(calls[0].init?.body as string);
+  assertEquals(body.mediatype, "image");
+  assertEquals(body.media, "https://cdn/x.jpg");
+  assertEquals(body.caption, "MultiPlus 3000W — R$ 6.900");
+  assertEquals(body.number, "5547999999999");
+});
+
+Deno.test("sendStatus: text — no 'number', bg color + font, allContacts default true", async () => {
+  const { fetchStub, calls } = mockFetch({ key: { id: "ST1" } });
+  await withFetch(fetchStub, () => provider.sendStatus({ type: "text", content: "Promoção!" }));
+  assertEquals(calls[0].url, `${BASE}/message/sendStatus/marineflow`);
+  const body = JSON.parse(calls[0].init?.body as string);
+  assertEquals(body.type, "text");
+  assertEquals(body.content, "Promoção!");
+  assertEquals(body.allContacts, true);
+  assertEquals(typeof body.backgroundColor, "string");
+  assertEquals(body.number, undefined); // status não é DM
+});
+
+Deno.test("sendStatus: image uses caption, not bg/font", async () => {
+  const { fetchStub, calls } = mockFetch({ key: { id: "ST2" } });
+  await withFetch(fetchStub, () =>
+    provider.sendStatus({ type: "image", content: "https://cdn/promo.jpg", caption: "Oferta" }),
+  );
+  const body = JSON.parse(calls[0].init?.body as string);
+  assertEquals(body.type, "image");
+  assertEquals(body.content, "https://cdn/promo.jpg");
+  assertEquals(body.caption, "Oferta");
+  assertEquals(body.backgroundColor, undefined);
+});
+
+Deno.test("sendStatus: statusJidList segments and turns off allContacts", async () => {
+  const { fetchStub, calls } = mockFetch({ key: { id: "ST3" } });
+  await withFetch(fetchStub, () =>
+    provider.sendStatus({ type: "text", content: "VIP", statusJidList: ["5547999999999@s.whatsapp.net"] }),
+  );
+  const body = JSON.parse(calls[0].init?.body as string);
+  assertEquals(body.allContacts, false);
+  assertEquals(body.statusJidList, ["5547999999999@s.whatsapp.net"]);
+});
+
+Deno.test("sendPoll: correct endpoint and payload", async () => {
+  const { fetchStub, calls } = mockFetch({ key: { id: "PL" } });
+  await withFetch(fetchStub, () =>
+    provider.sendPoll("5547999999999", "Qual horário?", ["Quinta 9h", "Sexta 14h"]),
+  );
+  assertEquals(calls[0].url, `${BASE}/message/sendPoll/marineflow`);
+  const body = JSON.parse(calls[0].init?.body as string);
+  assertEquals(body.name, "Qual horário?");
+  assertEquals(body.values, ["Quinta 9h", "Sexta 14h"]);
+  assertEquals(body.selectableCount, 1);
+  assertEquals(body.number, "5547999999999");
+});
+
+Deno.test("sendReaction: builds key with full jid + reaction emoji", async () => {
+  const { fetchStub, calls } = mockFetch({ key: { id: "RX" } });
+  await withFetch(fetchStub, () => provider.sendReaction("5547999999999", "BAE001", false, "✅"));
+  assertEquals(calls[0].url, `${BASE}/message/sendReaction/marineflow`);
+  const body = JSON.parse(calls[0].init?.body as string);
+  assertEquals(body.reaction, "✅");
+  assertEquals(body.key.id, "BAE001");
+  assertEquals(body.key.fromMe, false);
+  assertEquals(body.key.remoteJid, "5547999999999@s.whatsapp.net");
+});
+
+Deno.test("sendPresence: correct endpoint and payload", async () => {
+  const { fetchStub, calls } = mockFetch({});
+  await withFetch(fetchStub, () => provider.sendPresence("5547999999999", "composing", 900));
+  assertEquals(calls[0].url, `${BASE}/chat/sendPresence/marineflow`);
+  const body = JSON.parse(calls[0].init?.body as string);
+  assertEquals(body.presence, "composing");
+  assertEquals(body.delay, 900);
+  assertEquals(body.number, "5547999999999");
+});
+
+Deno.test("markRead: sends readMessages array with full jid", async () => {
+  const { fetchStub, calls } = mockFetch({});
+  await withFetch(fetchStub, () => provider.markRead("5547999999999", "BAE009", false));
+  assertEquals(calls[0].url, `${BASE}/chat/markMessageAsRead/marineflow`);
+  const body = JSON.parse(calls[0].init?.body as string);
+  assertEquals(body.readMessages[0].id, "BAE009");
+  assertEquals(body.readMessages[0].remoteJid, "5547999999999@s.whatsapp.net");
+});

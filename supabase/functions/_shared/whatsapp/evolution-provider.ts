@@ -1,6 +1,6 @@
 // EvolutionProvider — implements WhatsAppProvider against Evolution API v2.
 // Activated when WHATSAPP_PROVIDER=evolution (cutover B6).
-import type { WhatsAppProvider, SendResult, IncomingMessageEvent } from "./types.ts";
+import type { WhatsAppProvider, SendResult, IncomingMessageEvent, StatusContent } from "./types.ts";
 import { normalizePhoneNumber } from "./normalize.ts";
 
 export interface EvolutionConfig {
@@ -145,6 +145,78 @@ export class EvolutionProvider implements WhatsAppProvider {
     } catch {
       return false;
     }
+  }
+
+  // JID canônico do WhatsApp (para reação / marcar-lida, que exigem o remoteJid completo).
+  private jid(to: string): string {
+    return `${normalizePhoneNumber(to)}@s.whatsapp.net`;
+  }
+
+  // ─── Capacidades aditivas (não afetam o caminho vivo de mensagens) ──────────
+
+  async sendImage(to: string, imageUrl: string, caption?: string): Promise<SendResult> {
+    // Mesmo endpoint do documento, mediatype "image" (vitrine de produto / arte promo).
+    return this.post(`message/sendMedia/${this.instance}`, {
+      number: normalizePhoneNumber(to),
+      mediatype: "image",
+      media: imageUrl,
+      caption: caption ?? "",
+    });
+  }
+
+  async sendStatus(content: StatusContent): Promise<SendResult> {
+    // Status/Stories: sem "number" (não é DM). type text usa cor/fonte; mídia usa caption.
+    const payload: Record<string, unknown> = {
+      type: content.type,
+      content: content.content,
+      allContacts: content.allContacts ?? true,
+    };
+    if (content.type === "text") {
+      payload.backgroundColor = content.backgroundColor ?? "#0f6e78";
+      payload.font = content.font ?? 1;
+    } else {
+      payload.caption = content.caption ?? "";
+    }
+    // statusJidList segmenta quem vê (e desliga allContacts).
+    if (content.statusJidList && content.statusJidList.length > 0) {
+      payload.statusJidList = content.statusJidList;
+      payload.allContacts = false;
+    }
+    return this.post(`message/sendStatus/${this.instance}`, payload);
+  }
+
+  async sendPoll(to: string, name: string, options: string[], selectableCount = 1): Promise<SendResult> {
+    return this.post(`message/sendPoll/${this.instance}`, {
+      number: normalizePhoneNumber(to),
+      name,
+      selectableCount,
+      values: options,
+    });
+  }
+
+  async sendReaction(to: string, messageId: string, fromMe: boolean, emoji: string): Promise<SendResult> {
+    return this.post(`message/sendReaction/${this.instance}`, {
+      key: { remoteJid: this.jid(to), fromMe, id: messageId },
+      reaction: emoji,
+    });
+  }
+
+  async sendPresence(
+    to: string,
+    presence: "composing" | "recording" | "paused",
+    delayMs = 1200,
+  ): Promise<SendResult> {
+    return this.post(`chat/sendPresence/${this.instance}`, {
+      number: normalizePhoneNumber(to),
+      presence,
+      delay: delayMs,
+    });
+  }
+
+  async markRead(to: string, messageId: string, fromMe: boolean): Promise<SendResult> {
+    return this.post(`chat/markMessageAsRead/${this.instance}`, {
+      readMessages: [{ remoteJid: this.jid(to), fromMe, id: messageId }],
+    });
   }
 
   parseIncomingWebhook(payload: unknown): IncomingMessageEvent | null {
