@@ -46,6 +46,8 @@ interface Props {
   discountRatio?: number;
   expensesTotal?: number;
   presetExpensesPct?: number;
+  /** Rótulo da condição de pagamento já definida no orçamento — para o seletor já vir marcado. */
+  appliedConditionLabel?: string;
 }
 
 const fmt = (v: number) =>
@@ -65,6 +67,7 @@ export function RegisterDepositDialog({
   discountRatio = 1,
   expensesTotal = 0,
   presetExpensesPct = 0,
+  appliedConditionLabel = '',
 }: Props) {
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -116,6 +119,14 @@ export function RegisterDepositDialog({
     if ((presetServicesPct ?? 0) > 0 || (presetPartsPct ?? 0) > 0) setMode('category');
   }, [open, presetServicesPct, presetPartsPct, presetExpensesPct]);
 
+  // Marca no seletor a condição JÁ definida no orçamento (só se ela existir na lista de presets —
+  // condições avulsas/custom não têm rótulo a exibir). Roda também quando os presets chegam async.
+  useEffect(() => {
+    if (!open) return;
+    const lbl = appliedConditionLabel || '';
+    setPresetLabel(lbl && (paymentPresets || []).some((p: any) => p.label === lbl) ? lbl : '');
+  }, [open, appliedConditionLabel, paymentPresets]);
+
   // Escolha de uma condição de pagamento pré-cadastrada direto no diálogo (agiliza o lançamento
   // sem abrir o orçamento). Preenche serviços/peças/despesas % com a parcela de SINAL do preset.
   const applyPreset = (label: string) => {
@@ -127,6 +138,12 @@ export function RegisterDepositDialog({
       setPartsPct(pcts.partsPct);
       setExpensesPct(pcts.expensesPct);
       setMode('category');
+      // Condição sem parcela de entrada (0%): avisa em vez de deixar o valor mudar sem explicação.
+      if (pcts.servicesPct === 0 && pcts.partsPct === 0 && pcts.expensesPct === 0) {
+        toast({ title: 'Condição sem entrada', description: 'Essa condição não prevê sinal (0%). Ajuste os % ou escolha outra.' });
+      }
+    } else {
+      toast({ title: 'Condição sem parcela de sinal', description: 'Nenhuma parcela de entrada (aprovação/dia 0) foi definida nessa condição.' });
     }
   };
 
@@ -264,7 +281,7 @@ export function RegisterDepositDialog({
                     type="number" min="0" max="100" step="5"
                     className="w-20 h-7 text-right text-sm"
                     value={servicesPct}
-                    onChange={e => setServicesPct(Math.min(100, parseFloat(e.target.value) || 0))}
+                    onChange={e => { setServicesPct(Math.min(100, parseFloat(e.target.value) || 0)); setPresetLabel(''); }}
                   />
                   <span className="text-xs text-muted-foreground w-24 text-right">
                     = {fmt(laborNet * servicesPct / 100)}
@@ -278,7 +295,7 @@ export function RegisterDepositDialog({
                     type="number" min="0" max="100" step="5"
                     className="w-20 h-7 text-right text-sm"
                     value={partsPct}
-                    onChange={e => setPartsPct(Math.min(100, parseFloat(e.target.value) || 0))}
+                    onChange={e => { setPartsPct(Math.min(100, parseFloat(e.target.value) || 0)); setPresetLabel(''); }}
                   />
                   <span className="text-xs text-muted-foreground w-24 text-right">
                     = {fmt(partsNet * partsPct / 100)}
