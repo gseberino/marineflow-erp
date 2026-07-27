@@ -48,6 +48,18 @@ export interface DepositComputation {
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+/**
+ * Condição praticada pela empresa quando o orçamento não define uma: o sinal cobre 100%
+ * de materiais e despesas mais 50% da mão de obra, e o saldo (os outros 50% de serviço)
+ * fica para a entrega.
+ *
+ * Existe para que o diálogo "Receber sinal" e a conciliação bancária esperem o MESMO
+ * valor. Enquanto o diálogo sugeria 30% do total e a conciliação calculava 100/50, o
+ * operador registrava um sinal que o motor depois não reconhecia.
+ * Espelhada em `supabase/functions/_shared/banking/quote-deposit.ts` (CONDICAO_PADRAO).
+ */
+export const CONDICAO_PADRAO = { servicesPct: 50, partsPct: 100, expensesPct: 100 } as const;
+
 /** Deriva mão de obra, peças, despesas, subtotal, base e o discountRatio de um orçamento. */
 export function depositBaseFromOrder(order: DepositOrderLike) {
   const laborCost = Number(order.labor_cost_total || 0);

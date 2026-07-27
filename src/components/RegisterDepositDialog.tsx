@@ -14,7 +14,7 @@ import { useAppSettings } from '@/hooks/use-app-settings';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
-import { depositAmountFromPcts, signalPctsFromInstallments, computeScheduleFromParts, type DepositInstallment } from '@/lib/quote-deposit';
+import { depositAmountFromPcts, signalPctsFromInstallments, computeScheduleFromParts, CONDICAO_PADRAO, type DepositInstallment } from '@/lib/quote-deposit';
 import { usePaymentConditionPresets } from '@/hooks/use-payment-conditions';
 import { addDays, format, parseISO } from 'date-fns';
 
@@ -91,10 +91,20 @@ export function RegisterDepositDialog({
   const hasPresetPcts = (presetServicesPct !== undefined && presetServicesPct > 0) ||
                         (presetPartsPct !== undefined && presetPartsPct > 0);
 
-  const [mode, setMode]             = useState<DepositMode>(hasPresetPcts ? 'category' : 'percent');
-  const [servicesPct, setServicesPct] = useState(presetServicesPct ?? 0);
-  const [partsPct, setPartsPct]       = useState(presetPartsPct ?? 0);
-  const [expensesPct, setExpensesPct] = useState(presetExpensesPct);
+  // Sem condição no orçamento, parte da condição praticada pela empresa (100% materiais +
+  // 50% mão de obra) em vez de um percentual liso sobre o total. É a mesma regra que a
+  // conciliação bancária usa para saber quanto esperar — divergir aqui faria o operador
+  // registrar um sinal que o motor depois não reconheceria.
+  const [mode, setMode]             = useState<DepositMode>('category');
+  const [servicesPct, setServicesPct] = useState(
+    hasPresetPcts ? (presetServicesPct ?? 0) : CONDICAO_PADRAO.servicesPct,
+  );
+  const [partsPct, setPartsPct]       = useState(
+    hasPresetPcts ? (presetPartsPct ?? 0) : CONDICAO_PADRAO.partsPct,
+  );
+  const [expensesPct, setExpensesPct] = useState(
+    hasPresetPcts ? presetExpensesPct : CONDICAO_PADRAO.expensesPct,
+  );
   const [presetLabel, setPresetLabel] = useState('');
   const [globalPct, setGlobalPct]     = useState(depositPctGlobal);
   const [fixedValue, setFixedValue]   = useState('');
@@ -127,10 +137,13 @@ export function RegisterDepositDialog({
   // busca a condição ao abrir). Só mexe nos %/modo, sem resetar método/data/observações.
   useEffect(() => {
     if (!open) return;
-    setServicesPct(presetServicesPct ?? 0);
-    setPartsPct(presetPartsPct ?? 0);
-    setExpensesPct(presetExpensesPct ?? 0);
-    if ((presetServicesPct ?? 0) > 0 || (presetPartsPct ?? 0) > 0) setMode('category');
+    const temPreset = (presetServicesPct ?? 0) > 0 || (presetPartsPct ?? 0) > 0;
+    // Sem condição no orçamento, cai na condição praticada pela empresa — nunca em zero,
+    // que deixaria o valor do sinal em branco esperando alguém digitar.
+    setServicesPct(temPreset ? (presetServicesPct ?? 0) : CONDICAO_PADRAO.servicesPct);
+    setPartsPct(temPreset ? (presetPartsPct ?? 0) : CONDICAO_PADRAO.partsPct);
+    setExpensesPct(temPreset ? (presetExpensesPct ?? 0) : CONDICAO_PADRAO.expensesPct);
+    setMode('category');
   }, [open, presetServicesPct, presetPartsPct, presetExpensesPct]);
 
   // Marca no seletor a condição JÁ definida no orçamento (só se ela existir na lista de presets —

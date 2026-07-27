@@ -38,13 +38,15 @@ const ABERTOS = ["pending", "partially_paid", "overdue", "scheduled"];
 const OS_ATIVAS = ["open", "scheduled", "in_progress", "awaiting_parts", "completed", "invoiced", "approved"];
 
 interface ReconcileBody {
-  action?: "suggest" | "auto" | "apply";
+  action?: "suggest" | "auto" | "apply" | "apply_group";
   transaction_id?: string;
   /** Só simula: devolve o que faria, sem gravar. */
   dry_run?: boolean;
   limit?: number;
   /** Para `apply`: o candidato escolhido na tela, do jeito que esta função o devolveu. */
   candidate?: Candidate;
+  /** Para `apply_group`: as contas que juntas somam o depósito. */
+  candidates?: Candidate[];
 }
 
 Deno.serve(async (req) => {
@@ -95,6 +97,46 @@ Deno.serve(async (req) => {
       });
       if (!resultado.ok) return jr({ error: resultado.message }, 400);
       return jr({ ok: true, message: resultado.message });
+    }
+
+    // ── Aplicar um pagamento agrupado ────────────────────────────────────────
+    // Cada conta recebe o próprio valor (não o do depósito), senão a primeira baixa
+    // consumiria o total e as demais ficariam com valor errado.
+    if (action === "apply_group") {
+      if (!body.transaction_id || !body.candidates?.length) {
+        return jr({ error: "transaction_id e candidates são obrigatórios" }, 400);
+      }
+      const { data: txRow, error: txOneErr } = await admin
+        .from("bank_transactions")
+        .select("id, transaction_date, description, amount, transaction_type, counterparty_name, reconciled")
+        .eq("id", body.transaction_id)
+        .single();
+      if (txOneErr) throw txOneErr;
+      if ((txRow as any)?.reconciled) return jr({ error: "esta transação já foi conciliada" }, 409);
+
+      const tx = txRow as BankTx;
+      const feitos: string[] = [];
+      const falhas: string[] = [];
+      for (const alvo of body.candidates) {
+        const parcela = { ...tx, amount: Number(alvo.amount) };
+        const r = await applySuggestion(admin, parcela, {
+          candidate: alvo, score: 0, tier: "probable", reasons: [], difference: 0, autoApply: false,
+        });
+        if (r.ok) feitos.push(alvo.label);
+        else falhas.push(`${alvo.label}: ${r.message}`);
+      }
+
+      // A transação é uma só e tem um único campo de pagamento, então ela guarda o
+      // vínculo da última baixa; o rastro completo do grupo fica nas contas quitadas.
+      if (feitos.length > 0) {
+        await admin.from("bank_transactions").update({ reconciled: true }).eq("id", tx.id);
+      }
+      return jr({
+        ok: falhas.length === 0,
+        message: `${feitos.length} conta(s) baixada(s)${falhas.length ? ` · ${falhas.length} falharam` : ""}`,
+        feitos,
+        falhas,
+      });
     }
 
     // ── Transações pendentes ─────────────────────────────────────────────────
@@ -473,7 +515,65 @@ async function applySuggestion(
       return { ok: true, message: `Recebimento lançado em ${candidate.label}` };
     }
 
-    // Cobrança avulsa exige decidir a classificação contábil — fica para as opções manuais.
+    // Cobrança avulsa: não tem conta a receber por trás, então cria a conta já quitada e
+    // deixa o gatilho de sincronização fechar a cobrança sozinho.
+    if (candidate.kind === "collection") {
+      const { data: cob, error: cobErr } = await admin
+        .from("collections")
+        .select("id, client_id, description, service_order_id, amount")
+        .eq("id", candidate.id)
+        .single();
+      if (cobErr) throw cobErr;
+
+      const { data: rec, error: recErr } = await admin
+        .from("receivables")
+        .insert({
+          client_id: (cob as any).client_id,
+          service_order_id: (cob as any).service_order_id ?? null,
+          description: (cob as any).description || candidate.label,
+          issue_date: hoje,
+          due_date: hoje,
+          amount: tx.amount,
+          paid_amount: tx.amount,
+          balance_amount: 0,
+          status: "paid",
+        })
+        .select("id")
+        .single();
+      if (recErr) throw recErr;
+
+      const { data: pay, error: payErr } = await admin
+        .from("payments")
+        .insert({
+          receivable_id: (rec as any).id,
+          payment_date: hoje,
+          amount: tx.amount,
+          payment_method: "bank_transfer",
+          notes: `Conciliação — ${tx.description}`.slice(0, 500),
+        })
+        .select("id")
+        .single();
+      if (payErr) throw payErr;
+
+      // Liga a cobrança à conta criada e a marca como paga (o gatilho cuida do resto
+      // quando o receivable já nasce quitado, mas aqui o vínculo ainda não existia).
+      await admin
+        .from("collections")
+        .update({
+          receivable_id: (rec as any).id,
+          status: "paid",
+          paid_at: new Date().toISOString(),
+          paid_amount: tx.amount,
+          paid_method: "bank_transfer",
+          payment_confirmed_by: "conciliacao",
+        })
+        .eq("id", candidate.id);
+
+      await marcarConciliada(admin, tx.id, (pay as any).id, (cob as any).service_order_id ?? null);
+      await aprender(admin, tx, candidate);
+      return { ok: true, message: `Cobrança quitada: ${candidate.label}` };
+    }
+
     return { ok: false, message: "Este tipo precisa ser conciliado pelas opções abaixo." };
   } catch (e) {
     console.error("[banking-reconcile] falha ao aplicar:", candidate.kind, candidate.id, e);

@@ -15,7 +15,7 @@ import { useSuppliers } from '@/hooks/use-suppliers';
 import { OPERATIONAL_EXPENSE_CATEGORIES } from '@/lib/expense-categories';
 import { parseFile, decodeStatementFile, type BankTransaction } from '@/lib/bank-parser';
 import {
-  useReconcileSuggestions, useAutoReconcile, useApplySuggestion,
+  useReconcileSuggestions, useAutoReconcile, useApplySuggestion, useApplyGroup, useAnalyzeWithAI,
   CANDIDATE_LABELS, type ReconcileSuggestion, type ReconcileGroup,
 } from '@/hooks/use-reconciliation';
 import { toast } from 'sonner';
@@ -49,6 +49,9 @@ export function BankReconciliation() {
   const { data: engine, isLoading: engineLoading, refetch: refetchEngine } = useReconcileSuggestions();
   const autoReconcile = useAutoReconcile();
   const applySuggestion = useApplySuggestion();
+  const applyGroup = useApplyGroup();
+  const analyzeWithAI = useAnalyzeWithAI();
+  const [aiAnalysis, setAiAnalysis] = useState<Record<string, string>>({});
   const suggestionsByTx = new Map<string, ReconcileSuggestion[]>(
     (engine?.transactions || []).map(t => [t.transaction.id, t.suggestions]),
   );
@@ -318,6 +321,36 @@ export function BankReconciliation() {
     }
   };
 
+  const handleApplyGroup = async (tx: any, g: ReconcileGroup) => {
+    try {
+      const r = await applyGroup.mutateAsync({ transactionId: tx.id, candidates: g.candidates });
+      if (r.falhas?.length) {
+        toast.warning(`${r.message}. Não deu certo em: ${r.falhas.join('; ')}`);
+      } else {
+        toast.success(r.message);
+      }
+      setReconcileId(null);
+      invalidateAll();
+      refetchEngine();
+    } catch (e: any) {
+      toast.error(e?.message || 'Erro ao baixar as contas');
+    }
+  };
+
+  const handleAnalyzeWithAI = async (tx: any) => {
+    try {
+      const analise = await analyzeWithAI.mutateAsync({
+        transactionId: tx.id,
+        description: tx.description,
+        amount: Number(tx.amount),
+        date: tx.transaction_date,
+      });
+      setAiAnalysis(prev => ({ ...prev, [tx.id]: analise }));
+    } catch (e: any) {
+      toast.error(e?.message || 'Não consegui analisar agora');
+    }
+  };
+
   const handleUnignore = async (id: string) => {
     try {
       await unignore.mutateAsync(id);
@@ -535,13 +568,17 @@ export function BankReconciliation() {
                                 </div>
                               </div>
 
+                              {/* Diz o que a confirmação vai fazer com a diferença, não só
+                                  que ela existe: recebeu menos deixa saldo em aberto,
+                                  recebeu mais costuma ser juros ou multa. */}
                               {Math.abs(s.difference) >= 0.01 && (
-                                <p className="text-xs flex items-center gap-1.5 text-warning">
-                                  <AlertTriangle className="h-3 w-3 shrink-0" />
-                                  {s.difference > 0
-                                    ? `Entrou ${formatCurrency(Math.abs(s.difference))} a mais que o esperado`
-                                    : `Entrou ${formatCurrency(Math.abs(s.difference))} a menos que o esperado`}
-                                  {' — confirme se é juros, tarifa ou valor negociado.'}
+                                <p className="text-xs flex items-start gap-1.5 text-warning">
+                                  <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
+                                  <span>
+                                    {s.difference > 0
+                                      ? `Entrou ${formatCurrency(Math.abs(s.difference))} a mais que o esperado — costuma ser juros ou multa por atraso. A baixa será pelo valor recebido.`
+                                      : `Entrou ${formatCurrency(Math.abs(s.difference))} a menos que o esperado — pode ser tarifa do banco ou pagamento parcial. Confirmar dá baixa parcial e mantém ${formatCurrency(Math.abs(s.difference))} em aberto.`}
+                                  </span>
                                 </p>
                               )}
 
@@ -556,6 +593,25 @@ export function BankReconciliation() {
                         </div>
                       );
                     })()}
+
+                    {/* Quando o cálculo não alcança, o agente entra: ele lê conversas,
+                        histórico e orçamentos em negociação. Só opina — não concilia. */}
+                    <div className="space-y-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleAnalyzeWithAI(tx)}
+                        disabled={analyzeWithAI.isPending}
+                      >
+                        <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+                        {analyzeWithAI.isPending ? 'Analisando...' : 'Analisar com IA'}
+                      </Button>
+                      {aiAnalysis[tx.id] && (
+                        <div className="rounded-lg border bg-card p-3 text-sm whitespace-pre-wrap">
+                          {aiAnalysis[tx.id]}
+                        </div>
+                      )}
+                    </div>
 
                     {/* Pagamento agrupado: o cliente quitou várias contas num depósito só.
                         Aparece apenas quando nenhuma conta sozinha explica o valor. */}
@@ -575,10 +631,19 @@ export function BankReconciliation() {
                                 <li key={`${c.kind}-${c.id}`}>• {c.label} — {formatCurrency(c.amount)}</li>
                               ))}
                             </ul>
-                            <p className="text-xs text-muted-foreground">
-                              Confirme uma conta de cada vez pelas opções abaixo — assim cada baixa
-                              fica registrada com o valor certo.
-                            </p>
+                            <div className="flex items-center justify-between gap-2 flex-wrap pt-1">
+                              <span className="text-xs text-muted-foreground">
+                                Cada conta é baixada pelo próprio valor.
+                              </span>
+                              <Button
+                                size="sm"
+                                onClick={() => handleApplyGroup(tx, g)}
+                                disabled={applyGroup.isPending}
+                              >
+                                <Check className="h-3 w-3 mr-1" />
+                                Baixar as {g.candidates.length} contas
+                              </Button>
+                            </div>
                           </div>
                         ))}
                       </div>

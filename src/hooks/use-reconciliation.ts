@@ -128,6 +128,57 @@ export function useApplySuggestion() {
   });
 }
 
+/** Baixa de uma vez as contas que juntas somam o depósito, cada uma pelo próprio valor. */
+export function useApplyGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { transactionId: string; candidates: ReconcileCandidate[] }) => {
+      const { data, error } = await supabase.functions.invoke('banking-reconcile', {
+        body: { action: 'apply_group', transaction_id: input.transactionId, candidates: input.candidates },
+      });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      return data as { ok: boolean; message: string; feitos: string[]; falhas: string[] };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['bank-transactions'] });
+      qc.invalidateQueries({ queryKey: ['reconcile-suggestions'] });
+      qc.invalidateQueries({ queryKey: ['receivables'] });
+      qc.invalidateQueries({ queryKey: ['payables'] });
+      qc.invalidateQueries({ queryKey: ['payments'] });
+      qc.invalidateQueries({ queryKey: ['financial-summary'] });
+    },
+  });
+}
+
+/**
+ * Manda uma transação específica para o agente analisar.
+ *
+ * Serve para quando o motor não achou nada: o agente enxerga o que regra nenhuma alcança
+ * — conversas de WhatsApp, histórico do cliente, orçamentos em negociação. Ele responde
+ * com a leitura dele; registrar o dinheiro continua sendo ação explícita de quem lê.
+ */
+export function useAnalyzeWithAI() {
+  return useMutation({
+    mutationFn: async (input: { transactionId: string; description: string; amount: number; date: string }) => {
+      const pergunta =
+        `Analise esta entrada do extrato bancário que não foi identificada automaticamente: ` +
+        `${input.date}, valor R$ ${input.amount.toFixed(2)}, histórico "${input.description}". ` +
+        `Use sugerir_conciliacao com transaction_id ${input.transactionId} e cruze com o que você ` +
+        `souber de conversas, orçamentos em aberto e histórico dos clientes. Responda em no máximo ` +
+        `4 linhas: do que provavelmente se trata, de qual cliente, e o que confirmar. Não concilie nada.`;
+
+      const { data, error } = await supabase.functions.invoke('ai-agent', {
+        body: { messages: [{ role: 'user', content: pergunta }] },
+      });
+      if (error) throw error;
+      const resposta = (data as any)?.reply ?? (data as any)?.message ?? (data as any)?.content;
+      if (!resposta) throw new Error('O agente não retornou uma análise.');
+      return String(resposta);
+    },
+  });
+}
+
 /** Rótulo curto do tipo de candidato, para a etiqueta na sugestão. */
 export const CANDIDATE_LABELS: Record<CandidateKind, string> = {
   receivable: 'Conta a receber',

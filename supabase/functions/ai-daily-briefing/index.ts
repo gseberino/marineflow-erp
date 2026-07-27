@@ -291,9 +291,43 @@ Deno.serve(async (req) => {
       if (pend.length > 0) {
         const total = pend.reduce((s, t) => s + Number(t.amount || 0), 0);
         conciliaLines.push(`🏦 Entradas sem identificação: *${pend.length}* (${fmt.format(total)})`);
+
+        // Roda o motor para dizer o que essas entradas provavelmente são, em vez de só
+        // apontar que existem. Só sugere — conciliar continua sendo ação explícita.
+        let sugestoesPorTx = new Map<string, string>();
+        try {
+          const resp = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/banking-reconcile`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-cron-secret": Deno.env.get("CRON_SECRET") ?? "",
+            },
+            body: JSON.stringify({ action: "suggest", limit: 20 }),
+          });
+          if (resp.ok) {
+            const dados = await resp.json();
+            for (const item of dados.transactions || []) {
+              const melhor = (item.suggestions || [])[0];
+              if (melhor) {
+                sugestoesPorTx.set(
+                  item.transaction.id,
+                  `${melhor.candidate.label}${melhor.candidate.clientName ? ` (${melhor.candidate.clientName})` : ""} · ${melhor.score}%`,
+                );
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("[ai-daily-briefing] motor de conciliação indisponível:", e);
+        }
+
         for (const t of pend.slice(0, 3)) {
           const desc = String(t.description || "").slice(0, 40);
-          conciliaLines.push(`   • ${fmt.format(Number(t.amount))} — ${desc}`);
+          const palpite = sugestoesPorTx.get(t.id);
+          conciliaLines.push(
+            palpite
+              ? `   • ${fmt.format(Number(t.amount))} — parece ser ${palpite}`
+              : `   • ${fmt.format(Number(t.amount))} — ${desc}`,
+          );
         }
       }
     } catch (e) {
