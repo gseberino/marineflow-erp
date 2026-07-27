@@ -2,7 +2,8 @@
 // (Dashboard, OS, cliente, embarcação, Settings). Mesma motivação do
 // AgendaPage.smoke.test.tsx: erro de inicialização não aparece em tsc/build.
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { DashboardTasksWidget } from './DashboardTasksWidget';
@@ -12,13 +13,17 @@ import { TaskAutomationSettings } from './TaskAutomationSettings';
 import { FocusMode } from './FocusMode';
 import { OpenLoopsPanel } from './OpenLoopsPanel';
 
-const { queryBuilder, q, mut, liveTasks, openLoops, loopsRef, roleRef } = vi.hoisted(() => {
+const { queryBuilder, q, mut, liveTasks, openLoops, loopsRef, roleRef, upsertSpy } = vi.hoisted(() => {
+  // Espião de gravação: é o que prova que a confirmação BLOQUEIA o salvamento, e não
+  // apenas aparece por cima de uma alteração que já aconteceu.
+  const upsertSpy = vi.fn();
   const queryBuilder = (): any => {
     const o: any = {};
     for (const k of ['select', 'eq', 'neq', 'in', 'gte', 'lte', 'lt', 'gt', 'order',
-      'limit', 'is', 'not', 'like', 'update', 'insert', 'delete', 'upsert', 'filter', 'or']) {
+      'limit', 'is', 'not', 'like', 'update', 'insert', 'delete', 'filter', 'or']) {
       o[k] = () => o;
     }
+    o.upsert = (...args: unknown[]) => { upsertSpy(...args); return o; };
     o.maybeSingle = async () => ({ data: null, error: null });
     o.single = async () => ({ data: null, error: null });
     o.then = (res: any) => Promise.resolve({ data: [], error: null }).then(res);
@@ -64,7 +69,7 @@ const { queryBuilder, q, mut, liveTasks, openLoops, loopsRef, roleRef } = vi.hoi
   // Mutáveis para os testes trocarem o retorno dos hooks (estado vazio, cargo do usuário).
   const loopsRef = { current: openLoops as any[] };
   const roleRef = { current: { id: 'u1', role: 'admin' } as any };
-  return { queryBuilder, q, mut, liveTasks, openLoops, loopsRef, roleRef };
+  return { queryBuilder, q, mut, liveTasks, openLoops, loopsRef, roleRef, upsertSpy };
 });
 
 vi.mock('@/integrations/supabase/client', () => ({
@@ -138,6 +143,25 @@ describe('componentes da Agenda 2.0 — smoke de render', () => {
     expect(screen.getByText('cobrado 3×')).toBeTruthy();
     // A frase literal precisa aparecer para conferir sem abrir a conversa.
     expect(screen.getByText(/as baterias chegam quarta/)).toBeTruthy();
+  });
+
+  it('ligar mensagem ao CLIENTE pede confirmação antes de salvar', async () => {
+    const user = userEvent.setup();
+    wrap(<TaskAutomationSettings />);
+
+    // O interruptor da regra que envia ao cliente é o que fica ao lado do rótulo dela.
+    const linha = screen.getByText('Lembrete de agendamento ao CLIENTE').closest('div')!.parentElement!;
+    await user.click(within(linha).getByRole('switch'));
+
+    // Não pode ter salvo nada ainda: primeiro o aviso.
+    expect(await screen.findByText(/Ligar “Lembrete de agendamento ao CLIENTE”\?/)).toBeTruthy();
+    expect(upsertSpy).not.toHaveBeenCalled();
+
+    // Sem modo de teste, o botão só libera depois de digitar a palavra.
+    const confirmar = screen.getByRole('button', { name: /Ligar e enviar a clientes/ });
+    expect(confirmar).toBeDisabled();
+    await user.type(screen.getByLabelText(/digite/i), 'LIGAR');
+    expect(confirmar).not.toBeDisabled();
   });
 
   it('OpenLoopsPanel esconde fio de dinheiro do técnico', () => {
