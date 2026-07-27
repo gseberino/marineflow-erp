@@ -2653,7 +2653,10 @@ export default function FiscalEmission() {
                 {items.map((it, index) => {
                   // Item fora da devolução (checkbox desmarcado) → recolhido.
                   const collapsed = it.included === false;
-                  const itemTotal = Math.max(0, it.quantity * it.unit_price - (it.discount || 0)) + (it.other_expenses || 0);
+                  // Inclui o IPI devolvido (ipiUnit × qtd, arredondado) — é "por fora"
+                  // e integra o total da nota (vIPIDevol), como na emissão.
+                  const ipiDevolItem = Math.round((it.ipiUnit || 0) * (it.quantity || 0) * 100) / 100;
+                  const itemTotal = Math.max(0, it.quantity * it.unit_price - (it.discount || 0)) + (it.other_expenses || 0) + ipiDevolItem;
                   return (
                   <div key={index} className={`rounded-lg border p-3 ${collapsed ? 'bg-muted/20' : 'space-y-2'}`}>
                     {/* Devolução: incluir/excluir o item (parcial) + referência por item (VC02-14). */}
@@ -2750,6 +2753,23 @@ export default function FiscalEmission() {
                         <p className="text-[10px] text-muted-foreground">
                           Inclui {formatCurrency(it.other_expenses!)} de despesas acessórias (IPI da nota de compra).
                         </p>
+                      )}
+                      {/* IPI devolvido editável: reproduz o vIPI do XML da compra, mas
+                          ajustável para casar com o arredondamento do fornecedor (1 centavo). */}
+                      {it.referencedItemNumber != null && (it.ipiUnit || 0) > 0 && (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Label className="text-[10px] text-muted-foreground shrink-0">IPI devolvido (R$)</Label>
+                          <Input
+                            type="number" min="0" step="0.01" className="h-8 text-xs w-28"
+                            value={ipiDevolItem}
+                            onChange={(e) => {
+                              const total = Math.max(0, parseFloat(e.target.value) || 0);
+                              const q = it.quantity || 0;
+                              updateItem(index, { ipiUnit: q > 0 ? total / q : 0 });
+                            }}
+                          />
+                          <span className="text-[10px] text-muted-foreground">vIPIDevol (impostoDevol). Reproduz o vIPI da nota de compra; ajuste só se o fornecedor confirmar outro valor.</span>
+                        </div>
                       )}
 
                       {/* Resumo fiscal + botão para os detalhes. */}
