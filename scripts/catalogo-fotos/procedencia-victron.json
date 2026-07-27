@@ -5709,5 +5709,709 @@
         "arquivo": "RJ45_terminator_right_ASS030700000.jpg"
       }
     ]
+  },
+  {
+    "sku": "2929",
+    "name": "CABO MUNIDO DE PECAS DE CONEXAO VE. DIRECT - 3M 90 GRAUS PARA USB. VICTRON PARA USO EM",
+    "estoque": 9,
+    "preco": 157.38,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "ve-direct-to-usb-interface",
+    "pagina": "https://www.victronenergy.com/accessories/ve-direct-to-usb-interface",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/299_225_20200421081909.png",
+    "arquivo": "299_225_20200421081909.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        3,
+        90
+      ],
+      "sobrando": [
+        299,
+        225
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ASS030530030_VE.Direct to USB-C interface (unit).png",
+        "arquivo": "ASS030530030_VE.Direct to USB-C interface (unit).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ASS030530030_VE.Direct to USB-C interface (close-up).png",
+        "arquivo": "ASS030530030_VE.Direct to USB-C interface (close-up).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ASS030530030_VE.Direct to USB-C interface (unit conn).png",
+        "arquivo": "ASS030530030_VE.Direct to USB-C interface (unit conn).png"
+      }
+    ]
+  },
+  {
+    "sku": "2386",
+    "name": "CARREGADOR DE BATERIA SENDO CONTROLADOR DE - CARGA SOLAR MPPT SMARTSOLAR 100/50. VICTRON",
+    "estoque": 6,
+    "preco": 2437.09,
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "smartsolar-100-30-100-50",
+    "pagina": "https://www.victronenergy.com/solar-charge-controllers/smartsolar-100-30-100-50",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 100-50 (front).png",
+    "arquivo": "SmartSolar MPPT 100-50 (front).png",
+    "numeros_casados": [
+      100,
+      50
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 100-50 (conn).png",
+        "arquivo": "SmartSolar MPPT 100-50 (conn).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/products/SmartSolar MPPT 100-50 (top).png",
+        "arquivo": "SmartSolar MPPT 100-50 (top).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/vc5_mppt-100-50-status.png",
+        "arquivo": "vc5_mppt-100-50-status.png"
+      }
+    ]
+  },
+  {
+    "sku": "2656",
+    "name": "CARREGADOR DE BATERIA E CONVERSOR DC-DC - ORION-TR SMART 24/24-17A 400W ISOLADO.",
+    "estoque": 5,
+    "preco": 2536.67,
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "orion-tr-smart",
+    "pagina": "https://www.victronenergy.com/dc-dc-converters/orion-tr-smart",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Orion-Tr smart 24-24-17 (front).png",
+    "arquivo": "Orion-Tr smart 24-24-17 (front).png",
+    "numeros_casados": [
+      24,
+      17
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion-Tr Smart 24-24-12 (front).png",
+        "arquivo": "Orion-Tr Smart 24-24-12 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/products/Orion-Tr isolated_24 12.png",
+        "arquivo": "Orion-Tr isolated_24 12.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion-Tr smart 24-24-17 (top).png",
+        "arquivo": "Orion-Tr smart 24-24-17 (top).png"
+      }
+    ]
+  },
+  {
+    "sku": "2390",
+    "name": "CENTRAL DE CONTROLE CERBO GX VICTRON ENERGY. - UTILIZADO PARA MONITORAMENTO DE",
+    "estoque": 4,
+    "preco": 1995.7,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "cerbo-gx",
+    "pagina": "https://www.victronenergy.com/communication-centres/cerbo-gx",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/Cerbo GX nw.png",
+    "arquivo": "Cerbo GX nw.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Cerbo GX (front).png",
+        "arquivo": "Cerbo GX (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Cerbo GX MK2 (front).png",
+        "arquivo": "Cerbo GX MK2 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Cerbo GX (top_conn).png",
+        "arquivo": "Cerbo GX (top_conn).png"
+      }
+    ]
+  },
+  {
+    "sku": "2590",
+    "name": "CABO MUNIDO DE PECAS DE CONEXAO VE. DIRECT - PARA USB. VICTRON PARA USO EM EMBARCACOES",
+    "estoque": 3,
+    "preco": 563.13,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "ve-direct-to-usb-interface",
+    "pagina": "https://www.victronenergy.com/accessories/ve-direct-to-usb-interface",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/299_225_20200421081909.png",
+    "arquivo": "299_225_20200421081909.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [],
+      "sobrando": [
+        299,
+        225
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ASS030530030_VE.Direct to USB-C interface (unit).png",
+        "arquivo": "ASS030530030_VE.Direct to USB-C interface (unit).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ASS030530030_VE.Direct to USB-C interface (close-up).png",
+        "arquivo": "ASS030530030_VE.Direct to USB-C interface (close-up).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ASS030530030_VE.Direct to USB-C interface (unit conn).png",
+        "arquivo": "ASS030530030_VE.Direct to USB-C interface (unit conn).png"
+      }
+    ]
+  },
+  {
+    "sku": "2894",
+    "name": "CABO MUNIDO DE PECAS DE CONEXAO VE.DIRECT - 1,8M SENDO 1 LADO EM 90GRAUS. VICTRON",
+    "estoque": 3,
+    "preco": 118.34,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "ve.direct.cable",
+    "pagina": "https://www.victronenergy.com/cables/ve.direct.cable",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/357_295_20170712115218.png",
+    "arquivo": "357_295_20170712115218.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        1,
+        8,
+        90
+      ],
+      "sobrando": [
+        357,
+        295
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/VE.Direct cable 0.9m.png",
+        "arquivo": "VE.Direct cable 0.9m.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/VE.Direct-cable-0.9m_one-side-right-angle.png",
+        "arquivo": "VE.Direct-cable-0.9m_one-side-right-angle.png"
+      }
+    ]
+  },
+  {
+    "sku": "2759",
+    "name": "BARRAMENTO LYNX DISTRIBUIDOR M8 - VICTRON - ENERGY,",
+    "estoque": 2,
+    "preco": 2127.98,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "lynx-distributor",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/lynx-distributor",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/Lynx distributor.png",
+    "arquivo": "Lynx distributor.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        8
+      ],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Lynx distributor (top_open).png",
+        "arquivo": "Lynx distributor (top_open).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Lynx distributor (left_open).png",
+        "arquivo": "Lynx distributor (left_open).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Lynx distributor (front_open).png",
+        "arquivo": "Lynx distributor (front_open).png"
+      }
+    ]
+  },
+  {
+    "sku": null,
+    "name": "Inversor e Carregador MultiPlus - II 12/2000/80 - 32 - 220V - Victron Energy",
+    "estoque": 2,
+    "preco": 13495.95,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "multiplus-ii",
+    "pagina": "https://www.victronenergy.com/inverters-chargers/multiplus-ii",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/MultiPlus-II_nw.png",
+    "arquivo": "MultiPlus-II_nw.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        12,
+        2000,
+        80,
+        32,
+        230
+      ],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PMP122305010_Multiplus-II 12V 3kVA_120-32 230V (front).png",
+        "arquivo": "PMP122305010_Multiplus-II 12V 3kVA_120-32 230V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PMP122305010_Multiplus-II 12V 3kVA_120-32 230V (bottom.png",
+        "arquivo": "PMP122305010_Multiplus-II 12V 3kVA_120-32 230V (bottom.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MultiPlus-II 48V 10kVA 230V (front).png",
+        "arquivo": "MultiPlus-II 48V 10kVA 230V (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "1855",
+    "name": "APARELHO RECEPTOR E EMISSOR DE DADOS - - VE.BUS SMART DONGLE - PARA COMUNICACAO EM",
+    "estoque": 1,
+    "preco": 1563.01,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "ve-bus-smart-dongle",
+    "pagina": "https://www.victronenergy.com/accessories/ve-bus-smart-dongle",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/386_805_20180709090157.png",
+    "arquivo": "386_805_20180709090157.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [],
+      "sobrando": [
+        386,
+        805
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/VE.Bus Smart Dongle (top-with cable).png",
+        "arquivo": "VE.Bus Smart Dongle (top-with cable).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/VE.Bus Smart Dongle (top).png",
+        "arquivo": "VE.Bus Smart Dongle (top).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/VE.Bus Smart Dongle (right).png",
+        "arquivo": "VE.Bus Smart Dongle (right).png"
+      }
+    ]
+  },
+  {
+    "sku": "2814",
+    "name": "APARELHO RECEPTOR E EMISSOR DE DADOS - - VE.DIRECT BT SMART DONGLE - PARA COMUNICACAO",
+    "estoque": 1,
+    "preco": 712.79,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "ve-direct-bluetooth-smart-dongle",
+    "pagina": "https://www.victronenergy.com/accessories/ve-direct-bluetooth-smart-dongle",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/277_168_20170712113226.png",
+    "arquivo": "277_168_20170712113226.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [],
+      "sobrando": [
+        277,
+        168
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/VE. Direct Bluetooth Smart Dongle.jpg",
+        "arquivo": "VE. Direct Bluetooth Smart Dongle.jpg"
+      }
+    ]
+  },
+  {
+    "sku": "2649",
+    "name": "CABO MUNIDO DE PECAS DE CONEXAO UTP RJ45 1,8 - M - VICTRON ENERGY. MODELO: ASS030064950",
+    "estoque": 1,
+    "preco": 87.17,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "rj45-utp-cable",
+    "pagina": "https://www.victronenergy.com/cables/rj45-utp-cable",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/RJ45.png",
+    "arquivo": "RJ45.png",
+    "numeros_casados": [
+      45
+    ],
+    "numeros_conflitantes": {
+      "faltando": [
+        1,
+        8
+      ],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/RJ45 UTP Cable 3 m (top).png",
+        "arquivo": "RJ45 UTP Cable 3 m (top).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/RJ45 UTP Cable 0,9 m (top).png",
+        "arquivo": "RJ45 UTP Cable 0,9 m (top).png"
+      }
+    ]
+  },
+  {
+    "sku": "2999",
+    "name": "Barramento Lynx Distribuidor M10",
+    "estoque": 0,
+    "preco": 2884.47,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "lynx-distributor",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/lynx-distributor",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/Lynx distributor.png",
+    "arquivo": "Lynx distributor.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        10
+      ],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Lynx distributor (M10) (open-front).png",
+        "arquivo": "Lynx distributor (M10) (open-front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Lynx distributor (M10) (open-right).png",
+        "arquivo": "Lynx distributor (M10) (open-right).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Lynx distributor (M10) (open-front-caps).png",
+        "arquivo": "Lynx distributor (M10) (open-front-caps).png"
+      }
+    ]
+  },
+  {
+    "sku": "2998",
+    "name": "Barramento Lynx Power In M10",
+    "estoque": 0,
+    "preco": 2122.71,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "lynx-power-in",
+    "pagina": "https://www.victronenergy.com/dc-distribution-systems/lynx-power-in",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/lynx.png",
+    "arquivo": "lynx.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        10
+      ],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Lynx Power in (M10) (front).png",
+        "arquivo": "Lynx Power in (M10) (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Lynx Power in (M10) (left-open).png",
+        "arquivo": "Lynx Power in (M10) (left-open).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Lynx_Power_in_front_LYN020102000.jpg",
+        "arquivo": "Lynx_Power_in_front_LYN020102000.jpg"
+      }
+    ]
+  },
+  {
+    "sku": "3026",
+    "name": "Cabo ON OFF Remoto para skylla-I para configuração",
+    "estoque": 0,
+    "preco": 433.35,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "skylla-i-remote-on-off-cable",
+    "pagina": "https://www.victronenergy.com/accessories/skylla-i-remote-on-off-cable",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/314_993_20170712113950.png",
+    "arquivo": "314_993_20170712113950.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [],
+      "sobrando": [
+        314,
+        993
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Skylla-i-remote-on-off-cable_ASS030550400.jpg",
+        "arquivo": "Skylla-i-remote-on-off-cable_ASS030550400.jpg"
+      }
+    ]
+  },
+  {
+    "sku": "2972",
+    "name": "Carregador de Bateria Orion XS 1400 - 12/12-50A .. 12/24-25A .. 24/12-50A ..24/24-50A",
+    "estoque": 0,
+    "preco": 4601.3,
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "orion-xs-dc-dc-battery-chargers",
+    "pagina": "https://www.victronenergy.com/dc-dc-converters/orion-xs-dc-dc-battery-chargers",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Orion XS 12_12-50A Non-isolated DC-DC charger (front).png",
+    "arquivo": "Orion XS 12_12-50A Non-isolated DC-DC charger (front).png",
+    "numeros_casados": [
+      12,
+      50
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion XS 12-12-50A DC-DC battery charger (conn.top).png",
+        "arquivo": "Orion XS 12-12-50A DC-DC battery charger (conn.top).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion XS 12-12-50A DC-DC battery charger (conn.open).png",
+        "arquivo": "Orion XS 12-12-50A DC-DC battery charger (conn.open).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion XS 12-12-50A DC-DC battery charger (conn.right).png",
+        "arquivo": "Orion XS 12-12-50A DC-DC battery charger (conn.right).png"
+      }
+    ]
+  },
+  {
+    "sku": "2862",
+    "name": "Fusível ANL 500A/80V usado em Lynx shunt",
+    "estoque": 0,
+    "preco": 154.57,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "lynx-shunt-ve-can",
+    "pagina": "https://www.victronenergy.com/battery-monitors/lynx-shunt-ve-can",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/230_588_20180706090107.png",
+    "arquivo": "230_588_20180706090107.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        500,
+        80
+      ],
+      "sobrando": [
+        230,
+        588
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Lynx shunt VE.Can (top-open).png",
+        "arquivo": "Lynx shunt VE.Can (top-open).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Lynx shunt VE.Can (left_open).png",
+        "arquivo": "Lynx shunt VE.Can (left_open).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Lynx shunt VE.Can (front_open).png",
+        "arquivo": "Lynx shunt VE.Can (front_open).png"
+      }
+    ]
+  },
+  {
+    "sku": "2864",
+    "name": "Inversor e Carregador Multiplus - II 48/5000/70 - 95 120V",
+    "estoque": 0,
+    "preco": 13175.37,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "multiplus-ii-2x-120v",
+    "pagina": "https://www.victronenergy.com/inverters-chargers/multiplus-ii-2x-120v",
+    "conf_familia": "media",
+    "imagem": "https://www.victronenergy.com/upload/products/PMP122305100_ MultiPlus-II 12_3000_120-50_2x120V (front)nw.png",
+    "arquivo": "PMP122305100_ MultiPlus-II 12_3000_120-50_2x120V (front)nw.png",
+    "numeros_casados": [
+      120
+    ],
+    "numeros_conflitantes": {
+      "faltando": [
+        48,
+        5000,
+        70,
+        95
+      ],
+      "sobrando": [
+        12,
+        3000,
+        50,
+        2
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PMP122305100_ MultiPlus-II 12_3000_120-50_2x120V (front)nw.png",
+        "arquivo": "PMP122305100_ MultiPlus-II 12_3000_120-50_2x120V (front)nw.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PMP122305100_ MultiPlus-II 12_3000_120-50_2x120V (left)nw.png",
+        "arquivo": "PMP122305100_ MultiPlus-II 12_3000_120-50_2x120V (left)nw.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PMP122305100_ MultiPlus-II 12_3000_120-50_2x120V (bottom).png",
+        "arquivo": "PMP122305100_ MultiPlus-II 12_3000_120-50_2x120V (bottom).png"
+      }
+    ]
+  },
+  {
+    "sku": "3039",
+    "name": "Painel multicontrole para inversor Phoenix",
+    "estoque": 0,
+    "preco": 2800.62,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "phoenix-inverter-control",
+    "pagina": "https://www.victronenergy.com/display-and-panels/phoenix-inverter-control",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/Inverter Control.png",
+    "arquivo": "Inverter Control.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/REC030001210-Inverter Control-1.png",
+        "arquivo": "REC030001210-Inverter Control-1.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/REC030001210-Inverter Control-4.png",
+        "arquivo": "REC030001210-Inverter Control-4.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/REC030001210-Inverter Control-3.png",
+        "arquivo": "REC030001210-Inverter Control-3.png"
+      }
+    ]
+  },
+  {
+    "sku": "3029",
+    "name": "Painel multicontrole para Skylla-I GX (Right angle RJ45) retrátil",
+    "estoque": 0,
+    "preco": 1981.98,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "skylla-i-control-gx",
+    "pagina": "https://www.victronenergy.com/display-and-panels/skylla-i-control-gx",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/276_147_20180706111219.png",
+    "arquivo": "276_147_20180706111219.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        45
+      ],
+      "sobrando": [
+        276,
+        147
+      ]
+    },
+    "alternativas": []
+  },
+  {
+    "sku": "3040",
+    "name": "Relé Combinador de Bateria de Lítio Inteligente Cyrix LI-CT- 12/24v - 230 A - carrega através do alternador - não converte",
+    "estoque": 0,
+    "preco": 2048.14,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "cyrix-battery-combiners",
+    "pagina": "https://www.victronenergy.com/battery-isolators-and-combiners/cyrix-battery-combiners",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/157_181_20180709121436.png",
+    "arquivo": "157_181_20180709121436.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        12,
+        24,
+        230
+      ],
+      "sobrando": [
+        157,
+        181
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Cyrix-Li-ct 12-24_120A (front).png",
+        "arquivo": "Cyrix-Li-ct 12-24_120A (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CYR010230450 = Cyrix-Li-load 1224V-230A intelligent load relay _front.jpg",
+        "arquivo": "CYR010230450 = Cyrix-Li-load 1224V-230A intelligent load relay _front.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CYR010230010R-=-Cyrix-ct-1224V-230A-intelligent-battery-combiner_front.jpg",
+        "arquivo": "CYR010230010R-=-Cyrix-ct-1224V-230A-intelligent-battery-combiner_front.jpg"
+      }
+    ]
+  },
+  {
+    "sku": "2994",
+    "name": "Sistema de gerenciamento de bateria VE.BUS BMS NG",
+    "estoque": 0,
+    "preco": 2211.81,
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "ve-bus-bms-ng",
+    "pagina": "https://www.victronenergy.com/battery-management-systems/ve-bus-bms-ng",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/VE.Bus BMS NG.png",
+    "arquivo": "VE.Bus BMS NG.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/VE.Bus BMS NG (conn).png",
+        "arquivo": "VE.Bus BMS NG (conn).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/VE.Bus BMS NG (connector).png",
+        "arquivo": "VE.Bus BMS NG (connector).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/VE.Bus BMS NG (top).png",
+        "arquivo": "VE.Bus BMS NG (top).png"
+      }
+    ]
   }
 ]
