@@ -53,6 +53,16 @@ export interface Candidate {
    * (efeito do gatilho on_quote_deposit_paid). A UI avisa antes de confirmar.
    */
   convertsQuote?: boolean;
+  /**
+   * De onde saiu o valor esperado do sinal:
+   * - "condicao": da condição de pagamento acordada com o cliente — é o valor que o
+   *   orçamento mostra, e o que deve bater com o que ele pagou;
+   * - "percentual": estimativa pelo percentual padrão, usada quando o orçamento não tem
+   *   condição definida. A UI precisa deixar claro que é palpite, não combinado.
+   */
+  amountSource?: "condicao" | "percentual";
+  /** Rótulo da condição de pagamento, ex.: "50% mão de obra + 100% materiais antecipados". */
+  conditionLabel?: string | null;
 }
 
 export interface MatchReason {
@@ -75,6 +85,17 @@ export interface Suggestion {
   difference: number;
   /** Só a camada de certeza concilia sozinha — decisão do usuário em 27/07/2026. */
   autoApply: boolean;
+}
+
+/** Um depósito só que paga várias contas do mesmo cliente. */
+export interface GroupSuggestion {
+  candidates: Candidate[];
+  /** Soma das contas do grupo. */
+  total: number;
+  /** Recebido menos a soma do grupo. */
+  difference: number;
+  clientName: string | null;
+  detail: string;
 }
 
 export interface MatchOptions {

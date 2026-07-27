@@ -16,7 +16,7 @@ import { OPERATIONAL_EXPENSE_CATEGORIES } from '@/lib/expense-categories';
 import { parseFile, decodeStatementFile, type BankTransaction } from '@/lib/bank-parser';
 import {
   useReconcileSuggestions, useAutoReconcile, useApplySuggestion,
-  CANDIDATE_LABELS, type ReconcileSuggestion,
+  CANDIDATE_LABELS, type ReconcileSuggestion, type ReconcileGroup,
 } from '@/hooks/use-reconciliation';
 import { toast } from 'sonner';
 import { Upload, Check, X, Undo2, Sparkles, AlertTriangle } from 'lucide-react';
@@ -51,6 +51,9 @@ export function BankReconciliation() {
   const applySuggestion = useApplySuggestion();
   const suggestionsByTx = new Map<string, ReconcileSuggestion[]>(
     (engine?.transactions || []).map(t => [t.transaction.id, t.suggestions]),
+  );
+  const groupsByTx = new Map<string, ReconcileGroup[]>(
+    (engine?.transactions || []).map(t => [t.transaction.id, t.groups || []]),
   );
 
   const [tab, setTab] = useState<TabType>('pending');
@@ -301,13 +304,7 @@ export function BankReconciliation() {
 
   const handleApplySuggestion = async (tx: any, s: ReconcileSuggestion) => {
     try {
-      await applySuggestion.mutateAsync({
-        transactionId: tx.id,
-        amount: Number(tx.amount),
-        date: tx.transaction_date,
-        description: tx.description,
-        candidate: s.candidate,
-      });
+      await applySuggestion.mutateAsync({ transactionId: tx.id, candidate: s.candidate });
       toast.success(
         s.candidate.convertsQuote
           ? `Sinal registrado — ${s.candidate.documentNumber} aprovado e convertido em OS`
@@ -502,6 +499,20 @@ export function BankReconciliation() {
                                   {s.candidate.clientName && (
                                     <p className="text-sm text-muted-foreground">{s.candidate.clientName}</p>
                                   )}
+                                  {/* De onde veio o valor esperado: o combinado no orçamento
+                                      ou uma estimativa. Sem isso, uma estimativa de 30% parece
+                                      tão firme quanto uma condição acordada com o cliente. */}
+                                  {s.candidate.amountSource === 'condicao' && (
+                                    <p className="text-xs text-muted-foreground">
+                                      Conforme a condição do orçamento
+                                      {s.candidate.conditionLabel ? `: ${s.candidate.conditionLabel}` : ''}
+                                    </p>
+                                  )}
+                                  {s.candidate.amountSource === 'percentual' && (
+                                    <p className="text-xs text-warning">
+                                      Valor estimado — este orçamento não tem condição de pagamento definida
+                                    </p>
+                                  )}
                                   <p className="text-xs text-muted-foreground mt-1">
                                     {s.reasons.map(r => r.detail).join(' · ')}
                                   </p>
@@ -539,6 +550,33 @@ export function BankReconciliation() {
                         </div>
                       );
                     })()}
+
+                    {/* Pagamento agrupado: o cliente quitou várias contas num depósito só.
+                        Aparece apenas quando nenhuma conta sozinha explica o valor. */}
+                    {(groupsByTx.get(tx.id) || []).length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-sm font-medium">Pode ser um pagamento agrupado</p>
+                        {(groupsByTx.get(tx.id) || []).map((g, i) => (
+                          <div key={i} className="rounded-lg border p-3 text-sm space-y-1">
+                            <div className="flex items-center justify-between gap-3 flex-wrap">
+                              <span className="font-medium">
+                                {g.candidates.length} contas de {g.clientName || 'um mesmo cliente'}
+                              </span>
+                              <span className="font-medium">{formatCurrency(g.total)}</span>
+                            </div>
+                            <ul className="text-xs text-muted-foreground space-y-0.5">
+                              {g.candidates.map(c => (
+                                <li key={`${c.kind}-${c.id}`}>• {c.label} — {formatCurrency(c.amount)}</li>
+                              ))}
+                            </ul>
+                            <p className="text-xs text-muted-foreground">
+                              Confirme uma conta de cada vez pelas opções abaixo — assim cada baixa
+                              fica registrada com o valor certo.
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
 
                     <div className="flex flex-wrap gap-1.5">
                       {modeButtons.map(({ mode, label }) => (

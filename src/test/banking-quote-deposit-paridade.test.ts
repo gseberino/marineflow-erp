@@ -111,3 +111,43 @@ describe("sinal esperado (usado pela conciliação)", () => {
     expect(expectedDepositAmount({ grand_total: 0 }, null, 30)).toBeNull();
   });
 });
+
+describe("orçamentos reais com condição de pagamento (regressão)", () => {
+  // A primeira versão da conciliação lia só `custom_payment_installments` e ignorava a
+  // condição PRÉ-CADASTRADA, caindo no percentual padrão. O valor sugerido saía muito
+  // longe do que o cliente combinou: no ORÇ-00069 dava R$ 2.702,70 em vez de R$ 5.692,25,
+  // e na OS-00060 dava R$ 6.000 em vez de R$ 18.001,04. Estes casos travam a regressão.
+  const condicao5050 = [
+    { tipo: "aprovacao" as const, label: "Sinal", services_pct: 50, parts_pct: 100, expenses_pct: 100, days_after_approval: 0 },
+    { tipo: "entrega" as const, label: "Saldo", services_pct: 50, parts_pct: 0, expenses_pct: 0, days_after_approval: 0 },
+  ];
+
+  it("ORÇ-00069: sinal é o da condição, não 30% do total", () => {
+    const r = expectedDepositAmount(
+      { labor_cost_total: 5600, parts_cost_total: 2005.40, tax_amount: 1403.59, grand_total: 9008.99 },
+      condicao5050,
+      30,
+    );
+    expect(r?.source).toBe("condicao");
+    expect(r?.amount).toBeCloseTo(5692.25, 1);
+  });
+
+  it("OS-00060: bate com o valor que o orçamento mostra ao cliente", () => {
+    const r = expectedDepositAmount(
+      { labor_cost_total: 4110, parts_cost_total: 16450.67, discount_amount: 560.67, grand_total: 20000 },
+      condicao5050,
+      30,
+    );
+    expect(r?.source).toBe("condicao");
+    expect(r?.amount).toBeCloseTo(18001.04, 1);
+  });
+
+  it("orçamento sem condição segue estimando pelo percentual, e diz que é estimativa", () => {
+    const r = expectedDepositAmount(
+      { labor_cost_total: 1685, parts_cost_total: 3636.36, grand_total: 5321.36 },
+      null,
+      30,
+    );
+    expect(r).toEqual({ amount: 1596.41, source: "percentual" });
+  });
+});

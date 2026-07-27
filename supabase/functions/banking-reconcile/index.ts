@@ -13,7 +13,9 @@
 // usuário, validado aqui) e o cron da varredura diária (manda só x-cron-secret).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { suggestMatches, pickAutoApply } from "../_shared/banking/matching.ts";
+import {
+  suggestMatches, pickAutoApply, suggestCombinations, statementSignature,
+} from "../_shared/banking/matching.ts";
 import { expectedDepositAmount } from "../_shared/banking/quote-deposit.ts";
 import type { BankTx, Candidate, Suggestion } from "../_shared/banking/types.ts";
 
@@ -36,11 +38,13 @@ const ABERTOS = ["pending", "partially_paid", "overdue", "scheduled"];
 const OS_ATIVAS = ["open", "scheduled", "in_progress", "awaiting_parts", "completed", "invoiced", "approved"];
 
 interface ReconcileBody {
-  action?: "suggest" | "auto";
+  action?: "suggest" | "auto" | "apply";
   transaction_id?: string;
   /** Só simula: devolve o que faria, sem gravar. */
   dry_run?: boolean;
   limit?: number;
+  /** Para `apply`: o candidato escolhido na tela, do jeito que esta função o devolveu. */
+  candidate?: Candidate;
 }
 
 Deno.serve(async (req) => {
@@ -68,6 +72,31 @@ Deno.serve(async (req) => {
   const action = body.action ?? "suggest";
 
   try {
+    // ── Aplicar uma escolha da tela ──────────────────────────────────────────
+    // Passa por aqui (e não direto do frontend) para que exista um único caminho de
+    // escrita no financeiro, e para que toda confirmação vire aprendizado.
+    if (action === "apply") {
+      if (!body.transaction_id || !body.candidate) {
+        return jr({ error: "transaction_id e candidate são obrigatórios" }, 400);
+      }
+      const { data: txRow, error: txOneErr } = await admin
+        .from("bank_transactions")
+        .select("id, transaction_date, description, amount, transaction_type, counterparty_name, reconciled")
+        .eq("id", body.transaction_id)
+        .single();
+      if (txOneErr) throw txOneErr;
+      if (!txRow) return jr({ error: "transação não encontrada" }, 404);
+      if ((txRow as any).reconciled) return jr({ error: "esta transação já foi conciliada" }, 409);
+
+      const alvo = body.candidate;
+      const resultado = await applySuggestion(admin, txRow as BankTx, {
+        candidate: alvo,
+        score: 0, tier: "probable", reasons: [], difference: 0, autoApply: false,
+      });
+      if (!resultado.ok) return jr({ error: resultado.message }, 400);
+      return jr({ ok: true, message: resultado.message });
+    }
+
     // ── Transações pendentes ─────────────────────────────────────────────────
     let txQuery = admin
       .from("bank_transactions")
@@ -86,11 +115,39 @@ Deno.serve(async (req) => {
 
     const candidates = await buildCandidates(admin);
 
+    // ── Memória: o que histórico parecido já ensinou sobre quem paga ─────────
+    const assinaturas = new Map<string, string>();
+    for (const tx of transactions) {
+      const sig = statementSignature(tx.description, tx.counterparty_name);
+      if (sig) assinaturas.set(tx.id, sig);
+    }
+    const memoriaPorTx = new Map<string, Map<string, number>>();
+    if (assinaturas.size > 0) {
+      const { data: memoria } = await admin
+        .from("reconciliation_memory")
+        .select("statement_key, client_id, hits")
+        .in("statement_key", Array.from(new Set(assinaturas.values())));
+      const porChave = new Map<string, Map<string, number>>();
+      for (const m of (memoria || []) as any[]) {
+        const mapa = porChave.get(m.statement_key) ?? new Map<string, number>();
+        mapa.set(m.client_id, Number(m.hits) || 1);
+        porChave.set(m.statement_key, mapa);
+      }
+      for (const [txId, sig] of assinaturas) {
+        const mapa = porChave.get(sig);
+        if (mapa) memoriaPorTx.set(txId, mapa);
+      }
+    }
+
     // ── Pontuação ────────────────────────────────────────────────────────────
-    const perTransaction: Array<{ transaction: BankTx; suggestions: Suggestion[] }> = transactions.map((tx) => ({
-      transaction: tx,
-      suggestions: suggestMatches(tx, candidates),
-    }));
+    const perTransaction = transactions.map((tx) => {
+      const suggestions = suggestMatches(tx, candidates, {}, 5, memoriaPorTx.get(tx.id));
+      // Pagamento agrupado só interessa quando nenhuma conta sozinha explica o valor.
+      const grupos = suggestions.some((s) => Math.abs(s.difference) < 0.01)
+        ? []
+        : suggestCombinations(tx, candidates);
+      return { transaction: tx, suggestions, groups: grupos };
+    });
 
     // ── Camada de certeza: aplica sozinha ────────────────────────────────────
     const applied: Array<{ transaction_id: string; candidate: Candidate; message: string }> = [];
@@ -117,6 +174,7 @@ Deno.serve(async (req) => {
       transactions: restantes.map((p) => ({
         transaction: p.transaction,
         suggestions: p.suggestions,
+        groups: p.groups,
       })),
       applied,
       summary: {
@@ -224,10 +282,21 @@ async function buildCandidates(admin: ReturnType<typeof createClient>): Promise<
     .select(`id, service_order_number, quote_status, status, grand_total, created_at,
              labor_cost_total, parts_cost_total, operational_cost_total, travel_cost_total,
              subcontract_cost_total, is_travel_billable, discount_amount, tax_amount,
-             custom_payment_installments, client_id, clients(name, cpf_cnpj)`)
+             custom_payment_installments, payment_condition_preset_id, payment_conditions,
+             client_id, clients(name, cpf_cnpj),
+             payment_condition_presets(label, installments)`)
     .in("quote_status", ["awaiting_deposit", "sent"])
     .not("status", "in", '("cancelled")')
     .limit(200);
+
+  // Condições pré-cadastradas: alguns orçamentos guardam só o rótulo em
+  // `payment_conditions`, sem o id do preset — o mesmo fallback que a tela de orçamento faz.
+  const { data: presets } = await admin
+    .from("payment_condition_presets")
+    .select("id, label, installments");
+  const presetPorLabel = new Map<string, any>(
+    (presets || []).map((p: any) => [String(p.label), p]),
+  );
 
   for (const q of quotes || []) {
     // Se o sinal já foi pago, o orçamento não está mais esperando dinheiro.
@@ -239,19 +308,27 @@ async function buildCandidates(admin: ReturnType<typeof createClient>): Promise<
       .eq("status", "paid");
     if ((count ?? 0) > 0) continue;
 
-    const esperado = expectedDepositAmount(
-      q as never,
-      (q as any).custom_payment_installments,
-      globalPct,
-    );
+    // Precedência idêntica à do orçamento e do botão "Receber sinal": a condição
+    // pré-cadastrada manda; sem ela, a condição avulsa do orçamento; sem nenhuma, o
+    // percentual padrão — que é estimativa, não combinado, e a UI diz isso.
+    const preset = (q as any).payment_condition_presets
+      ?? presetPorLabel.get(String((q as any).payment_conditions ?? ""));
+    const installments = Array.isArray(preset?.installments)
+      ? preset.installments
+      : (Array.isArray((q as any).custom_payment_installments) ? (q as any).custom_payment_installments : null);
+
+    const esperado = expectedDepositAmount(q as never, installments, globalPct);
     if (!esperado) continue;
 
     const cliente = (q as any).clients;
+    const rotuloCondicao = esperado.source === "condicao" ? (preset?.label ?? "condição do orçamento") : null;
     candidates.push({
       kind: "quote_deposit",
       id: q.id as string,
       label: `Sinal do ${q.service_order_number}`,
       amount: esperado.amount,
+      amountSource: esperado.source,
+      conditionLabel: rotuloCondicao,
       direction: "credit",
       dueDate: null,
       referenceDate: String(q.created_at).slice(0, 10),
@@ -331,6 +408,7 @@ async function applySuggestion(
       if (error) throw error;
       const paymentId = (data as any)?.payment_id ?? null;
       await marcarConciliada(admin, tx.id, paymentId, candidate.serviceOrderId ?? null);
+      await aprender(admin, tx, candidate);
       return { ok: true, message: `Baixa registrada em ${candidate.label}` };
     }
 
@@ -348,11 +426,51 @@ async function applySuggestion(
       if (error) throw error;
       const paymentId = (data as any)?.payment_id ?? null;
       await marcarConciliada(admin, tx.id, paymentId, candidate.serviceOrderId ?? null);
+      await aprender(admin, tx, candidate);
       return { ok: true, message: `Sinal registrado e ${candidate.documentNumber} aprovado` };
     }
 
-    // collection avulsa e saldo de OS exigem decisão de classificação — ficam como sugestão.
-    return { ok: false, message: "tipo requer confirmação humana" };
+    // Saldo de OS ainda não lançado: cria a conta a receber já quitada, para que o
+    // recebimento apareça no financeiro ligado à ordem certa. Só acontece por escolha
+    // explícita na tela — nunca na camada automática, que não trata este tipo.
+    if (candidate.kind === "service_order_balance" && candidate.serviceOrderId) {
+      const { data: rec, error: recErr } = await admin
+        .from("receivables")
+        .insert({
+          service_order_id: candidate.serviceOrderId,
+          client_id: candidate.clientId,
+          description: `Recebimento conciliado — ${candidate.documentNumber ?? "OS"}`,
+          issue_date: hoje,
+          due_date: hoje,
+          amount: tx.amount,
+          paid_amount: tx.amount,
+          balance_amount: 0,
+          status: "paid",
+        })
+        .select("id")
+        .single();
+      if (recErr) throw recErr;
+
+      const { data: pay, error: payErr } = await admin
+        .from("payments")
+        .insert({
+          receivable_id: (rec as any).id,
+          payment_date: hoje,
+          amount: tx.amount,
+          payment_method: "bank_transfer",
+          notes: `Conciliação — ${tx.description}`.slice(0, 500),
+        })
+        .select("id")
+        .single();
+      if (payErr) throw payErr;
+
+      await marcarConciliada(admin, tx.id, (pay as any).id, candidate.serviceOrderId);
+      await aprender(admin, tx, candidate);
+      return { ok: true, message: `Recebimento lançado em ${candidate.label}` };
+    }
+
+    // Cobrança avulsa exige decidir a classificação contábil — fica para as opções manuais.
+    return { ok: false, message: "Este tipo precisa ser conciliado pelas opções abaixo." };
   } catch (e) {
     console.error("[banking-reconcile] falha ao aplicar:", candidate.kind, candidate.id, e);
     return { ok: false, message: String((e as Error)?.message ?? e) };
@@ -373,4 +491,28 @@ async function marcarConciliada(
       reconciled_service_order_id: serviceOrderId,
     })
     .eq("id", txId);
+}
+
+/**
+ * Guarda o que esta conciliação ensinou: este histórico bancário pertence a este cliente.
+ * Falha aqui não pode derrubar a conciliação — o dinheiro já foi registrado, e não
+ * aprender é bem menos grave do que quebrar a operação.
+ */
+async function aprender(
+  admin: ReturnType<typeof createClient>,
+  tx: BankTx,
+  candidate: Candidate,
+) {
+  try {
+    if (!candidate.clientId) return;
+    const chave = statementSignature(tx.description, tx.counterparty_name);
+    if (!chave) return;
+    await admin.rpc("remember_reconciliation", {
+      p_statement_key: chave,
+      p_client_id: candidate.clientId,
+      p_candidate_kind: candidate.kind,
+    });
+  } catch (e) {
+    console.warn("[banking-reconcile] não consegui registrar o aprendizado:", e);
+  }
 }

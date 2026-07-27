@@ -17,6 +17,7 @@
 import {
   type BankTx,
   type Candidate,
+  type GroupSuggestion,
   type MatchOptions,
   type MatchReason,
   type MatchTier,
@@ -30,6 +31,7 @@ const W_DOCUMENT = 25; // CNPJ/CPF do pagador batendo com o cadastro
 const W_NAME = 15;     // nome do cliente aparecendo no histórico
 const W_DATE = 15;     // proximidade do vencimento
 const BONUS_DOCNUM = 12; // número do orçamento/OS citado no histórico do extrato
+const BONUS_MEMORIA = 18; // teto do reforço por conciliações anteriores com o mesmo cliente
 
 /** Sufixos societários e ruído que atrapalham a comparação de nomes. */
 const NAME_NOISE = new Set([
@@ -83,6 +85,21 @@ export function nameOverlap(clientName: string | null | undefined, statementText
   return hits.length / nameTokens.length;
 }
 
+/**
+ * Assinatura do histórico bancário: tokens identificadores, sem ruído, em ordem
+ * alfabética. É a chave da memória de conciliação — "PIX RECEBIDO MARINA SOL" e
+ * "TED MARINA SOL LTDA" produzem a mesma assinatura, então o que foi aprendido numa
+ * transferência serve para a próxima, mesmo que o banco escreva diferente.
+ * Devolve string vazia quando o histórico não tem nada identificável (só "PIX RECEBIDO"),
+ * caso em que não há o que aprender.
+ */
+export function statementSignature(description: string, counterpartyName?: string | null): string {
+  const tokens = significantTokens(`${description} ${counterpartyName || ""}`, STATEMENT_NOISE)
+    .filter((t) => !/^\d+$/.test(t)); // números soltos (valor, documento) não identificam
+  if (tokens.length === 0) return "";
+  return Array.from(new Set(tokens)).sort().join(" ").slice(0, 200);
+}
+
 /** Tolerância efetiva: a menor entre o percentual e o teto absoluto. */
 export function effectiveTolerance(expected: number, opts: MatchOptions): number {
   const pct = Math.abs(expected) * (opts.amountTolerancePct / 100);
@@ -112,6 +129,8 @@ export function scoreCandidate(
   tx: BankTx,
   candidate: Candidate,
   options: Partial<MatchOptions> = {},
+  /** Clientes que este histórico já apontou antes, e quantas vezes. Ver reconciliation_memory. */
+  memory?: Map<string, number>,
 ): Suggestion | null {
   const opts = { ...DEFAULT_MATCH_OPTIONS, ...options };
 
@@ -244,6 +263,23 @@ export function scoreCandidate(
     });
   }
 
+  // Aprendizado: este histórico já foi conciliado com este cliente antes. Cresce com as
+  // confirmações, mas com teto — memória reforça um candidato, não decide sozinha.
+  if (memory && candidate.clientId) {
+    const hits = memory.get(candidate.clientId) ?? 0;
+    if (hits > 0) {
+      const pts = Math.min(BONUS_MEMORIA, 6 + hits * 3);
+      score += pts;
+      reasons.push({
+        signal: "memoria",
+        detail: hits === 1
+          ? "Histórico parecido já foi conciliado com este cliente"
+          : `Histórico parecido já foi conciliado com este cliente ${hits} vezes`,
+        points: pts,
+      });
+    }
+  }
+
   score = Math.min(100, score);
   if (score < opts.minScore) return null;
 
@@ -335,14 +371,83 @@ export function suggestMatches(
   candidates: Candidate[],
   options: Partial<MatchOptions> = {},
   limit = 5,
+  memory?: Map<string, number>,
 ): Suggestion[] {
   const scored: Suggestion[] = [];
   for (const candidate of candidates) {
-    const suggestion = scoreCandidate(tx, candidate, options);
+    const suggestion = scoreCandidate(tx, candidate, options, memory);
     if (suggestion) scored.push(suggestion);
   }
   scored.sort((a, b) => b.score - a.score || Math.abs(a.difference) - Math.abs(b.difference));
   return scored.slice(0, limit);
+}
+
+/**
+ * Um depósito pagando várias contas do mesmo cliente.
+ *
+ * É o problema da soma de subconjuntos, que é exponencial no caso geral — mas o caso real
+ * é pequeno e bem-comportado: contas de um mesmo cliente, poucas em aberto, e só interessa
+ * combinação de 2 ou 3 (acima disso a chance de coincidência acidental cresce mais rápido
+ * que a utilidade). Por isso a busca é limitada por cliente e por tamanho, em vez de um
+ * algoritmo genérico.
+ */
+export function suggestCombinations(
+  tx: BankTx,
+  candidates: Candidate[],
+  options: Partial<MatchOptions> = {},
+  maxPorCliente = 8,
+): GroupSuggestion[] {
+  const opts = { ...DEFAULT_MATCH_OPTIONS, ...options };
+  const tolerance = effectiveTolerance(tx.amount, opts);
+
+  // Agrupa por cliente: só faz sentido somar contas do mesmo pagador.
+  const porCliente = new Map<string, Candidate[]>();
+  for (const c of candidates) {
+    if (c.direction !== tx.transaction_type || !c.clientId) continue;
+    if (c.amount <= 0 || c.amount >= tx.amount) continue; // parcela maior que o todo não compõe
+    const lista = porCliente.get(c.clientId) ?? [];
+    lista.push(c);
+    porCliente.set(c.clientId, lista);
+  }
+
+  const grupos: GroupSuggestion[] = [];
+
+  for (const [, lista] of porCliente) {
+    // As maiores primeiro: combinações relevantes aparecem cedo e o corte não as perde.
+    const itens = lista.slice().sort((a, b) => b.amount - a.amount).slice(0, maxPorCliente);
+
+    for (let i = 0; i < itens.length; i++) {
+      for (let j = i + 1; j < itens.length; j++) {
+        const soma2 = itens[i].amount + itens[j].amount;
+        if (Math.abs(soma2 - tx.amount) <= tolerance) {
+          grupos.push(montarGrupo(tx, [itens[i], itens[j]], soma2));
+          continue;
+        }
+        // Só tenta trio se a dupla ainda está abaixo do valor recebido.
+        if (soma2 >= tx.amount) continue;
+        for (let k = j + 1; k < itens.length; k++) {
+          const soma3 = soma2 + itens[k].amount;
+          if (Math.abs(soma3 - tx.amount) <= tolerance) {
+            grupos.push(montarGrupo(tx, [itens[i], itens[j], itens[k]], soma3));
+          }
+        }
+      }
+    }
+  }
+
+  grupos.sort((a, b) => Math.abs(a.difference) - Math.abs(b.difference) || a.candidates.length - b.candidates.length);
+  return grupos.slice(0, 3);
+}
+
+function montarGrupo(tx: BankTx, itens: Candidate[], soma: number): GroupSuggestion {
+  const nomes = itens.map((c) => c.label).join(" + ");
+  return {
+    candidates: itens,
+    total: Number(soma.toFixed(2)),
+    difference: Number((tx.amount - soma).toFixed(2)),
+    clientName: itens[0].clientName ?? null,
+    detail: `${itens.length} contas de ${itens[0].clientName || "um mesmo cliente"} somam este valor: ${nomes}`,
+  };
 }
 
 /**

@@ -19,6 +19,9 @@ export interface ReconcileCandidate {
   documentNumber?: string | null;
   serviceOrderId?: string | null;
   convertsQuote?: boolean;
+  /** "condicao" = valor combinado no orçamento; "percentual" = estimativa pelo padrão. */
+  amountSource?: 'condicao' | 'percentual';
+  conditionLabel?: string | null;
 }
 
 export interface ReconcileSuggestion {
@@ -30,8 +33,21 @@ export interface ReconcileSuggestion {
   autoApply: boolean;
 }
 
+/** Um depósito só que paga várias contas do mesmo cliente. */
+export interface ReconcileGroup {
+  candidates: ReconcileCandidate[];
+  total: number;
+  difference: number;
+  clientName: string | null;
+  detail: string;
+}
+
 export interface ReconcileResponse {
-  transactions: { transaction: { id: string }; suggestions: ReconcileSuggestion[] }[];
+  transactions: {
+    transaction: { id: string };
+    suggestions: ReconcileSuggestion[];
+    groups?: ReconcileGroup[];
+  }[];
   applied: { transaction_id: string; candidate: ReconcileCandidate; message: string }[];
   summary: {
     pendentes: number; conciliadas: number; sugeridas: number;
@@ -80,60 +96,22 @@ export function useAutoReconcile() {
 /**
  * Aplica uma sugestão escolhida na tela.
  *
- * Sinal de orçamento passa pela mesma rotina do botão "Receber sinal", para que o
- * gatilho que aprova o orçamento dispare igual; os demais tipos passam pela rotina
- * atômica de baixa. O objetivo é não criar um segundo caminho de escrita no financeiro.
+ * Passa pela edge function em vez de escrever daqui para que exista um único caminho de
+ * escrita no financeiro — o mesmo que a conciliação automática e o agente usam — e para
+ * que toda confirmação alimente a memória de conciliação. Sinal de orçamento continua
+ * passando pela rotina do botão "Receber sinal", então o gatilho que aprova o orçamento
+ * dispara igual.
  */
 export function useApplySuggestion() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: {
-      transactionId: string;
-      amount: number;
-      date: string;
-      description: string;
-      candidate: ReconcileCandidate;
-    }) => {
-      const { candidate } = input;
-      let paymentId: string | null = null;
-
-      if (candidate.kind === 'receivable' || candidate.kind === 'payable') {
-        const { data, error } = await supabase.rpc('register_payment_and_update_balance', {
-          p_receivable_id: candidate.kind === 'receivable' ? candidate.id : null,
-          p_payable_id: candidate.kind === 'payable' ? candidate.id : null,
-          p_amount: input.amount,
-          p_payment_date: input.date,
-          p_payment_method: 'bank_transfer',
-          p_installments: 1,
-          p_card_fee_percent: 0,
-          p_net_amount: input.amount,
-          p_notes: `Conciliação — ${input.description}`.slice(0, 500),
-        });
-        if (error) throw error;
-        paymentId = (data as any)?.payment_id ?? null;
-      } else if (candidate.kind === 'quote_deposit') {
-        const { data, error } = await supabase.rpc('register_deposit_and_convert', {
-          p_service_order_id: candidate.serviceOrderId!,
-          p_amount: input.amount,
-          p_payment_date: input.date,
-          p_payment_method: 'bank_transfer',
-          p_card_fee_percent: 0,
-          p_notes: `Conciliação — ${input.description}`.slice(0, 500),
-        });
-        if (error) throw error;
-        paymentId = (data as any)?.payment_id ?? null;
-      } else {
-        throw new Error('Este tipo precisa ser conciliado pelas opções abaixo.');
-      }
-
-      const { error: txErr } = await supabase.from('bank_transactions').update({
-        reconciled: true,
-        reconciled_payment_id: paymentId,
-        reconciled_service_order_id: candidate.serviceOrderId ?? null,
-      }).eq('id', input.transactionId);
-      if (txErr) throw txErr;
-
-      return { paymentId };
+    mutationFn: async (input: { transactionId: string; candidate: ReconcileCandidate }) => {
+      const { data, error } = await supabase.functions.invoke('banking-reconcile', {
+        body: { action: 'apply', transaction_id: input.transactionId, candidate: input.candidate },
+      });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      return data as { ok: boolean; message: string };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['bank-transactions'] });

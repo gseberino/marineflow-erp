@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   scoreCandidate,
   suggestMatches,
+  suggestCombinations,
+  statementSignature,
   pickAutoApply,
   effectiveTolerance,
   nameOverlap,
@@ -215,6 +217,73 @@ describe("cenário real do sistema (orçamentos em produção em 27/07/2026)", (
     const out = suggestMatches(tx({ amount: 1692.0, transaction_date: "2026-07-27" }), orcamentos);
     expect(out[0].candidate.documentNumber).toBe("ORÇ-00061");
     expect(out[0].score).toBeGreaterThan(out[1]?.score ?? 0);
+  });
+});
+
+describe("memória de conciliação", () => {
+  it("gera a mesma assinatura para históricos que variam só no ruído bancário", () => {
+    const a = statementSignature('PIX RECEBIDO MARINA DO SOL LTDA', null);
+    const b = statementSignature('TED MARINA SOL', 'LTDA');
+    expect(a).toBe(b);
+  });
+
+  it("não gera assinatura quando o histórico não identifica ninguém", () => {
+    expect(statementSignature('PIX RECEBIDO', null)).toBe('');
+    expect(statementSignature('TED 12345', null)).toBe('');
+  });
+
+  it("reforça o candidato do cliente já conciliado com histórico parecido", () => {
+    const t = tx({ amount: 5000, description: 'PIX RECEBIDO ACME' });
+    const c = cand({ amount: 5000, clientId: 'cli-1', clientName: 'Outro Nome Qualquer' });
+    const semMemoria = scoreCandidate(t, c)!;
+    const comMemoria = scoreCandidate(t, c, {}, new Map([['cli-1', 3]]))!;
+    expect(comMemoria.score).toBeGreaterThan(semMemoria.score);
+    expect(comMemoria.reasons.some(r => r.signal === 'memoria')).toBe(true);
+  });
+
+  it("memória não decide sozinha: candidato de valor absurdo continua fora", () => {
+    const t = tx({ amount: 5000 });
+    const c = cand({ amount: 100, clientId: 'cli-1' });
+    expect(scoreCandidate(t, c, {}, new Map([['cli-1', 10]]))).toBeNull();
+  });
+});
+
+describe("pagamento agrupado (um depósito, várias contas)", () => {
+  const doisTitulos: Candidate[] = [
+    cand({ id: 'r1', amount: 1200, clientId: 'cli-1', clientName: 'Marina do Sol', label: 'Parcela 1' }),
+    cand({ id: 'r2', amount: 800, clientId: 'cli-1', clientName: 'Marina do Sol', label: 'Parcela 2' }),
+    cand({ id: 'r3', amount: 500, clientId: 'cli-2', clientName: 'Outro Cliente', label: 'Avulsa' }),
+  ];
+
+  it("encontra a dupla que soma o valor recebido", () => {
+    const grupos = suggestCombinations(tx({ amount: 2000 }), doisTitulos);
+    expect(grupos).toHaveLength(1);
+    expect(grupos[0].candidates.map(c => c.id).sort()).toEqual(['r1', 'r2']);
+    expect(grupos[0].difference).toBe(0);
+  });
+
+  it("não mistura contas de clientes diferentes", () => {
+    // 1200 + 500 = 1700, mas são clientes diferentes: não pode ser sugerido.
+    expect(suggestCombinations(tx({ amount: 1700 }), doisTitulos)).toHaveLength(0);
+  });
+
+  it("encontra trio quando a dupla não fecha", () => {
+    const tres: Candidate[] = [
+      cand({ id: 'a', amount: 300, clientId: 'c1', clientName: 'Cliente' }),
+      cand({ id: 'b', amount: 400, clientId: 'c1', clientName: 'Cliente' }),
+      cand({ id: 'c', amount: 500, clientId: 'c1', clientName: 'Cliente' }),
+    ];
+    const grupos = suggestCombinations(tx({ amount: 1200 }), tres);
+    expect(grupos[0].candidates).toHaveLength(3);
+  });
+
+  it("ignora contas maiores que o próprio depósito", () => {
+    const grupos = suggestCombinations(tx({ amount: 1000 }), [
+      cand({ id: 'grande', amount: 5000, clientId: 'c1' }),
+      cand({ id: 'p1', amount: 600, clientId: 'c1' }),
+      cand({ id: 'p2', amount: 400, clientId: 'c1' }),
+    ]);
+    expect(grupos[0].candidates.map(c => c.id).sort()).toEqual(['p1', 'p2']);
   });
 });
 
