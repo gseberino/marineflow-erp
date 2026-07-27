@@ -1621,43 +1621,61 @@ export type Database = {
       bank_transactions: {
         Row: {
           amount: number
+          balance_after: number | null
           bank_ref_id: string | null
+          counterparty_document: string | null
+          counterparty_name: string | null
           created_at: string | null
           description: string
+          dismissed_reason: string | null
           id: string
           import_batch_id: string | null
+          pix_end_to_end_id: string | null
+          provider: string
           reconciled: boolean | null
           reconciled_payment_id: string | null
           reconciled_service_order_id: string | null
-          source_type: string | null
+          source_type: string
           transaction_date: string
           transaction_type: string
         }
         Insert: {
           amount: number
+          balance_after?: number | null
           bank_ref_id?: string | null
+          counterparty_document?: string | null
+          counterparty_name?: string | null
           created_at?: string | null
           description: string
+          dismissed_reason?: string | null
           id?: string
           import_batch_id?: string | null
+          pix_end_to_end_id?: string | null
+          provider?: string
           reconciled?: boolean | null
           reconciled_payment_id?: string | null
           reconciled_service_order_id?: string | null
-          source_type?: string | null
+          source_type?: string
           transaction_date: string
           transaction_type: string
         }
         Update: {
           amount?: number
+          balance_after?: number | null
           bank_ref_id?: string | null
+          counterparty_document?: string | null
+          counterparty_name?: string | null
           created_at?: string | null
           description?: string
+          dismissed_reason?: string | null
           id?: string
           import_batch_id?: string | null
+          pix_end_to_end_id?: string | null
+          provider?: string
           reconciled?: boolean | null
           reconciled_payment_id?: string | null
           reconciled_service_order_id?: string | null
-          source_type?: string | null
+          source_type?: string
           transaction_date?: string
           transaction_type?: string
         }

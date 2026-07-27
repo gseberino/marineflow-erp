@@ -252,15 +252,59 @@ export function useUnignoreBankTransaction() {
   });
 }
 
+export type ImportResult = { imported: number; skipped: number };
+
+/**
+ * Importa transações de extrato ignorando as que já entraram antes.
+ *
+ * O identificador do banco (FITID no OFX) é único e estável por conta, então serve
+ * de chave de deduplicação: sem isso, reimportar um período sobreposto — que é o
+ * uso normal, já que ninguém acerta o corte exato do extrato — duplicaria todo o
+ * histórico e inflaria o financeiro. Transações sem identificador (CSV que não traz
+ * um) não têm como ser comparadas e entram sempre.
+ */
 export function useImportBankTransactions() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (args: { transactions: BankTransaction[]; source_type?: 'bank' | 'credit_card' }) => {
+    mutationFn: async (args: { transactions: BankTransaction[]; source_type?: 'bank' | 'credit_card' }): Promise<ImportResult> => {
+      const source_type = args.source_type || 'bank';
+      const refs = args.transactions.map(t => t.bank_ref_id).filter((r): r is string => !!r);
+
+      const existing = new Set<string>();
+      // Fatiado porque a consulta vai na URL: um extrato anual passaria do limite.
+      for (let i = 0; i < refs.length; i += 200) {
+        const chunk = refs.slice(i, i + 200);
+        const { data, error } = await supabase
+          .from('bank_transactions')
+          .select('bank_ref_id')
+          .eq('source_type', source_type)
+          .in('bank_ref_id', chunk);
+        if (error) throw error;
+        for (const row of data || []) if (row.bank_ref_id) existing.add(row.bank_ref_id);
+      }
+
+      const novas = args.transactions.filter(t => !t.bank_ref_id || !existing.has(t.bank_ref_id));
+      const skipped = args.transactions.length - novas.length;
+      if (novas.length === 0) return { imported: 0, skipped };
+
       const batch_id = crypto.randomUUID();
-      const rows = args.transactions.map(t => ({ ...t, import_batch_id: batch_id, reconciled: false, source_type: args.source_type || 'bank' }));
-      const { data, error } = await supabase.from('bank_transactions').insert(rows).select();
+      const rows = novas.map(t => ({
+        transaction_date: t.transaction_date,
+        description: t.description,
+        amount: t.amount,
+        transaction_type: t.transaction_type,
+        bank_ref_id: t.bank_ref_id ?? null,
+        pix_end_to_end_id: t.pix_end_to_end_id ?? null,
+        counterparty_name: t.counterparty_name ?? null,
+        counterparty_document: t.counterparty_document ?? null,
+        import_batch_id: batch_id,
+        reconciled: false,
+        source_type,
+      }));
+
+      const { data, error } = await supabase.from('bank_transactions').insert(rows).select('id');
       if (error) throw error;
-      return data;
+      return { imported: data?.length ?? 0, skipped };
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['bank-transactions'] }),
   });

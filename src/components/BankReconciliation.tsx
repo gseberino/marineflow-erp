@@ -13,7 +13,7 @@ import { useServiceOrders } from '@/hooks/use-service-orders';
 import { useClients } from '@/hooks/use-clients';
 import { useSuppliers } from '@/hooks/use-suppliers';
 import { OPERATIONAL_EXPENSE_CATEGORIES } from '@/lib/expense-categories';
-import { parseFile, type BankTransaction } from '@/lib/bank-parser';
+import { parseFile, decodeStatementFile, type BankTransaction } from '@/lib/bank-parser';
 import { toast } from 'sonner';
 import { Upload, Check, X, Undo2 } from 'lucide-react';
 import { StatusBadge } from '@/components/StatusBadge';
@@ -68,7 +68,9 @@ export function BankReconciliation() {
   const handleFile = useCallback((file: File) => {
     const reader = new FileReader();
     reader.onload = (e) => {
-      const content = e.target?.result as string;
+      // Lido como bytes: o encoding do extrato varia por banco e decodificar
+      // Latin-1 como UTF-8 corrompe todos os acentos das descrições.
+      const content = decodeStatementFile(e.target?.result as ArrayBuffer);
       const result = parseFile(content, file.name);
       if (result.transactions.length === 0) {
         toast.error('Nenhuma transação encontrada no arquivo');
@@ -77,7 +79,7 @@ export function BankReconciliation() {
       setPreview(result.transactions);
       setPreviewSource(result.source_type);
     };
-    reader.readAsText(file);
+    reader.readAsArrayBuffer(file);
   }, []);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -89,8 +91,16 @@ export function BankReconciliation() {
   const handleImport = async () => {
     if (!preview) return;
     try {
-      await importMutation.mutateAsync({ transactions: preview, source_type: previewSource });
-      toast.success(`${preview.length} transações importadas`);
+      const { imported, skipped } = await importMutation.mutateAsync({ transactions: preview, source_type: previewSource });
+      if (imported === 0 && skipped > 0) {
+        toast.info(`Nada novo: as ${skipped} transações do arquivo já haviam sido importadas`);
+      } else {
+        toast.success(
+          skipped > 0
+            ? `${imported} transações importadas · ${skipped} já existiam e foram ignoradas`
+            : `${imported} transações importadas`
+        );
+      }
       setPreview(null);
     } catch { toast.error('Erro ao importar'); }
   };
