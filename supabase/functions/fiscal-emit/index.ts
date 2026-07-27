@@ -428,6 +428,17 @@ async function prepareNfePayload(
         unitPrice: Number(it.unit_price),
         discount: it.discount != null && it.discount !== "" ? Number(it.discount) : 0,
         otherExpenses: it.other_expenses != null && it.other_expenses !== "" ? Number(it.other_expenses) : 0,
+        // IPI devolvido (devolução) → returned_ipi (impostoDevol/vIPIDevol).
+        returnedIpi: (() => {
+          const r = it.returned_ipi as { value?: unknown; percentage?: unknown } | null | undefined;
+          const v = r && r.value != null && r.value !== "" ? Number(r.value) : 0;
+          if (!(v > 0)) return null;
+          const out: { value: number; percentage?: number } = { value: v };
+          if (r?.percentage != null && r.percentage !== "" && !Number.isNaN(Number(r.percentage))) {
+            out.percentage = Number(r.percentage);
+          }
+          return out;
+        })(),
         barcode: it.barcode ? String(it.barcode) : (productBarcode ?? null),
         csosn: it.csosn ? String(it.csosn) : rf.csosn,
         origin: num(it.origin, rf.origin),

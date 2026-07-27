@@ -17,7 +17,8 @@ export interface EmissionDraftItem {
   quantity: number;
   unit_price: number;
   discount?: number; // prod/vDesc
-  other_expenses?: number; // prod/vOutro (ex.: IPI na devolução do Simples)
+  other_expenses?: number; // prod/vOutro (outras despesas acessórias genuínas)
+  ipiUnit?: number; // IPI POR UNIDADE da nota de compra (devolução) → vira returned_ipi
   csosn?: string;
   origin: number;
   icms_rate: number;
@@ -39,6 +40,9 @@ export interface EmissionBodyItem {
   unit_price: number;
   discount: number;
   other_expenses: number;
+  // IPI devolvido (devolução do Simples) → det/impostoDevol/IPI/vIPIDevol na Contora.
+  // É o instrumento CORRETO (gera crédito de IPI ao fornecedor), no lugar do vOutro.
+  returned_ipi?: { value: number };
   csosn?: string;
   origin: number;
   icms_rate: number;
@@ -61,6 +65,12 @@ export function buildEmissionItem(it: EmissionDraftItem): EmissionBodyItem {
     unit_price: it.unit_price,
     discount: it.discount || 0, // vDesc por item (prod/vDesc)
     other_expenses: it.other_expenses || 0, // vOutro por item (despesas acessórias)
+    // IPI da devolução: valor proporcional à quantidade devolvida (ipiUnit × qtd),
+    // enviado como returned_ipi (impostoDevol/vIPIDevol) — não mais em vOutro.
+    returned_ipi:
+      it.ipiUnit && it.ipiUnit > 0
+        ? { value: Math.round(it.ipiUnit * it.quantity * 100) / 100 }
+        : undefined,
     csosn: it.csosn || undefined,
     origin: it.origin,
     icms_rate: it.icms_rate,

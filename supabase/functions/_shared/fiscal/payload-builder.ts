@@ -169,9 +169,14 @@ export interface NfeItemInput {
   // Contora (NfeItem.discount → det/prod/vDesc).
   discount?: number | null;
   // Outras despesas acessórias do item (prod/vOutro). SOMAM ao total
-  // (vNF = vProd − vDesc + vOutro). Campo `other_expenses` da Contora — usado na
-  // devolução ao fornecedor do Simples para repassar o IPI da nota de compra.
+  // (vNF = vProd − vDesc + vOutro). Campo `other_expenses` da Contora.
   otherExpenses?: number | null;
+  // IPI devolvido do item (devolução do Simples) → returned_ipi na Contora
+  // (det/impostoDevol/IPI/vIPIDevol). Instrumento CORRETO para o crédito de IPI ao
+  // fornecedor — substitui o vOutro nesse caso. value = IPI proporcional à qtd
+  // devolvida; percentage (pDevol) opcional, default 100. Soma ao vNF (regra
+  // W16-10); o totalizador ICMSTot/vIPIDevol é calculado pela própria Contora.
+  returnedIpi?: { value: number; percentage?: number } | null;
   barcode?: string | null; // GTIN/EAN do produto → cEAN/cEANTrib ("SEM GTIN" se ausente)
   // Grupo tributário resolvido a partir do produto (ver product-fiscal.ts).
   // Quando csosn+origin vêm preenchidos, montamos o bloco `taxes` que a Contora
@@ -274,14 +279,19 @@ export function buildNfeDraftPayload(
   const totalDiscount = round2(
     input.items.reduce((sum, it) => sum + Math.max(0, Number(it.discount) || 0), 0),
   );
-  // Outras despesas acessórias (vOutro) somam ao total. Na devolução do Simples,
-  // carregam o IPI da nota de compra que precisa entrar no total sem destaque.
+  // Outras despesas acessórias (vOutro) somam ao total.
   const totalOther = round2(
     input.items.reduce((sum, it) => sum + Math.max(0, Number(it.otherExpenses) || 0), 0),
   );
-  // vNF = vProd − vDesc + vOutro. É o valor que precisa fechar com a soma dos
-  // pagamentos/duplicatas (sem IPI destacado: Simples).
-  const totalAmount = round2(grossAmount - totalDiscount + totalOther);
+  // IPI devolvido (impostoDevol/vIPIDevol) também entra no vNF (regra W16-10 da
+  // NF-e). A Contora calcula o totalizador ICMSTot/vIPIDevol a partir dos itens;
+  // aqui só precisamos que o total local (espelho/duplicatas) já inclua o valor.
+  const totalReturnedIpi = round2(
+    input.items.reduce((sum, it) => sum + Math.max(0, Number(it.returnedIpi?.value) || 0), 0),
+  );
+  // vNF = vProd − vDesc + vOutro + vIPIDevol. É o valor que precisa fechar com a
+  // soma dos pagamentos/duplicatas.
+  const totalAmount = round2(grossAmount - totalDiscount + totalOther + totalReturnedIpi);
 
   // Indicador de IE do destinatário (indIEDest): 1=contribuinte, 2=isento, 9=não
   // contribuinte. Default 9 mantém o comportamento antigo; a UI passa a informar.
@@ -334,6 +344,17 @@ export function buildNfeDraftPayload(
       if (desc > 0) item.discount = desc; // → det/prod/vDesc
       const outro = round2(Math.max(0, Number(it.otherExpenses) || 0));
       if (outro > 0) item.other_expenses = outro; // → det/prod/vOutro
+      // IPI devolvido (devolução do Simples) → det/impostoDevol/IPI/vIPIDevol.
+      // Não é vOutro: é o grupo que gera o crédito de IPI ao fornecedor.
+      const ipiDevol = round2(Math.max(0, Number(it.returnedIpi?.value) || 0));
+      if (ipiDevol > 0) {
+        const rip: Record<string, number> = { value: ipiDevol };
+        const pdevol = it.returnedIpi?.percentage;
+        if (pdevol != null && Number.isFinite(Number(pdevol))) {
+          rip.percentage = round2(Math.max(0, Math.min(100, Number(pdevol))));
+        }
+        item.returned_ipi = rip; // → returned_ipi da Contora
+      }
       const taxes = buildItemTaxes(it);
       if (taxes) item.taxes = taxes;
       // A referência à NF-e original é NÍVEL DA NOTA na Contora

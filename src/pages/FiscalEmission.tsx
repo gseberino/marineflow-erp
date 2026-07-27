@@ -1136,11 +1136,13 @@ export default function FiscalEmission() {
         // UNIDADE para escalar na devolução parcial (ver onChange da quantidade).
         discount: Number(it.discount) || 0,
         discountUnit: qty > 0 ? (Number(it.discount) || 0) / qty : 0,
-        // IPI da nota de compra vai em despesas acessórias (prod/vOutro): repassa
-        // o crédito ao fornecedor e faz o total da devolução bater com a compra.
-        // Também por unidade, para escalar na devolução parcial.
-        other_expenses: Number(it.ipiValue) || 0,
-        otherExpensesUnit: qty > 0 ? (Number(it.ipiValue) || 0) / qty : 0,
+        // IPI da nota de compra NÃO vai mais em despesas acessórias (vOutro): agora
+        // em returned_ipi (impostoDevol/vIPIDevol), o instrumento CORRETO que gera o
+        // crédito de IPI ao fornecedor (confirmado pela Contora, chamado #vIPIDevol).
+        // O valor é calculado na emissão a partir de ipiUnit × qtd (ver
+        // buildEmissionItem), escalando sozinho na devolução parcial.
+        other_expenses: 0,
+        otherExpensesUnit: 0,
         // Simples em devolução de compra: CSOSN 900, sem destaque de ICMS. A
         // origem da mercadoria é preservada do XML da compra (intrínseca ao item).
         csosn: '900', origin: Number(it.origin ?? 0) || 0,

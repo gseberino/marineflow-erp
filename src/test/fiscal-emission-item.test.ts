@@ -25,6 +25,19 @@ describe("buildEmissionItem", () => {
     expect(buildEmissionItem(base).discount).toBe(0);
   });
 
+  // IPI da devolução agora vai em returned_ipi (impostoDevol/vIPIDevol), o
+  // instrumento correto que gera crédito ao fornecedor — não mais em vOutro.
+  it("converte ipiUnit em returned_ipi proporcional à quantidade (vIPIDevol)", () => {
+    expect(buildEmissionItem({ ...base, ipiUnit: 20.94, quantity: 10 }).returned_ipi).toEqual({ value: 209.4 });
+    // devolução parcial: metade da quantidade → metade do IPI
+    expect(buildEmissionItem({ ...base, ipiUnit: 20.94, quantity: 5 }).returned_ipi).toEqual({ value: 104.7 });
+  });
+
+  it("omite returned_ipi quando não há IPI de devolução (venda normal)", () => {
+    expect(buildEmissionItem(base).returned_ipi).toBeUndefined();
+    expect(buildEmissionItem({ ...base, ipiUnit: 0 }).returned_ipi).toBeUndefined();
+  });
+
   it("mapeia referencedKey/referencedItemNumber → referenced_key/referenced_item", () => {
     const r = buildEmissionItem({ ...base, referencedKey: "42260750057049000159550020000000191870891237", referencedItemNumber: 5 });
     expect(r.referenced_key).toBe("42260750057049000159550020000000191870891237");
