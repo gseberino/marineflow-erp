@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { DatePickerBR, todayISO } from '@/components/ui/date-picker-br';
 import { useToast } from '@/hooks/use-toast';
 import { useAppSettings } from '@/hooks/use-app-settings';
 import { supabase } from '@/integrations/supabase/client';
@@ -95,7 +96,7 @@ export function RegisterDepositDialog({
   const [fixedValue, setFixedValue]   = useState('');
   const [method, setMethod]           = useState(defaultMethod);
   const [cardFee, setCardFee]         = useState(String(defaultFee));
-  const [date, setDate]               = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate]               = useState(todayISO());
   const [notes, setNotes]             = useState('');
   const [loading, setLoading]         = useState(false);
   const [stockConfirmOpen, setStockConfirmOpen] = useState(false);
@@ -111,7 +112,7 @@ export function RegisterDepositDialog({
     setFixedValue('');
     setMethod(defaultMethod);
     setCardFee(String(defaultFee));
-    setDate(new Date().toISOString().split('T')[0]);
+    setDate(todayISO());
     setNotes('');
     setPresetLabel('');
     setReceiptUrl('');
@@ -480,7 +481,7 @@ export function RegisterDepositDialog({
             </div>
             <div className="space-y-1.5">
               <Label>Data</Label>
-              <Input type="date" value={date} onChange={e => setDate(e.target.value)} />
+              <DatePickerBR value={date} onChange={setDate} />
             </div>
           </div>
 
