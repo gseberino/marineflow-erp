@@ -55,12 +55,13 @@ export interface Candidate {
   convertsQuote?: boolean;
   /**
    * De onde saiu o valor esperado do sinal:
-   * - "condicao": da condição de pagamento acordada com o cliente — é o valor que o
-   *   orçamento mostra, e o que deve bater com o que ele pagou;
-   * - "percentual": estimativa pelo percentual padrão, usada quando o orçamento não tem
-   *   condição definida. A UI precisa deixar claro que é palpite, não combinado.
+   * - "condicao": da condição acordada no orçamento — é o valor que o cliente viu;
+   * - "padrao": da condição padrão da casa (100% materiais + 50% mão de obra), quando o
+   *   orçamento não define uma. É previsível, mas não foi acordado por escrito;
+   * - "percentual": último recurso, percentual liso sobre o total, para orçamentos que
+   *   não dá para decompor. A UI precisa deixar claro que é estimativa.
    */
-  amountSource?: "condicao" | "percentual";
+  amountSource?: "condicao" | "padrao" | "percentual";
   /** Rótulo da condição de pagamento, ex.: "50% mão de obra + 100% materiais antecipados". */
   conditionLabel?: string | null;
 }

@@ -73,29 +73,56 @@ function normalizeInstallment(r: DepositInstallment) {
   };
 }
 
+/**
+ * A parcela é o SINAL quando é explicitamente `tipo='aprovacao'`, ou — em condições
+ * antigas sem tipo — quando cai no dia 0.
+ *
+ * A checagem por tipo vem ANTES do fallback por dia de propósito: uma parcela
+ * `tipo='entrega'` pode ter `days_after_approval=0` (vence "na entrega", não na
+ * aprovação) e não é sinal. Espelha `isSignalInstallment` de `src/lib/quote-deposit.ts`.
+ */
+function isSignalInstallment(r: ReturnType<typeof normalizeInstallment>): boolean {
+  if (r.tipo === "aprovacao") return true;
+  if (r.tipo === "entrega" || r.tipo === "prazo") return false;
+  return r.days === 0;
+}
+
 export function signalPctsFromInstallments(
   installments: DepositInstallment[] | null | undefined,
 ): { servicesPct: number; partsPct: number; expensesPct: number } | null {
   const rows = Array.isArray(installments) ? installments.map(normalizeInstallment) : [];
-  const s = rows.find((r) => r.tipo === "aprovacao" || r.days === 0);
+  const s = rows.find(isSignalInstallment);
   return s ? { servicesPct: s.servicesPct, partsPct: s.partsPct, expensesPct: s.expensesPct } : null;
 }
 
 /**
+ * Condição padrão da casa, informada pelo usuário em 27/07/2026: o sinal cobre 100% de
+ * materiais e despesas mais 50% da mão de obra; o saldo são os 50% restantes de serviço,
+ * pagos na entrega. É a mesma regra do preset "50% mão de obra + 100% materiais
+ * antecipados" já cadastrado no sistema.
+ *
+ * Usada quando o orçamento não tem condição definida. Antes disso o fallback era um
+ * percentual liso sobre o total (30%), que não corresponde a nada praticado — e fazia a
+ * conciliação esperar um valor que o cliente nunca combinou.
+ */
+export const CONDICAO_PADRAO = { servicesPct: 50, partsPct: 100, expensesPct: 100 } as const;
+
+/**
  * Quanto se espera de sinal deste orçamento.
  *
- * Preferência pela condição de pagamento (é o combinado com o cliente); sem ela, cai no
- * percentual global configurado em `app_settings.quote_deposit_percentage`, aplicado
- * sobre o total já líquido — a mesma conta do modo "% do total" do diálogo de sinal.
+ * Ordem: a condição acordada no orçamento manda; sem ela, a condição padrão da casa; e o
+ * percentual liso só sobra para quando não há como decompor o orçamento em mão de obra e
+ * materiais. A `source` sai junto porque a tela precisa distinguir o combinado do estimado.
  */
 export function expectedDepositAmount(
   order: DepositOrderLike & { grand_total?: number | null },
   installments: DepositInstallment[] | null | undefined,
   globalPct: number,
-): { amount: number; source: "condicao" | "percentual" } | null {
+): { amount: number; source: "condicao" | "padrao" | "percentual" } | null {
+  const b = depositBaseFromOrder(order);
+
   const pcts = signalPctsFromInstallments(installments);
   if (pcts && (pcts.servicesPct > 0 || pcts.partsPct > 0 || pcts.expensesPct > 0)) {
-    const b = depositBaseFromOrder(order);
     const amount = depositAmountFromPcts(
       b.laborCost, b.partsCost, b.expensesTotal, b.discountRatio,
       pcts.servicesPct, pcts.partsPct, pcts.expensesPct,
@@ -103,9 +130,29 @@ export function expectedDepositAmount(
     if (amount > 0) return { amount, source: "condicao" };
   }
 
+  if (b.subtotal > 0) {
+    const amount = depositAmountFromPcts(
+      b.laborCost, b.partsCost, b.expensesTotal, b.discountRatio,
+      CONDICAO_PADRAO.servicesPct, CONDICAO_PADRAO.partsPct, CONDICAO_PADRAO.expensesPct,
+    );
+    if (amount > 0) return { amount, source: "padrao" };
+  }
+
   const grandTotal = Number(order.grand_total || 0);
   if (grandTotal > 0 && globalPct > 0) {
     return { amount: round2(grandTotal * globalPct / 100), source: "percentual" };
   }
   return null;
+}
+
+/**
+ * Saldo que fica para a entrega: o que não entrou no sinal.
+ * Com a condição padrão, são os 50% restantes de mão de obra.
+ */
+export function expectedBalanceAmount(
+  order: DepositOrderLike & { grand_total?: number | null },
+  depositAmount: number,
+): number {
+  const b = depositBaseFromOrder(order);
+  return round2(Math.max(0, b.base - depositAmount));
 }

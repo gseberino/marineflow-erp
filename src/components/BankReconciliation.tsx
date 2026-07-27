@@ -508,9 +508,15 @@ export function BankReconciliation() {
                                       {s.candidate.conditionLabel ? `: ${s.candidate.conditionLabel}` : ''}
                                     </p>
                                   )}
+                                  {s.candidate.amountSource === 'padrao' && (
+                                    <p className="text-xs text-muted-foreground">
+                                      Pela condição padrão (100% materiais + 50% mão de obra) — este
+                                      orçamento não tem condição própria definida
+                                    </p>
+                                  )}
                                   {s.candidate.amountSource === 'percentual' && (
                                     <p className="text-xs text-warning">
-                                      Valor estimado — este orçamento não tem condição de pagamento definida
+                                      Valor estimado — não foi possível separar mão de obra e materiais
                                     </p>
                                   )}
                                   <p className="text-xs text-muted-foreground mt-1">

@@ -19,8 +19,11 @@ export interface ReconcileCandidate {
   documentNumber?: string | null;
   serviceOrderId?: string | null;
   convertsQuote?: boolean;
-  /** "condicao" = valor combinado no orçamento; "percentual" = estimativa pelo padrão. */
-  amountSource?: 'condicao' | 'percentual';
+  /**
+   * "condicao" = combinado no orçamento; "padrao" = condição padrão da casa
+   * (100% materiais + 50% mão de obra); "percentual" = estimativa liso sobre o total.
+   */
+  amountSource?: 'condicao' | 'padrao' | 'percentual';
   conditionLabel?: string | null;
 }
 

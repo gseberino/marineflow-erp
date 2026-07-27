@@ -321,7 +321,11 @@ async function buildCandidates(admin: ReturnType<typeof createClient>): Promise<
     if (!esperado) continue;
 
     const cliente = (q as any).clients;
-    const rotuloCondicao = esperado.source === "condicao" ? (preset?.label ?? "condição do orçamento") : null;
+    const rotuloCondicao = esperado.source === "condicao"
+      ? (preset?.label ?? "condição do orçamento")
+      : esperado.source === "padrao"
+        ? "100% materiais + 50% mão de obra"
+        : null;
     candidates.push({
       kind: "quote_deposit",
       id: q.id as string,

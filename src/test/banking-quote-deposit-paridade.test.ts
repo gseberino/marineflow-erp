@@ -19,6 +19,7 @@ import {
   depositAmountFromPcts as amountEdge,
   signalPctsFromInstallments as pctsEdge,
   expectedDepositAmount,
+  expectedBalanceAmount,
 } from "../../supabase/functions/_shared/banking/quote-deposit";
 
 const ordens: DepositOrderLike[] = [
@@ -80,31 +81,34 @@ describe("sinal esperado (usado pela conciliação)", () => {
     expect(r).toEqual({ amount: 1000, source: "condicao" });
   });
 
-  it("cai no percentual global quando não há condição", () => {
-    const r = expectedDepositAmount({ labor_cost_total: 1000, grand_total: 5321.36 }, null, 30);
-    expect(r).toEqual({ amount: 1596.41, source: "percentual" });
+  it("sem condição, usa a condição padrão da casa (100% materiais + 50% mão de obra)", () => {
+    // Mão de obra 1.000 e peças 2.000 → sinal = 500 + 2.000 = 2.500.
+    const r = expectedDepositAmount(
+      { labor_cost_total: 1000, parts_cost_total: 2000, grand_total: 3000 },
+      null,
+      30,
+    );
+    expect(r).toEqual({ amount: 2500, source: "padrao" });
   });
 
-  it("usa o percentual quando todas as parcelas são a prazo", () => {
+  it("cai na condição padrão quando todas as parcelas são a prazo", () => {
     const r = expectedDepositAmount(
       { labor_cost_total: 1000, grand_total: 1000 },
       [{ tipo: "prazo", days_after_approval: 30, services_pct: 100, parts_pct: 100 }],
       30,
     );
-    expect(r?.source).toBe("percentual");
+    expect(r?.source).toBe("padrao");
   });
 
-  it("trata parcela sem prazo definido como entrada, igual ao diálogo de sinal", () => {
-    // Peculiaridade herdada da regra do frontend: `days_after_approval` ausente vira 0,
-    // e dia 0 é entrada. Vale para qualquer tipo, inclusive 'entrega'. Documentado aqui
-    // porque afeta o valor que a conciliação vai esperar — se um dia isso for corrigido,
-    // precisa ser corrigido nos dois lados ao mesmo tempo.
+  it("parcela de entrega no dia 0 não é sinal", () => {
+    // "Vence na entrega" é diferente de "vence na aprovação", mesmo com days=0. Sem essa
+    // distinção o motor esperaria o valor da entrega como se fosse o sinal.
     const r = expectedDepositAmount(
-      { labor_cost_total: 1000, grand_total: 1000 },
+      { labor_cost_total: 1000, parts_cost_total: 500, grand_total: 1500 },
       [{ tipo: "entrega", services_pct: 100, parts_pct: 100 }],
       30,
     );
-    expect(r?.source).toBe("condicao");
+    expect(r?.source).toBe("padrao"); // cai na condição padrão, não na parcela de entrega
   });
 
   it("devolve nulo quando não há como estimar", () => {
@@ -142,12 +146,21 @@ describe("orçamentos reais com condição de pagamento (regressão)", () => {
     expect(r?.amount).toBeCloseTo(18001.04, 1);
   });
 
-  it("orçamento sem condição segue estimando pelo percentual, e diz que é estimativa", () => {
+  it("ORÇ-00070 sem condição própria: aplica a regra padrão da casa", () => {
+    // Mão de obra 1.685 (50% = 842,50) + peças 3.636,36 (100%) = 4.478,86.
+    // Antes o motor sugeria R$ 1.596,41 (30% liso), que não corresponde a nada praticado.
     const r = expectedDepositAmount(
       { labor_cost_total: 1685, parts_cost_total: 3636.36, grand_total: 5321.36 },
       null,
       30,
     );
-    expect(r).toEqual({ amount: 1596.41, source: "percentual" });
+    expect(r?.source).toBe("padrao");
+    expect(r?.amount).toBeCloseTo(4478.86, 2);
+  });
+
+  it("saldo da entrega é o que sobra do sinal (os 50% restantes de mão de obra)", () => {
+    const ordem = { labor_cost_total: 1685, parts_cost_total: 3636.36, grand_total: 5321.36 };
+    const sinal = expectedDepositAmount(ordem, null, 30)!;
+    expect(expectedBalanceAmount(ordem, sinal.amount)).toBeCloseTo(842.50, 2);
   });
 });
