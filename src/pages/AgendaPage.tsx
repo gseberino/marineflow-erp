@@ -34,6 +34,7 @@ import { FocusMode } from '@/components/agenda/FocusMode';
 import { OnMyWayButton } from '@/components/agenda/OnMyWayButton';
 import { SuggestionCard } from '@/components/agenda/SuggestionCard';
 import { VoiceCaptureButton } from '@/components/agenda/VoiceCaptureButton';
+import { InstallAgendaButton } from '@/components/agenda/InstallAgendaButton';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -230,8 +231,11 @@ export default function AgendaPage() {
   // Atalhos do PWA e Share Target: consome os parâmetros e limpa a URL,
   // para um F5 não repetir a ação (ex.: reabrir o gravador).
   useEffect(() => {
-    if (searchParams.get('action') === 'voice') {
+    const action = searchParams.get('action');
+    if (action === 'voice') {
       voiceTriggerRef.current?.querySelector('button')?.click();
+    } else if (action === 'focus') {
+      setFocusOpen(true);
     }
     if (searchParams.has('view') || searchParams.has('action')
         || searchParams.has('share_text') || searchParams.has('share_title')
@@ -326,6 +330,7 @@ export default function AgendaPage() {
             {saveTask.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Criar'}
           </Button>
           <div ref={voiceTriggerRef} className="contents"><VoiceCaptureButton /></div>
+          <InstallAgendaButton />
           <Button size="sm" variant="outline" onClick={handleExportCsv} title="Exportar CSV da visão atual">
             <Download className="h-4 w-4" />
           </Button>

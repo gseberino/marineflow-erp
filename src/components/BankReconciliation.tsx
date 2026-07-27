@@ -14,8 +14,12 @@ import { useClients } from '@/hooks/use-clients';
 import { useSuppliers } from '@/hooks/use-suppliers';
 import { OPERATIONAL_EXPENSE_CATEGORIES } from '@/lib/expense-categories';
 import { parseFile, decodeStatementFile, type BankTransaction } from '@/lib/bank-parser';
+import {
+  useReconcileSuggestions, useAutoReconcile, useApplySuggestion, useApplyGroup, useAnalyzeWithAI,
+  CANDIDATE_LABELS, type ReconcileSuggestion, type ReconcileGroup,
+} from '@/hooks/use-reconciliation';
 import { toast } from 'sonner';
-import { Upload, Check, X, Undo2 } from 'lucide-react';
+import { Upload, Check, X, Undo2, Sparkles, AlertTriangle } from 'lucide-react';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase } from '@/integrations/supabase/client';
@@ -40,7 +44,28 @@ export function BankReconciliation() {
   const createPayable = useCreatePayable();
   const registerPayment = useRegisterPayment();
 
+  // Motor de conciliação: sugestões pontuadas vindas do backend, que enxerga candidatos
+  // que a tela não tinha — sinal de orçamento, saldo de OS e cobranças avulsas.
+  const { data: engine, isLoading: engineLoading, refetch: refetchEngine } = useReconcileSuggestions();
+  const autoReconcile = useAutoReconcile();
+  const applySuggestion = useApplySuggestion();
+  const applyGroup = useApplyGroup();
+  const analyzeWithAI = useAnalyzeWithAI();
+  const [aiAnalysis, setAiAnalysis] = useState<Record<string, string>>({});
+  const suggestionsByTx = new Map<string, ReconcileSuggestion[]>(
+    (engine?.transactions || []).map(t => [t.transaction.id, t.suggestions]),
+  );
+  const groupsByTx = new Map<string, ReconcileGroup[]>(
+    (engine?.transactions || []).map(t => [t.transaction.id, t.groups || []]),
+  );
+  const internalTransferTx = new Set(
+    (engine?.transactions || []).filter(t => t.internalTransfer).map(t => t.transaction.id),
+  );
+
   const [tab, setTab] = useState<TabType>('pending');
+  const [search, setSearch] = useState('');
+  const [matchFilter, setMatchFilter] = useState<'all' | 'with' | 'without'>('all');
+  const [sortBy, setSortBy] = useState<'date' | 'amount'>('date');
   const [preview, setPreview] = useState<BankTransaction[] | null>(null);
   const [previewSource, setPreviewSource] = useState<'bank' | 'credit_card'>('bank');
   const [filter, setFilter] = useState<'all' | 'credit' | 'debit'>('all');
@@ -61,9 +86,36 @@ export function BankReconciliation() {
   const reconciledTx = allTx.filter(t => t.reconciled && t.reconciled_payment_id);
   const ignoredTx = allTx.filter(t => t.reconciled && !t.reconciled_payment_id);
 
+  const bestMatch = (txId: string): ReconcileSuggestion | undefined =>
+    (suggestionsByTx.get(txId) || [])[0];
+
   const filtered = pending
     .filter(t => filter === 'all' || t.transaction_type === filter)
-    .filter(t => sourceFilter === 'all' || t.source_type === sourceFilter);
+    .filter(t => sourceFilter === 'all' || t.source_type === sourceFilter)
+    .filter(t => {
+      if (matchFilter === 'all') return true;
+      const tem = !!bestMatch(t.id) || (groupsByTx.get(t.id) || []).length > 0;
+      return matchFilter === 'with' ? tem : !tem;
+    })
+    .filter(t => {
+      if (!search.trim()) return true;
+      const alvo = `${t.description} ${bestMatch(t.id)?.candidate.label ?? ''} ${bestMatch(t.id)?.candidate.clientName ?? ''}`;
+      return alvo.toLowerCase().includes(search.trim().toLowerCase());
+    })
+    .slice()
+    .sort((a, b) => sortBy === 'amount'
+      ? Number(b.amount) - Number(a.amount)
+      : (a.transaction_date < b.transaction_date ? 1 : -1));
+
+  // Números do topo: o operador precisa saber o tamanho da fila e quanto dela o sistema
+  // já sabe explicar, antes de abrir transação por transação.
+  const resumo = {
+    total: pending.length,
+    valorEntradas: pending.filter(t => t.transaction_type === 'credit')
+      .reduce((s, t) => s + Number(t.amount), 0),
+    comSugestao: pending.filter(t => !!bestMatch(t.id)).length,
+    semCandidato: pending.filter(t => !bestMatch(t.id) && (groupsByTx.get(t.id) || []).length === 0).length,
+  };
 
   const handleFile = useCallback((file: File) => {
     const reader = new FileReader();
@@ -269,6 +321,78 @@ export function BankReconciliation() {
     } catch { toast.error('Erro'); }
   };
 
+  const handleAutoReconcile = async () => {
+    try {
+      const r = await autoReconcile.mutateAsync(false);
+      const { conciliadas, sugeridas, sem_candidato } = r.summary;
+      if (conciliadas === 0 && sugeridas === 0) {
+        toast.info('Nenhuma correspondência encontrada para as transações pendentes');
+      } else if (conciliadas === 0) {
+        // Sem identificador Pix nem documento do pagador no extrato, nada atinge o grau
+        // de certeza exigido para conciliar sozinho — e dizer só "0 conciliadas" faz
+        // parecer que o motor não achou nada, quando ele achou e está pedindo conferência.
+        toast.success(
+          `${sugeridas} transações com correspondência para você conferir na lista · ${sem_candidato} sem candidato. ` +
+          `Nada foi conciliado sozinho porque este extrato não traz identificador do Pix nem CPF/CNPJ do pagador.`,
+        );
+      } else {
+        toast.success(
+          `${conciliadas} conciliada(s) automaticamente · ${sugeridas} com sugestão para conferir · ${sem_candidato} sem candidato`,
+        );
+      }
+      setMatchFilter(sugeridas > 0 ? 'with' : 'all');
+      invalidateAll();
+    } catch (e: any) {
+      toast.error(e?.message || 'Erro ao conciliar');
+    }
+  };
+
+  const handleApplySuggestion = async (tx: any, s: ReconcileSuggestion) => {
+    try {
+      await applySuggestion.mutateAsync({ transactionId: tx.id, candidate: s.candidate });
+      toast.success(
+        s.candidate.convertsQuote
+          ? `Sinal registrado — ${s.candidate.documentNumber} aprovado e convertido em OS`
+          : `Conciliado com ${s.candidate.label}`,
+      );
+      setReconcileId(null);
+      invalidateAll();
+      refetchEngine();
+    } catch (e: any) {
+      toast.error(e?.message || 'Erro ao aplicar sugestão');
+    }
+  };
+
+  const handleApplyGroup = async (tx: any, g: ReconcileGroup) => {
+    try {
+      const r = await applyGroup.mutateAsync({ transactionId: tx.id, candidates: g.candidates });
+      if (r.falhas?.length) {
+        toast.warning(`${r.message}. Não deu certo em: ${r.falhas.join('; ')}`);
+      } else {
+        toast.success(r.message);
+      }
+      setReconcileId(null);
+      invalidateAll();
+      refetchEngine();
+    } catch (e: any) {
+      toast.error(e?.message || 'Erro ao baixar as contas');
+    }
+  };
+
+  const handleAnalyzeWithAI = async (tx: any) => {
+    try {
+      const analise = await analyzeWithAI.mutateAsync({
+        transactionId: tx.id,
+        description: tx.description,
+        amount: Number(tx.amount),
+        date: tx.transaction_date,
+      });
+      setAiAnalysis(prev => ({ ...prev, [tx.id]: analise }));
+    } catch (e: any) {
+      toast.error(e?.message || 'Não consegui analisar agora');
+    }
+  };
+
   const handleUnignore = async (id: string) => {
     try {
       await unignore.mutateAsync(id);
@@ -356,52 +480,342 @@ export function BankReconciliation() {
       {/* === PENDING TAB === */}
       {tab === 'pending' && (
         <div>
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold">{t.financial.unreconciledTransactions} ({pending.length})</h3>
-            <div className="flex gap-1 flex-wrap">
-              {(['all', 'credit', 'debit'] as const).map(f => (
-                <Button key={f} size="sm" variant={filter === f ? 'default' : 'outline'} onClick={() => setFilter(f)}>
-                  {f === 'all' ? t.common.all : f === 'credit' ? t.financial.inflow : t.financial.outflow}
-                </Button>
-              ))}
-              <span className="mx-1 border-l" />
-              {([
-                { v: 'all' as const, l: t.financial.sourceAll },
-                { v: 'bank' as const, l: t.financial.sourceBank },
-                { v: 'credit_card' as const, l: t.financial.sourceCard },
-              ]).map(({ v, l }) => (
-                <Button key={v} size="sm" variant={sourceFilter === v ? 'default' : 'outline'} onClick={() => setSourceFilter(v)}>
-                  {l}
-                </Button>
-              ))}
+          {/* Painel de situação: quanto está pendente, quanto disso o sistema já sabe
+              explicar e quanto vai exigir análise. Sem isto, "13 sugestões" era um número
+              sem lugar nenhum para olhar. */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-3">
+            {[
+              { label: 'Pendentes', valor: String(resumo.total), tom: '' },
+              { label: 'Entradas a identificar', valor: formatCurrency(resumo.valorEntradas), tom: 'text-success' },
+              { label: 'Com correspondência', valor: String(resumo.comSugestao), tom: 'text-warning' },
+              { label: 'Sem candidato', valor: String(resumo.semCandidato), tom: 'text-muted-foreground' },
+            ].map(k => (
+              <div key={k.label} className="rounded-lg border bg-card px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{k.label}</p>
+                <p className={`text-lg font-semibold tabular-nums ${k.tom}`}>{k.valor}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="rounded-lg border bg-card p-3 mb-3 space-y-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Input
+                placeholder="Buscar por histórico, cliente ou documento..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="h-8 max-w-xs"
+              />
+              <Button size="sm" onClick={handleAutoReconcile} disabled={autoReconcile.isPending || pending.length === 0}>
+                <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+                {autoReconcile.isPending ? 'Analisando...' : 'Analisar tudo'}
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => refetchEngine()} disabled={engineLoading}>
+                {engineLoading ? 'Atualizando...' : 'Atualizar análise'}
+              </Button>
+            </div>
+
+            <div className="flex items-center gap-3 flex-wrap text-sm">
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-muted-foreground mr-1">Tipo</span>
+                {(['all', 'credit', 'debit'] as const).map(f => (
+                  <Button key={f} size="sm" variant={filter === f ? 'default' : 'outline'}
+                    className="h-7 px-2 text-xs" onClick={() => setFilter(f)}>
+                    {f === 'all' ? t.common.all : f === 'credit' ? t.financial.inflow : t.financial.outflow}
+                  </Button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-muted-foreground mr-1">Análise</span>
+                {([
+                  { v: 'all' as const, l: 'Todas' },
+                  { v: 'with' as const, l: 'Com correspondência' },
+                  { v: 'without' as const, l: 'Sem candidato' },
+                ]).map(({ v, l }) => (
+                  <Button key={v} size="sm" variant={matchFilter === v ? 'default' : 'outline'}
+                    className="h-7 px-2 text-xs" onClick={() => setMatchFilter(v)}>
+                    {l}
+                  </Button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-muted-foreground mr-1">Origem</span>
+                {([
+                  { v: 'all' as const, l: t.financial.sourceAll },
+                  { v: 'bank' as const, l: t.financial.sourceBank },
+                  { v: 'credit_card' as const, l: t.financial.sourceCard },
+                ]).map(({ v, l }) => (
+                  <Button key={v} size="sm" variant={sourceFilter === v ? 'default' : 'outline'}
+                    className="h-7 px-2 text-xs" onClick={() => setSourceFilter(v)}>
+                    {l}
+                  </Button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-muted-foreground mr-1">Ordenar</span>
+                {([
+                  { v: 'date' as const, l: 'Data' },
+                  { v: 'amount' as const, l: 'Valor' },
+                ]).map(({ v, l }) => (
+                  <Button key={v} size="sm" variant={sortBy === v ? 'default' : 'outline'}
+                    className="h-7 px-2 text-xs" onClick={() => setSortBy(v)}>
+                    {l}
+                  </Button>
+                ))}
+              </div>
             </div>
           </div>
+
+          <p className="text-sm text-muted-foreground mb-2">
+            Mostrando {filtered.length} de {pending.length} transações
+          </p>
 
           {filtered.length === 0 && <p className="text-sm text-muted-foreground py-4 text-center">{t.common.noResults}</p>}
 
           <div className="space-y-2">
-            {filtered.map(tx => (
-              <div key={tx.id} className="rounded-lg border bg-card">
-                <div className="flex items-center justify-between p-3">
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm text-muted-foreground">{formatDate(tx.transaction_date)}</span>
-                    <span className="text-sm truncate max-w-[300px]">{tx.description}</span>
-                    {tx.source_type === 'credit_card' && (
-                      <StatusBadge className="bg-accent/15 text-accent">{t.financial.sourceCard}</StatusBadge>
+            {filtered.map(tx => {
+              const melhor = bestMatch(tx.id);
+              const temGrupo = (groupsByTx.get(tx.id) || []).length > 0;
+              return (
+              <div
+                key={tx.id}
+                className={`rounded-lg border bg-card ${
+                  melhor?.tier === 'certain' ? 'border-l-4 border-l-success'
+                    : melhor?.tier === 'probable' ? 'border-l-4 border-l-warning' : ''
+                }`}
+              >
+                <div className="flex items-start justify-between p-3 gap-3 flex-wrap">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm text-muted-foreground tabular-nums">{formatDate(tx.transaction_date)}</span>
+                      <span className="text-sm truncate max-w-[320px]">{tx.description}</span>
+                      {tx.source_type === 'credit_card' && (
+                        <StatusBadge className="bg-accent/15 text-accent">{t.financial.sourceCard}</StatusBadge>
+                      )}
+                    </div>
+                    {/* A correspondência aparece aqui, na linha fechada: antes ela só existia
+                        depois de abrir a transação, e o resumo "N sugestões" não levava a lugar nenhum. */}
+                    {melhor ? (
+                      <p className="text-xs mt-1 flex items-center gap-1.5 flex-wrap">
+                        <Sparkles className="h-3 w-3 text-primary shrink-0" />
+                        <span className="font-medium">{melhor.candidate.label}</span>
+                        {melhor.candidate.clientName && (
+                          <span className="text-muted-foreground">· {melhor.candidate.clientName}</span>
+                        )}
+                        <StatusBadge className={
+                          melhor.tier === 'certain' ? 'bg-success/15 text-success'
+                            : melhor.tier === 'probable' ? 'bg-warning/15 text-warning'
+                            : 'bg-muted text-muted-foreground'
+                        }>
+                          {melhor.score}%
+                        </StatusBadge>
+                      </p>
+                    ) : internalTransferTx.has(tx.id) ? (
+                      <p className="text-xs mt-1 text-muted-foreground">
+                        Parece transferência entre contas da empresa — não é receita nem despesa
+                      </p>
+                    ) : temGrupo ? (
+                      <p className="text-xs mt-1 text-muted-foreground flex items-center gap-1.5">
+                        <Sparkles className="h-3 w-3 shrink-0" />
+                        Pode ser um pagamento agrupado
+                      </p>
+                    ) : !engineLoading && (
+                      <p className="text-xs mt-1 text-muted-foreground">Sem correspondência encontrada</p>
                     )}
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className={`font-semibold ${tx.transaction_type === 'credit' ? 'text-success' : 'text-destructive'}`}>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className={`font-semibold tabular-nums ${tx.transaction_type === 'credit' ? 'text-success' : 'text-destructive'}`}>
                       {tx.transaction_type === 'credit' ? '+' : '-'}{formatCurrency(Number(tx.amount))}
                     </span>
+                    {melhor && reconcileId !== tx.id && (
+                      <Button
+                        size="sm"
+                        onClick={() => handleApplySuggestion(tx, melhor)}
+                        disabled={applySuggestion.isPending}
+                        title={melhor.reasons.map(r => r.detail).join(' · ')}
+                      >
+                        <Check className="h-3 w-3 mr-1" />Confirmar
+                      </Button>
+                    )}
+                    {internalTransferTx.has(tx.id) && reconcileId !== tx.id && (
+                      <Button size="sm" variant="outline" onClick={() => handleDismiss(tx)} disabled={dismiss.isPending}>
+                        Marcar como transferência
+                      </Button>
+                    )}
                     <Button size="sm" variant="outline" onClick={() => openReconcile(tx.id, tx)}>
-                      {t.financial.reconcile}
+                      {reconcileId === tx.id ? 'Fechar' : melhor ? 'Ver opções' : t.financial.reconcile}
                     </Button>
                   </div>
                 </div>
 
                 {reconcileId === tx.id && (
                   <div className="border-t p-4 bg-muted/30 space-y-4">
+                    {/* Sugestões do motor: já consideram sinal de orçamento, saldo de OS e
+                        cobranças — candidatos que as opções manuais abaixo não alcançam. */}
+                    {(() => {
+                      const smart = suggestionsByTx.get(tx.id) || [];
+                      if (engineLoading) {
+                        return <p className="text-sm text-muted-foreground">Analisando correspondências...</p>;
+                      }
+                      if (smart.length === 0) return null;
+                      return (
+                        <div className="space-y-2">
+                          <p className="text-sm font-medium flex items-center gap-1.5">
+                            <Sparkles className="h-3.5 w-3.5 text-primary" />
+                            Correspondências encontradas
+                          </p>
+                          {smart.map(s => (
+                            <div
+                              key={`${s.candidate.kind}-${s.candidate.id}`}
+                              className={`rounded-lg border p-3 space-y-2 ${
+                                s.tier === 'certain' ? 'border-success bg-success/5'
+                                  : s.tier === 'probable' ? 'border-warning bg-warning/5' : ''
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-3 flex-wrap">
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-medium">{s.candidate.label}</span>
+                                    <StatusBadge className="bg-muted text-muted-foreground">
+                                      {CANDIDATE_LABELS[s.candidate.kind]}
+                                    </StatusBadge>
+                                    <StatusBadge className={
+                                      s.tier === 'certain' ? 'bg-success/15 text-success'
+                                        : s.tier === 'probable' ? 'bg-warning/15 text-warning'
+                                        : 'bg-muted text-muted-foreground'
+                                    }>
+                                      {s.score}% de confiança
+                                    </StatusBadge>
+                                  </div>
+                                  {s.candidate.clientName && (
+                                    <p className="text-sm text-muted-foreground">{s.candidate.clientName}</p>
+                                  )}
+                                  {/* De onde veio o valor esperado: o combinado no orçamento
+                                      ou uma estimativa. Sem isso, uma estimativa de 30% parece
+                                      tão firme quanto uma condição acordada com o cliente. */}
+                                  {s.candidate.amountSource === 'condicao' && (
+                                    <p className="text-xs text-muted-foreground">
+                                      Conforme a condição do orçamento
+                                      {s.candidate.conditionLabel ? `: ${s.candidate.conditionLabel}` : ''}
+                                    </p>
+                                  )}
+                                  {s.candidate.amountSource === 'padrao' && (
+                                    <p className="text-xs text-muted-foreground">
+                                      Pela condição padrão (100% materiais + 50% mão de obra) — este
+                                      orçamento não tem condição própria definida
+                                    </p>
+                                  )}
+                                  {s.candidate.amountSource === 'percentual' && (
+                                    <p className="text-xs text-warning">
+                                      Valor estimado — não foi possível separar mão de obra e materiais
+                                    </p>
+                                  )}
+                                  <p className="text-xs text-muted-foreground mt-1">
+                                    {s.reasons.map(r => r.detail).join(' · ')}
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium">{formatCurrency(s.candidate.amount)}</span>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleApplySuggestion(tx, s)}
+                                    disabled={applySuggestion.isPending}
+                                  >
+                                    <Check className="h-3 w-3 mr-1" />{t.financial.confirmReconciliation}
+                                  </Button>
+                                </div>
+                              </div>
+
+                              {/* Diz o que a confirmação vai fazer com a diferença, não só
+                                  que ela existe: recebeu menos deixa saldo em aberto,
+                                  recebeu mais costuma ser juros ou multa. */}
+                              {Math.abs(s.difference) >= 0.01 && (
+                                <p className="text-xs flex items-start gap-1.5 text-warning">
+                                  <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
+                                  <span>
+                                    {s.difference > 0
+                                      ? `Entrou ${formatCurrency(Math.abs(s.difference))} a mais que o esperado — costuma ser juros ou multa por atraso. A baixa será pelo valor recebido.`
+                                      : `Entrou ${formatCurrency(Math.abs(s.difference))} a menos que o esperado — pode ser tarifa do banco ou pagamento parcial. Confirmar dá baixa parcial e mantém ${formatCurrency(Math.abs(s.difference))} em aberto.`}
+                                  </span>
+                                </p>
+                              )}
+
+                              {s.candidate.kind === 'existing_payment' && (
+                                <p className="text-xs text-muted-foreground">
+                                  Este recebimento já está lançado no financeiro. Confirmar apenas
+                                  liga esta linha do extrato a ele — nenhum valor novo é registrado.
+                                </p>
+                              )}
+
+                              {s.candidate.convertsQuote && (
+                                <p className="text-xs flex items-center gap-1.5 text-muted-foreground">
+                                  <AlertTriangle className="h-3 w-3 shrink-0" />
+                                  Confirmar vai aprovar o {s.candidate.documentNumber} e convertê-lo em OS.
+                                </p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+
+                    {/* Quando o cálculo não alcança, o agente entra: ele lê conversas,
+                        histórico e orçamentos em negociação. Só opina — não concilia. */}
+                    <div className="space-y-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleAnalyzeWithAI(tx)}
+                        disabled={analyzeWithAI.isPending}
+                      >
+                        <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+                        {analyzeWithAI.isPending ? 'Analisando...' : 'Analisar com IA'}
+                      </Button>
+                      {aiAnalysis[tx.id] && (
+                        <div className="rounded-lg border bg-card p-3 text-sm whitespace-pre-wrap">
+                          {aiAnalysis[tx.id]}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Pagamento agrupado: o cliente quitou várias contas num depósito só.
+                        Aparece apenas quando nenhuma conta sozinha explica o valor. */}
+                    {(groupsByTx.get(tx.id) || []).length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-sm font-medium">Pode ser um pagamento agrupado</p>
+                        {(groupsByTx.get(tx.id) || []).map((g, i) => (
+                          <div key={i} className="rounded-lg border p-3 text-sm space-y-1">
+                            <div className="flex items-center justify-between gap-3 flex-wrap">
+                              <span className="font-medium">
+                                {g.candidates.length} contas de {g.clientName || 'um mesmo cliente'}
+                              </span>
+                              <span className="font-medium">{formatCurrency(g.total)}</span>
+                            </div>
+                            <ul className="text-xs text-muted-foreground space-y-0.5">
+                              {g.candidates.map(c => (
+                                <li key={`${c.kind}-${c.id}`}>• {c.label} — {formatCurrency(c.amount)}</li>
+                              ))}
+                            </ul>
+                            <div className="flex items-center justify-between gap-2 flex-wrap pt-1">
+                              <span className="text-xs text-muted-foreground">
+                                Cada conta é baixada pelo próprio valor.
+                              </span>
+                              <Button
+                                size="sm"
+                                onClick={() => handleApplyGroup(tx, g)}
+                                disabled={applyGroup.isPending}
+                              >
+                                <Check className="h-3 w-3 mr-1" />
+                                Baixar as {g.candidates.length} contas
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
                     <div className="flex flex-wrap gap-1.5">
                       {modeButtons.map(({ mode, label }) => (
                         <Button key={mode} size="sm" variant={reconcileMode === mode ? 'default' : 'outline'} onClick={() => setReconcileMode(mode)}>
@@ -567,7 +981,8 @@ export function BankReconciliation() {
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

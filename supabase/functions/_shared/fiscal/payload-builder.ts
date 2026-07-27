@@ -357,10 +357,21 @@ export function buildNfeDraftPayload(
       }
       const taxes = buildItemTaxes(it);
       if (taxes) item.taxes = taxes;
-      // A referência à NF-e original é NÍVEL DA NOTA na Contora
-      // (payload.referenced_documents[].access_key → ide/NFref/refNFe), montada
-      // abaixo a partir das chaves por item. NÃO há referência por item no
-      // contrato — o refKeyItem daqui alimenta o grupo agregado da nota.
+      // Referência à NF-e de origem POR ITEM (grupo DFeReferenciado, regra VC02-14):
+      // access_key + item = nItem na nota de COMPRA do fornecedor. Enviamos explícito
+      // porque a ordem da devolução não coincide com a da nota do fornecedor (e na
+      // parcial itens são excluídos) — a inferência por posição da API erraria. A
+      // Contora roteia por ambiente: cabeçalho em produção até 31/08/2026 e por item
+      // a partir de 01/09/2026; em homologação já vai por item. O nível da nota
+      // (referenced_documents, montado abaixo) continua sendo enviado.
+      const refKeyItem = onlyDigits(it.referencedKey);
+      if (refKeyItem.length === 44) {
+        const refDoc: Record<string, unknown> = { access_key: refKeyItem };
+        if (it.referencedItemNumber != null && Number(it.referencedItemNumber) > 0) {
+          refDoc.item = Number(it.referencedItemNumber);
+        }
+        item.referenced_document = refDoc; // → det/DFeReferenciado
+      }
       return item;
     }),
     // Devolução/remessa não têm transação financeira → tPag=90 (Sem Pagamento)

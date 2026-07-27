@@ -637,3 +637,45 @@ export function useTaskReminders(taskId: string | undefined) {
     },
   });
 }
+
+/** Um item em aberto com um cliente/fornecedor — o "fio solto" da Fase 13. */
+export type OpenLoop = {
+  id: string;
+  kind: string;
+  source: 'erp' | 'conversation';
+  title: string;
+  detail: string | null;
+  due_at: string | null;
+  priority: 'low' | 'normal' | 'high' | 'urgent';
+  service_order_id: string | null;
+  service_order_number: string | null;
+  mentions: number;
+  evidence: string | null;
+  opened_at: string;
+  last_seen_at: string;
+  atrasado: boolean;
+};
+
+/**
+ * O que está em aberto com esta entidade AGORA.
+ * A ordenação (atrasado → prioridade → prazo) vem pronta do banco, para a tela e o
+ * agente enxergarem exatamente a mesma fila.
+ */
+export function useEntityOpenLoops(
+  entityType: 'client' | 'supplier',
+  entityId: string | undefined,
+) {
+  return useQuery({
+    queryKey: ['entity-open-loops', entityType, entityId],
+    enabled: !!entityId,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('get_entity_open_loops', {
+        p_entity_type: entityType,
+        p_entity_id: entityId!,
+        p_limit: 20,
+      });
+      if (error) throw error;
+      return (data || []) as OpenLoop[];
+    },
+  });
+}

@@ -1,7 +1,7 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   isWorthAnalyzing, normalizeProposal, formatConversation, CONFIDENCE_FLOOR, buildDateTable,
-  isDetectorAutonomous, shouldAutoCreate, AUTONOMY_MIN_SAMPLE,
+  isDetectorAutonomous, shouldAutoCreate, AUTONOMY_MIN_SAMPLE, loopKeyFromTitle,
   type ConversationMessage, type RawProposal,
 } from "./inbox-detector.ts";
 
@@ -143,4 +143,35 @@ Deno.test("formatConversation: indexa e rotula quem falou", () => {
 Deno.test("CONFIDENCE_FLOOR: followup é o mais exigente", () => {
   assertEquals(CONFIDENCE_FLOOR.followup > CONFIDENCE_FLOOR.promise, true);
   assertEquals(CONFIDENCE_FLOOR.third_party_deadline > CONFIDENCE_FLOOR.client_request, true);
+});
+
+Deno.test("loopKeyFromTitle: títulos equivalentes colidem na mesma chave", () => {
+  // Acento, caixa, pontuação e palavra vazia não podem gerar um segundo fio.
+  const a = loopKeyFromTitle("Acompanhar a entrega dos materiais da OS-1042");
+  const b = loopKeyFromTitle("acompanhar entrega de materiais da OS 1042");
+  assertEquals(a, b);
+  // Note o "os" ausente: a sigla OS cai junto com o artigo "os" da lista de palavras
+  // vazias. Quem discrimina uma OS da outra é o NÚMERO, que permanece.
+  assertEquals(a, "conv:acompanhar-entrega-materiais-1042");
+});
+
+Deno.test("loopKeyFromTitle: OS diferentes continuam sendo fios diferentes", () => {
+  // Consequência do teste acima: se o número não sobrevivesse, toda OS viraria o mesmo fio.
+  assertEquals(
+    loopKeyFromTitle("Acompanhar entrega dos materiais da OS-1042") ===
+    loopKeyFromTitle("Acompanhar entrega dos materiais da OS-1043"),
+    false,
+  );
+});
+
+Deno.test("loopKeyFromTitle: assuntos diferentes NÃO colidem", () => {
+  const entrega = loopKeyFromTitle("Acompanhar entrega dos materiais da OS-1042");
+  const orcamento = loopKeyFromTitle("Enviar orçamento do motor para o Vanderlei");
+  assertEquals(entrega === orcamento, false);
+});
+
+Deno.test("loopKeyFromTitle: título vazio não vira chave coringa", () => {
+  // Se virasse "conv:" para qualquer entrada, dois fios sem título se fundiriam.
+  assertEquals(loopKeyFromTitle(""), "conv:");
+  assertEquals(loopKeyFromTitle("!!!"), "conv:");
 });

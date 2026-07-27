@@ -55,6 +55,7 @@ import { generatePDF, downloadPDF, DEFAULT_PDF_OPTIONS } from '@/lib/pdf-generat
 import type { PDFOptions } from '@/lib/pdf-generator';
 import { PDFOptionsDialog } from '@/components/PDFOptionsDialog';
 import { RegisterDepositDialog } from '@/components/RegisterDepositDialog';
+import { CompletionSendDialog } from '@/components/CompletionSendDialog';
 import { StockAlertDialog } from '@/components/StockAlertDialog';
 import { ReceivePODialog } from '@/components/ReceivePODialog';
 import { OPERATIONAL_EXPENSE_CATEGORIES } from '@/lib/expense-categories';
@@ -1093,6 +1094,10 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [depositDialogOpen, setDepositDialogOpen] = useState(false);
   const [showCommission, setShowCommission] = useState(false);
   const [depositFromFinancial, setDepositFromFinancial] = useState(false);
+  // Prompt opt-in de conclusão (avisar cliente + saldo) — aberto ao concluir a OS.
+  const [completionSend, setCompletionSend] = useState<{
+    open: boolean; balance: number; dueDate: string | null; clientName: string | null; clientPhone: string | null;
+  }>({ open: false, balance: 0, dueDate: null, clientName: null, clientPhone: null });
   const { data: vesselContacts } = useVesselContacts(form.vessel_id || undefined);
 
   // Part inline-card state (matches the services pattern)
@@ -1622,20 +1627,56 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           }
         }
 
-        // M4: Auto-gerar cobranças quando OS é concluída com preset de parcelamento
+        // M4: gerar cobranças do saldo ao concluir (preset de parcelamento) — SEM auto-envio.
+        // Na conclusão o aviso ao cliente é OPT-IN (prompt abaixo), nunca WhatsApp automático.
         if (form.status === 'completed' && form.payment_condition_preset_id) {
           const { generateCollectionsFromOS } = await import('@/lib/generate-collections');
           generateCollectionsFromOS({
             serviceOrderId: orderId!,
             approvalDate: new Date().toISOString().slice(0, 10),
             trigger: 'status_change',
+            autoSend: false,
           })
             .then((res) => {
               if (res.created > 0) {
-                toast.success(`${res.created} cobrança(s) parcelada(s) gerada(s) automaticamente.`);
+                toast.success(`${res.created} cobrança(s) do saldo registrada(s).`);
               }
             })
             .catch((err) => console.error('auto-generate-collections (completed) failed', err));
+        }
+
+        // Conclusão → prompt OPT-IN para avisar o cliente (serviço concluído + saldo). O trigger
+        // sync_balance_due_on_completion já reajustou o vencimento do saldo "na entrega" para a
+        // conclusão real, então o valor/vencimento lidos aqui já vêm certos. Só na TRANSIÇÃO para
+        // concluída (não re-abre a cada re-gravação de OS já concluída) e só se houver saldo.
+        if (form.status === 'completed' && orderData?.status !== 'completed') {
+          try {
+            const [{ data: recRows }, cliRes] = await Promise.all([
+              supabase.from('receivables')
+                .select('balance_amount, due_date, is_deposit, status')
+                .eq('service_order_id', orderId!)
+                .neq('status', 'cancelled'),
+              form.client_id
+                ? supabase.from('clients').select('name, whatsapp, phone').eq('id', form.client_id).maybeSingle()
+                : Promise.resolve({ data: null } as { data: any }),
+            ]);
+            const pend = (recRows || []).filter((r: any) => !r.is_deposit && r.status !== 'paid');
+            const outstanding = pend.reduce((s: number, r: any) => s + Number(r.balance_amount || 0), 0);
+            if (outstanding > 0.009) {
+              const dueRow = pend.slice().sort((a: any, b: any) =>
+                String(a.due_date).localeCompare(String(b.due_date)))[0];
+              const cli = (cliRes as any).data;
+              setCompletionSend({
+                open: true,
+                balance: Math.round(outstanding * 100) / 100,
+                dueDate: dueRow?.due_date ?? null,
+                clientName: cli?.name ?? null,
+                clientPhone: cli?.whatsapp || cli?.phone || null,
+              });
+            }
+          } catch (err) {
+            console.error('completion prompt prep failed', err);
+          }
         }
 
         // Auto-trigger collection generation when status becomes 'invoiced'
@@ -2383,6 +2424,21 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           presetExpensesPct={depositFromFinancial && signalRow ? signalRow.expenses_pct : undefined}
           appliedConditionLabel={form.payment_conditions || ''}
           installments={installmentSource ?? undefined}
+          scheduledEndAt={form.scheduled_end_at || null}
+        />
+      )}
+
+      {/* Prompt opt-in de conclusão (avisar cliente + saldo) */}
+      {!isNew && orderId && (
+        <CompletionSendDialog
+          open={completionSend.open}
+          onOpenChange={v => setCompletionSend(prev => ({ ...prev, open: v }))}
+          serviceOrderId={orderId}
+          osNumber={orderData?.service_order_number || ''}
+          clientName={completionSend.clientName}
+          clientPhone={completionSend.clientPhone}
+          balance={completionSend.balance}
+          dueDate={completionSend.dueDate}
         />
       )}
 

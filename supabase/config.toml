@@ -67,6 +67,12 @@ verify_jwt = false
 [functions.agenda-inbox-detector]
 verify_jwt = false
 
+# Motor de conciliação bancária. Dois chamadores: o painel (manda o JWT do usuário,
+# validado dentro da função via auth.getUser) e a varredura diária (pg_cron, que manda
+# só x-cron-secret). Com verify_jwt=true o gateway barraria o cron antes do código.
+[functions.banking-reconcile]
+verify_jwt = false
+
 # Integração bancária (Open Finance via Pluggy): receptor de webhooks do Pluggy.
 # Chega SEM Authorization — a autenticação é o token secreto na query string
 # (?token=), validado internamente contra PLUGGY_WEBHOOK_TOKEN (timing-safe).

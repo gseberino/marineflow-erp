@@ -184,6 +184,149 @@ export function useFinancialSummary() {
   });
 }
 
+export interface ForecastWeek {
+  /** Segunda-feira da semana, ISO. */
+  inicio: string;
+  rotulo: string;
+  entradas: number;
+  saidas: number;
+  liquido: number;
+  /** Soma dos líquidos até esta semana. */
+  acumulado: number;
+  /** Contas vencidas arrastadas para a primeira semana. */
+  contemAtrasados: boolean;
+}
+
+/**
+ * Projeção de caixa das próximas semanas a partir do que está programado.
+ *
+ * Deliberadamente NÃO projeta saldo bancário absoluto: o sistema não conhece o saldo real
+ * da conta (não há integração bancária ativa), e exibir um "saldo previsto" a partir de um
+ * saldo inicial desconhecido seria inventar número — justamente o tipo de erro que quebra
+ * a confiança num módulo financeiro. O que ela responde é o que dá para responder com
+ * honestidade: quanto entra, quanto sai e qual o resultado líquido de cada semana.
+ *
+ * Contas já vencidas e ainda em aberto entram na primeira semana, porque é quando elas
+ * pressionam o caixa de verdade.
+ */
+export function useCashForecast(semanas: number = 8) {
+  return useQuery({
+    queryKey: ['cash-forecast', semanas],
+    queryFn: async (): Promise<{ weeks: ForecastWeek[]; totalEntradas: number; totalSaidas: number; semanasNegativas: number }> => {
+      const hoje = new Date();
+      hoje.setHours(0, 0, 0, 0);
+      const limite = new Date(hoje);
+      limite.setDate(limite.getDate() + semanas * 7);
+      const limiteISO = limite.toISOString().split('T')[0];
+
+      const [recRes, payRes] = await Promise.all([
+        supabase.from('receivables')
+          .select('balance_amount, due_date')
+          .not('status', 'in', '("paid","cancelled")')
+          .lte('due_date', limiteISO),
+        supabase.from('payables')
+          .select('balance_amount, due_date')
+          .not('status', 'in', '("paid","cancelled")')
+          .lte('due_date', limiteISO),
+      ]);
+
+      // Segunda-feira da semana corrente é a âncora das faixas.
+      const inicioSemana = (d: Date) => {
+        const c = new Date(d);
+        const diaDaSemana = (c.getDay() + 6) % 7; // 0 = segunda
+        c.setDate(c.getDate() - diaDaSemana);
+        c.setHours(0, 0, 0, 0);
+        return c;
+      };
+
+      const primeira = inicioSemana(hoje);
+      const buckets: ForecastWeek[] = [];
+      for (let i = 0; i < semanas; i++) {
+        const inicio = new Date(primeira);
+        inicio.setDate(inicio.getDate() + i * 7);
+        const fim = new Date(inicio);
+        fim.setDate(fim.getDate() + 6);
+        buckets.push({
+          inicio: inicio.toISOString().split('T')[0],
+          rotulo: i === 0 ? 'Esta semana' : i === 1 ? 'Próxima semana'
+            : `${String(inicio.getDate()).padStart(2, '0')}/${String(inicio.getMonth() + 1).padStart(2, '0')} a ${String(fim.getDate()).padStart(2, '0')}/${String(fim.getMonth() + 1).padStart(2, '0')}`,
+          entradas: 0, saidas: 0, liquido: 0, acumulado: 0, contemAtrasados: false,
+        });
+      }
+
+      const indiceDe = (dueDate: string) => {
+        const d = new Date(`${dueDate}T12:00:00`);
+        if (d < hoje) return 0; // vencido pressiona o caixa agora
+        const diff = Math.floor((inicioSemana(d).getTime() - primeira.getTime()) / (7 * 86400000));
+        return diff >= 0 && diff < buckets.length ? diff : -1;
+      };
+
+      for (const r of (recRes.data || [])) {
+        const i = indiceDe(r.due_date as string);
+        if (i < 0) continue;
+        buckets[i].entradas += Number(r.balance_amount || 0);
+        if (i === 0 && new Date(`${r.due_date}T12:00:00`) < hoje) buckets[0].contemAtrasados = true;
+      }
+      for (const p of (payRes.data || [])) {
+        const i = indiceDe(p.due_date as string);
+        if (i < 0) continue;
+        buckets[i].saidas += Number(p.balance_amount || 0);
+        if (i === 0 && new Date(`${p.due_date}T12:00:00`) < hoje) buckets[0].contemAtrasados = true;
+      }
+
+      let acumulado = 0;
+      for (const b of buckets) {
+        b.liquido = Number((b.entradas - b.saidas).toFixed(2));
+        acumulado += b.liquido;
+        b.acumulado = Number(acumulado.toFixed(2));
+      }
+
+      return {
+        weeks: buckets,
+        totalEntradas: buckets.reduce((s, b) => s + b.entradas, 0),
+        totalSaidas: buckets.reduce((s, b) => s + b.saidas, 0),
+        semanasNegativas: buckets.filter(b => b.liquido < 0).length,
+      };
+    },
+  });
+}
+
+/**
+ * Contas a pagar que parecem lançamento repetido: mesmo fornecedor, mesmo valor e
+ * vencimento próximo. Pagar duas vezes o mesmo boleto é um erro caro e silencioso.
+ */
+export function useDuplicatePayables() {
+  return useQuery({
+    queryKey: ['duplicate-payables'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('payables')
+        .select('id, description, amount, due_date, supplier_id, suppliers(name)')
+        .not('status', 'in', '("paid","cancelled")')
+        .order('due_date');
+      if (error) throw error;
+
+      const grupos = new Map<string, any[]>();
+      for (const p of data || []) {
+        const chave = `${p.supplier_id ?? 'sem-fornecedor'}|${Number(p.amount).toFixed(2)}`;
+        grupos.set(chave, [...(grupos.get(chave) || []), p]);
+      }
+
+      return Array.from(grupos.values())
+        .filter(g => g.length > 1)
+        .map(g => ({
+          fornecedor: (g[0] as any).suppliers?.name ?? 'Sem fornecedor',
+          valor: Number(g[0].amount),
+          contas: g,
+          // Vencimentos no mesmo mês reforçam a suspeita de duplicidade; espalhados pelo
+          // ano são provavelmente parcelas legítimas de um contrato.
+          mesmoMes: new Set(g.map((p: any) => String(p.due_date).slice(0, 7))).size === 1,
+        }))
+        .filter(g => g.mesmoMes);
+    },
+  });
+}
+
 export function useCashFlow(months: number = 6) {
   return useQuery({
     queryKey: ['cash-flow', months],

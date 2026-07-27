@@ -7,6 +7,11 @@ describe("buildDanfeFilename", () => {
       .toBe("Devolução 25 - KAMELL COMERCIO.pdf");
   });
 
+  it("inclui 'Referente NF <origem>' quando a devolução tem nota de origem", () => {
+    expect(buildDanfeFilename({ nature: "Devolução de compra", number: 26, reference: "34395", recipient: "KAMELL COMERCIO E SERVICOS LTDA" }))
+      .toBe("Devolução 26 - Referente NF 34.395 - KAMELL COMERCIO.pdf");
+  });
+
   it("usa só a 1ª palavra da natureza e as 2 primeiras do destinatário", () => {
     expect(buildDanfeFilename({ nature: "Venda de mercadoria", number: 1042, recipient: "Marina Azul Nautica Ltda" }))
       .toBe("Venda 1042 - Marina Azul.pdf");

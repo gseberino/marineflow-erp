@@ -1195,6 +1195,13 @@ export default function FiscalEmission() {
     setItems((prev) => prev.map((it, i) => (i === index ? { ...it, ...patch } : it)));
   };
 
+  // Devolução parcial: marcar/desmarcar todos os itens de uma vez. Sem isso, para
+  // devolver 1 item de uma nota grande o usuário desmarcava todos os outros na mão
+  // — erro fácil (itens vizinhos/parecidos ficavam marcados por engano).
+  const setAllIncluded = (included: boolean) => {
+    setItems((prev) => prev.map((it) => ({ ...it, included })));
+  };
+
   const removeItem = (index: number) => {
     setItems((prev) => prev.filter((_, i) => i !== index));
   };
@@ -1429,6 +1436,7 @@ export default function FiscalEmission() {
         const filename = buildDanfeFilename({
           nature: (selectedNature as any)?.label,
           number: res.number,
+          reference: (returnSource as any)?.number, // nº da NF de compra (devolução)
           recipient: recipientName,
           extension: res.is_pdf ? 'pdf' : 'xml',
         });
@@ -2620,11 +2628,23 @@ export default function FiscalEmission() {
             </Card>
 
             <Card>
-              <CardHeader className="pb-2 flex flex-row items-center justify-between">
-                <CardTitle className="text-sm">Itens ({items.length})</CardTitle>
-                <Button size="sm" variant="outline" onClick={addItem}>
-                  <Plus className="h-3.5 w-3.5 mr-1" />Adicionar item
-                </Button>
+              <CardHeader className="pb-2 flex flex-row items-center justify-between gap-2 flex-wrap">
+                <CardTitle className="text-sm">
+                  Itens ({items.length}){isReturn && items.length > 0
+                    ? ` · ${includedItems.length} incluído${includedItems.length === 1 ? '' : 's'} na devolução`
+                    : ''}
+                </CardTitle>
+                <div className="flex items-center gap-2">
+                  {isReturn && items.length > 1 && (
+                    <>
+                      <Button size="sm" variant="outline" onClick={() => setAllIncluded(false)}>Desmarcar todos</Button>
+                      <Button size="sm" variant="outline" onClick={() => setAllIncluded(true)}>Marcar todos</Button>
+                    </>
+                  )}
+                  <Button size="sm" variant="outline" onClick={addItem}>
+                    <Plus className="h-3.5 w-3.5 mr-1" />Adicionar item
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent className="space-y-3">
                 {items.length === 0 && (
@@ -2633,7 +2653,10 @@ export default function FiscalEmission() {
                 {items.map((it, index) => {
                   // Item fora da devolução (checkbox desmarcado) → recolhido.
                   const collapsed = it.included === false;
-                  const itemTotal = Math.max(0, it.quantity * it.unit_price - (it.discount || 0)) + (it.other_expenses || 0);
+                  // Inclui o IPI devolvido (ipiUnit × qtd, arredondado) — é "por fora"
+                  // e integra o total da nota (vIPIDevol), como na emissão.
+                  const ipiDevolItem = Math.round((it.ipiUnit || 0) * (it.quantity || 0) * 100) / 100;
+                  const itemTotal = Math.max(0, it.quantity * it.unit_price - (it.discount || 0)) + (it.other_expenses || 0) + ipiDevolItem;
                   return (
                   <div key={index} className={`rounded-lg border p-3 ${collapsed ? 'bg-muted/20' : 'space-y-2'}`}>
                     {/* Devolução: incluir/excluir o item (parcial) + referência por item (VC02-14). */}
@@ -2730,6 +2753,23 @@ export default function FiscalEmission() {
                         <p className="text-[10px] text-muted-foreground">
                           Inclui {formatCurrency(it.other_expenses!)} de despesas acessórias (IPI da nota de compra).
                         </p>
+                      )}
+                      {/* IPI devolvido editável: reproduz o vIPI do XML da compra, mas
+                          ajustável para casar com o arredondamento do fornecedor (1 centavo). */}
+                      {it.referencedItemNumber != null && (it.ipiUnit || 0) > 0 && (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Label className="text-[10px] text-muted-foreground shrink-0">IPI devolvido (R$)</Label>
+                          <Input
+                            type="number" min="0" step="0.01" className="h-8 text-xs w-28"
+                            value={ipiDevolItem}
+                            onChange={(e) => {
+                              const total = Math.max(0, parseFloat(e.target.value) || 0);
+                              const q = it.quantity || 0;
+                              updateItem(index, { ipiUnit: q > 0 ? total / q : 0 });
+                            }}
+                          />
+                          <span className="text-[10px] text-muted-foreground">vIPIDevol (impostoDevol). Reproduz o vIPI da nota de compra; ajuste só se o fornecedor confirmar outro valor.</span>
+                        </div>
                       )}
 
                       {/* Resumo fiscal + botão para os detalhes. */}

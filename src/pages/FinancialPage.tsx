@@ -16,6 +16,7 @@ import { ReceivableFormDialog } from '@/components/ReceivableFormDialog';
 import { PayableFormDialog } from '@/components/PayableFormDialog';
 import { BankReconciliation } from '@/components/BankReconciliation';
 import { ReimbursementsPanel } from '@/components/ReimbursementsPanel';
+import { CashForecastPanel } from '@/components/CashForecastPanel';
 import { DREPanel } from '@/components/DREPanel';
 import { AgingReportPanel } from '@/components/AgingReportPanel';
 import { FinancialFilterPanel, applyFilters, defaultFilters, type FinancialFilters } from '@/components/FinancialFilterPanel';
@@ -127,7 +128,7 @@ export default function FinancialPage() {
   const [whatsAppTarget, setWhatsAppTarget] = useState<SendViaWhatsAppTarget | null>(null);
   const [recFilters, setRecFilters] = useState<FinancialFilters>({ ...defaultFilters });
   const [payFilters, setPayFilters] = useState<FinancialFilters>({ ...defaultFilters });
-  const [paySubTab, setPaySubTab] = useState<'list' | 'reimbursements'>('list');
+  const [paySubTab, setPaySubTab] = useState<'list' | 'reimbursements' | 'forecast'>('list');
   const [groupBy, setGroupBy] = useState<'none' | 'category' | 'supplier' | 'month'>('none');
   const { data: pendingReimb } = usePendingReimbursements();
 
@@ -688,6 +689,9 @@ export default function FinancialPage() {
                 <Button size="sm" variant={paySubTab === 'reimbursements' ? 'default' : 'outline'} onClick={() => setPaySubTab('reimbursements')}>
                   {t.financial.pendingReimbursements} ({pendingReimb?.length || 0})
                 </Button>
+                <Button size="sm" variant={paySubTab === 'forecast' ? 'default' : 'outline'} onClick={() => setPaySubTab('forecast')}>
+                  Programação
+                </Button>
               </div>
             </div>
             <div className="flex gap-2">
@@ -713,6 +717,8 @@ export default function FinancialPage() {
 
           {paySubTab === 'reimbursements' ? (
             <ReimbursementsPanel />
+          ) : paySubTab === 'forecast' ? (
+            <CashForecastPanel />
           ) : (
           <>
           <FinancialFilterPanel type="payable" filters={payFilters} onChange={setPayFilters} />

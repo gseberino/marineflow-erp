@@ -25,6 +25,11 @@ export interface RawProposal {
   time?: string | null;       // HH:MM
   priority?: string | null;
   evidence_message_index?: number | null;
+  // Fase 14 — visão de conjunto:
+  /** Código [L1], [L2]… de um fio já aberto que esta menção ATUALIZA (em vez de duplicar). */
+  updates_open_loop?: string | null;
+  /** Número da OS a que o compromisso pertence, quando a conversa deixa claro. */
+  service_order_number?: string | null;
 }
 
 export interface Proposal extends RawProposal {
@@ -44,6 +49,28 @@ export const CONFIDENCE_FLOOR: Record<DetectorKind, number> = {
 };
 
 export interface DetectorStats { accepted: number; dismissed: number }
+
+/**
+ * Chave estável de um fio vindo da conversa, derivada do título.
+ * É a REDE DE SEGURANÇA do agrupamento: o caminho principal é o modelo apontar
+ * updates_open_loop; quando ele não aponta, dois títulos equivalentes ainda colidem aqui e
+ * viram um fio só. Sem acento, sem pontuação, sem palavra vazia — "Acompanhar a entrega dos
+ * materiais" e "acompanhar entrega de materiais" produzem a mesma chave.
+ */
+const PALAVRAS_VAZIAS = new Set([
+  "a", "o", "as", "os", "de", "da", "do", "das", "dos", "e", "em", "no", "na", "nos", "nas",
+  "para", "pra", "com", "um", "uma", "ao", "aos", "por", "que",
+]);
+
+export function loopKeyFromTitle(title: string): string {
+  const limpo = String(title || "")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")  // tira marca de acento
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 0 && !PALAVRAS_VAZIAS.has(w));
+  return "conv:" + limpo.join("-").slice(0, 80);
+}
 
 /**
  * Autonomia graduada (Fase 11): um detector só passa a criar tarefa DIRETO depois de
@@ -163,6 +190,8 @@ const PROPOSE_TOOL: ClaudeToolSchema = {
             due_date: { type: "string", description: "YYYY-MM-DD se a conversa indicar dia. Omita se não houver." },
             time: { type: "string", description: "HH:MM só se houver hora marcada explícita." },
             priority: { type: "string", enum: ["low", "normal", "high", "urgent"] },
+            updates_open_loop: { type: "string", description: "Código [L1], [L2]… do fio JÁ ABERTO que esta menção apenas atualiza. Preencha sempre que o assunto já estiver na lista — assim não nasce uma segunda tarefa quase igual." },
+            service_order_number: { type: "string", description: "Número da OS a que este compromisso pertence, copiado da lista de contexto. Só preencha se a conversa deixar claro." },
           },
           required: ["title", "evidence", "detector", "confidence"],
         },
@@ -199,11 +228,18 @@ export function buildDateTable(now: Date): string {
   return linhas.join("\n");
 }
 
-export function buildDetectorPrompt(hojeBRT: string, contactLabel: string, dateTable = ""): string {
+export function buildDetectorPrompt(
+  hojeBRT: string, contactLabel: string, dateTable = "", erpContext = "",
+): string {
   return `Você analisa uma conversa de WhatsApp de uma empresa de manutenção náutica (HBR Marine) e extrai APENAS compromissos concretos que geram trabalho para a EQUIPE DA HBR.
 
 Hoje é ${hojeBRT} (America/Sao_Paulo). Conversa com: ${contactLabel}.
 ${dateTable ? `\nCONVERSÃO DE DATAS (use exatamente estes valores em due_date — não calcule por conta própria):\n${dateTable}\n` : ""}
+${erpContext ? `\nCONTEXTO JÁ REGISTRADO NO SISTEMA sobre este contato:\n${erpContext}\n
+Use este contexto para:
+- Escrever no NÍVEL CERTO: se a conversa cita um item de uma entrega maior, fale do conjunto e da OS ("Acompanhar entrega dos materiais da OS-1042"), não só do item ("acompanhar baterias").
+- Citar o número da OS no título quando a conversa for claramente sobre ela.
+- NÃO duplicar: se já existe tarefa cobrindo o assunto, não proponha outra igual.\n` : ""}
 
 O que É compromisso (proponha):
 - promise: alguém da HBR prometeu algo ("vou te mandar o orçamento amanhã", "te ligo segunda").
@@ -225,7 +261,13 @@ Regras invioláveis:
 4. Só coloque data/hora se a conversa disser. Nunca invente prazo. Quando a conversa citar
    um dia ("segunda", "amanhã", "dia 12", "essa semana"), CONVERTA para due_date usando a
    tabela acima — uma tarefa com dia dito e sem due_date é um erro seu.
-5. No máximo 3 propostas por conversa — as mais importantes.`;
+5. No máximo 3 propostas por conversa — as mais importantes.
+6. FALE DO CONJUNTO, NÃO DO ITEM. Se a conversa cita uma peça de uma entrega maior que já
+   está no contexto, o compromisso é a entrega inteira: "Acompanhar entrega dos materiais da
+   OS-1042", não "acompanhar as baterias". O item vira detalhe, não vira tarefa própria.
+7. NÃO DUPLIQUE. Se o assunto já está na lista de fios abertos, preencha updates_open_loop
+   com o código dele ([L1], [L2]…) e não crie proposta nova para o mesmo assunto. Uma
+   cobrança repetida do mesmo pedido é o MESMO fio, mais insistente — não um segundo fio.`;
 }
 
 /** Formata a conversa para o modelo, com índices para a evidência. */
@@ -244,13 +286,14 @@ export async function detectInConversation(
   msgs: ConversationMessage[],
   contactLabel: string,
   now: Date = new Date(),
+  erpContext = "",
 ): Promise<Proposal[]> {
   if (!isWorthAnalyzing(msgs)) return [];
 
   const hojeBRT = new Date(now.getTime() - 3 * 3600000).toISOString().slice(0, 10);
   const result = await callClaude({
     model: MODEL_LITE,
-    system: [{ type: "text", text: buildDetectorPrompt(hojeBRT, contactLabel, buildDateTable(now)) }],
+    system: [{ type: "text", text: buildDetectorPrompt(hojeBRT, contactLabel, buildDateTable(now), erpContext) }],
     messages: [{ role: "user", content: [{ type: "text", text: formatConversation(msgs) }] }],
     tools: [PROPOSE_TOOL],
     maxTokens: 1500,

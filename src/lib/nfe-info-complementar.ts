@@ -226,9 +226,10 @@ export function buildDevolucaoInfo(input: {
     partes.push(`Valor do ICMS para crédito do destinatário: ${brl(input.icmsValue)}`);
   }
   if (input.ipiValue != null && input.ipiValue > 0) {
-    // Sem ";" no meio: o ";" é o separador de blocos (vira quebra de linha no DANFE).
+    // Curto de propósito: linha longa quebra feio na coluna estreita do DANFE
+    // (separava "R$" do valor). Sem ";" no meio (";" é o separador de blocos).
     partes.push(
-      `Valor do IPI devolvido ao fornecedor (grupo impostoDevol / tag vIPIDevol da NF-e, integra o total da nota): ${brl(input.ipiValue)}`,
+      `Valor do IPI devolvido ao fornecedor (impostoDevol/vIPIDevol): ${brl(input.ipiValue)}`,
     );
   }
 

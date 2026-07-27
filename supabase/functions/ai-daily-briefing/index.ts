@@ -273,9 +273,73 @@ Deno.serve(async (req) => {
       recebLines.push(`   • ${nome || "(sem cliente)"} — ${fmt.format(Number(r.balance_amount ?? r.amount ?? 0))} · vencido ${dias}d`);
     }
 
+    // ── Extrato por identificar (varredura de conciliação) ─────────────────────
+    // Só reporta: dinheiro que entrou na conta e ainda não foi ligado a nada. Não concilia
+    // nada sozinho aqui — a conciliação automática só acontece na camada de certeza, e
+    // por ação explícita na tela ou no agente.
+    const conciliaLines: string[] = [];
+    try {
+      const { data: pendentesBanco } = await admin
+        .from("bank_transactions")
+        .select("id, transaction_date, description, amount, transaction_type")
+        .eq("reconciled", false)
+        .eq("transaction_type", "credit")
+        .order("amount", { ascending: false })
+        .limit(4);
+
+      const pend = (pendentesBanco as any[]) || [];
+      if (pend.length > 0) {
+        const total = pend.reduce((s, t) => s + Number(t.amount || 0), 0);
+        conciliaLines.push(`🏦 Entradas sem identificação: *${pend.length}* (${fmt.format(total)})`);
+
+        // Roda o motor para dizer o que essas entradas provavelmente são, em vez de só
+        // apontar que existem. Só sugere — conciliar continua sendo ação explícita.
+        let sugestoesPorTx = new Map<string, string>();
+        try {
+          const resp = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/banking-reconcile`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-cron-secret": Deno.env.get("CRON_SECRET") ?? "",
+            },
+            body: JSON.stringify({ action: "suggest", limit: 20 }),
+          });
+          if (resp.ok) {
+            const dados = await resp.json();
+            for (const item of dados.transactions || []) {
+              const melhor = (item.suggestions || [])[0];
+              if (melhor) {
+                sugestoesPorTx.set(
+                  item.transaction.id,
+                  `${melhor.candidate.label}${melhor.candidate.clientName ? ` (${melhor.candidate.clientName})` : ""} · ${melhor.score}%`,
+                );
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("[ai-daily-briefing] motor de conciliação indisponível:", e);
+        }
+
+        for (const t of pend.slice(0, 3)) {
+          const desc = String(t.description || "").slice(0, 40);
+          const palpite = sugestoesPorTx.get(t.id);
+          conciliaLines.push(
+            palpite
+              ? `   • ${fmt.format(Number(t.amount))} — parece ser ${palpite}`
+              : `   • ${fmt.format(Number(t.amount))} — ${desc}`,
+          );
+        }
+      }
+    } catch (e) {
+      console.warn("[ai-daily-briefing] varredura de conciliação falhou:", e);
+    }
+
     // Sugestão do dia (Onda 1): 1 sugestão acionável, rotativa por dia — reusa os candidatos
     // já levantados (orçamentos parados, recebíveis vencidos, OS paradas). Uma por dia, sem spam.
     const sugestoes: string[] = [];
+    if (conciliaLines.length > 0) {
+      sugestoes.push("conciliar as entradas do extrato que ainda não foram identificadas. Me peça *conciliar extrato* que eu analiso e sugiro as correspondências.");
+    }
     for (const q of flaggedQuotes) {
       sugestoes.push(`dar um follow-up no orçamento de *${q.nome}* (${fmt.format(q.valor)}), parado há ${q.dias}d. Me peça que eu preparo.`);
     }
@@ -323,6 +387,7 @@ Deno.serve(async (req) => {
       ...recebLines,
       ...(upcomingCount > 0 ? [`🔜 A vencer (próx. 3 dias): *${upcomingCount}* (${fmt.format(upcomingSum)})`] : []),
       `✅ Aprovações da IA pendentes: *${pendingCount ?? 0}*`,
+      ...conciliaLines,
       ...stuckLines,
       ...manutLines,
       ...stockLines,

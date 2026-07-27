@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ClientFormDialog } from '@/components/ClientFormDialog';
 import { RecordHistory } from '@/components/RecordHistory';
 import { EntityTasksPanel } from '@/components/agenda/EntityTasksPanel';
+import { OpenLoopsPanel } from '@/components/agenda/OpenLoopsPanel';
 import { PageShell } from '@/v2/components/PageShell';
 import { KPIStat } from '@/v2/components/KPIStat';
 import { StatusChip, type StatusTone } from '@/v2/components/StatusChip';
@@ -162,6 +163,10 @@ export default function ClientDetailV2() {
           <KPIStat label={t.clients.vessels} value={String(vessels?.length ?? 0)} />
           <KPIStat label={t.clients.serviceOrders} value={String(orders?.length ?? 0)} />
         </div>
+
+        {/* Acima das abas, igual ao V1: o que está pendente com o cliente aparece ao abrir a
+            tela, sem exigir um clique. Some sozinho quando não há nada. */}
+        <OpenLoopsPanel entityType="client" entityId={id} title="Em aberto com este cliente" />
 
         <Tabs defaultValue="vessels">
           <TabsList className="flex h-auto w-full flex-wrap justify-start">

@@ -98,4 +98,35 @@ describe('computeSchedule — sinal + saldo (com desconto)', () => {
     ]);
     expect(s.balance).toHaveLength(0);
   });
+
+  it("saldo 'em X dias' tem dueBasis='days'", () => {
+    const s = computeSchedule(ORC_00060, COND_00060_COMPLETA);
+    expect(s.balance[0].dueBasis).toBe('days');
+    expect(s.balance[0].days).toBe(30);
+  });
+});
+
+// Condição REAL "na entrega": a parcela de saldo é tipo='entrega' com days_after_approval=0.
+// A heurística antiga (days===0 = sinal) classificava essa parcela como SINAL → saldo sumia (bug).
+const ORDER_ENTREGA = { labor_cost_total: 2000, parts_cost_total: 1000, discount_amount: 0 };
+const COND_ENTREGA = [
+  { tipo: 'aprovacao' as const, label: 'Sinal', services_pct: 50, parts_pct: 100, expenses_pct: 100, days_after_approval: 0 },
+  { tipo: 'entrega' as const, label: 'Saldo', services_pct: 50, parts_pct: 0, expenses_pct: 0, days_after_approval: 0 },
+];
+
+describe("classificação por tipo — parcela 'na entrega' (days=0) NÃO é sinal", () => {
+  it('a parcela entrega vira SALDO com dueBasis=delivery, não sinal', () => {
+    const s = computeSchedule(ORDER_ENTREGA, COND_ENTREGA);
+    expect(s.signalAmount).toBeCloseTo(2000, 2); // 2000*0.5 + 1000*1.0
+    expect(s.balance).toHaveLength(1);
+    expect(s.balance[0].amount).toBeCloseTo(1000, 2); // 2000*0.5
+    expect(s.balance[0].dueBasis).toBe('delivery');
+    expect(s.signalAmount + s.balanceTotal).toBeCloseTo(3000, 2);
+  });
+
+  it('computeDeposit acha a parcela de aprovação como sinal (não a de entrega)', () => {
+    const r = computeDeposit(ORDER_ENTREGA, COND_ENTREGA);
+    expect(r.signal).toEqual({ servicesPct: 50, partsPct: 100, expensesPct: 100 });
+    expect(r.amount).toBeCloseTo(2000, 2);
+  });
 });
