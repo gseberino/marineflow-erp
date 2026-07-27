@@ -1645,39 +1645,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             .catch((err) => console.error('auto-generate-collections (completed) failed', err));
         }
 
-        // Conclusão → prompt OPT-IN para avisar o cliente (serviço concluído + saldo). O trigger
-        // sync_balance_due_on_completion já reajustou o vencimento do saldo "na entrega" para a
-        // conclusão real, então o valor/vencimento lidos aqui já vêm certos. Só na TRANSIÇÃO para
-        // concluída (não re-abre a cada re-gravação de OS já concluída) e só se houver saldo.
-        if (form.status === 'completed' && orderData?.status !== 'completed') {
-          try {
-            const [{ data: recRows }, cliRes] = await Promise.all([
-              supabase.from('receivables')
-                .select('balance_amount, due_date, is_deposit, status')
-                .eq('service_order_id', orderId!)
-                .neq('status', 'cancelled'),
-              form.client_id
-                ? supabase.from('clients').select('name, whatsapp, phone').eq('id', form.client_id).maybeSingle()
-                : Promise.resolve({ data: null } as { data: any }),
-            ]);
-            const pend = (recRows || []).filter((r: any) => !r.is_deposit && r.status !== 'paid');
-            const outstanding = pend.reduce((s: number, r: any) => s + Number(r.balance_amount || 0), 0);
-            if (outstanding > 0.009) {
-              const dueRow = pend.slice().sort((a: any, b: any) =>
-                String(a.due_date).localeCompare(String(b.due_date)))[0];
-              const cli = (cliRes as any).data;
-              setCompletionSend({
-                open: true,
-                balance: Math.round(outstanding * 100) / 100,
-                dueDate: dueRow?.due_date ?? null,
-                clientName: cli?.name ?? null,
-                clientPhone: cli?.whatsapp || cli?.phone || null,
-              });
-            }
-          } catch (err) {
-            console.error('completion prompt prep failed', err);
-          }
-        }
+        // (O prompt opt-in de conclusão fica no handleStatusChange — onde a conclusão realmente
+        // acontece via o seletor de status. Aqui, no salvar, ele não caberia.)
 
         // Auto-trigger collection generation when status becomes 'invoiced'
         if (form.status === 'invoiced') {
@@ -1794,6 +1763,39 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         if (totalDeposit > 0) {
           const fmt = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalDeposit);
           toast.info(`Sinal de ${fmt} já foi recebido. Lembre-se de descontar no valor da cobrança final.`, { duration: 8000 });
+        }
+      }
+
+      // Conclusão → prompt OPT-IN para avisar o cliente (serviço concluído + saldo). A mutation
+      // acima já criou os recebíveis da conclusão e o trigger ajustou os vencimentos "na entrega",
+      // então o saldo/vencimento lidos aqui já vêm certos. Só abre quando há saldo em aberto.
+      if (newStatus === 'completed') {
+        try {
+          const [{ data: recRows }, cliRes] = await Promise.all([
+            supabase.from('receivables')
+              .select('balance_amount, due_date, is_deposit, status')
+              .eq('service_order_id', orderId)
+              .neq('status', 'cancelled'),
+            form.client_id
+              ? supabase.from('clients').select('name, whatsapp, phone').eq('id', form.client_id).maybeSingle()
+              : Promise.resolve({ data: null } as { data: any }),
+          ]);
+          const pend = (recRows || []).filter((r: any) => !r.is_deposit && r.status !== 'paid');
+          const outstanding = pend.reduce((s: number, r: any) => s + Number(r.balance_amount || 0), 0);
+          if (outstanding > 0.009) {
+            const dueRow = pend.slice().sort((a: any, b: any) =>
+              String(a.due_date).localeCompare(String(b.due_date)))[0];
+            const cli = (cliRes as any).data;
+            setCompletionSend({
+              open: true,
+              balance: Math.round(outstanding * 100) / 100,
+              dueDate: dueRow?.due_date ?? null,
+              clientName: cli?.name ?? null,
+              clientPhone: cli?.whatsapp || cli?.phone || null,
+            });
+          }
+        } catch (err) {
+          console.error('completion prompt prep failed', err);
         }
       }
     } catch (e: any) {

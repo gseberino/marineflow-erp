@@ -178,6 +178,42 @@ export function computeSchedule(
   return computeScheduleFromParts(b.laborCost, b.partsCost, b.expensesTotal, b.discountRatio, installments);
 }
 
+/** Uma parcela do plano, com valor (com desconto) e se é a entrada (sinal). */
+export interface InstallmentRow extends ScheduleRow {
+  isSignal: boolean;
+}
+
+/**
+ * TODAS as parcelas da condição (entrada + saldo), cada uma com o valor já com desconto — para
+ * gerar os recebíveis de uma OS concluída SEM sinal (o cliente deve o plano inteiro). Diferente de
+ * computeScheduleFromParts, que separa/exclui a entrada (usada quando o sinal já foi pago).
+ */
+export function computeAllInstallments(
+  laborCost: number,
+  partsCost: number,
+  expensesTotal: number,
+  discountRatio: number,
+  installments: DepositInstallment[] | null | undefined,
+): InstallmentRow[] {
+  const rows = Array.isArray(installments) ? installments.map(normalizeInstallment) : [];
+  const out: InstallmentRow[] = [];
+  rows.forEach((r, i) => {
+    const amount = depositAmountFromPcts(
+      laborCost, partsCost, expensesTotal, discountRatio, r.servicesPct, r.partsPct, r.expensesPct,
+    );
+    if (amount > 0) {
+      out.push({
+        label: r.label || `Parcela ${i + 1}`,
+        amount,
+        days: r.days,
+        dueBasis: r.tipo === "entrega" ? "delivery" : "days",
+        isSignal: isSignalInstallment(r),
+      });
+    }
+  });
+  return out;
+}
+
 /** Cálculo completo do sinal do orçamento a partir das parcelas da condição de pagamento. */
 export function computeDeposit(
   order: DepositOrderLike,
