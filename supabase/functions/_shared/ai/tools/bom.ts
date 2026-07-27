@@ -167,4 +167,34 @@ export const bomTools: ToolDef[] = [
       };
     },
   },
+  {
+    name: "produce_composed_product",
+    description:
+      "PRODUZ um produto composto/kit: consome os componentes do estoque (conforme a receita/BOM) e credita o produto acabado. Use quando o dono disser 'produzi 3 kits X', 'montei 2 unidades do composto Y'. Checa a disponibilidade (não consome estoque reservado) e é atômico — se faltar componente, não consome nada e diz o que faltou. Não emite nota nem mexe em OS.",
+    input_schema: {
+      type: "object",
+      properties: {
+        product_id: { type: "string", description: "UUID do produto composto/kit a produzir." },
+        quantity: { type: "number", description: "Quantas unidades produzir (padrão 1)." },
+      },
+      required: ["product_id"],
+    },
+    risk: "low",
+    async execute(args, { sb }) {
+      const qty = Number(args.quantity) || 1;
+      const { data, error } = await sb.rpc("produce_composed_product", { p_parent: args.product_id, p_qty: qty });
+      if (error) throw error;
+      const res = (data as any) || {};
+      if (res.ok === false) {
+        return { error: res.error || "Não foi possível produzir.", faltantes: res.faltantes ?? undefined };
+      }
+      return {
+        ok: true,
+        produzido: res.produzido,
+        novo_estoque: res.novo_estoque_pai,
+        consumidos: res.consumidos,
+        instrucao: "Componentes baixados e produto acabado creditado no estoque.",
+      };
+    },
+  },
 ];
