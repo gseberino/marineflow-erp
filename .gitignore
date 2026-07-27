@@ -26,3 +26,6 @@ dist-ssr
 # CLI/one-off local
 scratch/
 supabase/.temp/
+
+# fotos baixadas do catálogo do fabricante (pesadas; refazíveis pelos scripts)
+.catalogo-fotos/

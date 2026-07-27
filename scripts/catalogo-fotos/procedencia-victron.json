@@ -1,0 +1,1562 @@
+[
+  {
+    "sku": "2584",
+    "estoque": 2,
+    "preco": 17593.58,
+    "familia": "multiplus-ii",
+    "name": "Inversor e Carregador MultiPlus - II 12/3000/120 - 32 - 220V - Victron Energy",
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "multiplus-ii",
+    "pagina": "https://www.victronenergy.com/inverters-chargers/multiplus-ii",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/PMP122305010_Multiplus-II 12V 3kVA_120-32 230V (front).png",
+    "arquivo": "PMP122305010_Multiplus-II 12V 3kVA_120-32 230V (front).png",
+    "numeros_casados": [
+      12,
+      3000,
+      120,
+      32,
+      230
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PMP122305010_Multiplus-II 12V 3kVA_120-32 230V (bottom.png",
+        "arquivo": "PMP122305010_Multiplus-II 12V 3kVA_120-32 230V (bottom.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PMP122305010_Multiplus-II 12V 3kVA_120-32 230V (left).png",
+        "arquivo": "PMP122305010_Multiplus-II 12V 3kVA_120-32 230V (left).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PMP122305010_Multiplus-II 12V 3kVA_120-32 230V (right).png",
+        "arquivo": "PMP122305010_Multiplus-II 12V 3kVA_120-32 230V (right).png"
+      }
+    ]
+  },
+  {
+    "sku": "2658",
+    "estoque": 1,
+    "preco": 13375.23,
+    "familia": "multiplus-ii",
+    "name": "Inversor e Carregador MultiPlus - II 24/3000/70 - 32 - 220V - Victron Energy",
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "multiplus-ii",
+    "pagina": "https://www.victronenergy.com/inverters-chargers/multiplus-ii",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/MultiPlus-II 24V 3kVA (front).png",
+    "arquivo": "MultiPlus-II 24V 3kVA (front).png",
+    "numeros_casados": [
+      24,
+      3000
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PMP122305010_Multiplus-II 12V 3kVA_120-32 230V (front).png",
+        "arquivo": "PMP122305010_Multiplus-II 12V 3kVA_120-32 230V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PMP122305010_Multiplus-II 12V 3kVA_120-32 230V (bottom.png",
+        "arquivo": "PMP122305010_Multiplus-II 12V 3kVA_120-32 230V (bottom.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MultiPlus-II 48V 3kVA (front).png",
+        "arquivo": "MultiPlus-II 48V 3kVA (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2598",
+    "estoque": 1,
+    "preco": 2699.23,
+    "familia": "orion",
+    "name": "Carregador de Bateria Inteligente Orion-Tr Smart 12/12-30A - Victron Energy",
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "orion-tr-smart",
+    "pagina": "https://www.victronenergy.com/dc-dc-converters/orion-tr-smart",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Orion-Tr Smart 12-12-30 (front).png",
+    "arquivo": "Orion-Tr Smart 12-12-30 (front).png",
+    "numeros_casados": [
+      12,
+      30
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion-Tr Smart 48-12-30 (front).png",
+        "arquivo": "Orion-Tr Smart 48-12-30 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Orion-Tr Smart 24-24-12 (front).png",
+        "arquivo": "Orion-Tr Smart 24-24-12 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/products/Orion-Tr isolated_24 12.png",
+        "arquivo": "Orion-Tr isolated_24 12.png"
+      }
+    ]
+  },
+  {
+    "sku": "2752",
+    "estoque": 1,
+    "preco": 1721.27,
+    "familia": "gx",
+    "name": "Multicontrole Digital 200/200A GX (RJ45) - Victron Energy",
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "digital-multi-control-panel-gx",
+    "pagina": "https://www.victronenergy.com/display-and-panels/digital-multi-control-panel-gx",
+    "conf_familia": "media",
+    "imagem": "https://www.victronenergy.com/upload/products/274_205_20180706100526.png",
+    "arquivo": "274_205_20180706100526.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        200,
+        45
+      ],
+      "sobrando": [
+        274,
+        205
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Digital_MultiControl_200A_GX (front).jpg",
+        "arquivo": "Digital_MultiControl_200A_GX (front).jpg"
+      }
+    ]
+  },
+  {
+    "sku": "2763",
+    "estoque": 1,
+    "preco": 1637.05,
+    "familia": "orion",
+    "name": "Conversor Orion 24/12-70A IP20 - Victron Energy",
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "orion-dc-dc-converters-12v-24v-48v-110v",
+    "pagina": "https://www.victronenergy.com/dc-dc-converters/orion-dc-dc-converters-12v-24v-48v-110v",
+    "conf_familia": "media",
+    "imagem": "https://www.victronenergy.com/upload/documents/ORI241270020_Orion 24_12-70A DC-DC converter IP20 (front).png",
+    "arquivo": "ORI241270020_Orion 24_12-70A DC-DC converter IP20 (front).png",
+    "numeros_casados": [
+      24,
+      12,
+      70
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ORI122408020_Orion 12_24-8 DC-DC converter IP20 (front).png",
+        "arquivo": "ORI122408020_Orion 12_24-8 DC-DC converter IP20 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ORI122410020_Orion 12_24-10 DC-DC converter IP20 (front).png",
+        "arquivo": "ORI122410020_Orion 12_24-10 DC-DC converter IP20 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ORI122410020_Orion 12_24-10 DC-DC converter IP20 (front).png",
+        "arquivo": "ORI122410020_Orion 12_24-10 DC-DC converter IP20 (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2660",
+    "estoque": 3,
+    "preco": 1295.24,
+    "familia": "smartshunt",
+    "name": "Monitor de Bateria SmartShunt 500A/50mV IP65 - Victron Energy",
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "smart-battery-shunt",
+    "pagina": "https://www.victronenergy.com/battery-monitors/smart-battery-shunt",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/SmartShunt 500A-50mV (front).png",
+    "arquivo": "SmartShunt 500A-50mV (front).png",
+    "numeros_casados": [
+      500,
+      50
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SHU067150050 SmartShunt 500A-50mV IP65 (front).png",
+        "arquivo": "SHU067150050 SmartShunt 500A-50mV IP65 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SHU067150050 SmartShunt 500A-50mV IP65 (cables).png",
+        "arquivo": "SHU067150050 SmartShunt 500A-50mV IP65 (cables).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SHU067150050 SmartShunt 500A-50mV IP65 (front-angle).png",
+        "arquivo": "SHU067150050 SmartShunt 500A-50mV IP65 (front-angle).png"
+      }
+    ]
+  },
+  {
+    "sku": "2729",
+    "estoque": 1,
+    "preco": 1075.13,
+    "familia": "outros",
+    "name": "VE.Can para NMEA2000 Macho Micro C - Victron Energy",
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "ve-can-to-nmea2000-micro-c-male",
+    "pagina": "https://www.victronenergy.com/accessories/ve-can-to-nmea2000-micro-c-male",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/VE.Can to NMEA2000 micro-C male_ASS030520200_new.png",
+    "arquivo": "VE.Can to NMEA2000 micro-C male_ASS030520200_new.png",
+    "numeros_casados": [
+      2000
+    ],
+    "numeros_conflitantes": {
+      "faltando": [],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/VE.Can to NMEA2000 micro-C male_ASS030520200_new.png",
+        "arquivo": "VE.Can to NMEA2000 micro-C male_ASS030520200_new.png"
+      }
+    ]
+  },
+  {
+    "sku": "1856",
+    "estoque": 1,
+    "preco": 1023.92,
+    "familia": "outros",
+    "name": "Interface MK3-USB (VE.Bus para USB) - Victron Energy",
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "interface-mk3-usb",
+    "pagina": "https://www.victronenergy.com/accessories/interface-mk3-usb",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/292_999_20190228120524.png",
+    "arquivo": "292_999_20190228120524.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        3
+      ],
+      "sobrando": [
+        292,
+        999
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ASS030140030_Interface MK3-USB-C (VE.Bus to USB-C) (front).png",
+        "arquivo": "ASS030140030_Interface MK3-USB-C (VE.Bus to USB-C) (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ASS030140030_Interface MK3-USB-C (VE.Bus to USB-C) (close-up).png",
+        "arquivo": "ASS030140030_Interface MK3-USB-C (VE.Bus to USB-C) (close-up).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/ASS030140030_Interface MK3-USB-C (VE.Bus to USB-C) (top).png",
+        "arquivo": "ASS030140030_Interface MK3-USB-C (VE.Bus to USB-C) (top).png"
+      }
+    ]
+  },
+  {
+    "sku": "2775",
+    "estoque": 4,
+    "preco": 527.3,
+    "familia": "outros",
+    "name": "Sensor de Bateria Inteligente - Victron Energy",
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "smart-battery-sense",
+    "pagina": "https://www.victronenergy.com/meters-and-sensors/smart-battery-sense",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/376_721_20200922101649.png",
+    "arquivo": "376_721_20200922101649.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [],
+      "sobrando": [
+        376,
+        721
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Smart BatterySense long range (front).png",
+        "arquivo": "Smart BatterySense long range (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Smart Battery Sense (top-CU).png",
+        "arquivo": "Smart Battery Sense (top-CU).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Smart BatterySense long range (topcover).png",
+        "arquivo": "Smart BatterySense long range (topcover).png"
+      }
+    ]
+  },
+  {
+    "sku": "2728",
+    "estoque": 1,
+    "preco": 475.14,
+    "familia": "bmv",
+    "name": "Sensor de Temperatura para BMV-702/712 - Victron Energy",
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "bmv-702",
+    "pagina": "https://www.victronenergy.com/battery-monitors/bmv-702",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/BMV-702_SOC.png",
+    "arquivo": "BMV-702_SOC.png",
+    "numeros_casados": [
+      702
+    ],
+    "numeros_conflitantes": {
+      "faltando": [
+        712
+      ],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/BMV-702.png",
+        "arquivo": "BMV-702.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Wall mount enclosure for Color Control.jpg",
+        "arquivo": "Wall mount enclosure for Color Control.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Wall mount enclosure for BMV or MPPT Control.jpg",
+        "arquivo": "Wall mount enclosure for BMV or MPPT Control.jpg"
+      }
+    ]
+  },
+  {
+    "sku": "2756",
+    "estoque": 1,
+    "preco": 425.07,
+    "familia": "outros",
+    "name": "Antena Ativa GPS - Victron Energy",
+    "status": "sem-regra",
+    "motivo": "nenhuma regra de família casou"
+  },
+  {
+    "sku": "2727",
+    "estoque": 1,
+    "preco": 312.24,
+    "familia": "gx",
+    "name": "Sensor de Temperatura para QUA/MP Cerbo GX - Victron Energy",
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "temperature-sensor-qua-pmp-venus-gx",
+    "pagina": "https://www.victronenergy.com/meters-and-sensors/temperature-sensor-qua-pmp-venus-gx",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/416_603_20190117155925.png",
+    "arquivo": "416_603_20190117155925.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [],
+      "sobrando": [
+        416,
+        603
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Temperature sensor QUA PMP Venus GX.png",
+        "arquivo": "Temperature sensor QUA PMP Venus GX.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Temperature sensor QUA PMP Venus GX - side.png",
+        "arquivo": "Temperature sensor QUA PMP Venus GX - side.png"
+      }
+    ]
+  },
+  {
+    "sku": "2651",
+    "estoque": 1,
+    "preco": 0,
+    "familia": "baterias",
+    "name": "Bateria de Lítio (LiFePO4) Smart 12,8V/200Ah - Victron Energy",
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "lithium-battery-12-8v",
+    "pagina": "https://www.victronenergy.com/batteries/lithium-battery-12-8v",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/BAT512120610 LiFePO4 Battery 12,8V-200Ah Smart (front).png",
+    "arquivo": "BAT512120610 LiFePO4 Battery 12,8V-200Ah Smart (front).png",
+    "numeros_casados": [
+      4,
+      12,
+      200
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/BAT512120610 LiFePO4 Battery 12,8V-200Ah Smart (front-top).png",
+        "arquivo": "BAT512120610 LiFePO4 Battery 12,8V-200Ah Smart (front-top).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/LiFePO4 Battery 12,8V-180Ah Smart (front).png",
+        "arquivo": "LiFePO4 Battery 12,8V-180Ah Smart (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/BAT512110610 LiFePO4 Battery 12,8V-100Ah Smart (front).png",
+        "arquivo": "BAT512110610 LiFePO4 Battery 12,8V-100Ah Smart (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2391",
+    "estoque": 4,
+    "preco": 0,
+    "familia": "gx",
+    "name": "Tela GX Touch 50 (5”) - Victron Energy",
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "gx-touch-50",
+    "pagina": "https://www.victronenergy.com/display-and-panels/gx-touch-50",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/GX Touch 50 front.png",
+    "arquivo": "GX Touch 50 front.png",
+    "numeros_casados": [
+      50
+    ],
+    "numeros_conflitantes": {
+      "faltando": [
+        5
+      ],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/BPP900455150 GX Touch 50 Flush (front)on.png",
+        "arquivo": "BPP900455150 GX Touch 50 Flush (front)on.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/GX Touch 50 (back with mount).png",
+        "arquivo": "GX Touch 50 (back with mount).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/GX Protection cover (50 back).png",
+        "arquivo": "GX Protection cover (50 back).png"
+      }
+    ]
+  },
+  {
+    "sku": "2685",
+    "estoque": 4,
+    "preco": 0,
+    "familia": "battery-protect",
+    "name": "Protetor de Bateria Smart 12/24V-220A - Victron Energy",
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "smart-battery-protect",
+    "pagina": "https://www.victronenergy.com/battery_protect/smart-battery-protect",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Smart BatteryProtect 12-24V 220A (front-angle).png",
+    "arquivo": "Smart BatteryProtect 12-24V 220A (front-angle).png",
+    "numeros_casados": [
+      12,
+      24,
+      230
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Smart BatteryProtect 12-24V 65A (front).png",
+        "arquivo": "Smart BatteryProtect 12-24V 65A (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Smart BatteryProtect 12-24V 100A (front).png",
+        "arquivo": "Smart BatteryProtect 12-24V 100A (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Smart BatteryProtect 12-24V 220A (top).png",
+        "arquivo": "Smart BatteryProtect 12-24V 220A (top).png"
+      }
+    ]
+  },
+  {
+    "sku": "2774",
+    "estoque": 0,
+    "preco": 50393.43,
+    "familia": "quattro",
+    "name": "Inversor e Carregador Quattro 48/10000/140 - 100/100 120V - Victron Energy",
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "quattro",
+    "pagina": "https://www.victronenergy.com/inverters-chargers/quattro",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Quattro 48-10000-140 120V (front).png",
+    "arquivo": "Quattro 48-10000-140 120V (front).png",
+    "numeros_casados": [
+      48,
+      10000,
+      140,
+      120
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Quattro 48V 10000VA 140A 230V (front).png",
+        "arquivo": "Quattro 48V 10000VA 140A 230V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Quattro_48V 15kVA_front.png",
+        "arquivo": "Quattro_48V 15kVA_front.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Quattro 48V 10000VA 140A 230V (left).png",
+        "arquivo": "Quattro 48V 10000VA 140A 230V (left).png"
+      }
+    ]
+  },
+  {
+    "sku": "2773",
+    "estoque": 0,
+    "preco": 47879.61,
+    "familia": "quattro",
+    "name": "Inversor e Carregador Quattro 48/10000/140 - 100/100 220V - Victron Energy",
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "quattro",
+    "pagina": "https://www.victronenergy.com/inverters-chargers/quattro",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Quattro 48V 10000VA 140A 230V (front).png",
+    "arquivo": "Quattro 48V 10000VA 140A 230V (front).png",
+    "numeros_casados": [
+      48,
+      10000,
+      140,
+      230
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Quattro 48-10000-140 120V (front).png",
+        "arquivo": "Quattro 48-10000-140 120V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Quattro 48V 10000VA 140A 230V (left).png",
+        "arquivo": "Quattro 48V 10000VA 140A 230V (left).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Quattro 48V 10000VA 140A 230V (right).png",
+        "arquivo": "Quattro 48V 10000VA 140A 230V (right).png"
+      }
+    ]
+  },
+  {
+    "sku": "2823",
+    "estoque": 0,
+    "preco": 43194.34,
+    "familia": "quattro",
+    "name": "Inversor e Carregador Quattro 48/8000/110 - 100/100 220V - Victron Energy",
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "quattro",
+    "pagina": "https://www.victronenergy.com/inverters-chargers/quattro",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Quattro 48V 8000VA 110A 230V (front).png",
+    "arquivo": "Quattro 48V 8000VA 110A 230V (front).png",
+    "numeros_casados": [
+      48,
+      8000,
+      110,
+      230
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Quattro 48V 8000VA 110A 230V (left).png",
+        "arquivo": "Quattro 48V 8000VA 110A 230V (left).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Quattro 48V 8000VA 110A 230V (right).png",
+        "arquivo": "Quattro 48V 8000VA 110A 230V (right).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Quattro 24V 8000VA 200A 230V (front).png",
+        "arquivo": "Quattro 24V 8000VA 200A 230V (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2769",
+    "estoque": 0,
+    "preco": 28034.52,
+    "familia": "multiplus-ii",
+    "name": "Inversor e Carregador MultiPlus - II 24/5000/120 - 50 220V - Victron Energy",
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "multiplus-ii",
+    "pagina": "https://www.victronenergy.com/inverters-chargers/multiplus-ii",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Multiplus-II 24V 5kVA 120-50 230V (front).png",
+    "arquivo": "Multiplus-II 24V 5kVA 120-50 230V (front).png",
+    "numeros_casados": [
+      24,
+      5000,
+      120,
+      50,
+      230
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Multiplus-II 24V 5kVA 120-50 230V (left).png",
+        "arquivo": "Multiplus-II 24V 5kVA 120-50 230V (left).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Multiplus-II 24V 5kVA 120-50 230V (right).png",
+        "arquivo": "Multiplus-II 24V 5kVA 120-50 230V (right).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Multiplus-II 24V 5kVA 120-50 230V (bottom).png",
+        "arquivo": "Multiplus-II 24V 5kVA 120-50 230V (bottom).png"
+      }
+    ]
+  },
+  {
+    "sku": "2683",
+    "estoque": 0,
+    "preco": 26987.9,
+    "familia": "quattro",
+    "name": "Inversor e Carregador Quattro 24/3000/70 - 50/50 220V - Victron Energy",
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "quattro",
+    "pagina": "https://www.victronenergy.com/inverters-chargers/quattro",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Quattro-24-3000-70_front_300dpi.jpg",
+    "arquivo": "Quattro-24-3000-70_front_300dpi.jpg",
+    "numeros_casados": [
+      24,
+      3000,
+      70
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Quattro-24-3000-70_left_300dpi.jpg",
+        "arquivo": "Quattro-24-3000-70_left_300dpi.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Quattro-24-3000-70_right_300dpi.jpg",
+        "arquivo": "Quattro-24-3000-70_right_300dpi.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Quattro-48-5000-70-50_front_300dpi.jpg",
+        "arquivo": "Quattro-48-5000-70-50_front_300dpi.jpg"
+      }
+    ]
+  },
+  {
+    "sku": "2767",
+    "estoque": 0,
+    "preco": 21352.91,
+    "familia": "multiplus",
+    "name": "Inversor e Carregador MultiPlus 12/3000/120 - 50 220V - Victron Energy",
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "multiplus-12v-24v-48v-800va-3kva",
+    "pagina": "https://www.victronenergy.com/inverters-chargers/multiplus-12v-24v-48v-800va-3kva",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/MultiPlus-12-3000-120-50_front_300dpi.jpg",
+    "arquivo": "MultiPlus-12-3000-120-50_front_300dpi.jpg",
+    "numeros_casados": [
+      12,
+      3000,
+      120,
+      50
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Multiplus-12-3000-120-50_left_300dpi.jpg",
+        "arquivo": "Multiplus-12-3000-120-50_left_300dpi.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MultiPlus-12-3000-120-50_right_300dpi.jpg",
+        "arquivo": "MultiPlus-12-3000-120-50_right_300dpi.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MultiPlus-24-3000-70-50_front_300dpi.jpg",
+        "arquivo": "MultiPlus-24-3000-70-50_front_300dpi.jpg"
+      }
+    ]
+  },
+  {
+    "sku": "3030",
+    "estoque": 0,
+    "preco": 18666.18,
+    "familia": "skylla",
+    "name": "Carregador Skylla-I 24/80(3) 230V - Victron Energy",
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "skylla-i",
+    "pagina": "https://www.victronenergy.com/chargers/skylla-i",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/SKI024080002_Skylla-i_24_80(3)_front_ON.jpg",
+    "arquivo": "SKI024080002_Skylla-i_24_80(3)_front_ON.jpg",
+    "numeros_casados": [
+      24,
+      80,
+      3
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SKI024080002_Skylla-i_24_80(3)_left_ON.jpg",
+        "arquivo": "SKI024080002_Skylla-i_24_80(3)_left_ON.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SKI024080002_Skylla-i_24_80(3)_right_ON.jpg",
+        "arquivo": "SKI024080002_Skylla-i_24_80(3)_right_ON.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SKI024100002_Skylla-i_24_100(3)_front_ON.jpg",
+        "arquivo": "SKI024100002_Skylla-i_24_100(3)_front_ON.jpg"
+      }
+    ]
+  },
+  {
+    "sku": "2765",
+    "estoque": 0,
+    "preco": 16931.07,
+    "familia": "phoenix",
+    "name": "Inversor Phoenix 12/3000 120V VE.Bus - Victron Energy",
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "phoenix-inverter-12v-24v-48v-800va-3kva",
+    "pagina": "https://www.victronenergy.com/inverters/phoenix-inverter-12v-24v-48v-800va-3kva",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/PIN123020100_Inverter 12-3000 120V VE BUS (front).png",
+    "arquivo": "PIN123020100_Inverter 12-3000 120V VE BUS (front).png",
+    "numeros_casados": [
+      12,
+      3000,
+      120
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PIN243020100_Inverter 24-3000 120V VE Bus (front).png",
+        "arquivo": "PIN243020100_Inverter 24-3000 120V VE Bus (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PIN123020100_Inverter 12-3000 120V VE BUS (left).png",
+        "arquivo": "PIN123020100_Inverter 12-3000 120V VE BUS (left).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PIN123020100_Inverter 12-3000 120V VE BUS (right).png",
+        "arquivo": "PIN123020100_Inverter 12-3000 120V VE BUS (right).png"
+      }
+    ]
+  },
+  {
+    "sku": "2770",
+    "estoque": 0,
+    "preco": 16563.47,
+    "familia": "multiplus",
+    "name": "Inversor e Carregador MultiPlus 24/3000/70 - 50 120V - Victron Energy",
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "multiplus-12v-24v-48v-800va-3kva",
+    "pagina": "https://www.victronenergy.com/inverters-chargers/multiplus-12v-24v-48v-800va-3kva",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/MultiPlus-24-3000-70-50_front_300dpi.jpg",
+    "arquivo": "MultiPlus-24-3000-70-50_front_300dpi.jpg",
+    "numeros_casados": [
+      24,
+      3000,
+      70,
+      50
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MultiPlus-24-3000-70-50_left_300dpi.jpg",
+        "arquivo": "MultiPlus-24-3000-70-50_left_300dpi.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MultiPlus-24-3000-70-50_right_300dpi.jpg",
+        "arquivo": "MultiPlus-24-3000-70-50_right_300dpi.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MultiPlus-24-3000-70-16_front_300dpi.jpg",
+        "arquivo": "MultiPlus-24-3000-70-16_front_300dpi.jpg"
+      }
+    ]
+  },
+  {
+    "sku": "2780",
+    "estoque": 0,
+    "preco": 15458.48,
+    "familia": "skylla",
+    "name": "Carregador Skylla-TG 24/80(1+1) 230V - Victron Energy",
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "skylla-24v-48v",
+    "pagina": "https://www.victronenergy.com/chargers/skylla-24v-48v",
+    "conf_familia": "media",
+    "imagem": "https://www.victronenergy.com/upload/products/150_549_20180813120234.png",
+    "arquivo": "150_549_20180813120234.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        24,
+        80,
+        1,
+        230
+      ],
+      "sobrando": [
+        150,
+        549
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SDTG2400503_Solar Skylla-TG 24-50(1+1) GL 120-240V (front).png",
+        "arquivo": "SDTG2400503_Solar Skylla-TG 24-50(1+1) GL 120-240V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SDTG2401003_Solar Skylla-TG 24-100(1+1) GL 120-240V (front).png",
+        "arquivo": "SDTG2401003_Solar Skylla-TG 24-100(1+1) GL 120-240V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/STG024050300-left-300dpi.jpg",
+        "arquivo": "STG024050300-left-300dpi.jpg"
+      }
+    ]
+  },
+  {
+    "sku": "2766",
+    "estoque": 0,
+    "preco": 14397.14,
+    "familia": "multiplus",
+    "name": "Inversor e Carregador MultiPlus 12/2000/80 - 32 - 220V - Victron Energy",
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "multiplus-12v-24v-48v-800va-3kva",
+    "pagina": "https://www.victronenergy.com/inverters-chargers/multiplus-12v-24v-48v-800va-3kva",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/MultiPlus 20k.png",
+    "arquivo": "MultiPlus 20k.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        12,
+        2000,
+        80,
+        32,
+        230
+      ],
+      "sobrando": [
+        20
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MultiPlus-Compact-12-2000-80-30_front_300dpi.jpg",
+        "arquivo": "MultiPlus-Compact-12-2000-80-30_front_300dpi.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MultiPlus-Compact-12-2000-80-30_left_300dpi.jpg",
+        "arquivo": "MultiPlus-Compact-12-2000-80-30_left_300dpi.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MultiPlus-Compact-12-2000-80-30_right_300dpi.jpg",
+        "arquivo": "MultiPlus-Compact-12-2000-80-30_right_300dpi.jpg"
+      }
+    ]
+  },
+  {
+    "sku": "2888",
+    "estoque": -1,
+    "preco": 14109.39,
+    "familia": "multiplus-ii",
+    "name": "Inversor e Carregador MultiPlus II - 12/3000/120 - 50 120V - Victron Energy",
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "multiplus-ii-2x-120v",
+    "pagina": "https://www.victronenergy.com/inverters-chargers/multiplus-ii-2x-120v",
+    "conf_familia": "media",
+    "imagem": "https://www.victronenergy.com/upload/products/PMP122305100_ MultiPlus-II 12_3000_120-50_2x120V (front)nw.png",
+    "arquivo": "PMP122305100_ MultiPlus-II 12_3000_120-50_2x120V (front)nw.png",
+    "numeros_casados": [
+      12,
+      3000,
+      120,
+      50
+    ],
+    "numeros_conflitantes": {
+      "faltando": [],
+      "sobrando": [
+        2
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PMP122305100_ MultiPlus-II 12_3000_120-50_2x120V (front)nw.png",
+        "arquivo": "PMP122305100_ MultiPlus-II 12_3000_120-50_2x120V (front)nw.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PMP122305100_ MultiPlus-II 12_3000_120-50_2x120V (left)nw.png",
+        "arquivo": "PMP122305100_ MultiPlus-II 12_3000_120-50_2x120V (left)nw.png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PMP122305100_ MultiPlus-II 12_3000_120-50_2x120V (bottom).png",
+        "arquivo": "PMP122305100_ MultiPlus-II 12_3000_120-50_2x120V (bottom).png"
+      }
+    ]
+  },
+  {
+    "sku": "2822",
+    "estoque": 0,
+    "preco": 13526.47,
+    "familia": "multiplus",
+    "name": "Inversor e Carregador MultiPlus 12/2000/80 - 50 - 120V - Victron Energy",
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "multiplus-12v-24v-48v-800va-3kva",
+    "pagina": "https://www.victronenergy.com/inverters-chargers/multiplus-12v-24v-48v-800va-3kva",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/MultiPlus 20k.png",
+    "arquivo": "MultiPlus 20k.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        12,
+        2000,
+        80,
+        50,
+        120
+      ],
+      "sobrando": [
+        20
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MultiPlus-12-3000-120-50_front_300dpi.jpg",
+        "arquivo": "MultiPlus-12-3000-120-50_front_300dpi.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MultiPlus-Compact-12-2000-80-30_front_300dpi.jpg",
+        "arquivo": "MultiPlus-Compact-12-2000-80-30_front_300dpi.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CMP242200100_MultiPlus Compact 24_2000_50-50 120V VE-Bus (front).png",
+        "arquivo": "CMP242200100_MultiPlus Compact 24_2000_50-50 120V VE-Bus (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2971",
+    "estoque": 0,
+    "preco": 12980.11,
+    "familia": "lynx",
+    "name": "Barramento Lynx SMART BMS 500 NG - Victron Energy",
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "lynx-smart-bms-ng",
+    "pagina": "https://www.victronenergy.com/battery-management-systems/lynx-smart-bms-ng",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/Lynx Smart BMS 500 NG.png",
+    "arquivo": "Lynx Smart BMS 500 NG.png",
+    "numeros_casados": [
+      500
+    ],
+    "numeros_conflitantes": {
+      "faltando": [],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Lynx Smart BMS 500 NG (M10) (conn).png",
+        "arquivo": "Lynx Smart BMS 500 NG (M10) (conn).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Lynx Smart BMS 500 NG (M10) (left no cap).png",
+        "arquivo": "Lynx Smart BMS 500 NG (M10) (left no cap).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Lynx Smart BMS 500 NG (M10) (top).png",
+        "arquivo": "Lynx Smart BMS 500 NG (M10) (top).png"
+      }
+    ]
+  },
+  {
+    "sku": "2863",
+    "estoque": 0,
+    "preco": 12959.68,
+    "familia": "lynx",
+    "name": "Lynx Smart BMS 500 (M8) - Victron Energy",
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "lynx-smart-bms",
+    "pagina": "https://www.victronenergy.com/battery-management-systems/lynx-smart-bms",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/Lynx Smart BMS 1000 (M10).png",
+    "arquivo": "Lynx Smart BMS 1000 (M10).png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        500,
+        8
+      ],
+      "sobrando": [
+        1000,
+        10
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Lynx Smart BMS (front).png",
+        "arquivo": "Lynx Smart BMS (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Lynx-Smart-BMS-(front-angle).png",
+        "arquivo": "Lynx-Smart-BMS-(front-angle).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Lynx-Smart-BMS-(top-with-connector).png",
+        "arquivo": "Lynx-Smart-BMS-(top-with-connector).png"
+      }
+    ]
+  },
+  {
+    "sku": "2772",
+    "estoque": 0,
+    "preco": 12821.79,
+    "familia": "multiplus-ii",
+    "name": "Inversor e Carregador MultiPlus - II 48/5000/70 - 50 220V - Victron Energy",
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "multiplus-ii",
+    "pagina": "https://www.victronenergy.com/inverters-chargers/multiplus-ii",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/MultiPlus-II 48V 5kVA (front).png",
+    "arquivo": "MultiPlus-II 48V 5kVA (front).png",
+    "numeros_casados": [
+      48,
+      5000
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Multiplus-II 24V 5kVA 120-50 230V (front).png",
+        "arquivo": "Multiplus-II 24V 5kVA 120-50 230V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MultiPlus-II 48V 10kVA 230V (front).png",
+        "arquivo": "MultiPlus-II 48V 10kVA 230V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PMP482805000_MultiPlus-II 48V 8kVA 230V (front).png",
+        "arquivo": "PMP482805000_MultiPlus-II 48V 8kVA 230V (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2768",
+    "estoque": 0,
+    "preco": 12482.07,
+    "familia": "multiplus",
+    "name": "Inversor e Carregador MultiPlus 24/2000/50 - 50 120V - Victron Energy",
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "multiplus-12v-24v-48v-800va-3kva",
+    "pagina": "https://www.victronenergy.com/inverters-chargers/multiplus-12v-24v-48v-800va-3kva",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/CMP242200100_MultiPlus Compact 24_2000_50-50 120V VE-Bus (front).png",
+    "arquivo": "CMP242200100_MultiPlus Compact 24_2000_50-50 120V VE-Bus (front).png",
+    "numeros_casados": [
+      24,
+      2000,
+      50,
+      120
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CMP242200100_MultiPlus Compact 24_2000_50-50 120V VE-Bus (conn).png",
+        "arquivo": "CMP242200100_MultiPlus Compact 24_2000_50-50 120V VE-Bus (conn).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CMP242200100_MultiPlus Compact 24_2000_50-50 120V VE-Bus (front + acc).png",
+        "arquivo": "CMP242200100_MultiPlus Compact 24_2000_50-50 120V VE-Bus (front + acc).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CMP242200100_MultiPlus Compact 24_2000_50-50 120V VE-Bus (left).png",
+        "arquivo": "CMP242200100_MultiPlus Compact 24_2000_50-50 120V VE-Bus (left).png"
+      }
+    ]
+  },
+  {
+    "sku": "2778",
+    "estoque": 0,
+    "preco": 11609.63,
+    "familia": "smartsolar",
+    "name": "Controlador de Carga Solar Blue MPPT 250/100-Tr VE.Can - Victron Energy",
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "smartsolar-250-85-250-100",
+    "pagina": "https://www.victronenergy.com/solar-charge-controllers/smartsolar-250-85-250-100",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/MPPT 250 70 MC4.png",
+    "arquivo": "MPPT 250 70 MC4.png",
+    "numeros_casados": [
+      250
+    ],
+    "numeros_conflitantes": {
+      "faltando": [
+        100
+      ],
+      "sobrando": [
+        70,
+        4
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 250-70-Tr (front).png",
+        "arquivo": "SmartSolar MPPT 250-70-Tr (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 250-70-MC4 (front).png",
+        "arquivo": "SmartSolar MPPT 250-70-MC4 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartSolar charge controller MPPT 250 60 Tr (top with display).png",
+        "arquivo": "SmartSolar charge controller MPPT 250 60 Tr (top with display).png"
+      }
+    ]
+  },
+  {
+    "sku": "3032",
+    "estoque": 0,
+    "preco": 11606,
+    "familia": "skylla",
+    "name": "Carregador Skylla-IP65 24/35(3) 120-230V - Victron Energy",
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "skylla-ip65",
+    "pagina": "https://www.victronenergy.com/chargers/skylla-ip65",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/Skylla IP65new.png",
+    "arquivo": "Skylla IP65new.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        24,
+        35,
+        3,
+        120,
+        230
+      ],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Skylla IP65 24V 35A (1+1) (top).png",
+        "arquivo": "Skylla IP65 24V 35A (1+1) (top).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Skylla-I65 12V 70A 3 outputs (front).png",
+        "arquivo": "Skylla-I65 12V 70A 3 outputs (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Skylla-I65 12V 70A 3 outputs (front-angle).png",
+        "arquivo": "Skylla-I65 12V 70A 3 outputs (front-angle).png"
+      }
+    ]
+  },
+  {
+    "sku": "3031",
+    "estoque": 0,
+    "preco": 11606,
+    "familia": "skylla",
+    "name": "Carregador Skylla-IP65 12/70(3) 120-230V - Victron Energy",
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "skylla-ip65",
+    "pagina": "https://www.victronenergy.com/chargers/skylla-ip65",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/Skylla IP65new.png",
+    "arquivo": "Skylla IP65new.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        12,
+        70,
+        3,
+        120,
+        230
+      ],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Skylla-I65 12V 70A 3 outputs (front).png",
+        "arquivo": "Skylla-I65 12V 70A 3 outputs (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Skylla-I65 12V 70A 3 outputs (front-angle).png",
+        "arquivo": "Skylla-I65 12V 70A 3 outputs (front-angle).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Skylla-I65 12V 70A 3 outputs (top).png",
+        "arquivo": "Skylla-I65 12V 70A 3 outputs (top).png"
+      }
+    ]
+  },
+  {
+    "sku": "1853",
+    "estoque": 0,
+    "preco": 10611.41,
+    "familia": "multiplus",
+    "name": "Inversor e Carregador MultiPlus 12/1200/50 - 16 - 220V - Victron Energy",
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "multiplus-12v-24v-48v-800va-3kva",
+    "pagina": "https://www.victronenergy.com/inverters-chargers/multiplus-12v-24v-48v-800va-3kva",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/MultiPlus 20k.png",
+    "arquivo": "MultiPlus 20k.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        12,
+        1200,
+        50,
+        16,
+        230
+      ],
+      "sobrando": [
+        20
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MultiPlus-12-3000-120-50_front_300dpi.jpg",
+        "arquivo": "MultiPlus-12-3000-120-50_front_300dpi.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MultiPlus Compact 12V 1600VA_front.jpg",
+        "arquivo": "MultiPlus Compact 12V 1600VA_front.jpg"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Multiplus-12-3000-120-50_left_300dpi.jpg",
+        "arquivo": "Multiplus-12-3000-120-50_left_300dpi.jpg"
+      }
+    ]
+  },
+  {
+    "sku": "2818",
+    "estoque": 0,
+    "preco": 10480.59,
+    "familia": "centaur",
+    "name": "Carregador de Bateria Centaur 12/80(3) - 120/230v - Victron Energy",
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "centaur-charger-12v-24v",
+    "pagina": "https://www.victronenergy.com/chargers/centaur-charger-12v-24v",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/151_831_20180705150216.png",
+    "arquivo": "151_831_20180705150216.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        12,
+        80,
+        3,
+        120,
+        230
+      ],
+      "sobrando": [
+        151,
+        831
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CCH012080000_Centaur Charger 12-80(3) 120-240V (front).png",
+        "arquivo": "CCH012080000_Centaur Charger 12-80(3) 120-240V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CCH012080000_Centaur Charger 12-80(3) 120-240V (conn).png",
+        "arquivo": "CCH012080000_Centaur Charger 12-80(3) 120-240V (conn).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/CCH012080000_Centaur Charger 12-80(3) 120-240V (pcb conn).png",
+        "arquivo": "CCH012080000_Centaur Charger 12-80(3) 120-240V (pcb conn).png"
+      }
+    ]
+  },
+  {
+    "sku": "1851",
+    "estoque": 0,
+    "preco": 10393.19,
+    "familia": "phoenix",
+    "name": "Inversor Phoenix Smart 12/1600 - 220V - Victron Energy",
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "phoenix-inverter-smart",
+    "pagina": "https://www.victronenergy.com/inverters/phoenix-inverter-smart",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Inverter 12V 1600VA Smart (front).png",
+    "arquivo": "Inverter 12V 1600VA Smart (front).png",
+    "numeros_casados": [
+      12,
+      1600
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Inverter 12V 2000VA Smart (front).png",
+        "arquivo": "Inverter 12V 2000VA Smart (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Inverter Smart 12V 3000VA (front).png",
+        "arquivo": "Inverter Smart 12V 3000VA (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Inverter Smart 24V 1600VA (front).png",
+        "arquivo": "Inverter Smart 24V 1600VA (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2771",
+    "estoque": 0,
+    "preco": 9089.73,
+    "familia": "multiplus-ii",
+    "name": "Inversor e Carregador MultiPlus-II 48/3000/35 - 32 220V - Victron Energy",
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "multiplus-ii",
+    "pagina": "https://www.victronenergy.com/inverters-chargers/multiplus-ii",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/MultiPlus-II 48V 3kVA (front).png",
+    "arquivo": "MultiPlus-II 48V 3kVA (front).png",
+    "numeros_casados": [
+      48,
+      3000
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Multiplus-II 48V 3kVA 230V (front-angle).png",
+        "arquivo": "Multiplus-II 48V 3kVA 230V (front-angle).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PMP122305010_Multiplus-II 12V 3kVA_120-32 230V (front).png",
+        "arquivo": "PMP122305010_Multiplus-II 12V 3kVA_120-32 230V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/MultiPlus-II 48V 10kVA 230V (front).png",
+        "arquivo": "MultiPlus-II 48V 10kVA 230V (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "2833",
+    "estoque": 0,
+    "preco": 8602.37,
+    "familia": "gx",
+    "name": "Central de Monitoramento Ekrano GX - Victron Energy",
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "ekrano-gx",
+    "pagina": "https://www.victronenergy.com/communication-centres/ekrano-gx",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/Ekrano GX.png",
+    "arquivo": "Ekrano GX.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Ekrano GX (lright).png",
+        "arquivo": "Ekrano GX (lright).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Ekrano GX (front-angle).png",
+        "arquivo": "Ekrano GX (front-angle).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Ekrano (mounting set2).png",
+        "arquivo": "Ekrano (mounting set2).png"
+      }
+    ]
+  },
+  {
+    "sku": null,
+    "estoque": 0,
+    "preco": 8053.99,
+    "familia": "phoenix",
+    "name": "Carregador de Bateria Phoenix 12/50(2+1) - 120/230v - Victron Energy",
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "phoenix-charger-12v-24v",
+    "pagina": "https://www.victronenergy.com/chargers/phoenix-charger-12v-24v",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/products/Charger.png",
+    "arquivo": "Charger.png",
+    "numeros_casados": [],
+    "numeros_conflitantes": {
+      "faltando": [
+        12,
+        50,
+        2,
+        1,
+        120,
+        230
+      ],
+      "sobrando": []
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PCH012050001_Charger 12-50 (2+1) 120-240V (front).png",
+        "arquivo": "PCH012050001_Charger 12-50 (2+1) 120-240V (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PCH012050001_Charger 12-50 (2+1) 120-240V (conn).png",
+        "arquivo": "PCH012050001_Charger 12-50 (2+1) 120-240V (conn).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/PCH012050001_Charger 12-50 (2+1) 120-240V (wirekit).png",
+        "arquivo": "PCH012050001_Charger 12-50 (2+1) 120-240V (wirekit).png"
+      }
+    ]
+  },
+  {
+    "sku": "2901",
+    "estoque": 0,
+    "preco": 6187.68,
+    "familia": "smartsolar",
+    "name": "Controlador de Carga Solar Blue MPPT 250/70 TR - Victron Energy",
+    "status": "candidato",
+    "nivel": "variante-exata",
+    "slug": "smartsolar-mppt-ve.can",
+    "pagina": "https://www.victronenergy.com/solar-charge-controllers/smartsolar-mppt-ve.can",
+    "conf_familia": "media",
+    "imagem": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 250 70-Tr VE.Can (front).png",
+    "arquivo": "SmartSolar MPPT 250 70-Tr VE.Can (front).png",
+    "numeros_casados": [
+      250,
+      70
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 250 70 MC4 VE.Can (front).png",
+        "arquivo": "SmartSolar MPPT 250 70 MC4 VE.Can (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 250 70-Tr VE.Can (top-display).png",
+        "arquivo": "SmartSolar MPPT 250 70-Tr VE.Can (top-display).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 150-70-Tr VE Can (front).png",
+        "arquivo": "SmartSolar MPPT 150-70-Tr VE Can (front).png"
+      }
+    ]
+  },
+  {
+    "sku": "1849",
+    "estoque": 0,
+    "preco": 6051.24,
+    "familia": "phoenix",
+    "name": "Carregador de Bateria Phoenix Smart IP43 12/50 (3) - 220v - Victron Energy",
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "phoenix-smart-ip43-charger",
+    "pagina": "https://www.victronenergy.com/chargers/phoenix-smart-ip43-charger",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Smart IP43 Charger 12V 50A 3 outputs (front-angle).png",
+    "arquivo": "Smart IP43 Charger 12V 50A 3 outputs (front-angle).png",
+    "numeros_casados": [
+      12,
+      50,
+      3
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Smart IP43 Charger 12V 50A 3 outputs (top).png",
+        "arquivo": "Smart IP43 Charger 12V 50A 3 outputs (top).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Smart IP43 Charger 12V 30A 3 outputs (front-angle).png",
+        "arquivo": "Smart IP43 Charger 12V 30A 3 outputs (front-angle).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/products/Smart IP43.png",
+        "arquivo": "Smart IP43.png"
+      }
+    ]
+  },
+  {
+    "sku": "2777",
+    "estoque": 0,
+    "preco": 4908.67,
+    "familia": "smartsolar",
+    "name": "Controlador de Carga Solar Smart MPPT 150/60-MC4 - Victron Energy",
+    "status": "candidato",
+    "nivel": "familia",
+    "slug": "smartsolar-150-35",
+    "pagina": "https://www.victronenergy.com/solar-charge-controllers/smartsolar-150-35",
+    "conf_familia": "media",
+    "imagem": "https://www.victronenergy.com/upload/products/SmartSolar MPPT 150-35 (top).png",
+    "arquivo": "SmartSolar MPPT 150-35 (top).png",
+    "numeros_casados": [
+      150
+    ],
+    "numeros_conflitantes": {
+      "faltando": [
+        60,
+        4
+      ],
+      "sobrando": [
+        35
+      ]
+    },
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 150-35 (front).png",
+        "arquivo": "SmartSolar MPPT 150-35 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 150-45 (front).png",
+        "arquivo": "SmartSolar MPPT 150-45 (front).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/SmartSolar MPPT 150-35 (conn).png",
+        "arquivo": "SmartSolar MPPT 150-35 (conn).png"
+      }
+    ]
+  },
+  {
+    "sku": "1848",
+    "estoque": 0,
+    "preco": 4585.61,
+    "familia": "phoenix",
+    "name": "Carregador de Bateria Phoenix Smart IP43 12/30 (3) - 120v/220v - Victron Energy",
+    "status": "candidato",
+    "nivel": "variante",
+    "slug": "phoenix-smart-ip43-charger",
+    "pagina": "https://www.victronenergy.com/chargers/phoenix-smart-ip43-charger",
+    "conf_familia": "alta",
+    "imagem": "https://www.victronenergy.com/upload/documents/Smart IP43 Charger 12V 30A 3 outputs (front-angle).png",
+    "arquivo": "Smart IP43 Charger 12V 30A 3 outputs (front-angle).png",
+    "numeros_casados": [
+      12,
+      30,
+      3
+    ],
+    "alternativas": [
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Smart IP43 Charger 12V 30A 3 outputs (top).png",
+        "arquivo": "Smart IP43 Charger 12V 30A 3 outputs (top).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Smart IP43 Charger 12V 50A 3 outputs (front-angle).png",
+        "arquivo": "Smart IP43 Charger 12V 50A 3 outputs (front-angle).png"
+      },
+      {
+        "url": "https://www.victronenergy.com/upload/documents/Smart IP43 Charger 12V 30A 1+1 outputs (front-angle).png",
+        "arquivo": "Smart IP43 Charger 12V 30A 1+1 outputs (front-angle).png"
+      }
+    ]
+  }
+]
