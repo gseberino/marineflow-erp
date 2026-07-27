@@ -132,3 +132,32 @@ no resumo do mês); `register_payment_and_update_balance` é atômica e checa ro
 | 6 | Conversão do orçamento | **Sim, mas avisando antes**: a sugestão exibe "isto vai aprovar o ORÇ-XXXXX e convertê-lo em OS". |
 
 → Implementação liberada. Ordem: Fase 1 (candidatos) → Fase 2 (motor) → Fase 3 (IA) → Fase 4 (memória).
+
+## 9. ENTREGUE — Fases 1 a 3 em produção (27/07/2026, commit a0d4d2d)
+
+**Motor** (`supabase/functions/_shared/banking/`): `types.ts`, `matching.ts` (puro/testável),
+`quote-deposit.ts` (espelho do frontend + teste de paridade).
+Pesos: valor 45 · documento 25 · nome 15 · data 15 · bônus 12 por citação do nº do documento.
+Tolerância 2% limitada a R$ 50. Data **eliminatória** para sinal de orçamento (pagamento
+antes da proposta ou fora da janela de 90 dias reprova) e apenas penalizada para contas
+com vencimento (atraso é normal). Auto-aplicação exige certeza **e** ausência de empate.
+
+**Edge `banking-reconcile`**: monta candidatos de 5 origens — receivables, payables,
+collections avulsas, **sinal de orçamento** (`quote_status IN ('awaiting_deposit','sent')`
+sem sinal já pago) e **saldo de OS ativa** não lançado. `action: 'suggest' | 'auto'`.
+Aplicação reaproveita `register_payment_and_update_balance` e `register_deposit_and_convert`
+(para o gatilho de conversão disparar igual). verify_jwt=false com auth dupla (JWT ou cron).
+
+**Agente** (`_shared/ai/tools/banking.ts`): `listar_transacoes_pendentes` e
+`sugerir_conciliacao` (risk low), `conciliar_transacao` (**risk high** → gate de aprovação).
+
+**Briefing 07:30**: bloco "Entradas sem identificação" + sugestão do dia. Só reporta.
+
+**UI**: botão "Conciliar tudo", sugestões com % de confiança e motivos, alerta de
+divergência de valor e aviso "vai aprovar o ORÇ-XXXXX e convertê-lo em OS".
+
+**Testes**: 24 do motor (inclui os 3 orçamentos reais), 8 de paridade, 4 de render. Suíte 304.
+Verificado em produção no chunk `AgingReportPanel-*.js` — o Vite agrupa o financeiro lá,
+não no `index`; conferir o chunk certo ao validar deploy de UI financeira.
+
+**Fase 4 (memória de conciliação, 1-para-muitos, parcial, juros/tarifa automáticos)**: não feita.
