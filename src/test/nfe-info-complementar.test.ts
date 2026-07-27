@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   BLOCK_SEPARATOR,
   SIMPLES_INFO_NOTE,
+  SIMPLES_INFO_NOTE_BASE,
   composeAdditionalInfo,
   normalizeAdditionalInfo,
   stripInvalidIcmsCreditClaim,
@@ -246,7 +247,7 @@ describe("buildDevolucaoInfo — dados adicionais da devolução ao fornecedor",
     const out = buildDevolucaoInfo(base);
     expect(out).toContain("Devolução Parcial Ref. NF-e nº 40.480, série 1, de 11/09/2025");
     expect(out).toContain("Valor do ICMS para crédito do destinatário: R$ 197,79");
-    expect(out).toContain("Valor do IPI para crédito do destinatário (informado no campo despesas acessórias): R$ 84,96");
+    expect(out).toContain("Valor do IPI devolvido ao fornecedor (grupo impostoDevol / tag vIPIDevol da NF-e, integra o total da nota): R$ 84,96");
     expect(out).toContain("Chave de acesso da NF-e de origem: " + base.accessKey);
   });
 
@@ -275,6 +276,21 @@ describe("buildDevolucaoInfo — dados adicionais da devolução ao fornecedor",
     const out = composeAdditionalInfo({ freeText: buildDevolucaoInfo(base) });
     expect(out.startsWith("Devolução Parcial Ref.")).toBe(true);
     expect(out.endsWith(SIMPLES_INFO_NOTE)).toBe(true);
+  });
+
+  // Na DEVOLUÇÃO, a frase "Não gera direito a crédito fiscal de IPI" (art. 60 =
+  // venda p/ comercialização) é omitida: contradiz o vIPIDevol (estorno do IPI do
+  // fornecedor). A declaração obrigatória do Simples permanece.
+  it("devolução (isReturn) omite a frase de crédito de IPI, mas mantém a declaração obrigatória", () => {
+    const out = composeAdditionalInfo({ freeText: buildDevolucaoInfo(base), isReturn: true });
+    expect(out).toContain("Documento emitido por ME ou EPP optante pelo Simples Nacional.");
+    expect(out).not.toContain("Não gera direito a crédito fiscal de IPI");
+    expect(out.endsWith(SIMPLES_INFO_NOTE_BASE)).toBe(true);
+  });
+
+  it("venda (padrão) mantém a frase de crédito de IPI", () => {
+    const out = composeAdditionalInfo({ freeText: "Venda normal" });
+    expect(out).toContain("Não gera direito a crédito fiscal de IPI");
   });
 });
 

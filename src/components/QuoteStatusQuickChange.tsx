@@ -27,6 +27,8 @@ export function QuoteStatusQuickChange({ orderId, currentQuoteStatus, serviceOrd
   const [depositOpen, setDepositOpen] = useState(false);
   const [abandoning, setAbandoning] = useState(false);
   const [deposit, setDeposit] = useState<DepositComputation | null>(null);
+  const [appliedLabel, setAppliedLabel] = useState('');
+  const [installments, setInstallments] = useState<any[] | null>(null);
   const isBusy = updateQuoteStatus.isPending || abandoning;
 
   // Ao abrir "Receber sinal": carrega os dados do orçamento + a condição de pagamento e computa
@@ -51,6 +53,8 @@ export function QuoteStatusQuickChange({ orderId, currentQuoteStatus, serviceOrd
         ? preset!.installments
         : (Array.isArray(o.custom_payment_installments) ? o.custom_payment_installments : null);
       setDeposit(computeDeposit(o, installments));
+      setAppliedLabel((preset as any)?.label ?? '');
+      setInstallments(installments);
     })();
     return () => { cancelled = true; };
   }, [depositOpen, orderId, paymentPresets]);
@@ -114,7 +118,7 @@ export function QuoteStatusQuickChange({ orderId, currentQuoteStatus, serviceOrd
         </div>
         <RegisterDepositDialog
           open={depositOpen}
-          onOpenChange={v => { setDepositOpen(v); if (!v) setDeposit(null); }}
+          onOpenChange={v => { setDepositOpen(v); if (!v) { setDeposit(null); setAppliedLabel(''); setInstallments(null); } }}
           serviceOrderId={orderId}
           serviceOrderNumber={serviceOrderNumber}
           grandTotal={grandTotal}
@@ -125,6 +129,8 @@ export function QuoteStatusQuickChange({ orderId, currentQuoteStatus, serviceOrd
           presetServicesPct={deposit?.signal?.servicesPct}
           presetPartsPct={deposit?.signal?.partsPct}
           presetExpensesPct={deposit?.signal?.expensesPct}
+          appliedConditionLabel={appliedLabel}
+          installments={installments ?? undefined}
         />
       </>
     );

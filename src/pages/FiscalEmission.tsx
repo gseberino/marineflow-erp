@@ -41,6 +41,7 @@ import { buildEspelhoHtml } from '@/lib/danfe-espelho';
 import { extractInvokeErrorMessage } from '@/lib/invoke-error';
 import { buildEmissionItem, computeReturnIcmsRate } from '@/lib/fiscal-emission-item';
 import { computeDraftMeta, normalizeDraftState, natureLabel, type FiscalDraftState } from '@/lib/fiscal-draft-state';
+import { buildDanfeFilename } from '@/lib/danfe-filename';
 import { BLOCK_SEPARATOR, buildDevolucaoInfo, composeAdditionalInfo, stripManagedBlocks, stripPurchaseBlock } from '@/lib/nfe-info-complementar';
 // Reaproveita os mesmos módulos que a edge function fiscal-emit usa no
 // servidor — evita duplicar a lista de formas de pagamento, natureza de
@@ -1346,6 +1347,7 @@ export default function FiscalEmission() {
     additional_info: composeAdditionalInfo({
       purchaseOrder, buyer: buyerName,
       freeText: [devolucaoInfo, additionalInfo].filter(Boolean).join(BLOCK_SEPARATOR),
+      isReturn, // devolução: omite a frase de crédito de IPI (ver composeAdditionalInfo)
     }) || undefined,
     // Guardados tambem em colunas proprias (restaura ao duplicar; nota pesquisavel).
     customer_po_number: purchaseOrder.trim() || undefined,
@@ -1417,13 +1419,26 @@ export default function FiscalEmission() {
         body: { action: 'homolog', ...buildEmissionBody() },
       });
       if (error) throw new Error(await extractInvokeErrorMessage(error));
-      // Sucesso: a Contora devolve a DANFE de homologação como PDF (Blob).
-      if (data instanceof Blob && data.type.includes('pdf')) {
-        win.location.href = URL.createObjectURL(data);
-        toast.success('DANFE de homologação autorizada pela SEFAZ (SEM VALOR FISCAL). Abriu em nova aba.', { id: tId });
+      const res = data as any;
+      // Sucesso: a Contora devolve a DANFE de homologação (número + base64). Abre
+      // na aba para conferir E baixa com nome padronizado para enviar ao fornecedor.
+      if (res?.ok && res?.danfe_base64) {
+        const bytes = Uint8Array.from(atob(res.danfe_base64), (c) => c.charCodeAt(0));
+        const blob = new Blob([bytes], { type: res.is_pdf ? 'application/pdf' : 'application/xml' });
+        const url = URL.createObjectURL(blob);
+        const filename = buildDanfeFilename({
+          nature: (selectedNature as any)?.label,
+          number: res.number,
+          recipient: recipientName,
+          extension: res.is_pdf ? 'pdf' : 'xml',
+        });
+        win.location.href = url; // visualiza na aba
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); a.remove();
+        toast.success(`DANFE de homologação autorizada pela SEFAZ e baixada como "${filename}".`, { id: tId });
         return;
       }
-      const res = data as any;
       // Homologação indisponível (conta sem homologação, ou 321 residual) → local.
       if (res?.homolog_unavailable) {
         const html = await fetchLocalEspelhoHtml();

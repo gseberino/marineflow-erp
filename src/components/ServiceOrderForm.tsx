@@ -2381,6 +2381,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           presetServicesPct={depositFromFinancial && signalRow ? signalRow.services_pct : undefined}
           presetPartsPct={depositFromFinancial && signalRow ? signalRow.parts_pct : undefined}
           presetExpensesPct={depositFromFinancial && signalRow ? signalRow.expenses_pct : undefined}
+          appliedConditionLabel={form.payment_conditions || ''}
+          installments={installmentSource ?? undefined}
         />
       )}
 
