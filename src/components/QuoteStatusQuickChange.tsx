@@ -29,6 +29,7 @@ export function QuoteStatusQuickChange({ orderId, currentQuoteStatus, serviceOrd
   const [deposit, setDeposit] = useState<DepositComputation | null>(null);
   const [appliedLabel, setAppliedLabel] = useState('');
   const [installments, setInstallments] = useState<any[] | null>(null);
+  const [scheduledEndAt, setScheduledEndAt] = useState<string | null>(null);
   const isBusy = updateQuoteStatus.isPending || abandoning;
 
   // Ao abrir "Receber sinal": carrega os dados do orçamento + a condição de pagamento e computa
@@ -40,7 +41,7 @@ export function QuoteStatusQuickChange({ orderId, currentQuoteStatus, serviceOrd
     (async () => {
       const { data: so } = await supabase
         .from('service_orders')
-        .select('labor_cost_total, parts_cost_total, operational_cost_total, travel_cost_total, subcontract_cost_total, is_travel_billable, discount_amount, tax_amount, payment_condition_preset_id, payment_conditions, custom_payment_installments')
+        .select('labor_cost_total, parts_cost_total, operational_cost_total, travel_cost_total, subcontract_cost_total, is_travel_billable, discount_amount, tax_amount, payment_condition_preset_id, payment_conditions, custom_payment_installments, scheduled_end_at')
         .eq('id', orderId)
         .maybeSingle();
       if (cancelled || !so) return;
@@ -55,6 +56,7 @@ export function QuoteStatusQuickChange({ orderId, currentQuoteStatus, serviceOrd
       setDeposit(computeDeposit(o, installments));
       setAppliedLabel((preset as any)?.label ?? '');
       setInstallments(installments);
+      setScheduledEndAt(o.scheduled_end_at ?? null);
     })();
     return () => { cancelled = true; };
   }, [depositOpen, orderId, paymentPresets]);
@@ -118,7 +120,7 @@ export function QuoteStatusQuickChange({ orderId, currentQuoteStatus, serviceOrd
         </div>
         <RegisterDepositDialog
           open={depositOpen}
-          onOpenChange={v => { setDepositOpen(v); if (!v) { setDeposit(null); setAppliedLabel(''); setInstallments(null); } }}
+          onOpenChange={v => { setDepositOpen(v); if (!v) { setDeposit(null); setAppliedLabel(''); setInstallments(null); setScheduledEndAt(null); } }}
           serviceOrderId={orderId}
           serviceOrderNumber={serviceOrderNumber}
           grandTotal={grandTotal}
@@ -131,6 +133,7 @@ export function QuoteStatusQuickChange({ orderId, currentQuoteStatus, serviceOrd
           presetExpensesPct={deposit?.signal?.expensesPct}
           appliedConditionLabel={appliedLabel}
           installments={installments ?? undefined}
+          scheduledEndAt={scheduledEndAt}
         />
       </>
     );

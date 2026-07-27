@@ -16,6 +16,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 import { depositAmountFromPcts, signalPctsFromInstallments, computeScheduleFromParts, type DepositInstallment } from '@/lib/quote-deposit';
 import { usePaymentConditionPresets } from '@/hooks/use-payment-conditions';
+import { addDays, format, parseISO } from 'date-fns';
 
 const PAYMENT_METHODS = [
   { value: 'pix',           label: 'PIX' },
@@ -51,6 +52,8 @@ interface Props {
   appliedConditionLabel?: string;
   /** Parcelas da condição — usadas na prévia do saldo quando não é um preset nomeado (custom). */
   installments?: DepositInstallment[];
+  /** Entrega prevista (scheduled_end_at) — vencimento das parcelas de saldo do tipo "na entrega". */
+  scheduledEndAt?: string | null;
 }
 
 const fmt = (v: number) =>
@@ -72,6 +75,7 @@ export function RegisterDepositDialog({
   presetExpensesPct = 0,
   appliedConditionLabel = '',
   installments,
+  scheduledEndAt,
 }: Props) {
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -180,6 +184,18 @@ export function RegisterDepositDialog({
     [laborCost, partsCost, expensesTotal, ratio, activeInstallments],
   );
 
+  // Vencimento de cada parcela do saldo:
+  //  - 'delivery' → entrega prevista (scheduled_end_at); sem ela, fallback de +30 dias do sinal.
+  //  - 'days'     → data do sinal + N dias.
+  const deliveryISO = scheduledEndAt ? scheduledEndAt.slice(0, 10) : '';
+  const resolveDueDate = (row: { days: number; dueBasis: 'delivery' | 'days' }): string => {
+    const base = parseISO(date);
+    if (row.dueBasis === 'delivery') {
+      return deliveryISO || format(addDays(base, 30), 'yyyy-MM-dd');
+    }
+    return format(addDays(base, row.days || 0), 'yyyy-MM-dd');
+  };
+
   // Calculate deposit amount from current mode
   const calcAmount = (): number => {
     if (mode === 'category') {
@@ -234,16 +250,30 @@ export function RegisterDepositDialog({
     if (!isValid) return;
     setLoading(true);
     try {
+      // Saldo como CONTA A RECEBER: monta as parcelas do saldo (com vencimento resolvido) e a RPC
+      // cria um recebível PENDENTE por parcela + a cobrança vinculada (sem auto-envio). Só no modo
+      // "por categoria" — em %/valor fixo o sinal é ad-hoc e não reconcilia com o saldo da condição.
+      const balancePayload = mode === 'category'
+        ? schedule.balance.map((r) => ({
+            description: `${r.label} — ${serviceOrderNumber}`,
+            amount: r.amount,
+            due_date: resolveDueDate(r),
+          }))
+        : [];
+
       const { data, error } = await supabase.rpc('register_deposit_and_convert', {
-        p_service_order_id:  serviceOrderId,
-        p_amount:            depositAmount,
-        p_payment_date:      date,
-        p_payment_method:    method,
-        p_card_fee_percent:  isCredit ? parseFloat(cardFee) : 0,
-        p_notes:             notes.trim() || null,
+        p_service_order_id:     serviceOrderId,
+        p_amount:               depositAmount,
+        p_payment_date:         date,
+        p_payment_method:       method,
+        p_card_fee_percent:     isCredit ? parseFloat(cardFee) : 0,
+        p_notes:                notes.trim() || null,
+        p_balance_installments: balancePayload.length > 0 ? balancePayload : null,
+        p_create_collections:   true,
       });
       if (error) throw error;
       const paymentId = (data as any)?.payment_id as string | undefined;
+      const balanceCreated = Number((data as any)?.balance_receivables ?? 0);
 
       // (B) Se o usuário trocou a condição no diálogo, grava-a no orçamento para PDF/saldo baterem.
       if (presetLabel && presetLabel !== appliedConditionLabel) {
@@ -264,24 +294,10 @@ export function RegisterDepositDialog({
         } as never).eq('id', paymentId);
       }
 
-      // (F) Gera as cobranças do SALDO (sem WhatsApp). Só quando o sinal veio da condição
-      // (modo "por categoria"); em %/valor fixo o sinal é ad-hoc e não reconcilia com o saldo.
-      // Não-fatal: falha aqui não desfaz o sinal.
-      let balanceCreated = 0;
-      if (mode === 'category') {
-        try {
-          const { generateBalanceCollections } = await import('@/lib/generate-collections');
-          const res = await generateBalanceCollections({ serviceOrderId, approvalDate: date });
-          balanceCreated = res.created;
-        } catch (genErr) {
-          console.error('Falha ao gerar cobranças do saldo', genErr);
-        }
-      }
-
       toast({
         title: 'Sinal registrado!',
         description: balanceCreated > 0
-          ? `${serviceOrderNumber} convertido em OS · ${balanceCreated} cobrança(s) do saldo criada(s). Confirme o estoque.`
+          ? `${serviceOrderNumber} convertido em OS · saldo lançado em ${balanceCreated} conta(s) a receber. Confirme o estoque.`
           : `${serviceOrderNumber} convertido em OS. Confirme o estoque das peças.`,
       });
       qc.invalidateQueries({ queryKey: ['service-orders'] });
@@ -450,12 +466,17 @@ export function RegisterDepositDialog({
               <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                 <CalendarClock className="h-3.5 w-3.5" /> Saldo após o sinal
               </div>
-              {schedule.balance.map((r, i) => (
-                <div key={i} className="flex items-center justify-between">
-                  <span className="text-muted-foreground">{r.label} · {r.days} dia{r.days === 1 ? '' : 's'}</span>
-                  <span>{fmt(r.amount)}</span>
-                </div>
-              ))}
+              {schedule.balance.map((r, i) => {
+                const dueLabel = r.dueBasis === 'delivery'
+                  ? (deliveryISO ? `entrega ${format(parseISO(deliveryISO), 'dd/MM/yyyy')}` : 'na entrega')
+                  : `${r.days} dia${r.days === 1 ? '' : 's'}`;
+                return (
+                  <div key={i} className="flex items-center justify-between">
+                    <span className="text-muted-foreground">{r.label} · {dueLabel}</span>
+                    <span>{fmt(r.amount)}</span>
+                  </div>
+                );
+              })}
               <div className="flex items-center justify-between pt-1.5 border-t font-medium">
                 <span>Total do saldo</span>
                 <span>{fmt(schedule.balanceTotal)}</span>

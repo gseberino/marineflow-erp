@@ -88,12 +88,30 @@ function normalizeInstallment(r: DepositInstallment) {
   };
 }
 
+type NormalizedInstallment = ReturnType<typeof normalizeInstallment>;
+
+/**
+ * A parcela é o SINAL (entrada) quando é explicitamente `tipo='aprovacao'`, ou — em condições
+ * antigas sem tipo (só `percent`) — quando cai no dia 0.
+ *
+ * ATENÇÃO: uma parcela `tipo='entrega'` pode ter `days_after_approval=0` (vence "na entrega", não
+ * na aprovação) e NÃO é sinal. Por isso a checagem por tipo tem que vir ANTES do fallback por dia —
+ * a heurística `days===0` sozinha classificava a parcela de entrega como sinal (bug).
+ */
+function isSignalInstallment(r: NormalizedInstallment): boolean {
+  if (r.tipo === "aprovacao") return true;
+  if (r.tipo === "entrega" || r.tipo === "prazo") return false;
+  return r.days === 0;
+}
+
 /** Uma parcela do cronograma, com o valor já calculado (com desconto). */
 export interface ScheduleRow {
   label: string;
   amount: number;
-  /** dias após a aprovação (0 = na aprovação). */
+  /** dias após a aprovação (para dueBasis='days'). */
   days: number;
+  /** vencimento: 'delivery' = na entrega prevista (scheduled_end_at); 'days' = aprovação + days. */
+  dueBasis: "delivery" | "days";
 }
 
 export interface PaymentSchedule {
@@ -109,7 +127,7 @@ export interface PaymentSchedule {
  * Cronograma completo (sinal + saldo) a partir dos custos já derivados do orçamento e das parcelas
  * da condição de pagamento. Cada parcela usa a MESMA conta do sinal (categoria × discountRatio),
  * então sinal + saldo fecham com o valor líquido do orçamento. Base única para a prévia do saldo
- * (diálogo) e para gerar as cobranças do saldo (generateBalanceCollections).
+ * (diálogo) e para lançar os recebíveis do saldo (RPC register_deposit_and_convert).
  */
 export function computeScheduleFromParts(
   laborCost: number,
@@ -125,11 +143,11 @@ export function computeScheduleFromParts(
     const amount = depositAmountFromPcts(
       laborCost, partsCost, expensesTotal, discountRatio, r.servicesPct, r.partsPct, r.expensesPct,
     );
-    const isSignal = r.tipo === "aprovacao" || r.days === 0;
-    if (isSignal) {
+    if (isSignalInstallment(r)) {
       signalAmount += amount;
     } else if (amount > 0) {
-      balance.push({ label: r.label || `Parcela ${i + 1}`, amount, days: r.days });
+      const dueBasis: "delivery" | "days" = r.tipo === "entrega" ? "delivery" : "days";
+      balance.push({ label: r.label || `Parcela ${i + 1}`, amount, days: r.days, dueBasis });
     }
   });
   return {
@@ -155,7 +173,7 @@ export function computeDeposit(
 ): DepositComputation {
   const b = depositBaseFromOrder(order);
   const rows = Array.isArray(installments) ? installments.map(normalizeInstallment) : [];
-  const signalRow = rows.find((r) => r.tipo === "aprovacao" || r.days === 0);
+  const signalRow = rows.find(isSignalInstallment);
   const signal = signalRow
     ? { servicesPct: signalRow.servicesPct, partsPct: signalRow.partsPct, expensesPct: signalRow.expensesPct }
     : null;
@@ -173,6 +191,6 @@ export function signalPctsFromInstallments(
   installments: DepositInstallment[] | null | undefined,
 ): { servicesPct: number; partsPct: number; expensesPct: number } | null {
   const rows = Array.isArray(installments) ? installments.map(normalizeInstallment) : [];
-  const s = rows.find((r) => r.tipo === "aprovacao" || r.days === 0);
+  const s = rows.find(isSignalInstallment);
   return s ? { servicesPct: s.servicesPct, partsPct: s.partsPct, expensesPct: s.expensesPct } : null;
 }

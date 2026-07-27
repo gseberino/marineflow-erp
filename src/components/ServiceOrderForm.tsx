@@ -2383,6 +2383,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           presetExpensesPct={depositFromFinancial && signalRow ? signalRow.expenses_pct : undefined}
           appliedConditionLabel={form.payment_conditions || ''}
           installments={installmentSource ?? undefined}
+          scheduledEndAt={form.scheduled_end_at || null}
         />
       )}
 
