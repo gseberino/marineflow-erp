@@ -1195,6 +1195,13 @@ export default function FiscalEmission() {
     setItems((prev) => prev.map((it, i) => (i === index ? { ...it, ...patch } : it)));
   };
 
+  // Devolução parcial: marcar/desmarcar todos os itens de uma vez. Sem isso, para
+  // devolver 1 item de uma nota grande o usuário desmarcava todos os outros na mão
+  // — erro fácil (itens vizinhos/parecidos ficavam marcados por engano).
+  const setAllIncluded = (included: boolean) => {
+    setItems((prev) => prev.map((it) => ({ ...it, included })));
+  };
+
   const removeItem = (index: number) => {
     setItems((prev) => prev.filter((_, i) => i !== index));
   };
@@ -2621,11 +2628,23 @@ export default function FiscalEmission() {
             </Card>
 
             <Card>
-              <CardHeader className="pb-2 flex flex-row items-center justify-between">
-                <CardTitle className="text-sm">Itens ({items.length})</CardTitle>
-                <Button size="sm" variant="outline" onClick={addItem}>
-                  <Plus className="h-3.5 w-3.5 mr-1" />Adicionar item
-                </Button>
+              <CardHeader className="pb-2 flex flex-row items-center justify-between gap-2 flex-wrap">
+                <CardTitle className="text-sm">
+                  Itens ({items.length}){isReturn && items.length > 0
+                    ? ` · ${includedItems.length} incluído${includedItems.length === 1 ? '' : 's'} na devolução`
+                    : ''}
+                </CardTitle>
+                <div className="flex items-center gap-2">
+                  {isReturn && items.length > 1 && (
+                    <>
+                      <Button size="sm" variant="outline" onClick={() => setAllIncluded(false)}>Desmarcar todos</Button>
+                      <Button size="sm" variant="outline" onClick={() => setAllIncluded(true)}>Marcar todos</Button>
+                    </>
+                  )}
+                  <Button size="sm" variant="outline" onClick={addItem}>
+                    <Plus className="h-3.5 w-3.5 mr-1" />Adicionar item
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent className="space-y-3">
                 {items.length === 0 && (
