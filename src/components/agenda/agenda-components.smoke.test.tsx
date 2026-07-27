@@ -150,11 +150,12 @@ describe('componentes da Agenda 2.0 — smoke de render', () => {
     wrap(<TaskAutomationSettings />);
 
     // O interruptor da regra que envia ao cliente é o que fica ao lado do rótulo dela.
-    const linha = screen.getByText('Lembrete de agendamento ao CLIENTE').closest('div')!.parentElement!;
+    // Regex, não texto exato: o rótulo já mudou uma vez e quebrou este teste à toa.
+    const linha = screen.getByText(/Lembrete de agendamento ao CLIENTE/).closest('div')!.parentElement!;
     await user.click(within(linha).getByRole('switch'));
 
     // Não pode ter salvo nada ainda: primeiro o aviso.
-    expect(await screen.findByText(/Ligar “Lembrete de agendamento ao CLIENTE”\?/)).toBeTruthy();
+    expect(await screen.findByText(/^Ligar “Lembrete de agendamento ao CLIENTE/)).toBeTruthy();
     expect(upsertSpy).not.toHaveBeenCalled();
 
     // Sem modo de teste, o botão só libera depois de digitar a palavra.

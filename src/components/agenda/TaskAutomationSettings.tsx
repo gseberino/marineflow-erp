@@ -93,8 +93,9 @@ const RULE_DEFS: { id: string; label: string; description: string; defaultEnable
   { id: 'r12', label: 'Orçamento externo aguardando análise', description: 'Tarefa quando um orçamento submetido fica 2 dias sem análise.', defaultEnabled: true },
   { id: 'r14', label: 'Plano de manutenção vencendo', description: 'Tarefa "Propor revisão" quando um plano de manutenção da embarcação entra na janela.', defaultEnabled: true },
   { id: 'r10', label: 'Lembrete interno de OS (equipe)', description: 'WhatsApp interno ao técnico na véspera da OS agendada (só usuários com canal IA habilitado).', defaultEnabled: true },
-  { id: 'r9', label: 'Lembrete de agendamento ao CLIENTE', description: 'WhatsApp ao cliente na véspera do atendimento. Envia mensagem real a clientes — ative com cuidado (respeita o modo de teste).', defaultEnabled: false, clientFacing: true },
-  { id: 'r13', label: 'Pesquisa pós-serviço ao CLIENTE', description: 'No dia seguinte à conclusão da OS, pergunta ao cliente como foi (nota 0-10) por WhatsApp. Envia a clientes — respeita o modo de teste.', defaultEnabled: false, clientFacing: true },
+  { id: 'r15', label: 'Confirmar agendamento com o cliente', description: 'Cria uma TAREFA sua na véspera ("confirmar com fulano o atendimento de amanhã"). Não envia nada sozinho — você dispara pelo botão na Agenda, um a um. É a alternativa recomendada ao envio automático abaixo.', defaultEnabled: true },
+  { id: 'r9', label: 'Lembrete de agendamento ao CLIENTE (envio automático)', description: 'Manda o WhatsApp sozinho na véspera. Disparo automático para quem não escreveu primeiro é o principal motivo de bloqueio do número — e o número da HBR carrega todo o histórico. Prefira a regra acima; deixe esta desligada.', defaultEnabled: false, clientFacing: true },
+  { id: 'r13', label: 'Pesquisa pós-serviço ao CLIENTE (envio automático)', description: 'No dia seguinte à conclusão da OS, pergunta ao cliente como foi (nota 0-10). Sem pedido do cliente, isso pesa como marketing: exige consentimento e saída fácil pela LGPD, e é disparo proativo com o risco de bloqueio que vem junto. Decidido manter desligada.', defaultEnabled: false, clientFacing: true },
 ];
 
 /**

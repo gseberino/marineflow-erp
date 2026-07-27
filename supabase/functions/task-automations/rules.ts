@@ -424,7 +424,67 @@ const r14: Rule = {
   },
 };
 
-export const RULES: Rule[] = [r1, r2, r3, r4, r5, r6, r7, r8, r11, r12, r14];
+// R15: a alternativa ESCOLHIDA no lugar do envio automático ao cliente (R9).
+// Em vez de o sistema mandar WhatsApp sozinho na véspera, ele cria uma TAREFA sua:
+// "confirmar com fulano o atendimento de amanhã". Você abre a agenda, vê a lista do dia e
+// dispara pelo botão, um a um. Nada sai daqui — esta regra não envia nada a ninguém.
+//
+// Por que assim: disparo automático para quem não escreveu primeiro é o principal motivo de
+// bloqueio do número no WhatsApp, e o número da HBR carrega todo o histórico de conversa.
+// Volume baixo e humano decidindo é o que reduz o risco — não o texto da mensagem.
+const r15: Rule = {
+  id: 'r15',
+  label: 'Confirmar agendamento com o cliente (tarefa, não envio)',
+  defaultEnabled: true,
+  async find(db) {
+    // Janela: OS agendadas para as próximas 48h. A chave inclui o DIA do atendimento, então
+    // remarcar para outra data gera uma tarefa nova em vez de reaproveitar a antiga.
+    const agora = new Date();
+    const limite = new Date(Date.now() + 48 * 3600000);
+    const { data } = await db
+      .from('service_orders')
+      .select('id, service_order_number, scheduled_start_at, client_id, clients(name, phone, whatsapp)')
+      .eq('status', 'scheduled')
+      .gte('scheduled_start_at', agora.toISOString())
+      .lte('scheduled_start_at', limite.toISOString())
+      .limit(50);
+    return (data || [])
+      // Sem telefone não há o que confirmar — a tarefa só geraria ruído.
+      .filter((o: any) => String(o.clients?.whatsapp || o.clients?.phone || '').replace(/\D/g, '').length >= 10)
+      .map((o: any) => {
+        const dia = String(o.scheduled_start_at).slice(0, 10);
+        const hora = new Date(o.scheduled_start_at).toLocaleTimeString('pt-BR', {
+          hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo',
+        });
+        return {
+          automation_key: keyOf('r15', 'so', o.id, dia),
+          title: `Confirmar com ${o.clients?.name || 'o cliente'} a OS ${o.service_order_number} (${fmtDate(dia)} às ${hora})`,
+          priority: 'high' as const,
+          assignee: 'admin' as const,
+          due_at: dueAt(todayISO()),
+          related_entity_type: 'service_order',
+          related_entity_id: o.id,
+          client_id: o.client_id,
+          notes: 'Use o botão de confirmação na Agenda para mandar a mensagem — nada é enviado sozinho.',
+        };
+      });
+  },
+  async isResolved(db, task) {
+    const id = entityIdFromKey(task.automation_key);
+    const dia = task.automation_key.split(':')[3];
+    const { data } = await db.from('service_orders')
+      .select('status, scheduled_start_at').eq('id', id).maybeSingle();
+    if (!data) return 'OS não existe mais';
+    if (data.status !== 'scheduled') return `OS mudou para ${data.status}`;
+    if (!data.scheduled_start_at) return 'OS perdeu o agendamento';
+    if (String(data.scheduled_start_at).slice(0, 10) !== dia) return 'Atendimento foi remarcado';
+    // Passou a hora: confirmar depois não serve para nada.
+    if (new Date(data.scheduled_start_at) < new Date()) return 'Atendimento já aconteceu';
+    return null;
+  },
+};
+
+export const RULES: Rule[] = [r1, r2, r3, r4, r5, r6, r7, r8, r11, r12, r14, r15];
 
 export function ruleById(id: string): Rule | undefined {
   return RULES.find((r) => r.id === id);
