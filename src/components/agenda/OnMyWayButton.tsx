@@ -19,10 +19,18 @@ export function OnMyWayButton({ order }: { order: any }) {
     try {
       const { data: os, error } = await supabase
         .from('service_orders')
-        .select('id, service_order_number, clients(name, phone, whatsapp), vessels(name)')
+        .select('id, service_order_number, clients(name, phone, whatsapp, opt_out_whatsapp), vessels(name)')
         .eq('id', order.id)
         .single();
       if (error) throw error;
+      // Opt-out vale para QUALQUER envio, inclusive o manual. As ferramentas do agente já
+      // respeitavam; este botão não — dava para mandar mensagem a quem pediu para parar.
+      if ((os as any).clients?.opt_out_whatsapp) {
+        toast.error('Este cliente pediu para não receber mensagens no WhatsApp.', {
+          description: 'Avise por telefone ou outro canal.',
+        });
+        return;
+      }
       const phone = String((os as any).clients?.whatsapp || (os as any).clients?.phone || '').replace(/\D/g, '');
       if (!phone || phone.length < 10) { toast.error('Cliente sem telefone cadastrado.'); return; }
 
