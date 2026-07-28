@@ -77,7 +77,11 @@ async function invokeReconcile<T>(body: Record<string, unknown>): Promise<T> {
     if (resposta && typeof resposta.json === 'function') {
       try {
         const corpo = await resposta.json();
-        if (corpo?.error) throw new Error(String(corpo.error));
+        // `detail` carrega a exceção original quando a função quebra; sem ele a tela
+        // mostra só "unexpected_error", que não diz nada a quem está conciliando.
+        if (corpo?.error) {
+          throw new Error(corpo.detail ? `${corpo.error}: ${corpo.detail}` : String(corpo.error));
+        }
       } catch (e) {
         if (e instanceof Error && e.message && !e.message.includes('non-2xx')) throw e;
       }

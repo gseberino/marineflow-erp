@@ -12,13 +12,24 @@
 // verify_jwt=false no config.toml porque há dois chamadores: o painel (manda o JWT do
 // usuário, validado aqui) e o cron da varredura diária (manda só x-cron-secret).
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
   suggestMatches, pickAutoApply, suggestCombinations, statementSignature,
   looksLikeInternalTransfer,
 } from "../_shared/banking/matching.ts";
 import { expectedDepositAmount } from "../_shared/banking/quote-deposit.ts";
 import type { BankTx, Candidate, Suggestion } from "../_shared/banking/types.ts";
+
+/**
+ * Cliente do banco.
+ *
+ * Alias explícito em vez de `ReturnType<typeof createClient>`, que resolve para um
+ * genérico incompatível com o que `createClient(url, key)` realmente devolve. O ruído
+ * desses erros falsos escondia erro de verdade no `deno check` — foi assim que uma
+ * chamada com argumentos deslocados passou despercebida e derrubou a conciliação em
+ * produção. Rodar `deno check` nesta função antes de deployar agora vale a pena.
+ */
+type DbClient = SupabaseClient<any, "public", any>;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -72,7 +83,7 @@ Deno.serve(async (req) => {
    * toda baixa com "Acesso negado". Além disso, registrar dinheiro deve ficar atribuído
    * ao usuário real, não a um processo anônimo.
    */
-  let userClient: ReturnType<typeof createClient> | null = null;
+  let userClient: DbClient | null = null;
   if (!isCron) {
     const authHeader = req.headers.get("Authorization") || "";
     const token = authHeader.replace("Bearer ", "");
@@ -272,7 +283,7 @@ Deno.serve(async (req) => {
  * A ordem importa pouco (o motor pontua), mas a abrangência importa muito: candidato
  * que não entra aqui simplesmente nunca é sugerido.
  */
-async function buildCandidates(admin: ReturnType<typeof createClient>): Promise<Candidate[]> {
+async function buildCandidates(admin: DbClient): Promise<Candidate[]> {
   const candidates: Candidate[] = [];
 
   // 1. Contas a receber em aberto.
@@ -506,7 +517,9 @@ async function buildCandidates(admin: ReturnType<typeof createClient>): Promise<
  * trilha de auditoria e os gatilhos de conversão de orçamento aconteçam igual.
  */
 async function applySuggestion(
-  admin: ReturnType<typeof createClient>,
+  admin: DbClient,
+  /** Cliente com o JWT de quem clicou — as rotinas de baixa exigem auth.uid(). */
+  userClient: DbClient | null,
   tx: BankTx,
   suggestion: Suggestion,
 ): Promise<{ ok: boolean; message: string }> {
@@ -671,7 +684,7 @@ async function applySuggestion(
 }
 
 async function marcarConciliada(
-  admin: ReturnType<typeof createClient>,
+  admin: DbClient,
   txId: string,
   paymentId: string | null,
   serviceOrderId: string | null,
@@ -692,7 +705,7 @@ async function marcarConciliada(
  * aprender é bem menos grave do que quebrar a operação.
  */
 async function aprender(
-  admin: ReturnType<typeof createClient>,
+  admin: DbClient,
   tx: BankTx,
   candidate: Candidate,
 ) {
