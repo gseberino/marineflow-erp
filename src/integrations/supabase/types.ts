@@ -3729,6 +3729,44 @@ export type Database = {
           },
         ]
       }
+      reconciliation_memory: {
+        Row: {
+          candidate_kind: string | null
+          client_id: string | null
+          created_at: string
+          hits: number
+          id: string
+          last_seen_at: string
+          statement_key: string
+        }
+        Insert: {
+          candidate_kind?: string | null
+          client_id?: string | null
+          created_at?: string
+          hits?: number
+          id?: string
+          last_seen_at?: string
+          statement_key: string
+        }
+        Update: {
+          candidate_kind?: string | null
+          client_id?: string | null
+          created_at?: string
+          hits?: number
+          id?: string
+          last_seen_at?: string
+          statement_key?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reconciliation_memory_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       receivables: {
         Row: {
           amount: number

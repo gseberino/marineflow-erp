@@ -203,6 +203,61 @@ export function useAnalyzeWithAI() {
   });
 }
 
+export interface ReconciliationHealth {
+  total: number;
+  conciliadas: number;
+  pendentes: number;
+  /** Percentual do extrato já explicado. */
+  taxa: number;
+  valorPendente: number;
+  /** Dias desde a transação pendente mais antiga. */
+  diasMaisAntiga: number | null;
+  /** Padrões de histórico bancário que o sistema já aprendeu. */
+  padroesAprendidos: number;
+}
+
+/**
+ * Saúde da conciliação: quanto do extrato já está explicado, o que está encalhado e há
+ * quanto tempo. É a métrica que diz se a rotina está em dia — e o número de padrões
+ * aprendidos mostra o motor ficando melhor com o uso, que de outro modo é invisível.
+ */
+export function useReconciliationHealth() {
+  return useQuery({
+    queryKey: ['reconciliation-health'],
+    queryFn: async (): Promise<ReconciliationHealth> => {
+      const [todas, memoria] = await Promise.all([
+        supabase.from('bank_transactions').select('amount, reconciled, transaction_date'),
+        supabase.from('reconciliation_memory').select('id', { count: 'exact', head: true }),
+      ]);
+
+      const linhas = todas.data || [];
+      const pendentes = linhas.filter(l => !l.reconciled);
+      const conciliadas = linhas.length - pendentes.length;
+
+      let diasMaisAntiga: number | null = null;
+      if (pendentes.length > 0) {
+        const maisAntiga = pendentes.reduce((min, l) =>
+          String(l.transaction_date) < min ? String(l.transaction_date) : min,
+          String(pendentes[0].transaction_date));
+        diasMaisAntiga = Math.floor(
+          (Date.now() - new Date(`${maisAntiga}T12:00:00`).getTime()) / 86400000,
+        );
+      }
+
+      return {
+        total: linhas.length,
+        conciliadas,
+        pendentes: pendentes.length,
+        taxa: linhas.length > 0 ? Math.round((conciliadas / linhas.length) * 100) : 0,
+        valorPendente: pendentes.reduce((s, l) => s + Number(l.amount || 0), 0),
+        diasMaisAntiga,
+        padroesAprendidos: memoria.count ?? 0,
+      };
+    },
+    staleTime: 60_000,
+  });
+}
+
 /** Rótulo curto do tipo de candidato, para a etiqueta na sugestão. */
 export const CANDIDATE_LABELS: Record<CandidateKind, string> = {
   receivable: 'Conta a receber',
