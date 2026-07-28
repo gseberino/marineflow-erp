@@ -23,17 +23,25 @@ export interface CompletionMessageInput {
   balance?: number | null;
   /** vencimento do saldo (ISO 'yyyy-MM-dd'); usa a conclusão real quando o saldo é "na entrega". */
   dueDate?: string | null;
+  /**
+   * Instrução de pagamento a incluir quando há saldo. Hoje = chave Pix estática da empresa
+   * (Configurações). SEAM: quando a integração bancária estiver pronta, passar aqui o Pix
+   * copia-e-cola / link dinâmico daquele saldo (mesmo ponto de injeção, sem mudar o resto).
+   */
+  pixKey?: string | null;
 }
 
-/** Monta a mensagem padrão de conclusão. Com saldo em aberto, inclui valor e vencimento. */
-export function buildCompletionMessage({ clientName, osNumber, balance, dueDate }: CompletionMessageInput): string {
+/** Monta a mensagem padrão de conclusão. Com saldo em aberto, inclui valor, vencimento e (se houver) Pix. */
+export function buildCompletionMessage({ clientName, osNumber, balance, dueDate, pixKey }: CompletionMessageInput): string {
   const nome = firstName(clientName);
   const saldo = Number(balance || 0);
   if (saldo > 0.009) {
+    const pixLine = pixKey && pixKey.trim() ? `\n\n💠 Para pagar por Pix, use a chave: *${pixKey.trim()}*` : '';
     return (
       `Olá ${nome}! 🚤\n\n` +
-      `Concluímos o serviço da ${osNumber}. Ficou um saldo de *${brl(saldo)}*${duePhrase(dueDate)}.\n\n` +
-      `Qualquer dúvida sobre o pagamento ou o serviço, estamos à disposição. Obrigado pela confiança!`
+      `Concluímos o serviço da ${osNumber}. Ficou um saldo de *${brl(saldo)}*${duePhrase(dueDate)}.` +
+      pixLine +
+      `\n\nQualquer dúvida sobre o pagamento ou o serviço, estamos à disposição. Obrigado pela confiança!`
     );
   }
   return (

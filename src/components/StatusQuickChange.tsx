@@ -9,6 +9,8 @@ import { useUpdateServiceOrderStatus, useCancelServiceOrder, useReopenServiceOrd
 import { statusConfig } from '@/lib/constants';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import { supabase } from '@/integrations/supabase/client';
+import { CompletionSendDialog } from '@/components/CompletionSendDialog';
 import type { ServiceOrderStatus } from '@/types/domain';
 
 interface Props {
@@ -26,6 +28,9 @@ export function StatusQuickChange({ orderId, currentStatus }: Props) {
   const [cancelOpen, setCancelOpen] = useState(false);
   const [reopenOpen, setReopenOpen] = useState(false);
   const [reason, setReason] = useState('');
+  const [completionSend, setCompletionSend] = useState<{
+    open: boolean; osNumber: string; balance: number; dueDate: string | null; clientName: string | null; clientPhone: string | null;
+  }>({ open: false, osNumber: '', balance: 0, dueDate: null, clientName: null, clientPhone: null });
 
   const cfg = statusConfig[currentStatus];
   const validTransitions = STATUS_TRANSITIONS[currentStatus] ?? [];
@@ -101,6 +106,32 @@ export function StatusQuickChange({ orderId, currentStatus }: Props) {
     try {
       await updateStatus.mutateAsync({ id: orderId, status: target });
       toast({ title: `Status atualizado para "${(t.status as Record<string, string>)[target]}"` });
+
+      // Conclusão pela lista → mesmo prompt opt-in de "avisar o cliente + saldo" do formulário.
+      if (target === 'completed') {
+        const [{ data: so }, { data: recRows }] = await Promise.all([
+          supabase.from('service_orders')
+            .select('service_order_number, clients(name, whatsapp, phone)')
+            .eq('id', orderId).maybeSingle(),
+          supabase.from('receivables')
+            .select('balance_amount, due_date, is_deposit, status')
+            .eq('service_order_id', orderId).neq('status', 'cancelled'),
+        ]);
+        const pend = (recRows || []).filter((r: any) => !r.is_deposit && r.status !== 'paid');
+        const outstanding = pend.reduce((s: number, r: any) => s + Number(r.balance_amount || 0), 0);
+        if (outstanding > 0.009) {
+          const dueRow = pend.slice().sort((a: any, b: any) => String(a.due_date).localeCompare(String(b.due_date)))[0];
+          const cli = (so as any)?.clients;
+          setCompletionSend({
+            open: true,
+            osNumber: (so as any)?.service_order_number || '',
+            balance: Math.round(outstanding * 100) / 100,
+            dueDate: dueRow?.due_date ?? null,
+            clientName: cli?.name ?? null,
+            clientPhone: cli?.whatsapp || cli?.phone || null,
+          });
+        }
+      }
     } catch (err: any) {
       toast({ title: 'Erro ao atualizar status', description: err.message, variant: 'destructive' });
     }
@@ -231,6 +262,18 @@ export function StatusQuickChange({ orderId, currentStatus }: Props) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Prompt opt-in de conclusão (avisar cliente + saldo) — ao concluir pela lista */}
+      <CompletionSendDialog
+        open={completionSend.open}
+        onOpenChange={v => setCompletionSend(prev => ({ ...prev, open: v }))}
+        serviceOrderId={orderId}
+        osNumber={completionSend.osNumber}
+        clientName={completionSend.clientName}
+        clientPhone={completionSend.clientPhone}
+        balance={completionSend.balance}
+        dueDate={completionSend.dueDate}
+      />
     </>
   );
 }

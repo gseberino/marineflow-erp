@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Loader2, Send, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
+import { useAppSettings } from '@/hooks/use-app-settings';
 import { buildCompletionMessage } from '@/lib/completion-message';
 
 interface Props {
@@ -32,12 +33,14 @@ export function CompletionSendDialog({
   const [phone, setPhone] = useState('');
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
+  const { data: settingsMap } = useAppSettings();
+  const pixKey = settingsMap?.['pix_key'] ?? null;
 
   useEffect(() => {
     if (!open) return;
     setPhone(clientPhone || '');
-    setMessage(buildCompletionMessage({ clientName, osNumber, balance, dueDate }));
-  }, [open, clientPhone, clientName, osNumber, balance, dueDate]);
+    setMessage(buildCompletionMessage({ clientName, osNumber, balance, dueDate, pixKey }));
+  }, [open, clientPhone, clientName, osNumber, balance, dueDate, pixKey]);
 
   const digits = phone.replace(/\D/g, '');
   const canSend = digits.length >= 10 && message.trim().length > 0;

@@ -32,4 +32,15 @@ describe('buildCompletionMessage', () => {
     const msg = buildCompletionMessage({ osNumber: 'OS-1', balance: 0 });
     expect(msg).toContain('Cliente');
   });
+
+  it('com saldo + chave Pix: inclui a linha do Pix', () => {
+    const msg = buildCompletionMessage({ osNumber: 'OS-1', balance: 500, pixKey: 'hbr@marine.com.br' });
+    expect(msg).toContain('Pix');
+    expect(msg).toContain('hbr@marine.com.br');
+  });
+
+  it('sem saldo: NÃO inclui Pix mesmo com chave', () => {
+    const msg = buildCompletionMessage({ osNumber: 'OS-1', balance: 0, pixKey: 'hbr@marine.com.br' });
+    expect(msg).not.toContain('hbr@marine.com.br');
+  });
 });

@@ -256,13 +256,20 @@ export function useCancelServiceOrder() {
     mutationFn: async ({ id, reason }: { id: string; reason: string }) => {
       return await cancelServiceOrderCascade(id, reason);
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ['service-orders'] });
       qc.invalidateQueries({ queryKey: ['receivables'] });
       qc.invalidateQueries({ queryKey: ['payables'] });
       qc.invalidateQueries({ queryKey: ['products'] });
       qc.invalidateQueries({ queryKey: ['payments'] });
       qc.invalidateQueries({ queryKey: ['bank-transactions'] });
+      qc.invalidateQueries({ queryKey: ['collections'] });
+      // Sinal já recebido → avisa o usuário para tratar a devolução/retenção (não define política).
+      const dep = Number(data?.deposit_paid || 0);
+      if (dep > 0) {
+        const fmt = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(dep);
+        toast.warning(`Atenção: sinal de ${fmt} já havia sido recebido nesta OS. Trate a devolução ou retenção conforme o combinado com o cliente.`, { duration: 10000 });
+      }
     },
   });
 }
