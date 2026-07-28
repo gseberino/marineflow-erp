@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
+import { createShareClient } from '@/integrations/supabase/share-client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -59,6 +60,9 @@ export default function PublicServiceOrderView() {
   const [signaturePng, setSignaturePng] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Cliente que leva o token do link no cabeçalho, para a RLS poder compará-lo.
+  const sb = useMemo(() => (token ? createShareClient(token) : supabase), [token]);
+
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
@@ -66,7 +70,7 @@ export default function PublicServiceOrderView() {
 
     (async () => {
       try {
-        const { data: order, error: orderErr } = await supabase
+        const { data: order, error: orderErr } = await sb
           .from('service_orders')
           .select('*')
           .eq('share_token', token)
@@ -82,20 +86,20 @@ export default function PublicServiceOrderView() {
         }
 
         const [clientRes, vesselRes, partsRes, servicesRes, settingsRes, sigRes, presetRes] = await Promise.all([
-          supabase.from('clients').select('*').eq('id', order.client_id).maybeSingle(),
+          sb.from('clients').select('*').eq('id', order.client_id).maybeSingle(),
           order.vessel_id
-            ? supabase.from('vessels').select('*').eq('id', order.vessel_id).maybeSingle()
+            ? sb.from('vessels').select('*').eq('id', order.vessel_id).maybeSingle()
             : Promise.resolve({ data: null, error: null }),
-          supabase
+          sb
             .from('service_order_parts')
             .select('*, products(name, sku)')
             .eq('service_order_id', order.id),
-          supabase
+          sb
             .from('service_order_services')
             .select('*')
             .eq('service_order_id', order.id),
-          supabase.from('app_settings').select('key, value'),
-          supabase
+          sb.from('app_settings').select('key, value'),
+          sb
             .from('service_order_signatures')
             .select('id, signature_image_url, accepted_name, signed_at, superseded_at, document_hash')
             .eq('service_order_id', order.id)
@@ -104,7 +108,7 @@ export default function PublicServiceOrderView() {
             .limit(1)
             .maybeSingle(),
           (order as any).payment_condition_preset_id
-            ? supabase
+            ? sb
                 .from('payment_condition_presets')
                 .select('label, installments')
                 .eq('id', (order as any).payment_condition_preset_id)
