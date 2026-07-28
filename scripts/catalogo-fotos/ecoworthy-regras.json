@@ -1,0 +1,10 @@
+{
+  "_doc": "Regras da EcoWorthy. Catálogo vem do adaptador Shopify (1-shopify.mjs), unindo a loja .com e a uk. — nenhuma das duas sozinha cobre tudo. O slug aqui é o handle do Shopify.",
+  "regras": [
+    { "padrao": "monitor de baterias.*300a|display monitor.*300a", "slug": "300a-3-5-touchable-display-battery-monitor-with-hall-sensor-for-agm-and-lithium-lifepo4-batteries", "conf": "alta" },
+    { "padrao": "mppt 12/24v 60a|mppt.*60a.*oled|mppt.*oled.*60a", "slug": "60a-12-24-36-48v-mppt-oled-display-solar-charge-controller-regulator", "conf": "alta" },
+    { "padrao": "bateria de l[ií]tio 12v.*314", "slug": "eco-worthy-12v-314ah-lifepo4-lithium-battery-bluetooth-with-soc-leds-and-low-temp-protection", "conf": "alta" },
+    { "padrao": "bateria de l[ií]tio 12v.*300", "slug": "eco-worthy-12v-300ah-lifepo4-lithium-battery-bluetooth-with-soc-leds-and-low-temp-protection", "conf": "alta" },
+    { "padrao": "bateria de l[ií]tio 12v.*280", "slug": "eco-worthy-12v-280ah-metal-case-lifepo4-lithium-battery-with-bluetooth-and-low-temperature-protection", "conf": "media" }
+  ]
+}

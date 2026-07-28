@@ -19,10 +19,13 @@ import { fileURLToPath } from 'node:url';
 
 const aqui = path.dirname(fileURLToPath(import.meta.url));
 const dados = process.argv[2] || path.join(process.cwd(), '.catalogo-fotos');
+// --regras <arquivo>: cada marca tem a sua tabela. Sem isto, Victron.
+const iRegras = process.argv.indexOf('--regras');
+const arquivoRegras = iRegras === -1 ? 'victron-regras.json' : process.argv[iRegras + 1];
 
 const catalogo = JSON.parse(fs.readFileSync(path.join(dados, 'victron-catalogo.json'), 'utf8'));
 const produtos = JSON.parse(fs.readFileSync(path.join(dados, 'produtos.json'), 'utf8'));
-const { regras } = JSON.parse(fs.readFileSync(path.join(aqui, 'victron-regras.json'), 'utf8'));
+const { regras } = JSON.parse(fs.readFileSync(path.join(aqui, arquivoRegras), 'utf8'));
 
 const porSlug = new Map(catalogo.map((c) => [c.slug, c]));
 
@@ -65,8 +68,12 @@ function especificacoes(texto) {
   return new Set(nums.map((n) => (n === 220 || n === 230 ? 230 : n)));
 }
 
-/** É a foto-herói da família (a que a Victron usa no topo da página)? */
-const ehHeroi = (url) => /\/upload\/products\//.test(url);
+/**
+ * É a foto principal? Na Victron é a que vive em /upload/products/ (topo da
+ * página). No Shopify não há esse sinal na URL — a loja publica a foto principal
+ * como a PRIMEIRA da lista, então é a posição que informa.
+ */
+const ehHeroi = (url, indice) => /\/upload\/products\//.test(url) || indice === 0;
 
 /** Penaliza ângulos que não servem de vitrine; premia a foto frontal/hero. */
 function pontuarAngulo(arquivo) {
@@ -114,7 +121,7 @@ for (const prod of produtos) {
 
   const especProduto = especificacoes(prod.name);
   const candidatos = pagina.imagens
-    .map((url) => {
+    .map((url, indice) => {
       const arquivo = decodificar(url.split('/').pop() || url);
       const especArquivo = especificacoes(arquivo);
       const casados = [...especProduto].filter((n) => especArquivo.has(n));
@@ -129,6 +136,7 @@ for (const prod of produtos) {
         casados,
         faltando,
         sobrando,
+        heroi: ehHeroi(url, indice),
         // "sobrando" pesa: número no arquivo que não temos = é OUTRA variante.
         // "faltando" quase não pesa: o nome oficial costuma ser mais curto que o
         // nosso (o arquivo diz "24V 3kVA", nós dizemos "24/3000/70-32 220V").
@@ -161,7 +169,7 @@ for (const prod of produtos) {
   // Sem variante exata: a foto-herói da família é honesta (é a linha certa do
   // produto), enquanto a foto de OUTRA variante seria enganosa. Preferimos a
   // herói e marcamos para conferência humana.
-  const heroi = candidatos.filter((c) => ehHeroi(c.url)).sort((a, b) => b.pontos - a.pontos)[0];
+  const heroi = candidatos.filter((c) => c.heroi).sort((a, b) => b.pontos - a.pontos)[0];
   const escolhida = heroi || melhor;
 
   resultado.push({
