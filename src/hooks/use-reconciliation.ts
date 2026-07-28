@@ -61,11 +61,36 @@ export interface ReconcileResponse {
   };
 }
 
-async function callReconcile(body: Record<string, unknown>): Promise<ReconcileResponse> {
+/**
+ * Chama a função e devolve a mensagem REAL quando ela recusa a operação.
+ *
+ * `functions.invoke` entrega apenas "Edge Function returned a non-2xx status code" em
+ * qualquer erro HTTP — o motivo fica no corpo da resposta. Sem ler esse corpo, quem está
+ * conciliando vê "erro na edge function" e não tem como saber que faltou permissão, que a
+ * transação já estava conciliada ou que o valor não bate.
+ */
+async function invokeReconcile<T>(body: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabase.functions.invoke('banking-reconcile', { body });
-  if (error) throw error;
+
+  if (error) {
+    const resposta = (error as any)?.context as Response | undefined;
+    if (resposta && typeof resposta.json === 'function') {
+      try {
+        const corpo = await resposta.json();
+        if (corpo?.error) throw new Error(String(corpo.error));
+      } catch (e) {
+        if (e instanceof Error && e.message && !e.message.includes('non-2xx')) throw e;
+      }
+    }
+    throw error;
+  }
+
   if ((data as any)?.error) throw new Error((data as any).error);
-  return data as ReconcileResponse;
+  return data as T;
+}
+
+async function callReconcile(body: Record<string, unknown>): Promise<ReconcileResponse> {
+  return invokeReconcile<ReconcileResponse>(body);
 }
 
 /**
@@ -111,14 +136,12 @@ export function useAutoReconcile() {
 export function useApplySuggestion() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { transactionId: string; candidate: ReconcileCandidate }) => {
-      const { data, error } = await supabase.functions.invoke('banking-reconcile', {
-        body: { action: 'apply', transaction_id: input.transactionId, candidate: input.candidate },
-      });
-      if (error) throw error;
-      if ((data as any)?.error) throw new Error((data as any).error);
-      return data as { ok: boolean; message: string };
-    },
+    mutationFn: (input: { transactionId: string; candidate: ReconcileCandidate }) =>
+      invokeReconcile<{ ok: boolean; message: string }>({
+        action: 'apply',
+        transaction_id: input.transactionId,
+        candidate: input.candidate,
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['bank-transactions'] });
       qc.invalidateQueries({ queryKey: ['reconcile-suggestions'] });
@@ -135,14 +158,12 @@ export function useApplySuggestion() {
 export function useApplyGroup() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { transactionId: string; candidates: ReconcileCandidate[] }) => {
-      const { data, error } = await supabase.functions.invoke('banking-reconcile', {
-        body: { action: 'apply_group', transaction_id: input.transactionId, candidates: input.candidates },
-      });
-      if (error) throw error;
-      if ((data as any)?.error) throw new Error((data as any).error);
-      return data as { ok: boolean; message: string; feitos: string[]; falhas: string[] };
-    },
+    mutationFn: (input: { transactionId: string; candidates: ReconcileCandidate[] }) =>
+      invokeReconcile<{ ok: boolean; message: string; feitos: string[]; falhas: string[] }>({
+        action: 'apply_group',
+        transaction_id: input.transactionId,
+        candidates: input.candidates,
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['bank-transactions'] });
       qc.invalidateQueries({ queryKey: ['reconcile-suggestions'] });

@@ -63,12 +63,30 @@ Deno.serve(async (req) => {
   // ── Autenticação: painel (JWT) ou cron (segredo) ───────────────────────────
   const cronSecret = req.headers.get("x-cron-secret");
   const isCron = !!cronSecret && cronSecret === Deno.env.get("CRON_SECRET");
+
+  /**
+   * Cliente que carrega o JWT de quem clicou.
+   *
+   * As rotinas de baixa checam o cargo com `is_admin_or_financial(auth.uid())`, e
+   * `auth.uid()` é NULO em chamada com service-role — usar o cliente admin aqui derruba
+   * toda baixa com "Acesso negado". Além disso, registrar dinheiro deve ficar atribuído
+   * ao usuário real, não a um processo anônimo.
+   */
+  let userClient: ReturnType<typeof createClient> | null = null;
   if (!isCron) {
     const authHeader = req.headers.get("Authorization") || "";
     const token = authHeader.replace("Bearer ", "");
     if (!token) return jr({ error: "unauthorized" }, 401);
     const { data: userData, error: userErr } = await admin.auth.getUser(token);
     if (userErr || !userData?.user) return jr({ error: "unauthorized" }, 401);
+    userClient = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+      {
+        global: { headers: { Authorization: `Bearer ${token}` } },
+        auth: { persistSession: false, autoRefreshToken: false },
+      },
+    );
   }
 
   const body: ReconcileBody = await req.json().catch(() => ({}));
@@ -92,7 +110,7 @@ Deno.serve(async (req) => {
       if ((txRow as any).reconciled) return jr({ error: "esta transação já foi conciliada" }, 409);
 
       const alvo = body.candidate;
-      const resultado = await applySuggestion(admin, txRow as BankTx, {
+      const resultado = await applySuggestion(admin, userClient, txRow as BankTx, {
         candidate: alvo,
         score: 0, tier: "probable", reasons: [], difference: 0, autoApply: false,
       });
@@ -120,7 +138,7 @@ Deno.serve(async (req) => {
       const falhas: string[] = [];
       for (const alvo of body.candidates) {
         const parcela = { ...tx, amount: Number(alvo.amount) };
-        const r = await applySuggestion(admin, parcela, {
+        const r = await applySuggestion(admin, userClient, parcela, {
           candidate: alvo, score: 0, tier: "probable", reasons: [], difference: 0, autoApply: false,
         });
         if (r.ok) feitos.push(alvo.label);
@@ -216,7 +234,7 @@ Deno.serve(async (req) => {
           applied.push({ transaction_id: item.transaction.id, candidate: auto.candidate, message: "simulação" });
           continue;
         }
-        const result = await applySuggestion(admin, item.transaction, auto);
+        const result = await applySuggestion(admin, userClient, item.transaction, auto);
         if (result.ok) {
           applied.push({ transaction_id: item.transaction.id, candidate: auto.candidate, message: result.message });
           item.suggestions = []; // já resolvida
@@ -504,8 +522,14 @@ async function applySuggestion(
       return { ok: true, message: `Vinculado ao pagamento já registrado (${candidate.label})` };
     }
 
+    // As rotinas abaixo checam o cargo por auth.uid(); sem o cliente do usuário elas
+    // recusam com "Acesso negado". A varredura automática por cron não registra dinheiro.
+    if (!userClient) {
+      return { ok: false, message: "Registrar pagamento exige um usuário autenticado." };
+    }
+
     if (candidate.kind === "receivable" || candidate.kind === "payable") {
-      const { data, error } = await admin.rpc("register_payment_and_update_balance", {
+      const { data, error } = await userClient.rpc("register_payment_and_update_balance", {
         p_receivable_id: candidate.kind === "receivable" ? candidate.id : null,
         p_payable_id: candidate.kind === "payable" ? candidate.id : null,
         p_amount: tx.amount,
@@ -526,7 +550,7 @@ async function applySuggestion(
     if (candidate.kind === "quote_deposit") {
       // Cria o recebível de sinal já quitado e converte o orçamento — o mesmo caminho
       // do botão "Receber sinal", inclusive disparando o gatilho de conversão.
-      const { data, error } = await admin.rpc("register_deposit_and_convert", {
+      const { data, error } = await userClient.rpc("register_deposit_and_convert", {
         p_service_order_id: candidate.serviceOrderId,
         p_amount: tx.amount,
         p_payment_date: hoje,
