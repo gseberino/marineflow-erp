@@ -28,40 +28,14 @@
   <meta name="twitter:title" content="HBR Marine - ERP Sistema">
   <meta property="og:description" content="MarineFlow ERP is a specialized SaaS application for nautical technical services.">
   <meta name="twitter:description" content="MarineFlow ERP is a specialized SaaS application for nautical technical services.">
-  <script>
-    // Auto-reset zoom when fingers are released — keeps layout locked to device width
-    // Allows temporary pinch-zoom while fingers are on screen, resets on touchend
-    (function () {
-      var lastTouchEnd = 0;
-
-      // Reset zoom by briefly enforcing maximum-scale=1, then restoring
-      function resetZoom() {
-        var meta = document.querySelector('meta[name="viewport"]');
-        if (!meta) return;
-        var base = 'width=device-width, initial-scale=1.0, viewport-fit=cover';
-        meta.setAttribute('content', base + ', maximum-scale=1.0');
-        setTimeout(function () {
-          meta.setAttribute('content', base);
-        }, 300);
-      }
-
-      // Reset on touchend when all fingers are lifted
-      document.addEventListener('touchend', function (e) {
-        if (e.touches.length === 0) {
-          resetZoom();
-        }
-      }, { passive: true });
-
-      // Prevent double-tap zoom (but keep pinch-zoom)
-      document.addEventListener('touchend', function (e) {
-        var now = Date.now();
-        if (now - lastTouchEnd < 300 && e.touches.length === 0) {
-          e.preventDefault();
-        }
-        lastTouchEnd = now;
-      }, { passive: false });
-    })();
-  </script>
+  <!--
+    Havia aqui um script que forçava maximum-scale=1 a cada toque, desfazendo o zoom do
+    usuário 300ms depois, e que bloqueava o duplo-toque. Em telas mais largas que o
+    celular (23 páginas da v1 ainda são), o pinch era a única forma de enxergar a linha
+    inteira — e ele desfazia justamente isso. Também contraria a diretriz de
+    acessibilidade que exige permitir ampliar (WCAG 1.4.4).
+    Removido: no iPhone o comportamento padrão é melhor que o remendo.
+  -->
 </head>
 
   <body>

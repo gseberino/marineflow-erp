@@ -419,7 +419,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
   );
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-background">
+    // app-shell troca h-screen (100vh) por 100dvh e recua as áreas do sistema quando
+    // instalado. Ver o bloco "APP INSTALADO NO CELULAR" em index.css.
+    <div className="app-shell flex w-full overflow-hidden bg-background">
       <aside
         className={cn(
           'hidden lg:flex flex-col bg-sidebar border-r border-sidebar-border transition-all duration-200 shrink-0',

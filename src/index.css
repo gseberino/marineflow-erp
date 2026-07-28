@@ -163,3 +163,31 @@ body {
     background-color: hsl(var(--muted-foreground) / 0.5);
   }
 }
+
+/* ============================================================
+   APP INSTALADO NO CELULAR (iPhone principalmente)
+   ============================================================
+   O index.html declara viewport-fit=cover, que estende a página por baixo do
+   entalhe e da barra inferior do iPhone. Sem compensar essas áreas, parte da
+   interface fica embaixo do sistema — e como a casca do app é overflow-hidden,
+   não há como rolar até ela: o conteúdo simplesmente não existe para o usuário.
+   Isso valia para TODAS as telas, v1 e v2.
+
+   Vale só quando o app está instalado (display-mode: standalone). No navegador,
+   a barra do Safari já ocupa essas áreas e o recuo criaria faixa vazia à toa. */
+@layer components {
+  .app-shell {
+    /* 100dvh, não 100vh: no iOS a barra do navegador entra e sai, e 100vh é
+       calculado pela tela inteira — a última faixa da tela ficava inalcançável. */
+    height: 100dvh;
+  }
+
+  @media (display-mode: standalone) {
+    .app-shell {
+      padding-top: env(safe-area-inset-top, 0px);
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+      padding-left: env(safe-area-inset-left, 0px);
+      padding-right: env(safe-area-inset-right, 0px);
+    }
+  }
+}
