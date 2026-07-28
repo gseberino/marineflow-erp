@@ -12,6 +12,7 @@ import { MaintenancePlansPanel } from './MaintenancePlansPanel';
 import { TaskAutomationSettings } from './TaskAutomationSettings';
 import { FocusMode } from './FocusMode';
 import { OpenLoopsPanel } from './OpenLoopsPanel';
+import { InstallAgendaCard } from './InstallAgendaCard';
 
 const { queryBuilder, q, mut, liveTasks, openLoops, loopsRef, roleRef, upsertSpy } = vi.hoisted(() => {
   // Espião de gravação: é o que prova que a confirmação BLOQUEIA o salvamento, e não
@@ -163,6 +164,17 @@ describe('componentes da Agenda 2.0 — smoke de render', () => {
     expect(confirmar).toBeDisabled();
     await user.type(screen.getByLabelText(/digite/i), 'LIGAR');
     expect(confirmar).not.toBeDisabled();
+  });
+
+  it('InstallAgendaCard aparece mesmo sem o evento do navegador', () => {
+    // Era exatamente esta a falha do botão antigo: sem `beforeinstallprompt` ele retornava
+    // null, então no iPhone nunca aparecia nada. Aqui o evento não é disparado e o cartão
+    // ainda precisa se explicar.
+    wrap(<InstallAgendaCard />);
+    expect(screen.getByText('Agenda no celular')).toBeTruthy();
+    // No jsdom não há evento nem iOS, então cai no ramo "navegador sem suporte" — que é o
+    // ponto: sempre há uma explicação, nunca uma tela em branco.
+    expect(screen.getByText(/não oferece instalação/)).toBeTruthy();
   });
 
   it('OpenLoopsPanel esconde fio de dinheiro do técnico', () => {

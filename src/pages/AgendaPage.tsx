@@ -560,6 +560,13 @@ function InboxView({ suggestions }: { suggestions: any[] }) {
             Quando alguém pedir algo nas conversas — ou quando você ditar um recado no
             microfone acima — as sugestões aparecem aqui para você aceitar com um toque.
           </p>
+          {/* O estado vazio é onde a pessoa mais lê. É o lugar certo para explicar que a
+              autonomia depende do uso — sem isso, ninguém descobre por que ele "nunca evolui". */}
+          <p className="text-xs text-muted-foreground max-w-md mx-auto">
+            Cada aceite ou dispensa ensina o agente. Depois de 8 decisões suas com 80% de
+            acerto num tipo de sugestão, ele passa a criar aquele tipo sozinho — e você
+            continua podendo desfazer.
+          </p>
         </div>
       )}
 
