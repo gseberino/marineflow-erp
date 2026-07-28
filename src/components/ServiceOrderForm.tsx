@@ -1,6 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
+import {
+  computeOsFinancials, normalizeInstallmentRows,
+  calcInstallmentAmount as calcInstallmentAmountPure,
+  findSignalRow, simulateCardReceipt, computeItemDiscountTotal,
+  computePartsProfit, computeReceivablesStatus,
+} from '@/lib/os-financials';
 import { ServiceTimer } from '@/components/ServiceTimer';
 import { useI18n } from '@/i18n';
 import { useClients } from '@/hooks/use-clients';
@@ -1396,82 +1402,57 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     }
   }, [form.marina_id, form.technician_count_for_travel, marinas]);
 
-  // Financial summary
+  // Financial summary — matemática extraída para o módulo puro os-financials
+  // (Fase 3 UI v2: os testes de paridade pinam este comportamento).
   const laborCost = orderData?.labor_cost_total || 0;
   const partsCost = orderData?.parts_cost_total || 0;
   const operationalCost = orderData?.operational_cost_total || 0;
-  // Onda 1D: deslocamento só entra no valor cobrado do cliente se marcado como faturável.
-  const billableTravelCost = form.is_travel_billable !== false ? (form.travel_cost_total || 0) : 0;
-  const expensesTotal = operationalCost
-    + billableTravelCost
-    + (form.subcontract_cost_total || 0);
   const selectedPreset = (paymentPresets || []).find(
     (p: any) =>
       p.id === form.payment_condition_preset_id ||
       (p.label === form.payment_conditions && !form.payment_condition_preset_id)
   );
   const customInstallments = (form as any).custom_payment_installments;
-  const installmentSource = Array.isArray(selectedPreset?.installments)
-    ? selectedPreset!.installments
-    : (Array.isArray(customInstallments) ? customInstallments : null);
-  const installmentRows = Array.isArray(installmentSource)
-    ? (installmentSource as any[]).map((r: any) => ({
-        label: r.label || '',
-        services_pct: Number(r.services_pct ?? r.percent ?? 0),
-        parts_pct: Number(r.parts_pct ?? r.percent ?? 0),
-        expenses_pct: Number(r.expenses_pct ?? 0),
-        days_after_approval: Number(r.days_after_approval ?? 0),
-        tipo: r.tipo as 'aprovacao' | 'entrega' | 'prazo' | undefined,
-      }))
-    : [];
-  const subtotal = laborCost + partsCost + operationalCost + billableTravelCost + (form.subcontract_cost_total || 0);
-  // "base" = valor já com desconto/imposto, antes de qualquer taxa de cartão repassada.
-  const base = subtotal - (form.discount_amount || 0) + (form.tax_amount || 0);
+  const installmentRows = normalizeInstallmentRows(
+    Array.isArray(selectedPreset?.installments)
+      ? selectedPreset!.installments
+      : (Array.isArray(customInstallments) ? customInstallments : null)
+  );
+  const {
+    billableTravelCost, expensesTotal, subtotal, base,
+    passthroughFeePercent, passthroughCardFeeAmount, grandTotal, discountRatio,
+  } = computeOsFinancials({
+    laborCost,
+    partsCost,
+    operationalCost,
+    travelCost: form.travel_cost_total || 0,
+    isTravelBillable: form.is_travel_billable !== false,
+    subcontractCost: form.subcontract_cost_total || 0,
+    discountAmount: form.discount_amount || 0,
+    taxAmount: form.tax_amount || 0,
+    cardFeePassthroughEnabled: !!form.card_fee_passthrough_enabled,
+    cardInstallments: form.card_installments,
+    cardFees,
+  });
 
-  // Onda 1C: repasse da taxa de cartão ao cliente — soma por cima do "base" só quando habilitado,
-  // usando o número de parcelas persistido (form.card_installments), não o do simulador abaixo.
-  const passthroughFee = cardFees?.find((f) => f.installments === form.card_installments);
-  const passthroughFeePercent = passthroughFee?.fee_percent || 0;
-  const passthroughCardFeeAmount = (form.card_fee_passthrough_enabled && passthroughFeePercent > 0)
-    ? Math.round((base * Number(passthroughFeePercent) / (100 - Number(passthroughFeePercent))) * 100) / 100
-    : 0;
-  const grandTotal = base + passthroughCardFeeAmount;
-
-  // Apply the discount ratio proportionally to each installment row
-  const discountRatio = subtotal > 0 ? base / subtotal : 1;
-  const calcInstallmentAmount = (row: typeof installmentRows[0]) => {
-    const gross =
-      (laborCost * row.services_pct / 100)
-      + (partsCost * row.parts_pct / 100)
-      + (expensesTotal * row.expenses_pct / 100);
-    return Math.round(gross * discountRatio * 100) / 100;
-  };
+  const calcInstallmentAmount = (row: typeof installmentRows[0]) =>
+    calcInstallmentAmountPure(row, { laborCost, partsCost, expensesTotal, discountRatio });
 
   // Sinal (deposit) row from preset — first installment with tipo='aprovacao' or days=0
-  const signalRow = installmentRows.find(r => r.tipo === 'aprovacao' || r.days_after_approval === 0);
+  const signalRow = findSignalRow(installmentRows);
   const signalAmount = signalRow ? calcInstallmentAmount(signalRow) : null;
 
   // Simulador de Recebimento — preview livre de qualquer parcelamento, independente do que
   // está de fato marcado para repasse (form.card_installments/card_fee_passthrough_enabled).
   const selectedFee = cardFees?.find((f) => f.installments === selectedInstallments);
   const feePercent = selectedFee?.fee_percent || 0;
-  const cardGross = feePercent > 0 ? base / (1 - Number(feePercent) / 100) : base;
-  const cardFeeAmount = cardGross - base;
-  const installmentValue = selectedInstallments > 0 ? cardGross / selectedInstallments : cardGross;
+  const { cardGross, cardFeeAmount, installmentValue } = simulateCardReceipt(base, Number(feePercent), selectedInstallments);
 
-  // Desconto aplicado por item (serviço/peça) — separado do desconto de categoria
-  // (form.discount_amount). Mão de obra/Peças acima já são exibidos líquidos de
-  // desconto por item; esta linha só existe para tornar esse desconto visível.
-  const itemDiscountTotal = Math.round((
-    (soServices || []).reduce((s: number, x: any) => s + (x.quantity * x.unit_price_snapshot - x.line_total), 0) +
-    (parts || []).reduce((s: number, x: any) => s + (x.quantity * x.unit_sale_snapshot - x.line_total_sale), 0)
-  ) * 100) / 100;
+  // Desconto aplicado por item (serviço/peça) — separado do desconto de categoria.
+  const itemDiscountTotal = computeItemDiscountTotal(soServices as any, parts as any);
 
   // Parts profit (edit-mode only, never in PDF)
-  const partsRevenue = (parts || []).reduce((sum: number, p: any) => sum + (p.line_total_sale || 0), 0);
-  const partsCostItems = (parts || []).reduce((sum: number, p: any) => sum + (p.line_total_cost || 0), 0);
-  const partsProfit = partsRevenue - partsCostItems;
-  const partsMarginPct = partsRevenue > 0 ? (partsProfit / partsRevenue) * 100 : 0;
+  const { partsRevenue, partsProfit, partsMarginPct } = computePartsProfit(parts as any);
 
   // Section subtotals
   const servicesItemCount = (soServices || []).length;
@@ -1479,11 +1460,10 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const partsItemCount = (parts || []).length;
 
   // M1: Totais financeiros da OS a partir dos recebíveis reais
-  const soTotalCharged = (soReceivables || []).reduce((s, r) => s + Number((r as any).amount || 0), 0);
-  const soTotalPaid    = (soReceivables || []).reduce((s, r) => s + Number((r as any).paid_amount || 0), 0);
-  const soBalance      = (soReceivables || []).reduce((s, r) => s + Number((r as any).balance_amount || 0), 0);
-  const soPayStatus = soBalance <= 0 && soTotalCharged > 0 ? 'paid'
-    : soTotalPaid > 0 ? 'partially_paid' : 'unpaid';
+  const {
+    totalCharged: soTotalCharged, totalPaid: soTotalPaid,
+    balance: soBalance, payStatus: soPayStatus,
+  } = computeReceivablesStatus(soReceivables as any);
 
   const handleSave = async () => {
     if (!form.client_id || !form.vessel_id || !form.problem_description) {
