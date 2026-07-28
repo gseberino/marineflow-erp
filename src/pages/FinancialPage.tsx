@@ -3,13 +3,13 @@ import { PageHeader } from '@/components/PageHeader';
 import { KPICard } from '@/components/KPICard';
 import { StatusBadge } from '@/components/StatusBadge';
 import { useI18n } from '@/i18n';
-import { DollarSign, TrendingUp, TrendingDown, AlertTriangle, ArrowUpCircle, ArrowDownCircle, Plus, Info, Receipt as ReceiptIcon, Paperclip, Download, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, AlertTriangle, ArrowUpCircle, ArrowDownCircle, Plus, Info, Receipt as ReceiptIcon, Paperclip, Download, ArrowUpDown, ArrowUp, ArrowDown, Clock } from 'lucide-react';
 import { exportToCSV } from '@/lib/export';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useReceivables, usePayables, useFinancialSummary, useCashFlow } from '@/hooks/use-financial';
+import { useReceivables, usePayables, useFinancialSummary, useCashFlow, useReceivablesDSO } from '@/hooks/use-financial';
 import { usePendingReimbursements } from '@/hooks/use-service-order-expenses';
 import { PaymentDialog } from '@/components/PaymentDialog';
 import { ReceivableFormDialog } from '@/components/ReceivableFormDialog';
@@ -113,6 +113,7 @@ export default function FinancialPage() {
   const { data: receivables, isLoading: loadingRec, error: recError } = useReceivables();
   const { data: payables, isLoading: loadingPay, error: payError } = usePayables();
   const { data: summary, isLoading: loadingSummary, error: summaryError } = useFinancialSummary();
+  const { data: dsoData } = useReceivablesDSO();
   const [cfMonths, setCfMonths] = useState(6);
   const { data: cashFlow } = useCashFlow(cfMonths);
 
@@ -447,9 +448,15 @@ export default function FinancialPage() {
                 <KPICard title={t.financial.pendingPayables} value={formatCurrency(summary?.total_payable || 0)} icon={TrendingDown} />
                 <KPICard title={`${t.financial.overdue} (${t.financial.payables})`} value={formatCurrency(summary?.overdue_payable || 0)} icon={AlertTriangle} className={summary?.overdue_payable ? 'border-destructive/30' : ''} />
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <KPICard title={t.financial.collectedThisMonth} value={formatCurrency(summary?.collected_this_month || 0)} icon={ArrowUpCircle} />
                 <KPICard title={t.financial.paidThisMonth} value={formatCurrency(summary?.paid_this_month || 0)} icon={ArrowDownCircle} />
+                <KPICard
+                  title="Prazo médio de recebimento"
+                  value={dsoData?.dso != null ? `${dsoData.dso} dias` : '—'}
+                  icon={Clock}
+                  subtitle={dsoData?.count ? `média dos últimos 90 dias · ${dsoData.count} recebimento(s)` : 'sem dados nos últimos 90 dias'}
+                />
               </div>
             </>
           )}
