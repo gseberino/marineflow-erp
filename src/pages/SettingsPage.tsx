@@ -635,7 +635,7 @@ function CompanyTab() {
               onChange={e => set('travel_km_rate', e.target.value)} className="mt-1" />
             <p className="text-[10px] text-muted-foreground mt-0.5">Multiplica a distância (ida+volta) no cálculo da OS</p>
           </div>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <div>
               <label className="text-xs font-medium text-muted-foreground">R$/h — 1 téc.</label>
               <Input type="number" step="0.01" value={form.travel_hourly_1}

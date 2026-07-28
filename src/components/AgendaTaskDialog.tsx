@@ -354,7 +354,7 @@ export function AgendaTaskDialog({
                 <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
               </div>
             ) : (
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <div className="space-y-2 col-span-1">
                   <Label>Data *</Label>
                   <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />

@@ -192,7 +192,7 @@ export function AppUserEditDialog({ user, open, onOpenChange, isCurrentUserAdmin
           </TabsContent>
 
           <TabsContent value="address" className="space-y-3 pt-4">
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <Label>CEP</Label>
                 <div className="relative">

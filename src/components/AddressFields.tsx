@@ -151,7 +151,7 @@ export function AddressFields({ value, onChange, showCoordinates = true, coordin
       </div>
 
       {/* 3. Número + Complemento */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div>
           <Label>{t.address.number}</Label>
           <Input
