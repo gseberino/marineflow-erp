@@ -37,7 +37,9 @@ const seco = tem('seco');
 const gravarUrl = tem('gravar-url');
 
 const BUCKET = 'product-images';
-const PREFIXO = 'catalogo/victron';
+// --marca <nome>: a pasta no bucket. As fotos da EcoWorthy foram parar em
+// catalogo/victron por este valor estar fixo — funciona, mas mente sobre a origem.
+const PREFIXO = `catalogo/${(opcao('marca') || 'victron').replace(/[^a-z0-9-]/gi, '-').toLowerCase()}`;
 
 const base = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
 const chave = process.env.SUPABASE_SERVICE_ROLE_KEY;
