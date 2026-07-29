@@ -64,7 +64,6 @@ import { RegisterDepositDialog } from '@/components/RegisterDepositDialog';
 import { CompletionSendDialog } from '@/components/CompletionSendDialog';
 import { StockAlertDialog } from '@/components/StockAlertDialog';
 import { ReceivePODialog } from '@/components/ReceivePODialog';
-import { OPERATIONAL_EXPENSE_CATEGORIES } from '@/lib/expense-categories';
 import { calculateDisplacement, calculateTravelCost, travelRatesFromSettings } from '@/lib/displacement';
 import { statusConfig, priorityConfig } from '@/lib/constants';
 import { StatusBadge } from '@/components/StatusBadge';
@@ -84,10 +83,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle, Pencil, Paperclip, X, FileImage, ExternalLink, Package, Copy, Camera, MapPin, Clock, Download, Loader2, DollarSign, Percent, Hash, PackagePlus } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle, Pencil, Package, Copy, Camera, MapPin, Clock, Download, Loader2, DollarSign, Percent, Hash, PackagePlus } from 'lucide-react';
 import { toast } from 'sonner';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { MoneyInput } from '@/components/MoneyInput';
@@ -112,9 +110,11 @@ const STATUSES = [
   'awaiting_client', 'approved', 'completed', 'invoiced', 'cancelled',
 ] as const;
 import {
-  ServiceCardFormComponent, PartCardFormComponent,
+  ServiceCardFormComponent,
   QuickDiscountPopover, BILLING_UNIT_LABELS,
 } from './service-order/form-parts';
+import { PartsSection } from './service-order/parts-section';
+import { ExpensesTimeDialogs } from './service-order/expenses-time-dialogs';
 import { FinancialSection } from './service-order/financial-section';
 export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const navigate = useNavigate();
@@ -2610,638 +2610,70 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         </Dialog>
       )}
 
-      {/* F - Parts — always visible (with always-on entry row) */}
-      <section className="rounded-xl border bg-card shadow-sm overflow-hidden">
-        <div className="p-5 border-b">
-          <h2 className="font-semibold text-sm">{t.serviceOrders.parts}</h2>
-          {isNew && (
-            <p className="text-xs text-muted-foreground mt-1">
-              Itens adicionados aqui serão salvos quando você criar a OS.
-            </p>
-          )}
-        </div>
+      <PartsSection
+        isNew={isNew}
+        orderId={orderId}
+        orderData={orderData}
+        parts={parts}
+        products={products}
+        partsItemCount={partsItemCount}
+        partsRevenue={partsRevenue}
+        partsProfit={partsProfit}
+        partsMarginPct={partsMarginPct}
+        draftParts={draftParts}
+        setDraftParts={setDraftParts}
+        editingPart={editingPart}
+        setEditingPart={setEditingPart}
+        openNewPartCards={openNewPartCards}
+        setOpenNewPartCards={setOpenNewPartCards}
+        setPriceCalcCardKey={setPriceCalcCardKey}
+        addNewPartCard={addNewPartCard}
+        cancelPartCard={cancelPartCard}
+        handleConfirmNewPartCard={handleConfirmNewPartCard}
+        handleConfirmEditPart={handleConfirmEditPart}
+        startEditPersistedPart={startEditPersistedPart}
+        applyQuickDiscountToPart={applyQuickDiscountToPart}
+        updatePartLine={updatePartLine}
+        removePart={removePart}
+        addPart={addPart}
+      />
 
-        {/* List of parts as collapsible cards + add button */}
-        {(() => {
-          const persisted = (parts || []) as any[];
-          const drafts = isNew ? draftParts : [];
-
-          // PartCardFormComponent and PART_UNITS are defined at module scope to preserve input focus.
-
-          const renderCollapsedPartRow = (opts: {
-            keyId: string;
-            name: string;
-            unit?: string;
-            quantity: number;
-            unitPrice: number;
-            total: number;
-            isDraft?: boolean;
-            image_url?: string | null;
-            warranty_expires_at?: string | null;
-            discountPct?: number;
-            discountAmount?: number;
-            onExpand: () => void;
-            onDelete: () => void;
-            onApplyDiscount?: (pct: number, discountAmount: number) => void;
-          }) => (
-            <div
-              key={opts.keyId}
-              className={`flex items-center gap-3 px-4 py-3 border-b last:border-0 ${
-                opts.isDraft ? 'bg-amber-50/40' : ''
-              }`}
-            >
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  {opts.image_url ? (
-                    <img
-                      src={opts.image_url}
-                      alt={opts.name}
-                      className="h-8 w-8 rounded object-cover flex-shrink-0"
-                    />
-                  ) : (
-                    <div className="h-8 w-8 rounded bg-muted flex items-center justify-center flex-shrink-0">
-                      <Package className="h-4 w-4 text-muted-foreground" />
-                    </div>
-                  )}
-                  <div>
-                    <div className="font-medium text-sm">{opts.name}</div>
-                    {opts.isDraft && (
-                      <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
-                        rascunho
-                      </span>
-                    )}
-                    {opts.warranty_expires_at && new Date(opts.warranty_expires_at) > new Date() && (
-                      <span className="ml-2 text-[10px] text-green-700 bg-green-100 rounded px-1">
-                        Garantia até {new Date(opts.warranty_expires_at).toLocaleDateString('pt-BR')}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-              {opts.unit && (
-                <div className="hidden sm:block w-16 text-center text-xs text-muted-foreground">
-                  {opts.unit}
-                </div>
-              )}
-              <div className="hidden sm:block w-16 text-center text-sm">
-                {opts.quantity}
-              </div>
-              <div className="hidden md:block w-28 text-right text-sm">
-                {formatCurrency(opts.unitPrice)}
-              </div>
-              <div className="w-28 text-right font-semibold">
-                {formatCurrency(opts.total)}
-                {(opts.discountPct || 0) > 0 && (
-                  <div className="text-[10px] font-normal text-destructive">−{opts.discountPct}%</div>
-                )}
-              </div>
-              {opts.onApplyDiscount && (
-                <QuickDiscountPopover
-                  quantity={opts.quantity}
-                  unitPrice={opts.unitPrice}
-                  discountPct={opts.discountPct || 0}
-                  discountAmount={opts.discountAmount || 0}
-                  formatCurrency={formatCurrency}
-                  onApply={opts.onApplyDiscount}
-                />
-              )}
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                onClick={opts.onExpand}
-                title="Editar"
-              >
-                <Pencil className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-destructive"
-                onClick={opts.onDelete}
-                title="Excluir"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-          );
-
-          return (
-            <div>
-              {persisted.length === 0 && drafts.length === 0 && openNewPartCards.length === 0 && (
-                <p className="text-sm text-muted-foreground p-5">
-                  {t.serviceOrders.noPartsYet}
-                </p>
-              )}
-
-              {/* Header row labels */}
-              {(persisted.length > 0 || drafts.length > 0) && (
-                <div className="hidden sm:flex items-center gap-3 px-4 py-2 text-xs text-muted-foreground bg-muted/40 border-b">
-                  <div className="flex-1">{t.serviceOrders.product}</div>
-                  <div className="w-16 text-center">Un</div>
-                  <div className="w-16 text-center">{t.serviceOrders.qty}</div>
-                  <div className="hidden md:block w-28 text-right">{t.serviceOrders.unitPrice}</div>
-                  <div className="w-28 text-right">{t.common.total}</div>
-                  <div className="w-16" />
-                </div>
-              )}
-
-              {/* Persisted rows */}
-              {persisted.map((p: any) => {
-                const isEditing = !!editingPart[p.id];
-                if (isEditing) {
-                  return (
-                    <div key={p.id} className="border-b last:border-0">
-                      <PartCardFormComponent
-                        cardKey={p.id}
-                        draft={editingPart[p.id]}
-                        products={products || []}
-                        formatCurrency={formatCurrency}
-                        onUpdate={(patch) =>
-                          setEditingPart((prev) => ({
-                            ...prev,
-                            [p.id]: { ...prev[p.id], ...patch },
-                          }))
-                        }
-                        onConfirm={() => handleConfirmEditPart(p.id, p)}
-                        onCancel={() => cancelPartCard(p.id, false)}
-                        onOpenPriceCalc={() => setPriceCalcCardKey(p.id)}
-                        confirmDisabled={updatePartLine.isPending}
-                        supabase={supabase}
-                        clientId={orderData?.client_id}
-                      />
-                    </div>
-                  );
-                }
-                return renderCollapsedPartRow({
-                  keyId: p.id,
-                  name: p.products?.name || 'Produto',
-                  unit: p.products?.unit,
-                  quantity: p.quantity,
-                  unitPrice: p.unit_sale_snapshot,
-                  total: p.line_total_sale,
-                  discountPct: p.discount_pct,
-                  discountAmount: p.discount_amount,
-                  onApplyDiscount: (pct: number, discountAmount: number) => applyQuickDiscountToPart(p, pct, discountAmount),
-                  image_url: p.products?.image_url || null,
-                  warranty_expires_at: p.warranty_expires_at || null,
-                  onExpand: () => startEditPersistedPart(p),
-                  onDelete: () =>
-                    removePart.mutate({
-                      id: p.id,
-                      service_order_id: orderId!,
-                      product_id: p.product_id,
-                      quantity: p.quantity,
-                      unit_cost_snapshot: p.unit_cost_snapshot,
-                    }),
-                });
-              })}
-
-              {/* Draft rows (OS not saved yet) */}
-              {drafts.map((d) =>
-                renderCollapsedPartRow({
-                  keyId: d.tempId,
-                  name: d.name,
-                  quantity: d.quantity,
-                  unitPrice: d.unit_sale,
-                  total: Math.round((d.unit_sale * d.quantity - (d.discount_amount || 0)) * 100) / 100,
-                  discountPct: d.discount_pct,
-                  discountAmount: d.discount_amount,
-                  onApplyDiscount: (pct: number, discountAmount: number) =>
-                    setDraftParts((prev) => prev.map((x) => (x.tempId === d.tempId ? { ...x, discount_pct: pct, discount_amount: discountAmount } : x))),
-                  isDraft: true,
-                  image_url: (products?.find(pr => pr.id === d.product_id) as any)?.image_url || null,
-                  onExpand: () => {
-                    const key = `new-${d.tempId}`;
-                    const prod = products?.find((p) => p.id === d.product_id);
-                    setEditingPart((prev) => ({
-                      ...prev,
-                      [key]: {
-                        product_id: d.product_id,
-                        name: d.name,
-                        unit: prod?.unit || 'un',
-                        quantity: d.quantity,
-                        unit_cost: d.unit_cost,
-                        unit_sale: d.unit_sale,
-                        notes: '',
-                        discount_pct: d.discount_pct || 0,
-                        discount_amount: d.discount_amount || 0,
-                      },
-                    }));
-                    setOpenNewPartCards((prev) => [...prev, key]);
-                    setDraftParts((prev) => prev.filter((x) => x.tempId !== d.tempId));
-                  },
-                  onDelete: () =>
-                    setDraftParts((prev) => prev.filter((x) => x.tempId !== d.tempId)),
-                })
-              )}
-
-              {/* New (unsaved) cards */}
-              {openNewPartCards.map((key) => (
-                <div key={key} className="border-b last:border-0">
-                  <PartCardFormComponent
-                    cardKey={key}
-                    draft={editingPart[key]}
-                    products={products || []}
-                    formatCurrency={formatCurrency}
-                    onUpdate={(patch) =>
-                      setEditingPart((prev) => ({
-                        ...prev,
-                        [key]: { ...prev[key], ...patch },
-                      }))
-                    }
-                    onConfirm={() => handleConfirmNewPartCard(key)}
-                    onCancel={() => cancelPartCard(key, true)}
-                    onOpenPriceCalc={() => setPriceCalcCardKey(key)}
-                    confirmDisabled={addPart.isPending}
-                    supabase={supabase}
-                    clientId={orderData?.client_id}
-                  />
-                </div>
-              ))}
-
-              {/* Add button */}
-              <div className="p-4">
-                <Button size="sm" variant="outline" onClick={addNewPartCard}>
-                  <Plus className="h-3.5 w-3.5 mr-1" /> Adicionar Peça
-                </Button>
-              </div>
-            </div>
-          );
-        })()}
-
-        {/* Parts subtotal + profit bar (edit-mode only) */}
-        {partsItemCount > 0 && !isNew && (
-          <div className="px-5 py-3 border-t bg-muted/30 flex items-center justify-between text-sm flex-wrap gap-2">
-            <div className="flex items-center gap-4 flex-wrap">
-              <span className="text-muted-foreground">{partsItemCount} {partsItemCount === 1 ? 'peça' : 'peças'}</span>
-              {partsProfit !== 0 && (
-                <span className={partsProfit >= 0 ? 'text-emerald-600 text-xs' : 'text-red-600 text-xs'}>
-                  Lucro peças: {partsProfit >= 0 ? '+' : ''}{formatCurrency(partsProfit)}
-                  {partsRevenue > 0 && ` (${partsMarginPct.toFixed(1)}%)`}
-                </span>
-              )}
-            </div>
-            <span className="font-semibold">{formatCurrency(partsRevenue)}</span>
-          </div>
-        )}
-      </section>
-
-      {!isNew && (
-        <Dialog open={showExpensesDialog} onOpenChange={setShowExpensesDialog}>
-          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Receipt className="h-4 w-4" /> Despesas Operacionais
-              </DialogTitle>
-            </DialogHeader>
-            <div className="space-y-0">
-              <div className="flex items-center justify-between pb-3">
-                <h2 className="font-semibold text-sm">{t.serviceOrders.operationalExpenses}</h2>
-                <Button variant="outline" size="sm" className="gap-1" onClick={() => setShowExpForm(!showExpForm)}>
-                  <Plus className="h-3 w-3" /> {t.serviceOrders.addExpense}
-                </Button>
-              </div>
-              {showExpForm && (
-                <div className="p-4 border rounded-lg bg-muted/30 space-y-3 mb-3">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div>
-                      <Label>{t.products.category}</Label>
-                      <Select value={expForm.category} onValueChange={(v) => setExpForm({ ...expForm, category: v })}>
-                        <SelectTrigger><SelectValue placeholder={t.products.category} /></SelectTrigger>
-                        <SelectContent>
-                          {OPERATIONAL_EXPENSE_CATEGORIES.map((c) => (
-                            <SelectItem key={c} value={c}>{c}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label>{t.serviceOrders.expenseDate}</Label>
-                      <Input type="date" value={expForm.expense_date} onChange={(e) => setExpForm({ ...expForm, expense_date: e.target.value })} />
-                    </div>
-                    <div>
-                      <Label>{t.common.amount}</Label>
-                      <MoneyInput value={expForm.amount}
-                        onValueChange={(v) => setExpForm({ ...expForm, amount: v })} />
-                    </div>
-                  </div>
-                  <div>
-                    <Label>{t.common.description}</Label>
-                    <Input value={expForm.description} onChange={(e) => setExpForm({ ...expForm, description: e.target.value })} />
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <Label>{t.serviceOrders.paidBy}</Label>
-                      <Select value={expForm.paid_by} onValueChange={(v: 'company' | 'technician') => setExpForm({ ...expForm, paid_by: v })}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="company">{t.serviceOrders.paidByCompany}</SelectItem>
-                          <SelectItem value="technician">{t.serviceOrders.paidByTechnician}</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {expForm.paid_by === 'technician' && (
-                      <div>
-                        <Label>{t.serviceOrders.technicians}</Label>
-                        <Select value={expForm.technician_user_id} onValueChange={(v) => setExpForm({ ...expForm, technician_user_id: v })}>
-                          <SelectTrigger><SelectValue placeholder={t.serviceOrders.technicians} /></SelectTrigger>
-                          <SelectContent>
-                            {appUsers?.map((u) => (
-                              <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <p className="text-xs text-warning mt-1">{t.serviceOrders.pendingReimbursement}</p>
-                      </div>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <Label>Comprovante</Label>
-                      <input
-                        ref={receiptInputRef}
-                        type="file"
-                        accept="image/*,application/pdf"
-                        capture="environment"
-                        className="hidden"
-                        onChange={(e) => {
-                          const f = e.target.files?.[0];
-                          if (f) handleUploadReceipt(f);
-                        }}
-                      />
-                      {expForm.receipt_url ? (
-                        <div className="flex items-center gap-2 mt-1 p-2 rounded-md border bg-background">
-                          {/\.(png|jpe?g|gif|webp|svg)$/i.test(expForm.receipt_url) ? (
-                            <img
-                              src={expForm.receipt_url}
-                              alt="Comprovante"
-                              className="h-[60px] w-[60px] object-cover rounded border"
-                            />
-                          ) : (
-                            <div className="h-[60px] w-[60px] flex items-center justify-center rounded border bg-muted">
-                              <FileText className="h-6 w-6 text-muted-foreground" />
-                            </div>
-                          )}
-                          <a
-                            href={expForm.receipt_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs text-primary hover:underline truncate flex-1"
-                          >
-                            Ver comprovante
-                          </a>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            onClick={handleRemoveReceipt}
-                          >
-                            <X className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      ) : (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="w-full gap-2 mt-1"
-                          onClick={() => receiptInputRef.current?.click()}
-                          disabled={uploadingReceipt}
-                        >
-                          <Paperclip className="h-3.5 w-3.5" />
-                          {uploadingReceipt ? 'Enviando...' : '📎 Anexar comprovante'}
-                        </Button>
-                      )}
-                    </div>
-                    <div>
-                      <Label>{t.common.notes}</Label>
-                      <Input value={expForm.notes} onChange={(e) => setExpForm({ ...expForm, notes: e.target.value })} />
-                    </div>
-                  </div>
-                  <div>
-                    <Label>Fornecedor</Label>
-                    <EntityCombobox
-                      value={expForm.supplier_id}
-                      onChange={(v) => setExpForm({ ...expForm, supplier_id: v })}
-                      options={(suppliers || []).filter((s) => s.active).map((s) => ({
-                        value: s.id,
-                        label: s.name,
-                        description: s.cnpj_cpf || undefined,
-                      }))}
-                      placeholder="—"
-                      onCreate={(typed) => {
-                        setQuickSupplierName(typed);
-                        setQuickSupplierOpen(true);
-                      }}
-                      createLabel="+ Cadastrar novo fornecedor"
-                    />
-                  </div>
-                  {!editingExpenseId && (
-                    <label className="flex items-center gap-2 text-sm cursor-pointer">
-                      <input type="checkbox" checked={expForm.also_create_payable}
-                        onChange={(e) => setExpForm({ ...expForm, also_create_payable: e.target.checked })} />
-                      {t.serviceOrders.alsoCreatePayable}
-                    </label>
-                  )}
-                  <label className="flex items-center gap-2 text-sm cursor-pointer">
-                    <input type="checkbox" checked={expForm.billable_to_client}
-                      onChange={(e) => setExpForm({ ...expForm, billable_to_client: e.target.checked })} />
-                    Faturável ao cliente
-                    <span className="text-xs text-muted-foreground">(desmarque para custo interno, não repassado no orçamento/OS)</span>
-                  </label>
-                  <div className="flex gap-2">
-                    <Button size="sm" onClick={handleAddExpense} disabled={addExpense.isPending || updateExpense.isPending}>
-                      {editingExpenseId ? 'Atualizar' : t.common.save}
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => { resetExpForm(); setShowExpForm(false); }}>
-                      {t.common.cancel}
-                    </Button>
-                  </div>
-                </div>
-              )}
-              {(!soExpenses || soExpenses.length === 0) ? (
-                <p className="text-sm text-muted-foreground p-5">{t.serviceOrders.noExpensesYet}</p>
-              ) : (
-                <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b bg-muted/50">
-                      <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.common.date}</th>
-                      <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.products.category}</th>
-                      <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.common.description}</th>
-                      <th className="px-4 py-2 text-left font-medium text-muted-foreground hidden sm:table-cell">Fornecedor</th>
-                      <th className="px-4 py-2 text-left font-medium text-muted-foreground hidden sm:table-cell">{t.serviceOrders.paidBy}</th>
-                      <th className="px-4 py-2 text-center font-medium text-muted-foreground hidden md:table-cell">Comprovante</th>
-                      <th className="px-4 py-2 text-right font-medium text-muted-foreground">{t.common.amount}</th>
-                      <th className="px-4 py-2 w-20"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {soExpenses.map((exp: any) => (
-                      <tr key={exp.id} className="border-b last:border-0">
-                        <td className="px-4 py-3 text-muted-foreground">{formatDate(exp.expense_date)}</td>
-                        <td className="px-4 py-3"><StatusBadge className="bg-secondary text-secondary-foreground">{exp.category}</StatusBadge></td>
-                        <td className="px-4 py-3 font-medium">
-                          {exp.description}
-                          {exp.billable_to_client === false && (
-                            <StatusBadge className="bg-muted text-muted-foreground ml-1">Interno</StatusBadge>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">
-                          {exp.suppliers?.name || '—'}
-                        </td>
-                        <td className="px-4 py-3 hidden sm:table-cell">
-                          {exp.paid_by === 'technician' ? (
-                            <span className="text-warning">{exp.app_users?.full_name || t.serviceOrders.paidByTechnician}
-                              {!exp.reimbursed && <StatusBadge className="bg-warning/15 text-warning ml-1">{t.serviceOrders.pendingReimbursement}</StatusBadge>}
-                              {exp.reimbursed && <StatusBadge className="bg-success/15 text-success ml-1">{t.serviceOrders.reimbursed}</StatusBadge>}
-                            </span>
-                          ) : t.serviceOrders.paidByCompany}
-                        </td>
-                        <td className="px-4 py-3 text-center hidden md:table-cell">
-                          {exp.receipt_url ? (
-                            /\.(png|jpe?g|gif|webp|svg)$/i.test(exp.receipt_url) ? (
-                              <a href={exp.receipt_url} target="_blank" rel="noopener noreferrer" className="inline-block">
-                                <img src={exp.receipt_url} alt="Comprovante" className="h-8 w-8 object-cover rounded border inline-block" />
-                              </a>
-                            ) : (
-                              <a href={exp.receipt_url} target="_blank" rel="noopener noreferrer" className="text-primary inline-flex items-center gap-1 hover:underline">
-                                <FileImage className="h-4 w-4" />
-                                <ExternalLink className="h-3 w-3" />
-                              </a>
-                            )
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-right font-semibold">{formatCurrency(Number(exp.amount))}</td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center justify-end gap-1">
-                            <Button variant="ghost" size="icon" className="h-7 w-7"
-                              onClick={() => handleEditExpense(exp)}>
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
-                              onClick={() => removeExpense.mutate({ id: exp.id, service_order_id: orderId! })}>
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                </div>
-              )}
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
-
-      {!isNew && (
-        <Dialog open={showTimeDialog} onOpenChange={setShowTimeDialog}>
-          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Clock className="h-4 w-4" /> Controle de Horas
-              </DialogTitle>
-            </DialogHeader>
-            <div className="space-y-0">
-              <div className="flex items-center justify-between pb-3">
-                <div>
-                  <h2 className="font-semibold text-sm">{t.services.timeSection}</h2>
-                  <p className="text-xs text-muted-foreground mt-0.5">{t.services.timeNote}</p>
-                </div>
-                <Button variant="outline" size="sm" className="gap-1" onClick={() => setShowTimeForm(!showTimeForm)}>
-                  <Plus className="h-3 w-3" /> {t.serviceOrders.addTimeEntry}
-                </Button>
-              </div>
-              {showTimeForm && (
-                <div className="p-4 border rounded-lg bg-muted/30 space-y-3 mb-3">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div>
-                      <Label>{t.serviceOrders.technicians}</Label>
-                      <Select value={timeForm.technician_user_id}
-                        onValueChange={(v) => setTimeForm({ ...timeForm, technician_user_id: v })}>
-                        <SelectTrigger><SelectValue placeholder="Selecionar técnico" /></SelectTrigger>
-                        <SelectContent>
-                          {appUsers?.map((u) => (
-                            <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label>{t.serviceOrders.scheduledStart}</Label>
-                      <Input type="datetime-local" value={timeForm.started_at}
-                        onChange={(e) => setTimeForm({ ...timeForm, started_at: e.target.value })} />
-                    </div>
-                    <div>
-                      <Label>{t.serviceOrders.scheduledEnd}</Label>
-                      <Input type="datetime-local" value={timeForm.ended_at}
-                        onChange={(e) => setTimeForm({ ...timeForm, ended_at: e.target.value })} />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div>
-                      <Label>Duração (min)</Label>
-                      <Input type="number" value={timeForm.duration_minutes}
-                        onChange={(e) => setTimeForm({ ...timeForm, duration_minutes: parseInt(e.target.value) || 0 })} />
-                    </div>
-                    <div className="flex items-end gap-2">
-                      <label className="flex items-center gap-1.5 text-sm">
-                        <Switch checked={timeForm.billable}
-                          onCheckedChange={(v) => setTimeForm({ ...timeForm, billable: v })} />
-                        {t.serviceOrders.billable}
-                      </label>
-                    </div>
-                    <div>
-                      <Label>{t.common.notes}</Label>
-                      <Input value={timeForm.notes}
-                        onChange={(e) => setTimeForm({ ...timeForm, notes: e.target.value })} />
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button size="sm" onClick={handleAddTime} disabled={addTime.isPending}>{t.common.save}</Button>
-                    <Button size="sm" variant="outline" onClick={() => setShowTimeForm(false)}>{t.common.cancel}</Button>
-                  </div>
-                </div>
-              )}
-              {(!timeEntries || timeEntries.length === 0) ? (
-                <p className="text-sm text-muted-foreground p-5">{t.serviceOrders.noTimeEntries}</p>
-              ) : (
-                <div className="divide-y">
-                  {timeEntries.map((te: any) => (
-                    <div key={te.id} className="flex items-start justify-between p-4">
-                      <div>
-                        <p className="text-sm font-medium">{te.app_users?.full_name}</p>
-                        {te.notes && <p className="text-xs text-muted-foreground">{te.notes}</p>}
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {formatDateTime(te.started_at)} → {te.ended_at ? formatDateTime(te.ended_at) : '...'}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <div className="text-right">
-                          <p className="text-sm font-semibold">{((te.duration_minutes || 0) / 60).toFixed(1)}h</p>
-                          <StatusBadge className={te.billable ? 'bg-success/15 text-success' : 'bg-muted text-muted-foreground'}>
-                            {te.billable ? t.serviceOrders.billable : t.serviceOrders.nonBillable}
-                          </StatusBadge>
-                        </div>
-                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
-                          onClick={() => removeTime.mutate({ id: te.id, service_order_id: orderId! })}>
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
+      <ExpensesTimeDialogs
+        isNew={isNew}
+        orderId={orderId}
+        showExpensesDialog={showExpensesDialog}
+        setShowExpensesDialog={setShowExpensesDialog}
+        showTimeDialog={showTimeDialog}
+        setShowTimeDialog={setShowTimeDialog}
+        showExpForm={showExpForm}
+        setShowExpForm={setShowExpForm}
+        showTimeForm={showTimeForm}
+        setShowTimeForm={setShowTimeForm}
+        expForm={expForm}
+        setExpForm={setExpForm}
+        timeForm={timeForm}
+        setTimeForm={setTimeForm}
+        editingExpenseId={editingExpenseId}
+        resetExpForm={resetExpForm}
+        handleAddExpense={handleAddExpense}
+        handleAddTime={handleAddTime}
+        handleEditExpense={handleEditExpense}
+        handleUploadReceipt={handleUploadReceipt}
+        handleRemoveReceipt={handleRemoveReceipt}
+        uploadingReceipt={uploadingReceipt}
+        receiptInputRef={receiptInputRef}
+        soExpenses={soExpenses}
+        timeEntries={timeEntries}
+        suppliers={suppliers}
+        appUsers={appUsers}
+        addExpense={addExpense}
+        addTime={addTime}
+        removeExpense={removeExpense}
+        removeTime={removeTime}
+        updateExpense={updateExpense}
+        setQuickSupplierOpen={setQuickSupplierOpen}
+        setQuickSupplierName={setQuickSupplierName}
+      />
 
       {/* G - Linked Purchase Orders */}
       {!isNew && orderId && linkedPOs && linkedPOs.length > 0 && (
