@@ -62,7 +62,7 @@ function useDayBoard() {
       const ids = (orders || []).map((o: any) => o.id);
       if (ids.length === 0) return { orders: [] as BoardOrder[], stepsByOrder: {} as Record<string, BoardStep[]> };
 
-      const { data: steps, error: stepErr } = await (supabase as any)
+      const { data: steps, error: stepErr } = await supabase
         .from('service_order_steps')
         .select('id, service_order_id, status, standard_minutes, actual_minutes, blocked_reason_code, blocked_note, title')
         .in('service_order_id', ids);

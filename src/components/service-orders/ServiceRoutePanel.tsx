@@ -13,7 +13,7 @@ import { StepFocusMode } from './StepFocusMode';
 import { printRouteSheet } from '@/lib/route-sheet';
 import {
   useServiceOrderSteps, useGenerateSteps, useReorderSteps, useDeleteStep,
-  useUpsertStep, useReopenStep, useStopReasons,
+  useCreateStep, useReopenStep, useStopReasons,
   summarizeRoute, groupStepsByBlock, formatMinutes,
   type ServiceOrderStep,
 } from '@/hooks/use-service-steps';
@@ -63,7 +63,7 @@ export function ServiceRoutePanel({
   const generate = useGenerateSteps();
   const reorder = useReorderSteps();
   const remove = useDeleteStep();
-  const upsert = useUpsertStep();
+  const create = useCreateStep();
   const reopen = useReopenStep();
 
   const [focusOpen, setFocusOpen] = useState(false);
@@ -97,7 +97,7 @@ export function ServiceRoutePanel({
     const title = newTitle.trim();
     if (!title) return;
     const maxSeq = steps.reduce((m, s) => Math.max(m, s.seq), 0);
-    upsert.mutate(
+    create.mutate(
       { service_order_id: serviceOrderId!, title, seq: maxSeq + 1, block: 'Extra', origin: 'manual' },
       {
         onSuccess: () => setNewTitle(''),
@@ -287,7 +287,7 @@ export function ServiceRoutePanel({
           placeholder="Acrescentar um passo (ex.: conferir aperto dos terminais)"
           className="h-9"
         />
-        <Button size="sm" variant="outline" onClick={handleAdd} disabled={!newTitle.trim() || upsert.isPending}>
+        <Button size="sm" variant="outline" onClick={handleAdd} disabled={!newTitle.trim() || create.isPending}>
           <Plus className="h-4 w-4" />
         </Button>
       </div>

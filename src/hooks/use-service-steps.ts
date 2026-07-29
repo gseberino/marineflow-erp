@@ -5,10 +5,10 @@ import { supabase } from '@/integrations/supabase/client';
  * Roteiro de Execução da OS — Ciclo do Serviço.
  * Plano: plans/marineflow-execucao-os-roteiro.md
  *
- * Nota sobre `supabase as any`: as tabelas deste módulo só entram em
- * src/integrations/supabase/types.ts depois que a migration for aplicada e os
- * tipos regenerados. Até lá, o padrão do repo (ver use-scheduled-sends.ts) é o
- * cast — as interfaces abaixo é que seguram a tipagem no lado do app.
+ * As tabelas deste módulo já estão em src/integrations/supabase/types.ts (tipos
+ * regenerados após a migration de 29/07), então nada de cast: erro de coluna é
+ * pego pelo tsc. As interfaces abaixo existem para os componentes conversarem
+ * entre si sem depender do tipo gerado.
  */
 
 export type StepStatus = 'pending' | 'in_progress' | 'done' | 'not_applicable' | 'blocked';
@@ -66,7 +66,7 @@ export function useServiceOrderSteps(serviceOrderId: string | undefined) {
     queryKey: ['service-order-steps', serviceOrderId],
     enabled: !!serviceOrderId,
     queryFn: async (): Promise<ServiceOrderStep[]> => {
-      const { data, error } = await (supabase as any)
+      const { data, error } = await supabase
         .from('service_order_steps')
         .select(STEP_SELECT)
         .eq('service_order_id', serviceOrderId)
@@ -83,7 +83,7 @@ export function useStopReasons() {
     queryKey: ['work-stop-reasons'],
     staleTime: 60 * 60 * 1000, // muda raramente; revisão é trimestral
     queryFn: async (): Promise<StopReason[]> => {
-      const { data, error } = await (supabase as any)
+      const { data, error } = await supabase
         .from('work_stop_reasons')
         .select('code, label, category, counts_as_billable, sort')
         .eq('active', true)
@@ -102,7 +102,7 @@ export function useGenerateSteps() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (serviceOrderId: string): Promise<number> => {
-      const { data, error } = await (supabase as any).rpc('generate_service_order_steps', {
+      const { data, error } = await supabase.rpc('generate_service_order_steps', {
         p_service_order_id: serviceOrderId,
       });
       if (error) throw error;
@@ -149,7 +149,7 @@ export function useStartStep() {
       // Pausa implícita do passo que estava rodando: fecha o trecho em curso
       // somando ao acumulado e zera started_at, para o relógio não continuar
       // correndo enquanto o técnico está em outro passo.
-      const { data: running } = await (supabase as any)
+      const { data: running } = await supabase
         .from('service_order_steps')
         .select('id, actual_minutes, started_at')
         .eq('service_order_id', step.service_order_id)
@@ -157,7 +157,7 @@ export function useStartStep() {
         .neq('id', step.id);
 
       for (const other of (running || []) as Array<{ id: string; actual_minutes: number | null; started_at: string | null }>) {
-        await (supabase as any)
+        await supabase
           .from('service_order_steps')
           .update({
             status: 'pending',
@@ -167,7 +167,7 @@ export function useStartStep() {
           .eq('id', other.id);
       }
 
-      const { error } = await (supabase as any)
+      const { error } = await supabase
         .from('service_order_steps')
         .update({ status: 'in_progress', started_at: now })
         .eq('id', step.id);
@@ -186,7 +186,7 @@ export function useCompleteStep() {
       step, measureValue, notes,
     }: { step: ServiceOrderStep; measureValue?: number | null; notes?: string }) => {
       const now = new Date().toISOString();
-      const { error } = await (supabase as any)
+      const { error } = await supabase
         .from('service_order_steps')
         .update({
           status: 'done',
@@ -215,7 +215,7 @@ export function useSkipStep() {
     mutationFn: async ({ step, reason }: { step: ServiceOrderStep; reason: string }) => {
       const trimmed = reason.trim();
       if (!trimmed) throw new Error('Diga em uma palavra por que não se aplica.');
-      const { error } = await (supabase as any)
+      const { error } = await supabase
         .from('service_order_steps')
         .update({ status: 'not_applicable', na_reason: trimmed, completed_at: new Date().toISOString() })
         .eq('id', step.id);
@@ -235,7 +235,7 @@ export function useBlockStep() {
       step, reasonCode, note,
     }: { step: ServiceOrderStep; reasonCode: string; note?: string }) => {
       if (!reasonCode) throw new Error('Escolha o motivo da parada.');
-      const { error } = await (supabase as any)
+      const { error } = await supabase
         .from('service_order_steps')
         .update({
           status: 'blocked',
@@ -260,7 +260,7 @@ export function useReopenStep() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (step: ServiceOrderStep) => {
-      const { error } = await (supabase as any)
+      const { error } = await supabase
         .from('service_order_steps')
         .update({
           // Desfazer é desfazer: o tempo do trecho anterior some junto, senão
@@ -277,26 +277,45 @@ export function useReopenStep() {
   });
 }
 
-export function useUpsertStep() {
+/**
+ * Passo novo. O tipo exige o que o banco exige (OS, título e posição) em vez de
+ * aceitar um objeto parcial e descobrir o que falta só no erro do servidor.
+ */
+export type NewStep =
+  Pick<ServiceOrderStep, 'service_order_id' | 'title' | 'seq'> &
+  Partial<Pick<ServiceOrderStep, 'block' | 'detail' | 'kind' | 'mode' | 'standard_minutes'
+    | 'is_killer' | 'requires_photo' | 'requires_measure' | 'measure_unit'
+    | 'assigned_user_id' | 'origin' | 'notes'>>;
+
+export function useCreateStep() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: Partial<ServiceOrderStep> & { service_order_id: string }) => {
-      if (input.id) {
-        const { id, ...rest } = input;
-        const { error } = await (supabase as any).from('service_order_steps').update(rest).eq('id', id);
-        if (error) throw error;
-        return id;
-      }
-      const { data, error } = await (supabase as any)
+    mutationFn: async (input: NewStep): Promise<string> => {
+      const { data, error } = await supabase
         .from('service_order_steps')
         .insert({ origin: 'manual', ...input })
         .select('id')
         .single();
       if (error) throw error;
-      return data.id as string;
+      return data.id;
     },
     onSuccess: (_r, input) => {
       qc.invalidateQueries({ queryKey: ['service-order-steps', input.service_order_id] });
+    },
+  });
+}
+
+export function useUpdateStep() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id, serviceOrderId, patch,
+    }: { id: string; serviceOrderId: string; patch: Partial<Omit<ServiceOrderStep, 'id' | 'service_order_id'>> }) => {
+      const { error } = await supabase.from('service_order_steps').update(patch).eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: (_r, { serviceOrderId }) => {
+      qc.invalidateQueries({ queryKey: ['service-order-steps', serviceOrderId] });
     },
   });
 }
@@ -305,7 +324,7 @@ export function useDeleteStep() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id }: { id: string; serviceOrderId: string }) => {
-      const { error } = await (supabase as any).from('service_order_steps').delete().eq('id', id);
+      const { error } = await supabase.from('service_order_steps').delete().eq('id', id);
       if (error) throw error;
     },
     onSuccess: (_r, { serviceOrderId }) => {
@@ -320,10 +339,10 @@ export function useReorderSteps() {
   return useMutation({
     mutationFn: async ({ a, b }: { a: ServiceOrderStep; b: ServiceOrderStep }) => {
       // seq tem unique só no template; aqui a troca direta é segura.
-      const { error: e1 } = await (supabase as any)
+      const { error: e1 } = await supabase
         .from('service_order_steps').update({ seq: b.seq }).eq('id', a.id);
       if (e1) throw e1;
-      const { error: e2 } = await (supabase as any)
+      const { error: e2 } = await supabase
         .from('service_order_steps').update({ seq: a.seq }).eq('id', b.id);
       if (e2) throw e2;
     },

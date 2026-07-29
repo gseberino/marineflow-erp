@@ -51,6 +51,7 @@ export type Database = {
           evidence_at: string | null
           id: string
           kind: string
+          open_loop_id: string | null
           origin: string
           priority: string
           related_entity_id: string | null
@@ -77,6 +78,7 @@ export type Database = {
           evidence_at?: string | null
           id?: string
           kind?: string
+          open_loop_id?: string | null
           origin?: string
           priority?: string
           related_entity_id?: string | null
@@ -103,6 +105,7 @@ export type Database = {
           evidence_at?: string | null
           id?: string
           kind?: string
+          open_loop_id?: string | null
           origin?: string
           priority?: string
           related_entity_id?: string | null
@@ -119,10 +122,31 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "agenda_suggestions_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "agenda_suggestions_created_task_id_fkey"
             columns: ["created_task_id"]
             isOneToOne: false
             referencedRelation: "agenda_tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agenda_suggestions_open_loop_id_fkey"
+            columns: ["open_loop_id"]
+            isOneToOne: false
+            referencedRelation: "entity_open_loops"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agenda_suggestions_resolved_by_fkey"
+            columns: ["resolved_by"]
+            isOneToOne: false
+            referencedRelation: "app_users"
             referencedColumns: ["id"]
           },
           {
@@ -237,17 +261,17 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "agenda_tasks_client_id_fkey"
-            columns: ["client_id"]
-            isOneToOne: false
-            referencedRelation: "clients"
-            referencedColumns: ["id"]
-          },
-          {
             foreignKeyName: "agenda_tasks_assignee_user_id_fkey"
             columns: ["assignee_user_id"]
             isOneToOne: false
             referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agenda_tasks_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
             referencedColumns: ["id"]
           },
           {
@@ -404,6 +428,51 @@ export type Database = {
         }
         Relationships: []
       }
+      ai_comms_log: {
+        Row: {
+          audiencia: string | null
+          block_code: string | null
+          created_at: string
+          entity_id: string | null
+          entity_kind: string | null
+          id: string
+          message_preview: string | null
+          phone: string | null
+          reply_intent: string | null
+          responded_at: string | null
+          status: string
+          tipo: string
+        }
+        Insert: {
+          audiencia?: string | null
+          block_code?: string | null
+          created_at?: string
+          entity_id?: string | null
+          entity_kind?: string | null
+          id?: string
+          message_preview?: string | null
+          phone?: string | null
+          reply_intent?: string | null
+          responded_at?: string | null
+          status?: string
+          tipo: string
+        }
+        Update: {
+          audiencia?: string | null
+          block_code?: string | null
+          created_at?: string
+          entity_id?: string | null
+          entity_kind?: string | null
+          id?: string
+          message_preview?: string | null
+          phone?: string | null
+          reply_intent?: string | null
+          responded_at?: string | null
+          status?: string
+          tipo?: string
+        }
+        Relationships: []
+      }
       ai_correction_patterns: {
         Row: {
           client_id: string | null
@@ -546,6 +615,81 @@ export type Database = {
           },
         ]
       }
+      ai_learned_routines: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          automation_payload: Json | null
+          category: string
+          created_at: string
+          description: string | null
+          evidence: string | null
+          id: string
+          last_observed_at: string
+          observations: number
+          pattern_key: string
+          rejected_reason: string | null
+          status: string
+          suggested_automation: string | null
+          title: string
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          automation_payload?: Json | null
+          category?: string
+          created_at?: string
+          description?: string | null
+          evidence?: string | null
+          id?: string
+          last_observed_at?: string
+          observations?: number
+          pattern_key: string
+          rejected_reason?: string | null
+          status?: string
+          suggested_automation?: string | null
+          title: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          automation_payload?: Json | null
+          category?: string
+          created_at?: string
+          description?: string | null
+          evidence?: string | null
+          id?: string
+          last_observed_at?: string
+          observations?: number
+          pattern_key?: string
+          rejected_reason?: string | null
+          status?: string
+          suggested_automation?: string | null
+          title?: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_learned_routines_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_learned_routines_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ai_lifecycle_events: {
         Row: {
           created_at: string
@@ -579,6 +723,57 @@ export type Database = {
           metadata?: Json
           new_value?: string | null
           old_value?: string | null
+        }
+        Relationships: []
+      }
+      ai_message_feedback: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          message_excerpt: string | null
+          rating: string
+          session_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          message_excerpt?: string | null
+          rating: string
+          session_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          message_excerpt?: string | null
+          rating?: string
+          session_id?: string | null
+        }
+        Relationships: []
+      }
+      ai_operator_alerts_log: {
+        Row: {
+          alert_key: string
+          channel: string
+          created_at: string
+          id: string
+          meta: Json | null
+        }
+        Insert: {
+          alert_key: string
+          channel?: string
+          created_at?: string
+          id?: string
+          meta?: Json | null
+        }
+        Update: {
+          alert_key?: string
+          channel?: string
+          created_at?: string
+          id?: string
+          meta?: Json | null
         }
         Relationships: []
       }
@@ -783,8 +978,29 @@ export type Database = {
             foreignKeyName: "ai_operator_draft_items_product_id_fkey"
             columns: ["product_id"]
             isOneToOne: false
+            referencedRelation: "product_availability"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_operator_draft_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
             referencedRelation: "products"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_operator_draft_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_entradas_pendentes"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "ai_operator_draft_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_variancia"
+            referencedColumns: ["product_id"]
           },
           {
             foreignKeyName: "ai_operator_draft_items_service_id_fkey"
@@ -893,6 +1109,13 @@ export type Database = {
             foreignKeyName: "ai_operator_drafts_converted_service_order_id_fkey"
             columns: ["converted_service_order_id"]
             isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_operator_drafts_converted_service_order_id_fkey"
+            columns: ["converted_service_order_id"]
+            isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
           },
@@ -908,6 +1131,13 @@ export type Database = {
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_operator_drafts_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
             referencedColumns: ["id"]
           },
           {
@@ -947,6 +1177,7 @@ export type Database = {
           scope: string
           source: string
           source_reference: string | null
+          supplier_id: string | null
           title: string
           topic: string
           updated_at: string
@@ -968,6 +1199,7 @@ export type Database = {
           scope?: string
           source?: string
           source_reference?: string | null
+          supplier_id?: string | null
           title: string
           topic: string
           updated_at?: string
@@ -989,6 +1221,7 @@ export type Database = {
           scope?: string
           source?: string
           source_reference?: string | null
+          supplier_id?: string | null
           title?: string
           topic?: string
           updated_at?: string
@@ -1024,6 +1257,13 @@ export type Database = {
             columns: ["rejected_by"]
             isOneToOne: false
             referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_operator_memory_notes_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
             referencedColumns: ["id"]
           },
           {
@@ -1278,6 +1518,13 @@ export type Database = {
             foreignKeyName: "ai_operator_sessions_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_operator_sessions_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
           },
@@ -1286,6 +1533,69 @@ export type Database = {
             columns: ["vessel_id"]
             isOneToOne: false
             referencedRelation: "vessels"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ai_suggestion_reviews: {
+        Row: {
+          ai_model: string | null
+          approved: Json | null
+          change_summary: string | null
+          id: string
+          prompt_version: string | null
+          reviewed_at: string
+          reviewer_id: string | null
+          service_id: string | null
+          suggested: Json
+          suggestion_type: string
+          target_id: string | null
+          target_table: string
+          verdict: string
+        }
+        Insert: {
+          ai_model?: string | null
+          approved?: Json | null
+          change_summary?: string | null
+          id?: string
+          prompt_version?: string | null
+          reviewed_at?: string
+          reviewer_id?: string | null
+          service_id?: string | null
+          suggested: Json
+          suggestion_type: string
+          target_id?: string | null
+          target_table: string
+          verdict: string
+        }
+        Update: {
+          ai_model?: string | null
+          approved?: Json | null
+          change_summary?: string | null
+          id?: string
+          prompt_version?: string | null
+          reviewed_at?: string
+          reviewer_id?: string | null
+          service_id?: string | null
+          suggested?: Json
+          suggestion_type?: string
+          target_id?: string | null
+          target_table?: string
+          verdict?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_suggestion_reviews_reviewer_id_fkey"
+            columns: ["reviewer_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_suggestion_reviews_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
             referencedColumns: ["id"]
           },
         ]
@@ -1388,6 +1698,60 @@ export type Database = {
         }
         Relationships: []
       }
+      app_error_logs: {
+        Row: {
+          action: string | null
+          context: string | null
+          details: Json | null
+          fingerprint: string
+          first_seen_at: string
+          id: string
+          last_seen_at: string
+          level: string
+          message: string
+          occurrences: number
+          resolved_at: string | null
+          source: string
+          user_agent: string | null
+          user_email: string | null
+          user_id: string | null
+        }
+        Insert: {
+          action?: string | null
+          context?: string | null
+          details?: Json | null
+          fingerprint: string
+          first_seen_at?: string
+          id?: string
+          last_seen_at?: string
+          level?: string
+          message: string
+          occurrences?: number
+          resolved_at?: string | null
+          source: string
+          user_agent?: string | null
+          user_email?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          action?: string | null
+          context?: string | null
+          details?: Json | null
+          fingerprint?: string
+          first_seen_at?: string
+          id?: string
+          last_seen_at?: string
+          level?: string
+          message?: string
+          occurrences?: number
+          resolved_at?: string | null
+          source?: string
+          user_agent?: string | null
+          user_email?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       app_notifications: {
         Row: {
           body: string | null
@@ -1486,6 +1850,8 @@ export type Database = {
           address_complement: string | null
           address_line_1: string | null
           address_number: string | null
+          ai_whatsapp_enabled: boolean
+          ai_whatsapp_pin_hash: string | null
           avatar_url: string | null
           birth_date: string | null
           city: string | null
@@ -1503,6 +1869,7 @@ export type Database = {
           neighborhood: string | null
           notes: string | null
           phone: string | null
+          phone_normalized: string | null
           pix_key: string | null
           postal_code: string | null
           resignation_date: string | null
@@ -1517,6 +1884,8 @@ export type Database = {
           address_complement?: string | null
           address_line_1?: string | null
           address_number?: string | null
+          ai_whatsapp_enabled?: boolean
+          ai_whatsapp_pin_hash?: string | null
           avatar_url?: string | null
           birth_date?: string | null
           city?: string | null
@@ -1534,6 +1903,7 @@ export type Database = {
           neighborhood?: string | null
           notes?: string | null
           phone?: string | null
+          phone_normalized?: string | null
           pix_key?: string | null
           postal_code?: string | null
           resignation_date?: string | null
@@ -1548,6 +1918,8 @@ export type Database = {
           address_complement?: string | null
           address_line_1?: string | null
           address_number?: string | null
+          ai_whatsapp_enabled?: boolean
+          ai_whatsapp_pin_hash?: string | null
           avatar_url?: string | null
           birth_date?: string | null
           city?: string | null
@@ -1565,6 +1937,7 @@ export type Database = {
           neighborhood?: string | null
           notes?: string | null
           phone?: string | null
+          phone_normalized?: string | null
           pix_key?: string | null
           postal_code?: string | null
           resignation_date?: string | null
@@ -1617,6 +1990,120 @@ export type Database = {
           triggered_by_table?: string | null
         }
         Relationships: []
+      }
+      bank_charges: {
+        Row: {
+          amount: number
+          barcode: string | null
+          client_id: string | null
+          created_at: string
+          created_by: string | null
+          digitable_line: string | null
+          due_date: string | null
+          error_message: string | null
+          id: string
+          kind: string
+          paid_amount: number | null
+          paid_at: string | null
+          pdf_url: string | null
+          pix_copy_paste: string | null
+          pix_end_to_end_id: string | null
+          pix_qr_base64: string | null
+          provider: string
+          provider_charge_id: string | null
+          raw: Json | null
+          receivable_id: string | null
+          service_order_id: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          barcode?: string | null
+          client_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          digitable_line?: string | null
+          due_date?: string | null
+          error_message?: string | null
+          id?: string
+          kind: string
+          paid_amount?: number | null
+          paid_at?: string | null
+          pdf_url?: string | null
+          pix_copy_paste?: string | null
+          pix_end_to_end_id?: string | null
+          pix_qr_base64?: string | null
+          provider: string
+          provider_charge_id?: string | null
+          raw?: Json | null
+          receivable_id?: string | null
+          service_order_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          barcode?: string | null
+          client_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          digitable_line?: string | null
+          due_date?: string | null
+          error_message?: string | null
+          id?: string
+          kind?: string
+          paid_amount?: number | null
+          paid_at?: string | null
+          pdf_url?: string | null
+          pix_copy_paste?: string | null
+          pix_end_to_end_id?: string | null
+          pix_qr_base64?: string | null
+          provider?: string
+          provider_charge_id?: string | null
+          raw?: Json | null
+          receivable_id?: string | null
+          service_order_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bank_charges_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bank_charges_receivable_id_fkey"
+            columns: ["receivable_id"]
+            isOneToOne: false
+            referencedRelation: "receivables"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bank_charges_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bank_charges_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bank_charges_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "vw_os_profitability"
+            referencedColumns: ["os_id"]
+          },
+        ]
       }
       bank_connections: {
         Row: {
@@ -1672,8 +2159,8 @@ export type Database = {
       bank_transactions: {
         Row: {
           amount: number
-          bank_connection_id: string | null
           balance_after: number | null
+          bank_connection_id: string | null
           bank_ref_id: string | null
           counterparty_document: string | null
           counterparty_name: string | null
@@ -1693,8 +2180,8 @@ export type Database = {
         }
         Insert: {
           amount: number
-          bank_connection_id?: string | null
           balance_after?: number | null
+          bank_connection_id?: string | null
           bank_ref_id?: string | null
           counterparty_document?: string | null
           counterparty_name?: string | null
@@ -1714,8 +2201,8 @@ export type Database = {
         }
         Update: {
           amount?: number
-          bank_connection_id?: string | null
           balance_after?: number | null
+          bank_connection_id?: string | null
           bank_ref_id?: string | null
           counterparty_document?: string | null
           counterparty_name?: string | null
@@ -1735,6 +2222,13 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "bank_transactions_bank_connection_id_fkey"
+            columns: ["bank_connection_id"]
+            isOneToOne: false
+            referencedRelation: "bank_connections"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "bank_transactions_reconciled_payment_id_fkey"
             columns: ["reconciled_payment_id"]
             isOneToOne: false
@@ -1746,6 +2240,13 @@ export type Database = {
             columns: ["reconciled_service_order_id"]
             isOneToOne: false
             referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bank_transactions_reconciled_service_order_id_fkey"
+            columns: ["reconciled_service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
             referencedColumns: ["id"]
           },
           {
@@ -1822,57 +2323,81 @@ export type Database = {
       clients: {
         Row: {
           active: boolean
+          address_complement: string | null
           address_line_1: string | null
           address_line_2: string | null
+          address_number: string | null
           city: string | null
+          communication_tone: string | null
           country: string | null
           cpf_cnpj: string | null
           created_at: string
+          display_name: string | null
           email: string | null
           id: string
+          ie_indicator: number | null
           name: string
+          neighborhood: string | null
           notes: string | null
+          opt_out_whatsapp: boolean
           phone: string | null
           postal_code: string | null
           state: string | null
+          state_registration: string | null
           type: string
           updated_at: string
           whatsapp: string | null
         }
         Insert: {
           active?: boolean
+          address_complement?: string | null
           address_line_1?: string | null
           address_line_2?: string | null
+          address_number?: string | null
           city?: string | null
+          communication_tone?: string | null
           country?: string | null
           cpf_cnpj?: string | null
           created_at?: string
+          display_name?: string | null
           email?: string | null
           id?: string
+          ie_indicator?: number | null
           name: string
+          neighborhood?: string | null
           notes?: string | null
+          opt_out_whatsapp?: boolean
           phone?: string | null
           postal_code?: string | null
           state?: string | null
+          state_registration?: string | null
           type: string
           updated_at?: string
           whatsapp?: string | null
         }
         Update: {
           active?: boolean
+          address_complement?: string | null
           address_line_1?: string | null
           address_line_2?: string | null
+          address_number?: string | null
           city?: string | null
+          communication_tone?: string | null
           country?: string | null
           cpf_cnpj?: string | null
           created_at?: string
+          display_name?: string | null
           email?: string | null
           id?: string
+          ie_indicator?: number | null
           name?: string
+          neighborhood?: string | null
           notes?: string | null
+          opt_out_whatsapp?: boolean
           phone?: string | null
           postal_code?: string | null
           state?: string | null
+          state_registration?: string | null
           type?: string
           updated_at?: string
           whatsapp?: string | null
@@ -2069,6 +2594,13 @@ export type Database = {
             foreignKeyName: "collections_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "collections_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
           },
@@ -2133,6 +2665,13 @@ export type Database = {
             foreignKeyName: "commissions_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "commissions_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
           },
@@ -2144,6 +2683,84 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      company_fiscal_settings: {
+        Row: {
+          active_environment: string
+          city_name: string | null
+          cnpj: string | null
+          complement: string | null
+          contora_template_id: string | null
+          created_at: string | null
+          crt: number
+          district: string | null
+          ibge_city_code: string | null
+          id: string
+          legal_name: string | null
+          municipal_registration: string | null
+          nfe_series_producao: number
+          number: string | null
+          postal_code: string | null
+          provider: string
+          singleton_guard: boolean
+          state_code: string | null
+          state_registration: string | null
+          street: string | null
+          tax_regime: string
+          trade_name: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          active_environment?: string
+          city_name?: string | null
+          cnpj?: string | null
+          complement?: string | null
+          contora_template_id?: string | null
+          created_at?: string | null
+          crt?: number
+          district?: string | null
+          ibge_city_code?: string | null
+          id?: string
+          legal_name?: string | null
+          municipal_registration?: string | null
+          nfe_series_producao?: number
+          number?: string | null
+          postal_code?: string | null
+          provider?: string
+          singleton_guard?: boolean
+          state_code?: string | null
+          state_registration?: string | null
+          street?: string | null
+          tax_regime?: string
+          trade_name?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          active_environment?: string
+          city_name?: string | null
+          cnpj?: string | null
+          complement?: string | null
+          contora_template_id?: string | null
+          created_at?: string | null
+          crt?: number
+          district?: string | null
+          ibge_city_code?: string | null
+          id?: string
+          legal_name?: string | null
+          municipal_registration?: string | null
+          nfe_series_producao?: number
+          number?: string | null
+          postal_code?: string | null
+          provider?: string
+          singleton_guard?: boolean
+          state_code?: string | null
+          state_registration?: string | null
+          street?: string | null
+          tax_regime?: string
+          trade_name?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
       }
       cost_centers: {
         Row: {
@@ -2179,6 +2796,119 @@ export type Database = {
             columns: ["parent_id"]
             isOneToOne: false
             referencedRelation: "cost_centers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      entity_open_loops: {
+        Row: {
+          created_at: string
+          detail: string | null
+          due_at: string | null
+          entity_id: string
+          entity_type: string
+          evidence: string | null
+          evidence_at: string | null
+          id: string
+          kind: string
+          last_seen_at: string
+          loop_key: string
+          mentions: number
+          opened_at: string
+          priority: string
+          ref_id: string | null
+          ref_table: string | null
+          resolved_at: string | null
+          resolved_reason: string | null
+          service_order_id: string | null
+          source: string
+          source_message_id: string | null
+          status: string
+          task_id: string | null
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          detail?: string | null
+          due_at?: string | null
+          entity_id: string
+          entity_type: string
+          evidence?: string | null
+          evidence_at?: string | null
+          id?: string
+          kind: string
+          last_seen_at?: string
+          loop_key: string
+          mentions?: number
+          opened_at?: string
+          priority?: string
+          ref_id?: string | null
+          ref_table?: string | null
+          resolved_at?: string | null
+          resolved_reason?: string | null
+          service_order_id?: string | null
+          source: string
+          source_message_id?: string | null
+          status?: string
+          task_id?: string | null
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          detail?: string | null
+          due_at?: string | null
+          entity_id?: string
+          entity_type?: string
+          evidence?: string | null
+          evidence_at?: string | null
+          id?: string
+          kind?: string
+          last_seen_at?: string
+          loop_key?: string
+          mentions?: number
+          opened_at?: string
+          priority?: string
+          ref_id?: string | null
+          ref_table?: string | null
+          resolved_at?: string | null
+          resolved_reason?: string | null
+          service_order_id?: string | null
+          source?: string
+          source_message_id?: string | null
+          status?: string
+          task_id?: string | null
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "entity_open_loops_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "entity_open_loops_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "entity_open_loops_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "vw_os_profitability"
+            referencedColumns: ["os_id"]
+          },
+          {
+            foreignKeyName: "entity_open_loops_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_tasks"
             referencedColumns: ["id"]
           },
         ]
@@ -2366,8 +3096,29 @@ export type Database = {
             foreignKeyName: "external_quote_parts_product_id_fkey"
             columns: ["product_id"]
             isOneToOne: false
+            referencedRelation: "product_availability"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "external_quote_parts_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
             referencedRelation: "products"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "external_quote_parts_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_entradas_pendentes"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "external_quote_parts_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_variancia"
+            referencedColumns: ["product_id"]
           },
         ]
       }
@@ -2571,6 +3322,13 @@ export type Database = {
             foreignKeyName: "external_quotes_converted_service_order_id_fkey"
             columns: ["converted_service_order_id"]
             isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "external_quotes_converted_service_order_id_fkey"
+            columns: ["converted_service_order_id"]
+            isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
           },
@@ -2597,32 +3355,230 @@ export type Database = {
           },
         ]
       }
+      finance_review_queue: {
+        Row: {
+          bank_transaction_id: string | null
+          confidence: number
+          created_at: string
+          created_payable_id: string | null
+          created_receivable_id: string | null
+          decided_at: string | null
+          decided_by: string | null
+          decision_note: string | null
+          dre_group: string | null
+          id: string
+          kind: string
+          reasoning: string | null
+          related_transaction_id: string | null
+          status: string
+          suggested_amount: number | null
+          suggested_category: string | null
+          suggested_client_id: string | null
+          suggested_date: string | null
+          suggested_description: string | null
+          suggested_supplier_id: string | null
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          bank_transaction_id?: string | null
+          confidence?: number
+          created_at?: string
+          created_payable_id?: string | null
+          created_receivable_id?: string | null
+          decided_at?: string | null
+          decided_by?: string | null
+          decision_note?: string | null
+          dre_group?: string | null
+          id?: string
+          kind: string
+          reasoning?: string | null
+          related_transaction_id?: string | null
+          status?: string
+          suggested_amount?: number | null
+          suggested_category?: string | null
+          suggested_client_id?: string | null
+          suggested_date?: string | null
+          suggested_description?: string | null
+          suggested_supplier_id?: string | null
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          bank_transaction_id?: string | null
+          confidence?: number
+          created_at?: string
+          created_payable_id?: string | null
+          created_receivable_id?: string | null
+          decided_at?: string | null
+          decided_by?: string | null
+          decision_note?: string | null
+          dre_group?: string | null
+          id?: string
+          kind?: string
+          reasoning?: string | null
+          related_transaction_id?: string | null
+          status?: string
+          suggested_amount?: number | null
+          suggested_category?: string | null
+          suggested_client_id?: string | null
+          suggested_date?: string | null
+          suggested_description?: string | null
+          suggested_supplier_id?: string | null
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_review_queue_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "bank_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_review_queue_created_payable_id_fkey"
+            columns: ["created_payable_id"]
+            isOneToOne: false
+            referencedRelation: "payables"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_review_queue_created_receivable_id_fkey"
+            columns: ["created_receivable_id"]
+            isOneToOne: false
+            referencedRelation: "receivables"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_review_queue_related_transaction_id_fkey"
+            columns: ["related_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "bank_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_review_queue_suggested_client_id_fkey"
+            columns: ["suggested_client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_review_queue_suggested_supplier_id_fkey"
+            columns: ["suggested_supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       financial_categories: {
         Row: {
           active: boolean | null
           color: string | null
           created_at: string | null
+          description: string | null
+          dre_group: string | null
           id: string
           name: string
+          sort_order: number
           type: string
         }
         Insert: {
           active?: boolean | null
           color?: string | null
           created_at?: string | null
+          description?: string | null
+          dre_group?: string | null
           id?: string
           name: string
+          sort_order?: number
           type: string
         }
         Update: {
           active?: boolean | null
           color?: string | null
           created_at?: string | null
+          description?: string | null
+          dre_group?: string | null
           id?: string
           name?: string
+          sort_order?: number
           type?: string
         }
         Relationships: []
+      }
+      fiscal_document_sequences: {
+        Row: {
+          document_type: string
+          environment: string
+          last_number: number
+          series: number
+          updated_at: string | null
+        }
+        Insert: {
+          document_type: string
+          environment?: string
+          last_number?: number
+          series?: number
+          updated_at?: string | null
+        }
+        Update: {
+          document_type?: string
+          environment?: string
+          last_number?: number
+          series?: number
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      fiscal_emission_drafts: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          form_state: Json
+          id: string
+          label: string | null
+          nature_of_operation: string | null
+          recipient_name: string | null
+          status: string
+          total_amount: number | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          form_state: Json
+          id?: string
+          label?: string | null
+          nature_of_operation?: string | null
+          recipient_name?: string | null
+          status?: string
+          total_amount?: number | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          form_state?: Json
+          id?: string
+          label?: string | null
+          nature_of_operation?: string | null
+          recipient_name?: string | null
+          status?: string
+          total_amount?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fiscal_emission_drafts_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       fiscal_note_items: {
         Row: {
@@ -2709,8 +3665,29 @@ export type Database = {
             foreignKeyName: "fiscal_note_items_product_id_fkey"
             columns: ["product_id"]
             isOneToOne: false
+            referencedRelation: "product_availability"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fiscal_note_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
             referencedRelation: "products"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fiscal_note_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_entradas_pendentes"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "fiscal_note_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_variancia"
+            referencedColumns: ["product_id"]
           },
         ]
       }
@@ -2720,6 +3697,7 @@ export type Database = {
           confirmed_at: string | null
           created_at: string | null
           id: string
+          import_result: Json | null
           issue_date: string | null
           issued_at: string | null
           issuer_cnpj: string | null
@@ -2727,12 +3705,19 @@ export type Database = {
           items: Json | null
           nfe_key: string | null
           nfe_number: string | null
+          purchase_order_id: string | null
           status: string | null
+          supplier_id: string | null
           tax_cofins: number | null
           tax_icms: number | null
           tax_ipi: number | null
           tax_pis: number | null
           total_amount: number | null
+          total_discount: number | null
+          total_freight: number | null
+          total_insurance: number | null
+          total_other: number | null
+          total_products: number | null
           total_value: number | null
           updated_at: string | null
           xml_content: string | null
@@ -2743,6 +3728,7 @@ export type Database = {
           confirmed_at?: string | null
           created_at?: string | null
           id?: string
+          import_result?: Json | null
           issue_date?: string | null
           issued_at?: string | null
           issuer_cnpj?: string | null
@@ -2750,12 +3736,19 @@ export type Database = {
           items?: Json | null
           nfe_key?: string | null
           nfe_number?: string | null
+          purchase_order_id?: string | null
           status?: string | null
+          supplier_id?: string | null
           tax_cofins?: number | null
           tax_icms?: number | null
           tax_ipi?: number | null
           tax_pis?: number | null
           total_amount?: number | null
+          total_discount?: number | null
+          total_freight?: number | null
+          total_insurance?: number | null
+          total_other?: number | null
+          total_products?: number | null
           total_value?: number | null
           updated_at?: string | null
           xml_content?: string | null
@@ -2766,6 +3759,7 @@ export type Database = {
           confirmed_at?: string | null
           created_at?: string | null
           id?: string
+          import_result?: Json | null
           issue_date?: string | null
           issued_at?: string | null
           issuer_cnpj?: string | null
@@ -2773,18 +3767,40 @@ export type Database = {
           items?: Json | null
           nfe_key?: string | null
           nfe_number?: string | null
+          purchase_order_id?: string | null
           status?: string | null
+          supplier_id?: string | null
           tax_cofins?: number | null
           tax_icms?: number | null
           tax_ipi?: number | null
           tax_pis?: number | null
           total_amount?: number | null
+          total_discount?: number | null
+          total_freight?: number | null
+          total_insurance?: number | null
+          total_other?: number | null
+          total_products?: number | null
           total_value?: number | null
           updated_at?: string | null
           xml_content?: string | null
           xml_url?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "fiscal_notes_purchase_order_id_fkey"
+            columns: ["purchase_order_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fiscal_notes_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       import_sessions: {
         Row: {
@@ -2837,6 +3853,7 @@ export type Database = {
           quantity_delta: number
           reference_id: string | null
           reference_type: string | null
+          reverses_movement_id: string | null
           unit_cost_snapshot: number | null
         }
         Insert: {
@@ -2850,6 +3867,7 @@ export type Database = {
           quantity_delta: number
           reference_id?: string | null
           reference_type?: string | null
+          reverses_movement_id?: string | null
           unit_cost_snapshot?: number | null
         }
         Update: {
@@ -2863,6 +3881,7 @@ export type Database = {
           quantity_delta?: number
           reference_id?: string | null
           reference_type?: string | null
+          reverses_movement_id?: string | null
           unit_cost_snapshot?: number | null
         }
         Relationships: [
@@ -2877,7 +3896,35 @@ export type Database = {
             foreignKeyName: "inventory_movements_product_id_fkey"
             columns: ["product_id"]
             isOneToOne: false
+            referencedRelation: "product_availability"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_movements_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
             referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_movements_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_entradas_pendentes"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "inventory_movements_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_variancia"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "inventory_movements_reverses_movement_id_fkey"
+            columns: ["reverses_movement_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_movements"
             referencedColumns: ["id"]
           },
         ]
@@ -2953,8 +4000,131 @@ export type Database = {
             foreignKeyName: "invoices_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoices_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
+          },
+        ]
+      }
+      issued_fiscal_documents: {
+        Row: {
+          access_key: string | null
+          authorized_at: string | null
+          cancelled_at: string | null
+          client_id: string | null
+          created_at: string | null
+          customer_buyer_name: string | null
+          customer_po_number: string | null
+          document_type: string
+          environment: string
+          id: string
+          idempotency_key: string | null
+          number: number | null
+          origin_id: string | null
+          origin_type: string
+          payment_terms: Json | null
+          pdf_storage_path: string | null
+          pdf_url: string | null
+          protocol: string | null
+          provider: string
+          provider_document_id: string | null
+          provider_status: Json | null
+          receivable_id: string | null
+          request_payload: Json | null
+          series: number | null
+          source_items: Json | null
+          status: string
+          status_code: string | null
+          status_message: string | null
+          stock_reversed_at: string | null
+          stock_settled_at: string | null
+          updated_at: string | null
+          xml_storage_path: string | null
+          xml_url: string | null
+        }
+        Insert: {
+          access_key?: string | null
+          authorized_at?: string | null
+          cancelled_at?: string | null
+          client_id?: string | null
+          created_at?: string | null
+          customer_buyer_name?: string | null
+          customer_po_number?: string | null
+          document_type: string
+          environment?: string
+          id?: string
+          idempotency_key?: string | null
+          number?: number | null
+          origin_id?: string | null
+          origin_type?: string
+          payment_terms?: Json | null
+          pdf_storage_path?: string | null
+          pdf_url?: string | null
+          protocol?: string | null
+          provider?: string
+          provider_document_id?: string | null
+          provider_status?: Json | null
+          receivable_id?: string | null
+          request_payload?: Json | null
+          series?: number | null
+          source_items?: Json | null
+          status?: string
+          status_code?: string | null
+          status_message?: string | null
+          stock_reversed_at?: string | null
+          stock_settled_at?: string | null
+          updated_at?: string | null
+          xml_storage_path?: string | null
+          xml_url?: string | null
+        }
+        Update: {
+          access_key?: string | null
+          authorized_at?: string | null
+          cancelled_at?: string | null
+          client_id?: string | null
+          created_at?: string | null
+          customer_buyer_name?: string | null
+          customer_po_number?: string | null
+          document_type?: string
+          environment?: string
+          id?: string
+          idempotency_key?: string | null
+          number?: number | null
+          origin_id?: string | null
+          origin_type?: string
+          payment_terms?: Json | null
+          pdf_storage_path?: string | null
+          pdf_url?: string | null
+          protocol?: string | null
+          provider?: string
+          provider_document_id?: string | null
+          provider_status?: Json | null
+          receivable_id?: string | null
+          request_payload?: Json | null
+          series?: number | null
+          source_items?: Json | null
+          status?: string
+          status_code?: string | null
+          status_message?: string | null
+          stock_reversed_at?: string | null
+          stock_settled_at?: string | null
+          updated_at?: string | null
+          xml_storage_path?: string | null
+          xml_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "issued_fiscal_documents_receivable_id_fkey"
+            columns: ["receivable_id"]
+            isOneToOne: false
+            referencedRelation: "receivables"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -3085,6 +4255,7 @@ export type Database = {
           description: string
           due_date: string
           expense_category: string | null
+          fiscal_note_id: string | null
           id: string
           issue_date: string
           linked_service_order_id: string | null
@@ -3108,6 +4279,7 @@ export type Database = {
           description: string
           due_date: string
           expense_category?: string | null
+          fiscal_note_id?: string | null
           id?: string
           issue_date: string
           linked_service_order_id?: string | null
@@ -3131,6 +4303,7 @@ export type Database = {
           description?: string
           due_date?: string
           expense_category?: string | null
+          fiscal_note_id?: string | null
           id?: string
           issue_date?: string
           linked_service_order_id?: string | null
@@ -3160,10 +4333,24 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "payables_fiscal_note_id_fkey"
+            columns: ["fiscal_note_id"]
+            isOneToOne: false
+            referencedRelation: "fiscal_notes"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "payables_linked_service_order_id_fkey"
             columns: ["linked_service_order_id"]
             isOneToOne: false
             referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payables_linked_service_order_id_fkey"
+            columns: ["linked_service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
             referencedColumns: ["id"]
           },
           {
@@ -3226,6 +4413,8 @@ export type Database = {
           payable_id: string | null
           payment_date: string
           payment_method: string
+          receipt_storage_path: string | null
+          receipt_url: string | null
           receivable_id: string | null
           status: string | null
         }
@@ -3242,6 +4431,8 @@ export type Database = {
           payable_id?: string | null
           payment_date?: string
           payment_method?: string
+          receipt_storage_path?: string | null
+          receipt_url?: string | null
           receivable_id?: string | null
           status?: string | null
         }
@@ -3258,6 +4449,8 @@ export type Database = {
           payable_id?: string | null
           payment_date?: string
           payment_method?: string
+          receipt_storage_path?: string | null
+          receipt_url?: string | null
           receivable_id?: string | null
           status?: string | null
         }
@@ -3321,8 +4514,85 @@ export type Database = {
             foreignKeyName: "price_update_suggestions_product_id_fkey"
             columns: ["product_id"]
             isOneToOne: false
+            referencedRelation: "product_availability"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_update_suggestions_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
             referencedRelation: "products"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_update_suggestions_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_entradas_pendentes"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "price_update_suggestions_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_variancia"
+            referencedColumns: ["product_id"]
+          },
+        ]
+      }
+      product_aliases: {
+        Row: {
+          alias_normalized: string
+          alias_original: string
+          created_at: string | null
+          created_by: string | null
+          id: string
+          product_id: string
+        }
+        Insert: {
+          alias_normalized: string
+          alias_original: string
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          product_id: string
+        }
+        Update: {
+          alias_normalized?: string
+          alias_original?: string
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          product_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_aliases_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "product_availability"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_aliases_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_aliases_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_entradas_pendentes"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "product_aliases_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_variancia"
+            referencedColumns: ["product_id"]
           },
         ]
       }
@@ -3383,6 +4653,87 @@ export type Database = {
         }
         Relationships: []
       }
+      product_components: {
+        Row: {
+          component_product_id: string
+          created_at: string
+          id: string
+          parent_product_id: string
+          quantity: number
+        }
+        Insert: {
+          component_product_id: string
+          created_at?: string
+          id?: string
+          parent_product_id: string
+          quantity?: number
+        }
+        Update: {
+          component_product_id?: string
+          created_at?: string
+          id?: string
+          parent_product_id?: string
+          quantity?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_components_component_product_id_fkey"
+            columns: ["component_product_id"]
+            isOneToOne: false
+            referencedRelation: "product_availability"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_components_component_product_id_fkey"
+            columns: ["component_product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_components_component_product_id_fkey"
+            columns: ["component_product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_entradas_pendentes"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "product_components_component_product_id_fkey"
+            columns: ["component_product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_variancia"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "product_components_parent_product_id_fkey"
+            columns: ["parent_product_id"]
+            isOneToOne: false
+            referencedRelation: "product_availability"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_components_parent_product_id_fkey"
+            columns: ["parent_product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_components_parent_product_id_fkey"
+            columns: ["parent_product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_entradas_pendentes"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "product_components_parent_product_id_fkey"
+            columns: ["parent_product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_variancia"
+            referencedColumns: ["product_id"]
+          },
+        ]
+      }
       product_price_history: {
         Row: {
           created_at: string | null
@@ -3420,8 +4771,29 @@ export type Database = {
             foreignKeyName: "product_price_history_product_id_fkey"
             columns: ["product_id"]
             isOneToOne: false
+            referencedRelation: "product_availability"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_price_history_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
             referencedRelation: "products"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_price_history_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_entradas_pendentes"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "product_price_history_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_variancia"
+            referencedColumns: ["product_id"]
           },
         ]
       }
@@ -3479,8 +4851,29 @@ export type Database = {
             foreignKeyName: "product_suppliers_product_id_fkey"
             columns: ["product_id"]
             isOneToOne: false
+            referencedRelation: "product_availability"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_suppliers_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
             referencedRelation: "products"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_suppliers_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_entradas_pendentes"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "product_suppliers_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_variancia"
+            referencedColumns: ["product_id"]
           },
           {
             foreignKeyName: "product_suppliers_supplier_id_fkey"
@@ -3497,6 +4890,7 @@ export type Database = {
           barcode: string | null
           brand: string | null
           category: string | null
+          cfop: string | null
           cofins_rate: number | null
           commission_rate: number | null
           cost_currency: string | null
@@ -3511,6 +4905,7 @@ export type Database = {
           image_url: string | null
           ipi_rate: number | null
           is_commissionable: boolean | null
+          is_equipment: boolean | null
           last_stock_entry_at: string | null
           location_bin: string | null
           minimum_stock: number | null
@@ -3519,7 +4914,9 @@ export type Database = {
           notes: string | null
           pis_rate: number | null
           product_category_id: string | null
+          product_type: string
           profit_margin: number | null
+          reserved_quantity: number
           sale_currency: string | null
           sale_price: number | null
           sku: string | null
@@ -3528,12 +4925,14 @@ export type Database = {
           unit: string | null
           updated_at: string
           use_global_fiscal: boolean | null
+          vende_isolado: boolean
         }
         Insert: {
           active?: boolean
           barcode?: string | null
           brand?: string | null
           category?: string | null
+          cfop?: string | null
           cofins_rate?: number | null
           commission_rate?: number | null
           cost_currency?: string | null
@@ -3548,6 +4947,7 @@ export type Database = {
           image_url?: string | null
           ipi_rate?: number | null
           is_commissionable?: boolean | null
+          is_equipment?: boolean | null
           last_stock_entry_at?: string | null
           location_bin?: string | null
           minimum_stock?: number | null
@@ -3556,7 +4956,9 @@ export type Database = {
           notes?: string | null
           pis_rate?: number | null
           product_category_id?: string | null
+          product_type?: string
           profit_margin?: number | null
+          reserved_quantity?: number
           sale_currency?: string | null
           sale_price?: number | null
           sku?: string | null
@@ -3565,12 +4967,14 @@ export type Database = {
           unit?: string | null
           updated_at?: string
           use_global_fiscal?: boolean | null
+          vende_isolado?: boolean
         }
         Update: {
           active?: boolean
           barcode?: string | null
           brand?: string | null
           category?: string | null
+          cfop?: string | null
           cofins_rate?: number | null
           commission_rate?: number | null
           cost_currency?: string | null
@@ -3585,6 +4989,7 @@ export type Database = {
           image_url?: string | null
           ipi_rate?: number | null
           is_commissionable?: boolean | null
+          is_equipment?: boolean | null
           last_stock_entry_at?: string | null
           location_bin?: string | null
           minimum_stock?: number | null
@@ -3593,7 +4998,9 @@ export type Database = {
           notes?: string | null
           pis_rate?: number | null
           product_category_id?: string | null
+          product_type?: string
           profit_margin?: number | null
+          reserved_quantity?: number
           sale_currency?: string | null
           sale_price?: number | null
           sku?: string | null
@@ -3602,6 +5009,7 @@ export type Database = {
           unit?: string | null
           updated_at?: string
           use_global_fiscal?: boolean | null
+          vende_isolado?: boolean
         }
         Relationships: [
           {
@@ -3619,6 +5027,27 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      products_stock_backup_pre_v2: {
+        Row: {
+          backed_up_at: string | null
+          id: string | null
+          reserved_quantity: number | null
+          stock_quantity: number | null
+        }
+        Insert: {
+          backed_up_at?: string | null
+          id?: string | null
+          reserved_quantity?: number | null
+          stock_quantity?: number | null
+        }
+        Update: {
+          backed_up_at?: string | null
+          id?: string | null
+          reserved_quantity?: number | null
+          stock_quantity?: number | null
+        }
+        Relationships: []
       }
       purchase_order_items: {
         Row: {
@@ -3656,8 +5085,29 @@ export type Database = {
             foreignKeyName: "purchase_order_items_product_id_fkey"
             columns: ["product_id"]
             isOneToOne: false
+            referencedRelation: "product_availability"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_order_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
             referencedRelation: "products"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_order_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_entradas_pendentes"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "purchase_order_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_variancia"
+            referencedColumns: ["product_id"]
           },
           {
             foreignKeyName: "purchase_order_items_purchase_order_id_fkey"
@@ -3733,6 +5183,13 @@ export type Database = {
             foreignKeyName: "purchase_orders_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_orders_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
           },
@@ -3783,6 +5240,358 @@ export type Database = {
           },
         ]
       }
+      quote_request_items: {
+        Row: {
+          created_at: string | null
+          description: string
+          id: string
+          position: number
+          product_id: string | null
+          quantity: number
+          quote_request_id: string
+          service_order_part_id: string | null
+          service_order_service_id: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          description: string
+          id?: string
+          position?: number
+          product_id?: string | null
+          quantity?: number
+          quote_request_id: string
+          service_order_part_id?: string | null
+          service_order_service_id?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          description?: string
+          id?: string
+          position?: number
+          product_id?: string | null
+          quantity?: number
+          quote_request_id?: string
+          service_order_part_id?: string | null
+          service_order_service_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quote_request_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "product_availability"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_request_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_request_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_entradas_pendentes"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "quote_request_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_variancia"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "quote_request_items_quote_request_id_fkey"
+            columns: ["quote_request_id"]
+            isOneToOne: false
+            referencedRelation: "quote_requests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_request_items_service_order_part_id_fkey"
+            columns: ["service_order_part_id"]
+            isOneToOne: false
+            referencedRelation: "service_order_parts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_request_items_service_order_service_id_fkey"
+            columns: ["service_order_service_id"]
+            isOneToOne: false
+            referencedRelation: "service_order_services"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quote_requests: {
+        Row: {
+          closed_at: string | null
+          code: string
+          created_at: string | null
+          created_by: string | null
+          id: string
+          notes: string | null
+          sent_supplier_ids: string[]
+          service_order_id: string | null
+          status: string
+          updated_at: string | null
+        }
+        Insert: {
+          closed_at?: string | null
+          code: string
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          notes?: string | null
+          sent_supplier_ids?: string[]
+          service_order_id?: string | null
+          status?: string
+          updated_at?: string | null
+        }
+        Update: {
+          closed_at?: string | null
+          code?: string
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          notes?: string | null
+          sent_supplier_ids?: string[]
+          service_order_id?: string | null
+          status?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quote_requests_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_requests_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_requests_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "vw_os_profitability"
+            referencedColumns: ["os_id"]
+          },
+        ]
+      }
+      quote_responses: {
+        Row: {
+          confirmed: boolean
+          created_at: string | null
+          id: string
+          lead_time_days: number | null
+          quote_request_id: string
+          quote_request_item_id: string | null
+          source: string
+          source_excerpt: string | null
+          supplier_id: string
+          unit_price: number | null
+          updated_at: string | null
+          whatsapp_message_id: string | null
+        }
+        Insert: {
+          confirmed?: boolean
+          created_at?: string | null
+          id?: string
+          lead_time_days?: number | null
+          quote_request_id: string
+          quote_request_item_id?: string | null
+          source?: string
+          source_excerpt?: string | null
+          supplier_id: string
+          unit_price?: number | null
+          updated_at?: string | null
+          whatsapp_message_id?: string | null
+        }
+        Update: {
+          confirmed?: boolean
+          created_at?: string | null
+          id?: string
+          lead_time_days?: number | null
+          quote_request_id?: string
+          quote_request_item_id?: string | null
+          source?: string
+          source_excerpt?: string | null
+          supplier_id?: string
+          unit_price?: number | null
+          updated_at?: string | null
+          whatsapp_message_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quote_responses_quote_request_id_fkey"
+            columns: ["quote_request_id"]
+            isOneToOne: false
+            referencedRelation: "quote_requests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_responses_quote_request_item_id_fkey"
+            columns: ["quote_request_item_id"]
+            isOneToOne: false
+            referencedRelation: "quote_request_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_responses_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      receivables: {
+        Row: {
+          amount: number
+          balance_amount: number | null
+          bank_transaction_id: string | null
+          category: string | null
+          client_id: string
+          cost_center_id: string | null
+          created_at: string
+          currency: string | null
+          description: string
+          due_date: string
+          due_on_completion: boolean
+          id: string
+          invoice_id: string | null
+          is_deposit: boolean | null
+          issue_date: string
+          issued_fiscal_document_id: string | null
+          notes: string | null
+          paid_amount: number | null
+          payment_method: string | null
+          reminder_sent_at: string | null
+          service_order_id: string | null
+          status: string | null
+          sub_category: string | null
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          balance_amount?: number | null
+          bank_transaction_id?: string | null
+          category?: string | null
+          client_id: string
+          cost_center_id?: string | null
+          created_at?: string
+          currency?: string | null
+          description: string
+          due_date: string
+          due_on_completion?: boolean
+          id?: string
+          invoice_id?: string | null
+          is_deposit?: boolean | null
+          issue_date: string
+          issued_fiscal_document_id?: string | null
+          notes?: string | null
+          paid_amount?: number | null
+          payment_method?: string | null
+          reminder_sent_at?: string | null
+          service_order_id?: string | null
+          status?: string | null
+          sub_category?: string | null
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          balance_amount?: number | null
+          bank_transaction_id?: string | null
+          category?: string | null
+          client_id?: string
+          cost_center_id?: string | null
+          created_at?: string
+          currency?: string | null
+          description?: string
+          due_date?: string
+          due_on_completion?: boolean
+          id?: string
+          invoice_id?: string | null
+          is_deposit?: boolean | null
+          issue_date?: string
+          issued_fiscal_document_id?: string | null
+          notes?: string | null
+          paid_amount?: number | null
+          payment_method?: string | null
+          reminder_sent_at?: string | null
+          service_order_id?: string | null
+          status?: string | null
+          sub_category?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "receivables_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "bank_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "receivables_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "receivables_cost_center_id_fkey"
+            columns: ["cost_center_id"]
+            isOneToOne: false
+            referencedRelation: "cost_centers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "receivables_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "receivables_issued_fiscal_document_id_fkey"
+            columns: ["issued_fiscal_document_id"]
+            isOneToOne: false
+            referencedRelation: "issued_fiscal_documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "receivables_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "receivables_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "receivables_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "vw_os_profitability"
+            referencedColumns: ["os_id"]
+          },
+        ]
+      }
       reconciliation_memory: {
         Row: {
           candidate_kind: string | null
@@ -3821,114 +5630,6 @@ export type Database = {
           },
         ]
       }
-      receivables: {
-        Row: {
-          amount: number
-          balance_amount: number | null
-          category: string | null
-          client_id: string
-          cost_center_id: string | null
-          created_at: string
-          currency: string | null
-          description: string
-          due_date: string
-          id: string
-          invoice_id: string | null
-          is_deposit: boolean | null
-          issue_date: string
-          notes: string | null
-          paid_amount: number | null
-          payment_method: string | null
-          reminder_sent_at: string | null
-          service_order_id: string | null
-          status: string | null
-          sub_category: string | null
-          updated_at: string
-        }
-        Insert: {
-          amount: number
-          balance_amount?: number | null
-          category?: string | null
-          client_id: string
-          cost_center_id?: string | null
-          created_at?: string
-          currency?: string | null
-          description: string
-          due_date: string
-          id?: string
-          invoice_id?: string | null
-          is_deposit?: boolean | null
-          issue_date: string
-          notes?: string | null
-          paid_amount?: number | null
-          payment_method?: string | null
-          reminder_sent_at?: string | null
-          service_order_id?: string | null
-          status?: string | null
-          sub_category?: string | null
-          updated_at?: string
-        }
-        Update: {
-          amount?: number
-          balance_amount?: number | null
-          category?: string | null
-          client_id?: string
-          cost_center_id?: string | null
-          created_at?: string
-          currency?: string | null
-          description?: string
-          due_date?: string
-          id?: string
-          invoice_id?: string | null
-          is_deposit?: boolean | null
-          issue_date?: string
-          notes?: string | null
-          paid_amount?: number | null
-          payment_method?: string | null
-          reminder_sent_at?: string | null
-          service_order_id?: string | null
-          status?: string | null
-          sub_category?: string | null
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "receivables_client_id_fkey"
-            columns: ["client_id"]
-            isOneToOne: false
-            referencedRelation: "clients"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "receivables_cost_center_id_fkey"
-            columns: ["cost_center_id"]
-            isOneToOne: false
-            referencedRelation: "cost_centers"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "receivables_invoice_id_fkey"
-            columns: ["invoice_id"]
-            isOneToOne: false
-            referencedRelation: "invoices"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "receivables_service_order_id_fkey"
-            columns: ["service_order_id"]
-            isOneToOne: false
-            referencedRelation: "service_orders"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "receivables_service_order_id_fkey"
-            columns: ["service_order_id"]
-            isOneToOne: false
-            referencedRelation: "vw_os_profitability"
-            referencedColumns: ["os_id"]
-          },
-        ]
-      }
       saved_filters: {
         Row: {
           created_at: string | null
@@ -3958,6 +5659,119 @@ export type Database = {
           user_id?: string | null
         }
         Relationships: []
+      }
+      service_cases: {
+        Row: {
+          actual_minutes: number | null
+          asset_type: string | null
+          client_id: string | null
+          created_at: string
+          features: Json
+          id: string
+          marina_id: string | null
+          materials_cost: number | null
+          outcome: string | null
+          parts_used: Json | null
+          planned_minutes: number | null
+          service_id: string | null
+          service_order_id: string
+          unusable_reason: string | null
+          updated_at: string
+          usable: boolean
+          variance_pct: number | null
+          vessel_id: string | null
+        }
+        Insert: {
+          actual_minutes?: number | null
+          asset_type?: string | null
+          client_id?: string | null
+          created_at?: string
+          features?: Json
+          id?: string
+          marina_id?: string | null
+          materials_cost?: number | null
+          outcome?: string | null
+          parts_used?: Json | null
+          planned_minutes?: number | null
+          service_id?: string | null
+          service_order_id: string
+          unusable_reason?: string | null
+          updated_at?: string
+          usable?: boolean
+          variance_pct?: number | null
+          vessel_id?: string | null
+        }
+        Update: {
+          actual_minutes?: number | null
+          asset_type?: string | null
+          client_id?: string | null
+          created_at?: string
+          features?: Json
+          id?: string
+          marina_id?: string | null
+          materials_cost?: number | null
+          outcome?: string | null
+          parts_used?: Json | null
+          planned_minutes?: number | null
+          service_id?: string | null
+          service_order_id?: string
+          unusable_reason?: string | null
+          updated_at?: string
+          usable?: boolean
+          variance_pct?: number | null
+          vessel_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_cases_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_cases_marina_id_fkey"
+            columns: ["marina_id"]
+            isOneToOne: false
+            referencedRelation: "marinas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_cases_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_cases_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_cases_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_cases_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "vw_os_profitability"
+            referencedColumns: ["os_id"]
+          },
+          {
+            foreignKeyName: "service_cases_vessel_id_fkey"
+            columns: ["vessel_id"]
+            isOneToOne: false
+            referencedRelation: "vessels"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       service_order_expenses: {
         Row: {
@@ -4062,6 +5876,13 @@ export type Database = {
             foreignKeyName: "service_order_expenses_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_expenses_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
           },
@@ -4147,14 +5968,42 @@ export type Database = {
             foreignKeyName: "service_order_parts_product_id_fkey"
             columns: ["product_id"]
             isOneToOne: false
+            referencedRelation: "product_availability"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_parts_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
             referencedRelation: "products"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_parts_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_entradas_pendentes"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "service_order_parts_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_variancia"
+            referencedColumns: ["product_id"]
           },
           {
             foreignKeyName: "service_order_parts_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_parts_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
             referencedColumns: ["id"]
           },
           {
@@ -4169,31 +6018,37 @@ export type Database = {
       service_order_photos: {
         Row: {
           caption: string | null
+          captured_live: boolean
           created_at: string
           id: string
           photo_type: string
           public_url: string
           service_order_id: string
+          step_id: string | null
           storage_path: string
           uploaded_by: string | null
         }
         Insert: {
           caption?: string | null
+          captured_live?: boolean
           created_at?: string
           id?: string
           photo_type?: string
           public_url: string
           service_order_id: string
+          step_id?: string | null
           storage_path: string
           uploaded_by?: string | null
         }
         Update: {
           caption?: string | null
+          captured_live?: boolean
           created_at?: string
           id?: string
           photo_type?: string
           public_url?: string
           service_order_id?: string
+          step_id?: string | null
           storage_path?: string
           uploaded_by?: string | null
         }
@@ -4209,8 +6064,22 @@ export type Database = {
             foreignKeyName: "service_order_photos_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_photos_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
+          },
+          {
+            foreignKeyName: "service_order_photos_step_id_fkey"
+            columns: ["step_id"]
+            isOneToOne: false
+            referencedRelation: "service_order_steps"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "service_order_photos_uploaded_by_fkey"
@@ -4310,6 +6179,13 @@ export type Database = {
             foreignKeyName: "service_order_services_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_services_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
           },
@@ -4376,8 +6252,177 @@ export type Database = {
             foreignKeyName: "service_order_signatures_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_signatures_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
+          },
+        ]
+      }
+      service_order_steps: {
+        Row: {
+          actual_minutes: number | null
+          ai_confidence: number | null
+          ai_source: string | null
+          approved_at: string | null
+          approved_by: string | null
+          assigned_user_id: string | null
+          block: string | null
+          blocked_note: string | null
+          blocked_reason_code: string | null
+          completed_at: string | null
+          created_at: string
+          detail: string | null
+          id: string
+          is_killer: boolean
+          kind: string
+          measure_unit: string | null
+          measure_value: number | null
+          mode: string
+          na_reason: string | null
+          notes: string | null
+          origin: string
+          requires_measure: string | null
+          requires_photo: boolean
+          seq: number
+          service_order_id: string
+          service_order_service_id: string | null
+          standard_minutes: number | null
+          started_at: string | null
+          status: string
+          template_id: string | null
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          actual_minutes?: number | null
+          ai_confidence?: number | null
+          ai_source?: string | null
+          approved_at?: string | null
+          approved_by?: string | null
+          assigned_user_id?: string | null
+          block?: string | null
+          blocked_note?: string | null
+          blocked_reason_code?: string | null
+          completed_at?: string | null
+          created_at?: string
+          detail?: string | null
+          id?: string
+          is_killer?: boolean
+          kind?: string
+          measure_unit?: string | null
+          measure_value?: number | null
+          mode?: string
+          na_reason?: string | null
+          notes?: string | null
+          origin?: string
+          requires_measure?: string | null
+          requires_photo?: boolean
+          seq: number
+          service_order_id: string
+          service_order_service_id?: string | null
+          standard_minutes?: number | null
+          started_at?: string | null
+          status?: string
+          template_id?: string | null
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          actual_minutes?: number | null
+          ai_confidence?: number | null
+          ai_source?: string | null
+          approved_at?: string | null
+          approved_by?: string | null
+          assigned_user_id?: string | null
+          block?: string | null
+          blocked_note?: string | null
+          blocked_reason_code?: string | null
+          completed_at?: string | null
+          created_at?: string
+          detail?: string | null
+          id?: string
+          is_killer?: boolean
+          kind?: string
+          measure_unit?: string | null
+          measure_value?: number | null
+          mode?: string
+          na_reason?: string | null
+          notes?: string | null
+          origin?: string
+          requires_measure?: string | null
+          requires_photo?: boolean
+          seq?: number
+          service_order_id?: string
+          service_order_service_id?: string | null
+          standard_minutes?: number | null
+          started_at?: string | null
+          status?: string
+          template_id?: string | null
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_order_steps_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_steps_assigned_user_id_fkey"
+            columns: ["assigned_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_steps_blocked_reason_code_fkey"
+            columns: ["blocked_reason_code"]
+            isOneToOne: false
+            referencedRelation: "work_stop_reasons"
+            referencedColumns: ["code"]
+          },
+          {
+            foreignKeyName: "service_order_steps_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_steps_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_steps_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "vw_os_profitability"
+            referencedColumns: ["os_id"]
+          },
+          {
+            foreignKeyName: "service_order_steps_service_order_service_id_fkey"
+            columns: ["service_order_service_id"]
+            isOneToOne: false
+            referencedRelation: "service_order_services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_steps_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "service_step_templates"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -4418,6 +6463,13 @@ export type Database = {
             foreignKeyName: "service_order_technicians_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_technicians_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
           },
@@ -4450,6 +6502,8 @@ export type Database = {
           created_by: string | null
           currency: string | null
           custom_payment_installments: Json | null
+          customer_buyer_name: string | null
+          customer_po_number: string | null
           customer_visible_report: string | null
           diagnosis: string | null
           discount_amount: number | null
@@ -4531,6 +6585,8 @@ export type Database = {
           created_by?: string | null
           currency?: string | null
           custom_payment_installments?: Json | null
+          customer_buyer_name?: string | null
+          customer_po_number?: string | null
           customer_visible_report?: string | null
           diagnosis?: string | null
           discount_amount?: number | null
@@ -4612,6 +6668,8 @@ export type Database = {
           created_by?: string | null
           currency?: string | null
           custom_payment_installments?: Json | null
+          customer_buyer_name?: string | null
+          customer_po_number?: string | null
           customer_visible_report?: string | null
           diagnosis?: string | null
           discount_amount?: number | null
@@ -4726,6 +6784,106 @@ export type Database = {
           },
         ]
       }
+      service_step_templates: {
+        Row: {
+          active: boolean
+          approved_at: string | null
+          approved_by: string | null
+          block: string | null
+          created_at: string
+          created_by: string | null
+          detail: string | null
+          id: string
+          is_killer: boolean
+          kind: string
+          measure_unit: string | null
+          mode: string
+          origin: string
+          requires_measure: string | null
+          requires_part: boolean
+          requires_photo: boolean
+          role_hint: string | null
+          seq: number
+          service_id: string
+          standard_minutes: number | null
+          title: string
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          active?: boolean
+          approved_at?: string | null
+          approved_by?: string | null
+          block?: string | null
+          created_at?: string
+          created_by?: string | null
+          detail?: string | null
+          id?: string
+          is_killer?: boolean
+          kind?: string
+          measure_unit?: string | null
+          mode?: string
+          origin?: string
+          requires_measure?: string | null
+          requires_part?: boolean
+          requires_photo?: boolean
+          role_hint?: string | null
+          seq: number
+          service_id: string
+          standard_minutes?: number | null
+          title: string
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          active?: boolean
+          approved_at?: string | null
+          approved_by?: string | null
+          block?: string | null
+          created_at?: string
+          created_by?: string | null
+          detail?: string | null
+          id?: string
+          is_killer?: boolean
+          kind?: string
+          measure_unit?: string | null
+          mode?: string
+          origin?: string
+          requires_measure?: string | null
+          requires_part?: boolean
+          requires_photo?: boolean
+          role_hint?: string | null
+          seq?: number
+          service_id?: string
+          standard_minutes?: number | null
+          title?: string
+          updated_at?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_step_templates_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_step_templates_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_step_templates_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       services: {
         Row: {
           active: boolean | null
@@ -4736,8 +6894,12 @@ export type Database = {
           default_price: number | null
           default_warranty_days: number | null
           description: string | null
+          field_factor: number
           id: string
           name: string
+          requires_survey: boolean
+          standard_minutes: number | null
+          standard_source: string | null
           updated_at: string | null
         }
         Insert: {
@@ -4749,8 +6911,12 @@ export type Database = {
           default_price?: number | null
           default_warranty_days?: number | null
           description?: string | null
+          field_factor?: number
           id?: string
           name: string
+          requires_survey?: boolean
+          standard_minutes?: number | null
+          standard_source?: string | null
           updated_at?: string | null
         }
         Update: {
@@ -4762,8 +6928,12 @@ export type Database = {
           default_price?: number | null
           default_warranty_days?: number | null
           description?: string | null
+          field_factor?: number
           id?: string
           name?: string
+          requires_survey?: boolean
+          standard_minutes?: number | null
+          standard_source?: string | null
           updated_at?: string | null
         }
         Relationships: []
@@ -4801,8 +6971,29 @@ export type Database = {
             foreignKeyName: "supplier_product_mappings_internal_product_id_fkey"
             columns: ["internal_product_id"]
             isOneToOne: false
+            referencedRelation: "product_availability"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_product_mappings_internal_product_id_fkey"
+            columns: ["internal_product_id"]
+            isOneToOne: false
             referencedRelation: "products"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_product_mappings_internal_product_id_fkey"
+            columns: ["internal_product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_entradas_pendentes"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "supplier_product_mappings_internal_product_id_fkey"
+            columns: ["internal_product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_variancia"
+            referencedColumns: ["product_id"]
           },
           {
             foreignKeyName: "supplier_product_mappings_supplier_id_fkey"
@@ -4821,14 +7012,17 @@ export type Database = {
           address_number: string | null
           city: string | null
           cnpj_cpf: string | null
+          communication_tone: string | null
           contact_name: string | null
           country: string | null
           created_at: string | null
+          display_name: string | null
           email: string | null
           id: string
           name: string
           neighborhood: string | null
           notes: string | null
+          opt_out_whatsapp: boolean
           payment_terms: string | null
           phone: string | null
           postal_code: string | null
@@ -4844,14 +7038,17 @@ export type Database = {
           address_number?: string | null
           city?: string | null
           cnpj_cpf?: string | null
+          communication_tone?: string | null
           contact_name?: string | null
           country?: string | null
           created_at?: string | null
+          display_name?: string | null
           email?: string | null
           id?: string
           name: string
           neighborhood?: string | null
           notes?: string | null
+          opt_out_whatsapp?: boolean
           payment_terms?: string | null
           phone?: string | null
           postal_code?: string | null
@@ -4867,14 +7064,17 @@ export type Database = {
           address_number?: string | null
           city?: string | null
           cnpj_cpf?: string | null
+          communication_tone?: string | null
           contact_name?: string | null
           country?: string | null
           created_at?: string | null
+          display_name?: string | null
           email?: string | null
           id?: string
           name?: string
           neighborhood?: string | null
           notes?: string | null
+          opt_out_whatsapp?: boolean
           payment_terms?: string | null
           phone?: string | null
           postal_code?: string | null
@@ -4930,6 +7130,8 @@ export type Database = {
           notes: string | null
           service_order_id: string
           started_at: string
+          step_id: string | null
+          stop_reason_code: string | null
           technician_user_id: string
           updated_at: string
         }
@@ -4942,6 +7144,8 @@ export type Database = {
           notes?: string | null
           service_order_id: string
           started_at: string
+          step_id?: string | null
+          stop_reason_code?: string | null
           technician_user_id: string
           updated_at?: string
         }
@@ -4954,6 +7158,8 @@ export type Database = {
           notes?: string | null
           service_order_id?: string
           started_at?: string
+          step_id?: string | null
+          stop_reason_code?: string | null
           technician_user_id?: string
           updated_at?: string
         }
@@ -4969,8 +7175,29 @@ export type Database = {
             foreignKeyName: "time_entries_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "time_entries_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
+          },
+          {
+            foreignKeyName: "time_entries_step_id_fkey"
+            columns: ["step_id"]
+            isOneToOne: false
+            referencedRelation: "service_order_steps"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "time_entries_stop_reason_code_fkey"
+            columns: ["stop_reason_code"]
+            isOneToOne: false
+            referencedRelation: "work_stop_reasons"
+            referencedColumns: ["code"]
           },
           {
             foreignKeyName: "time_entries_technician_user_id_fkey"
@@ -5187,6 +7414,7 @@ export type Database = {
           last_outbound_at: string | null
           linked_client_id: string | null
           message_count: number
+          muted_at: string | null
           name: string | null
           notes: string | null
           phone_normalized: string
@@ -5205,6 +7433,7 @@ export type Database = {
           last_outbound_at?: string | null
           linked_client_id?: string | null
           message_count?: number
+          muted_at?: string | null
           name?: string | null
           notes?: string | null
           phone_normalized: string
@@ -5223,6 +7452,7 @@ export type Database = {
           last_outbound_at?: string | null
           linked_client_id?: string | null
           message_count?: number
+          muted_at?: string | null
           name?: string | null
           notes?: string | null
           phone_normalized?: string
@@ -5257,6 +7487,7 @@ export type Database = {
           raw_payload: Json | null
           sent_by: string | null
           service_order_id: string | null
+          supplier_id: string | null
           wa_message_id: string | null
         }
         Insert: {
@@ -5275,6 +7506,7 @@ export type Database = {
           raw_payload?: Json | null
           sent_by?: string | null
           service_order_id?: string | null
+          supplier_id?: string | null
           wa_message_id?: string | null
         }
         Update: {
@@ -5293,6 +7525,7 @@ export type Database = {
           raw_payload?: Json | null
           sent_by?: string | null
           service_order_id?: string | null
+          supplier_id?: string | null
           wa_message_id?: string | null
         }
         Relationships: [
@@ -5321,8 +7554,22 @@ export type Database = {
             foreignKeyName: "whatsapp_messages_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_messages_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
+          },
+          {
+            foreignKeyName: "whatsapp_messages_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -5507,6 +7754,13 @@ export type Database = {
             foreignKeyName: "whatsapp_scheduled_sends_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_scheduled_sends_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
           },
@@ -5658,8 +7912,176 @@ export type Database = {
         }
         Relationships: []
       }
+      work_stop_reasons: {
+        Row: {
+          active: boolean
+          category: string
+          code: string
+          counts_as_billable: boolean
+          label: string
+          sort: number
+        }
+        Insert: {
+          active?: boolean
+          category: string
+          code: string
+          counts_as_billable?: boolean
+          label: string
+          sort?: number
+        }
+        Update: {
+          active?: boolean
+          category?: string
+          code?: string
+          counts_as_billable?: boolean
+          label?: string
+          sort?: number
+        }
+        Relationships: []
+      }
     }
     Views: {
+      erp_open_loop_facts: {
+        Row: {
+          detail: string | null
+          due_at: string | null
+          entity_id: string | null
+          entity_type: string | null
+          kind: string | null
+          loop_key: string | null
+          priority: string | null
+          ref_id: string | null
+          ref_table: string | null
+          service_order_id: string | null
+          title: string | null
+        }
+        Relationships: []
+      }
+      product_availability: {
+        Row: {
+          available_quantity: number | null
+          id: string | null
+          name: string | null
+          reserved_quantity: number | null
+          sku: string | null
+          stock_quantity: number | null
+          unit: string | null
+        }
+        Insert: {
+          available_quantity?: never
+          id?: string | null
+          name?: string | null
+          reserved_quantity?: number | null
+          sku?: string | null
+          stock_quantity?: number | null
+          unit?: string | null
+        }
+        Update: {
+          available_quantity?: never
+          id?: string | null
+          name?: string | null
+          reserved_quantity?: number | null
+          sku?: string | null
+          stock_quantity?: number | null
+          unit?: string | null
+        }
+        Relationships: []
+      }
+      unidentified_contacts: {
+        Row: {
+          mensagens: number | null
+          phone_normalized: string | null
+          ultima_frase: string | null
+          ultima_mensagem: string | null
+        }
+        Relationships: []
+      }
+      v_estoque_entradas_pendentes: {
+        Row: {
+          brand: string | null
+          custo_estimado: number | null
+          is_equipment: boolean | null
+          name: string | null
+          product_id: string | null
+          saldo: number | null
+          sku: string | null
+          ultimo_alerta: string | null
+          unidades_a_lancar: number | null
+          vezes_que_ficou_negativo: number | null
+        }
+        Insert: {
+          brand?: string | null
+          custo_estimado?: never
+          is_equipment?: boolean | null
+          name?: string | null
+          product_id?: string | null
+          saldo?: number | null
+          sku?: string | null
+          ultimo_alerta?: never
+          unidades_a_lancar?: never
+          vezes_que_ficou_negativo?: never
+        }
+        Update: {
+          brand?: string | null
+          custo_estimado?: never
+          is_equipment?: boolean | null
+          name?: string | null
+          product_id?: string | null
+          saldo?: number | null
+          sku?: string | null
+          ultimo_alerta?: never
+          unidades_a_lancar?: never
+          vezes_que_ficou_negativo?: never
+        }
+        Relationships: []
+      }
+      v_estoque_variancia: {
+        Row: {
+          ajustes: number | null
+          baixas: number | null
+          brand: string | null
+          compras: number | null
+          contradicao: string | null
+          delta_desde_backup: number | null
+          disponivel: number | null
+          estornos: number | null
+          name: string | null
+          product_id: string | null
+          qtd_movimentos: number | null
+          reservado: number | null
+          saldo_atual: number | null
+          saldo_no_backup: number | null
+          sale_price: number | null
+          sku: string | null
+          valor_em_risco: number | null
+        }
+        Relationships: []
+      }
+      v_service_order_labor_variance: {
+        Row: {
+          client_id: string | null
+          id: string | null
+          orcado_min: number | null
+          padrao_roteiro_min: number | null
+          passos: number | null
+          passos_feitos: number | null
+          passos_na: number | null
+          passos_travados: number | null
+          real_min: number | null
+          service_order_number: string | null
+          status: string | null
+          variacao_pct: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_orders_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       vw_os_profitability: {
         Row: {
           client_name: string | null
@@ -5689,6 +8111,41 @@ export type Database = {
         Args: { _pending_action_id: string; _user_id: string }
         Returns: boolean
       }
+      archive_old_fiscal_drafts: { Args: { p_days?: number }; Returns: number }
+      backfill_message_identity: {
+        Args: { p_limit?: number }
+        Returns: {
+          linked_clients: number
+          linked_leads: number
+          linked_suppliers: number
+        }[]
+      }
+      bi_margin_by_category: {
+        Args: { _since?: string }
+        Returns: {
+          category: string
+          cost: number
+          revenue: number
+        }[]
+      }
+      bi_revenue_by_brand: {
+        Args: { _brand?: string; _since?: string }
+        Returns: {
+          brand: string
+          cost: number
+          qty: number
+          revenue: number
+        }[]
+      }
+      bi_top_clients: {
+        Args: { _limit?: number; _since?: string }
+        Returns: {
+          client_id: string
+          name: string
+          os_count: number
+          revenue: number
+        }[]
+      }
       cancel_service_order_cascade: {
         Args: { p_reason: string; p_service_order_id: string }
         Returns: Json
@@ -5702,19 +8159,22 @@ export type Database = {
         }
         Returns: string
       }
-      confirm_nfe_import:
-        | { Args: { p_note_id: string; p_supplier_id?: string }; Returns: Json }
-        | {
-            Args: {
-              p_manual_mappings?: Json
-              p_note_id: string
-              p_supplier_id?: string
-            }
-            Returns: Json
-          }
+      confirm_nfe_import: {
+        Args: {
+          p_manual_mappings?: Json
+          p_note_id: string
+          p_purchase_order_id?: string
+          p_supplier_id?: string
+        }
+        Returns: Json
+      }
       convert_external_quote_to_so: {
         Args: { _quote_id: string }
         Returns: string
+      }
+      generate_service_order_steps: {
+        Args: { p_service_order_id: string }
+        Returns: number
       }
       get_agenda_conflicts: {
         Args: {
@@ -5725,26 +8185,147 @@ export type Database = {
           p_user_id: string
         }
         Returns: {
-          source: string
-          ref_id: string
-          label: string
-          starts_at: string
           ends_at: string
+          label: string
+          ref_id: string
+          source: string
+          starts_at: string
+        }[]
+      }
+      get_entity_open_loops: {
+        Args: { p_entity_id: string; p_entity_type: string; p_limit?: number }
+        Returns: {
+          atrasado: boolean
+          detail: string
+          due_at: string
+          evidence: string
+          id: string
+          kind: string
+          last_seen_at: string
+          mentions: number
+          opened_at: string
+          priority: string
+          service_order_id: string
+          service_order_number: string
+          source: string
+          title: string
+        }[]
+      }
+      get_promo_candidates: {
+        Args: { p_limit?: number }
+        Returns: {
+          available: number
+          cost_price: number
+          days_since_sold: number
+          has_image: boolean
+          image_url: string
+          last_sold_at: string
+          margin_pct: number
+          name: string
+          product_id: string
+          reserved_quantity: number
+          sale_price: number
+          score: number
+          sku: string
+          stock_quantity: number
         }[]
       }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
       is_admin_or_financial: { Args: { _user_id: string }; Returns: boolean }
       is_external_seller: { Args: { _user_id: string }; Returns: boolean }
+      log_app_error: {
+        Args: {
+          p_action?: string
+          p_context?: string
+          p_details?: Json
+          p_level?: string
+          p_message: string
+          p_source: string
+        }
+        Returns: string
+      }
+      match_nfe_item: {
+        Args: {
+          p_barcode: string
+          p_description: string
+          p_manual_product_id?: string
+          p_sku_supplier: string
+          p_supplier_id: string
+        }
+        Returns: {
+          match_reason: string
+          product_id: string
+        }[]
+      }
       next_document_number: { Args: never; Returns: number }
+      next_fiscal_number: {
+        Args: {
+          p_document_type: string
+          p_environment?: string
+          p_series?: number
+        }
+        Returns: number
+      }
+      normalize_alias: { Args: { _s: string }; Returns: string }
+      normalize_product_text: { Args: { t: string }; Returns: string }
+      preview_nfe_import: {
+        Args: {
+          p_manual_mappings?: Json
+          p_note_id: string
+          p_supplier_id?: string
+        }
+        Returns: Json
+      }
+      produce_composed_product: {
+        Args: { p_parent: string; p_qty?: number }
+        Returns: Json
+      }
+      prune_app_error_logs: { Args: { p_days?: number }; Returns: number }
       recalc_po_total: { Args: { p_po_id: string }; Returns: undefined }
+      recalc_so_totals: { Args: { so_id: string }; Returns: undefined }
       receive_po: {
         Args: { p_due_days?: number; p_items: Json; p_po_id: string }
         Returns: Json
       }
+      recompute_product_cost: { Args: { _parent: string }; Returns: undefined }
+      recompute_product_reservations: {
+        Args: { _product: string }
+        Returns: undefined
+      }
+      reconcile_stock_to_v2: { Args: never; Returns: undefined }
+      record_conversation_loop: {
+        Args: {
+          p_detail?: string
+          p_due_at?: string
+          p_entity_id: string
+          p_entity_type: string
+          p_evidence?: string
+          p_evidence_at?: string
+          p_kind: string
+          p_loop_key: string
+          p_priority?: string
+          p_service_order_id?: string
+          p_source_message_id?: string
+          p_title: string
+        }
+        Returns: {
+          criado: boolean
+          loop_id: string
+        }[]
+      }
+      refresh_entity_open_loops: {
+        Args: never
+        Returns: {
+          abertos: number
+          fechados: number
+        }[]
+      }
       register_deposit_and_convert: {
         Args: {
           p_amount: number
+          p_balance_installments?: Json
           p_card_fee_percent?: number
+          p_create_collections?: boolean
           p_notes?: string
           p_payment_date: string
           p_payment_method: string
@@ -5766,9 +8347,84 @@ export type Database = {
         }
         Returns: Json
       }
+      remember_reconciliation: {
+        Args: {
+          p_candidate_kind?: string
+          p_client_id: string
+          p_statement_key: string
+        }
+        Returns: undefined
+      }
+      resolve_contact_identity: {
+        Args: { p_phone: string }
+        Returns: {
+          entity_id: string
+          entity_name: string
+          kind: string
+        }[]
+      }
+      resolve_practiced_price: {
+        Args: { p_client_id?: string; p_product_id: string }
+        Returns: {
+          price: number
+          ref_date: string
+          source: string
+        }[]
+      }
+      revert_nfe_import: { Args: { p_note_id: string }; Returns: Json }
+      search_products_trgm: {
+        Args: { _lim?: number; _term: string }
+        Returns: {
+          brand: string
+          cost_price: number
+          id: string
+          name: string
+          sale_price: number
+          sim: number
+          sku: string
+        }[]
+      }
+      set_fiscal_next_number: {
+        Args: {
+          p_document_type: string
+          p_environment: string
+          p_next_number: number
+          p_series: number
+        }
+        Returns: number
+      }
+      settle_nfe_stock_and_receivable: {
+        Args: { p_document_id: string; p_installments?: Json }
+        Returns: Json
+      }
+      share_token_da_requisicao: { Args: never; Returns: string }
+      show_limit: { Args: never; Returns: number }
+      show_trgm: { Args: { "": string }; Returns: string[] }
+      stock_model_v2_on: { Args: never; Returns: boolean }
+      touch_open_loop: {
+        Args: {
+          p_evidence?: string
+          p_evidence_at?: string
+          p_loop_id: string
+          p_source_message_id?: string
+        }
+        Returns: number
+      }
       wa_extract_body_text: { Args: { p: Json }; Returns: string }
       wa_extract_message_type: { Args: { p: Json }; Returns: string }
       wa_normalize_phone: { Args: { raw: string }; Returns: string }
+      whatsapp_pending_inbox: {
+        Args: { _limit?: number; _since?: string }
+        Returns: {
+          contato: string
+          is_client: boolean
+          last_body: string
+          last_inbound_at: string
+          last_outbound_at: string
+          phone: string
+          unread_count: number
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never
