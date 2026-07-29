@@ -61,11 +61,40 @@ export interface ReconcileResponse {
   };
 }
 
-async function callReconcile(body: Record<string, unknown>): Promise<ReconcileResponse> {
+/**
+ * Chama a função e devolve a mensagem REAL quando ela recusa a operação.
+ *
+ * `functions.invoke` entrega apenas "Edge Function returned a non-2xx status code" em
+ * qualquer erro HTTP — o motivo fica no corpo da resposta. Sem ler esse corpo, quem está
+ * conciliando vê "erro na edge function" e não tem como saber que faltou permissão, que a
+ * transação já estava conciliada ou que o valor não bate.
+ */
+async function invokeReconcile<T>(body: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabase.functions.invoke('banking-reconcile', { body });
-  if (error) throw error;
+
+  if (error) {
+    const resposta = (error as any)?.context as Response | undefined;
+    if (resposta && typeof resposta.json === 'function') {
+      try {
+        const corpo = await resposta.json();
+        // `detail` carrega a exceção original quando a função quebra; sem ele a tela
+        // mostra só "unexpected_error", que não diz nada a quem está conciliando.
+        if (corpo?.error) {
+          throw new Error(corpo.detail ? `${corpo.error}: ${corpo.detail}` : String(corpo.error));
+        }
+      } catch (e) {
+        if (e instanceof Error && e.message && !e.message.includes('non-2xx')) throw e;
+      }
+    }
+    throw error;
+  }
+
   if ((data as any)?.error) throw new Error((data as any).error);
-  return data as ReconcileResponse;
+  return data as T;
+}
+
+async function callReconcile(body: Record<string, unknown>): Promise<ReconcileResponse> {
+  return invokeReconcile<ReconcileResponse>(body);
 }
 
 /**
@@ -111,14 +140,12 @@ export function useAutoReconcile() {
 export function useApplySuggestion() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { transactionId: string; candidate: ReconcileCandidate }) => {
-      const { data, error } = await supabase.functions.invoke('banking-reconcile', {
-        body: { action: 'apply', transaction_id: input.transactionId, candidate: input.candidate },
-      });
-      if (error) throw error;
-      if ((data as any)?.error) throw new Error((data as any).error);
-      return data as { ok: boolean; message: string };
-    },
+    mutationFn: (input: { transactionId: string; candidate: ReconcileCandidate }) =>
+      invokeReconcile<{ ok: boolean; message: string }>({
+        action: 'apply',
+        transaction_id: input.transactionId,
+        candidate: input.candidate,
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['bank-transactions'] });
       qc.invalidateQueries({ queryKey: ['reconcile-suggestions'] });
@@ -135,14 +162,12 @@ export function useApplySuggestion() {
 export function useApplyGroup() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { transactionId: string; candidates: ReconcileCandidate[] }) => {
-      const { data, error } = await supabase.functions.invoke('banking-reconcile', {
-        body: { action: 'apply_group', transaction_id: input.transactionId, candidates: input.candidates },
-      });
-      if (error) throw error;
-      if ((data as any)?.error) throw new Error((data as any).error);
-      return data as { ok: boolean; message: string; feitos: string[]; falhas: string[] };
-    },
+    mutationFn: (input: { transactionId: string; candidates: ReconcileCandidate[] }) =>
+      invokeReconcile<{ ok: boolean; message: string; feitos: string[]; falhas: string[] }>({
+        action: 'apply_group',
+        transaction_id: input.transactionId,
+        candidates: input.candidates,
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['bank-transactions'] });
       qc.invalidateQueries({ queryKey: ['reconcile-suggestions'] });
@@ -179,6 +204,61 @@ export function useAnalyzeWithAI() {
       if (!resposta) throw new Error('O agente não retornou uma análise.');
       return String(resposta);
     },
+  });
+}
+
+export interface ReconciliationHealth {
+  total: number;
+  conciliadas: number;
+  pendentes: number;
+  /** Percentual do extrato já explicado. */
+  taxa: number;
+  valorPendente: number;
+  /** Dias desde a transação pendente mais antiga. */
+  diasMaisAntiga: number | null;
+  /** Padrões de histórico bancário que o sistema já aprendeu. */
+  padroesAprendidos: number;
+}
+
+/**
+ * Saúde da conciliação: quanto do extrato já está explicado, o que está encalhado e há
+ * quanto tempo. É a métrica que diz se a rotina está em dia — e o número de padrões
+ * aprendidos mostra o motor ficando melhor com o uso, que de outro modo é invisível.
+ */
+export function useReconciliationHealth() {
+  return useQuery({
+    queryKey: ['reconciliation-health'],
+    queryFn: async (): Promise<ReconciliationHealth> => {
+      const [todas, memoria] = await Promise.all([
+        supabase.from('bank_transactions').select('amount, reconciled, transaction_date'),
+        supabase.from('reconciliation_memory').select('id', { count: 'exact', head: true }),
+      ]);
+
+      const linhas = todas.data || [];
+      const pendentes = linhas.filter(l => !l.reconciled);
+      const conciliadas = linhas.length - pendentes.length;
+
+      let diasMaisAntiga: number | null = null;
+      if (pendentes.length > 0) {
+        const maisAntiga = pendentes.reduce((min, l) =>
+          String(l.transaction_date) < min ? String(l.transaction_date) : min,
+          String(pendentes[0].transaction_date));
+        diasMaisAntiga = Math.floor(
+          (Date.now() - new Date(`${maisAntiga}T12:00:00`).getTime()) / 86400000,
+        );
+      }
+
+      return {
+        total: linhas.length,
+        conciliadas,
+        pendentes: pendentes.length,
+        taxa: linhas.length > 0 ? Math.round((conciliadas / linhas.length) * 100) : 0,
+        valorPendente: pendentes.reduce((s, l) => s + Number(l.amount || 0), 0),
+        diasMaisAntiga,
+        padroesAprendidos: memoria.count ?? 0,
+      };
+    },
+    staleTime: 60_000,
   });
 }
 

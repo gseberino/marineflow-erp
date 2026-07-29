@@ -669,7 +669,10 @@ export function useEntityOpenLoops(
     queryKey: ['entity-open-loops', entityType, entityId],
     enabled: !!entityId,
     queryFn: async () => {
-      const { data, error } = await supabase.rpc('get_entity_open_loops', {
+      // A RPC existe no banco, mas integrations/supabase/types.ts é gerado e ainda não a
+      // conhece — regerar aqui puxaria o schema inteiro (várias sessões mexendo) e viraria
+      // um diff enorme no meio do voo. O cast é local e some quando os tipos forem gerados.
+      const { data, error } = await (supabase.rpc as any)('get_entity_open_loops', {
         p_entity_type: entityType,
         p_entity_id: entityId!,
         p_limit: 20,

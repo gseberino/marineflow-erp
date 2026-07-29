@@ -206,38 +206,23 @@ export function useUpdateServiceOrderStatus() {
       if (status === 'completed') {
         const { data: current } = await supabase
           .from('service_orders')
-          .select('check_out_at, grand_total, client_id, service_order_number, vessel_id')
+          .select('check_out_at')
           .eq('id', id)
-          .single();
+          .maybeSingle();
         if (!current?.check_out_at) updates.check_out_at = new Date().toISOString();
-        // Auto-generate receivable (only if none exists yet for this SO)
-        if (current) {
-          const { data: existingRec } = await supabase
-            .from('receivables')
-            .select('id')
-            .eq('service_order_id', id)
-            .neq('status', 'cancelled')
-            .maybeSingle();
 
-          if (!existingRec) {
-            const { data: vessel } = await supabase
-              .from('vessels')
-              .select('name')
-              .eq('id', current.vessel_id)
-              .single();
-            const today = new Date().toISOString().slice(0, 10);
-            const due = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
-            await supabase.from('receivables').insert({
-              client_id: current.client_id,
-              service_order_id: id,
-              description: `OS ${current.service_order_number} - ${vessel?.name || ''}`,
-              issue_date: today,
-              due_date: due,
-              amount: current.grand_total || 0,
-              balance_amount: current.grand_total || 0,
-              status: 'pending',
-            });
-          }
+        // Recebíveis da conclusão: UM título PENDENTE por parcela da condição (idempotente — pula
+        // se o fluxo do sinal já lançou entrada+saldo). Substitui o título único do total, deixando
+        // o financeiro coerente com o fluxo do sinal (aging/cobrança por parcela). Roda antes do
+        // UPDATE do status abaixo; o trigger sync_balance_due_on_completion depois só reconfirma o
+        // vencimento das parcelas "na entrega" (mesma data). Não-fatal.
+        try {
+          const now = new Date();
+          const completionDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+          const { ensureCompletionReceivables } = await import('@/lib/completion-receivables');
+          await ensureCompletionReceivables({ serviceOrderId: id, completionDate });
+        } catch (e) {
+          console.error('ensureCompletionReceivables failed', e);
         }
       }
       const { data, error } = await supabase
@@ -271,13 +256,20 @@ export function useCancelServiceOrder() {
     mutationFn: async ({ id, reason }: { id: string; reason: string }) => {
       return await cancelServiceOrderCascade(id, reason);
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ['service-orders'] });
       qc.invalidateQueries({ queryKey: ['receivables'] });
       qc.invalidateQueries({ queryKey: ['payables'] });
       qc.invalidateQueries({ queryKey: ['products'] });
       qc.invalidateQueries({ queryKey: ['payments'] });
       qc.invalidateQueries({ queryKey: ['bank-transactions'] });
+      qc.invalidateQueries({ queryKey: ['collections'] });
+      // Sinal já recebido → avisa o usuário para tratar a devolução/retenção (não define política).
+      const dep = Number(data?.deposit_paid || 0);
+      if (dep > 0) {
+        const fmt = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(dep);
+        toast.warning(`Atenção: sinal de ${fmt} já havia sido recebido nesta OS. Trate a devolução ou retenção conforme o combinado com o cliente.`, { duration: 10000 });
+      }
     },
   });
 }

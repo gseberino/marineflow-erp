@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Smartphone } from 'lucide-react';
 import { toast } from 'sonner';
@@ -33,11 +34,23 @@ export function InstallAgendaButton() {
     };
   }, []);
 
-  // Já rodando como app instalado, ou navegador sem suporte: não mostra nada
   const standalone = typeof window !== 'undefined'
     && (window.matchMedia?.('(display-mode: standalone)').matches
       || (window.navigator as any).standalone === true);
-  if (installed || standalone || !promptEvent) return null;
+  if (installed || standalone) return null;
+
+  // Sem o evento do navegador (é sempre o caso no iPhone) não há o que "clicar para
+  // instalar". Antes isso virava nada na tela — quem estava no Safari nunca descobria que
+  // dava para instalar. Agora manda para o passo a passo em Configurações.
+  if (!promptEvent) {
+    return (
+      <Button asChild size="sm" variant="ghost" title="Como instalar a Agenda no celular">
+        <Link to="/settings?tab=system">
+          <Smartphone className="h-4 w-4 mr-1" /> Instalar
+        </Link>
+      </Button>
+    );
+  }
 
   return (
     <Button

@@ -14,7 +14,9 @@ export interface FiscalDraftItemLike {
   quantity?: number;
   unit_price?: number;
   discount?: number; // total do item (vDesc)
-  other_expenses?: number; // total do item (vOutro / IPI na devolução)
+  other_expenses?: number; // total do item (vOutro). Em rascunhos ANTIGOS a devolução
+                           // gravava o IPI aqui; hoje o IPI vai em ipiUnit (abaixo).
+  ipiUnit?: number; // IPI devolvido POR UNIDADE (devolução, vIPIDevol) — soma "por fora"
   [k: string]: unknown;
 }
 
@@ -52,8 +54,10 @@ export interface FiscalDraftMeta {
   total_amount: number;
 }
 
-// Total exibido na lista: soma de (qtd × unitário − desconto + outras despesas)
-// por item — mesma composição do vNF (vProd − vDesc + vOutro).
+// Total exibido na lista: mesma composição do itemTotal da emissão
+// (vProd − vDesc + vOutro + vIPIDevol). O IPI devolvido vai "por fora" em
+// ipiUnit × qtd; rascunhos ANTIGOS que gravavam o IPI em other_expenses continuam
+// somando por `o` (e nesses ipiUnit é 0) — nunca os dois, então sem dupla contagem.
 export function computeDraftTotal(items: FiscalDraftItemLike[] | undefined): number {
   if (!Array.isArray(items)) return 0;
   return items.reduce((sum, it) => {
@@ -61,7 +65,8 @@ export function computeDraftTotal(items: FiscalDraftItemLike[] | undefined): num
     const u = Number(it?.unit_price) || 0;
     const d = Number(it?.discount) || 0;
     const o = Number(it?.other_expenses) || 0;
-    return sum + q * u - d + o;
+    const ipi = Math.round((Number(it?.ipiUnit) || 0) * q * 100) / 100;
+    return sum + Math.max(0, q * u - d) + o + ipi;
   }, 0);
 }
 

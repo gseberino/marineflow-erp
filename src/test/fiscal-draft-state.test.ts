@@ -18,6 +18,29 @@ describe("computeDraftTotal", () => {
     expect(total).toBeCloseTo(2357.14, 2);
   });
 
+  it("inclui o IPI devolvido (ipiUnit × qtd) — devolução nova grava o IPI em ipiUnit", () => {
+    // item 2391: 1648,27 − 0 desconto + 214,28 de IPI devolvido (13% × 1648,27)
+    const total = computeDraftTotal([
+      { quantity: 1, unit_price: 1648.27, discount: 0, other_expenses: 0, ipiUnit: 214.28 },
+    ]);
+    expect(total).toBeCloseTo(1862.55, 2);
+  });
+
+  it("escala o IPI por unidade e arredonda por item (qtd > 1)", () => {
+    const total = computeDraftTotal([
+      { quantity: 3, unit_price: 100, discount: 0, other_expenses: 0, ipiUnit: 4.005 },
+    ]);
+    // 300 + round2(4.005 × 3) = 300 + 12.02 (4.005×3 = 12.015 → 12.02)
+    expect(total).toBeCloseTo(312.02, 2);
+  });
+
+  it("não conta o IPI duas vezes: rascunho antigo (IPI em other_expenses, ipiUnit ausente)", () => {
+    const total = computeDraftTotal([
+      { quantity: 1, unit_price: 2147.74, discount: 0, other_expenses: 209.4 },
+    ]);
+    expect(total).toBeCloseTo(2357.14, 2);
+  });
+
   it("tolera itens/campos ausentes sem quebrar", () => {
     expect(computeDraftTotal(undefined)).toBe(0);
     expect(computeDraftTotal([{}, { quantity: 2, unit_price: 10 }])).toBe(20);

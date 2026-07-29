@@ -12,13 +12,24 @@
 // verify_jwt=false no config.toml porque há dois chamadores: o painel (manda o JWT do
 // usuário, validado aqui) e o cron da varredura diária (manda só x-cron-secret).
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
   suggestMatches, pickAutoApply, suggestCombinations, statementSignature,
   looksLikeInternalTransfer,
 } from "../_shared/banking/matching.ts";
 import { expectedDepositAmount } from "../_shared/banking/quote-deposit.ts";
 import type { BankTx, Candidate, Suggestion } from "../_shared/banking/types.ts";
+
+/**
+ * Cliente do banco.
+ *
+ * Alias explícito em vez de `ReturnType<typeof createClient>`, que resolve para um
+ * genérico incompatível com o que `createClient(url, key)` realmente devolve. O ruído
+ * desses erros falsos escondia erro de verdade no `deno check` — foi assim que uma
+ * chamada com argumentos deslocados passou despercebida e derrubou a conciliação em
+ * produção. Rodar `deno check` nesta função antes de deployar agora vale a pena.
+ */
+type DbClient = SupabaseClient<any, "public", any>;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -63,12 +74,30 @@ Deno.serve(async (req) => {
   // ── Autenticação: painel (JWT) ou cron (segredo) ───────────────────────────
   const cronSecret = req.headers.get("x-cron-secret");
   const isCron = !!cronSecret && cronSecret === Deno.env.get("CRON_SECRET");
+
+  /**
+   * Cliente que carrega o JWT de quem clicou.
+   *
+   * As rotinas de baixa checam o cargo com `is_admin_or_financial(auth.uid())`, e
+   * `auth.uid()` é NULO em chamada com service-role — usar o cliente admin aqui derruba
+   * toda baixa com "Acesso negado". Além disso, registrar dinheiro deve ficar atribuído
+   * ao usuário real, não a um processo anônimo.
+   */
+  let userClient: DbClient | null = null;
   if (!isCron) {
     const authHeader = req.headers.get("Authorization") || "";
     const token = authHeader.replace("Bearer ", "");
     if (!token) return jr({ error: "unauthorized" }, 401);
     const { data: userData, error: userErr } = await admin.auth.getUser(token);
     if (userErr || !userData?.user) return jr({ error: "unauthorized" }, 401);
+    userClient = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+      {
+        global: { headers: { Authorization: `Bearer ${token}` } },
+        auth: { persistSession: false, autoRefreshToken: false },
+      },
+    );
   }
 
   const body: ReconcileBody = await req.json().catch(() => ({}));
@@ -92,7 +121,7 @@ Deno.serve(async (req) => {
       if ((txRow as any).reconciled) return jr({ error: "esta transação já foi conciliada" }, 409);
 
       const alvo = body.candidate;
-      const resultado = await applySuggestion(admin, txRow as BankTx, {
+      const resultado = await applySuggestion(admin, userClient, txRow as BankTx, {
         candidate: alvo,
         score: 0, tier: "probable", reasons: [], difference: 0, autoApply: false,
       });
@@ -120,7 +149,7 @@ Deno.serve(async (req) => {
       const falhas: string[] = [];
       for (const alvo of body.candidates) {
         const parcela = { ...tx, amount: Number(alvo.amount) };
-        const r = await applySuggestion(admin, parcela, {
+        const r = await applySuggestion(admin, userClient, parcela, {
           candidate: alvo, score: 0, tier: "probable", reasons: [], difference: 0, autoApply: false,
         });
         if (r.ok) feitos.push(alvo.label);
@@ -216,7 +245,7 @@ Deno.serve(async (req) => {
           applied.push({ transaction_id: item.transaction.id, candidate: auto.candidate, message: "simulação" });
           continue;
         }
-        const result = await applySuggestion(admin, item.transaction, auto);
+        const result = await applySuggestion(admin, userClient, item.transaction, auto);
         if (result.ok) {
           applied.push({ transaction_id: item.transaction.id, candidate: auto.candidate, message: result.message });
           item.suggestions = []; // já resolvida
@@ -254,7 +283,7 @@ Deno.serve(async (req) => {
  * A ordem importa pouco (o motor pontua), mas a abrangência importa muito: candidato
  * que não entra aqui simplesmente nunca é sugerido.
  */
-async function buildCandidates(admin: ReturnType<typeof createClient>): Promise<Candidate[]> {
+async function buildCandidates(admin: DbClient): Promise<Candidate[]> {
   const candidates: Candidate[] = [];
 
   // 1. Contas a receber em aberto.
@@ -488,7 +517,9 @@ async function buildCandidates(admin: ReturnType<typeof createClient>): Promise<
  * trilha de auditoria e os gatilhos de conversão de orçamento aconteçam igual.
  */
 async function applySuggestion(
-  admin: ReturnType<typeof createClient>,
+  admin: DbClient,
+  /** Cliente com o JWT de quem clicou — as rotinas de baixa exigem auth.uid(). */
+  userClient: DbClient | null,
   tx: BankTx,
   suggestion: Suggestion,
 ): Promise<{ ok: boolean; message: string }> {
@@ -504,8 +535,14 @@ async function applySuggestion(
       return { ok: true, message: `Vinculado ao pagamento já registrado (${candidate.label})` };
     }
 
+    // As rotinas abaixo checam o cargo por auth.uid(); sem o cliente do usuário elas
+    // recusam com "Acesso negado". A varredura automática por cron não registra dinheiro.
+    if (!userClient) {
+      return { ok: false, message: "Registrar pagamento exige um usuário autenticado." };
+    }
+
     if (candidate.kind === "receivable" || candidate.kind === "payable") {
-      const { data, error } = await admin.rpc("register_payment_and_update_balance", {
+      const { data, error } = await userClient.rpc("register_payment_and_update_balance", {
         p_receivable_id: candidate.kind === "receivable" ? candidate.id : null,
         p_payable_id: candidate.kind === "payable" ? candidate.id : null,
         p_amount: tx.amount,
@@ -526,7 +563,7 @@ async function applySuggestion(
     if (candidate.kind === "quote_deposit") {
       // Cria o recebível de sinal já quitado e converte o orçamento — o mesmo caminho
       // do botão "Receber sinal", inclusive disparando o gatilho de conversão.
-      const { data, error } = await admin.rpc("register_deposit_and_convert", {
+      const { data, error } = await userClient.rpc("register_deposit_and_convert", {
         p_service_order_id: candidate.serviceOrderId,
         p_amount: tx.amount,
         p_payment_date: hoje,
@@ -647,7 +684,7 @@ async function applySuggestion(
 }
 
 async function marcarConciliada(
-  admin: ReturnType<typeof createClient>,
+  admin: DbClient,
   txId: string,
   paymentId: string | null,
   serviceOrderId: string | null,
@@ -668,7 +705,7 @@ async function marcarConciliada(
  * aprender é bem menos grave do que quebrar a operação.
  */
 async function aprender(
-  admin: ReturnType<typeof createClient>,
+  admin: DbClient,
   tx: BankTx,
   candidate: Candidate,
 ) {

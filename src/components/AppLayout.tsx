@@ -30,6 +30,7 @@ import { OfflineIndicator } from '@/components/OfflineIndicator';
 import { DiagnosticExportButton } from '@/components/DiagnosticExportButton';
 import { Button } from '@/components/ui/button';
 import { usePushNotifications, requestPushPermission } from '@/hooks/use-push-notifications';
+import { useSuggestions } from '@/hooks/use-agenda';
 import { toast } from 'sonner';
 
 // ── HBR Systems brand mark (inline SVG) ──────────────────────────────────────
@@ -76,6 +77,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const { t } = useI18n();
   const { user, signOut } = useAuth();
   usePushNotifications();
+  // Quantas sugestões esperam decisão. Consulta leve e cacheada (a mesma que a Agenda usa),
+  // então montar no layout não custa uma ida extra ao banco por tela.
+  const { data: sugestoes = [] } = useSuggestions();
+  const sugestoesPendentes = sugestoes.length;
 
   const [showPushBanner, setShowPushBanner] = useState(false);
 
@@ -282,24 +287,39 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
   const toggleGroup = (id: string) => setOpenGroup((prev) => (prev === id ? null : id));
 
-  const renderNavItem = (item: NavItem, indent = true) => (
-    <Link
-      key={item.path}
-      to={item.path}
-      onClick={() => setMobileOpen(false)}
-      className={cn(
-        'flex items-center gap-3 rounded-lg py-2 text-sm font-medium transition-colors',
-        indent && !collapsed ? 'pl-9 pr-3' : 'px-3',
-        isActive(item.path)
-          ? 'bg-sidebar-primary/15 text-sidebar-primary'
-          : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-      )}
-      title={collapsed ? item.label : undefined}
-    >
-      <item.icon className="h-4 w-4 shrink-0" />
-      {!collapsed && <span>{item.label}</span>}
-    </Link>
-  );
+  const renderNavItem = (item: NavItem, indent = true) => {
+    // Contador da Caixa de Entrada: sem ele, as sugestões do agente só existem para quem
+    // já sabe que a aba existe. É o padrão de fila de aprovação — o número no menu é o
+    // que faz a pessoa entrar. Recolhido, vira um ponto (não cabe número).
+    const pendentes = item.path === '/agenda' ? sugestoesPendentes : 0;
+    return (
+      <Link
+        key={item.path}
+        to={item.path}
+        onClick={() => setMobileOpen(false)}
+        className={cn(
+          'relative flex items-center gap-3 rounded-lg py-2 text-sm font-medium transition-colors',
+          indent && !collapsed ? 'pl-9 pr-3' : 'px-3',
+          isActive(item.path)
+            ? 'bg-sidebar-primary/15 text-sidebar-primary'
+            : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+        )}
+        title={collapsed && pendentes > 0
+          ? `${item.label} — ${pendentes} na caixa de entrada`
+          : (collapsed ? item.label : undefined)}
+      >
+        <item.icon className="h-4 w-4 shrink-0" />
+        {!collapsed && <span>{item.label}</span>}
+        {pendentes > 0 && (collapsed ? (
+          <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-primary" />
+        ) : (
+          <span className="ml-auto rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold leading-none text-primary-foreground">
+            {pendentes > 99 ? '99+' : pendentes}
+          </span>
+        ))}
+      </Link>
+    );
+  };
 
   const sidebarContent = (
     <div className="flex h-full flex-col">
@@ -399,7 +419,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
   );
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-background">
+    // app-shell troca h-screen (100vh) por 100dvh e recua as áreas do sistema quando
+    // instalado. Ver o bloco "APP INSTALADO NO CELULAR" em index.css.
+    <div className="app-shell flex w-full overflow-hidden bg-background">
       <aside
         className={cn(
           'hidden lg:flex flex-col bg-sidebar border-r border-sidebar-border transition-all duration-200 shrink-0',

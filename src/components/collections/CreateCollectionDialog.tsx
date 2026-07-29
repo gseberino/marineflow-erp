@@ -178,7 +178,7 @@ export function CreateCollectionDialog({ open, onOpenChange }: Props) {
                 <Switch checked={overrideContact} onCheckedChange={setOverrideContact} />
               </div>
             </div>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <Input placeholder="Nome" value={contactName} onChange={e => setContactName(e.target.value)} disabled={!overrideContact && !!selectedClient} />
               <Input placeholder="Telefone" value={contactPhone}
                 onChange={e => setContactPhone(maskPhone(e.target.value))} disabled={!overrideContact && !!selectedClient} />

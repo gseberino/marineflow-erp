@@ -560,6 +560,13 @@ function InboxView({ suggestions }: { suggestions: any[] }) {
             Quando alguém pedir algo nas conversas — ou quando você ditar um recado no
             microfone acima — as sugestões aparecem aqui para você aceitar com um toque.
           </p>
+          {/* O estado vazio é onde a pessoa mais lê. É o lugar certo para explicar que a
+              autonomia depende do uso — sem isso, ninguém descobre por que ele "nunca evolui". */}
+          <p className="text-xs text-muted-foreground max-w-md mx-auto">
+            Cada aceite ou dispensa ensina o agente. Depois de 8 decisões suas com 80% de
+            acerto num tipo de sugestão, ele passa a criar aquele tipo sozinho — e você
+            continua podendo desfazer.
+          </p>
         </div>
       )}
 
@@ -1169,14 +1176,20 @@ function MonthView({
               >
                 <div className="text-sm font-medium">{d.getDate()}</div>
                 <div className="mt-1 flex flex-wrap gap-1">
+                  {/* No celular a célula do mês tem ~45px. O pino "2 tarefas" ocupa ~61px e
+                      vazava para fora do dia. Abaixo de sm fica só o número; a partir de sm
+                      volta a palavra inteira. */}
                   {dayOrders.length > 0 && (
-                    <span className="inline-flex items-center rounded-full bg-primary/15 text-primary px-2 py-0.5 text-[10px] font-medium">
-                      {dayOrders.length} OS
+                    <span className="inline-flex items-center rounded-full bg-primary/15 text-primary px-1 sm:px-2 py-0.5 text-[10px] font-medium">
+                      {dayOrders.length}<span className="hidden sm:inline">&nbsp;OS</span>
                     </span>
                   )}
                   {dayTasks.length > 0 && (
-                    <span className="inline-flex items-center rounded-full bg-secondary text-secondary-foreground px-2 py-0.5 text-[10px] font-medium">
-                      {dayTasks.length} tarefa{dayTasks.length > 1 ? 's' : ''}
+                    <span className="inline-flex items-center rounded-full bg-secondary text-secondary-foreground px-1 sm:px-2 py-0.5 text-[10px] font-medium">
+                      {dayTasks.length}
+                      <span className="hidden sm:inline">
+                        &nbsp;tarefa{dayTasks.length > 1 ? 's' : ''}
+                      </span>
                     </span>
                   )}
                 </div>
@@ -1365,7 +1378,7 @@ function QuickScheduleDialog({
             />
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="space-y-2">
               <Label>Data *</Label>
               <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />

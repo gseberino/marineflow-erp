@@ -16,6 +16,7 @@ import { OPERATIONAL_EXPENSE_CATEGORIES } from '@/lib/expense-categories';
 import { parseFile, decodeStatementFile, type BankTransaction } from '@/lib/bank-parser';
 import {
   useReconcileSuggestions, useAutoReconcile, useApplySuggestion, useApplyGroup, useAnalyzeWithAI,
+  useReconciliationHealth,
   CANDIDATE_LABELS, type ReconcileSuggestion, type ReconcileGroup,
 } from '@/hooks/use-reconciliation';
 import { toast } from 'sonner';
@@ -51,6 +52,7 @@ export function BankReconciliation() {
   const applySuggestion = useApplySuggestion();
   const applyGroup = useApplyGroup();
   const analyzeWithAI = useAnalyzeWithAI();
+  const { data: health } = useReconciliationHealth();
   const [aiAnalysis, setAiAnalysis] = useState<Record<string, string>>({});
   const suggestionsByTx = new Map<string, ReconcileSuggestion[]>(
     (engine?.transactions || []).map(t => [t.transaction.id, t.suggestions]),
@@ -496,6 +498,36 @@ export function BankReconciliation() {
               </div>
             ))}
           </div>
+
+          {/* Saúde da rotina: quanto do extrato já está explicado, o que está encalhado e
+              há quanto tempo. O contador de padrões mostra o motor melhorando com o uso —
+              caso contrário esse ganho é invisível. */}
+          {health && health.total > 0 && (
+            <div className="rounded-lg border bg-card p-3 mb-3 flex items-center gap-4 flex-wrap text-sm">
+              <div className="flex items-center gap-2 min-w-[180px] flex-1">
+                <div className="h-2 flex-1 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${health.taxa >= 80 ? 'bg-success' : health.taxa >= 40 ? 'bg-warning' : 'bg-destructive'}`}
+                    style={{ width: `${health.taxa}%` }}
+                  />
+                </div>
+                <span className="tabular-nums font-medium whitespace-nowrap">{health.taxa}% do extrato</span>
+              </div>
+              <span className="text-muted-foreground">
+                {health.conciliadas} de {health.total} conciliadas
+              </span>
+              {health.diasMaisAntiga !== null && health.diasMaisAntiga > 0 && (
+                <span className={health.diasMaisAntiga > 30 ? 'text-warning' : 'text-muted-foreground'}>
+                  Mais antiga pendente: {health.diasMaisAntiga} dias
+                </span>
+              )}
+              {health.padroesAprendidos > 0 && (
+                <span className="text-muted-foreground">
+                  {health.padroesAprendidos} {health.padroesAprendidos === 1 ? 'padrão aprendido' : 'padrões aprendidos'}
+                </span>
+              )}
+            </div>
+          )}
 
           <div className="rounded-lg border bg-card p-3 mb-3 space-y-2">
             <div className="flex items-center gap-2 flex-wrap">

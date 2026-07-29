@@ -89,6 +89,8 @@ export async function cancelServiceOrderCascade(serviceOrderId: string, reason: 
       parts_restored: (rpcData as any).parts_restored,
       receivables_cancelled: (rpcData as any).receivables_cancelled,
       payments_cancelled: (rpcData as any).payments_cancelled,
+      collections_cancelled: (rpcData as any).collections_cancelled ?? 0,
+      deposit_paid: Number((rpcData as any).deposit_paid ?? 0),
     };
   }
 
@@ -97,6 +99,8 @@ export async function cancelServiceOrderCascade(serviceOrderId: string, reason: 
   let partsRestored = 0;
   let receivablesCancelled = 0;
   let paymentsCancelled = 0;
+  let collectionsCancelled = 0;
+  let depositPaid = 0;
 
   // 1. Restore parts stock — só no modelo antigo. No v2 o físico nunca foi baixado no add
   // (só reservado); ao cancelar, a reserva é recomputada pelo trigger e nada volta ao físico.
@@ -140,6 +144,9 @@ export async function cancelServiceOrderCascade(serviceOrderId: string, reason: 
     .eq('service_order_id', serviceOrderId);
 
   for (const rec of receivables || []) {
+    if ((rec as any).is_deposit && Number((rec as any).paid_amount || 0) > 0) {
+      depositPaid += Number((rec as any).paid_amount);
+    }
     const { data: payments } = await supabase
       .from('payments')
       .select('*')
@@ -189,6 +196,14 @@ export async function cancelServiceOrderCascade(serviceOrderId: string, reason: 
     receivablesCancelled++;
   }
 
+  // 2b. Cancel linked collections (cobranças) — OS cancelada não pode ter cobrança pendente.
+  const { data: cancelledColls } = await supabase.from('collections')
+    .update({ status: 'cancelled' })
+    .eq('service_order_id', serviceOrderId)
+    .neq('status', 'cancelled')
+    .select('id');
+  collectionsCancelled = cancelledColls?.length ?? 0;
+
   // 3. Update service order
   await supabase.from('service_orders').update({
     status: 'cancelled',
@@ -204,7 +219,13 @@ export async function cancelServiceOrderCascade(serviceOrderId: string, reason: 
     reason,
   });
 
-  return { parts_restored: partsRestored, receivables_cancelled: receivablesCancelled, payments_cancelled: paymentsCancelled };
+  return {
+    parts_restored: partsRestored,
+    receivables_cancelled: receivablesCancelled,
+    payments_cancelled: paymentsCancelled,
+    collections_cancelled: collectionsCancelled,
+    deposit_paid: depositPaid,
+  };
 }
 
 

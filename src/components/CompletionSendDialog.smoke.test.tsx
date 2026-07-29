@@ -6,6 +6,7 @@ import { CompletionSendDialog } from './CompletionSendDialog';
 vi.mock('@/integrations/supabase/client', () => ({
   supabase: { functions: { invoke: async () => ({ error: null }) } },
 }));
+vi.mock('@/hooks/use-app-settings', () => ({ useAppSettings: () => ({ data: { pix_key: 'hbr@pix.com' } }) }));
 
 describe('CompletionSendDialog — smoke', () => {
   it('abre com saldo e pré-preenche a mensagem (valor + vencimento)', () => {

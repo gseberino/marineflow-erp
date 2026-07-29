@@ -1302,6 +1302,14 @@ export default function FiscalEmission() {
   const subtotalProdutos = activeItems.reduce((s, it) => s + it.quantity * it.unit_price, 0);
   const totalDesconto = activeItems.reduce((s, it) => s + (it.discount || 0), 0);
   const totalDespesas = activeItems.reduce((s, it) => s + (it.other_expenses || 0), 0);
+  // IPI devolvido (vIPIDevol) — na devolução do Simples ele soma "por fora" ao
+  // TOTAL DA NOTA (vNF, regra W16-10), mas NÃO à base das parcelas/net_amount.
+  // Por isso fica separado de `total` (que alimenta buildSchedule): o total exibido
+  // é grandTotal; as duplicatas continuam usando `total`.
+  const totalIpiDevol = activeItems.reduce(
+    (s, it) => s + Math.round((it.ipiUnit || 0) * (it.quantity || 0) * 100) / 100, 0,
+  );
+  const grandTotal = total + totalIpiDevol;
 
   // Dados adicionais da devolução ao fornecedor, calculados a partir dos itens
   // REALMENTE devolvidos: o crédito de ICMS/IPI é proporcional à quantidade
@@ -2821,14 +2829,15 @@ export default function FiscalEmission() {
                 </div>
                 <div className="text-right">
                   <p className="text-xs text-muted-foreground uppercase">Total da Nota</p>
-                  <p className="text-2xl font-bold">{formatCurrency(total)}</p>
-                  {/* Explica a diferença entre o subtotal e o total: desconto e/ou
-                      despesas acessórias (o IPI da compra, na devolução). */}
-                  {(totalDesconto > 0 || totalDespesas > 0) && (
+                  <p className="text-2xl font-bold">{formatCurrency(grandTotal)}</p>
+                  {/* Explica a diferença entre o subtotal e o total: desconto,
+                      despesas acessórias e o IPI devolvido (vIPIDevol) da devolução. */}
+                  {(totalDesconto > 0 || totalDespesas > 0 || totalIpiDevol > 0) && (
                     <div className="text-[11px] text-muted-foreground">
                       Produtos {formatCurrency(subtotalProdutos)}
                       {totalDesconto > 0 && <> − desconto {formatCurrency(totalDesconto)}</>}
                       {totalDespesas > 0 && <> + despesas acess. (IPI) {formatCurrency(totalDespesas)}</>}
+                      {totalIpiDevol > 0 && <> + IPI devolvido {formatCurrency(totalIpiDevol)}</>}
                     </div>
                   )}
                 </div>

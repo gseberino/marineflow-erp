@@ -443,7 +443,7 @@ const r15: Rule = {
     const limite = new Date(Date.now() + 48 * 3600000);
     const { data } = await db
       .from('service_orders')
-      .select('id, service_order_number, scheduled_start_at, client_id, clients(name, phone, whatsapp)')
+      .select('id, service_order_number, scheduled_start_at, client_id, clients(name, phone, whatsapp, opt_out_whatsapp)')
       .eq('status', 'scheduled')
       .gte('scheduled_start_at', agora.toISOString())
       .lte('scheduled_start_at', limite.toISOString())
@@ -465,7 +465,11 @@ const r15: Rule = {
           related_entity_type: 'service_order',
           related_entity_id: o.id,
           client_id: o.client_id,
-          notes: 'Use o botão de confirmação na Agenda para mandar a mensagem — nada é enviado sozinho.',
+          // Opt-out não cancela a tarefa: confirmar por telefone continua valendo. Só muda
+          // o aviso, para você não tentar o WhatsApp e esbarrar no bloqueio.
+          notes: o.clients?.opt_out_whatsapp
+            ? '⚠️ Este cliente pediu para não receber WhatsApp — confirme por telefone.'
+            : 'Use o botão de confirmação na Agenda para mandar a mensagem — nada é enviado sozinho.',
         };
       });
   },

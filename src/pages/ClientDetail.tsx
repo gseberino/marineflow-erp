@@ -8,8 +8,9 @@ import { StatusBadge } from '@/components/StatusBadge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Mail, Phone, MapPin, Ship, Edit } from 'lucide-react';
+import { ArrowLeft, Mail, Phone, MapPin, Ship, Edit, FileText } from 'lucide-react';
 import { ClientFormDialog } from '@/components/ClientFormDialog';
+import { ClientStatementDialog } from '@/components/ClientStatementDialog';
 import { RecordHistory } from '@/components/RecordHistory';
 import { EntityTasksPanel } from '@/components/agenda/EntityTasksPanel';
 import { OpenLoopsPanel } from '@/components/agenda/OpenLoopsPanel';
@@ -22,6 +23,7 @@ export default function ClientDetail() {
   const { data: client, isLoading } = useClient(id);
   const { data: vessels } = useVesselsForClient(id);
   const [editOpen, setEditOpen] = useState(false);
+  const [statementOpen, setStatementOpen] = useState(false);
 
   // Fetch service orders for this client
   const { data: orders } = useQuery({
@@ -178,7 +180,14 @@ export default function ClientDetail() {
             </table>
           </div>
         </TabsContent>
-        <TabsContent value="financial" className="mt-4">
+        <TabsContent value="financial" className="mt-4 space-y-3">
+          {clientReceivables && clientReceivables.length > 0 && (
+            <div className="flex justify-end">
+              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setStatementOpen(true)}>
+                <FileText className="h-4 w-4" /> Enviar extrato
+              </Button>
+            </div>
+          )}
           <div className="rounded-xl border bg-card shadow-sm overflow-x-auto scrollbar-thin">
             <table className="w-full text-sm min-w-[600px]">
               <thead><tr className="border-b bg-muted/50">
@@ -234,6 +243,13 @@ export default function ClientDetail() {
       </Tabs>
 
       <ClientFormDialog open={editOpen} onOpenChange={setEditOpen} client={client} />
+      <ClientStatementDialog
+        open={statementOpen}
+        onOpenChange={setStatementOpen}
+        clientName={client.name}
+        clientPhone={(client as any).whatsapp || client.phone}
+        items={clientReceivables ?? []}
+      />
     </div>
   );
 }

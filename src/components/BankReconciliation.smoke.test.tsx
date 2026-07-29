@@ -94,6 +94,15 @@ vi.mock('@/hooks/use-financial', () => ({
 }));
 
 vi.mock('@/hooks/use-service-orders', () => ({ useServiceOrders: () => ({ data: [] }) }));
+vi.mock('@/hooks/use-reconciliation', async (original) => {
+  const real = await original<typeof import('@/hooks/use-reconciliation')>();
+  return {
+    ...real,
+    useReconciliationHealth: () => ({
+      data: { total: 10, conciliadas: 4, pendentes: 6, taxa: 40, valorPendente: 5000, diasMaisAntiga: 45, padroesAprendidos: 3 },
+    }),
+  };
+});
 vi.mock('@/hooks/use-clients', () => ({ useClients: () => ({ data: [] }) }));
 vi.mock('@/hooks/use-suppliers', () => ({ useSuppliers: () => ({ data: [] }) }));
 
@@ -118,6 +127,14 @@ describe('BankReconciliation — render', () => {
   it('mostra o botão de análise em lote quando há pendências', async () => {
     renderTela();
     expect(await screen.findByRole('button', { name: /Analisar tudo/i })).toBeInTheDocument();
+  });
+
+  it('mostra a saúde da rotina: progresso, atraso e aprendizado', async () => {
+    renderTela();
+    expect(await screen.findByText(/40% do extrato/)).toBeInTheDocument();
+    expect(screen.getByText(/4 de 10 conciliadas/)).toBeInTheDocument();
+    expect(screen.getByText(/Mais antiga pendente: 45 dias/)).toBeInTheDocument();
+    expect(screen.getByText(/3 padrões aprendidos/)).toBeInTheDocument();
   });
 
   it('resume a situação da fila no topo', async () => {

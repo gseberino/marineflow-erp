@@ -218,7 +218,7 @@ async function runClientReminders(db: Db, settings: Record<string, string>) {
   const now = new Date();
   const tomorrow = new Date(now.getTime() + 86400000);
   const { data: orders } = await db.from("service_orders")
-    .select("id, service_order_number, scheduled_start_at, clients(name, phone, whatsapp), vessels(name)")
+    .select("id, service_order_number, scheduled_start_at, clients(name, phone, whatsapp, opt_out_whatsapp), vessels(name)")
     .eq("status", "scheduled")
     .is("reminder_sent_at", null)
     .gte("scheduled_start_at", now.toISOString())
@@ -226,6 +226,9 @@ async function runClientReminders(db: Db, settings: Record<string, string>) {
 
   let sent = 0;
   for (const o of (orders as any[]) || []) {
+    // Quem pediu para parar não recebe, e ponto. Vale mesmo em modo de teste: se um dia o
+    // modo de teste for desligado sem revisar, o pedido do cliente continua valendo.
+    if (o.clients?.opt_out_whatsapp) continue;
     const phone = ((o.clients?.whatsapp || o.clients?.phone || "") as string).replace(/\D/g, "");
     if (!phone || phone.length < 10) continue;
     const target = testMode ? testNumber : phone;
@@ -259,13 +262,14 @@ async function runPostServiceSurvey(db: Db, settings: Record<string, string>) {
   const from = new Date(Date.now() - 2 * 86400000).toISOString();
   const to = new Date(Date.now() - 1 * 86400000).toISOString();
   const { data: orders } = await db.from("service_orders")
-    .select("id, service_order_number, updated_at, clients(name, phone, whatsapp), vessels(name)")
+    .select("id, service_order_number, updated_at, clients(name, phone, whatsapp, opt_out_whatsapp), vessels(name)")
     .eq("status", "completed")
     .gte("updated_at", from)
     .lte("updated_at", to);
 
   let sent = 0;
   for (const o of (orders as any[]) || []) {
+    if (o.clients?.opt_out_whatsapp) continue;
     const phone = ((o.clients?.whatsapp || o.clients?.phone || "") as string).replace(/\D/g, "");
     if (!phone || phone.length < 10) continue;
     const { data: dup } = await db.from("whatsapp_send_queue")

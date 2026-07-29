@@ -184,6 +184,49 @@ export function useFinancialSummary() {
   });
 }
 
+/**
+ * DSO / prazo médio de recebimento: quantos dias, em média, leva para receber — medido sobre os
+ * pagamentos REALIZADOS nos últimos `days` dias (emissão → pagamento), ponderado pelo valor.
+ * Exclui SINAIS (is_deposit), que são pagos na hora e puxariam o número para ~0, mascarando o
+ * prazo real de recebimento do saldo/faturas. É o termômetro de caixa (quanto menor, melhor).
+ */
+export function useReceivablesDSO(days: number = 90) {
+  return useQuery({
+    queryKey: ['receivables-dso', days],
+    queryFn: async () => {
+      const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+      const { data, error } = await supabase
+        .from('payments')
+        .select('amount, payment_date, receivable:receivables!inner(issue_date, is_deposit)')
+        .eq('status', 'confirmed')
+        .gte('payment_date', since);
+      if (error) throw error;
+
+      let weightSum = 0;
+      let weightedDays = 0;
+      let count = 0;
+      for (const p of (data as any[]) || []) {
+        const rec = p.receivable;
+        if (!rec || rec.is_deposit || !rec.issue_date || !p.payment_date) continue;
+        const d = Math.max(0, Math.round(
+          (new Date(p.payment_date).getTime() - new Date(rec.issue_date).getTime()) / 86400000,
+        ));
+        const amt = Number(p.amount || 0);
+        if (amt <= 0) continue;
+        weightSum += amt;
+        weightedDays += amt * d;
+        count += 1;
+      }
+      return {
+        dso: weightSum > 0 ? Math.round(weightedDays / weightSum) : null,
+        count,
+        periodDays: days,
+      };
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 export interface ForecastWeek {
   /** Segunda-feira da semana, ISO. */
   inicio: string;
