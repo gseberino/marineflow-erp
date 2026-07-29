@@ -486,7 +486,7 @@ function LeadsView() {
         />
       </div>
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList>
+        <TabsList className="flex h-auto w-full flex-wrap justify-start">
           <TabsTrigger value="pending">Pendentes</TabsTrigger>
           <TabsTrigger value="linked">Vinculados</TabsTrigger>
           <TabsTrigger value="converted">Convertidos</TabsTrigger>
@@ -714,7 +714,7 @@ export default function WhatsAppLeadsPage() {
         description="Inbox de conversas, leads, blocklist e respostas rápidas."
       />
       <Tabs value={view} onValueChange={setView}>
-        <TabsList>
+        <TabsList className="flex h-auto w-full flex-wrap justify-start">
           <TabsTrigger value="inbox">Inbox</TabsTrigger>
           <TabsTrigger value="leads">Leads</TabsTrigger>
           <TabsTrigger value="blocklist">Bloqueados</TabsTrigger>

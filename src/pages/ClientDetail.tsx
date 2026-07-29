@@ -112,7 +112,7 @@ export default function ClientDetail() {
       <OpenLoopsPanel entityType="client" entityId={id} title="Em aberto com este cliente" />
 
       <Tabs defaultValue="vessels">
-        <TabsList>
+        <TabsList className="flex h-auto w-full flex-wrap justify-start">
           <TabsTrigger value="vessels">{t.clients.vessels}</TabsTrigger>
           <TabsTrigger value="orders">{t.clients.serviceOrders}</TabsTrigger>
           <TabsTrigger value="financial">{t.clients.financial}</TabsTrigger>
