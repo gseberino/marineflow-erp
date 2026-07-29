@@ -23,6 +23,7 @@ const MarinaList = lazy(() => import("./pages/MarinaList"));
 const ProductList = lazy(() => import("./pages/ProductList"));
 const InventoryPage = lazy(() => import("./pages/InventoryPage"));
 const AgendaPage = lazy(() => import("./pages/AgendaPage"));
+const DayBoardPage = lazy(() => import("./pages/DayBoardPage"));
 const FinancialPage = lazy(() => import("./pages/FinancialPage"));
 const ReportsPage = lazy(() => import("./pages/ReportsPage"));
 const CollectionsPage = lazy(() => import("./pages/CollectionsPage"));
@@ -191,6 +192,7 @@ const App = () => (
                         <Route path="/inventory/import-xml" element={<ProtectedRoute roles={['admin']}><ImportFiscalXML /></ProtectedRoute>} />
                         <Route path="/fiscal/emissao" element={<ProtectedRoute roles={['admin']}><FiscalEmission /></ProtectedRoute>} />
                         <Route path="/agenda" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><AgendaPage /></ProtectedRoute>} />
+                        <Route path="/day-board" element={<ProtectedRoute roles={['admin','financial','technician']} groupId="operacional"><DayBoardPage /></ProtectedRoute>} />
                         <Route path="/financial" element={
                           <ProtectedRoute roles={['admin', 'financial']} groupId="financeiro">
                             <FinancialPage />

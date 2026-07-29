@@ -7,10 +7,11 @@ import { useI18n } from '@/i18n';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useRecordHistory } from '@/hooks/use-audit-log';
 import { Badge } from '@/components/ui/badge';
-import { History, Link2, Check, ListChecks } from 'lucide-react';
+import { History, Link2, Check, ListChecks, Route } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { EntityTasksPanel } from '@/components/agenda/EntityTasksPanel';
+import { ServiceRoutePanel } from '@/components/service-orders/ServiceRoutePanel';
 
 function TimelineTab({ id }: { id: string }) {
   const { data: history } = useRecordHistory('service_orders', id);
@@ -88,6 +89,11 @@ export default function ServiceOrderDetail() {
           {id && (
             <TimelineTab id={id} />
           )}
+          {/* Roteiro (execução técnica) e Tarefas (agenda administrativa) são coisas
+              diferentes de propósito — os nomes precisam deixar isso claro na tela. */}
+          <TabsTrigger value="route" className="flex items-center gap-1.5">
+            <Route className="h-3.5 w-3.5" /> Roteiro
+          </TabsTrigger>
           <TabsTrigger value="tasks" className="flex items-center gap-1.5">
             <ListChecks className="h-3.5 w-3.5" /> Tarefas
           </TabsTrigger>
@@ -110,6 +116,21 @@ export default function ServiceOrderDetail() {
           orderData={order}
           isLoading={isLoading}
         />
+      </TabsContent>
+
+      <TabsContent value="route" className="mt-0 p-4 lg:p-6">
+        <div className="max-w-3xl">
+          <ServiceRoutePanel
+            serviceOrderId={id}
+            orderNumber={order?.service_order_number}
+            clientName={order?.clients?.name}
+            assetName={order?.vessels?.name}
+            marinaName={order?.marinas?.name}
+            technicianName={order?.service_order_technicians?.[0]?.app_users?.full_name}
+            scheduledAt={order?.scheduled_start_at}
+            shareUrl={order?.share_token ? `${window.location.origin}/view/${order.share_token}` : null}
+          />
+        </div>
       </TabsContent>
 
       <TabsContent value="tasks" className="mt-0 p-4 lg:p-6">
