@@ -17,6 +17,7 @@ import { PayableFormDialog } from '@/components/PayableFormDialog';
 import { BankReconciliation } from '@/components/BankReconciliation';
 import { ReimbursementsPanel } from '@/components/ReimbursementsPanel';
 import { CashForecastPanel } from '@/components/CashForecastPanel';
+import { BankSourcesPanel } from '@/components/BankSourcesPanel';
 import { DREPanel } from '@/components/DREPanel';
 import { AgingReportPanel } from '@/components/AgingReportPanel';
 import { FinancialFilterPanel, applyFilters, defaultFilters, type FinancialFilters } from '@/components/FinancialFilterPanel';
@@ -437,6 +438,9 @@ export default function FinancialPage() {
           <TabsTrigger value="receivables">{t.financial.tabReceivables}</TabsTrigger>
           <TabsTrigger value="payables">{t.financial.tabPayables}</TabsTrigger>
           <TabsTrigger value="reconciliation">{t.financial.tabReconciliation}</TabsTrigger>
+          {/* Conectar banco e importar extrato é configuração de infraestrutura, não parte
+              do trabalho de conciliar — e ficava enterrado dentro da outra aba. */}
+          <TabsTrigger value="banks">Contas bancárias</TabsTrigger>
           <TabsTrigger value="aging">Aging</TabsTrigger>
         </TabsList>
 
@@ -823,6 +827,9 @@ export default function FinancialPage() {
         {/* === RECONCILIATION === */}
         <TabsContent value="reconciliation" className="mt-4">
           <BankReconciliation />
+        </TabsContent>
+        <TabsContent value="banks" className="mt-4">
+          <BankSourcesPanel />
         </TabsContent>
         <TabsContent value="aging" className="mt-4">
           <AgingReportPanel />
