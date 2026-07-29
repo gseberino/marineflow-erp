@@ -88,18 +88,23 @@ export async function fetchItem(apiKey: string, itemId: string): Promise<any> {
  * lista a pessoa fica presa achando que copiou o código errado — quando o problema é que
  * as credenciais configuradas são de outra aplicação.
  *
- * Nunca lança: é diagnóstico, e falhar aqui não pode piorar o erro que já aconteceu.
+ * Nunca lança: é diagnóstico, e falhar aqui não pode piorar o erro que já aconteceu. Mas
+ * devolve o motivo da falha — "não consegui listar" e "não há nenhuma conexão" levam a
+ * conclusões opostas, e tratar um como o outro manda a pessoa procurar no lugar errado.
  */
-export async function listItems(apiKey: string): Promise<Array<{ id: string; connector: string; status: string }>> {
+export async function listItems(
+  apiKey: string,
+): Promise<{ itens: Array<{ id: string; connector: string; status: string }>; erro: string | null }> {
   try {
     const data = await pluggyGet(apiKey, "/items");
-    return ((data?.results ?? []) as any[]).map((i) => ({
+    const itens = ((data?.results ?? []) as any[]).map((i) => ({
       id: String(i?.id ?? ""),
       connector: String(i?.connector?.name ?? i?.connector?.institutionUrl ?? "—"),
       status: String(i?.status ?? "—"),
     }));
-  } catch {
-    return [];
+    return { itens, erro: null };
+  } catch (e) {
+    return { itens: [], erro: String((e as Error)?.message ?? e).slice(0, 300) };
   }
 }
 

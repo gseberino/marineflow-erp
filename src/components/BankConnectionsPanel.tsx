@@ -51,6 +51,13 @@ export function BankConnectionsPanel() {
       toast.error('Informe o apelido e o Item ID');
       return;
     }
+    // Client ID e Item ID têm o mesmo formato e ficam na mesma tela do painel — trocar um
+    // pelo outro dá "conexão não encontrada", que parece erro de digitação e faz a pessoa
+    // reconferir o código certo por horas. Barrar aqui é mais barato que diagnosticar depois.
+    if (clientIdPrefixo && form.external_id.trim().toLowerCase().startsWith(clientIdPrefixo.toLowerCase())) {
+      toast.error('Isto é o Client ID da aplicação, não o Item ID da conexão. Pegue o Item ID em "Ir para Demo", no painel do provedor.');
+      return;
+    }
     try {
       await salvar.mutateAsync(form);
       toast.success('Conexão cadastrada. Use "Buscar extrato" para trazer as transações.');
@@ -120,7 +127,10 @@ export function BankConnectionsPanel() {
             <ol className="list-decimal ml-4 space-y-1 text-muted-foreground">
               <li>Conecte a conta em <span className="font-mono text-xs">meu.pluggy.ai</span> (é onde você autoriza o banco).</li>
               <li>No painel do Pluggy, abra sua aplicação e escolha o conector <strong>MeuPluggy</strong> para autorizar o acesso.</li>
-              <li>Clique em <strong>"Ir para Demo"</strong> e copie o <strong>Item ID</strong> da conexão.</li>
+              <li>
+                Clique em <strong>"Ir para Demo"</strong> e copie o <strong>Item ID</strong> da conexão —
+                não confunda com o Client ID da aplicação: têm o mesmo formato e ficam próximos na tela.
+              </li>
             </ol>
           </div>
 
@@ -129,7 +139,7 @@ export function BankConnectionsPanel() {
           <div className="space-y-2">
             <Button size="sm" variant="outline" onClick={handleListar} disabled={listarItens.isPending}>
               <Link2 className="h-3.5 w-3.5 mr-1.5" />
-              {listarItens.isPending ? 'Consultando...' : 'Ver conexões disponíveis'}
+              {listarItens.isPending ? 'Consultando...' : 'Tentar detectar conexões'}
             </Button>
 
             {disponiveis && disponiveis.length > 0 && (
@@ -155,14 +165,16 @@ export function BankConnectionsPanel() {
             )}
             {disponiveis && disponiveis.length === 0 && (
               <div className="rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm space-y-1.5">
-                <p className="font-medium">Nenhuma conexão visível com as credenciais atuais.</p>
+                <p className="font-medium">O provedor não permite listar as conexões por aqui.</p>
                 <p className="text-muted-foreground">
-                  No painel do provedor cada aplicação tem o próprio par de credenciais, e uma
-                  aplicação só enxerga as conexões autorizadas dentro dela. As credenciais deste
-                  sistema começam com{' '}
-                  <span className="font-mono font-medium">{clientIdPrefixo || '—'}</span>: abra a
-                  aplicação onde você autorizou o conector MeuPluggy e confira se o Client ID dela
-                  começa igual. Se for outra, é preciso trocar as credenciais aqui.
+                  É preciso copiar o Item ID no painel, seguindo o roteiro acima. Atenção: o Item ID
+                  <strong> não é</strong> o Client ID da aplicação — são códigos diferentes e ambos
+                  têm o mesmo formato, o que torna fácil trocar um pelo outro.
+                  {clientIdPrefixo && (
+                    <> O Client ID em uso aqui começa com{' '}
+                    <span className="font-mono font-medium">{clientIdPrefixo}</span> — se o código
+                    que você copiou começar assim, é o Client ID, não a conexão.</>
+                  )}
                 </p>
               </div>
             )}

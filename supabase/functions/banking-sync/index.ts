@@ -83,7 +83,7 @@ Deno.serve(async (req) => {
     // mais comum. Aqui a própria integração diz o que ela consegue ver.
     if (body.action === "list_items") {
       const apiKey = await pluggyAuth(clientId, clientSecret);
-      const itens = await listItems(apiKey);
+      const { itens, erro: erroLista } = await listItems(apiKey);
       const { data: jaCadastrados } = await admin
         .from("bank_connections")
         .select("external_id");
@@ -91,6 +91,7 @@ Deno.serve(async (req) => {
       return jr({
         ok: true,
         itens: itens.map((i) => ({ ...i, ja_cadastrado: cadastrados.has(i.id) })),
+        erro_listagem: erroLista,
         // Prefixo do CLIENT_ID em uso, para comparar com a aplicação aberta no painel do
         // provedor. É identificador, não segredo — e sem ele não há como saber a QUAL
         // aplicação o sistema está conectado quando a lista volta vazia.
@@ -227,8 +228,10 @@ async function sincronizarConexao(
     // dizer isso, a pessoa fica reconferindo o código à toa. Então mostramos exatamente
     // quais itens estas credenciais enxergam.
     if (msg.includes("404") || msg.toUpperCase().includes("ITEM_NOT_FOUND")) {
-      const visiveis = await listItems(apiKey);
-      msg = visiveis.length === 0
+      const { itens: visiveis, erro: erroVisiveis } = await listItems(apiKey);
+      msg = erroVisiveis
+        ? `Nao consegui listar as conexoes para comparar (${erroVisiveis}). O Item ID informado nao foi encontrado nesta aplicacao.`
+        : visiveis.length === 0
         ? "As credenciais configuradas não enxergam nenhuma conexão. Confira se o CLIENT_ID/CLIENT_SECRET são da MESMA aplicação onde você autorizou o conector MeuPluggy."
         : `Este Item ID não pertence à aplicação configurada. As conexões visíveis com estas credenciais são: ${
             visiveis.map((i) => `${i.connector} (${i.id})`).join(" · ")
