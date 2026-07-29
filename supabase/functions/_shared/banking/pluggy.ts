@@ -80,6 +80,29 @@ export async function fetchItem(apiKey: string, itemId: string): Promise<any> {
   return await pluggyGet(apiKey, `/items/${itemId}`);
 }
 
+/**
+ * Itens que ESTAS credenciais enxergam.
+ *
+ * Serve para diagnosticar o 404 mais confuso da integração: o item existe no painel, mas
+ * pertence a outra aplicação. Como a mensagem do provedor é só "item not found", sem esta
+ * lista a pessoa fica presa achando que copiou o código errado — quando o problema é que
+ * as credenciais configuradas são de outra aplicação.
+ *
+ * Nunca lança: é diagnóstico, e falhar aqui não pode piorar o erro que já aconteceu.
+ */
+export async function listItems(apiKey: string): Promise<Array<{ id: string; connector: string; status: string }>> {
+  try {
+    const data = await pluggyGet(apiKey, "/items");
+    return ((data?.results ?? []) as any[]).map((i) => ({
+      id: String(i?.id ?? ""),
+      connector: String(i?.connector?.name ?? i?.connector?.institutionUrl ?? "—"),
+      status: String(i?.status ?? "—"),
+    }));
+  } catch {
+    return [];
+  }
+}
+
 export async function fetchAccounts(apiKey: string, itemId: string): Promise<PluggyAccount[]> {
   const data = await pluggyGet(apiKey, `/accounts?itemId=${encodeURIComponent(itemId)}`);
   return (data?.results ?? []) as PluggyAccount[];

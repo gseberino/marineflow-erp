@@ -87,6 +87,46 @@ export function useDeleteBankConnection() {
  * `functions.invoke` sozinho só diz "non-2xx status code", e o motivo (consentimento
  * caído, credencial ausente) fica escondido no corpo.
  */
+export interface PluggyItemDisponivel {
+  id: string;
+  connector: string;
+  status: string;
+  ja_cadastrado: boolean;
+}
+
+/**
+ * Lista as conexões que as credenciais configuradas enxergam.
+ *
+ * O Item ID não existe em lugar nenhum do banco — só no painel do provedor — e copiar o
+ * de uma aplicação diferente daquela que gerou as credenciais dá um "item não encontrado"
+ * que parece erro de digitação. Perguntar ao próprio provedor o que ele vê resolve isso
+ * sem tentativa e erro.
+ */
+export function useListPluggyItems() {
+  return useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke('banking-sync', {
+        body: { action: 'list_items' },
+      });
+      if (error) {
+        const resposta = (error as any)?.context as Response | undefined;
+        if (resposta && typeof resposta.json === 'function') {
+          try {
+            const corpo = await resposta.json();
+            if (corpo?.error) {
+              throw new Error(corpo.detail ? `${corpo.error}: ${corpo.detail}` : String(corpo.error));
+            }
+          } catch (e) {
+            if (e instanceof Error && !e.message.includes('non-2xx')) throw e;
+          }
+        }
+        throw error;
+      }
+      return ((data as any)?.itens ?? []) as PluggyItemDisponivel[];
+    },
+  });
+}
+
 export function useSyncBank() {
   const qc = useQueryClient();
   return useMutation({

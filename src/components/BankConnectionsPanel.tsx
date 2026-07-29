@@ -6,7 +6,8 @@ import { StatusBadge } from '@/components/StatusBadge';
 import { useI18n } from '@/i18n';
 import {
   useBankConnections, useSaveBankConnection, useDeleteBankConnection, useSyncBank,
-  type BankConnection,
+  useListPluggyItems,
+  type BankConnection, type PluggyItemDisponivel,
 } from '@/hooks/use-bank-connections';
 import { toast } from 'sonner';
 import { RefreshCw, Plus, Trash2, AlertTriangle, CheckCircle2, Link2 } from 'lucide-react';
@@ -26,8 +27,22 @@ export function BankConnectionsPanel() {
   const excluir = useDeleteBankConnection();
   const sincronizar = useSyncBank();
 
+  const listarItens = useListPluggyItems();
   const [novoAberto, setNovoAberto] = useState(false);
+  const [disponiveis, setDisponiveis] = useState<PluggyItemDisponivel[] | null>(null);
   const [form, setForm] = useState({ external_id: '', label: '', account_kind: 'bank' as 'bank' | 'credit_card' });
+
+  const handleListar = async () => {
+    try {
+      const itens = await listarItens.mutateAsync();
+      setDisponiveis(itens);
+      if (itens.length === 0) {
+        toast.warning('Nenhuma conexão visível. Confira se as credenciais são da mesma aplicação onde você autorizou o conector MeuPluggy.');
+      }
+    } catch (e: any) {
+      toast.error(e?.message || 'Não consegui consultar as conexões');
+    }
+  };
 
   const handleSalvar = async () => {
     if (!form.external_id.trim() || !form.label.trim()) {
@@ -105,6 +120,43 @@ export function BankConnectionsPanel() {
               <li>No painel do Pluggy, abra sua aplicação e escolha o conector <strong>MeuPluggy</strong> para autorizar o acesso.</li>
               <li>Clique em <strong>"Ir para Demo"</strong> e copie o <strong>Item ID</strong> da conexão.</li>
             </ol>
+          </div>
+
+          {/* Em vez de digitar um código que não se sabe de onde tirar, perguntar ao
+              provedor o que ele enxerga com as credenciais atuais. */}
+          <div className="space-y-2">
+            <Button size="sm" variant="outline" onClick={handleListar} disabled={listarItens.isPending}>
+              <Link2 className="h-3.5 w-3.5 mr-1.5" />
+              {listarItens.isPending ? 'Consultando...' : 'Ver conexões disponíveis'}
+            </Button>
+
+            {disponiveis && disponiveis.length > 0 && (
+              <div className="rounded-lg border divide-y">
+                {disponiveis.map(item => (
+                  <div key={item.id} className="p-2 flex items-center justify-between gap-2 flex-wrap text-sm">
+                    <div className="min-w-0">
+                      <span className="font-medium">{item.connector}</span>
+                      <span className="text-muted-foreground ml-2">{item.status}</span>
+                      <p className="text-xs text-muted-foreground font-mono">{item.id}</p>
+                    </div>
+                    {item.ja_cadastrado ? (
+                      <StatusBadge className="bg-muted text-muted-foreground">já cadastrada</StatusBadge>
+                    ) : (
+                      <Button size="sm" variant="outline"
+                        onClick={() => setForm(f => ({ ...f, external_id: item.id, label: f.label || item.connector }))}>
+                        Usar esta
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            {disponiveis && disponiveis.length === 0 && (
+              <p className="text-sm text-warning">
+                Nenhuma conexão visível com as credenciais atuais. Verifique se o CLIENT_ID e o
+                CLIENT_SECRET são da mesma aplicação onde você autorizou o conector MeuPluggy.
+              </p>
+            )}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

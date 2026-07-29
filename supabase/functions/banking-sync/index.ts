@@ -13,7 +13,7 @@
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
-  pluggyAuth, fetchItem, fetchAccounts, fetchTransactions,
+  pluggyAuth, fetchItem, fetchAccounts, fetchTransactions, listItems,
   mapTransaction, accountSourceType,
 } from "../_shared/banking/pluggy.ts";
 
@@ -46,6 +46,8 @@ interface SyncBody {
   connection_id?: string;
   /** Ignora a janela incremental e varre o período inteiro. */
   full?: boolean;
+  /** `list_items` não sincroniza nada: só mostra o que as credenciais enxergam. */
+  action?: "sync" | "list_items";
 }
 
 Deno.serve(async (req) => {
@@ -76,6 +78,22 @@ Deno.serve(async (req) => {
   const body: SyncBody = await req.json().catch(() => ({}));
 
   try {
+    // Descobrir o Item ID sem sair do sistema: o código não existe em lugar nenhum do
+    // banco, só dentro do painel do provedor, e errar a aplicação de origem é o tropeço
+    // mais comum. Aqui a própria integração diz o que ela consegue ver.
+    if (body.action === "list_items") {
+      const apiKey = await pluggyAuth(clientId, clientSecret);
+      const itens = await listItems(apiKey);
+      const { data: jaCadastrados } = await admin
+        .from("bank_connections")
+        .select("external_id");
+      const cadastrados = new Set((jaCadastrados || []).map((c: any) => c.external_id));
+      return jr({
+        ok: true,
+        itens: itens.map((i) => ({ ...i, ja_cadastrado: cadastrados.has(i.id) })),
+      });
+    }
+
     let q = admin.from("bank_connections").select("*").eq("active", true).eq("provider", "pluggy");
     if (body.connection_id) q = q.eq("id", body.connection_id);
     const { data: conexoes, error: connErr } = await q;
@@ -198,7 +216,21 @@ async function sincronizarConexao(
     await registrarResultado(admin, conexao.id, "ok", mensagem, importadas, dataMaisRecente);
     return { conexao: rotulo, status: "ok", mensagem, importadas, ja_existiam: jaExistiam };
   } catch (e) {
-    const msg = String((e as Error)?.message ?? e).slice(0, 300);
+    let msg = String((e as Error)?.message ?? e).slice(0, 300);
+
+    // "item not found" é o erro mais enganoso desta integração: o código está certo no
+    // painel, mas pertence a OUTRA aplicação — e as credenciais aqui são de uma só. Sem
+    // dizer isso, a pessoa fica reconferindo o código à toa. Então mostramos exatamente
+    // quais itens estas credenciais enxergam.
+    if (msg.includes("404") || msg.toUpperCase().includes("ITEM_NOT_FOUND")) {
+      const visiveis = await listItems(apiKey);
+      msg = visiveis.length === 0
+        ? "As credenciais configuradas não enxergam nenhuma conexão. Confira se o CLIENT_ID/CLIENT_SECRET são da MESMA aplicação onde você autorizou o conector MeuPluggy."
+        : `Este Item ID não pertence à aplicação configurada. As conexões visíveis com estas credenciais são: ${
+            visiveis.map((i) => `${i.connector} (${i.id})`).join(" · ")
+          }. Cadastre um destes, ou troque as credenciais para as da aplicação onde este item foi criado.`;
+    }
+
     console.error(`[banking-sync] falha em ${rotulo}:`, e);
     await registrarResultado(admin, conexao.id, "error", msg, 0, null);
     return { conexao: rotulo, status: "error", mensagem: msg, importadas: 0 };
