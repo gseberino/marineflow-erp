@@ -30,14 +30,16 @@ export function BankConnectionsPanel() {
   const listarItens = useListPluggyItems();
   const [novoAberto, setNovoAberto] = useState(false);
   const [disponiveis, setDisponiveis] = useState<PluggyItemDisponivel[] | null>(null);
+  const [clientIdPrefixo, setClientIdPrefixo] = useState('');
   const [form, setForm] = useState({ external_id: '', label: '', account_kind: 'bank' as 'bank' | 'credit_card' });
 
   const handleListar = async () => {
     try {
-      const itens = await listarItens.mutateAsync();
+      const { itens, clientIdPrefixo: prefixo } = await listarItens.mutateAsync();
       setDisponiveis(itens);
+      setClientIdPrefixo(prefixo);
       if (itens.length === 0) {
-        toast.warning('Nenhuma conexão visível. Confira se as credenciais são da mesma aplicação onde você autorizou o conector MeuPluggy.');
+        toast.warning('Nenhuma conexão visível com as credenciais atuais.');
       }
     } catch (e: any) {
       toast.error(e?.message || 'Não consegui consultar as conexões');
@@ -152,9 +154,21 @@ export function BankConnectionsPanel() {
               </div>
             )}
             {disponiveis && disponiveis.length === 0 && (
-              <p className="text-sm text-warning">
-                Nenhuma conexão visível com as credenciais atuais. Verifique se o CLIENT_ID e o
-                CLIENT_SECRET são da mesma aplicação onde você autorizou o conector MeuPluggy.
+              <div className="rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm space-y-1.5">
+                <p className="font-medium">Nenhuma conexão visível com as credenciais atuais.</p>
+                <p className="text-muted-foreground">
+                  No painel do provedor cada aplicação tem o próprio par de credenciais, e uma
+                  aplicação só enxerga as conexões autorizadas dentro dela. As credenciais deste
+                  sistema começam com{' '}
+                  <span className="font-mono font-medium">{clientIdPrefixo || '—'}</span>: abra a
+                  aplicação onde você autorizou o conector MeuPluggy e confira se o Client ID dela
+                  começa igual. Se for outra, é preciso trocar as credenciais aqui.
+                </p>
+              </div>
+            )}
+            {disponiveis && disponiveis.length > 0 && clientIdPrefixo && (
+              <p className="text-xs text-muted-foreground">
+                Aplicação em uso: <span className="font-mono">{clientIdPrefixo}…</span>
               </p>
             )}
           </div>

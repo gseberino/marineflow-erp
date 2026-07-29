@@ -122,7 +122,10 @@ export function useListPluggyItems() {
         }
         throw error;
       }
-      return ((data as any)?.itens ?? []) as PluggyItemDisponivel[];
+      return {
+        itens: ((data as any)?.itens ?? []) as PluggyItemDisponivel[],
+        clientIdPrefixo: String((data as any)?.client_id_prefixo ?? ''),
+      };
     },
   });
 }

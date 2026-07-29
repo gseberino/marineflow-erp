@@ -91,6 +91,10 @@ Deno.serve(async (req) => {
       return jr({
         ok: true,
         itens: itens.map((i) => ({ ...i, ja_cadastrado: cadastrados.has(i.id) })),
+        // Prefixo do CLIENT_ID em uso, para comparar com a aplicação aberta no painel do
+        // provedor. É identificador, não segredo — e sem ele não há como saber a QUAL
+        // aplicação o sistema está conectado quando a lista volta vazia.
+        client_id_prefixo: clientId.slice(0, 8),
       });
     }
 

@@ -31,7 +31,7 @@ vi.mock('@/hooks/use-bank-connections', () => ({
   useSaveBankConnection: () => ({ mutateAsync: async () => {}, isPending: false }),
   useDeleteBankConnection: () => ({ mutateAsync: async () => {}, isPending: false }),
   useSyncBank: () => ({ mutateAsync: async () => ({ ok: true, message: 'ok', resultados: [] }), isPending: false }),
-  useListPluggyItems: () => ({ mutateAsync: async () => [], isPending: false }),
+  useListPluggyItems: () => ({ mutateAsync: async () => ({ itens: [], clientIdPrefixo: 'abcd1234' }), isPending: false }),
 }));
 
 function renderPainel() {
