@@ -11,6 +11,12 @@ interface ServiceTimerProps {
   finishedAt: string | null;
   elapsedMinutes: number;
   onUpdate: () => void;
+  /**
+   * A linha tem passos no Roteiro de Execução. Quando tem, o tempo vem da soma
+   * dos passos (trigger rollup_step_time_to_service_line) e este cronômetro vira
+   * leitura: dois donos do mesmo número é como o dado se perde.
+   */
+  managedByRoute?: boolean;
 }
 
 export function ServiceTimer({
@@ -20,8 +26,11 @@ export function ServiceTimer({
   finishedAt,
   elapsedMinutes,
   onUpdate,
+  managedByRoute = false,
 }: ServiceTimerProps) {
-  const [running, setRunning] = useState(!!startedAt && !finishedAt);
+  // Com o roteiro no comando, este cronômetro é só leitura — não deixa um
+  // intervalo rodando invisível no fundo.
+  const [running, setRunning] = useState(!managedByRoute && !!startedAt && !finishedAt);
   const [display, setDisplay] = useState(elapsedMinutes * 60);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -94,6 +103,21 @@ export function ServiceTimer({
     setRunning(false);
     onUpdate();
   };
+
+  // Roteiro no comando: mostra o total somado dos passos, sem botões. Quem
+  // controla o relógio é o Modo Foco, na aba Roteiro.
+  if (managedByRoute) {
+    return (
+      <div
+        className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+        title="O tempo desta linha vem dos passos do roteiro"
+      >
+        <Timer className="h-3 w-3" />
+        {fmt(elapsedMinutes * 60)}
+        <span className="text-[10px] opacity-70">· pelo roteiro</span>
+      </div>
+    );
+  }
 
   if (finishedAt) {
     return (

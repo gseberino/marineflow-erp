@@ -427,13 +427,3 @@ grant select on public.v_service_order_labor_variance to authenticated;
 
 comment on view public.v_service_order_labor_variance is
   'Orçado x padrão do roteiro x real por OS. O tempo aqui é custo, não unidade de faturamento.';
-
--- ─────────────────────────────────────────────────────────────
--- 10. FECHAR A FUNÇÃO DE TRIGGER (apontado pelo advisor)
---     rollup_step_time_to_service_line() precisa ser SECURITY DEFINER para
---     escrever em service_order_services independentemente de quem move o passo,
---     mas o PostgREST a expõe em /rest/v1/rpc/ — inclusive para anon. Chamada
---     fora do contexto de trigger ela falharia, mas superfície que não precisa
---     existir não deve existir.
--- ─────────────────────────────────────────────────────────────
-revoke all on function public.rollup_step_time_to_service_line() from public, anon, authenticated;

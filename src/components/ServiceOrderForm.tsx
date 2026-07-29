@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -13,6 +13,7 @@ import { useClients } from '@/hooks/use-clients';
 import { useVessels } from '@/hooks/use-vessels';
 import { useMarinas } from '@/hooks/use-marinas';
 import { useProducts } from '@/hooks/use-products';
+import { useServiceOrderSteps } from '@/hooks/use-service-steps';
 import { useServices } from '@/hooks/use-services';
 import { useCardFees } from '@/hooks/use-card-fees';
 import { useAppSettings } from '@/hooks/use-app-settings';
@@ -137,6 +138,13 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const calcTravelCost = (p: Parameters<typeof calculateTravelCost>[0]) => calculateTravelCost(p, travelRates);
   const { data: paymentPresets } = usePaymentConditionPresets();
   const { data: pdfData } = usePDFData(isNew ? undefined : orderId);
+  // Linhas que já têm roteiro: nelas o cronômetro vira leitura, porque o tempo
+  // passa a vir da soma dos passos (aba Roteiro).
+  const { data: routeSteps = [] } = useServiceOrderSteps(isNew ? undefined : orderId);
+  const linesWithRoute = useMemo(
+    () => new Set(routeSteps.map((s) => s.service_order_service_id).filter(Boolean) as string[]),
+    [routeSteps],
+  );
   const queryClient = useQueryClient();
   const openPdfDialog = (type: 'quote' | 'service_order' | 'invoice') => {
     if (orderId) {
@@ -2326,6 +2334,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                       startedAt={s.started_at || null}
                       finishedAt={s.finished_at || null}
                       elapsedMinutes={s.elapsed_minutes || 0}
+                      managedByRoute={linesWithRoute.has(s.id)}
                       onUpdate={() =>
                         queryClient.invalidateQueries({ queryKey: ['so-services', orderId] })
                       }

@@ -12,6 +12,7 @@ import { quoteTools } from "./quotes.ts";
 import { quoteBuilderTools } from "./quote-builder.ts";
 import { crmTools } from "./crm.ts";
 import { fieldOpsTools } from "./field-ops.ts";
+import { routeOpsTools } from "./route-ops.ts";
 import { autonomyTools } from "./autonomy.ts";
 import { contactTools } from "./contacts.ts";
 import { entityMemoryTools } from "./entity-memory.ts";
@@ -49,6 +50,7 @@ export const allTools: ToolDef[] = [
   ...quoteBuilderTools,
   ...crmTools,
   ...fieldOpsTools,
+  ...routeOpsTools,
   ...autonomyTools,
   ...entity360Tools,
   ...registryCrudTools,

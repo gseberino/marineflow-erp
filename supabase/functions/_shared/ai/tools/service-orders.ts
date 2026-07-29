@@ -308,12 +308,33 @@ export const serviceOrderTools: ToolDef[] = [
         .select("id, name_snapshot, quantity, unit_price_snapshot, line_total")
         .eq("service_order_id", args.id);
 
+      // Resumo do roteiro: sem isto o agente afirmaria que não há nada pendente
+      // com passos abertos. O detalhe fica em get_service_order_route.
+      const { data: steps } = await sb
+        .from("service_order_steps")
+        .select("seq, title, status")
+        .eq("service_order_id", args.id)
+        .order("seq", { ascending: true });
+
+      const roteiro = (steps || []).length === 0
+        ? { tem_roteiro: false }
+        : {
+            tem_roteiro: true,
+            total: steps.length,
+            concluidos: steps.filter((s: any) => s.status === "done" || s.status === "not_applicable").length,
+            travados: steps.filter((s: any) => s.status === "blocked").length,
+            proximo: (steps.find((s: any) => s.status === "in_progress")
+              || steps.find((s: any) => s.status === "pending"))?.title || null,
+            detalhe_em: "get_service_order_route",
+          };
+
       return {
         service_order: {
           ...so,
           cliente: so.clients?.name || "—",
           embarcacao: so.vessels?.name || "—",
         },
+        roteiro,
         parts: (parts || []).map((p: any) => ({
           item_id: p.id,
           tipo: "part",

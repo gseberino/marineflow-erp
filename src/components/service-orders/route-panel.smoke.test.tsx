@@ -73,6 +73,7 @@ vi.mock('@/integrations/supabase/client', () => {
 import { ServiceRoutePanel } from './ServiceRoutePanel';
 import { StepFocusMode } from './StepFocusMode';
 import DayBoardPage from '@/pages/DayBoardPage';
+import { ServiceTimer } from '@/components/ServiceTimer';
 
 function wrap(ui: React.ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -159,6 +160,34 @@ describe('Modo Foco', () => {
     const allDone = steps.map((s) => ({ ...s, status: 'done' }));
     render(wrap(<StepFocusMode open onOpenChange={() => {}} steps={allDone as any} />));
     expect(await screen.findByText('Roteiro concluído')).toBeInTheDocument();
+  });
+});
+
+describe('Cronômetro da linha de serviço x Roteiro', () => {
+  // Dois donos do mesmo número é como o dado se perde: quando a linha tem passos,
+  // o tempo vem da soma deles e o cronômetro antigo vira leitura.
+  const base = {
+    serviceLineId: 'l1', serviceOrderId: 'os1',
+    startedAt: null, finishedAt: null, elapsedMinutes: 125,
+    onUpdate: () => {},
+  };
+
+  it('sem roteiro: mantém os botões de controle', () => {
+    render(wrap(<ServiceTimer {...base} />));
+    expect(screen.getByRole('button', { name: /iniciar/i })).toBeInTheDocument();
+  });
+
+  it('com roteiro: vira leitura, sem botão que possa sobrescrever o tempo', () => {
+    render(wrap(<ServiceTimer {...base} managedByRoute />));
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(screen.getByText(/pelo roteiro/)).toBeInTheDocument();
+    expect(screen.getByText(/2h 05m/)).toBeInTheDocument();
+  });
+
+  it('com roteiro: não deixa cronômetro rodando invisível', () => {
+    // startedAt preenchido e sem finishedAt seria "rodando" no comportamento antigo
+    render(wrap(<ServiceTimer {...base} startedAt={new Date().toISOString()} managedByRoute />));
+    expect(screen.queryByRole('button', { name: /pausar/i })).not.toBeInTheDocument();
   });
 });
 
