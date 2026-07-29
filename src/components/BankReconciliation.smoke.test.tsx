@@ -161,6 +161,20 @@ describe('BankReconciliation — render', () => {
     expect(screen.getByRole('button', { name: /^Confirmar$/ })).toBeInTheDocument();
   });
 
+  // A tela abre no trabalho do dia; a configuração de onde vêm os dados fica noutra seção,
+  // para não soterrar a fila de conciliação como acontecia antes.
+  it('separa conciliar de origem dos dados, abrindo em conciliar', async () => {
+    const user = userEvent.setup();
+    renderTela();
+    await screen.findByText(/PIX RECEBIDO RODRIGO/);
+    expect(screen.queryByText(/Importar arquivo/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Origem dos dados/i }));
+    expect(await screen.findByText(/Importar arquivo/)).toBeInTheDocument();
+    // A fila sai de cena enquanto a configuração está aberta.
+    expect(screen.queryByText(/PIX RECEBIDO RODRIGO/)).not.toBeInTheDocument();
+  });
+
   it('filtra por transações sem candidato', async () => {
     const user = userEvent.setup();
     renderTela();

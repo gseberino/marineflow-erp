@@ -114,29 +114,48 @@ export async function fetchAccounts(apiKey: string, itemId: string): Promise<Plu
 }
 
 /**
- * Transações de uma conta. Pagina até o fim porque extrato parcial é pior que nenhum:
- * some no meio sem avisar e a conciliação passa a mentir sobre o que falta.
+ * Transações de uma conta, paginando até o fim.
+ *
+ * Usa `/v2/transactions`, que navega por cursor: a resposta traz `next` com a URL da
+ * página seguinte, e o fim é `next` nulo. A rota antiga por número de página foi
+ * descontinuada pelo provedor (responde 410) — e o parâmetro de data também mudou de
+ * `from` para `dateFrom`, detalhe fácil de perder porque não dá erro: sem ele a busca
+ * simplesmente traz o histórico inteiro toda vez.
+ *
+ * Paginar até o fim importa: extrato parcial é pior que extrato nenhum, porque some no
+ * meio sem avisar e a conciliação passa a mentir sobre o que falta.
  */
 export async function fetchTransactions(
   apiKey: string,
   accountId: string,
   from?: string | null,
-  maxPages = 20,
+  maxPages = 40,
 ): Promise<PluggyTransaction[]> {
   const todas: PluggyTransaction[] = [];
-  for (let page = 1; page <= maxPages; page++) {
-    const params = new URLSearchParams({
-      accountId,
-      page: String(page),
-      pageSize: "200",
-    });
-    if (from) params.set("from", from);
-    const data = await pluggyGet(apiKey, `/transactions?${params.toString()}`);
+  let after: string | null = null;
+
+  for (let pagina = 0; pagina < maxPages; pagina++) {
+    // Sem `pageSize`: a v2 usa páginas de tamanho fixo e recusa o parâmetro com 400.
+    const params = new URLSearchParams({ accountId });
+    if (from) params.set("dateFrom", from);
+    if (after) params.set("after", after);
+
+    const data = await pluggyGet(apiKey, `/v2/transactions?${params.toString()}`);
     const lote = (data?.results ?? []) as PluggyTransaction[];
     todas.push(...lote);
-    const totalPages = Number(data?.totalPages ?? 1);
-    if (page >= totalPages || lote.length === 0) break;
+
+    const next = data?.next;
+    if (!next || lote.length === 0) break;
+
+    // `next` vem como URL completa; o que interessa é o cursor dentro dela.
+    try {
+      after = new URL(String(next), PLUGGY_API).searchParams.get("after");
+    } catch {
+      after = null;
+    }
+    if (!after) break;
   }
+
   return todas;
 }
 

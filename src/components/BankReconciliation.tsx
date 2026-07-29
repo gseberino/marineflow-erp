@@ -28,6 +28,8 @@ import { supabase } from '@/integrations/supabase/client';
 
 type ReconcileMode = 'existing' | 'service_order' | 'new' | 'dismiss';
 type TabType = 'pending' | 'reconciled' | 'ignored';
+/** Separa o trabalho diário (conciliar) da configuração (de onde vêm os dados). */
+type SecaoType = 'conciliar' | 'fontes';
 
 export function BankReconciliation() {
   const { t, formatCurrency, formatDate } = useI18n();
@@ -65,6 +67,7 @@ export function BankReconciliation() {
     (engine?.transactions || []).filter(t => t.internalTransfer).map(t => t.transaction.id),
   );
 
+  const [secao, setSecao] = useState<SecaoType>('conciliar');
   const [tab, setTab] = useState<TabType>('pending');
   const [search, setSearch] = useState('');
   const [matchFilter, setMatchFilter] = useState<'all' | 'with' | 'without'>('all');
@@ -427,21 +430,55 @@ export function BankReconciliation() {
 
   return (
     <div className="space-y-6">
-      {/* Contas conectadas: o caminho automático. A importação por arquivo continua
-          logo abaixo, como alternativa e para extrato de banco sem Open Finance. */}
-      <BankConnectionsPanel />
-
-      {/* Import area — always visible */}
-      <div
-        className="border-2 border-dashed rounded-xl p-8 text-center cursor-pointer hover:border-primary/50 transition-colors"
-        onDragOver={e => e.preventDefault()} onDrop={handleDrop}
-        onClick={() => { const i = document.createElement('input'); i.type = 'file'; i.accept = '.ofx,.csv,.xls,.xlsx'; i.onchange = (e: any) => { if (e.target.files[0]) handleFile(e.target.files[0]); }; i.click(); }}
-      >
-        <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">{t.financial.dropStatementHere}</p>
+      {/* Duas coisas diferentes moravam na mesma tela: conciliar (todo dia) e configurar de
+          onde vêm os dados (uma vez). Empilhadas, a fila de trabalho ficava soterrada pelo
+          que quase nunca se mexe. */}
+      <div className="flex gap-1 border-b">
+        {([
+          { key: 'conciliar' as SecaoType, label: 'Conciliar', contador: pending.length },
+          { key: 'fontes' as SecaoType, label: 'Origem dos dados', contador: null },
+        ]).map(({ key, label, contador }) => (
+          <button
+            key={key}
+            onClick={() => setSecao(key)}
+            className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              secao === key
+                ? 'border-primary text-foreground'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {label}{contador !== null && contador > 0 ? ` (${contador})` : ''}
+          </button>
+        ))}
       </div>
 
-      {preview && (
+      {secao === 'fontes' && (
+        <div className="space-y-6">
+          {/* Contas conectadas: o caminho automático. */}
+          <BankConnectionsPanel />
+
+          <div className="space-y-2">
+            <div>
+              <h3 className="font-semibold">Importar arquivo</h3>
+              <p className="text-sm text-muted-foreground">
+                Alternativa para banco sem Open Finance, ou para trazer histórico antigo.
+              </p>
+            </div>
+            <div
+              className="border-2 border-dashed rounded-xl p-8 text-center cursor-pointer hover:border-primary/50 transition-colors"
+              onDragOver={e => e.preventDefault()} onDrop={handleDrop}
+              onClick={() => { const i = document.createElement('input'); i.type = 'file'; i.accept = '.ofx,.csv,.xls,.xlsx'; i.onchange = (e: any) => { if (e.target.files[0]) handleFile(e.target.files[0]); }; i.click(); }}
+            >
+              <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">{t.financial.dropStatementHere}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* A prévia do arquivo pertence à configuração, mas só faz sentido enquanto há
+          arquivo carregado — por isso acompanha a seção de origem. */}
+      {secao === 'fontes' && preview && (
         <div className="rounded-xl border bg-card p-4 space-y-3">
           {previewSource === 'credit_card' && (
             <div className="rounded-lg bg-warning/10 border border-warning/30 p-3 text-sm text-warning">
@@ -472,7 +509,8 @@ export function BankReconciliation() {
       )}
 
       {/* Tab selector */}
-      <div className="flex gap-1">
+      {secao === 'conciliar' && (
+      <div className="flex gap-1 flex-wrap">
         {([
           { key: 'pending' as TabType, label: t.financial.pendingTab, count: pending.length },
           { key: 'reconciled' as TabType, label: t.financial.reconciledTab, count: reconciledTx.length },
@@ -483,9 +521,10 @@ export function BankReconciliation() {
           </Button>
         ))}
       </div>
+      )}
 
       {/* === PENDING TAB === */}
-      {tab === 'pending' && (
+      {secao === 'conciliar' && tab === 'pending' && (
         <div>
           {/* Painel de situação: quanto está pendente, quanto disso o sistema já sabe
               explicar e quanto vai exigir análise. Sem isto, "13 sugestões" era um número
@@ -1025,7 +1064,7 @@ export function BankReconciliation() {
       )}
 
       {/* === RECONCILED TAB === */}
-      {tab === 'reconciled' && (
+      {secao === 'conciliar' && tab === 'reconciled' && (
         <div>
           <h3 className="font-semibold mb-3">{t.financial.reconciledTab} ({reconciledTx.length})</h3>
           {reconciledTx.length === 0 ? (
@@ -1068,7 +1107,7 @@ export function BankReconciliation() {
       )}
 
       {/* === IGNORED TAB === */}
-      {tab === 'ignored' && (
+      {secao === 'conciliar' && tab === 'ignored' && (
         <div>
           <h3 className="font-semibold mb-3">{t.financial.ignoredTab} ({ignoredTx.length})</h3>
           {ignoredTx.length === 0 ? (
