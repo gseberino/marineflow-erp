@@ -15,7 +15,7 @@
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
   suggestMatches, pickAutoApply, suggestCombinations, statementSignature,
-  looksLikeInternalTransfer,
+  looksLikeInternalTransfer, findInternalTransfers,
 } from "../_shared/banking/matching.ts";
 import { expectedDepositAmount } from "../_shared/banking/quote-deposit.ts";
 import type { BankTx, Candidate, Suggestion } from "../_shared/banking/types.ts";
@@ -172,7 +172,7 @@ Deno.serve(async (req) => {
     // ── Transações pendentes ─────────────────────────────────────────────────
     let txQuery = admin
       .from("bank_transactions")
-      .select("id, transaction_date, description, amount, transaction_type, pix_end_to_end_id, counterparty_document, counterparty_name")
+      .select("id, transaction_date, description, amount, transaction_type, pix_end_to_end_id, counterparty_document, counterparty_name, bank_connection_id")
       .eq("reconciled", false)
       .order("transaction_date", { ascending: false })
       .limit(body.limit ?? 200);
@@ -219,20 +219,43 @@ Deno.serve(async (req) => {
       .maybeSingle();
     const companyName = (cfgEmpresa as any)?.value ?? null;
 
+    // ── Transferências entre contas da própria empresa ───────────────────────
+    // Com mais de uma conta conectada, o mesmo dinheiro aparece duas vezes: sai de uma e
+    // entra na outra. Sem parear, vira despesa e receita fantasmas — infla faturamento e
+    // custo ao mesmo tempo. Marcamos as duas pernas para saírem da caça a candidatos.
+    const paresInternos = findInternalTransfers(transactions as never[]);
+    const pernaDeTransferencia = new Map<string, string>();
+    for (const par of paresInternos) {
+      pernaDeTransferencia.set(par.saida.id, par.detail);
+      pernaDeTransferencia.set(par.entrada.id, par.detail);
+    }
+
     // ── Pontuação ────────────────────────────────────────────────────────────
     const perTransaction = transactions.map((tx) => {
-      const internalTransfer = looksLikeInternalTransfer(tx.description, tx.counterparty_name, companyName);
+      // Duas formas de reconhecer o mesmo fenômeno: pelo nome da empresa no histórico, ou
+      // pelo par saída↔entrada entre contas conectadas. A segunda é mais forte, porque
+      // enxerga as duas pernas do movimento em vez de depender do texto.
+      const parInterno = pernaDeTransferencia.get(tx.id) ?? null;
+      const internalTransfer = !!parInterno ||
+        looksLikeInternalTransfer(tx.description, tx.counterparty_name, companyName);
+
       // Transferência entre contas próprias não tem candidato a procurar: não é receita
       // nem despesa, é o mesmo dinheiro mudando de lugar.
       if (internalTransfer) {
-        return { transaction: tx, suggestions: [], groups: [], internalTransfer: true };
+        return {
+          transaction: tx,
+          suggestions: [],
+          groups: [],
+          internalTransfer: true,
+          internalTransferDetail: parInterno,
+        };
       }
       const suggestions = suggestMatches(tx, candidates, {}, 5, memoriaPorTx.get(tx.id));
       // Pagamento agrupado só interessa quando nenhuma conta sozinha explica o valor.
       const grupos = suggestions.some((s) => Math.abs(s.difference) < 0.01)
         ? []
         : suggestCombinations(tx, candidates);
-      return { transaction: tx, suggestions, groups: grupos, internalTransfer: false };
+      return { transaction: tx, suggestions, groups: grupos, internalTransfer: false, internalTransferDetail: null };
     });
 
     // ── Camada de certeza: aplica sozinha ────────────────────────────────────
@@ -262,6 +285,7 @@ Deno.serve(async (req) => {
         suggestions: p.suggestions,
         groups: p.groups,
         internalTransfer: p.internalTransfer,
+        internalTransferDetail: p.internalTransferDetail,
       })),
       applied,
       summary: {
@@ -270,6 +294,7 @@ Deno.serve(async (req) => {
         sugeridas: restantes.filter((p) => p.suggestions.length > 0).length,
         sem_candidato: restantes.filter((p) => p.suggestions.length === 0).length,
         candidatos_avaliados: candidates.length,
+        transferencias_internas: paresInternos.length,
       },
     });
   } catch (e) {

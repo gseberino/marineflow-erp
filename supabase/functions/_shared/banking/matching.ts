@@ -119,6 +119,82 @@ export function looksLikeInternalTransfer(
   return empresa.every((t) => texto.includes(` ${t} `) || texto.includes(t));
 }
 
+/** Uma saída de uma conta que corresponde à entrada em outra conta da empresa. */
+export interface InternalTransferPair {
+  saida: { id: string; date: string; description: string; amount: number; connectionId: string | null };
+  entrada: { id: string; date: string; description: string; amount: number; connectionId: string | null };
+  /** Dias entre as duas pernas — normalmente 0 ou 1. */
+  defasagem: number;
+  detail: string;
+}
+
+interface TxParaPareamento {
+  id: string;
+  transaction_date: string;
+  description: string;
+  amount: number;
+  transaction_type: "credit" | "debit";
+  bank_connection_id?: string | null;
+}
+
+/**
+ * Encontra transferências entre contas da própria empresa pareando as duas pernas.
+ *
+ * Com mais de uma conta conectada, o mesmo dinheiro aparece duas vezes: sai de uma e entra
+ * na outra. Sem parear, ele vira uma despesa e uma receita fantasmas — infla faturamento e
+ * custo ao mesmo tempo, e o resultado até fecha, mas todos os números do meio ficam errados.
+ *
+ * O pareamento é por valor idêntico, contas diferentes e poucos dias de defasagem (Pix cai
+ * na hora, TED entre bancos pode virar o dia). Cada perna é usada uma única vez: sem isso,
+ * três transferências de mesmo valor no mesmo dia gerariam pares cruzados absurdos.
+ */
+export function findInternalTransfers(
+  transacoes: TxParaPareamento[],
+  toleranciaDias = 2,
+): InternalTransferPair[] {
+  const saidas = transacoes.filter((t) => t.transaction_type === "debit");
+  const entradas = transacoes.filter((t) => t.transaction_type === "credit");
+  const usadas = new Set<string>();
+  const pares: InternalTransferPair[] = [];
+
+  // Maiores primeiro: se houver ambiguidade, é melhor resolvê-la nos valores que mais
+  // pesam no resultado.
+  for (const saida of saidas.slice().sort((a, b) => b.amount - a.amount)) {
+    if (usadas.has(saida.id)) continue;
+
+    const candidata = entradas.find((e) => {
+      if (usadas.has(e.id)) return false;
+      // Contas diferentes: dinheiro que sai e entra na MESMA conta não é transferência.
+      if (!e.bank_connection_id || !saida.bank_connection_id) return false;
+      if (e.bank_connection_id === saida.bank_connection_id) return false;
+      if (Math.abs(e.amount - saida.amount) >= 0.01) return false;
+      return Math.abs(daysBetween(e.transaction_date, saida.transaction_date)) <= toleranciaDias;
+    });
+
+    if (!candidata) continue;
+    usadas.add(saida.id);
+    usadas.add(candidata.id);
+
+    const defasagem = Math.abs(daysBetween(candidata.transaction_date, saida.transaction_date));
+    pares.push({
+      saida: {
+        id: saida.id, date: saida.transaction_date, description: saida.description,
+        amount: saida.amount, connectionId: saida.bank_connection_id ?? null,
+      },
+      entrada: {
+        id: candidata.id, date: candidata.transaction_date, description: candidata.description,
+        amount: candidata.amount, connectionId: candidata.bank_connection_id ?? null,
+      },
+      defasagem,
+      detail: defasagem === 0
+        ? "Saiu de uma conta e entrou em outra no mesmo dia, pelo mesmo valor"
+        : `Saiu de uma conta e entrou em outra ${defasagem} dia(s) depois, pelo mesmo valor`,
+    });
+  }
+
+  return pares;
+}
+
 /** Tolerância efetiva: a menor entre o percentual e o teto absoluto. */
 export function effectiveTolerance(expected: number, opts: MatchOptions): number {
   const pct = Math.abs(expected) * (opts.amountTolerancePct / 100);
