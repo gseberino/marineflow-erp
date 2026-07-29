@@ -36,7 +36,7 @@ export function DiagnosticExportButton({ variant = 'header' }: Props) {
       <button
         onClick={handleExport}
         disabled={loading}
-        className="fixed bottom-4 right-4 z-[60] flex items-center gap-2 rounded-full bg-primary px-3 py-2 text-xs font-medium text-primary-foreground shadow-lg hover:opacity-90 disabled:opacity-50"
+        className="fixed bottom-safe-4 right-4 z-[60] flex items-center gap-2 rounded-full bg-primary px-3 py-2 text-xs font-medium text-primary-foreground shadow-lg hover:opacity-90 disabled:opacity-50"
       >
         {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bug className="h-3.5 w-3.5" />}
         Exportar diagnóstico
