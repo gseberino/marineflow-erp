@@ -1618,9 +1618,61 @@ export type Database = {
         }
         Relationships: []
       }
+      bank_connections: {
+        Row: {
+          account_kind: string
+          active: boolean
+          created_at: string
+          external_id: string
+          id: string
+          institution: string | null
+          label: string
+          last_sync_imported: number | null
+          last_sync_message: string | null
+          last_sync_status: string | null
+          last_synced_at: string | null
+          last_transaction_date: string | null
+          provider: string
+          updated_at: string
+        }
+        Insert: {
+          account_kind?: string
+          active?: boolean
+          created_at?: string
+          external_id: string
+          id?: string
+          institution?: string | null
+          label: string
+          last_sync_imported?: number | null
+          last_sync_message?: string | null
+          last_sync_status?: string | null
+          last_synced_at?: string | null
+          last_transaction_date?: string | null
+          provider?: string
+          updated_at?: string
+        }
+        Update: {
+          account_kind?: string
+          active?: boolean
+          created_at?: string
+          external_id?: string
+          id?: string
+          institution?: string | null
+          label?: string
+          last_sync_imported?: number | null
+          last_sync_message?: string | null
+          last_sync_status?: string | null
+          last_synced_at?: string | null
+          last_transaction_date?: string | null
+          provider?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       bank_transactions: {
         Row: {
           amount: number
+          bank_connection_id: string | null
           balance_after: number | null
           bank_ref_id: string | null
           counterparty_document: string | null
@@ -1641,6 +1693,7 @@ export type Database = {
         }
         Insert: {
           amount: number
+          bank_connection_id?: string | null
           balance_after?: number | null
           bank_ref_id?: string | null
           counterparty_document?: string | null
@@ -1661,6 +1714,7 @@ export type Database = {
         }
         Update: {
           amount?: number
+          bank_connection_id?: string | null
           balance_after?: number | null
           bank_ref_id?: string | null
           counterparty_document?: string | null

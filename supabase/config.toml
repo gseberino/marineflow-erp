@@ -67,6 +67,11 @@ verify_jwt = false
 [functions.agenda-inbox-detector]
 verify_jwt = false
 
+# Sincronização de extrato (Open Finance via Pluggy). Mesmo desenho da banking-reconcile:
+# painel manda JWT, cron manda x-cron-secret — a validação é interna.
+[functions.banking-sync]
+verify_jwt = false
+
 # Motor de conciliação bancária. Dois chamadores: o painel (manda o JWT do usuário,
 # validado dentro da função via auth.getUser) e a varredura diária (pg_cron, que manda
 # só x-cron-secret). Com verify_jwt=true o gateway barraria o cron antes do código.

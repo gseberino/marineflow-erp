@@ -22,6 +22,7 @@ import {
 import { toast } from 'sonner';
 import { Upload, Check, X, Undo2, Sparkles, AlertTriangle } from 'lucide-react';
 import { StatusBadge } from '@/components/StatusBadge';
+import { BankConnectionsPanel } from '@/components/BankConnectionsPanel';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -426,6 +427,10 @@ export function BankReconciliation() {
 
   return (
     <div className="space-y-6">
+      {/* Contas conectadas: o caminho automático. A importação por arquivo continua
+          logo abaixo, como alternativa e para extrato de banco sem Open Finance. */}
+      <BankConnectionsPanel />
+
       {/* Import area — always visible */}
       <div
         className="border-2 border-dashed rounded-xl p-8 text-center cursor-pointer hover:border-primary/50 transition-colors"
