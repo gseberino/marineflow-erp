@@ -191,3 +191,17 @@ body {
     }
   }
 }
+
+/* Elementos com position:fixed NÃO herdam o recuo da .app-shell — eles se posicionam
+   pela viewport, que com viewport-fit=cover inclui a área do indicador de home (~34px
+   no iPhone). Um "bottom-4" (16px) fica atrás da barra do sistema. */
+@layer utilities {
+  /* Encosta no fundo respeitando a barra do sistema (gavetas, barras de ação). */
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  /* Botão flutuante a 1rem do fundo ÚTIL, não do fundo físico da tela. */
+  .bottom-safe-4 {
+    bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  }
+}

@@ -427,7 +427,11 @@ export default function FinancialPage() {
       )}
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
+        {/* Quebra em várias linhas em vez de transbordar: são seis abas com nomes longos,
+            e sem isto as últimas ("Conciliação Bancária", "Aging") saem da área visível em
+            telas menores — sem barra de rolagem, ficam simplesmente inacessíveis. Mesmo
+            tratamento que a versão V2 desta página já usava. */}
+        <TabsList className="flex h-auto w-full flex-wrap justify-start">
           <TabsTrigger value="overview">{t.financial.tabOverview}</TabsTrigger>
           <TabsTrigger value="dre">DRE / Avançado</TabsTrigger>
           <TabsTrigger value="receivables">{t.financial.tabReceivables}</TabsTrigger>

@@ -74,7 +74,7 @@ export default function VesselDetail() {
       </div>
 
       <Tabs defaultValue="overview">
-        <TabsList>
+        <TabsList className="flex h-auto w-full flex-wrap justify-start">
           <TabsTrigger value="overview">{t.common.overview}</TabsTrigger>
           <TabsTrigger value="technical">{t.vessels.technicalProfile}</TabsTrigger>
           <TabsTrigger value="history">{t.vessels.serviceHistory}</TabsTrigger>
