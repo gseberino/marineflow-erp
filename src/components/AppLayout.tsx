@@ -158,13 +158,13 @@ export function AppLayout({ children }: { children: ReactNode }) {
       icon: Wrench,
       roles: ['admin', 'financial', 'technician', 'seller'],
       items: [
-        { label: 'CRM & Funil', icon: Target, path: '/crm' },
-        { label: 'Ordens de Serviço', icon: ClipboardList, path: '/service-orders' },
-        { label: 'Orçamentos', icon: FileText, path: '/quotes' },
+        { label: 'CRM & Funil', icon: Target, path: '/v2/crm' },
+        { label: 'Ordens de Serviço', icon: ClipboardList, path: '/v2/service-orders' },
+        { label: 'Orçamentos', icon: FileText, path: '/v2/quotes' },
         { label: 'Agenda', icon: CalendarDays, path: '/agenda' },
         { label: 'Quadro do Dia', icon: LayoutGrid, path: '/day-board', roles: ['admin', 'financial', 'technician'] },
-        { label: 'Motor de Vendas', icon: Rocket, path: '/prospecting', roles: ['admin'] },
-        { label: 'Cobranças', icon: CreditCard, path: '/collections', roles: ['admin', 'financial'] },
+        { label: 'Motor de Vendas', icon: Rocket, path: '/v2/prospecting', roles: ['admin'] },
+        { label: 'Cobranças', icon: CreditCard, path: '/v2/collections', roles: ['admin', 'financial'] },
       ],
     },
     {
@@ -172,10 +172,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
       label: 'Vendas Externas',
       icon: ShoppingCart,
       items: [
-        { label: 'Meus Orçamentos', icon: ClipboardList, path: '/external-quotes' },
-        { label: 'Meus Prospectos', icon: Users, path: '/external-quotes/leads', roles: ['external_seller', 'seller', 'admin'] },
-        { label: 'Catálogo de Produtos', icon: Package, path: '/external-quotes/catalog', roles: ['external_seller', 'seller', 'admin'] },
-        { label: 'Aprovar Orçamentos', icon: CheckCircle2, path: '/external-quotes/approval', roles: ['admin', 'financial'] },
+        { label: 'Meus Orçamentos', icon: ClipboardList, path: '/v2/external-quotes' },
+        { label: 'Meus Prospectos', icon: Users, path: '/v2/external-quotes/leads', roles: ['external_seller', 'seller', 'admin'] },
+        { label: 'Catálogo de Produtos', icon: Package, path: '/v2/external-quotes/catalog', roles: ['external_seller', 'seller', 'admin'] },
+        { label: 'Aprovar Orçamentos', icon: CheckCircle2, path: '/v2/external-quotes/approval', roles: ['admin', 'financial'] },
       ],
     },
     {
@@ -184,12 +184,12 @@ export function AppLayout({ children }: { children: ReactNode }) {
       icon: Database,
       roles: ['admin', 'financial', 'technician', 'seller'],
       items: [
-        { label: 'Clientes', icon: Users, path: '/clients' },
-        { label: 'Embarcações', icon: Ship, path: '/vessels' },
-        { label: 'Marinas', icon: Anchor, path: '/marinas' },
-        { label: 'Produtos', icon: Package, path: '/products' },
-        { label: 'Serviços', icon: Wrench, path: '/services' },
-        { label: 'Fornecedores', icon: Building2, path: '/suppliers' },
+        { label: 'Clientes', icon: Users, path: '/v2/clients' },
+        { label: 'Embarcações', icon: Ship, path: '/v2/vessels' },
+        { label: 'Marinas', icon: Anchor, path: '/v2/marinas' },
+        { label: 'Produtos', icon: Package, path: '/v2/products' },
+        { label: 'Serviços', icon: Wrench, path: '/v2/services' },
+        { label: 'Fornecedores', icon: Building2, path: '/v2/suppliers' },
       ],
     },
     {
@@ -202,10 +202,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
       icon: Boxes,
       roles: ['admin', 'financial'],
       items: [
-        { label: 'Entrada de Mercadoria (XML)', icon: FileDown, path: '/inventory/import-xml', roles: ['admin'] },
-        { label: 'Ordens de Compra', icon: Truck, path: '/purchase-orders', roles: ['admin', 'financial'] },
-        { label: 'Assistente de Compras', icon: ShoppingCart, path: '/inventory/smart-purchase', roles: ['admin', 'financial'] },
-        { label: 'Estoque', icon: Package, path: '/inventory', roles: ['admin', 'financial'] },
+        { label: 'Entrada de Mercadoria (XML)', icon: FileDown, path: '/v2/inventory/import-xml', roles: ['admin'] },
+        { label: 'Ordens de Compra', icon: Truck, path: '/v2/purchase-orders', roles: ['admin', 'financial'] },
+        { label: 'Assistente de Compras', icon: ShoppingCart, path: '/v2/inventory/smart-purchase', roles: ['admin', 'financial'] },
+        { label: 'Estoque', icon: Package, path: '/v2/inventory', roles: ['admin', 'financial'] },
       ],
     },
     {
@@ -217,9 +217,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
         // vez de passar por um redirecionamento: assim o endereço que aparece na barra é
         // o de verdade, e a rota antiga fica só como saída de emergência (?legacy=1).
         { label: 'Financeiro', icon: DollarSign, path: '/v2/financial', roles: ['admin', 'financial'] },
-        { label: 'Comissões', icon: Users, path: '/commissions', roles: ['admin', 'financial'] },
-        { label: 'Emissão Fiscal (NF-e)', icon: FileText, path: '/fiscal/emissao', roles: ['admin'] },
-        { label: 'Relatórios', icon: BarChart3, path: '/reports', roles: ['admin', 'financial'] },
+        { label: 'Comissões', icon: Users, path: '/v2/commissions', roles: ['admin', 'financial'] },
+        { label: 'Emissão Fiscal (NF-e)', icon: FileText, path: '/v2/fiscal/emissao', roles: ['admin'] },
+        { label: 'Relatórios', icon: BarChart3, path: '/v2/reports', roles: ['admin', 'financial'] },
       ],
     },
     {
@@ -228,10 +228,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
       icon: MessageCircle,
       roles: ['admin', 'financial', 'seller'],
       items: [
-        { label: 'Leads / Inbox', icon: MessageCircle, path: '/whatsapp/leads' },
-        { label: 'Agendar Status', icon: Camera, path: '/whatsapp/status' },
-        { label: 'Agendamentos', icon: CalendarClock, path: '/whatsapp/scheduled', roles: ['admin', 'financial'] },
-        { label: 'Logs', icon: History, path: '/whatsapp/logs', roles: ['admin'] },
+        { label: 'Leads / Inbox', icon: MessageCircle, path: '/v2/whatsapp/leads' },
+        { label: 'Agendar Status', icon: Camera, path: '/v2/whatsapp/status' },
+        { label: 'Agendamentos', icon: CalendarClock, path: '/v2/whatsapp/scheduled', roles: ['admin', 'financial'] },
+        { label: 'Logs', icon: History, path: '/v2/whatsapp/logs', roles: ['admin'] },
       ],
     },
     {
@@ -240,9 +240,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
       icon: Settings,
       roles: ['admin'],
       items: [
-        { label: 'Configurações', icon: Settings, path: '/settings' },
+        { label: 'Configurações', icon: Settings, path: '/v2/settings' },
         { label: 'Atividade da IA', icon: Bot, path: '/ai-activity' },
-        { label: 'Log de Auditoria', icon: History, path: '/audit-log' },
+        { label: 'Log de Auditoria', icon: History, path: '/v2/audit-log' },
       ],
     },
   ];
@@ -291,14 +291,17 @@ export function AppLayout({ children }: { children: ReactNode }) {
   // Track open/closed state per group. Default: only "operacional" open.
   const [openGroup, setOpenGroup] = useState<string | null>('operacional');
 
-  // Auto-expand the group that contains the active route
+  // Auto-expand the group that contains the active route.
+  // user?.id nas deps: no primeiro render o auth ainda não resolveu e
+  // visibleGroups vem vazio — sem re-rodar, um hard refresh em /v2/clients
+  // deixava Cadastros aceso porém fechado (bug pré-existente da v1).
   useEffect(() => {
     const activeGroup = visibleGroups.find((g) => g.items.some((i) => isActive(i.path)));
     if (activeGroup) {
       setOpenGroup(activeGroup.id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.pathname]);
+  }, [location.pathname, user?.id, user?.role]);
 
   const initials = user?.full_name
     ?.split(' ')
@@ -374,11 +377,11 @@ export function AppLayout({ children }: { children: ReactNode }) {
       <nav className="flex-1 space-y-1 p-2 overflow-y-auto scrollbar-thin">
         {/* Dashboard always visible at top */}
         <Link
-          to="/"
+          to="/v2/dashboard"
           onClick={() => setMobileOpen(false)}
           className={cn(
             'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
-            isActive('/')
+            isActive('/v2/dashboard')
               ? 'bg-sidebar-primary/15 text-sidebar-primary'
               : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
           )}
