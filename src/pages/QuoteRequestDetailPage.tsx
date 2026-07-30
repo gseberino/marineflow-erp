@@ -551,8 +551,9 @@ function OfferRow({
           )}
           {offer.isOutlier && (
             <span className="inline-flex items-center gap-0.5 font-medium text-amber-600 dark:text-amber-400">
-              · <AlertTriangle className="h-3 w-3" />
-              {Math.round(offer.deviationFromMean * 100)}% acima da média
+              <AlertTriangle className="h-3 w-3" />
+              {/* Uma string única: fragmentar em nós separados atrapalha leitor de tela. */}
+              <span>{`${Math.round(offer.deviationFromMean * 100)}% acima da média`}</span>
             </span>
           )}
           {offer.source !== 'manual' && <span className="opacity-70">· via {offer.source}</span>}

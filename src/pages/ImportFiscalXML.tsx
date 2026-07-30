@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,7 +20,9 @@ import { toast } from 'sonner';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useSuppliers } from '@/hooks/use-suppliers';
-import { usePurchaseOrders, usePurchaseOrder } from '@/hooks/use-purchase-orders';
+import {
+  usePurchaseOrders, usePurchaseOrder, PO_STATUS_LABELS, type POStatus,
+} from '@/hooks/use-purchase-orders';
 import { useI18n } from '@/i18n';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { useProducts } from '@/hooks/use-products';
@@ -158,6 +160,24 @@ export default function ImportFiscalXML() {
   // Três vias: quando um pedido é vinculado, carrega seus itens para confrontar
   // com a nota (quantidade e preço), pegando divergência de recebimento.
   const { data: linkedPO } = usePurchaseOrder(purchaseOrderId === '__none' ? undefined : purchaseOrderId);
+
+  // Pedidos ABERTOS do fornecedor da nota: são os candidatos plausíveis ao confronto
+  // em três vias. Antes a lista trazia todas as ordens de compra do sistema, sem
+  // sugestão — e as três notas já importadas em produção ficaram todas SEM pedido
+  // vinculado, ou seja, o confronto nunca aconteceu de fato.
+  const poCandidates = useMemo(() => {
+    if (supplierId === '__none') return [];
+    return ((purchaseOrders || []) as any[])
+      .filter(po => po.supplier_id === supplierId && ['draft', 'sent', 'partial'].includes(po.status))
+      .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  }, [purchaseOrders, supplierId]);
+
+  // Com um único pedido aberto do fornecedor, a escolha é obvia — já vem marcada.
+  // Com dois ou mais, não adivinha: quem confere decide (a tela mostra o aviso).
+  useEffect(() => {
+    if (purchaseOrderId !== '__none') return;
+    if (poCandidates.length === 1) setPurchaseOrderId(poCandidates[0].id);
+  }, [poCandidates, purchaseOrderId]);
 
   // Confronto pedido × nota, por produto. Casa o item da nota (produto resolvido
   // pelo preview do servidor) com o item do pedido (product_id). Só compara o que
@@ -605,16 +625,39 @@ export default function ImportFiscalXML() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__none">Não vincular</SelectItem>
-                      {(purchaseOrders || []).map((po: any) => (
+                      {/* Pedidos abertos do fornecedor da nota primeiro: é o que se
+                          está recebendo em 99% dos casos. */}
+                      {poCandidates.map((po: any) => (
                         <SelectItem key={po.id} value={po.id}>
-                          {po.po_number || po.id.slice(0, 8)} — {po.supplier_name || po.suppliers?.name || 'sem fornecedor'}
+                          ⭐ {po.po_number || po.id.slice(0, 8)} — {PO_STATUS_LABELS[po.status as POStatus] || po.status}
                         </SelectItem>
                       ))}
+                      {((purchaseOrders || []) as any[])
+                        .filter(po => !poCandidates.some((c: any) => c.id === po.id))
+                        .map((po: any) => (
+                          <SelectItem key={po.id} value={po.id}>
+                            {po.po_number || po.id.slice(0, 8)} — {po.supplier_name || po.suppliers?.name || 'sem fornecedor'}
+                          </SelectItem>
+                        ))}
                     </SelectContent>
                   </Select>
-                  <p className="text-[11px] text-muted-foreground">
-                    Amarra a nota ao pedido, evitando receber a mesma mercadoria duas vezes.
-                  </p>
+                  {poCandidates.length > 1 && purchaseOrderId === '__none' ? (
+                    <p className="text-[11px] font-medium text-amber-600 dark:text-amber-400">
+                      {poCandidates.length} pedidos abertos deste fornecedor — escolha qual esta nota atende.
+                    </p>
+                  ) : poCandidates.length === 1 && purchaseOrderId === poCandidates[0].id ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      Vinculado ao único pedido aberto deste fornecedor. Troque se não for este.
+                    </p>
+                  ) : supplierId !== '__none' && poCandidates.length === 0 ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      Nenhum pedido aberto deste fornecedor — compra direta, sem confronto pedido × nota.
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground">
+                      Amarra a nota ao pedido, evitando receber a mesma mercadoria duas vezes.
+                    </p>
+                  )}
                 </div>
               </div>
 
