@@ -52,6 +52,12 @@ const PAGES = [
      estas entradas são o que prova que continua cabendo. */
   { path: '/purchasing', modes: ['light', 'dark'], slug: 'purchasing-hub', themeVia: 'storage' },
   { path: '/purchasing/quotes', modes: ['light', 'dark'], slug: 'quotes-list', themeVia: 'storage' },
+  /* Telas nascidas depois do inventário original do redesign (auditoria
+     30/07/2026): tudo que entra no sistema entra também neste crivo. */
+  { path: '/day-board', modes: ['light', 'dark'], slug: 'dayboard', themeVia: 'storage' },
+  { path: '/v2/financial?tab=banks', modes: ['light', 'dark'], slug: 'fin-banks', themeVia: 'storage' },
+  { path: '/v2/financial?tab=inbox', modes: ['light', 'dark'], slug: 'fin-inbox', themeVia: 'storage' },
+  { path: '/v2/financial?tab=rules', modes: ['light', 'dark'], slug: 'fin-rules', themeVia: 'storage' },
 ];
 
 if (!EMAIL || !PASSWORD) {
