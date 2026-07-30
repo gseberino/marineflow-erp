@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -7,13 +7,11 @@ import {
   findSignalRow, simulateCardReceipt, computeItemDiscountTotal,
   computePartsProfit, computeReceivablesStatus,
 } from '@/lib/os-financials';
-import { ServiceTimer } from '@/components/ServiceTimer';
 import { useI18n } from '@/i18n';
 import { useClients } from '@/hooks/use-clients';
 import { useVessels } from '@/hooks/use-vessels';
 import { useMarinas } from '@/hooks/use-marinas';
 import { useProducts } from '@/hooks/use-products';
-import { useServiceOrderSteps } from '@/hooks/use-service-steps';
 import { useServices } from '@/hooks/use-services';
 import { useCardFees } from '@/hooks/use-card-fees';
 import { useAppSettings } from '@/hooks/use-app-settings';
@@ -38,15 +36,12 @@ import {
   useDuplicateServiceOrder,
   recalcTotals,
 } from '@/hooks/use-service-orders';
-import { useAppUsers, useCommissionableUsers, USER_ROLES } from '@/hooks/use-app-users';
+import { useAppUsers, useCommissionableUsers } from '@/hooks/use-app-users';
 import { usePaymentConditionPresets } from '@/hooks/use-payment-conditions';
 import { useCollectionsByOS } from '@/hooks/use-collections';
 import { useReceivablesByServiceOrder, usePaymentsByServiceOrder, useCreateReceivable } from '@/hooks/use-financial';
 import { PaymentDialog } from '@/components/PaymentDialog';
 import { useVesselContacts, VESSEL_CONTACT_ROLES } from '@/hooks/use-vessel-contacts';
-import { ClientCombobox } from '@/components/ClientCombobox';
-import { VesselSelect } from '@/components/VesselSelect';
-import { EntityCombobox, type EntityOption } from '@/components/EntityCombobox';
 import { QuickProductDialog } from '@/components/QuickProductDialog';
 import { MarinaFormDialog } from '@/components/MarinaFormDialog';
 import { QuickSupplierDialog } from '@/components/QuickSupplierDialog';
@@ -65,13 +60,11 @@ import { RegisterDepositDialog } from '@/components/RegisterDepositDialog';
 import { CompletionSendDialog } from '@/components/CompletionSendDialog';
 import { StockAlertDialog } from '@/components/StockAlertDialog';
 import { ReceivePODialog } from '@/components/ReceivePODialog';
-import { OPERATIONAL_EXPENSE_CATEGORIES } from '@/lib/expense-categories';
 import { calculateDisplacement, calculateTravelCost, travelRatesFromSettings } from '@/lib/displacement';
 import { statusConfig, priorityConfig } from '@/lib/constants';
 import { StatusBadge } from '@/components/StatusBadge';
 import { ServiceFormDialog } from '@/components/ServiceFormDialog';
 import { ServiceOrderSignatures } from '@/components/ServiceOrderSignatures';
-import { ServiceOrderPhotos } from '@/components/ServiceOrderPhotos';
 import { WhatsAppSendHistoryDialog } from '@/components/WhatsAppSendHistoryDialog';
 import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/SendViaWhatsAppDialog';
 import { useWhatsAppSendHistory } from '@/hooks/use-whatsapp-send-log';
@@ -85,13 +78,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Plus, Trash2, RefreshCw, AlertTriangle, Calculator, CreditCard, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle, Pencil, Paperclip, X, FileImage, ExternalLink, Package, Copy, Camera, MapPin, Clock, Download, Loader2, DollarSign, Tag, Percent, Hash, PackagePlus } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, AlertTriangle, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle, Copy, Download, Loader2, DollarSign, Percent, Hash } from 'lucide-react';
 import { toast } from 'sonner';
 import { normalizePhoneE164 } from '@/lib/masks';
-import { MoneyInput } from '@/components/MoneyInput';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { recordWhatsAppEvent } from '@/lib/diagnostics';
 import { useAITextOptimizer } from '@/hooks/use-ai-text-optimizer';
@@ -102,20 +93,13 @@ interface Props {
   isLoading?: boolean;
 }
 
-const SERVICE_TYPES = [
-  'diagnosis', 'repair', 'installation', 'preventive_maintenance',
-  'consulting', 'engineering_project', 'commissioning', 'inspection',
-] as const;
-
-const PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const;
-const STATUSES = [
-  'draft', 'scheduled', 'open', 'in_progress', 'awaiting_parts',
-  'awaiting_client', 'approved', 'completed', 'invoiced', 'cancelled',
-] as const;
-import {
-  ServiceCardFormComponent, PartCardFormComponent, CustomInstallmentEditor,
-  QuickDiscountPopover, BILLING_UNIT_LABELS,
-} from './service-order/form-parts';
+import { GeneralSections } from './service-order/general-sections';
+import { SummarySections } from './service-order/summary-sections';
+import { PartsSection } from './service-order/parts-section';
+import { ExpensesTimeDialogs } from './service-order/expenses-time-dialogs';
+import { ServicesSection } from './service-order/services-section';
+import { TravelDialog } from './service-order/travel-dialog';
+import { FinancialSection } from './service-order/financial-section';
 export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const navigate = useNavigate();
   const { t, formatCurrency, formatDateTime, formatDate } = useI18n();
@@ -138,13 +122,6 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const calcTravelCost = (p: Parameters<typeof calculateTravelCost>[0]) => calculateTravelCost(p, travelRates);
   const { data: paymentPresets } = usePaymentConditionPresets();
   const { data: pdfData } = usePDFData(isNew ? undefined : orderId);
-  // Linhas que já têm roteiro: nelas o cronômetro vira leitura, porque o tempo
-  // passa a vir da soma dos passos (aba Roteiro).
-  const { data: routeSteps = [] } = useServiceOrderSteps(isNew ? undefined : orderId);
-  const linesWithRoute = useMemo(
-    () => new Set(routeSteps.map((s) => s.service_order_service_id).filter(Boolean) as string[]),
-    [routeSteps],
-  );
   const queryClient = useQueryClient();
   const openPdfDialog = (type: 'quote' | 'service_order' | 'invoice') => {
     if (orderId) {
@@ -268,7 +245,6 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   // Onda 4: agora controla a expansão da seção Financeiro inline (não mais um modal) — começa expandida.
   const [showFinancialDialog, setShowFinancialDialog] = useState(true);
   const [depositDialogOpen, setDepositDialogOpen] = useState(false);
-  const [showCommission, setShowCommission] = useState(false);
   const [depositFromFinancial, setDepositFromFinancial] = useState(false);
   // Prompt opt-in de conclusão (avisar cliente + saldo) — aberto ao concluir a OS.
   const [completionSend, setCompletionSend] = useState<{
@@ -407,7 +383,6 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [waPreview, setWaPreview] = useState<{ phone: string; message: string; url: string; clientName: string } | null>(null);
   const [waEditMessage, setWaEditMessage] = useState('');
   const [waEditPhone, setWaEditPhone] = useState('');
-  const [presetKey, setPresetKey] = useState(0);
 
   const [generatingCollections, setGeneratingCollections] = useState(false);
   const prevSignedAt = useRef<string | null>(null);
@@ -1889,2196 +1864,211 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         </DialogContent>
       </Dialog>
 
-      {/* A - Identification */}
-      <section className="rounded-xl border bg-card p-5 shadow-sm space-y-4">
-        <h2 className="font-semibold text-sm">{t.serviceOrders.tabOverview}</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div>
-            <Label>{t.common.status}</Label>
-            <Select value={form.status} onValueChange={(v) => set('status', v)} disabled={!isNew}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {STATUSES.map((s) => (
-                  <SelectItem key={s} value={s}>{(t.status as Record<string, string>)[s]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label>{t.serviceOrders.priority}</Label>
-            <Select value={form.priority} onValueChange={(v) => set('priority', v)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {PRIORITIES.map((p) => (
-                  <SelectItem key={p} value={p}>{(t.priority as Record<string, string>)[p]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label>{t.common.type}</Label>
-            <Select value={form.service_type} onValueChange={(v) => set('service_type', v)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {SERVICE_TYPES.map((st) => (
-                  <SelectItem key={st} value={st}>{(t.serviceType as Record<string, string>)[st]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </section>
+      <GeneralSections
+        isNew={isNew}
+        isLocked={isLocked}
+        orderData={orderData}
+        form={form}
+        set={set}
+        setForm={setForm}
+        clients={clients}
+        allVessels={allVessels}
+        clientVessels={clientVessels}
+        marinas={marinas}
+        appUsers={appUsers}
+        vesselContacts={vesselContacts}
+        selectedTechnicians={selectedTechnicians}
+        setSelectedTechnicians={setSelectedTechnicians}
+        setQuickMarinaOpen={setQuickMarinaOpen}
+        setQuickMarinaName={setQuickMarinaName}
+        isOptimizing={isOptimizing}
+        optimizeText={optimizeText}
+      />
 
-      {/* B - Client & Vessel */}
-      <section className="rounded-xl border bg-card p-5 shadow-sm space-y-4">
-        <h2 className="font-semibold text-sm">{t.serviceOrders.clientAndVessel}</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <Label>{t.serviceOrders.client} *</Label>
-            <ClientCombobox
-              value={form.client_id}
-              onChange={(clientId) => {
-                set('client_id', clientId);
-                set('vessel_id', '');
-                set('requested_by_contact_id', '');
-                set('requested_by_name', '');
-              }}
-              clients={clients}
-              disabled={isLocked}
-            />
-          </div>
-          <div>
-            <Label>{t.serviceOrders.vessel} *</Label>
-            <VesselSelect
-              value={form.vessel_id}
-              clientId={form.client_id}
-              vessels={clientVessels}
-              disabled={!form.client_id || isLocked}
-              onChange={(vesselId) => {
-                set('vessel_id', vesselId);
-                set('requested_by_contact_id', '');
-                const vessel = allVessels?.find(v => v.id === vesselId);
-                if (vessel?.marina_id) set('marina_id', vessel.marina_id);
-              }}
-              onVesselCreated={(vessel) => {
-                set('vessel_id', vessel.id);
-                if (vessel.marina_id) set('marina_id', vessel.marina_id);
-              }}
-            />
-          </div>
-          <div>
-            <Label>{t.serviceOrders.marina}</Label>
-            <EntityCombobox
-              value={form.marina_id}
-              onChange={(v) => set('marina_id', v)}
-              options={(marinas || []).filter((m) => m.active).map((m) => ({
-                value: m.id,
-                label: m.name,
-                description: m.city || undefined,
-              }))}
-              placeholder="—"
-              onCreate={(typed) => {
-                setQuickMarinaName(typed);
-                setQuickMarinaOpen(true);
-              }}
-              createLabel="+ Cadastrar nova marina"
-            />
-          </div>
-          <div>
-            <Label>{t.serviceOrders.requestedBy}</Label>
-            {vesselContacts && vesselContacts.length > 0 ? (
-              <Select
-                value={form.requested_by_contact_id || 'none'}
-                onValueChange={(v) => {
-                  const contact = vesselContacts.find(c => c.id === v);
-                  setForm(f => ({
-                    ...f,
-                    requested_by_contact_id: v === 'none' ? '' : v,
-                    requested_by_name: contact?.full_name || '',
-                  }));
-                }}
-                disabled={isLocked}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecionar contato" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">—</SelectItem>
-                  {vesselContacts.map(c => (
-                    <SelectItem key={c.id} value={c.id}>
-                      <span className="flex items-center gap-1">
-                        {c.full_name}
-                        <span className="text-xs text-muted-foreground">
-                          ({VESSEL_CONTACT_ROLES.find(r => r.value === c.role)?.label || c.role})
-                        </span>
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : (
-              <div>
-                <Input
-                  value={form.requested_by_name}
-                  onChange={e => set('requested_by_name', e.target.value)}
-                  placeholder="Nome do solicitante"
-                  disabled={isLocked}
-                />
-                {form.vessel_id && (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Cadastre contatos na embarcação para aparecerem aqui
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Pedido do cliente: viaja até a NF-e ao faturar e sai no início das
-              informações complementares da nota. */}
-          <div>
-            <Label>Ordem de compra do cliente</Label>
-            <Input
-              value={form.customer_po_number}
-              onChange={e => set('customer_po_number', e.target.value)}
-              placeholder="Ex.: 05447"
-              maxLength={15}
-              disabled={isLocked}
-            />
-            <p className="text-xs text-muted-foreground mt-1">
-              Sai na NF-e ao faturar
-            </p>
-          </div>
-
-          <div>
-            <Label>Comprador</Label>
-            <Input
-              value={form.customer_buyer_name}
-              onChange={e => set('customer_buyer_name', e.target.value)}
-              placeholder="Ex.: Everton"
-              disabled={isLocked}
-            />
-            <p className="text-xs text-muted-foreground mt-1">
-              Em branco, usa o solicitante
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* C - Scheduling + Technicians (merged) */}
-      <section className="rounded-xl border bg-card p-5 shadow-sm space-y-4">
-        <h2 className="font-semibold text-sm">{t.serviceOrders.schedule}</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <Label>{t.serviceOrders.scheduledStart}</Label>
-            <Input type="datetime-local" value={form.scheduled_start_at} onChange={(e) => set('scheduled_start_at', e.target.value)} />
-          </div>
-          <div>
-            <Label>{t.serviceOrders.scheduledEnd}</Label>
-            <Input type="datetime-local" value={form.scheduled_end_at} onChange={(e) => set('scheduled_end_at', e.target.value)} />
-          </div>
-        </div>
-        {/* Technicians */}
-        <div>
-          <Label>{t.serviceOrders.technicians}</Label>
-          <div className="flex flex-wrap gap-2 mt-1">
-            {(appUsers || []).filter((u: any) =>
-              u.id && u.id.trim() !== '' &&
-              ['admin', 'technician', 'seller'].includes(u.role)
-            ).map((u) => (
-              <label key={u.id} className="flex items-center gap-1.5 text-sm border rounded-lg px-3 py-1.5 cursor-pointer hover:bg-muted transition-colors">
-                <input
-                  type="checkbox"
-                  checked={selectedTechnicians.includes(u.id)}
-                  onChange={(e) => {
-                    const next = e.target.checked
-                      ? [...selectedTechnicians, u.id]
-                      : selectedTechnicians.filter((id) => id !== u.id);
-                    setSelectedTechnicians(next);
-                    set('technician_count_for_travel', next.length || 1);
-                  }}
-                />
-                {u.full_name}
-              </label>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* D - Problem & Technical (compact with collapsible) */}
-      <section className="rounded-xl border bg-card p-5 shadow-sm space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-sm">{t.serviceOrders.problemDescription}</h2>
-        </div>
-        <div>
-          <div className="flex items-center justify-between mb-1">
-            <Label>{t.serviceOrders.problemDescription} *</Label>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-6 px-2 text-xs text-primary hover:text-primary hover:bg-primary/10"
-              onClick={async () => {
-                const optimized = await optimizeText(form.problem_description);
-                if (optimized) set('problem_description', optimized);
-              }}
-              disabled={isOptimizing || !form.problem_description || isLocked}
-            >
-              <Sparkles className="h-3 w-3 mr-1" /> IA
-            </Button>
-          </div>
-          <Textarea value={form.problem_description} onChange={(e) => set('problem_description', e.target.value)} rows={3} disabled={isLocked} />
-        </div>
-        <Collapsible>
-          <CollapsibleTrigger asChild>
-            <button type="button" className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors w-full text-left">
-              <ChevronDown className="h-3.5 w-3.5 transition-transform [[data-state=open]>&]:rotate-180" />
-              Observações para impressão (PDF)
-            </button>
-          </CollapsibleTrigger>
-          <CollapsibleContent className="pt-2">
-            <Textarea
-              value={form.extra_notes || ''}
-              onChange={e => set('extra_notes', e.target.value)}
-              placeholder="Informações específicas para este cliente, condições especiais, garantias, prazos..."
-              rows={2}
-              disabled={isLocked}
-            />
-          </CollapsibleContent>
-        </Collapsible>
-
-        {/* Photos (Only if editing existing OS) */}
-        {orderData?.id && (
-          <Collapsible>
-            <CollapsibleTrigger asChild>
-              <button type="button" className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors w-full text-left">
-                <ChevronDown className="h-3.5 w-3.5 transition-transform [[data-state=open]>&]:rotate-180" />
-                <Camera className="h-3.5 w-3.5" />
-                Fotos da OS
-              </button>
-            </CollapsibleTrigger>
-            <CollapsibleContent className="pt-3">
-              <ServiceOrderPhotos serviceOrderId={orderData.id} />
-            </CollapsibleContent>
-          </Collapsible>
-        )}
-      </section>
-
-      {/* E - Labor Services — always visible (with always-on entry row) */}
-      <section className="rounded-xl border bg-card shadow-sm overflow-hidden">
-        <div className="p-5 border-b">
-          <h2 className="font-semibold text-sm">{t.services.laborSection}</h2>
-          {isNew && (
-            <p className="text-xs text-muted-foreground mt-1">
-              Itens adicionados aqui serão salvos quando você criar a OS.
-            </p>
-          )}
-        </div>
-
-        {/* List of services as collapsible cards + add button */}
-        {(() => {
-          const persisted = (soServices || []) as any[];
-          const drafts = isNew ? draftServices : [];
-          const technicians = (appUsers || []).filter(
-            (u: any) => u.role === 'technician' || u.role === 'admin'
-          );
-
-          // ServiceCardFormComponent is defined at module scope to preserve input focus.
-
-          const renderCollapsedRow = (opts: {
-            keyId: string;
-            name: string;
-            description?: string;
-            unit: string;
-            quantity: number;
-            unitPrice: number;
-            total: number;
-            isDraft?: boolean;
-            discountPct?: number;
-            discountAmount?: number;
-            onExpand: () => void;
-            onDelete: () => void;
-            onApplyDiscount?: (pct: number, discountAmount: number) => void;
-            extra?: React.ReactNode;
-          }) => (
-            <div
-              key={opts.keyId}
-              className={`flex items-center gap-3 px-4 py-3 border-b last:border-0 ${
-                opts.isDraft ? 'bg-amber-50/40' : ''
-              }`}
-            >
-              <div className="flex-1 min-w-0">
-                <div className="font-medium truncate">
-                  {opts.name}
-                  {opts.isDraft && (
-                    <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
-                      rascunho
-                    </span>
-                  )}
-                </div>
-                {opts.description && (
-                  <div className="text-xs text-muted-foreground truncate">
-                    {opts.description}
-                  </div>
-                )}
-              </div>
-              <div className="hidden sm:block w-20 text-center text-xs text-muted-foreground">
-                {BILLING_UNIT_LABELS[opts.unit] || opts.unit}
-              </div>
-              <div className="hidden sm:block w-16 text-center text-sm">
-                {opts.quantity}
-              </div>
-              <div className="hidden md:block w-28 text-right text-sm">
-                {formatCurrency(opts.unitPrice)}
-              </div>
-              <div className="w-28 text-right font-semibold">
-                {formatCurrency(opts.total)}
-                {(opts.discountPct || 0) > 0 && (
-                  <div className="text-[10px] font-normal text-destructive">−{opts.discountPct}%</div>
-                )}
-              </div>
-              {opts.onApplyDiscount && (
-                <QuickDiscountPopover
-                  quantity={opts.quantity}
-                  unitPrice={opts.unitPrice}
-                  discountPct={opts.discountPct || 0}
-                  discountAmount={opts.discountAmount || 0}
-                  formatCurrency={formatCurrency}
-                  onApply={opts.onApplyDiscount}
-                />
-              )}
-              {opts.extra}
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                onClick={opts.onExpand}
-                title="Editar"
-              >
-                <Pencil className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-destructive"
-                onClick={opts.onDelete}
-                title="Excluir"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-          );
-
-          return (
-            <div>
-              {persisted.length === 0 && drafts.length === 0 && openNewSvcCards.length === 0 && (
-                <p className="text-sm text-muted-foreground p-5">
-                  {t.services.noServicesLinked}
-                </p>
-              )}
-
-              {/* Header row labels */}
-              {(persisted.length > 0 || drafts.length > 0) && (
-                <div className="hidden sm:flex items-center gap-3 px-4 py-2 text-xs text-muted-foreground bg-muted/40 border-b">
-                  <div className="flex-1">{t.services.serviceName}</div>
-                  <div className="w-20 text-center">{t.services.billingUnit}</div>
-                  <div className="w-16 text-center">{t.serviceOrders.qty}</div>
-                  <div className="hidden md:block w-28 text-right">{t.serviceOrders.unitPrice}</div>
-                  <div className="w-28 text-right">{t.common.total}</div>
-                  <div className="w-16" />
-                </div>
-              )}
-
-              {/* Persisted rows */}
-              {persisted.map((s: any) => {
-                const isEditing = !!editingSvc[s.id];
-                if (isEditing) {
-                  return (
-                    <div key={s.id} className="border-b last:border-0">
-                      <ServiceCardFormComponent
-                        cardKey={s.id}
-                        draft={editingSvc[s.id]}
-                        services={services || []}
-                        appUsers={appUsers || []}
-                        formatCurrency={formatCurrency}
-                        onUpdate={(patch) =>
-                          setEditingSvc((prev) => ({
-                            ...prev,
-                            [s.id]: { ...prev[s.id], ...patch },
-                          }))
-                        }
-                        onConfirm={() => handleConfirmEditSvc(s.id)}
-                        onCancel={() => cancelSvcCard(s.id, false)}
-                        confirmDisabled={updateSvcLine.isPending}
-                      />
-                    </div>
-                  );
-                }
-                return renderCollapsedRow({
-                  keyId: s.id,
-                  name: s.name_snapshot,
-                  description: s.description_snapshot,
-                  unit: s.billing_unit_snapshot,
-                  quantity: s.quantity,
-                  unitPrice: s.unit_price_snapshot,
-                  total: s.line_total,
-                  discountPct: s.discount_pct,
-                  discountAmount: s.discount_amount,
-                  onApplyDiscount: (pct: number, discountAmount: number) => applyQuickDiscountToService(s, pct, discountAmount),
-                  onExpand: () => startEditPersisted(s),
-                  onDelete: () =>
-                    removeService.mutate({ id: s.id, service_order_id: orderId! }),
-                  extra: orderId ? (
-                    <ServiceTimer
-                      serviceLineId={s.id}
-                      serviceOrderId={orderId}
-                      startedAt={s.started_at || null}
-                      finishedAt={s.finished_at || null}
-                      elapsedMinutes={s.elapsed_minutes || 0}
-                      managedByRoute={linesWithRoute.has(s.id)}
-                      onUpdate={() =>
-                        queryClient.invalidateQueries({ queryKey: ['so-services', orderId] })
-                      }
-                    />
-                  ) : undefined,
-                });
-              })}
-
-              {/* Draft rows (OS not saved yet) */}
-              {drafts.map((d) =>
-                renderCollapsedRow({
-                  keyId: d.tempId,
-                  name: d.name_snapshot,
-                  description: d.description_snapshot,
-                  unit: d.billing_unit_snapshot,
-                  quantity: d.quantity,
-                  unitPrice: d.unit_price_snapshot,
-                  total: Math.round((d.unit_price_snapshot * d.quantity - (d.discount_amount || 0)) * 100) / 100,
-                  discountPct: d.discount_pct,
-                  discountAmount: d.discount_amount,
-                  onApplyDiscount: (pct: number, discountAmount: number) =>
-                    setDraftServices((prev) => prev.map((x) => (x.tempId === d.tempId ? { ...x, discount_pct: pct, discount_amount: discountAmount } : x))),
-                  isDraft: true,
-                  onExpand: () => {
-                    // Move draft into edit card and remove from drafts list
-                    const key = `new-${d.tempId}`;
-                    setEditingSvc((prev) => ({
-                      ...prev,
-                      [key]: {
-                        service_id: d.service_id || '',
-                        name_snapshot: d.name_snapshot,
-                        description_snapshot: d.description_snapshot || '',
-                        billing_unit_snapshot: d.billing_unit_snapshot,
-                        quantity: d.quantity,
-                        unit_price: d.unit_price_snapshot,
-                        notes: d.notes || '',
-                        technician_user_id: (d as any).technician_user_id || '',
-                        discount_pct: (d as any).discount_pct || 0,
-                        discount_amount: (d as any).discount_amount || 0,
-                      },
-                    }));
-                    setOpenNewSvcCards((prev) => [...prev, key]);
-                    setDraftServices((prev) => prev.filter((x) => x.tempId !== d.tempId));
-                  },
-                  onDelete: () =>
-                    setDraftServices((prev) => prev.filter((x) => x.tempId !== d.tempId)),
-                })
-              )}
-
-              {/* New (unsaved) cards */}
-              {openNewSvcCards.map((key) => (
-                <div key={key} className="border-b last:border-0">
-                  <ServiceCardFormComponent
-                    cardKey={key}
-                    draft={editingSvc[key]}
-                    services={services || []}
-                    appUsers={appUsers || []}
-                    formatCurrency={formatCurrency}
-                    onUpdate={(patch) =>
-                      setEditingSvc((prev) => ({
-                        ...prev,
-                        [key]: { ...prev[key], ...patch },
-                      }))
-                    }
-                    onConfirm={() => handleConfirmNewSvcCard(key)}
-                    onCancel={() => cancelSvcCard(key, true)}
-                    confirmDisabled={addService.isPending}
-                  />
-                </div>
-              ))}
-
-              {/* Add button */}
-              <div className="p-4 flex flex-wrap gap-2">
-                <Button size="sm" variant="outline" onClick={addNewSvcCard}>
-                  <Plus className="h-3.5 w-3.5 mr-1" /> Adicionar Serviço
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setShowNewServiceDialog(true)}
-                >
-                  {t.services.registerNew}
-                </Button>
-              </div>
-            </div>
-          );
-        })()}
-
-        {/* Services subtotal bar */}
-        {servicesItemCount > 0 && !isNew && (
-          <div className="px-5 py-3 border-t bg-muted/30 flex items-center justify-between text-sm flex-wrap gap-2">
-            <span className="text-muted-foreground">{servicesItemCount} {servicesItemCount === 1 ? 'serviço' : 'serviços'}{billableHours > 0 ? ` · ${billableHours.toFixed(1)}h faturáveis` : ''}</span>
-            <span className="font-semibold">{formatCurrency(laborCost)}</span>
-          </div>
-        )}
-      </section>
+      <ServicesSection
+        isNew={isNew}
+        orderId={orderId}
+        services={services}
+        soServices={soServices}
+        appUsers={appUsers}
+        servicesItemCount={servicesItemCount}
+        laborCost={laborCost}
+        billableHours={billableHours}
+        draftServices={draftServices}
+        setDraftServices={setDraftServices}
+        editingSvc={editingSvc}
+        setEditingSvc={setEditingSvc}
+        openNewSvcCards={openNewSvcCards}
+        setOpenNewSvcCards={setOpenNewSvcCards}
+        setShowNewServiceDialog={setShowNewServiceDialog}
+        addNewSvcCard={addNewSvcCard}
+        cancelSvcCard={cancelSvcCard}
+        handleConfirmNewSvcCard={handleConfirmNewSvcCard}
+        handleConfirmEditSvc={handleConfirmEditSvc}
+        startEditPersisted={startEditPersisted}
+        applyQuickDiscountToService={applyQuickDiscountToService}
+        updateSvcLine={updateSvcLine}
+        removeService={removeService}
+        addService={addService}
+      />
 
       {/* New Service Dialog */}
       <ServiceFormDialog open={showNewServiceDialog} onOpenChange={setShowNewServiceDialog} />
 
-      {!isNew && (
-        <Dialog open={showTravelDialog} onOpenChange={setShowTravelDialog}>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <MapPin className="h-4 w-4" /> Deslocamento
-              </DialogTitle>
-            </DialogHeader>
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h2 className="font-semibold text-sm">{t.serviceOrders.travel}</h2>
-                {marina?.latitude && (
-                  <Button variant="outline" size="sm" onClick={runDisplacement} className="gap-1">
-                    <RefreshCw className="h-3 w-3" />
-                    {t.serviceOrders.recalculate}
-                  </Button>
-                )}
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
-                <div>
-                  <Label>Distância total (km ida+volta)</Label>
-                  <Input type="number" min={0} step="0.1"
-                    value={form.travel_distance_km}
-                    onChange={(e) => {
-                      const km = parseFloat(e.target.value) || 0;
-                      set('travel_distance_km', km);
-                      if (!manualTravel) {
-                        set('travel_cost_total', calcTravelCost({
-                          distance_km: km,
-                          travel_hours: form.travel_hours,
-                          technician_count: form.technician_count_for_travel,
-                          ferry_cost: form.ferry_cost,
-                          travel_type: form.travel_type,
-                        }));
-                      }
-                    }}
-                  />
-                </div>
-                <div>
-                  <Label>Tempo de deslocamento (horas)</Label>
-                  <Input type="number" min={0} step="0.5"
-                    value={form.travel_hours}
-                    onChange={(e) => {
-                      const hours = parseFloat(e.target.value) || 0;
-                      set('travel_hours', hours);
-                      if (!manualTravel) {
-                        set('travel_cost_total', calcTravelCost({
-                          distance_km: form.travel_distance_km,
-                          travel_hours: hours,
-                          technician_count: form.technician_count_for_travel,
-                          ferry_cost: form.ferry_cost,
-                          travel_type: form.travel_type,
-                        }));
-                      }
-                    }}
-                  />
-                </div>
-                <div>
-                  <Label>Técnicos no deslocamento</Label>
-                  <Select
-                    value={String(form.technician_count_for_travel)}
-                    onValueChange={(v) => {
-                      const count = parseInt(v) || 1;
-                      set('technician_count_for_travel', count);
-                      if (!manualTravel) {
-                        set('travel_cost_total', calcTravelCost({
-                          distance_km: form.travel_distance_km,
-                          travel_hours: form.travel_hours,
-                          technician_count: count,
-                          ferry_cost: form.ferry_cost,
-                          travel_type: form.travel_type,
-                        }));
-                      }
-                    }}
-                  >
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="1">1 técnico — {formatCurrency(travelRates.hourly[1])}/h</SelectItem>
-                      <SelectItem value="2">2 técnicos — {formatCurrency(travelRates.hourly[2])}/h</SelectItem>
-                      <SelectItem value="3">3 técnicos — {formatCurrency(travelRates.hourly[3])}/h</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label>Tipo de atendimento</Label>
-                  <Select
-                    value={form.travel_type}
-                    onValueChange={(v: any) => {
-                      set('travel_type', v);
-                      if (!manualTravel) {
-                        set('travel_cost_total', calcTravelCost({
-                          distance_km: form.travel_distance_km,
-                          travel_hours: form.travel_hours,
-                          technician_count: form.technician_count_for_travel,
-                          ferry_cost: form.ferry_cost,
-                          travel_type: v,
-                        }));
-                      }
-                    }}
-                  >
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="comercial">Comercial (sem acréscimo)</SelectItem>
-                      <SelectItem value="urgencia">Urgência fora do horário (+50%)</SelectItem>
-                      <SelectItem value="fds_feriado">Final de semana / Feriado (+30%)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
+      <TravelDialog
+        isNew={isNew}
+        form={form}
+        set={set}
+        marina={marina}
+        travelRates={travelRates}
+        manualTravel={manualTravel}
+        setManualTravel={setManualTravel}
+        showTravelDialog={showTravelDialog}
+        setShowTravelDialog={setShowTravelDialog}
+        calcTravelCost={calcTravelCost}
+        runDisplacement={runDisplacement}
+      />
 
-              {/* Travessia de balsa */}
-              <div className="mt-3 space-y-2">
-                <div>
-                  <Label>Valor da travessia de balsa / ferry (R$)</Label>
-                  <MoneyInput
-                    value={form.ferry_cost}
-                    onValueChange={(v) => {
-                      set('ferry_cost', v);
-                      if (!manualTravel) {
-                        set('travel_cost_total', calcTravelCost({
-                          distance_km: form.travel_distance_km,
-                          travel_hours: form.travel_hours,
-                          technician_count: form.technician_count_for_travel,
-                          ferry_cost: v,
-                          travel_type: form.travel_type,
-                        }));
-                      }
-                    }}
-                  />
-                </div>
-              </div>
+      <PartsSection
+        isNew={isNew}
+        orderId={orderId}
+        orderData={orderData}
+        parts={parts}
+        products={products}
+        partsItemCount={partsItemCount}
+        partsRevenue={partsRevenue}
+        partsProfit={partsProfit}
+        partsMarginPct={partsMarginPct}
+        draftParts={draftParts}
+        setDraftParts={setDraftParts}
+        editingPart={editingPart}
+        setEditingPart={setEditingPart}
+        openNewPartCards={openNewPartCards}
+        setOpenNewPartCards={setOpenNewPartCards}
+        setPriceCalcCardKey={setPriceCalcCardKey}
+        addNewPartCard={addNewPartCard}
+        cancelPartCard={cancelPartCard}
+        handleConfirmNewPartCard={handleConfirmNewPartCard}
+        handleConfirmEditPart={handleConfirmEditPart}
+        startEditPersistedPart={startEditPersistedPart}
+        applyQuickDiscountToPart={applyQuickDiscountToPart}
+        updatePartLine={updatePartLine}
+        removePart={removePart}
+        addPart={addPart}
+      />
 
-              {/* Total calculado */}
-              <div className="mt-4 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Label>Total deslocamento</Label>
-                  <label className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <input type="checkbox" checked={manualTravel}
-                      onChange={(e) => setManualTravel(e.target.checked)} />
-                    Ajuste manual
-                  </label>
-                </div>
-                {manualTravel ? (
-                  <MoneyInput
-                    value={form.travel_cost_total}
-                    onValueChange={(v) => set('travel_cost_total', v)}
-                  />
-                ) : (
-                  <span className="text-lg font-semibold">
-                    {formatCurrency(form.travel_cost_total)}
-                  </span>
-                )}
-              </div>
+      <ExpensesTimeDialogs
+        isNew={isNew}
+        orderId={orderId}
+        showExpensesDialog={showExpensesDialog}
+        setShowExpensesDialog={setShowExpensesDialog}
+        showTimeDialog={showTimeDialog}
+        setShowTimeDialog={setShowTimeDialog}
+        showExpForm={showExpForm}
+        setShowExpForm={setShowExpForm}
+        showTimeForm={showTimeForm}
+        setShowTimeForm={setShowTimeForm}
+        expForm={expForm}
+        setExpForm={setExpForm}
+        timeForm={timeForm}
+        setTimeForm={setTimeForm}
+        editingExpenseId={editingExpenseId}
+        resetExpForm={resetExpForm}
+        handleAddExpense={handleAddExpense}
+        handleAddTime={handleAddTime}
+        handleEditExpense={handleEditExpense}
+        handleUploadReceipt={handleUploadReceipt}
+        handleRemoveReceipt={handleRemoveReceipt}
+        uploadingReceipt={uploadingReceipt}
+        receiptInputRef={receiptInputRef}
+        soExpenses={soExpenses}
+        timeEntries={timeEntries}
+        suppliers={suppliers}
+        appUsers={appUsers}
+        addExpense={addExpense}
+        addTime={addTime}
+        removeExpense={removeExpense}
+        removeTime={removeTime}
+        updateExpense={updateExpense}
+        setQuickSupplierOpen={setQuickSupplierOpen}
+        setQuickSupplierName={setQuickSupplierName}
+      />
 
-              <label className="flex items-center gap-2 text-sm cursor-pointer">
-                <input type="checkbox" checked={form.is_travel_billable !== false}
-                  onChange={(e) => set('is_travel_billable', e.target.checked)} />
-                Repassar deslocamento ao cliente
-                <span className="text-xs text-muted-foreground">(desmarque para custo interno, não repassado no orçamento/OS)</span>
-              </label>
-
-              {/* Breakdown do cálculo */}
-              {!manualTravel && form.travel_cost_total > 0 && (
-                <div className="mt-2 text-xs text-muted-foreground space-y-0.5">
-                  <div>• Km: {form.travel_distance_km} km × R$ 1,10 = {formatCurrency(form.travel_distance_km * 1.10)}</div>
-                  {form.travel_hours > 0 && (
-                    <div>• Horas: {form.travel_hours}h × {formatCurrency(
-                      form.technician_count_for_travel === 1 ? 90 :
-                      form.technician_count_for_travel === 2 ? 170 : 250
-                    )}/h = {formatCurrency(form.travel_hours * (
-                      form.technician_count_for_travel === 1 ? 90 :
-                      form.technician_count_for_travel === 2 ? 170 : 250
-                    ))}</div>
-                  )}
-                  {form.ferry_cost > 0 && <div>• Balsa: {formatCurrency(form.ferry_cost)}</div>}
-                  {form.travel_type !== 'comercial' && (
-                    <div>• Acréscimo {form.travel_type === 'urgencia' ? '50% (urgência)' : '30% (FDS/feriado)'}</div>
-                  )}
-                </div>
-              )}
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
-
-      {/* F - Parts — always visible (with always-on entry row) */}
-      <section className="rounded-xl border bg-card shadow-sm overflow-hidden">
-        <div className="p-5 border-b">
-          <h2 className="font-semibold text-sm">{t.serviceOrders.parts}</h2>
-          {isNew && (
-            <p className="text-xs text-muted-foreground mt-1">
-              Itens adicionados aqui serão salvos quando você criar a OS.
-            </p>
-          )}
-        </div>
-
-        {/* List of parts as collapsible cards + add button */}
-        {(() => {
-          const persisted = (parts || []) as any[];
-          const drafts = isNew ? draftParts : [];
-
-          // PartCardFormComponent and PART_UNITS are defined at module scope to preserve input focus.
-
-          const renderCollapsedPartRow = (opts: {
-            keyId: string;
-            name: string;
-            unit?: string;
-            quantity: number;
-            unitPrice: number;
-            total: number;
-            isDraft?: boolean;
-            image_url?: string | null;
-            warranty_expires_at?: string | null;
-            discountPct?: number;
-            discountAmount?: number;
-            onExpand: () => void;
-            onDelete: () => void;
-            onApplyDiscount?: (pct: number, discountAmount: number) => void;
-          }) => (
-            <div
-              key={opts.keyId}
-              className={`flex items-center gap-3 px-4 py-3 border-b last:border-0 ${
-                opts.isDraft ? 'bg-amber-50/40' : ''
-              }`}
-            >
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  {opts.image_url ? (
-                    <img
-                      src={opts.image_url}
-                      alt={opts.name}
-                      className="h-8 w-8 rounded object-cover flex-shrink-0"
-                    />
-                  ) : (
-                    <div className="h-8 w-8 rounded bg-muted flex items-center justify-center flex-shrink-0">
-                      <Package className="h-4 w-4 text-muted-foreground" />
-                    </div>
-                  )}
-                  <div>
-                    <div className="font-medium text-sm">{opts.name}</div>
-                    {opts.isDraft && (
-                      <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
-                        rascunho
-                      </span>
-                    )}
-                    {opts.warranty_expires_at && new Date(opts.warranty_expires_at) > new Date() && (
-                      <span className="ml-2 text-[10px] text-green-700 bg-green-100 rounded px-1">
-                        Garantia até {new Date(opts.warranty_expires_at).toLocaleDateString('pt-BR')}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-              {opts.unit && (
-                <div className="hidden sm:block w-16 text-center text-xs text-muted-foreground">
-                  {opts.unit}
-                </div>
-              )}
-              <div className="hidden sm:block w-16 text-center text-sm">
-                {opts.quantity}
-              </div>
-              <div className="hidden md:block w-28 text-right text-sm">
-                {formatCurrency(opts.unitPrice)}
-              </div>
-              <div className="w-28 text-right font-semibold">
-                {formatCurrency(opts.total)}
-                {(opts.discountPct || 0) > 0 && (
-                  <div className="text-[10px] font-normal text-destructive">−{opts.discountPct}%</div>
-                )}
-              </div>
-              {opts.onApplyDiscount && (
-                <QuickDiscountPopover
-                  quantity={opts.quantity}
-                  unitPrice={opts.unitPrice}
-                  discountPct={opts.discountPct || 0}
-                  discountAmount={opts.discountAmount || 0}
-                  formatCurrency={formatCurrency}
-                  onApply={opts.onApplyDiscount}
-                />
-              )}
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                onClick={opts.onExpand}
-                title="Editar"
-              >
-                <Pencil className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-destructive"
-                onClick={opts.onDelete}
-                title="Excluir"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-          );
-
-          return (
-            <div>
-              {persisted.length === 0 && drafts.length === 0 && openNewPartCards.length === 0 && (
-                <p className="text-sm text-muted-foreground p-5">
-                  {t.serviceOrders.noPartsYet}
-                </p>
-              )}
-
-              {/* Header row labels */}
-              {(persisted.length > 0 || drafts.length > 0) && (
-                <div className="hidden sm:flex items-center gap-3 px-4 py-2 text-xs text-muted-foreground bg-muted/40 border-b">
-                  <div className="flex-1">{t.serviceOrders.product}</div>
-                  <div className="w-16 text-center">Un</div>
-                  <div className="w-16 text-center">{t.serviceOrders.qty}</div>
-                  <div className="hidden md:block w-28 text-right">{t.serviceOrders.unitPrice}</div>
-                  <div className="w-28 text-right">{t.common.total}</div>
-                  <div className="w-16" />
-                </div>
-              )}
-
-              {/* Persisted rows */}
-              {persisted.map((p: any) => {
-                const isEditing = !!editingPart[p.id];
-                if (isEditing) {
-                  return (
-                    <div key={p.id} className="border-b last:border-0">
-                      <PartCardFormComponent
-                        cardKey={p.id}
-                        draft={editingPart[p.id]}
-                        products={products || []}
-                        formatCurrency={formatCurrency}
-                        onUpdate={(patch) =>
-                          setEditingPart((prev) => ({
-                            ...prev,
-                            [p.id]: { ...prev[p.id], ...patch },
-                          }))
-                        }
-                        onConfirm={() => handleConfirmEditPart(p.id, p)}
-                        onCancel={() => cancelPartCard(p.id, false)}
-                        onOpenPriceCalc={() => setPriceCalcCardKey(p.id)}
-                        confirmDisabled={updatePartLine.isPending}
-                        supabase={supabase}
-                        clientId={orderData?.client_id}
-                      />
-                    </div>
-                  );
-                }
-                return renderCollapsedPartRow({
-                  keyId: p.id,
-                  name: p.products?.name || 'Produto',
-                  unit: p.products?.unit,
-                  quantity: p.quantity,
-                  unitPrice: p.unit_sale_snapshot,
-                  total: p.line_total_sale,
-                  discountPct: p.discount_pct,
-                  discountAmount: p.discount_amount,
-                  onApplyDiscount: (pct: number, discountAmount: number) => applyQuickDiscountToPart(p, pct, discountAmount),
-                  image_url: p.products?.image_url || null,
-                  warranty_expires_at: p.warranty_expires_at || null,
-                  onExpand: () => startEditPersistedPart(p),
-                  onDelete: () =>
-                    removePart.mutate({
-                      id: p.id,
-                      service_order_id: orderId!,
-                      product_id: p.product_id,
-                      quantity: p.quantity,
-                      unit_cost_snapshot: p.unit_cost_snapshot,
-                    }),
-                });
-              })}
-
-              {/* Draft rows (OS not saved yet) */}
-              {drafts.map((d) =>
-                renderCollapsedPartRow({
-                  keyId: d.tempId,
-                  name: d.name,
-                  quantity: d.quantity,
-                  unitPrice: d.unit_sale,
-                  total: Math.round((d.unit_sale * d.quantity - (d.discount_amount || 0)) * 100) / 100,
-                  discountPct: d.discount_pct,
-                  discountAmount: d.discount_amount,
-                  onApplyDiscount: (pct: number, discountAmount: number) =>
-                    setDraftParts((prev) => prev.map((x) => (x.tempId === d.tempId ? { ...x, discount_pct: pct, discount_amount: discountAmount } : x))),
-                  isDraft: true,
-                  image_url: (products?.find(pr => pr.id === d.product_id) as any)?.image_url || null,
-                  onExpand: () => {
-                    const key = `new-${d.tempId}`;
-                    const prod = products?.find((p) => p.id === d.product_id);
-                    setEditingPart((prev) => ({
-                      ...prev,
-                      [key]: {
-                        product_id: d.product_id,
-                        name: d.name,
-                        unit: prod?.unit || 'un',
-                        quantity: d.quantity,
-                        unit_cost: d.unit_cost,
-                        unit_sale: d.unit_sale,
-                        notes: '',
-                        discount_pct: d.discount_pct || 0,
-                        discount_amount: d.discount_amount || 0,
-                      },
-                    }));
-                    setOpenNewPartCards((prev) => [...prev, key]);
-                    setDraftParts((prev) => prev.filter((x) => x.tempId !== d.tempId));
-                  },
-                  onDelete: () =>
-                    setDraftParts((prev) => prev.filter((x) => x.tempId !== d.tempId)),
-                })
-              )}
-
-              {/* New (unsaved) cards */}
-              {openNewPartCards.map((key) => (
-                <div key={key} className="border-b last:border-0">
-                  <PartCardFormComponent
-                    cardKey={key}
-                    draft={editingPart[key]}
-                    products={products || []}
-                    formatCurrency={formatCurrency}
-                    onUpdate={(patch) =>
-                      setEditingPart((prev) => ({
-                        ...prev,
-                        [key]: { ...prev[key], ...patch },
-                      }))
-                    }
-                    onConfirm={() => handleConfirmNewPartCard(key)}
-                    onCancel={() => cancelPartCard(key, true)}
-                    onOpenPriceCalc={() => setPriceCalcCardKey(key)}
-                    confirmDisabled={addPart.isPending}
-                    supabase={supabase}
-                    clientId={orderData?.client_id}
-                  />
-                </div>
-              ))}
-
-              {/* Add button */}
-              <div className="p-4">
-                <Button size="sm" variant="outline" onClick={addNewPartCard}>
-                  <Plus className="h-3.5 w-3.5 mr-1" /> Adicionar Peça
-                </Button>
-              </div>
-            </div>
-          );
-        })()}
-
-        {/* Parts subtotal + profit bar (edit-mode only) */}
-        {partsItemCount > 0 && !isNew && (
-          <div className="px-5 py-3 border-t bg-muted/30 flex items-center justify-between text-sm flex-wrap gap-2">
-            <div className="flex items-center gap-4 flex-wrap">
-              <span className="text-muted-foreground">{partsItemCount} {partsItemCount === 1 ? 'peça' : 'peças'}</span>
-              {partsProfit !== 0 && (
-                <span className={partsProfit >= 0 ? 'text-emerald-600 text-xs' : 'text-red-600 text-xs'}>
-                  Lucro peças: {partsProfit >= 0 ? '+' : ''}{formatCurrency(partsProfit)}
-                  {partsRevenue > 0 && ` (${partsMarginPct.toFixed(1)}%)`}
-                </span>
-              )}
-            </div>
-            <span className="font-semibold">{formatCurrency(partsRevenue)}</span>
-          </div>
-        )}
-      </section>
-
-      {!isNew && (
-        <Dialog open={showExpensesDialog} onOpenChange={setShowExpensesDialog}>
-          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Receipt className="h-4 w-4" /> Despesas Operacionais
-              </DialogTitle>
-            </DialogHeader>
-            <div className="space-y-0">
-              <div className="flex items-center justify-between pb-3">
-                <h2 className="font-semibold text-sm">{t.serviceOrders.operationalExpenses}</h2>
-                <Button variant="outline" size="sm" className="gap-1" onClick={() => setShowExpForm(!showExpForm)}>
-                  <Plus className="h-3 w-3" /> {t.serviceOrders.addExpense}
-                </Button>
-              </div>
-              {showExpForm && (
-                <div className="p-4 border rounded-lg bg-muted/30 space-y-3 mb-3">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div>
-                      <Label>{t.products.category}</Label>
-                      <Select value={expForm.category} onValueChange={(v) => setExpForm({ ...expForm, category: v })}>
-                        <SelectTrigger><SelectValue placeholder={t.products.category} /></SelectTrigger>
-                        <SelectContent>
-                          {OPERATIONAL_EXPENSE_CATEGORIES.map((c) => (
-                            <SelectItem key={c} value={c}>{c}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label>{t.serviceOrders.expenseDate}</Label>
-                      <Input type="date" value={expForm.expense_date} onChange={(e) => setExpForm({ ...expForm, expense_date: e.target.value })} />
-                    </div>
-                    <div>
-                      <Label>{t.common.amount}</Label>
-                      <MoneyInput value={expForm.amount}
-                        onValueChange={(v) => setExpForm({ ...expForm, amount: v })} />
-                    </div>
-                  </div>
-                  <div>
-                    <Label>{t.common.description}</Label>
-                    <Input value={expForm.description} onChange={(e) => setExpForm({ ...expForm, description: e.target.value })} />
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <Label>{t.serviceOrders.paidBy}</Label>
-                      <Select value={expForm.paid_by} onValueChange={(v: 'company' | 'technician') => setExpForm({ ...expForm, paid_by: v })}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="company">{t.serviceOrders.paidByCompany}</SelectItem>
-                          <SelectItem value="technician">{t.serviceOrders.paidByTechnician}</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {expForm.paid_by === 'technician' && (
-                      <div>
-                        <Label>{t.serviceOrders.technicians}</Label>
-                        <Select value={expForm.technician_user_id} onValueChange={(v) => setExpForm({ ...expForm, technician_user_id: v })}>
-                          <SelectTrigger><SelectValue placeholder={t.serviceOrders.technicians} /></SelectTrigger>
-                          <SelectContent>
-                            {appUsers?.map((u) => (
-                              <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <p className="text-xs text-warning mt-1">{t.serviceOrders.pendingReimbursement}</p>
-                      </div>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <Label>Comprovante</Label>
-                      <input
-                        ref={receiptInputRef}
-                        type="file"
-                        accept="image/*,application/pdf"
-                        capture="environment"
-                        className="hidden"
-                        onChange={(e) => {
-                          const f = e.target.files?.[0];
-                          if (f) handleUploadReceipt(f);
-                        }}
-                      />
-                      {expForm.receipt_url ? (
-                        <div className="flex items-center gap-2 mt-1 p-2 rounded-md border bg-background">
-                          {/\.(png|jpe?g|gif|webp|svg)$/i.test(expForm.receipt_url) ? (
-                            <img
-                              src={expForm.receipt_url}
-                              alt="Comprovante"
-                              className="h-[60px] w-[60px] object-cover rounded border"
-                            />
-                          ) : (
-                            <div className="h-[60px] w-[60px] flex items-center justify-center rounded border bg-muted">
-                              <FileText className="h-6 w-6 text-muted-foreground" />
-                            </div>
-                          )}
-                          <a
-                            href={expForm.receipt_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs text-primary hover:underline truncate flex-1"
-                          >
-                            Ver comprovante
-                          </a>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            onClick={handleRemoveReceipt}
-                          >
-                            <X className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      ) : (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="w-full gap-2 mt-1"
-                          onClick={() => receiptInputRef.current?.click()}
-                          disabled={uploadingReceipt}
-                        >
-                          <Paperclip className="h-3.5 w-3.5" />
-                          {uploadingReceipt ? 'Enviando...' : '📎 Anexar comprovante'}
-                        </Button>
-                      )}
-                    </div>
-                    <div>
-                      <Label>{t.common.notes}</Label>
-                      <Input value={expForm.notes} onChange={(e) => setExpForm({ ...expForm, notes: e.target.value })} />
-                    </div>
-                  </div>
-                  <div>
-                    <Label>Fornecedor</Label>
-                    <EntityCombobox
-                      value={expForm.supplier_id}
-                      onChange={(v) => setExpForm({ ...expForm, supplier_id: v })}
-                      options={(suppliers || []).filter((s) => s.active).map((s) => ({
-                        value: s.id,
-                        label: s.name,
-                        description: s.cnpj_cpf || undefined,
-                      }))}
-                      placeholder="—"
-                      onCreate={(typed) => {
-                        setQuickSupplierName(typed);
-                        setQuickSupplierOpen(true);
-                      }}
-                      createLabel="+ Cadastrar novo fornecedor"
-                    />
-                  </div>
-                  {!editingExpenseId && (
-                    <label className="flex items-center gap-2 text-sm cursor-pointer">
-                      <input type="checkbox" checked={expForm.also_create_payable}
-                        onChange={(e) => setExpForm({ ...expForm, also_create_payable: e.target.checked })} />
-                      {t.serviceOrders.alsoCreatePayable}
-                    </label>
-                  )}
-                  <label className="flex items-center gap-2 text-sm cursor-pointer">
-                    <input type="checkbox" checked={expForm.billable_to_client}
-                      onChange={(e) => setExpForm({ ...expForm, billable_to_client: e.target.checked })} />
-                    Faturável ao cliente
-                    <span className="text-xs text-muted-foreground">(desmarque para custo interno, não repassado no orçamento/OS)</span>
-                  </label>
-                  <div className="flex gap-2">
-                    <Button size="sm" onClick={handleAddExpense} disabled={addExpense.isPending || updateExpense.isPending}>
-                      {editingExpenseId ? 'Atualizar' : t.common.save}
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => { resetExpForm(); setShowExpForm(false); }}>
-                      {t.common.cancel}
-                    </Button>
-                  </div>
-                </div>
-              )}
-              {(!soExpenses || soExpenses.length === 0) ? (
-                <p className="text-sm text-muted-foreground p-5">{t.serviceOrders.noExpensesYet}</p>
-              ) : (
-                <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b bg-muted/50">
-                      <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.common.date}</th>
-                      <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.products.category}</th>
-                      <th className="px-4 py-2 text-left font-medium text-muted-foreground">{t.common.description}</th>
-                      <th className="px-4 py-2 text-left font-medium text-muted-foreground hidden sm:table-cell">Fornecedor</th>
-                      <th className="px-4 py-2 text-left font-medium text-muted-foreground hidden sm:table-cell">{t.serviceOrders.paidBy}</th>
-                      <th className="px-4 py-2 text-center font-medium text-muted-foreground hidden md:table-cell">Comprovante</th>
-                      <th className="px-4 py-2 text-right font-medium text-muted-foreground">{t.common.amount}</th>
-                      <th className="px-4 py-2 w-20"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {soExpenses.map((exp: any) => (
-                      <tr key={exp.id} className="border-b last:border-0">
-                        <td className="px-4 py-3 text-muted-foreground">{formatDate(exp.expense_date)}</td>
-                        <td className="px-4 py-3"><StatusBadge className="bg-secondary text-secondary-foreground">{exp.category}</StatusBadge></td>
-                        <td className="px-4 py-3 font-medium">
-                          {exp.description}
-                          {exp.billable_to_client === false && (
-                            <StatusBadge className="bg-muted text-muted-foreground ml-1">Interno</StatusBadge>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">
-                          {exp.suppliers?.name || '—'}
-                        </td>
-                        <td className="px-4 py-3 hidden sm:table-cell">
-                          {exp.paid_by === 'technician' ? (
-                            <span className="text-warning">{exp.app_users?.full_name || t.serviceOrders.paidByTechnician}
-                              {!exp.reimbursed && <StatusBadge className="bg-warning/15 text-warning ml-1">{t.serviceOrders.pendingReimbursement}</StatusBadge>}
-                              {exp.reimbursed && <StatusBadge className="bg-success/15 text-success ml-1">{t.serviceOrders.reimbursed}</StatusBadge>}
-                            </span>
-                          ) : t.serviceOrders.paidByCompany}
-                        </td>
-                        <td className="px-4 py-3 text-center hidden md:table-cell">
-                          {exp.receipt_url ? (
-                            /\.(png|jpe?g|gif|webp|svg)$/i.test(exp.receipt_url) ? (
-                              <a href={exp.receipt_url} target="_blank" rel="noopener noreferrer" className="inline-block">
-                                <img src={exp.receipt_url} alt="Comprovante" className="h-8 w-8 object-cover rounded border inline-block" />
-                              </a>
-                            ) : (
-                              <a href={exp.receipt_url} target="_blank" rel="noopener noreferrer" className="text-primary inline-flex items-center gap-1 hover:underline">
-                                <FileImage className="h-4 w-4" />
-                                <ExternalLink className="h-3 w-3" />
-                              </a>
-                            )
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-right font-semibold">{formatCurrency(Number(exp.amount))}</td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center justify-end gap-1">
-                            <Button variant="ghost" size="icon" className="h-7 w-7"
-                              onClick={() => handleEditExpense(exp)}>
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
-                              onClick={() => removeExpense.mutate({ id: exp.id, service_order_id: orderId! })}>
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                </div>
-              )}
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
-
-      {!isNew && (
-        <Dialog open={showTimeDialog} onOpenChange={setShowTimeDialog}>
-          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Clock className="h-4 w-4" /> Controle de Horas
-              </DialogTitle>
-            </DialogHeader>
-            <div className="space-y-0">
-              <div className="flex items-center justify-between pb-3">
-                <div>
-                  <h2 className="font-semibold text-sm">{t.services.timeSection}</h2>
-                  <p className="text-xs text-muted-foreground mt-0.5">{t.services.timeNote}</p>
-                </div>
-                <Button variant="outline" size="sm" className="gap-1" onClick={() => setShowTimeForm(!showTimeForm)}>
-                  <Plus className="h-3 w-3" /> {t.serviceOrders.addTimeEntry}
-                </Button>
-              </div>
-              {showTimeForm && (
-                <div className="p-4 border rounded-lg bg-muted/30 space-y-3 mb-3">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div>
-                      <Label>{t.serviceOrders.technicians}</Label>
-                      <Select value={timeForm.technician_user_id}
-                        onValueChange={(v) => setTimeForm({ ...timeForm, technician_user_id: v })}>
-                        <SelectTrigger><SelectValue placeholder="Selecionar técnico" /></SelectTrigger>
-                        <SelectContent>
-                          {appUsers?.map((u) => (
-                            <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label>{t.serviceOrders.scheduledStart}</Label>
-                      <Input type="datetime-local" value={timeForm.started_at}
-                        onChange={(e) => setTimeForm({ ...timeForm, started_at: e.target.value })} />
-                    </div>
-                    <div>
-                      <Label>{t.serviceOrders.scheduledEnd}</Label>
-                      <Input type="datetime-local" value={timeForm.ended_at}
-                        onChange={(e) => setTimeForm({ ...timeForm, ended_at: e.target.value })} />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div>
-                      <Label>Duração (min)</Label>
-                      <Input type="number" value={timeForm.duration_minutes}
-                        onChange={(e) => setTimeForm({ ...timeForm, duration_minutes: parseInt(e.target.value) || 0 })} />
-                    </div>
-                    <div className="flex items-end gap-2">
-                      <label className="flex items-center gap-1.5 text-sm">
-                        <Switch checked={timeForm.billable}
-                          onCheckedChange={(v) => setTimeForm({ ...timeForm, billable: v })} />
-                        {t.serviceOrders.billable}
-                      </label>
-                    </div>
-                    <div>
-                      <Label>{t.common.notes}</Label>
-                      <Input value={timeForm.notes}
-                        onChange={(e) => setTimeForm({ ...timeForm, notes: e.target.value })} />
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button size="sm" onClick={handleAddTime} disabled={addTime.isPending}>{t.common.save}</Button>
-                    <Button size="sm" variant="outline" onClick={() => setShowTimeForm(false)}>{t.common.cancel}</Button>
-                  </div>
-                </div>
-              )}
-              {(!timeEntries || timeEntries.length === 0) ? (
-                <p className="text-sm text-muted-foreground p-5">{t.serviceOrders.noTimeEntries}</p>
-              ) : (
-                <div className="divide-y">
-                  {timeEntries.map((te: any) => (
-                    <div key={te.id} className="flex items-start justify-between p-4">
-                      <div>
-                        <p className="text-sm font-medium">{te.app_users?.full_name}</p>
-                        {te.notes && <p className="text-xs text-muted-foreground">{te.notes}</p>}
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {formatDateTime(te.started_at)} → {te.ended_at ? formatDateTime(te.ended_at) : '...'}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <div className="text-right">
-                          <p className="text-sm font-semibold">{((te.duration_minutes || 0) / 60).toFixed(1)}h</p>
-                          <StatusBadge className={te.billable ? 'bg-success/15 text-success' : 'bg-muted text-muted-foreground'}>
-                            {te.billable ? t.serviceOrders.billable : t.serviceOrders.nonBillable}
-                          </StatusBadge>
-                        </div>
-                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
-                          onClick={() => removeTime.mutate({ id: te.id, service_order_id: orderId! })}>
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
-
-      {/* G - Linked Purchase Orders */}
-      {!isNew && orderId && linkedPOs && linkedPOs.length > 0 && (
-        <section className="rounded-xl border bg-card shadow-sm overflow-hidden">
-          <div className="p-4 border-b flex items-center justify-between">
-            <h2 className="font-semibold text-sm flex items-center gap-2">
-              <Package className="h-4 w-4 text-muted-foreground" />
-              Compras vinculadas ({linkedPOs.length})
-            </h2>
-          </div>
-          <div className="divide-y">
-            {linkedPOs.map(po => {
-              const totalItems = (po.purchase_order_items ?? []).length;
-              const isReceived = po.status === 'received';
-              const isCancelled = po.status === 'cancelled';
-              const statusColors: Record<string, string> = {
-                draft: 'bg-muted text-muted-foreground',
-                sent: 'bg-blue-100 text-blue-700',
-                partial: 'bg-amber-100 text-amber-700',
-                received: 'bg-green-100 text-green-700',
-                cancelled: 'bg-red-100 text-red-600 line-through',
-              };
-              const statusLabels: Record<string, string> = {
-                draft: 'Rascunho', sent: 'Enviada', partial: 'Parcial', received: 'Recebida', cancelled: 'Cancelada',
-              };
-              const estimatedDate = po.expected_date
-                ? new Date(po.expected_date + 'T12:00:00').toLocaleDateString('pt-BR')
-                : null;
-              return (
-                <div key={po.id} className="px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
-                  <div className="space-y-0.5 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-sm">{po.po_number}</span>
-                      <span className={"inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium " + (statusColors[po.status] || 'bg-muted text-muted-foreground')}>
-                        {statusLabels[po.status] ?? po.status}
-                      </span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      {po.suppliers?.name ?? 'Fornecedor não definido'}
-                      {totalItems > 0 && " · " + totalItems + (totalItems === 1 ? ' item' : ' itens')}
-                      {estimatedDate && !isReceived && " · Previsão: " + estimatedDate}
-                      {po.total_amount > 0 && " · " + formatCurrency(po.total_amount)}
-                    </p>
-                  </div>
-                  <div className="flex gap-2 shrink-0">
-                    {!isReceived && !isCancelled && (
-                      <Button size="sm" variant="outline"
-                        className="h-7 text-xs gap-1 text-green-700 border-green-300 hover:bg-green-50"
-                        onClick={() => setReceivePOTarget(po)}>
-                        <PackagePlus className="h-3.5 w-3.5" /> Registrar recebimento
-                      </Button>
-                    )}
-                    {po.status === 'draft' && (
-                      <Button size="sm" variant="ghost"
-                        className="h-7 text-xs gap-1 text-blue-700"
-                        onClick={() => updatePO.mutateAsync({ id: po.id, status: 'sent' })}>
-                        Marcar como enviada
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
-
-      {/* H - Financial Mini-Summary */}
-      <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
-        {/* Toggle de visão Interno/Cliente */}
-        {!isNew && (
-          <div className="px-4 pt-2 flex items-center justify-end">
-            <div className="inline-flex items-center rounded-full border bg-muted/40 p-0.5 text-[11px]">
-              <button type="button"
-                onClick={() => setClientView(false)}
-                className={`px-2.5 py-0.5 rounded-full transition-colors ${!clientView ? 'bg-background shadow-sm font-medium text-foreground' : 'text-muted-foreground'}`}>
-                Interno
-              </button>
-              <button type="button"
-                onClick={() => setClientView(true)}
-                className={`px-2.5 py-0.5 rounded-full transition-colors ${clientView ? 'bg-background shadow-sm font-medium text-foreground' : 'text-muted-foreground'}`}>
-                Cliente
-              </button>
-            </div>
-          </div>
-        )}
-        {/* Row 1: line items */}
-        <div className="px-4 pt-4 pb-2 flex items-center justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-5 text-sm flex-wrap">
-            {laborCost > 0 && (
-              <span className="text-muted-foreground">
-                Serviços: <span className="font-semibold text-foreground">{formatCurrency(laborCost)}</span>
-              </span>
-            )}
-            {partsCost > 0 && (
-              <span className="text-muted-foreground">
-                Peças: <span className="font-semibold text-foreground">{formatCurrency(partsCost)}</span>
-              </span>
-            )}
-            {(form.travel_cost_total || 0) > 0 && (
-              <span className="text-muted-foreground">
-                Desl.: <span className="font-semibold text-foreground">{formatCurrency(form.travel_cost_total)}</span>
-              </span>
-            )}
-            {(form.discount_amount || 0) > 0 && (
-              <span className="text-red-600 text-xs">
-                Desconto: −{formatCurrency(form.discount_amount || 0)}
-              </span>
-            )}
-          </div>
-          <div className="flex flex-col items-end">
-            <span className="font-bold text-lg text-accent">
-              {formatCurrency(grandTotal)}
-            </span>
-            {/* M6: Valor orçado vs realizado — exibe variação quando há diferença */}
-            {(orderData as any)?.original_quote_amount > 0 &&
-              Math.abs(grandTotal - (orderData as any).original_quote_amount) > 0.01 && (
-              <span className="text-[10px] text-muted-foreground">
-                orçado {formatCurrency((orderData as any).original_quote_amount)}{' '}
-                <span className={grandTotal > (orderData as any).original_quote_amount
-                  ? 'text-destructive font-medium'
-                  : 'text-emerald-600 font-medium'}>
-                  {grandTotal > (orderData as any).original_quote_amount ? '+' : ''}
-                  {formatCurrency(grandTotal - (orderData as any).original_quote_amount)}
-                </span>
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Row 2: composition % + parts profit (edit-mode only, escondido na visão Cliente) */}
-        {!isNew && !clientView && (subtotal > 0 || partsRevenue > 0) && (
-          <div className="px-4 py-1.5 border-t bg-muted/20 flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
-            {laborCost > 0 && subtotal > 0 && (
-              <span>Serviços: {((laborCost / subtotal) * 100).toFixed(0)}%</span>
-            )}
-            {partsCost > 0 && subtotal > 0 && (
-              <span>Peças: {((partsCost / subtotal) * 100).toFixed(0)}%</span>
-            )}
-            {partsRevenue > 0 && (
-              <span className={`ml-auto font-medium ${partsProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                Lucro peças: {partsProfit >= 0 ? '+' : ''}{formatCurrency(partsProfit)} ({partsMarginPct.toFixed(1)}%)
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* M1: Gestão financeira integrada — sempre visível em OS salva */}
-        {!isNew && (
-          <div className="border-t">
-            {/* Cabeçalho com totais e badge de status */}
-            <div className="px-4 py-2 bg-blue-50/40 dark:bg-blue-950/20 flex items-center gap-3 flex-wrap text-xs">
-              {(soReceivables || []).length > 0 ? (
-                <>
-                  <span className="text-muted-foreground">
-                    Cobrado: <span className="font-semibold text-foreground">{formatCurrency(soTotalCharged)}</span>
-                  </span>
-                  <span className="text-muted-foreground">
-                    Recebido: <span className="font-semibold text-emerald-600">{formatCurrency(soTotalPaid)}</span>
-                  </span>
-                  {soBalance > 0.01 && (
-                    <span className="text-muted-foreground">
-                      Em aberto: <span className="font-semibold text-destructive">{formatCurrency(soBalance)}</span>
-                    </span>
-                  )}
-                  <span className={`ml-auto inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                    soPayStatus === 'paid'            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40'
-                    : soPayStatus === 'partially_paid' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40'
-                    : 'bg-muted text-muted-foreground'
-                  }`}>
-                    {soPayStatus === 'paid' ? 'Quitado' : soPayStatus === 'partially_paid' ? 'Parcial' : 'Não faturado'}
-                  </span>
-                </>
-              ) : (
-                <>
-                  <span className="text-muted-foreground">
-                    Valor a cobrar: <span className="font-semibold text-foreground">{formatCurrency(grandTotal)}</span>
-                  </span>
-                  <span className="ml-auto inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-muted text-muted-foreground">
-                    Sem lançamentos
-                  </span>
-                </>
-              )}
-            </div>
-
-            {/* Lista de recebíveis com ações */}
-            {(soReceivables || []).length > 0 && (
-              <div className="divide-y divide-dashed">
-                {(soReceivables || []).map((rec: any) => {
-                  const isPaid = rec.status === 'paid';
-                  const isPartial = rec.status === 'partially_paid';
-                  const bal = Number(rec.balance_amount || 0);
-                  return (
-                    <div key={rec.id} className="px-4 py-2 flex items-center gap-3 text-xs hover:bg-muted/20 transition-colors">
-                      {/* Descrição + vencimento */}
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium truncate text-foreground">{rec.description || 'Recebível'}</p>
-                        {rec.due_date && (
-                          <p className="text-muted-foreground text-[10px]">
-                            Vence: {new Date(rec.due_date + 'T12:00:00').toLocaleDateString('pt-BR')}
-                          </p>
-                        )}
-                      </div>
-                      {/* Valores */}
-                      <div className="text-right shrink-0">
-                        <p className="font-semibold">{formatCurrency(Number(rec.amount))}</p>
-                        {isPartial && (
-                          <p className="text-[10px] text-amber-600">Saldo: {formatCurrency(bal)}</p>
-                        )}
-                      </div>
-                      {/* Badge status */}
-                      <span className={`shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                        isPaid    ? 'bg-emerald-100 text-emerald-700'
-                        : isPartial ? 'bg-amber-100 text-amber-700'
-                        : 'bg-muted text-muted-foreground'
-                      }`}>
-                        {isPaid ? 'Pago' : isPartial ? 'Parcial' : 'Pendente'}
-                      </span>
-                      {/* Botão registrar pagamento */}
-                      {!isPaid && bal > 0 && (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="h-7 text-xs px-2 shrink-0 gap-1 border-primary/40 text-primary hover:bg-primary/5"
-                          onClick={() => setPaymentDialogReceivable(rec)}
-                        >
-                          <DollarSign className="h-3 w-3" />
-                          {isPartial ? 'Complementar' : 'Registrar pgto.'}
-                        </Button>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Botão criar recebível manual (quando não há nenhum ainda e OS não é nova) */}
-            {(soReceivables || []).length === 0 && grandTotal > 0 && (
-              <div className="px-4 py-2 flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">Nenhum lançamento financeiro ainda</span>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs px-2 gap-1 border-primary/40 text-primary hover:bg-primary/5"
-                  disabled={createReceivable.isPending}
-                  onClick={async () => {
-                    if (!orderId || !orderData?.client_id) return;
-                    try {
-                      const rec = await createReceivable.mutateAsync({
-                        client_id: orderData.client_id,
-                        service_order_id: orderId,
-                        description: `${orderData?.service_order_number || 'OS'} — saldo final`,
-                        issue_date: new Date().toISOString().split('T')[0],
-                        due_date: new Date().toISOString().split('T')[0],
-                        amount: grandTotal,
-                      });
-                      setPaymentDialogReceivable(rec);
-                    } catch (e: any) {
-                      toast.error(e?.message || 'Erro ao criar recebível');
-                    }
-                  }}
-                >
-                  <DollarSign className="h-3 w-3" />
-                  Lançar recebível
-                </Button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* M2: Histórico de pagamentos — colapsável, só aparece quando há pagamentos */}
-        {!isNew && (soPayments || []).length > 0 && (
-          <div className="border-t">
-            <button
-              type="button"
-              className="w-full flex items-center justify-between px-4 py-2 text-xs text-muted-foreground hover:bg-muted/30 transition-colors"
-              onClick={() => setShowPaymentHistory(v => !v)}
-            >
-              <span className="flex items-center gap-1.5">
-                <Receipt className="h-3.5 w-3.5" />
-                Histórico de pagamentos ({soPayments.length})
-              </span>
-              <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showPaymentHistory ? 'rotate-180' : ''}`} />
-            </button>
-            {showPaymentHistory && (
-              <div className="px-4 pb-3 space-y-0.5">
-                {(soPayments || []).map((p: any) => (
-                  <div key={p.id} className="grid grid-cols-[80px_1fr_auto] gap-2 items-center text-xs py-1.5 border-b border-dashed last:border-0">
-                    <span className="text-muted-foreground tabular-nums">
-                      {new Date(p.payment_date + 'T12:00:00').toLocaleDateString('pt-BR')}
-                    </span>
-                    <span className="text-muted-foreground truncate capitalize">
-                      {(p.payment_method || '—').replace(/_/g, ' ')}
-                      {p.installments > 1 ? ` ${p.installments}x` : ''}
-                    </span>
-                    <span className="font-semibold text-emerald-600 tabular-nums">
-                      {formatCurrency(Number(p.net_amount || p.amount))}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Row 3: action buttons */}
-        <div className="px-4 py-2 border-t flex items-center gap-2 flex-wrap">
-          {!isNew && (
-            <>
-              <Button variant="ghost" size="sm" className="gap-1 text-xs h-7" onClick={() => setShowTravelDialog(true)}>
-                <MapPin className="h-3 w-3" /> Deslocamento
-              </Button>
-              <Button variant="ghost" size="sm" className="gap-1 text-xs h-7" onClick={() => setShowExpensesDialog(true)}>
-                <Receipt className="h-3 w-3" /> Despesas
-              </Button>
-              <Button variant="ghost" size="sm" className="gap-1 text-xs h-7" onClick={() => setShowTimeDialog(true)}>
-                <Clock className="h-3 w-3" /> Horas
-              </Button>
-            </>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5 text-xs h-7 ml-auto"
-            onClick={() => setShowFinancialDialog((v) => !v)}
-          >
-            <Calculator className="h-3.5 w-3.5" />
-            {showFinancialDialog ? 'Ocultar' : 'Ver'} Composição Financeira
-            {/* M5: dot indicator quando financial_notes está preenchido */}
-            {form.financial_notes?.trim() && (
-              <span className="h-2 w-2 rounded-full bg-amber-400 ml-0.5 animate-pulse" title="Observações financeiras preenchidas" />
-            )}
-          </Button>
-        </div>
-      </div>
+      <SummarySections
+        isNew={isNew}
+        orderId={orderId}
+        orderData={orderData}
+        form={form}
+        clientView={clientView}
+        setClientView={setClientView}
+        linkedPOs={linkedPOs}
+        updatePO={updatePO}
+        setReceivePOTarget={setReceivePOTarget}
+        laborCost={laborCost}
+        partsCost={partsCost}
+        subtotal={subtotal}
+        grandTotal={grandTotal}
+        partsRevenue={partsRevenue}
+        partsProfit={partsProfit}
+        partsMarginPct={partsMarginPct}
+        soReceivables={soReceivables}
+        soPayments={soPayments}
+        soTotalCharged={soTotalCharged}
+        soTotalPaid={soTotalPaid}
+        soBalance={soBalance}
+        soPayStatus={soPayStatus}
+        showPaymentHistory={showPaymentHistory}
+        setShowPaymentHistory={setShowPaymentHistory}
+        setPaymentDialogReceivable={setPaymentDialogReceivable}
+        createReceivable={createReceivable}
+        showFinancialDialog={showFinancialDialog}
+        setShowFinancialDialog={setShowFinancialDialog}
+        setShowExpensesDialog={setShowExpensesDialog}
+        setShowTimeDialog={setShowTimeDialog}
+        setShowTravelDialog={setShowTravelDialog}
+      />
 
       {/* Onda 4: seção Financeiro inline (não mais modal) — showFinancialDialog agora controla expandido/colapsado */}
-      <Collapsible open={showFinancialDialog} onOpenChange={setShowFinancialDialog} className="rounded-lg border bg-card mt-3">
-        <CollapsibleTrigger asChild>
-          <button type="button" className="w-full flex items-center justify-between px-6 py-3 border-b text-left">
-            <span className="flex items-center gap-2 text-base font-semibold">
-              <Calculator className="h-4 w-4" /> Composição Financeira
-            </span>
-            <span className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground hidden sm:inline">{formatCurrency(grandTotal)}</span>
-              <ChevronDown className={`h-4 w-4 transition-transform ${showFinancialDialog ? 'rotate-180' : ''}`} />
-            </span>
-          </button>
-        </CollapsibleTrigger>
-
-        <CollapsibleContent>
-          <div className="px-6 py-4 space-y-5">
-
-            {/* ── SECTION 1: CUSTOS ── */}
-            <div className="space-y-2">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
-                <Receipt className="h-3.5 w-3.5" /> Custos
-              </p>
-              <div className="rounded-lg border bg-muted/20 divide-y text-sm">
-                {[
-                  { label: t.serviceOrders.labor,           value: laborCost },
-                  { label: t.serviceOrders.parts,           value: partsCost },
-                  { label: t.serviceOrders.operationalCost, value: operationalCost },
-                  { label: t.serviceOrders.travel,          value: form.travel_cost_total },
-                ].map(({ label, value }) => (
-                  <div key={label} className="flex justify-between px-3 py-1.5">
-                    <span className="text-muted-foreground">{label}</span>
-                    <span className={value > 0 ? 'font-medium' : 'text-muted-foreground/50'}>{formatCurrency(value || 0)}</span>
-                  </div>
-                ))}
-                <div className="flex justify-between px-3 py-1.5 items-center">
-                  <span className="text-muted-foreground">{t.serviceOrders.subcontract}</span>
-                  <MoneyInput className="w-28 h-7 text-right text-sm" value={form.subcontract_cost_total}
-                    onValueChange={(v) => set('subcontract_cost_total', v)} disabled={isLocked} />
-                </div>
-                <div className="flex justify-between px-3 py-2 bg-muted/40 rounded-b-lg font-medium">
-                  <span>Subtotal</span>
-                  <span>{formatCurrency(subtotal)}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* ── SECTION 2: AJUSTES ── */}
-            <div className="space-y-2">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
-                <Tag className="h-3.5 w-3.5" /> Ajustes
-              </p>
-              <div className="rounded-lg border bg-muted/20 p-3 space-y-3 text-sm">
-                {/* Discount */}
-                <div className="space-y-2">
-                  <p className="text-xs text-muted-foreground font-medium">Desconto por linha (%)</p>
-                  <p className="text-[11px] text-muted-foreground -mt-1">Aplica o desconto diretamente em cada linha de serviço/peça da OS.</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">↳ Serviços (%)</Label>
-                      <div className="flex items-center gap-1.5">
-                        <Input type="number" min="0" max="100" step="0.5"
-                          className="w-16 h-7 text-right text-xs" value={discountServicesPct || ''}
-                          placeholder="0" disabled={isLocked}
-                          onChange={e => {
-                            const pct = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
-                            applyBulkLineDiscount('services', pct);
-                          }} />
-                        <span className="text-xs text-muted-foreground">−{formatCurrency(laborCost * discountServicesPct / 100)}</span>
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">↳ Peças (%)</Label>
-                      <div className="flex items-center gap-1.5">
-                        <Input type="number" min="0" max="100" step="0.5"
-                          className="w-16 h-7 text-right text-xs" value={discountPartsPct || ''}
-                          placeholder="0" disabled={isLocked}
-                          onChange={e => {
-                            const pct = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
-                            applyBulkLineDiscount('parts', pct);
-                          }} />
-                        <span className="text-xs text-muted-foreground">−{formatCurrency(partsCost * discountPartsPct / 100)}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Atalhos rápidos — aplicam o mesmo % em lote a todas as linhas de serviço e peça */}
-                  {!isLocked && (laborCost + partsCost) > 0 && (
-                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                      {[5, 10, 15].map(p => (
-                        <button key={p} type="button" onClick={() => applyBulkLineDiscount('both', p)}
-                          className="text-[11px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:border-destructive/50 hover:text-destructive transition-colors">
-                          −{p}% em todas as linhas
-                        </button>
-                      ))}
-                      {(discountServicesPct > 0 || discountPartsPct > 0) && (
-                        <button type="button"
-                          onClick={() => applyBulkLineDiscount('both', 0)}
-                          className="text-[11px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted transition-colors ml-auto">
-                          Limpar desconto por linha
-                        </button>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="flex items-center justify-between pt-2 border-t border-dashed">
-                    <div>
-                      <Label className="text-xs font-medium text-destructive">Desconto adicional (valor fixo)</Label>
-                      <p className="text-[11px] text-muted-foreground">Ajuste extra de fechamento, somado por cima do já descontado por linha.</p>
-                    </div>
-                    <MoneyInput className="w-28 h-7 text-right text-sm text-destructive font-medium"
-                      value={form.discount_amount}
-                      onValueChange={v => set('discount_amount', v)}
-                      disabled={isLocked} />
-                  </div>
-                  {grandTotal > 0 && (
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <button type="button"
-                        onClick={() => {
-                          const step = grandTotal >= 1000 ? 100 : 10;
-                          const target = Math.floor(grandTotal / step) * step;
-                          const extraDiscount = Math.round((grandTotal - target) * 100) / 100;
-                          if (extraDiscount > 0) {
-                            set('discount_amount', Math.round(((form.discount_amount || 0) + extraDiscount) * 100) / 100);
-                          }
-                        }}
-                        className="text-[11px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:border-primary/50 hover:text-primary transition-colors">
-                        ⌄ Arredondar {formatCurrency(grandTotal >= 1000 ? Math.floor(grandTotal / 100) * 100 : Math.floor(grandTotal / 10) * 10)}
-                      </button>
-                      {(form.discount_amount || 0) > 0 && (
-                        <button type="button"
-                          onClick={() => set('discount_amount', 0)}
-                          className="text-[11px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted transition-colors">
-                          Limpar valor fixo
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Tax + ISS quick-apply */}
-                <div className="space-y-1.5 pt-2 border-t border-dashed">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-sm">{t.serviceOrders.tax}</Label>
-                    <MoneyInput className="w-28 h-7 text-right text-sm" value={form.tax_amount}
-                      onValueChange={v => set('tax_amount', v)} disabled={isLocked} />
-                  </div>
-                  {!isLocked && issRatePct > 0 && (
-                    <div className="flex items-center gap-2 justify-end">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          // ISS incide sobre a base (subtotal - desconto)
-                          const base = Math.max(0, subtotal - (form.discount_amount || 0));
-                          set('tax_amount', Math.round(base * issRatePct) / 100);
-                        }}
-                        className="text-[11px] px-2 py-0.5 rounded border border-blue-300 text-blue-700 hover:bg-blue-50 transition-colors"
-                      >
-                        Aplicar ISS {issRatePct}%
-                      </button>
-                      {form.tax_amount > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => set('tax_amount', 0)}
-                          className="text-[11px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted transition-colors"
-                        >
-                          Zerar
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Margin warning */}
-                {grandTotal > 0 && subtotal > 0 && (grandTotal / subtotal) < 0.85 && (
-                  <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
-                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                    Desconto alto — margem reduzida a {(((grandTotal - subtotal) / subtotal) * 100).toFixed(1)}%
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* ── SECTION 3: CONDIÇÕES DE RECEBIMENTO ── */}
-            <div className="space-y-2">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
-                <CreditCard className="h-3.5 w-3.5" /> Condições de Recebimento
-              </p>
-              <div className="rounded-lg border bg-muted/20 p-3 space-y-3">
-                {(orderData as any)?.converted_to_os_at ? (
-                  // Já convertida em OS: a condição de pagamento já foi decidida (e o sinal já
-                  // gerou um recebível real) — mostrar só um resumo somente-leitura em vez do
-                  // seletor/tabela de configuração, que não faz mais sentido reabrir aqui.
-                  <p className="text-sm">
-                    <span className="text-muted-foreground">Condição de pagamento: </span>
-                    <span className="font-medium">{form.payment_conditions || '—'}</span>
-                  </p>
-                ) : (
-                  <>
-                    <div className="flex gap-2 items-center">
-                      <Select key={presetKey} onValueChange={v => {
-                        if (v === '__custom__') {
-                          set('payment_condition_preset_id', '');
-                          set('payment_conditions', 'Personalizado');
-                          if (!Array.isArray(customInstallments) || customInstallments.length === 0) {
-                            set('custom_payment_installments', [
-                              { label: 'Parcela 1', services_pct: 100, parts_pct: 100, expenses_pct: 100, days_after_approval: 0, tipo: 'aprovacao' },
-                            ]);
-                          }
-                          setPresetKey(k => k + 1);
-                          return;
-                        }
-                        const preset = (paymentPresets || []).find((p: any) => p.label === v);
-                        set('payment_conditions', v);
-                        set('payment_condition_preset_id', preset?.id || '');
-                        set('custom_payment_installments', null);
-                        setPresetKey(k => k + 1);
-                      }} disabled={isLocked}>
-                        <SelectTrigger className="w-44 h-8 text-sm">
-                          <SelectValue placeholder="Pré-definidas..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__custom__">Personalizado</SelectItem>
-                          {(paymentPresets || []).map((p: any) => (
-                            <SelectItem key={p.id} value={p.label}>{p.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <Input value={form.payment_conditions || ''} onChange={e => set('payment_conditions', e.target.value)}
-                        placeholder="Ou descreva livremente..." disabled={isLocked} className="flex-1 h-8 text-sm" />
-                    </div>
-
-                    {/* Editor de parcelas personalizado (sem preset selecionado) */}
-                    {!selectedPreset && Array.isArray(customInstallments) && (
-                      <CustomInstallmentEditor
-                        installments={installmentRows}
-                        onChange={(rows) => set('custom_payment_installments', rows)}
-                        laborCost={laborCost}
-                        partsCost={partsCost}
-                        expensesTotal={expensesTotal}
-                        discountRatio={discountRatio}
-                        formatCurrency={formatCurrency}
-                        disabled={isLocked}
-                      />
-                    )}
-
-                    {/* Installment preview (preset) */}
-                    {selectedPreset && installmentRows.length > 0 && grandTotal > 0 && (
-                      <div className="rounded-md bg-background border divide-y text-sm">
-                        {installmentRows.map((row, i) => {
-                          const amount = calcInstallmentAmount(row);
-                          const isSignal = row.tipo === 'aprovacao' || row.days_after_approval === 0;
-                          const daysLabel = row.tipo === 'entrega' ? 'na entrega'
-                            : row.tipo === 'prazo' || row.days_after_approval > 0 ? `em ${row.days_after_approval} dias`
-                            : 'na aprovação';
-                          return (
-                            <div key={i} className={`flex justify-between items-center px-3 py-2 ${isSignal ? 'bg-orange-50' : ''}`}>
-                              <div>
-                                <span className="font-medium">{row.label || `Parcela ${i + 1}`}</span>
-                                <span className="ml-1.5 text-xs text-muted-foreground">({daysLabel})</span>
-                                {isSignal && <span className="ml-1.5 text-xs font-medium text-orange-600">● sinal</span>}
-                              </div>
-                              <span className="font-semibold">{formatCurrency(amount)}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </>
-                )}
-
-                {/* Sinal button */}
-                {!isNew && orderId && signalAmount !== null && (orderData as any)?.quote_status === 'awaiting_deposit' && (
-                  <Button
-                    type="button"
-                    className="w-full gap-2 bg-orange-500 hover:bg-orange-600 text-white"
-                    onClick={() => { setShowFinancialDialog(false); setDepositFromFinancial(true); setDepositDialogOpen(true); }}
-                  >
-                    <DollarSign className="h-4 w-4" />
-                    Registrar sinal — {formatCurrency(signalAmount)}
-                  </Button>
-                )}
-
-                {/* Generate collections button */}
-                {orderId && grandTotal > 0 && form.payment_conditions &&
-                  (form.status === 'completed' || form.status === 'invoiced' || !!form.signed_at) && (
-                  <Button variant="outline" size="sm" onClick={handleGenerateCollections}
-                    disabled={generatingCollections}
-                    className="gap-2 text-green-700 border-green-300 hover:bg-green-50 w-full">
-                    <CreditCard className="h-4 w-4" />
-                    {generatingCollections ? 'Gerando...' : 'Gerar Cobranças'}
-                  </Button>
-                )}
-
-                {orderId && osCollections && osCollections.length > 0 && (
-                  <div className="rounded-lg border bg-muted/20 p-3 space-y-1">
-                    <p className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
-                      <CreditCard className="h-3.5 w-3.5" /> Cobranças Geradas ({osCollections.length})
-                    </p>
-                    {osCollections.map(c => (
-                      <div key={c.id} className="grid grid-cols-[1fr_auto_auto] gap-2 items-center text-xs px-2 py-1.5 rounded bg-background border">
-                        <span className="truncate">{c.description || 'Cobrança'}</span>
-                        <span className="font-medium">{formatCurrency(Number(c.amount))}</span>
-                        <span className="text-muted-foreground">{new Date(c.due_date).toLocaleDateString('pt-BR')}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* ── SECTION 4: SIMULADOR DE RECEBIMENTO ── */}
-            <div className="space-y-2">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
-                <Calculator className="h-3.5 w-3.5" /> Simulador de Recebimento
-              </p>
-              <div className="rounded-lg border bg-muted/20 p-3 space-y-3">
-                {/* PIX */}
-                <div className="flex justify-between items-center text-sm">
-                  <span className="text-muted-foreground font-medium">PIX / Transferência</span>
-                  <span className="font-bold text-lg">{formatCurrency(grandTotal)}</span>
-                </div>
-                <div className="border-t border-dashed pt-3 space-y-2">
-                  <p className="text-xs text-muted-foreground font-medium flex items-center gap-1.5">
-                    <CreditCard className="h-3.5 w-3.5" /> Cartão de Crédito
-                  </p>
-                  <div className="grid grid-cols-3 gap-1.5 text-xs">
-                    {[1,2,3,4,5,6].map(n => {
-                      const fee = cardFees?.find((f: any) => f.installments === n);
-                      const feePct = fee?.fee_percent || 0;
-                      const gross = feePct > 0 ? base / (1 - Number(feePct) / 100) : base;
-                      const perInstall = gross / n;
-                      const isSelected = selectedInstallments === n;
-                      return (
-                        <button key={n} type="button"
-                          onClick={() => { setSelectedInstallments(n); set('card_installments', n); }}
-                          className={`rounded border p-1.5 text-left transition-colors ${isSelected ? 'bg-primary text-primary-foreground border-primary' : 'bg-background hover:bg-muted'}`}>
-                          <div className="font-semibold">{n}x {formatCurrency(perInstall)}</div>
-                          {feePct > 0 && (
-                            <div className={`text-[10px] ${isSelected ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
-                              taxa {Number(feePct).toFixed(1)}%
-                            </div>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {selectedInstallments > 0 && (() => {
-                    const fee = cardFees?.find((f: any) => f.installments === selectedInstallments);
-                    const feePct = fee?.fee_percent || 0;
-                    const gross = feePct > 0 ? base / (1 - Number(feePct) / 100) : base;
-                    return (
-                      <div className="rounded bg-muted/40 px-3 py-2 text-xs space-y-1">
-                        <div className="flex justify-between"><span className="text-muted-foreground">Valor a cobrar:</span><span className="font-semibold">{formatCurrency(gross)}</span></div>
-                        {feePct > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Taxa ({Number(feePct).toFixed(2)}%):</span><span className="text-destructive">−{formatCurrency(gross - base)}</span></div>}
-                        <div className="flex justify-between border-t pt-1 text-success font-medium"><span>Você recebe líquido:</span><span>{formatCurrency(base)}</span></div>
-                      </div>
-                    );
-                  })()}
-                  <label className="flex items-center gap-2 text-sm cursor-pointer pt-2 border-t mt-2">
-                    <input type="checkbox" checked={form.card_fee_passthrough_enabled}
-                      onChange={(e) => set('card_fee_passthrough_enabled', e.target.checked)} />
-                    Repassar taxa de cartão ao cliente
-                    <span className="text-xs text-muted-foreground">
-                      ({selectedInstallments}x — soma {formatCurrency(cardFeeAmount)} ao total)
-                    </span>
-                  </label>
-                </div>
-              </div>
-            </div>
-
-            {/* ── SECTION 5: DETALHES DO PDF ── */}
-            <div className="space-y-2">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
-                <FileText className="h-3.5 w-3.5" /> Detalhes do PDF
-              </p>
-              <div className="rounded-lg border bg-muted/20 p-3 space-y-3 text-sm">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Forma de pagamento preferida</Label>
-                    <Select value={form.payment_method_preferred || 'none'} onValueChange={v => set('payment_method_preferred', v === 'none' ? '' : v)} disabled={isLocked}>
-                      <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Padrão (todas)" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Padrão (todas as opções)</SelectItem>
-                        {[{v:'pix',l:'PIX'},{v:'bank_transfer',l:'Transferência'},{v:'cash',l:'Dinheiro'},{v:'debit_card',l:'Débito'},{v:'credit_card',l:'Crédito'},{v:'boleto',l:'Boleto'}].map(m => (
-                          <SelectItem key={m.v} value={m.v}>{m.l}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Validade do orçamento (dias)</Label>
-                    <Input type="number" min="1" className="h-8 text-sm"
-                      value={form.quote_validity_days || defaultQuoteValidityDays}
-                      onChange={e => set('quote_validity_days', parseInt(e.target.value) || defaultQuoteValidityDays)}
-                      disabled={isLocked} />
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs flex items-center gap-1.5">
-                    Observações financeiras
-                    <span className="text-muted-foreground">(aparece no PDF)</span>
-                    {/* M5: badge quando preenchido */}
-                    {form.financial_notes?.trim() && (
-                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-700 border border-amber-200">
-                        <AlertTriangle className="h-2.5 w-2.5" />
-                        preenchido
-                      </span>
-                    )}
-                  </Label>
-                  <Textarea value={form.financial_notes || ''} onChange={e => set('financial_notes', e.target.value)}
-                    rows={2} className="resize-none text-sm" placeholder="Condições especiais, avisos de pagamento..."
-                    disabled={isLocked} />
-                </div>
-              </div>
-            </div>
-
-            {/* ── SECTION 6: COMISSÃO (collapsible, oculto na visão Cliente) ── */}
-            {!clientView && (
-            <div className="rounded-lg border bg-muted/20 overflow-hidden">
-              <button type="button"
-                className="w-full flex items-center justify-between px-3 py-2.5 text-sm text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
-                onClick={() => setShowCommission(v => !v)}>
-                <span className="flex items-center gap-1.5 font-medium text-xs uppercase tracking-wide">
-                  <Receipt className="h-3.5 w-3.5" /> Comissão (uso interno)
-                </span>
-                <ChevronDown className={`h-4 w-4 transition-transform ${showCommission ? 'rotate-180' : ''}`} />
-              </button>
-              {showCommission && (
-                <div className="px-3 pb-3 pt-1 space-y-3 border-t text-sm">
-                  <div className="flex justify-between items-center">
-                    <Label className="text-sm text-muted-foreground">{(t.serviceOrders as any).commissionedPerson || 'Comissionado'}</Label>
-                    <Select value={form.commissioned_user_id || 'none'} onValueChange={v => {
-                      const user = commissionableUsers?.find(u => u.id === v);
-                      setForm(f => ({ ...f, commissioned_user_id: v === 'none' ? '' : v, commissioned_person: user?.full_name || '' }));
-                    }} disabled={isLocked}>
-                      <SelectTrigger className="w-48 h-8 text-sm"><SelectValue placeholder="Selecionar" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">—</SelectItem>
-                        {(commissionableUsers || []).map(u => (
-                          <SelectItem key={u.id} value={u.id}>{u.full_name} ({USER_ROLES.find(r => r.value === u.role)?.label || u.role})</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <Label className="text-sm text-muted-foreground">Comissão (%)</Label>
-                    <div className="flex items-center gap-2">
-                      <Input type="number" step="0.01" className="w-20 h-8 text-right text-sm"
-                        value={form.commission_rate}
-                        onChange={e => {
-                          const rate = parseFloat(e.target.value) || 0;
-                          setForm(f => ({ ...f, commission_rate: rate, commission_amount: Math.round(grandTotal * rate / 100 * 100) / 100 }));
-                        }} disabled={isLocked} />
-                      {(form.commission_rate || 0) > 0 && (
-                        <span className="text-xs text-muted-foreground">= {formatCurrency(grandTotal * (form.commission_rate || 0) / 100)}</span>
-                      )}
-                    </div>
-                  </div>
-                  {(form.commission_amount || 0) > 0 && (
-                    <div className="rounded bg-muted/40 px-3 py-2 text-xs space-y-1">
-                      <div className="flex justify-between"><span>Total bruto:</span><span>{formatCurrency(grandTotal)}</span></div>
-                      <div className="flex justify-between text-muted-foreground"><span>Comissão ({form.commission_rate}%):</span><span>−{formatCurrency(form.commission_amount || 0)}</span></div>
-                      <div className="flex justify-between font-semibold border-t pt-1"><span>Líquido empresa:</span><span>{formatCurrency(grandTotal - (form.commission_amount || 0))}</span></div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-            )}{/* end !clientView commission */}
-
-          </div>{/* end scrollable body */}
-
-          {/* ── RESUMO DO TOTAL (dentro da seção, complementar à barra fixa) ── */}
-          <div className="border-t px-6 py-3 flex items-center justify-between bg-muted/30 rounded-b-lg">
-            <div className="text-sm">
-              {(form.discount_amount || 0) > 0 && (
-                <span className="text-muted-foreground text-xs">
-                  Subtotal {formatCurrency(subtotal)} · Desc. −{formatCurrency(form.discount_amount || 0)}
-                  {(form.tax_amount || 0) > 0 ? ` · Taxa +${formatCurrency(form.tax_amount || 0)}` : ''}
-                </span>
-              )}
-            </div>
-            <div className="flex items-baseline gap-2">
-              <span className="text-sm text-muted-foreground">{t.serviceOrders.grandTotal}</span>
-              <span className="text-2xl font-bold text-accent">{formatCurrency(grandTotal)}</span>
-            </div>
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
+      <FinancialSection
+        showFinancialDialog={showFinancialDialog}
+        setShowFinancialDialog={setShowFinancialDialog}
+        form={form}
+        set={set}
+        setForm={setForm}
+        orderId={orderId}
+        orderData={orderData}
+        isNew={isNew}
+        isLocked={isLocked}
+        clientView={clientView}
+        laborCost={laborCost}
+        partsCost={partsCost}
+        operationalCost={operationalCost}
+        expensesTotal={expensesTotal}
+        subtotal={subtotal}
+        base={base}
+        grandTotal={grandTotal}
+        discountRatio={discountRatio}
+        cardFeeAmount={cardFeeAmount}
+        signalAmount={signalAmount}
+        discountServicesPct={discountServicesPct}
+        discountPartsPct={discountPartsPct}
+        applyBulkLineDiscount={applyBulkLineDiscount}
+        issRatePct={issRatePct}
+        defaultQuoteValidityDays={defaultQuoteValidityDays}
+        paymentPresets={paymentPresets}
+        selectedPreset={selectedPreset}
+        installmentRows={installmentRows}
+        calcInstallmentAmount={calcInstallmentAmount}
+        cardFees={cardFees}
+        selectedInstallments={selectedInstallments}
+        setSelectedInstallments={setSelectedInstallments}
+        setDepositFromFinancial={setDepositFromFinancial}
+        setDepositDialogOpen={setDepositDialogOpen}
+        handleGenerateCollections={handleGenerateCollections}
+        generatingCollections={generatingCollections}
+        osCollections={osCollections}
+        commissionableUsers={commissionableUsers}
+      />
 
       {/* Stock Alert Dialog — shown when part has insufficient stock */}
       {stockAlert && orderId && (

@@ -226,6 +226,23 @@ export function generatePDF(data: PDFData, options: PDFOptions): void {
 }
 
 /**
+ * Import dinâmico de html2pdf.js com 1 nova tentativa automática.
+ * "Failed to fetch dynamically imported module" costuma ser uma falha pontual
+ * de rede/timing (o chunk existe, só não chegou a tempo) — tentar de novo
+ * depois de uma pequena pausa resolve na maioria dos casos sem incomodar o
+ * usuário com um erro final que some ao tentar de novo manualmente.
+ */
+async function importHtml2Pdf(): Promise<any> {
+  try {
+    return await import('html2pdf.js');
+  } catch (err) {
+    console.warn('[generatePDFBlob] import dinâmico de html2pdf.js falhou, tentando novamente', err);
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    return await import('html2pdf.js');
+  }
+}
+
+/**
  * Gera o PDF como Blob (sem abrir janela de impressão).
  * Usa html2pdf.js (jsPDF + html2canvas) renderizando o HTML montado por buildHTMLDocument.
  */
@@ -271,8 +288,10 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
   }
 
   try {
-    // Import dinâmico para não pesar o bundle inicial
-    const html2pdfModule: any = await import('html2pdf.js');
+    // Import dinâmico para não pesar o bundle inicial. Falha de rede/timing
+    // ("Failed to fetch dynamically imported module") costuma ser passageira —
+    // uma nova tentativa silenciosa evita expor o erro ao usuário sem necessidade.
+    const html2pdfModule: any = await importHtml2Pdf();
     const html2pdf = html2pdfModule.default || html2pdfModule;
 
     // Altura real do conteúdo após layout. Forçar width E height (mais windowWidth/

@@ -67,6 +67,11 @@ verify_jwt = false
 [functions.agenda-inbox-detector]
 verify_jwt = false
 
+# Caixa de entrada financeira: gera propostas de lançamento e aplica as aprovadas.
+# Painel manda JWT (e a identidade fica registrada na decisão); cron manda x-cron-secret.
+[functions.finance-review]
+verify_jwt = false
+
 # Sincronização de extrato (Open Finance via Pluggy). Mesmo desenho da banking-reconcile:
 # painel manda JWT, cron manda x-cron-secret — a validação é interna.
 [functions.banking-sync]

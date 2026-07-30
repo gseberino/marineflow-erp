@@ -223,7 +223,17 @@ Deno.serve(async (req) => {
     // Com mais de uma conta conectada, o mesmo dinheiro aparece duas vezes: sai de uma e
     // entra na outra. Sem parear, vira despesa e receita fantasmas — infla faturamento e
     // custo ao mesmo tempo. Marcamos as duas pernas para saírem da caça a candidatos.
-    const paresInternos = findInternalTransfers(transactions as never[]);
+    //
+    // O pareamento roda sobre TODAS as pendentes, não sobre o lote exibido: as duas pernas
+    // podem cair em páginas diferentes, e aí metade dos pares desaparece — foi o que
+    // aconteceu quando isto usava só o lote (15 pares vistos de 29 existentes).
+    const { data: universoParaPares } = await admin
+      .from("bank_transactions")
+      .select("id, transaction_date, description, amount, transaction_type, bank_connection_id")
+      .eq("reconciled", false)
+      .not("bank_connection_id", "is", null)
+      .limit(5000);
+    const paresInternos = findInternalTransfers((universoParaPares ?? transactions) as never[]);
     const pernaDeTransferencia = new Map<string, string>();
     for (const par of paresInternos) {
       pernaDeTransferencia.set(par.saida.id, par.detail);
