@@ -73,12 +73,28 @@ describe('FinancialV2 — paridade e navegação', () => {
     expect(screen.getByRole('tab', { name: /Contas bancárias/i })).toBeInTheDocument();
   });
 
+  it('nenhuma aba abre em branco', async () => {
+    // Esta é a lição de um erro real: ao tirar o navigate da aba "Contas a Receber", ela
+    // ficou sem TabsContent nenhum e passou a abrir vazia. O teste anterior só verificava
+    // que a navegação parara — e navegação parada com tela em branco é pior que antes.
+    const user = userEvent.setup();
+    const { container } = renderFinanceiro();
+
+    const abas = await screen.findAllByRole('tab');
+    for (const aba of abas) {
+      await user.click(aba);
+      const painel = container.querySelector('[role="tabpanel"][data-state="active"]');
+      expect(painel, `aba "${aba.textContent}" não tem painel`).toBeTruthy();
+      expect(painel!.textContent?.trim().length, `aba "${aba.textContent}" abre vazia`).toBeGreaterThan(0);
+    }
+  });
+
   it('clicar numa aba troca de aba, não de página', async () => {
     const user = userEvent.setup();
     renderFinanceiro();
 
-    await user.click(await screen.findByRole('tab', { name: /Contas a Receber|Receivables/i }));
-    // A regressão original: esta aba disparava navigate('/v2/receivables').
+    await user.click(await screen.findByRole('tab', { name: /Conciliação|Reconciliation/i }));
+    // A regressão original: uma aba disparava navigate() e trocava a tela inteira.
     expect(navigateMock).not.toHaveBeenCalled();
   });
 

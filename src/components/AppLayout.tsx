@@ -7,7 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import {
   LayoutDashboard, Users, Ship, Anchor, Package, ClipboardList,
-  DollarSign, BarChart3, Settings, ChevronLeft, ChevronRight, Menu,
+  DollarSign, BarChart3, Settings, ChevronLeft, ChevronRight, Menu, TrendingUp,
   Warehouse, Building2, Wrench, History, LogOut, CalendarDays, MessageCircle, CreditCard,
   Database, ChevronDown, Rocket, ShoppingCart, FileDown, Target, CheckCircle2, Bell, CalendarClock, Truck, Camera, FileText, Bot, Boxes, LayoutGrid
 } from 'lucide-react';
@@ -194,6 +194,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
         // vez de passar por um redirecionamento: assim o endereço que aparece na barra é
         // o de verdade, e a rota antiga fica só como saída de emergência (?legacy=1).
         { label: 'Financeiro', icon: DollarSign, path: '/v2/financial', roles: ['admin', 'financial'] },
+        // Tela inteira, não aba: tem filtros, régua de cobrança e recibo próprios.
+        { label: 'Contas a Receber', icon: TrendingUp, path: '/v2/receivables', roles: ['admin', 'financial'] },
         { label: 'Comissões', icon: Users, path: '/commissions', roles: ['admin', 'financial'] },
         { label: 'Emissão Fiscal (NF-e)', icon: FileText, path: '/fiscal/emissao', roles: ['admin'] },
         { label: 'Relatórios', icon: BarChart3, path: '/reports', roles: ['admin', 'financial'] },

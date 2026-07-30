@@ -315,7 +315,10 @@ export default function FinancialV2() {
           <TabsList className="flex h-auto w-full flex-wrap justify-start">
             <TabsTrigger value="overview">{t.financial.tabOverview}</TabsTrigger>
             <TabsTrigger value="dre">DRE / Avançado</TabsTrigger>
-            <TabsTrigger value="receivables">{t.financial.tabReceivables}</TabsTrigger>
+            {/* Contas a Receber NÃO é aba: é tela própria (/v2/receivables), com filtros,
+                régua de cobrança e recibo. Era uma aba que navegava para fora — o pior dos
+                dois mundos, porque prometia troca de conteúdo e entregava troca de página.
+                Agora é item do menu, onde uma tela inteira deve estar. */}
             <TabsTrigger value="payables">{t.financial.tabPayables}</TabsTrigger>
             <TabsTrigger value="reconciliation">{t.financial.tabReconciliation}</TabsTrigger>
             {/* Conciliar é ligar dinheiro ao que já existe; a caixa de entrada é o que
