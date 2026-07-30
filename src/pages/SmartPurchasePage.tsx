@@ -21,28 +21,48 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { toast } from 'sonner';
+import { NewQuoteRequestDialog } from '@/components/purchasing/NewQuoteRequestDialog';
+import type { NewQuoteItem } from '@/hooks/use-quote-requests';
 
 export default function SmartPurchasePage() {
   const { t, formatCurrency } = useI18n();
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
+  const [quoteOpen, setQuoteOpen] = useState(false);
+  const [quoteItems, setQuoteItems] = useState<NewQuoteItem[]>([]);
 
-  // 1. Buscar produtos com estoque baixo ou sugestão de compra
+  // Produtos que precisam de reposição.
+  //
+  // Duas correções em relação à versão anterior desta tela:
+  //
+  // 1. O filtro era `.filter('stock_quantity','lte','minimum_stock')`. O PostgREST
+  //    trata 'minimum_stock' como VALOR literal, não como coluna — não existe
+  //    comparação coluna-a-coluna nessa sintaxe. Agora a comparação é feita aqui.
+  // 2. Comparava o estoque FÍSICO com o mínimo. Com o modelo de reserva v2 ligado,
+  //    o que importa é o DISPONÍVEL (físico − reservado): peça já prometida a uma OS
+  //    não está disponível para repor prateleira.
   const { data: suggestions, isLoading } = useQuery({
     queryKey: ['purchase-suggestions'],
     queryFn: async () => {
-      // Busca produtos onde estoque <= estoque mínimo
-      const { data, error } = await supabase
-        .from('products')
-        .select(`
-          *,
-          suppliers!products_supplier_id_fkey(name, contact_name, phone)
-        `)
-        .filter('stock_quantity', 'lte', 'minimum_stock')
-        .order('stock_quantity', { ascending: true });
-      
-      if (error) throw error;
-      return data;
-    }
+      const [prodRes, availRes] = await Promise.all([
+        supabase
+          .from('products')
+          .select('*, suppliers!products_supplier_id_fkey(name, contact_name, phone)')
+          .eq('active', true),
+        supabase.from('product_availability').select('id, stock_quantity, reserved_quantity'),
+      ]);
+      if (prodRes.error) throw prodRes.error;
+
+      const availById = new Map<string, number>();
+      for (const a of (availRes.data ?? []) as any[]) {
+        availById.set(a.id, Number(a.stock_quantity ?? 0) - Number(a.reserved_quantity ?? 0));
+      }
+
+      return ((prodRes.data ?? []) as any[])
+        .map(p => ({ ...p, available: availById.get(p.id) ?? Number(p.stock_quantity ?? 0) }))
+        // Sem mínimo definido não há régua de reposição — pedir seria adivinhação.
+        .filter(p => Number(p.minimum_stock ?? 0) > 0 && p.available <= Number(p.minimum_stock))
+        .sort((a, b) => a.available - b.available);
+    },
   });
 
   const handleToggleSelect = (id: string) => {
@@ -51,20 +71,33 @@ export default function SmartPurchasePage() {
     );
   };
 
+  /** Quanto repor: repõe até o dobro do mínimo, o que dá folga sem encalhar estoque. */
+  const suggestedQty = (p: any) =>
+    Math.max(1, Number(p.minimum_stock ?? 0) * 2 - Number(p.available ?? 0));
+
+  // Antes este botão só emitia um aviso ("itens prontos para cotação!") e limpava a
+  // seleção — nada era criado. Agora abre a cotação com os itens escolhidos, que é o
+  // que o texto sempre prometeu.
   const handleGenerateOrders = () => {
     if (selectedItems.length === 0) {
-      toast.error('Selecione ao menos um item para gerar a lista de compra.');
+      toast.error('Selecione ao menos um item para cotar.');
       return;
     }
-    // Simulação de geração de pedido
-    toast.success(`${selectedItems.length} itens prontos para cotação!`);
-    setSelectedItems([]);
+    const chosen = (suggestions ?? []).filter((p: any) => selectedItems.includes(p.id));
+    setQuoteItems(chosen.map((p: any) => ({
+      description: p.name,
+      quantity: suggestedQty(p),
+      product_id: p.id,
+    })));
+    setQuoteOpen(true);
   };
 
   const stats = {
-    criticalItems: suggestions?.filter(p => (p.stock_quantity || 0) === 0).length || 0,
+    criticalItems: suggestions?.filter((p: any) => (p.available ?? 0) <= 0).length || 0,
     totalToRestock: suggestions?.length || 0,
-    estimatedCost: suggestions?.reduce((s, p) => s + ((p.minimum_stock || 1) - (p.stock_quantity || 0)) * (p.cost_price || 0), 0) || 0
+    estimatedCost: suggestions?.reduce(
+      (s: number, p: any) => s + suggestedQty(p) * (Number(p.cost_price) || 0), 0,
+    ) || 0,
   };
 
   return (
@@ -111,7 +144,7 @@ export default function SmartPurchasePage() {
                     <TableHead className="w-[50px]"></TableHead>
                     <TableHead>Produto / SKU</TableHead>
                     <TableHead>Fornecedor Preferencial</TableHead>
-                    <TableHead className="text-right">Estoque Atual</TableHead>
+                    <TableHead className="text-right">Disponível</TableHead>
                     <TableHead className="text-right">Mínimo</TableHead>
                     <TableHead className="text-right">Sugestão</TableHead>
                   </TableRow>
@@ -143,13 +176,23 @@ export default function SmartPurchasePage() {
                           </div>
                         </TableCell>
                         <TableCell className="text-right">
-                          <Badge variant="outline" className={p.stock_quantity === 0 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}>
-                            {p.stock_quantity || 0} {p.unit}
+                          <Badge
+                            variant="outline"
+                            className={(p as any).available <= 0
+                              ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+                              : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'}
+                          >
+                            {(p as any).available ?? 0} {p.unit}
                           </Badge>
+                          {Number(p.reserved_quantity) > 0 && (
+                            <div className="text-[10px] text-muted-foreground">
+                              {p.stock_quantity} físico − {p.reserved_quantity} reservado
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell className="text-right text-muted-foreground text-xs">{p.minimum_stock || 0}</TableCell>
                         <TableCell className="text-right font-bold text-primary">
-                          +{(p.minimum_stock || 0) - (p.stock_quantity || 0) + 1}
+                          +{suggestedQty(p)}
                         </TableCell>
                       </TableRow>
                     ))
@@ -172,23 +215,32 @@ export default function SmartPurchasePage() {
               </div>
               
               <Button className="w-full bg-primary hover:bg-primary/90" onClick={handleGenerateOrders} disabled={selectedItems.length === 0}>
-                Gerar Lista de Compra <ChevronRight className="h-4 w-4 ml-1" />
+                Cotar selecionados <ChevronRight className="h-4 w-4 ml-1" />
               </Button>
               
               <div className="space-y-3 pt-4 border-t">
                 <div className="flex items-start gap-2 text-xs text-muted-foreground">
                   <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
-                  <span>Sugerimos priorizar itens vinculados a fornecedores para agilizar a cotação.</span>
+                  <span>A conta usa o <strong>disponível</strong> (físico menos reservado): peça já prometida a uma OS não conta como estoque.</span>
                 </div>
                 <div className="flex items-start gap-2 text-xs text-muted-foreground">
                   <History className="h-4 w-4 text-blue-500 shrink-0" />
-                  <span>O sistema usará o último custo do XML como referência de preço.</span>
+                  <span>A estimativa usa o último custo conhecido; a cotação dá o preço real.</span>
                 </div>
               </div>
             </CardContent>
           </Card>
         </div>
       </div>
+
+      <NewQuoteRequestDialog
+        open={quoteOpen}
+        onOpenChange={v => {
+          setQuoteOpen(v);
+          if (!v) setSelectedItems([]);
+        }}
+        prefilledItems={quoteItems}
+      />
     </div>
   );
 }

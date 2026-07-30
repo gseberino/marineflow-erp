@@ -1,7 +1,7 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   RULES, isRuleEnabled, ruleById, ruleIdFromKey, entityIdFromKey, keyOf, fmtBRL, fmtDate, dueAt,
-  isManualDismissal, dismissCooldownDays,
+  isManualDismissal, dismissCooldownDays, businessDaysBetween,
 } from "./rules.ts";
 
 Deno.test("isManualDismissal: conclusão MANUAL recente bloqueia recriação", () => {
@@ -193,5 +193,45 @@ Deno.test("isResolved r16: reserva e OC aberta contam; falta real mantém a tare
   assertEquals(
     await r16.isResolved(mkDb({ so, parts: [] }), { automation_key: "r16:so:x" }),
     "OS não tem mais peças lançadas",
+  );
+});
+
+Deno.test("businessDaysBetween: ignora fim de semana (espelha a tela)", () => {
+  // sexta 24/07/2026 -> segunda 27/07 = 1 dia útil (não 3)
+  assertEquals(businessDaysBetween("2026-07-24T10:00:00Z", new Date("2026-07-27T10:00:00Z")), 1);
+  // segunda 20/07 -> sexta 24/07 = 4
+  assertEquals(businessDaysBetween("2026-07-20T09:00:00Z", new Date("2026-07-24T09:00:00Z")), 4);
+  assertEquals(businessDaysBetween("data inválida", new Date()), 0);
+});
+
+Deno.test("isResolved r17: preço registrado ou cotação fechada resolve", async () => {
+  const r17 = ruleById("r17")!;
+  const mkDb = (row: unknown) => ({
+    from: () => ({
+      select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: row }) }) }),
+    }),
+  });
+
+  // ninguém respondeu ainda → tarefa continua
+  assertEquals(
+    await r17.isResolved(mkDb({ status: "open", quote_responses: [] }), { automation_key: "r17:quote:x" }),
+    null,
+  );
+  // resposta SEM preço não conta como resposta (ex.: "bom dia, vou ver")
+  assertEquals(
+    await r17.isResolved(mkDb({ status: "open", quote_responses: [{ unit_price: null }] }), { automation_key: "r17:quote:x" }),
+    null,
+  );
+  assertEquals(
+    await r17.isResolved(mkDb({ status: "open", quote_responses: [{ unit_price: 120 }] }), { automation_key: "r17:quote:x" }),
+    "Fornecedor respondeu",
+  );
+  assertEquals(
+    await r17.isResolved(mkDb({ status: "closed", quote_responses: [] }), { automation_key: "r17:quote:x" }),
+    "Cotação fechada",
+  );
+  assertEquals(
+    await r17.isResolved(mkDb(null), { automation_key: "r17:quote:x" }),
+    "Cotação não existe mais",
   );
 });

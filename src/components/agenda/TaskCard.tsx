@@ -6,7 +6,7 @@ import {
 import { cn } from '@/lib/utils';
 import {
   Bot, Cog, Briefcase, User, DollarSign, ShoppingCart, Package, FileText,
-  Anchor, Clock, CalendarDays, MapPin, AlarmClock, Timer,
+  Anchor, Clock, CalendarDays, MapPin, AlarmClock, Timer, ClipboardList,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useState } from 'react';
@@ -26,6 +26,7 @@ const ENTITY_CONFIG: Record<RelatedEntityType, { label: string; Icon: typeof Bri
   purchase_order: { label: 'OC',         Icon: ShoppingCart, route: () => '/purchase-orders' },
   collection:     { label: 'Cobrança',   Icon: DollarSign,   route: () => '/financial' },
   stock_item:     { label: 'Estoque',    Icon: Package,      route: () => '/inventory' },
+  quote_request:  { label: 'Cotação',    Icon: ClipboardList, route: (id) => `/purchasing/quotes/${id}` },
 };
 
 const PRIORITY_BAR: Record<string, string> = {
@@ -87,6 +88,13 @@ function TaskActionButton({ task, onScheduleOs }: { task: any; onScheduleOs?: (t
     payable: { label: 'Registrar pagamento', onClick: openPayment },
     purchase_order: { label: 'Receber OC', onClick: (e) => { e.stopPropagation(); navigate('/purchase-orders'); } },
     stock_item: { label: 'Repor', onClick: (e) => { e.stopPropagation(); navigate('/inventory/smart-purchase'); } },
+    quote_request: {
+      label: 'Cobrar resposta',
+      onClick: (e) => {
+        e.stopPropagation();
+        if (task.related_entity_id) navigate(`/purchasing/quotes/${task.related_entity_id}`);
+      },
+    },
     // A tarefa de compra (R16) leva direto para a OS, onde a faixa de compras tem o
     // "Resolver" com cotar / gerar OC — em vez de largar o usuário na lista de OCs.
     service_order: task.automation_key?.startsWith('r16:')

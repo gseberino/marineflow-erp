@@ -4,7 +4,9 @@ import { supabase } from '@/integrations/supabase/client';
 // Tipos de entidade vinculável a uma tarefa (espelha o CHECK de agenda_tasks)
 export type RelatedEntityType =
   | 'service_order' | 'quote' | 'external_quote' | 'client' | 'vessel'
-  | 'receivable' | 'payable' | 'purchase_order' | 'collection' | 'stock_item';
+  | 'receivable' | 'payable' | 'purchase_order' | 'collection' | 'stock_item'
+  /** cotação a fornecedor (COT-) — usada pela regra R17, cobrança de resposta */
+  | 'quote_request';
 
 export type ReminderInput = { remind_at: string; channel: 'app' | 'whatsapp' };
 

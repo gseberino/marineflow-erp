@@ -47,6 +47,11 @@ const PAGES = [
   { path: '/v2/purchase-orders', modes: ['light', 'dark'], slug: 'po', themeVia: 'storage' },
   { path: '/v2/crm', modes: ['light', 'dark'], slug: 'crm', themeVia: 'storage' },
   { path: '/v2/external-quotes/catalog', modes: ['light', 'dark'], slug: 'catalog', themeVia: 'storage' },
+  /* Compras: o mapa de cotação é o pior caso de largura do sistema (itens ×
+     fornecedores). Foi desenhado como bloco-por-item justamente para caber —
+     estas entradas são o que prova que continua cabendo. */
+  { path: '/purchasing', modes: ['light', 'dark'], slug: 'purchasing-hub', themeVia: 'storage' },
+  { path: '/purchasing/quotes', modes: ['light', 'dark'], slug: 'quotes-list', themeVia: 'storage' },
 ];
 
 if (!EMAIL || !PASSWORD) {

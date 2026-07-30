@@ -45,6 +45,27 @@ export const keyOf = (rule: string, entity: string, id: string, bucket?: string)
 export const entityIdFromKey = (key: string) => key.split(':')[2] || '';
 
 const daysAgoISO = (days: number) => new Date(Date.now() - days * 86400000).toISOString();
+
+/**
+ * Dias ÚTEIS entre duas datas. Usado no prazo de resposta do fornecedor: contar dias
+ * corridos faria a cobrança disparar na segunda por causa do fim de semana.
+ * Espelha src/lib/quote-comparison.ts#businessDaysSince (a tela mostra o mesmo número).
+ */
+export function businessDaysBetween(from: string | Date, to: Date): number {
+  const start = typeof from === 'string' ? new Date(from) : from;
+  if (Number.isNaN(start.getTime())) return 0;
+  let days = 0;
+  const cursor = new Date(start);
+  cursor.setHours(0, 0, 0, 0);
+  const end = new Date(to);
+  end.setHours(0, 0, 0, 0);
+  while (cursor < end) {
+    cursor.setDate(cursor.getDate() + 1);
+    const dow = cursor.getDay();
+    if (dow !== 0 && dow !== 6) days++;
+  }
+  return days;
+}
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const inDaysISO = (days: number) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
 
@@ -608,7 +629,63 @@ const r16: Rule = {
   },
 };
 
-export const RULES: Rule[] = [r1, r2, r3, r4, r5, r6, r7, r8, r11, r12, r14, r15, r16];
+// R17: cotação enviada sem nenhuma resposta.
+//
+// A janela praticada no mercado para o fornecedor responder é de 3 a 5 dias úteis, e a
+// recomendação é lembrete em vez de caçar no inbox. Este é o caso que de fato aconteceu
+// aqui: 3 cotações enviadas em 23/07 e nenhuma resposta registrada até 29/07.
+//
+// Conta em dias ÚTEIS: contar corridos dispararia na segunda-feira por causa do fim de
+// semana. A tarefa é interna — nada é enviado ao fornecedor sem você mandar.
+const r17: Rule = {
+  id: 'r17',
+  label: 'Cotação sem resposta do fornecedor',
+  defaultEnabled: true,
+  async find(db) {
+    const { data } = await db
+      .from('quote_requests')
+      .select('id, code, created_at, service_orders(service_order_number), quote_responses(unit_price)')
+      .eq('status', 'open')
+      .limit(100);
+
+    return (data || [])
+      .filter((q: any) => {
+        // Alguém já mandou preço? Então não é falta de resposta — é falta de decisão,
+        // e isso a Central de Compras mostra sem precisar de tarefa.
+        const hasPrice = (q.quote_responses || []).some((r: any) => Number(r.unit_price) > 0);
+        if (hasPrice) return false;
+        return businessDaysBetween(q.created_at, new Date()) >= 3;
+      })
+      .map((q: any) => {
+        const dias = businessDaysBetween(q.created_at, new Date());
+        return {
+          automation_key: keyOf('r17', 'quote', q.id),
+          title: `Cobrar resposta da cotação ${q.code}` +
+            (q.service_orders?.service_order_number ? ` (${q.service_orders.service_order_number})` : ''),
+          priority: (dias >= 5 ? 'urgent' : 'high') as 'urgent' | 'high',
+          assignee: 'admin' as const,
+          due_at: dueAt(todayISO()),
+          related_entity_type: 'quote_request',
+          related_entity_id: q.id,
+          notes: `Enviada há ${dias} dias úteis sem nenhum preço. A janela normal é de 3 a 5 dias úteis.`,
+        };
+      });
+  },
+  async isResolved(db, task) {
+    const id = entityIdFromKey(task.automation_key);
+    const { data } = await db
+      .from('quote_requests')
+      .select('status, quote_responses(unit_price)')
+      .eq('id', id)
+      .maybeSingle();
+    if (!data) return 'Cotação não existe mais';
+    if (data.status !== 'open') return `Cotação ${data.status === 'closed' ? 'fechada' : 'cancelada'}`;
+    const hasPrice = (data.quote_responses || []).some((r: any) => Number(r.unit_price) > 0);
+    return hasPrice ? 'Fornecedor respondeu' : null;
+  },
+};
+
+export const RULES: Rule[] = [r1, r2, r3, r4, r5, r6, r7, r8, r11, r12, r14, r15, r16, r17];
 
 export function ruleById(id: string): Rule | undefined {
   return RULES.find((r) => r.id === id);
