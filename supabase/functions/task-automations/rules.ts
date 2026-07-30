@@ -645,11 +645,16 @@ const r17: Rule = {
   label: 'Cotação sem resposta do fornecedor',
   defaultEnabled: true,
   async find(db) {
-    const { data } = await db
+    const { data, error } = await db
       .from('quote_requests')
       .select('id, code, created_at, service_orders(service_order_number), quote_responses(unit_price)')
       .eq('status', 'open')
       .limit(100);
+
+    // Sem isto, um erro de consulta viraria `data = null` e a regra devolveria lista
+    // vazia — indistinguível de "não há cotação parada". Levantar faz o motor logar
+    // com o id da regra, que é o que permite descobrir a causa sem adivinhação.
+    if (error) throw error;
 
     return (data || [])
       .filter((q: any) => {
