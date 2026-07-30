@@ -7,11 +7,12 @@ import { useI18n } from '@/i18n';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useRecordHistory } from '@/hooks/use-audit-log';
 import { Badge } from '@/components/ui/badge';
-import { History, Link2, Check, ListChecks, Route } from 'lucide-react';
+import { History, Link2, Check, ListChecks, Route, ClipboardCheck } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { EntityTasksPanel } from '@/components/agenda/EntityTasksPanel';
 import { ServiceRoutePanel } from '@/components/service-orders/ServiceRoutePanel';
+import { SurveyPanel } from '@/components/service-orders/SurveyPanel';
 
 function TimelineTab({ id }: { id: string }) {
   const { data: history } = useRecordHistory('service_orders', id);
@@ -36,6 +37,14 @@ export default function ServiceOrderDetail() {
 
   const { data: order, isLoading, error } = useServiceOrder(isNew ? undefined : id);
   const [copied, setCopied] = useState(false);
+
+  // Enquanto é orçamento (draft), ainda dá tempo de levantar antes de dar o preço.
+  const isQuote = order?.status === 'draft';
+  // O levantamento avalia UM serviço: o de maior valor da OS, que é o que
+  // domina o risco da estimativa.
+  const mainService = (order?.service_order_services || [])
+    .filter((s: any) => s.service_id)
+    .sort((a: any, b: any) => Number(b.line_total || 0) - Number(a.line_total || 0))[0];
 
   if (!isNew && !isLoading && !order && !error) {
     return (
@@ -94,6 +103,13 @@ export default function ServiceOrderDetail() {
           <TabsTrigger value="route" className="flex items-center gap-1.5">
             <Route className="h-3.5 w-3.5" /> Roteiro
           </TabsTrigger>
+          {/* Levantamento só faz sentido enquanto é orçamento: depois de virar OS,
+              o preço já foi dado e a pergunta certa chegou tarde. */}
+          {isQuote && (
+            <TabsTrigger value="survey" className="flex items-center gap-1.5">
+              <ClipboardCheck className="h-3.5 w-3.5" /> Levantamento
+            </TabsTrigger>
+          )}
           <TabsTrigger value="tasks" className="flex items-center gap-1.5">
             <ListChecks className="h-3.5 w-3.5" /> Tarefas
           </TabsTrigger>
@@ -132,6 +148,20 @@ export default function ServiceOrderDetail() {
           />
         </div>
       </TabsContent>
+
+      {isQuote && (
+        <TabsContent value="survey" className="mt-0 p-4 lg:p-6">
+          <div className="max-w-3xl">
+            <SurveyPanel
+              serviceOrderId={id}
+              serviceId={mainService?.service_id}
+              clientId={order?.client_id}
+              vesselId={order?.vessel_id}
+              valorEstimado={order?.grand_total}
+            />
+          </div>
+        </TabsContent>
+      )}
 
       <TabsContent value="tasks" className="mt-0 p-4 lg:p-6">
         <div className="max-w-2xl">

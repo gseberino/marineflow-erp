@@ -6606,6 +6606,7 @@ export type Database = {
           commission_rate: number | null
           commissioned_person: string | null
           commissioned_user_id: string | null
+          contingency_pct: number | null
           converted_to_os_at: string | null
           created_at: string
           created_by: string | null
@@ -6618,6 +6619,7 @@ export type Database = {
           discount_amount: number | null
           discount_parts_pct: number
           discount_services_pct: number
+          estimate_confidence: string | null
           estimated_hours: number | null
           extra_notes: string | null
           ferry_cost: number | null
@@ -6664,6 +6666,7 @@ export type Database = {
           solution_applied: string | null
           status: string
           subcontract_cost_total: number | null
+          survey_id: string | null
           tax_amount: number | null
           technician_count_for_travel: number | null
           technician_notes: string | null
@@ -6689,6 +6692,7 @@ export type Database = {
           commission_rate?: number | null
           commissioned_person?: string | null
           commissioned_user_id?: string | null
+          contingency_pct?: number | null
           converted_to_os_at?: string | null
           created_at?: string
           created_by?: string | null
@@ -6701,6 +6705,7 @@ export type Database = {
           discount_amount?: number | null
           discount_parts_pct?: number
           discount_services_pct?: number
+          estimate_confidence?: string | null
           estimated_hours?: number | null
           extra_notes?: string | null
           ferry_cost?: number | null
@@ -6747,6 +6752,7 @@ export type Database = {
           solution_applied?: string | null
           status?: string
           subcontract_cost_total?: number | null
+          survey_id?: string | null
           tax_amount?: number | null
           technician_count_for_travel?: number | null
           technician_notes?: string | null
@@ -6772,6 +6778,7 @@ export type Database = {
           commission_rate?: number | null
           commissioned_person?: string | null
           commissioned_user_id?: string | null
+          contingency_pct?: number | null
           converted_to_os_at?: string | null
           created_at?: string
           created_by?: string | null
@@ -6784,6 +6791,7 @@ export type Database = {
           discount_amount?: number | null
           discount_parts_pct?: number
           discount_services_pct?: number
+          estimate_confidence?: string | null
           estimated_hours?: number | null
           extra_notes?: string | null
           ferry_cost?: number | null
@@ -6830,6 +6838,7 @@ export type Database = {
           solution_applied?: string | null
           status?: string
           subcontract_cost_total?: number | null
+          survey_id?: string | null
           tax_amount?: number | null
           technician_count_for_travel?: number | null
           technician_notes?: string | null
@@ -6882,6 +6891,13 @@ export type Database = {
             columns: ["requested_by_contact_id"]
             isOneToOne: false
             referencedRelation: "vessel_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_orders_survey_id_fkey"
+            columns: ["survey_id"]
+            isOneToOne: false
+            referencedRelation: "service_surveys"
             referencedColumns: ["id"]
           },
           {
@@ -6989,6 +7005,283 @@ export type Database = {
             columns: ["service_id"]
             isOneToOne: false
             referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      service_survey_answers: {
+        Row: {
+          answer_json: Json | null
+          answer_value: string | null
+          answered_at: string
+          id: string
+          photo_path: string | null
+          question_snapshot: string
+          seq: number
+          skipped_reason: string | null
+          survey_id: string
+          template_id: string | null
+        }
+        Insert: {
+          answer_json?: Json | null
+          answer_value?: string | null
+          answered_at?: string
+          id?: string
+          photo_path?: string | null
+          question_snapshot: string
+          seq: number
+          skipped_reason?: string | null
+          survey_id: string
+          template_id?: string | null
+        }
+        Update: {
+          answer_json?: Json | null
+          answer_value?: string | null
+          answered_at?: string
+          id?: string
+          photo_path?: string | null
+          question_snapshot?: string
+          seq?: number
+          skipped_reason?: string | null
+          survey_id?: string
+          template_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_survey_answers_survey_id_fkey"
+            columns: ["survey_id"]
+            isOneToOne: false
+            referencedRelation: "service_surveys"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_survey_answers_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "service_survey_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      service_survey_templates: {
+        Row: {
+          active: boolean
+          affects: string[] | null
+          answer_type: string
+          approved_at: string | null
+          approved_by: string | null
+          ask_remotely: boolean
+          branch_on: Json | null
+          created_at: string
+          created_by: string | null
+          help_text: string | null
+          id: string
+          options: Json | null
+          origin: string
+          price_impact: string
+          question: string
+          seq: number
+          service_id: string
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          active?: boolean
+          affects?: string[] | null
+          answer_type?: string
+          approved_at?: string | null
+          approved_by?: string | null
+          ask_remotely?: boolean
+          branch_on?: Json | null
+          created_at?: string
+          created_by?: string | null
+          help_text?: string | null
+          id?: string
+          options?: Json | null
+          origin?: string
+          price_impact?: string
+          question: string
+          seq: number
+          service_id: string
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          active?: boolean
+          affects?: string[] | null
+          answer_type?: string
+          approved_at?: string | null
+          approved_by?: string | null
+          ask_remotely?: boolean
+          branch_on?: Json | null
+          created_at?: string
+          created_by?: string | null
+          help_text?: string | null
+          id?: string
+          options?: Json | null
+          origin?: string
+          price_impact?: string
+          question?: string
+          seq?: number
+          service_id?: string
+          updated_at?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_survey_templates_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_survey_templates_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_survey_templates_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      service_surveys: {
+        Row: {
+          answered_at: string | null
+          answered_by: string | null
+          cases_used: Json | null
+          client_id: string | null
+          confidence: string | null
+          confidence_rationale: string | null
+          contingency_pct: number | null
+          created_at: string
+          created_by: string | null
+          estimated_minutes_p50: number | null
+          estimated_minutes_p80: number | null
+          id: string
+          materials_draft: Json | null
+          mode: string
+          questions_asked: number | null
+          questions_planned: number | null
+          service_id: string | null
+          service_order_id: string | null
+          share_token: string | null
+          status: string
+          trigger_reason: string
+          updated_at: string
+          vessel_id: string | null
+        }
+        Insert: {
+          answered_at?: string | null
+          answered_by?: string | null
+          cases_used?: Json | null
+          client_id?: string | null
+          confidence?: string | null
+          confidence_rationale?: string | null
+          contingency_pct?: number | null
+          created_at?: string
+          created_by?: string | null
+          estimated_minutes_p50?: number | null
+          estimated_minutes_p80?: number | null
+          id?: string
+          materials_draft?: Json | null
+          mode?: string
+          questions_asked?: number | null
+          questions_planned?: number | null
+          service_id?: string | null
+          service_order_id?: string | null
+          share_token?: string | null
+          status?: string
+          trigger_reason: string
+          updated_at?: string
+          vessel_id?: string | null
+        }
+        Update: {
+          answered_at?: string | null
+          answered_by?: string | null
+          cases_used?: Json | null
+          client_id?: string | null
+          confidence?: string | null
+          confidence_rationale?: string | null
+          contingency_pct?: number | null
+          created_at?: string
+          created_by?: string | null
+          estimated_minutes_p50?: number | null
+          estimated_minutes_p80?: number | null
+          id?: string
+          materials_draft?: Json | null
+          mode?: string
+          questions_asked?: number | null
+          questions_planned?: number | null
+          service_id?: string | null
+          service_order_id?: string | null
+          share_token?: string | null
+          status?: string
+          trigger_reason?: string
+          updated_at?: string
+          vessel_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_surveys_answered_by_fkey"
+            columns: ["answered_by"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_surveys_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_surveys_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_surveys_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_surveys_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_surveys_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_surveys_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "vw_os_profitability"
+            referencedColumns: ["os_id"]
+          },
+          {
+            foreignKeyName: "service_surveys_vessel_id_fkey"
+            columns: ["vessel_id"]
+            isOneToOne: false
+            referencedRelation: "vessels"
             referencedColumns: ["id"]
           },
         ]
@@ -8281,6 +8574,10 @@ export type Database = {
         Args: { _quote_id: string }
         Returns: string
       }
+      estimate_from_cases: {
+        Args: { p_min_casos?: number; p_service_id: string }
+        Returns: Json
+      }
       generate_service_order_steps: {
         Args: { p_service_order_id: string }
         Returns: number
@@ -8511,6 +8808,15 @@ export type Database = {
         Returns: Json
       }
       share_token_da_requisicao: { Args: never; Returns: string }
+      should_survey_service: {
+        Args: {
+          p_client_id?: string
+          p_service_id: string
+          p_valor?: number
+          p_vessel_id?: string
+        }
+        Returns: Json
+      }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
       stock_model_v2_on: { Args: never; Returns: boolean }
@@ -8666,9 +8972,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {},
   },
