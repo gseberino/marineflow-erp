@@ -9,7 +9,8 @@ import {
   LayoutDashboard, Users, Ship, Anchor, Package, ClipboardList,
   DollarSign, BarChart3, Settings, ChevronLeft, ChevronRight, Menu, TrendingUp,
   Warehouse, Building2, Wrench, History, LogOut, CalendarDays, MessageCircle, CreditCard,
-  Database, ChevronDown, Rocket, ShoppingCart, FileDown, Target, CheckCircle2, Bell, CalendarClock, Truck, Camera, FileText, Bot, Boxes, LayoutGrid
+  Database, ChevronDown, Rocket, ShoppingCart, FileDown, Target, CheckCircle2, Bell, CalendarClock, Truck, Camera, FileText, Bot, Boxes, LayoutGrid,
+  Sparkles, ArrowLeftRight, TrendingDown
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -31,6 +32,7 @@ import { DiagnosticExportButton } from '@/components/DiagnosticExportButton';
 import { Button } from '@/components/ui/button';
 import { usePushNotifications, requestPushPermission } from '@/hooks/use-push-notifications';
 import { useSuggestions } from '@/hooks/use-agenda';
+import { useFinanceReviewCount } from '@/hooks/use-finance-review';
 import { toast } from 'sonner';
 import { Moon, Sun } from 'lucide-react';
 import { getThemeMode, THEME_EVENT, toggleThemeMode, type ThemeMode } from '@/v2/theme';
@@ -104,6 +106,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
   // então montar no layout não custa uma ida extra ao banco por tela.
   const { data: sugestoes = [] } = useSuggestions();
   const sugestoesPendentes = sugestoes.length;
+  // Mesmo raciocínio para o financeiro: uma fila de aprovação que ninguém vê é uma fila
+  // que ninguém trabalha. Só a contagem, não as linhas.
+  const { data: propostasPendentes = 0 } = useFinanceReviewCount();
 
   const [showPushBanner, setShowPushBanner] = useState(false);
 
@@ -214,13 +219,23 @@ export function AppLayout({ children }: { children: ReactNode }) {
       id: 'financeiro',
       label: 'Financeiro',
       icon: DollarSign,
+      // O grupo tinha um item "Financeiro" dentro de si, e nove abas escondidas dentro
+      // DESSE item. Dois problemas: o nível repetido não informava nada, e trabalho
+      // diário (conciliar, decidir o que o banco trouxe) ficava a dois cliques de
+      // distância, invisível de fora.
+      //
+      // Sobe para o menu o que é DESTINO — aquilo que alguém abre o sistema para fazer.
+      // Continua como aba o que é RECORTE do mesmo material: DRE e Aging são leituras da
+      // visão geral, e contas bancárias e regras são ajustes que se faz uma vez e revisita
+      // raramente. Promover tudo daria uma lista de doze itens onde nada se destaca —
+      // trocar "escondido demais" por "achatado demais" não é ganho.
       items: [
-        // Primeira tela migrada para a v2 (30/07/2026). O menu aponta direto para lá em
-        // vez de passar por um redirecionamento: assim o endereço que aparece na barra é
-        // o de verdade, e a rota antiga fica só como saída de emergência (?legacy=1).
-        { label: 'Financeiro', icon: DollarSign, path: '/v2/financial', roles: ['admin', 'financial'] },
+        { label: 'Visão Geral', icon: DollarSign, path: '/v2/financial', roles: ['admin', 'financial'] },
+        { label: 'Caixa de Entrada', icon: Sparkles, path: '/v2/financial?tab=inbox', roles: ['admin', 'financial'] },
+        { label: 'Conciliação', icon: ArrowLeftRight, path: '/v2/financial?tab=reconciliation', roles: ['admin', 'financial'] },
         // Tela inteira, não aba: tem filtros, régua de cobrança e recibo próprios.
         { label: 'Contas a Receber', icon: TrendingUp, path: '/v2/receivables', roles: ['admin', 'financial'] },
+        { label: 'Contas a Pagar', icon: TrendingDown, path: '/v2/financial?tab=payables', roles: ['admin', 'financial'] },
         { label: 'Comissões', icon: Users, path: '/v2/commissions', roles: ['admin', 'financial'] },
         { label: 'Emissão Fiscal (NF-e)', icon: FileText, path: '/v2/fiscal/emissao', roles: ['admin'] },
         { label: 'Relatórios', icon: BarChart3, path: '/v2/reports', roles: ['admin', 'financial'] },
@@ -253,19 +268,30 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
   const isActive = (path: string) => {
     if (path === '/') return location.pathname === '/';
-    if (location.pathname === path) return true;
-    
-    // Check if another menu item is a better (longer) match
-    const allPaths = groups.flatMap(g => g.items.map(i => i.path));
+
+    // Vários itens do Financeiro moram na MESMA rota e se distinguem pela aba
+    // (/v2/financial?tab=inbox). Comparar só o pathname acenderia todos de uma vez, e o
+    // menu deixaria de dizer onde a pessoa está — que é a única coisa que ele faz aqui.
+    const [rota, query] = path.split('?');
+    const abaDoItem = query ? new URLSearchParams(query).get('tab') : null;
+    const abaAtual = new URLSearchParams(location.search).get('tab');
+
+    if (location.pathname === rota) {
+      // Sem aba na URL, o item sem aba é quem representa a página (a "Visão Geral").
+      return abaDoItem ? abaDoItem === abaAtual : !abaAtual;
+    }
+
+    // Item mais específico ganha, para /v2/clients não acender junto de /v2/clients/:id.
+    const allPaths = groups.flatMap(g => g.items.map(i => i.path.split('?')[0]));
     const matchingPaths = allPaths.filter(p => location.pathname.startsWith(p) && (location.pathname.length === p.length || location.pathname.charAt(p.length) === '/'));
     const longestMatch = matchingPaths.reduce((a, b) => a.length > b.length ? a : b, '');
-    
+
     if (longestMatch) {
-      return path === longestMatch;
+      return rota === longestMatch;
     }
-    
-    // Fallback for paths that don't match any menu exactly (like /clients/new)
-    return location.pathname.startsWith(path + '/');
+
+    // Fallback para caminhos sem item exato no menu (como /clients/new).
+    return location.pathname.startsWith(rota + '/');
   };
 
   // Filter items based on roles and dynamic permissions (metadata.visible_areas)
@@ -325,16 +351,20 @@ export function AppLayout({ children }: { children: ReactNode }) {
     // Contador da Caixa de Entrada: sem ele, as sugestões do agente só existem para quem
     // já sabe que a aba existe. É o padrão de fila de aprovação — o número no menu é o
     // que faz a pessoa entrar. Recolhido, vira um ponto (não cabe número).
-    const pendentes = item.path === '/agenda' ? sugestoesPendentes : 0;
+    const pendentes = item.path === '/agenda'
+      ? sugestoesPendentes
+      : item.path === '/v2/financial?tab=inbox' ? propostasPendentes : 0;
+    const ativo = isActive(item.path);
     return (
       <Link
         key={item.path}
         to={item.path}
         onClick={() => setMobileOpen(false)}
+        aria-current={ativo ? 'page' : undefined}
         className={cn(
           'relative flex items-center gap-3 rounded-lg py-2 text-sm font-medium transition-colors',
           indent && !collapsed ? 'pl-9 pr-3' : 'px-3',
-          isActive(item.path)
+          ativo
             ? 'bg-sidebar-primary/15 text-sidebar-primary'
             : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
         )}

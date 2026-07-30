@@ -78,6 +78,27 @@ export function useFinanceReviewQueue() {
   });
 }
 
+/**
+ * Só a CONTAGEM da fila, para o menu.
+ *
+ * Consulta separada de propósito: o menu monta em toda tela do sistema e não pode arrastar
+ * as 500 linhas da fila junto. `head: true` traz o total sem trazer linha nenhuma.
+ */
+export function useFinanceReviewCount() {
+  return useQuery({
+    queryKey: ['finance-review-count'],
+    queryFn: async (): Promise<number> => {
+      const { count, error } = await supabase
+        .from('finance_review_queue')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'pending');
+      if (error) throw error;
+      return count ?? 0;
+    },
+    staleTime: 60_000,
+  });
+}
+
 export function useGerarPropostas() {
   const qc = useQueryClient();
   type Resposta = { ok: boolean; criadas: number; message: string; elegiveis_lote?: number };
