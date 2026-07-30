@@ -82,6 +82,9 @@ const ExternalQuoteDetailPage = lazy(() => import("./pages/ExternalQuoteDetailPa
 const ExternalSellerLeadsPage = lazy(() => import("./pages/ExternalSellerLeadsPage"));
 const ExternalProductCatalogPage = lazy(() => import("./pages/ExternalProductCatalogPage"));
 const PurchaseOrdersPage = lazy(() => import("./pages/PurchaseOrdersPage"));
+const PurchasingHubPage = lazy(() => import("./pages/PurchasingHubPage"));
+const QuoteRequestsPage = lazy(() => import("./pages/QuoteRequestsPage"));
+const QuoteRequestDetailPage = lazy(() => import("./pages/QuoteRequestDetailPage"));
 const AIActivityPage = lazy(() => import("./pages/AIActivityPage"));
 
 /**
@@ -204,6 +207,7 @@ const App = () => (
                         <Route path="/v2/products" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><ProductsListV2 /></ProtectedRoute>} />
                         <Route path="/v2/services" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><ServicesListV2 /></ProtectedRoute>} />
                         <Route path="/v2/suppliers" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><SuppliersListV2 /></ProtectedRoute>} />
+
                         <Route path="/purchase-orders" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><LegadoOuV2 to="/v2/purchase-orders" legacy={<PurchaseOrdersPage />} /></ProtectedRoute>} />
                         <Route path="/service-orders/new" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><LegadoOuV2 to="/v2/service-orders/new" legacy={<ServiceOrderDetail />} /></ProtectedRoute>} />
                         <Route path="/service-orders/:id" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><LegadoOuV2 to="/v2/service-orders/:id" legacy={<ServiceOrderDetail />} /></ProtectedRoute>} />
@@ -219,6 +223,15 @@ const App = () => (
                         <Route path="/inventory/smart-purchase" element={<ProtectedRoute roles={['admin','financial']}><LegadoOuV2 to="/v2/inventory/smart-purchase" legacy={<SmartPurchasePage />} /></ProtectedRoute>} />
                         <Route path="/inventory/import-xml" element={<ProtectedRoute roles={['admin']}><LegadoOuV2 to="/v2/inventory/import-xml" legacy={<ImportFiscalXML />} /></ProtectedRoute>} />
                         <Route path="/fiscal/emissao" element={<ProtectedRoute roles={['admin']}><LegadoOuV2 to="/v2/fiscal/emissao" legacy={<FiscalEmission />} /></ProtectedRoute>} />
+                        {/* Compras: telas NOVAS, então não existe versão antiga delas. As
+                            rotas sem prefixo ficam como atalho e caem na v2 preservando :id
+                            e query, pelo mesmo LegadoOuV2 do resto do ERP. */}
+                        <Route path="/purchasing" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><LegadoOuV2 to="/v2/purchasing" legacy={<PurchasingHubPage />} /></ProtectedRoute>} />
+                        <Route path="/purchasing/quotes" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><LegadoOuV2 to="/v2/purchasing/quotes" legacy={<QuoteRequestsPage />} /></ProtectedRoute>} />
+                        <Route path="/purchasing/quotes/:id" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><LegadoOuV2 to="/v2/purchasing/quotes/:id" legacy={<QuoteRequestDetailPage />} /></ProtectedRoute>} />
+                        <Route path="/v2/purchasing" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><PurchasingHubPage /></ProtectedRoute>} />
+                        <Route path="/v2/purchasing/quotes" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><QuoteRequestsPage /></ProtectedRoute>} />
+                        <Route path="/v2/purchasing/quotes/:id" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><QuoteRequestDetailPage /></ProtectedRoute>} />
                         <Route path="/agenda" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><AgendaPage /></ProtectedRoute>} />
                         <Route path="/day-board" element={<ProtectedRoute roles={['admin','financial','technician']} groupId="operacional"><DayBoardPage /></ProtectedRoute>} />
                         {/* Financeiro migrado para a v2 em 30/07/2026. Links antigos,

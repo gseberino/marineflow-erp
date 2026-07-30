@@ -202,6 +202,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
       icon: Boxes,
       roles: ['admin', 'financial'],
       items: [
+        { label: 'Central de Compras', icon: ShoppingCart, path: '/v2/purchasing', roles: ['admin', 'financial'] },
+        { label: 'Cotações', icon: ClipboardList, path: '/v2/purchasing/quotes', roles: ['admin', 'financial'] },
         { label: 'Entrada de Mercadoria (XML)', icon: FileDown, path: '/v2/inventory/import-xml', roles: ['admin'] },
         { label: 'Ordens de Compra', icon: Truck, path: '/v2/purchase-orders', roles: ['admin', 'financial'] },
         { label: 'Assistente de Compras', icon: ShoppingCart, path: '/v2/inventory/smart-purchase', roles: ['admin', 'financial'] },

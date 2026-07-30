@@ -47,7 +47,8 @@ const PO_DETAIL_SELECT = `
   purchase_order_items(*, products(name, sku))
 `;
 
-async function generatePONumber(): Promise<string> {
+/** Exportada para quem gera OC fora deste arquivo (ex.: cesta escolhida na cotação). */
+export async function generatePONumber(): Promise<string> {
   const { data } = await supabase
     .from('purchase_orders')
     .select('po_number')
