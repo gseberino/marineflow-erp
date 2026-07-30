@@ -11,8 +11,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { I18nProvider } from '@/i18n';
 import { FinanceReviewInbox } from './FinanceReviewInbox';
 
-const { propostas, aprovarMock } = vi.hoisted(() => ({
+const { propostas, aprovarMock, duplicataMock, regraMock } = vi.hoisted(() => ({
   aprovarMock: vi.fn(),
+  duplicataMock: vi.fn(),
+  regraMock: vi.fn(),
   propostas: [
     {
       id: 'p1', kind: 'create_payable', status: 'pending',
@@ -28,7 +30,8 @@ const { propostas, aprovarMock } = vi.hoisted(() => ({
       title: 'Despesa: MARINE EXPRESS COMERCIAL', reasoning: 'CNPJ/CPF confere com o fornecedor MARINE EXPRESS',
       confidence: 90, suggested_amount: 18001.04, suggested_date: '2026-07-18',
       suggested_category: 'Peças e materiais', suggested_description: 'MARINE EXPRESS COMERCIAL',
-      suggested_supplier_id: 'f1', dre_group: 'custo_direto', created_at: '2026-07-18T10:00:00Z',
+      suggested_supplier_id: 'f1', dre_group: 'custo_direto', applied_rule_id: 'r1',
+      created_at: '2026-07-18T10:00:00Z',
     },
     {
       id: 'p3', kind: 'internal_transfer', status: 'pending',
@@ -49,15 +52,18 @@ vi.mock('@/hooks/use-finance-review', async (importOriginal) => {
     useGerarPropostas: () => ({ mutate: vi.fn(), isPending: false }),
     useAprovarPropostas: () => ({ mutate: aprovarMock, isPending: false }),
     useRecusarPropostas: () => ({ mutate: vi.fn(), isPending: false }),
+    useMarcarDuplicata: () => ({ mutate: duplicataMock, isPending: false }),
   };
 });
 
-vi.mock('@/integrations/supabase/client', () => ({
-  supabase: {
-    from: () => ({
-      select: () => ({ eq: () => ({ eq: () => ({ order: () => Promise.resolve({ data: [], error: null }) }) }) }),
-    }),
-  },
+vi.mock('@/hooks/use-financial-categories', () => ({
+  useFinancialCategories: () => ({
+    data: [
+      { name: 'Combustível e deslocamento', dre_group: 'custo_direto' },
+      { name: 'Peças e materiais', dre_group: 'custo_direto' },
+    ],
+    isLoading: false,
+  }),
 }));
 
 function renderInbox() {
@@ -65,7 +71,7 @@ function renderInbox() {
   return render(
     <QueryClientProvider client={qc}>
       <I18nProvider>
-        <FinanceReviewInbox />
+        <FinanceReviewInbox onCriarRegra={regraMock} />
       </I18nProvider>
     </QueryClientProvider>,
   );
@@ -112,5 +118,41 @@ describe('FinanceReviewInbox', () => {
   it('marca a transferência entre contas como fora do resultado', async () => {
     renderInbox();
     expect(await screen.findByText('Não entra no resultado')).toBeInTheDocument();
+  });
+});
+
+describe('ações da linha', () => {
+  it('a categoria fica editável na própria linha, não escondida', async () => {
+    // A versão anterior punha o seletor dentro do "por que o sistema propôs isto". Ação
+    // atrás de explicação é ação que ninguém encontra.
+    renderInbox();
+    expect(await screen.findByText('Combustível e deslocamento')).toBeInTheDocument();
+  });
+
+  it('marcar duplicata tira a transação da fila, não só a proposta', async () => {
+    // Recusar sozinho deixaria a transação pendente, e a próxima varredura a proporia de
+    // novo — o gestor recusaria a mesma linha para sempre.
+    const user = userEvent.setup();
+    renderInbox();
+    const botoes = await screen.findAllByRole('button', { name: /duplicata/i });
+    await user.click(botoes[0]);
+    expect(duplicataMock).toHaveBeenCalledWith(
+      expect.objectContaining({ propostaId: 'p1', bankTransactionId: 't1' }),
+    );
+  });
+
+  it('dá para ensinar uma regra a partir da linha que está na tela', async () => {
+    const user = userEvent.setup();
+    renderInbox();
+    const botoes = await screen.findAllByRole('button', { name: /regra a partir desta linha/i });
+    await user.click(botoes[0]);
+    expect(regraMock).toHaveBeenCalledWith(
+      expect.objectContaining({ set_category: 'Combustível e deslocamento' }),
+    );
+  });
+
+  it('proposta vinda de regra se identifica como tal', async () => {
+    renderInbox();
+    expect(await screen.findByText('Pela sua regra')).toBeInTheDocument();
   });
 });

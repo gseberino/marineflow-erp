@@ -18,7 +18,8 @@ import { BankReconciliation } from '@/components/BankReconciliation';
 import { ReimbursementsPanel } from '@/components/ReimbursementsPanel';
 import { CashForecastPanel } from '@/components/CashForecastPanel';
 import { BankSourcesPanel } from '@/components/BankSourcesPanel';
-import { FinanceReviewInbox } from '@/components/FinanceReviewInbox';
+import { FinanceReviewInbox, type SementeDeRegra } from '@/components/FinanceReviewInbox';
+import { FinanceRulesPanel, EditorDeRegra } from '@/components/FinanceRulesPanel';
 import { DREPanel } from '@/components/DREPanel';
 import { AgingReportPanel } from '@/components/AgingReportPanel';
 import { FinancialFilterPanel, applyFilters, defaultFilters, type FinancialFilters } from '@/components/FinancialFilterPanel';
@@ -108,6 +109,9 @@ export default function FinancialPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState(() => searchParams.get('tab') || 'overview');
+  // Regra criada a partir de uma linha da caixa de entrada: o editor abre já preenchido,
+  // sem obrigar o gestor a redigitar o fornecedor que ele está olhando na tela.
+  const [sementeRegra, setSementeRegra] = useState<SementeDeRegra | null>(null);
   useEffect(() => {
     const tab = searchParams.get('tab');
     if (tab) setActiveTab(tab);
@@ -443,6 +447,9 @@ export default function FinancialPage() {
               é o oposto — o que passou pela conta e nunca virou lançamento nenhum. São
               trabalhos diferentes e juntos um esconderia o outro. */}
           <TabsTrigger value="inbox">Caixa de entrada</TabsTrigger>
+          {/* Ensinar o sistema é trabalho distinto de decidir uma linha: a regra vale para
+              tudo que vier depois, então merece um lugar próprio em vez de um botão. */}
+          <TabsTrigger value="rules">Regras</TabsTrigger>
           {/* Conectar banco e importar extrato é configuração de infraestrutura, não parte
               do trabalho de conciliar — e ficava enterrado dentro da outra aba. */}
           <TabsTrigger value="banks">Contas bancárias</TabsTrigger>
@@ -834,7 +841,10 @@ export default function FinancialPage() {
           <BankReconciliation />
         </TabsContent>
         <TabsContent value="inbox" className="mt-4">
-          <FinanceReviewInbox />
+          <FinanceReviewInbox onCriarRegra={setSementeRegra} />
+        </TabsContent>
+        <TabsContent value="rules" className="mt-4">
+          <FinanceRulesPanel />
         </TabsContent>
         <TabsContent value="banks" className="mt-4">
           <BankSourcesPanel />
@@ -843,6 +853,15 @@ export default function FinancialPage() {
           <AgingReportPanel />
         </TabsContent>
       </Tabs>
+
+      {sementeRegra && (
+        <EditorDeRegra
+          key={sementeRegra.match_value}
+          aberto
+          onFechar={() => setSementeRegra(null)}
+          regra={sementeRegra}
+        />
+      )}
 
       {paymentTarget && (
         <PaymentDialog

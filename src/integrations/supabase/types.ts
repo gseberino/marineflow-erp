@@ -3382,6 +3382,7 @@ export type Database = {
       }
       finance_review_queue: {
         Row: {
+          applied_rule_id: string | null
           bank_transaction_id: string | null
           confidence: number
           created_at: string
@@ -3406,6 +3407,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          applied_rule_id?: string | null
           bank_transaction_id?: string | null
           confidence?: number
           created_at?: string
@@ -3430,6 +3432,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          applied_rule_id?: string | null
           bank_transaction_id?: string | null
           confidence?: number
           created_at?: string
@@ -3454,6 +3457,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "finance_review_queue_applied_rule_id_fkey"
+            columns: ["applied_rule_id"]
+            isOneToOne: false
+            referencedRelation: "finance_rules"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "finance_review_queue_bank_transaction_id_fkey"
             columns: ["bank_transaction_id"]
@@ -3492,6 +3502,80 @@ export type Database = {
           {
             foreignKeyName: "finance_review_queue_suggested_supplier_id_fkey"
             columns: ["suggested_supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_rules: {
+        Row: {
+          autonomy: string
+          created_at: string
+          created_by: string | null
+          direction: string
+          id: string
+          last_applied_at: string | null
+          match_type: string
+          match_value: string
+          max_amount: number | null
+          min_amount: number | null
+          note: string | null
+          origin: string
+          reasoning: string | null
+          set_category: string | null
+          set_dre_group: string | null
+          set_supplier_id: string | null
+          status: string
+          times_applied: number
+          updated_at: string
+        }
+        Insert: {
+          autonomy?: string
+          created_at?: string
+          created_by?: string | null
+          direction?: string
+          id?: string
+          last_applied_at?: string | null
+          match_type: string
+          match_value: string
+          max_amount?: number | null
+          min_amount?: number | null
+          note?: string | null
+          origin?: string
+          reasoning?: string | null
+          set_category?: string | null
+          set_dre_group?: string | null
+          set_supplier_id?: string | null
+          status?: string
+          times_applied?: number
+          updated_at?: string
+        }
+        Update: {
+          autonomy?: string
+          created_at?: string
+          created_by?: string | null
+          direction?: string
+          id?: string
+          last_applied_at?: string | null
+          match_type?: string
+          match_value?: string
+          max_amount?: number | null
+          min_amount?: number | null
+          note?: string | null
+          origin?: string
+          reasoning?: string | null
+          set_category?: string | null
+          set_dre_group?: string | null
+          set_supplier_id?: string | null
+          status?: string
+          times_applied?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_rules_set_supplier_id_fkey"
+            columns: ["set_supplier_id"]
             isOneToOne: false
             referencedRelation: "suppliers"
             referencedColumns: ["id"]
@@ -8255,6 +8339,10 @@ export type Database = {
           stock_quantity: number
         }[]
       }
+      increment_finance_rule_usage: {
+        Args: { rule_id: string }
+        Returns: undefined
+      }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
       is_admin_or_financial: { Args: { _user_id: string }; Returns: boolean }
       is_external_seller: { Args: { _user_id: string }; Returns: boolean }
@@ -8578,6 +8666,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {},
   },

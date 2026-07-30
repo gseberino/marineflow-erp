@@ -23,8 +23,8 @@
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
-  montarProposta,
-  type FornecedorConhecido, type HistoricoFornecedor, type TransacaoOrfa,
+  montarProposta, sugerirRegras,
+  type FornecedorConhecido, type HistoricoFornecedor, type RegraFinanceira, type TransacaoOrfa,
 } from "../_shared/banking/proposals.ts";
 import { findInternalTransfers } from "../_shared/banking/matching.ts";
 
@@ -49,7 +49,7 @@ const LIMITE_LOTE = 500;
 const JANELA_DIAS = 90;
 
 interface Body {
-  action?: "generate" | "approve" | "reject";
+  action?: "generate" | "approve" | "reject" | "suggest_rules";
   /** generate: inclui o histórico inteiro, não só a janela. */
   incluir_historico?: boolean;
   ids?: string[];
@@ -87,6 +87,7 @@ Deno.serve(async (req) => {
     if (action === "generate") return await gerar(admin, !!body.incluir_historico);
     if (action === "approve") return await aprovar(admin, body.ids ?? [], userId, body.overrides ?? {});
     if (action === "reject") return await recusar(admin, body.ids ?? [], userId, body.note ?? null);
+    if (action === "suggest_rules") return await proporRegras(admin);
     return jr({ error: "acao_desconhecida" }, 400);
   } catch (e) {
     console.error("[finance-review] erro:", e);
@@ -146,7 +147,12 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
 
   const historico = await montarHistoricoPorFornecedor(admin);
 
+  const { data: regrasRows } = await admin
+    .from("finance_rules").select("*").eq("status", "active").limit(500);
+  const regras = (regrasRows ?? []) as unknown as RegraFinanceira[];
+
   const linhas: Record<string, unknown>[] = [];
+  const autoAplicar: Record<string, unknown>[] = [];
   for (const tx of transacoes) {
     if (naFila.has(tx.id) || lancadas.has(tx.id)) continue;
     if (jaCoberta.has(tx.id)) continue;   // é a entrada de um par já proposto pela saída
@@ -172,8 +178,8 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     // Entrada que não é transferência interna fica para a conciliação (ver cabeçalho).
     if (tx.transaction_type !== "debit") continue;
 
-    const p = montarProposta(tx, fornecedores, historico);
-    linhas.push({
+    const p = montarProposta(tx, fornecedores, historico, regras);
+    const linha = {
       kind: p.kind,
       bank_transaction_id: p.bankTransactionId,
       title: p.title,
@@ -185,25 +191,111 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
       suggested_description: p.suggestedDescription,
       suggested_supplier_id: p.suggestedSupplierId,
       dre_group: p.dreGroup,
-    });
+      applied_rule_id: p.appliedRuleId,
+    };
+    linhas.push(linha);
+    // Regra com autonomia foi conferida pelo gestor no momento em que ele a criou; segurar
+    // a proposta para ele confirmar de novo seria pedir a mesma decisão duas vezes.
+    if (p.autoAplicavel) autoAplicar.push(linha);
   }
 
   let criadas = 0;
+  const idsPorTransacao = new Map<string, string>();
   for (let i = 0; i < linhas.length; i += 200) {
     const lote = linhas.slice(i, i + 200);
-    const { error: insErr } = await admin.from("finance_review_queue").insert(lote);
+    const { data: inseridas, error: insErr } = await admin
+      .from("finance_review_queue").insert(lote).select("id, bank_transaction_id");
     if (insErr) throw insErr;
+    for (const r of (inseridas ?? []) as any[]) idsPorTransacao.set(r.bank_transaction_id, r.id);
     criadas += lote.length;
   }
+
+  // Aplica de imediato o que as regras autônomas resolveram. Cada lançamento fica ligado à
+  // regra que o criou, então desligar a regra e desfazer o que ela fez são a mesma consulta.
+  let lancadasSozinhas = 0;
+  const idsAuto = autoAplicar
+    .map((l) => idsPorTransacao.get(String(l.bank_transaction_id)))
+    .filter((v): v is string => !!v);
+  if (idsAuto.length > 0) {
+    const resposta = await aprovar(admin, idsAuto, null, {});
+    const corpo = await resposta.json();
+    lancadasSozinhas = Number(corpo?.aprovadas ?? 0);
+  }
+
+  const partes = [
+    criadas > 0 ? `${criadas - lancadasSozinhas} proposta(s) para revisar` : "Nada novo para propor",
+    lancadasSozinhas > 0 ? `${lancadasSozinhas} lançada(s) pelas suas regras` : "",
+    pares.length ? `${pares.length} transferência(s) entre contas` : "",
+  ].filter(Boolean);
 
   return jr({
     ok: true,
     criadas,
+    lancadas_por_regra: lancadasSozinhas,
     transferencias_internas: pares.length,
     elegiveis_lote: linhas.filter((l) => Number(l.suggested_amount) < LIMITE_LOTE).length,
-    message: criadas > 0
-      ? `${criadas} proposta(s) na fila` + (pares.length ? ` · ${pares.length} transferência(s) entre contas` : "")
-      : "Nada novo para propor",
+    message: partes.join(" · "),
+  });
+}
+
+/**
+ * Procura repetições nas decisões já tomadas e as grava como regras PROPOSTAS.
+ *
+ * Nasce inerte: `status: 'proposed'` não classifica nada até alguém aceitar. O sistema
+ * observou um padrão, não recebeu uma ordem — e um padrão pode ser três erros iguais.
+ */
+async function proporRegras(admin: DbClient) {
+  const { data: lancamentos } = await admin
+    .from("payables")
+    .select("supplier_id, supplier_name, expense_category")
+    .not("expense_category", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(3000);
+
+  const { data: cats } = await admin
+    .from("financial_categories").select("name, dre_group").eq("active", true);
+  const grupoDa = new Map<string, string>();
+  for (const c of (cats ?? []) as any[]) if (c.dre_group) grupoDa.set(String(c.name), String(c.dre_group));
+
+  const { data: fornecedores } = await admin.from("suppliers").select("id, name").limit(2000);
+  const nomeDo = new Map<string, string>();
+  for (const f of (fornecedores ?? []) as any[]) nomeDo.set(f.id, f.name);
+
+  const decisoes = ((lancamentos ?? []) as any[]).map((p) => ({
+    supplierId: p.supplier_id ?? null,
+    supplierName: p.supplier_id ? nomeDo.get(p.supplier_id) : p.supplier_name,
+    counterpartyName: p.supplier_name ?? null,
+    categoria: String(p.expense_category),
+    dreGroup: grupoDa.get(String(p.expense_category)) ?? "despesa_operacional",
+  }));
+
+  const { data: existentes } = await admin.from("finance_rules").select("*").limit(1000);
+  const padroes = sugerirRegras(decisoes, (existentes ?? []) as unknown as RegraFinanceira[]);
+
+  if (padroes.length === 0) {
+    return jr({ ok: true, propostas: 0, message: "Nenhum padrão novo o bastante para virar regra" });
+  }
+
+  const { error } = await admin.from("finance_rules").insert(
+    padroes.map((p) => ({
+      match_type: p.matchType,
+      match_value: p.matchValue,
+      direction: p.direction,
+      set_category: p.setCategory,
+      set_dre_group: p.setDreGroup,
+      set_supplier_id: p.setSupplierId,
+      autonomy: "suggest",
+      origin: "ai",
+      status: "proposed",
+      reasoning: p.reasoning,
+    })),
+  );
+  if (error) throw error;
+
+  return jr({
+    ok: true,
+    propostas: padroes.length,
+    message: `${padroes.length} regra(s) sugerida(s) a partir do que você já decidiu`,
   });
 }
 
@@ -336,6 +428,13 @@ async function aprovar(
       await admin.from("finance_review_queue").update({
         status: "approved", decided_by: userId, decided_at: new Date().toISOString(),
       }).eq("id", p.id);
+
+      // Quanto cada regra trabalhou é o que separa regra útil de regra esquecida — e é o
+      // número que permite auditar uma regra pelo resultado, não pela intenção.
+      if (p.applied_rule_id) {
+        await admin.rpc("increment_finance_rule_usage", { rule_id: p.applied_rule_id })
+          .then(undefined, () => { /* contador é telemetria: nunca derruba a aprovação */ });
+      }
       feitos.push(p.id);
     } catch (e) {
       console.error("[finance-review] falha ao aprovar", p.id, e);

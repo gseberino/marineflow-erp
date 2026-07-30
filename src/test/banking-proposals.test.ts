@@ -5,7 +5,8 @@
 import { describe, it, expect } from "vitest";
 import {
   classificar, acharFornecedor, montarProposta,
-  type TransacaoOrfa, type FornecedorConhecido, type HistoricoFornecedor,
+  sugerirRegras,
+  type TransacaoOrfa, type FornecedorConhecido, type HistoricoFornecedor, type RegraFinanceira,
 } from "../../supabase/functions/_shared/banking/proposals";
 
 const tx = (o: Partial<TransacaoOrfa> = {}): TransacaoOrfa => ({
@@ -174,5 +175,112 @@ describe("montagem da proposta", () => {
       fornecedores,
     );
     expect(p.confidence).toBeLessThanOrEqual(98);
+  });
+});
+
+describe("regras que o gestor ensina", () => {
+  const regra = (o: Partial<RegraFinanceira> = {}): RegraFinanceira => ({
+    id: "r1", match_type: "counterparty", match_value: "GUSTAVO SEBERINO DA SILVA",
+    direction: "debit", autonomy: "suggest", status: "active",
+    set_category: "Pró-labore e retiradas", set_dre_group: "nao_operacional",
+    ...o,
+  });
+
+  it("a instrução do gestor vence a dedução do sistema", () => {
+    // "PIX para Gustavo Seberino" seria Outras despesas pela regra de texto. A instrução
+    // explícita não é mais um palpite a ser ponderado — é uma ordem.
+    const p = montarProposta(
+      tx({ description: "TRANSF ENVIADA PIX", counterparty_name: "GUSTAVO SEBERINO DA SILVA" }),
+      fornecedores, undefined, [regra()],
+    );
+    expect(p.suggestedCategory).toBe("Pró-labore e retiradas");
+    expect(p.dreGroup).toBe("nao_operacional");
+    expect(p.reasoning).toContain("Regra sua");
+    expect(p.appliedRuleId).toBe("r1");
+  });
+
+  it("regra por documento ganha de regra por texto", () => {
+    // CNPJ é identidade; texto casa demais. Se a ordem fosse a de cadastro, um "PIX"
+    // genérico sequestraria a classificação de um fornecedor configurado a dedo.
+    const porTexto = regra({ id: "r-texto", match_type: "text", match_value: "PIX", set_category: "Errada" });
+    const porDoc = regra({ id: "r-doc", match_type: "document", match_value: "68.904.101/0001-20", set_category: "Certa" });
+    const p = montarProposta(
+      tx({ description: "TRANSF ENVIADA PIX", counterparty_document: "68904101000120" }),
+      fornecedores, undefined, [porTexto, porDoc],
+    );
+    expect(p.suggestedCategory).toBe("Certa");
+  });
+
+  it("respeita a faixa de valor da regra", () => {
+    const r = regra({ match_type: "text", match_value: "MARINE", min_amount: 1000, set_category: "Investimento" });
+    const pequena = montarProposta(tx({ description: "MARINE EXPRESS", amount: 300 }), fornecedores, undefined, [r]);
+    const grande = montarProposta(tx({ description: "MARINE EXPRESS", amount: 5000 }), fornecedores, undefined, [r]);
+    expect(pequena.suggestedCategory).toBe("Peças e materiais");   // caiu na regra genérica
+    expect(grande.suggestedCategory).toBe("Investimento");
+  });
+
+  it("regra pausada não vale", () => {
+    const p = montarProposta(
+      tx({ description: "TRANSF ENVIADA PIX", counterparty_name: "GUSTAVO SEBERINO DA SILVA" }),
+      fornecedores, undefined, [regra({ status: "paused" })],
+    );
+    expect(p.suggestedCategory).toBe("Outras despesas");
+  });
+
+  it("regra de saída não classifica entrada", () => {
+    const p = montarProposta(
+      tx({ transaction_type: "credit", counterparty_name: "GUSTAVO SEBERINO DA SILVA" }),
+      fornecedores, undefined, [regra()],
+    );
+    expect(p.suggestedCategory).not.toBe("Pró-labore e retiradas");
+  });
+
+  it("só a regra com autonomia lança sozinha", () => {
+    const comum = montarProposta(tx({ counterparty_name: "GUSTAVO SEBERINO DA SILVA" }), fornecedores, undefined, [regra()]);
+    const autonoma = montarProposta(tx({ counterparty_name: "GUSTAVO SEBERINO DA SILVA" }), fornecedores, undefined, [regra({ autonomy: "apply" })]);
+    expect(comum.autoAplicavel).toBe(false);
+    expect(autonoma.autoAplicavel).toBe(true);
+  });
+});
+
+describe("regras que a IA propõe", () => {
+  const d = (supplierId: string | null, categoria: string, counterpartyName?: string) =>
+    ({ supplierId, categoria, dreGroup: "custo_direto", counterpartyName, supplierName: "Marine Express" });
+
+  it("propõe quando o gestor repetiu a mesma escolha", () => {
+    const p = sugerirRegras([d("f1", "Frete e importação"), d("f1", "Frete e importação"), d("f1", "Frete e importação")], []);
+    expect(p).toHaveLength(1);
+    expect(p[0].setCategory).toBe("Frete e importação");
+    expect(p[0].reasoning).toContain("3 despesas");
+  });
+
+  it("cala quando o mesmo fornecedor teve categorias diferentes", () => {
+    // Sem unanimidade, a escolha depende de algo que o histórico não mostra. Propor uma
+    // delas seria decidir no lugar de quem sabe.
+    const p = sugerirRegras([d("f1", "Frete e importação"), d("f1", "Frete e importação"), d("f1", "Peças e materiais")], []);
+    expect(p).toHaveLength(0);
+  });
+
+  it("não insiste em regra que já existe ou que foi recusada", () => {
+    const decisoes = [d("f1", "Frete e importação"), d("f1", "Frete e importação"), d("f1", "Frete e importação")];
+    const recusada: RegraFinanceira = {
+      id: "r1", match_type: "supplier", match_value: "f1", direction: "debit",
+      autonomy: "suggest", status: "rejected",
+    };
+    expect(sugerirRegras(decisoes, [recusada])).toHaveLength(0);
+  });
+
+  it("não propõe com poucas repetições", () => {
+    expect(sugerirRegras([d("f1", "Frete e importação"), d("f1", "Frete e importação")], [])).toHaveLength(0);
+  });
+
+  it("usa o nome da contraparte quando não há fornecedor cadastrado", () => {
+    const p = sugerirRegras([
+      d(null, "Pró-labore e retiradas", "GUSTAVO SEBERINO"),
+      d(null, "Pró-labore e retiradas", "GUSTAVO SEBERINO"),
+      d(null, "Pró-labore e retiradas", "GUSTAVO SEBERINO"),
+    ], []);
+    expect(p[0].matchType).toBe("counterparty");
+    expect(p[0].matchValue).toBe("GUSTAVO SEBERINO");
   });
 });

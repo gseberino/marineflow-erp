@@ -7,8 +7,11 @@
 //
 // Duas faixas, conforme a decisão do usuário: até R$ 500 aprova em bloco (é onde está o
 // volume e o risco é baixo); acima disso, uma a uma, porque valor grande merece o olho.
+//
+// PRINCÍPIO DE INTERFACE (correção de 29/07): toda ação que o gestor precisa tomar fica NA
+// LINHA, visível. A versão anterior escondia a troca de categoria dentro do "por que o
+// sistema propôs isto" — ação atrás de explicação é ação que não existe.
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -16,32 +19,19 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import {
+  Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { useI18n } from '@/i18n';
-import { supabase } from '@/integrations/supabase/client';
+import { useFinancialCategories } from '@/hooks/use-financial-categories';
 import {
   useFinanceReviewQueue, useGerarPropostas, useAprovarPropostas, useRecusarPropostas,
-  LIMITE_LOTE, type PropostaFinanceira, type Correcao,
+  useMarcarDuplicata, LIMITE_LOTE, type PropostaFinanceira, type Correcao,
 } from '@/hooks/use-finance-review';
 import {
   Sparkles, Check, X, ChevronDown, ArrowLeftRight, TrendingDown, Info, RefreshCw,
+  CopyX, Wand2,
 } from 'lucide-react';
-
-/** Categorias ativas do plano de contas, para corrigir a sugestão sem sair da tela. */
-function useCategorias(tipo: 'payable' | 'receivable') {
-  return useQuery({
-    queryKey: ['financial-categories', tipo],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('financial_categories')
-        .select('name, dre_group')
-        .eq('type', tipo).eq('active', true)
-        .order('sort_order');
-      if (error) throw error;
-      return (data ?? []) as { name: string; dre_group: string | null }[];
-    },
-    staleTime: 10 * 60_000,
-  });
-}
 
 function corDaConfianca(c: number): string {
   if (c >= 85) return 'bg-success/10 text-success border-success/30';
@@ -64,6 +54,8 @@ interface LinhaProps {
   onCorrigir: (c: Correcao) => void;
   onAprovar: () => void;
   onRecusar: () => void;
+  onDuplicata: () => void;
+  onCriarRegra: () => void;
   ocupado: boolean;
   /** Em lote a seleção manda; individualmente cada linha tem seus botões. */
   modoLote: boolean;
@@ -71,13 +63,14 @@ interface LinhaProps {
 
 function LinhaProposta({
   p, categorias, selecionada, onSelecionar, correcao, onCorrigir,
-  onAprovar, onRecusar, ocupado, modoLote,
+  onAprovar, onRecusar, onDuplicata, onCriarRegra, ocupado, modoLote,
 }: LinhaProps) {
   const { formatCurrency, formatDate } = useI18n();
   const [aberta, setAberta] = useState(false);
 
   const transferencia = p.kind === 'internal_transfer';
   const categoria = correcao?.category ?? p.suggested_category ?? '';
+  const porRegra = !!p.applied_rule_id;
 
   return (
     <Card className="p-3">
@@ -99,9 +92,13 @@ function LinhaProposta({
               ? <ArrowLeftRight className="h-4 w-4 shrink-0 text-primary" />
               : <TrendingDown className="h-4 w-4 shrink-0 text-destructive" />}
             <span className="truncate font-medium">{p.title}</span>
-            <Badge variant="outline" className={`shrink-0 text-xs ${corDaConfianca(p.confidence)}`}>
-              {rotuloDaConfianca(p.confidence)} · {p.confidence}%
-            </Badge>
+            {porRegra
+              ? <Badge variant="secondary" className="shrink-0 text-xs">Pela sua regra</Badge>
+              : (
+                <Badge variant="outline" className={`shrink-0 text-xs ${corDaConfianca(p.confidence)}`}>
+                  {rotuloDaConfianca(p.confidence)} · {p.confidence}%
+                </Badge>
+              )}
           </div>
 
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
@@ -109,10 +106,26 @@ function LinhaProposta({
             <span className="font-semibold text-foreground">
               {formatCurrency(Number(p.suggested_amount ?? 0))}
             </span>
-            {transferencia
-              ? <Badge variant="secondary" className="text-xs">Não entra no resultado</Badge>
-              : <span className="truncate">{categoria || 'Sem categoria'}</span>}
+            {transferencia && (
+              <Badge variant="secondary" className="text-xs">Não entra no resultado</Badge>
+            )}
           </div>
+
+          {/* A categoria é a decisão principal da tela: fica editável na linha, sempre. */}
+          {!transferencia && (
+            <div className="mt-2 max-w-xs">
+              <Select value={categoria} onValueChange={(v) => onCorrigir({ ...correcao, category: v })}>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue placeholder="Escolher categoria" />
+                </SelectTrigger>
+                <SelectContent>
+                  {categorias.map((c) => (
+                    <SelectItem key={c.name} value={c.name}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           <Collapsible open={aberta} onOpenChange={setAberta}>
             <CollapsibleTrigger asChild>
@@ -122,54 +135,89 @@ function LinhaProposta({
                 <ChevronDown className={`h-3 w-3 transition-transform ${aberta ? 'rotate-180' : ''}`} />
               </button>
             </CollapsibleTrigger>
-            <CollapsibleContent className="mt-2 space-y-2">
+            <CollapsibleContent className="mt-2">
               <p className="rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">
                 {p.reasoning || 'Sem justificativa registrada.'}
               </p>
-
-              {!transferencia && (
-                <div className="max-w-sm">
-                  <label className="mb-1 block text-xs font-medium">Categoria</label>
-                  <Select value={categoria} onValueChange={(v) => onCorrigir({ ...correcao, category: v })}>
-                    <SelectTrigger className="h-8 text-xs">
-                      <SelectValue placeholder="Escolher categoria" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {categorias.map((c) => (
-                        <SelectItem key={c.name} value={c.name}>{c.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
             </CollapsibleContent>
           </Collapsible>
         </div>
 
-        {!modoLote && (
-          <div className="flex shrink-0 gap-1">
-            <Button size="sm" variant="outline" disabled={ocupado} onClick={onAprovar} title="Aprovar">
-              <Check className="h-4 w-4" />
-            </Button>
-            <Button size="sm" variant="ghost" disabled={ocupado} onClick={onRecusar} title="Recusar">
-              <X className="h-4 w-4" />
-            </Button>
+        <TooltipProvider>
+          <div className="flex shrink-0 flex-wrap justify-end gap-1">
+            {/* aria-label além do tooltip: botão só de ícone precisa de nome para leitor
+                de tela, e o texto do tooltip não conta — ele só existe no hover. */}
+            {!modoLote && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="sm" variant="outline" disabled={ocupado} onClick={onAprovar}
+                    aria-label="Aprovar e lançar">
+                    <Check className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Aprovar e lançar</TooltipContent>
+              </Tooltip>
+            )}
+
+            {!transferencia && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="sm" variant="ghost" disabled={ocupado} onClick={onCriarRegra}
+                    aria-label="Criar uma regra a partir desta linha">
+                    <Wand2 className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Criar uma regra a partir desta linha</TooltipContent>
+              </Tooltip>
+            )}
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button size="sm" variant="ghost" disabled={ocupado} onClick={onDuplicata}
+                  aria-label="É duplicata — tirar da fila">
+                  <CopyX className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>É duplicata — tirar da fila</TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button size="sm" variant="ghost" disabled={ocupado} onClick={onRecusar}
+                  aria-label="Descartar esta proposta">
+                  <X className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Descartar esta proposta</TooltipContent>
+            </Tooltip>
           </div>
-        )}
+        </TooltipProvider>
       </div>
     </Card>
   );
 }
 
-export function FinanceReviewInbox() {
+export interface SementeDeRegra {
+  match_type: 'counterparty' | 'supplier';
+  match_value: string;
+  set_category: string | null;
+}
+
+export function FinanceReviewInbox({
+  onCriarRegra,
+}: {
+  /** A tela que hospeda abre o editor de regras já preenchido com esta linha. */
+  onCriarRegra?: (semente: SementeDeRegra) => void;
+} = {}) {
   const { formatCurrency } = useI18n();
   const { data: propostas = [], isLoading } = useFinanceReviewQueue();
-  const { data: categorias = [] } = useCategorias('payable');
+  const { data: categorias = [] } = useFinancialCategories('payable');
 
   const gerar = useGerarPropostas();
   const aprovar = useAprovarPropostas();
   const recusar = useRecusarPropostas();
-  const ocupado = gerar.isPending || aprovar.isPending || recusar.isPending;
+  const duplicata = useMarcarDuplicata();
+  const ocupado = gerar.isPending || aprovar.isPending || recusar.isPending || duplicata.isPending;
 
   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
   const [correcoes, setCorrecoes] = useState<Record<string, Correcao>>({});
@@ -210,10 +258,30 @@ export function FinanceReviewInbox() {
     aprovar.mutate({ ids, overrides }, { onSuccess: () => setSelecionadas(new Set()) });
   };
 
+  const criarRegraDaLinha = (p: PropostaFinanceira) => {
+    onCriarRegra?.({
+      match_type: p.suggested_supplier_id ? 'supplier' : 'counterparty',
+      match_value: p.suggested_supplier_id ?? (p.suggested_description ?? p.title),
+      set_category: correcoes[p.id]?.category ?? p.suggested_category,
+    });
+  };
+
   const valorSelecionado = useMemo(
     () => lote.filter((p) => selecionadas.has(p.id)).reduce((s, p) => s + Number(p.suggested_amount ?? 0), 0),
     [lote, selecionadas],
   );
+
+  const propsComuns = (p: PropostaFinanceira) => ({
+    p,
+    categorias,
+    correcao: correcoes[p.id],
+    onCorrigir: (c: Correcao) => corrigir(p.id, c),
+    onAprovar: () => aprovar.mutate({ ids: [p.id], overrides: correcoes[p.id] ? { [p.id]: correcoes[p.id] } : {} }),
+    onRecusar: () => recusar.mutate({ ids: [p.id] }),
+    onDuplicata: () => duplicata.mutate({ propostaId: p.id, bankTransactionId: p.bank_transaction_id }),
+    onCriarRegra: () => criarRegraDaLinha(p),
+    ocupado,
+  });
 
   if (isLoading) {
     return <div className="space-y-2">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-20 rounded-xl" />)}</div>;
@@ -295,14 +363,9 @@ export function FinanceReviewInbox() {
 
           {lote.map((p) => (
             <LinhaProposta
-              key={p.id} p={p} categorias={categorias} modoLote
+              key={p.id} {...propsComuns(p)} modoLote
               selecionada={selecionadas.has(p.id)}
               onSelecionar={(m) => marcar(p.id, m)}
-              correcao={correcoes[p.id]}
-              onCorrigir={(c) => corrigir(p.id, c)}
-              onAprovar={() => aprovar.mutate({ ids: [p.id], overrides: correcoes[p.id] ? { [p.id]: correcoes[p.id] } : {} })}
-              onRecusar={() => recusar.mutate({ ids: [p.id] })}
-              ocupado={ocupado}
             />
           ))}
         </div>
@@ -317,13 +380,8 @@ export function FinanceReviewInbox() {
           </div>
           {individuais.map((p) => (
             <LinhaProposta
-              key={p.id} p={p} categorias={categorias} modoLote={false}
+              key={p.id} {...propsComuns(p)} modoLote={false}
               selecionada={false} onSelecionar={() => {}}
-              correcao={correcoes[p.id]}
-              onCorrigir={(c) => corrigir(p.id, c)}
-              onAprovar={() => aprovar.mutate({ ids: [p.id], overrides: correcoes[p.id] ? { [p.id]: correcoes[p.id] } : {} })}
-              onRecusar={() => recusar.mutate({ ids: [p.id] })}
-              ocupado={ocupado}
             />
           ))}
         </div>

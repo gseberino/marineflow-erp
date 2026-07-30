@@ -99,6 +99,60 @@ export interface HistoricoFornecedor {
   vezes: number;
 }
 
+/** Uma regra que o gestor ensinou (ou que a IA propôs e ele aceitou). */
+export interface RegraFinanceira {
+  id: string;
+  match_type: "document" | "supplier" | "counterparty" | "text";
+  match_value: string;
+  direction: "debit" | "credit" | "any";
+  min_amount?: number | null;
+  max_amount?: number | null;
+  set_category?: string | null;
+  set_dre_group?: string | null;
+  set_supplier_id?: string | null;
+  autonomy: "suggest" | "apply";
+  status: string;
+}
+
+/**
+ * Acha a regra que reconhece esta transação, da mais específica para a mais genérica.
+ *
+ * A ordem NÃO é a de cadastro: é a da força da evidência. Documento é identidade e não se
+ * confunde; texto é aproximação e casa demais. Se a regra por texto viesse antes, um
+ * "PIX" qualquer sequestraria a classificação de um fornecedor que o gestor configurou
+ * a dedo.
+ */
+export function acharRegra(
+  tx: TransacaoOrfa,
+  regras: RegraFinanceira[],
+  fornecedorId?: string | null,
+): RegraFinanceira | null {
+  const doc = (tx.counterparty_document || "").replace(/\D/g, "");
+  const texto = normalizeText(`${tx.description} ${tx.counterparty_name || ""}`);
+  const nome = normalizeText(tx.counterparty_name || "");
+
+  const serve = (r: RegraFinanceira): boolean => {
+    if (r.status !== "active") return false;
+    if (r.direction !== "any" && r.direction !== tx.transaction_type) return false;
+    if (r.min_amount != null && tx.amount < Number(r.min_amount)) return false;
+    if (r.max_amount != null && tx.amount > Number(r.max_amount)) return false;
+    return true;
+  };
+
+  const ordem: Array<(r: RegraFinanceira) => boolean> = [
+    (r) => r.match_type === "document" && doc.length >= 11 && r.match_value.replace(/\D/g, "") === doc,
+    (r) => r.match_type === "supplier" && !!fornecedorId && r.match_value === fornecedorId,
+    (r) => r.match_type === "counterparty" && !!nome && normalizeText(r.match_value) === nome,
+    (r) => r.match_type === "text" && texto.includes(normalizeText(r.match_value).trim()),
+  ];
+
+  for (const casa of ordem) {
+    const achada = regras.find((r) => serve(r) && casa(r));
+    if (achada) return achada;
+  }
+  return null;
+}
+
 export interface Proposta {
   kind: "create_payable" | "create_receivable";
   bankTransactionId: string;
@@ -111,6 +165,10 @@ export interface Proposta {
   suggestedDescription: string;
   suggestedSupplierId: string | null;
   dreGroup: string;
+  /** Regra que classificou — permite auditar a regra pelo resultado dela. */
+  appliedRuleId: string | null;
+  /** A regra tem autonomia para lançar sozinha (o gestor conferiu ao criá-la). */
+  autoAplicavel: boolean;
 }
 
 /** Compara nomes ignorando acento, caixa e sufixo societário. */
@@ -175,6 +233,7 @@ export function montarProposta(
   tx: TransacaoOrfa,
   fornecedores: FornecedorConhecido[],
   historico?: Map<string, HistoricoFornecedor>,
+  regras: RegraFinanceira[] = [],
 ): Proposta {
   const ehSaida = tx.transaction_type === "debit";
   const classificacao = classificar(tx);
@@ -212,10 +271,24 @@ export function montarProposta(
   }
 
   const nome = tx.counterparty_name || tx.description;
-  const categoria = aprendido?.categoria ?? classificacao?.categoria
+  let categoria = aprendido?.categoria ?? classificacao?.categoria
     ?? (ehSaida ? "Outras despesas" : "Outras receitas");
-  const dreGroup = aprendido?.dreGroup ?? classificacao?.dreGroup
+  let dreGroup = aprendido?.dreGroup ?? classificacao?.dreGroup
     ?? (ehSaida ? "despesa_operacional" : "receita");
+  let fornecedorId = achado?.fornecedor.id ?? null;
+
+  // A regra do gestor vem POR ÚLTIMO e vence tudo, de propósito: ela não é mais um palpite
+  // a ser ponderado, é uma instrução. Quem escreveu "PIX para Fulano é pró-labore" não
+  // quer que uma regra de texto genérica discorde disso.
+  const regra = acharRegra(tx, regras, fornecedorId);
+  if (regra) {
+    if (regra.set_category) categoria = regra.set_category;
+    if (regra.set_dre_group) dreGroup = regra.set_dre_group;
+    if (regra.set_supplier_id) fornecedorId = regra.set_supplier_id;
+    razoes.length = 0;   // o motivo passa a ser a regra; o resto virou ruído
+    razoes.push(`Regra sua: ${descreverRegra(regra)}`);
+    confianca = regra.autonomy === "apply" ? 99 : 95;
+  }
 
   return {
     kind: ehSaida ? "create_payable" : "create_receivable",
@@ -227,7 +300,126 @@ export function montarProposta(
     suggestedDate: tx.transaction_date,
     suggestedCategory: categoria,
     suggestedDescription: nome.slice(0, 200),
-    suggestedSupplierId: achado?.fornecedor.id ?? null,
+    suggestedSupplierId: fornecedorId,
     dreGroup,
+    appliedRuleId: regra?.id ?? null,
+    autoAplicavel: regra?.autonomy === "apply",
   };
+}
+
+/** Uma repetição que o sistema notou e acha que merece virar regra. */
+export interface PadraoDetectado {
+  matchType: RegraFinanceira["match_type"];
+  matchValue: string;
+  direction: RegraFinanceira["direction"];
+  setCategory: string;
+  setDreGroup: string;
+  setSupplierId: string | null;
+  vezes: number;
+  reasoning: string;
+}
+
+/**
+ * Olha o que o gestor já decidiu e propõe virar regra o que se repetiu.
+ *
+ * A proposta NASCE inerte (`status: 'proposed'`, autonomia `suggest`): o sistema percebeu
+ * um padrão, não recebeu uma ordem. Transformar observação em regra ativa sem alguém olhar
+ * é como deixar o sistema escrever as próprias instruções — se ele classificou errado três
+ * vezes, viraria regra classificar errado para sempre.
+ *
+ * Exige UNANIMIDADE, não maioria: se o mesmo fornecedor já recebeu duas categorias
+ * diferentes, a decisão depende de algo que o histórico não mostra, e propor uma delas
+ * seria escolher no lugar de quem sabe.
+ */
+export function sugerirRegras(
+  decisoes: Array<{
+    supplierId: string | null;
+    supplierName?: string | null;
+    counterpartyName?: string | null;
+    categoria: string;
+    dreGroup: string;
+  }>,
+  regrasExistentes: RegraFinanceira[],
+  minimo = 3,
+): PadraoDetectado[] {
+  const porAlvo = new Map<string, {
+    matchType: RegraFinanceira["match_type"];
+    matchValue: string;
+    rotulo: string;
+    supplierId: string | null;
+    categorias: Map<string, { dreGroup: string; vezes: number }>;
+  }>();
+
+  for (const d of decisoes) {
+    if (!d.categoria || d.categoria === "Outras despesas") continue;
+
+    // Fornecedor cadastrado é alvo melhor que nome solto: sobrevive a mudança de razão
+    // social e a variações de escrita no extrato.
+    const chave = d.supplierId
+      ? `supplier:${d.supplierId}`
+      : d.counterpartyName
+        ? `counterparty:${normalizeText(d.counterpartyName)}`
+        : null;
+    if (!chave) continue;
+
+    const entrada = porAlvo.get(chave) ?? {
+      matchType: (d.supplierId ? "supplier" : "counterparty") as RegraFinanceira["match_type"],
+      matchValue: d.supplierId ?? String(d.counterpartyName),
+      rotulo: d.supplierName || d.counterpartyName || "este fornecedor",
+      supplierId: d.supplierId,
+      categorias: new Map<string, { dreGroup: string; vezes: number }>(),
+    };
+    const atual = entrada.categorias.get(d.categoria) ?? { dreGroup: d.dreGroup, vezes: 0 };
+    atual.vezes += 1;
+    entrada.categorias.set(d.categoria, atual);
+    porAlvo.set(chave, entrada);
+  }
+
+  const jaTemRegra = new Set(
+    regrasExistentes
+      .filter((r) => r.status === "active" || r.status === "proposed" || r.status === "rejected")
+      .map((r) => `${r.match_type}:${normalizeText(r.match_value)}`),
+  );
+
+  const padroes: PadraoDetectado[] = [];
+  for (const alvo of porAlvo.values()) {
+    if (alvo.categorias.size !== 1) continue;                     // sem unanimidade, não opina
+    const [categoria, dados] = [...alvo.categorias.entries()][0];
+    if (dados.vezes < minimo) continue;
+    if (jaTemRegra.has(`${alvo.matchType}:${normalizeText(alvo.matchValue)}`)) continue;
+
+    padroes.push({
+      matchType: alvo.matchType,
+      matchValue: alvo.matchValue,
+      direction: "debit",
+      setCategory: categoria,
+      setDreGroup: dados.dreGroup,
+      setSupplierId: alvo.supplierId,
+      vezes: dados.vezes,
+      reasoning: `As últimas ${dados.vezes} despesas de ${alvo.rotulo} foram lançadas como ${categoria}, sem exceção. Criar a regra evita repetir essa escolha toda vez.`,
+    });
+  }
+
+  return padroes.sort((a, b) => b.vezes - a.vezes);
+}
+
+/** Frase curta que explica a regra para quem a lê na fila — e para quem vai revisá-la. */
+export function descreverRegra(r: RegraFinanceira): string {
+  const alvo = r.match_type === "document"
+    ? `quem tem o CNPJ/CPF ${r.match_value}`
+    : r.match_type === "supplier"
+      ? "este fornecedor"
+      : r.match_type === "counterparty"
+        ? `pagamentos para "${r.match_value}"`
+        : `histórico contendo "${r.match_value}"`;
+
+  const faixa = r.min_amount != null && r.max_amount != null
+    ? ` entre R$ ${r.min_amount} e R$ ${r.max_amount}`
+    : r.min_amount != null
+      ? ` acima de R$ ${r.min_amount}`
+      : r.max_amount != null
+        ? ` até R$ ${r.max_amount}`
+        : "";
+
+  return `${alvo}${faixa} é sempre ${r.set_category ?? "classificado por esta regra"}`;
 }
