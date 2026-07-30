@@ -1,7 +1,7 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   RULES, isRuleEnabled, ruleById, ruleIdFromKey, entityIdFromKey, keyOf, fmtBRL, fmtDate, dueAt,
-  isManualDismissal, dismissCooldownDays,
+  isManualDismissal, dismissCooldownDays, businessDaysBetween,
 } from "./rules.ts";
 
 Deno.test("isManualDismissal: conclusão MANUAL recente bloqueia recriação", () => {
@@ -99,5 +99,139 @@ Deno.test("isResolved r1: OS agendada ou status mudado resolve", async () => {
   assertEquals(
     await r1.isResolved(mkDb({ status: "approved", scheduled_start_at: null }), { automation_key: "r1:so:x" }),
     null,
+  );
+});
+
+// R16 é a rede do aviso de compra da aprovação: se estes testes falharem, a tarefa
+// pode ficar viva para item que já chegou (ruído) ou morrer com item ainda faltando
+// (a OS para sem ninguém saber).
+Deno.test("isResolved r16: reserva e OC aberta contam; falta real mantém a tarefa", async () => {
+  const r16 = ruleById("r16")!;
+
+  // O mock distingue as tabelas porque a regra consulta quatro em sequência.
+  const mkDb = (opts: {
+    so?: unknown;
+    parts?: unknown[];
+    avail?: unknown[];
+    poItems?: unknown[];
+  }) => ({
+    from: (table: string) => {
+      if (table === "service_orders") {
+        return { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: opts.so }) }) }) };
+      }
+      if (table === "service_order_parts") {
+        return { select: () => ({ eq: async () => ({ data: opts.parts ?? [] }) }) };
+      }
+      if (table === "product_availability") {
+        return { select: () => ({ in: async () => ({ data: opts.avail ?? [] }) }) };
+      }
+      // purchase_order_items: dois .in() encadeados (produto e status da OC)
+      return {
+        select: () => ({ in: () => ({ in: async () => ({ data: opts.poItems ?? [] }) }) }),
+      };
+    },
+  });
+
+  const so = { status: "approved" };
+  const parts = [{ product_id: "p1", quantity: 6 }];
+
+  // físico cobre e nada está reservado → resolvida
+  assertEquals(
+    await r16.isResolved(
+      mkDb({ so, parts, avail: [{ id: "p1", stock_quantity: 10, reserved_quantity: 0 }] }),
+      { automation_key: "r16:so:x" },
+    ),
+    "Compra resolvida (em estoque ou já pedida)",
+  );
+
+  // físico existe mas está TODO reservado para outras OS → segue faltando
+  assertEquals(
+    await r16.isResolved(
+      mkDb({ so, parts, avail: [{ id: "p1", stock_quantity: 10, reserved_quantity: 10 }] }),
+      { automation_key: "r16:so:x" },
+    ),
+    null,
+  );
+
+  // sem estoque, mas já pedido em OC aberta → resolvida (está a caminho)
+  assertEquals(
+    await r16.isResolved(
+      mkDb({
+        so, parts,
+        avail: [{ id: "p1", stock_quantity: 0, reserved_quantity: 0 }],
+        poItems: [{ product_id: "p1", quantity: 6, received_qty: 0 }],
+      }),
+      { automation_key: "r16:so:x" },
+    ),
+    "Compra resolvida (em estoque ou já pedida)",
+  );
+
+  // OC parcialmente recebida não cobre o resto → segue faltando
+  assertEquals(
+    await r16.isResolved(
+      mkDb({
+        so, parts,
+        avail: [{ id: "p1", stock_quantity: 0, reserved_quantity: 0 }],
+        poItems: [{ product_id: "p1", quantity: 6, received_qty: 4 }],
+      }),
+      { automation_key: "r16:so:x" },
+    ),
+    null,
+  );
+
+  // OS saiu do ciclo de execução → não faz sentido comprar
+  assertEquals(
+    await r16.isResolved(mkDb({ so: { status: "cancelled" } }), { automation_key: "r16:so:x" }),
+    "OS mudou para cancelled",
+  );
+  assertEquals(
+    await r16.isResolved(mkDb({ so: undefined }), { automation_key: "r16:so:x" }),
+    "OS não existe mais",
+  );
+
+  // peças removidas da OS
+  assertEquals(
+    await r16.isResolved(mkDb({ so, parts: [] }), { automation_key: "r16:so:x" }),
+    "OS não tem mais peças lançadas",
+  );
+});
+
+Deno.test("businessDaysBetween: ignora fim de semana (espelha a tela)", () => {
+  // sexta 24/07/2026 -> segunda 27/07 = 1 dia útil (não 3)
+  assertEquals(businessDaysBetween("2026-07-24T10:00:00Z", new Date("2026-07-27T10:00:00Z")), 1);
+  // segunda 20/07 -> sexta 24/07 = 4
+  assertEquals(businessDaysBetween("2026-07-20T09:00:00Z", new Date("2026-07-24T09:00:00Z")), 4);
+  assertEquals(businessDaysBetween("data inválida", new Date()), 0);
+});
+
+Deno.test("isResolved r17: preço registrado ou cotação fechada resolve", async () => {
+  const r17 = ruleById("r17")!;
+  const mkDb = (row: unknown) => ({
+    from: () => ({
+      select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: row }) }) }),
+    }),
+  });
+
+  // ninguém respondeu ainda → tarefa continua
+  assertEquals(
+    await r17.isResolved(mkDb({ status: "open", quote_responses: [] }), { automation_key: "r17:quote:x" }),
+    null,
+  );
+  // resposta SEM preço não conta como resposta (ex.: "bom dia, vou ver")
+  assertEquals(
+    await r17.isResolved(mkDb({ status: "open", quote_responses: [{ unit_price: null }] }), { automation_key: "r17:quote:x" }),
+    null,
+  );
+  assertEquals(
+    await r17.isResolved(mkDb({ status: "open", quote_responses: [{ unit_price: 120 }] }), { automation_key: "r17:quote:x" }),
+    "Fornecedor respondeu",
+  );
+  assertEquals(
+    await r17.isResolved(mkDb({ status: "closed", quote_responses: [] }), { automation_key: "r17:quote:x" }),
+    "Cotação fechada",
+  );
+  assertEquals(
+    await r17.isResolved(mkDb(null), { automation_key: "r17:quote:x" }),
+    "Cotação não existe mais",
   );
 });

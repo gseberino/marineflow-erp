@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   summarizeRoute, groupStepsByBlock, nextStep, formatMinutes, elapsedMinutesSince,
-  accumulatedMinutes,
+  accumulatedMinutes, isAiDraft,
   type ServiceOrderStep,
 } from './use-service-steps';
 
@@ -133,6 +133,34 @@ describe('tempo decorrido', () => {
 
   it('nunca devolve zero para passo já iniciado — zero mentiria na estatística', () => {
     expect(elapsedMinutesSince(new Date().toISOString())).toBe(1);
+  });
+});
+
+describe('rascunho da IA (IA-1)', () => {
+  it('passo da IA sem aprovação é sugestão', () => {
+    expect(isAiDraft(step({ origin: 'ai', approved_at: null }))).toBe(true);
+  });
+
+  it('passo da IA aprovado deixa de ser sugestão e entra no roteiro', () => {
+    expect(isAiDraft(step({ origin: 'ai', approved_at: new Date().toISOString() }))).toBe(false);
+  });
+
+  it('passo de template nunca é sugestão, mesmo sem approved_at', () => {
+    // Só o que a IA escreveu precisa de assinatura; o catálogo já foi aprovado
+    // quando o template foi criado.
+    expect(isAiDraft(step({ origin: 'template', approved_at: null }))).toBe(false);
+    expect(isAiDraft(step({ origin: 'manual', approved_at: null }))).toBe(false);
+    expect(isAiDraft(step({ origin: 'client_request', approved_at: null }))).toBe(false);
+  });
+
+  it('sugestão não entra na contagem do roteiro', () => {
+    const todos = [
+      step({ origin: 'template', status: 'done' }),
+      step({ origin: 'ai', approved_at: null, standard_minutes: 60 }),
+    ];
+    const soAprovados = todos.filter((s) => !isAiDraft(s));
+    expect(summarizeRoute(soAprovados).total).toBe(1);
+    expect(summarizeRoute(soAprovados).standardMinutes).toBe(0);
   });
 });
 

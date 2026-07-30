@@ -43,6 +43,10 @@ export interface ServiceOrderStep {
   actual_minutes: number | null;
   origin: StepOrigin;
   notes: string | null;
+  /** Preenchidos só quando origin='ai'. approved_at nulo = ainda é sugestão. */
+  ai_confidence?: number | null;
+  ai_source?: string | null;
+  approved_at?: string | null;
 }
 
 export interface StopReason {
@@ -57,7 +61,8 @@ const STEP_SELECT = `
   id, service_order_id, service_order_service_id, template_id, seq, block, title, detail,
   kind, mode, standard_minutes, is_killer, requires_photo, requires_measure, measure_unit,
   measure_value, status, na_reason, blocked_reason_code, blocked_note, assigned_user_id,
-  started_at, completed_at, actual_minutes, origin, notes
+  started_at, completed_at, actual_minutes, origin, notes,
+  ai_confidence, ai_source, approved_at
 `;
 
 /** Passos de uma OS, na ordem de execução. */
@@ -406,6 +411,68 @@ export function groupStepsByBlock(steps: ServiceOrderStep[]): Array<{ block: str
 /** O próximo passo a executar: em andamento primeiro, senão o primeiro pendente. */
 export function nextStep(steps: ServiceOrderStep[]): ServiceOrderStep | undefined {
   return steps.find((s) => s.status === 'in_progress') || steps.find((s) => s.status === 'pending');
+}
+
+// ── Rascunho da IA (IA-1) ────────────────────────────────────────────────────
+
+/**
+ * Passo proposto pela IA e ainda não julgado por um humano.
+ * `approved_at` nulo com `origin='ai'` é o que separa sugestão de roteiro válido.
+ */
+export function isAiDraft(step: ServiceOrderStep & { approved_at?: string | null }): boolean {
+  return step.origin === 'ai' && !step.approved_at;
+}
+
+/**
+ * Aprova ou descarta um passo sugerido, registrando o veredito.
+ *
+ * O registro é o ponto: sem ele, a IA propõe para sempre a mesma coisa errada.
+ * `edited` cobre o caso em que a pessoa aceitou a ideia mas reescreveu — que é
+ * o sinal mais informativo dos três.
+ */
+export function useReviewAiStep() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      step, verdict, changeSummary,
+    }: {
+      step: ServiceOrderStep;
+      verdict: 'accepted' | 'edited' | 'rejected';
+      changeSummary?: string;
+    }) => {
+      const { data: auth } = await supabase.auth.getUser();
+      const reviewer = auth?.user?.id ?? null;
+
+      if (verdict === 'rejected') {
+        const { error } = await supabase.from('service_order_steps').delete().eq('id', step.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('service_order_steps')
+          .update({ approved_by: reviewer, approved_at: new Date().toISOString() })
+          .eq('id', step.id);
+        if (error) throw error;
+      }
+
+      const { error: revErr } = await supabase.from('ai_suggestion_reviews').insert({
+        suggestion_type: 'step',
+        target_table: 'service_order_steps',
+        target_id: step.id,
+        suggested: {
+          title: step.title, detail: step.detail, kind: step.kind,
+          standard_minutes: step.standard_minutes, block: step.block,
+        },
+        approved: verdict === 'rejected' ? null : { title: step.title, standard_minutes: step.standard_minutes },
+        verdict,
+        change_summary: changeSummary ?? null,
+        reviewer_id: reviewer,
+      });
+      if (revErr) throw revErr;
+    },
+    onSuccess: (_r, { step }) => {
+      qc.invalidateQueries({ queryKey: ['service-order-steps', step.service_order_id] });
+    },
+  });
 }
 
 export function formatMinutes(min: number | null | undefined): string {

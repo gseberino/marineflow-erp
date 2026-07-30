@@ -45,6 +45,27 @@ export const keyOf = (rule: string, entity: string, id: string, bucket?: string)
 export const entityIdFromKey = (key: string) => key.split(':')[2] || '';
 
 const daysAgoISO = (days: number) => new Date(Date.now() - days * 86400000).toISOString();
+
+/**
+ * Dias ÚTEIS entre duas datas. Usado no prazo de resposta do fornecedor: contar dias
+ * corridos faria a cobrança disparar na segunda por causa do fim de semana.
+ * Espelha src/lib/quote-comparison.ts#businessDaysSince (a tela mostra o mesmo número).
+ */
+export function businessDaysBetween(from: string | Date, to: Date): number {
+  const start = typeof from === 'string' ? new Date(from) : from;
+  if (Number.isNaN(start.getTime())) return 0;
+  let days = 0;
+  const cursor = new Date(start);
+  cursor.setHours(0, 0, 0, 0);
+  const end = new Date(to);
+  end.setHours(0, 0, 0, 0);
+  while (cursor < end) {
+    cursor.setDate(cursor.getDate() + 1);
+    const dow = cursor.getDay();
+    if (dow !== 0 && dow !== 6) days++;
+  }
+  return days;
+}
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const inDaysISO = (days: number) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
 
@@ -488,7 +509,191 @@ const r15: Rule = {
   },
 };
 
-export const RULES: Rule[] = [r1, r2, r3, r4, r5, r6, r7, r8, r11, r12, r14, r15];
+// R16: OS comprometida com item faltando para executar.
+//
+// É a rede do aviso que aparece na aprovação do orçamento: quem clica em "Depois" no
+// diálogo não perde a pendência, ela volta como tarefa. Uma tarefa POR OS (não por
+// item) — cinco peças faltando é uma ida ao fornecedor, não cinco tarefas.
+//
+// A conta é a necessidade LÍQUIDA, igual à da tela (src/lib/purchase-needs.ts):
+// falta = necessário − (físico − reservado) − saldo de OC aberta. Sem descontar a
+// reserva, duas OS enxergariam a mesma peça; sem descontar a OC, a tarefa reapareceria
+// para algo que já está a caminho.
+//
+// Rascunho fica fora de propósito: orçamento não aprovado não gera compra.
+const r16: Rule = {
+  id: 'r16',
+  label: 'OS comprometida com item a comprar',
+  defaultEnabled: true,
+  async find(db) {
+    const { data: orders } = await db
+      .from('service_orders')
+      .select('id, service_order_number, status, client_id, clients(name)')
+      .in('status', ['approved', 'scheduled', 'in_progress', 'awaiting_parts'])
+      .limit(80);
+    const list = orders || [];
+    if (!list.length) return [];
+
+    const ids = list.map((o: any) => o.id);
+    const [{ data: parts }, { data: avail }, { data: poItems }] = await Promise.all([
+      db.from('service_order_parts')
+        .select('service_order_id, product_id, quantity')
+        .in('service_order_id', ids),
+      db.from('product_availability').select('id, stock_quantity, reserved_quantity'),
+      db.from('purchase_order_items')
+        .select('product_id, quantity, received_qty, purchase_orders!inner(status)')
+        .in('purchase_orders.status', ['draft', 'sent', 'partial']),
+    ]);
+
+    const availById = new Map<string, number>();
+    for (const a of avail || []) {
+      availById.set(a.id, Number(a.stock_quantity || 0) - Number(a.reserved_quantity || 0));
+    }
+    const onOrderById = new Map<string, number>();
+    for (const i of poItems || []) {
+      const pending = Math.max(0, Number(i.quantity || 0) - Number(i.received_qty || 0));
+      onOrderById.set(i.product_id, (onOrderById.get(i.product_id) || 0) + pending);
+    }
+
+    const shortageByOrder = new Map<string, number>();
+    for (const p of parts || []) {
+      const available = Math.max(0, availById.get(p.product_id) || 0);
+      const onOrder = onOrderById.get(p.product_id) || 0;
+      if (Math.max(0, Number(p.quantity || 0) - available - onOrder) > 0) {
+        shortageByOrder.set(p.service_order_id, (shortageByOrder.get(p.service_order_id) || 0) + 1);
+      }
+    }
+
+    return list
+      .filter((o: any) => shortageByOrder.has(o.id))
+      .map((o: any) => {
+        const n = shortageByOrder.get(o.id) || 0;
+        return {
+          automation_key: keyOf('r16', 'so', o.id),
+          // Sem o prefixo "da OS": existem registros comprometidos cujo número ainda é
+          // ORÇ- (o status andou por fora da conversão), e "da OS ORÇ-00070" fica errado.
+          // O próprio número já diz o que é.
+          title: `Comprar ${n} ${n === 1 ? 'item' : 'itens'} — ${o.service_order_number}` +
+            (o.clients?.name ? ` (${o.clients.name})` : ''),
+          // Aguardando peças é o caso em que a OS já está parada esperando.
+          priority: (o.status === 'awaiting_parts' ? 'urgent' : 'high') as 'urgent' | 'high',
+          assignee: 'admin' as const,
+          due_at: dueAt(todayISO()),
+          related_entity_type: 'service_order',
+          related_entity_id: o.id,
+          client_id: o.client_id,
+          notes: 'Abra a OS e use "Resolver" na faixa de compras: dá para cotar com fornecedores ou gerar a ordem de compra.',
+        };
+      });
+  },
+  async isResolved(db, task) {
+    const id = entityIdFromKey(task.automation_key);
+    const { data: so } = await db.from('service_orders').select('status').eq('id', id).maybeSingle();
+    if (!so) return 'OS não existe mais';
+    if (['completed', 'invoiced', 'cancelled', 'draft'].includes(so.status)) {
+      return `OS mudou para ${so.status}`;
+    }
+
+    const { data: parts } = await db
+      .from('service_order_parts')
+      .select('product_id, quantity')
+      .eq('service_order_id', id);
+    if (!parts?.length) return 'OS não tem mais peças lançadas';
+
+    const productIds = parts.map((p: any) => p.product_id);
+    const [{ data: avail }, { data: poItems }] = await Promise.all([
+      db.from('product_availability')
+        .select('id, stock_quantity, reserved_quantity')
+        .in('id', productIds),
+      db.from('purchase_order_items')
+        .select('product_id, quantity, received_qty, purchase_orders!inner(status)')
+        .in('product_id', productIds)
+        .in('purchase_orders.status', ['draft', 'sent', 'partial']),
+    ]);
+
+    const availById = new Map<string, number>();
+    for (const a of avail || []) {
+      availById.set(a.id, Number(a.stock_quantity || 0) - Number(a.reserved_quantity || 0));
+    }
+    const onOrderById = new Map<string, number>();
+    for (const i of poItems || []) {
+      const pending = Math.max(0, Number(i.quantity || 0) - Number(i.received_qty || 0));
+      onOrderById.set(i.product_id, (onOrderById.get(i.product_id) || 0) + pending);
+    }
+
+    const stillShort = parts.some((p: any) => {
+      const available = Math.max(0, availById.get(p.product_id) || 0);
+      const onOrder = onOrderById.get(p.product_id) || 0;
+      return Math.max(0, Number(p.quantity || 0) - available - onOrder) > 0;
+    });
+
+    // Gerar a OC já resolve: o item passa a contar como "a caminho".
+    return stillShort ? null : 'Compra resolvida (em estoque ou já pedida)';
+  },
+};
+
+// R17: cotação enviada sem nenhuma resposta.
+//
+// A janela praticada no mercado para o fornecedor responder é de 3 a 5 dias úteis, e a
+// recomendação é lembrete em vez de caçar no inbox. Este é o caso que de fato aconteceu
+// aqui: 3 cotações enviadas em 23/07 e nenhuma resposta registrada até 29/07.
+//
+// Conta em dias ÚTEIS: contar corridos dispararia na segunda-feira por causa do fim de
+// semana. A tarefa é interna — nada é enviado ao fornecedor sem você mandar.
+const r17: Rule = {
+  id: 'r17',
+  label: 'Cotação sem resposta do fornecedor',
+  defaultEnabled: true,
+  async find(db) {
+    const { data, error } = await db
+      .from('quote_requests')
+      .select('id, code, created_at, service_orders(service_order_number), quote_responses(unit_price)')
+      .eq('status', 'open')
+      .limit(100);
+
+    // Sem isto, um erro de consulta viraria `data = null` e a regra devolveria lista
+    // vazia — indistinguível de "não há cotação parada". Levantar faz o motor logar
+    // com o id da regra, que é o que permite descobrir a causa sem adivinhação.
+    if (error) throw error;
+
+    return (data || [])
+      .filter((q: any) => {
+        // Alguém já mandou preço? Então não é falta de resposta — é falta de decisão,
+        // e isso a Central de Compras mostra sem precisar de tarefa.
+        const hasPrice = (q.quote_responses || []).some((r: any) => Number(r.unit_price) > 0);
+        if (hasPrice) return false;
+        return businessDaysBetween(q.created_at, new Date()) >= 3;
+      })
+      .map((q: any) => {
+        const dias = businessDaysBetween(q.created_at, new Date());
+        return {
+          automation_key: keyOf('r17', 'quote', q.id),
+          title: `Cobrar resposta da cotação ${q.code}` +
+            (q.service_orders?.service_order_number ? ` (${q.service_orders.service_order_number})` : ''),
+          priority: (dias >= 5 ? 'urgent' : 'high') as 'urgent' | 'high',
+          assignee: 'admin' as const,
+          due_at: dueAt(todayISO()),
+          related_entity_type: 'quote_request',
+          related_entity_id: q.id,
+          notes: `Enviada há ${dias} dias úteis sem nenhum preço. A janela normal é de 3 a 5 dias úteis.`,
+        };
+      });
+  },
+  async isResolved(db, task) {
+    const id = entityIdFromKey(task.automation_key);
+    const { data } = await db
+      .from('quote_requests')
+      .select('status, quote_responses(unit_price)')
+      .eq('id', id)
+      .maybeSingle();
+    if (!data) return 'Cotação não existe mais';
+    if (data.status !== 'open') return `Cotação ${data.status === 'closed' ? 'fechada' : 'cancelada'}`;
+    const hasPrice = (data.quote_responses || []).some((r: any) => Number(r.unit_price) > 0);
+    return hasPrice ? 'Fornecedor respondeu' : null;
+  },
+};
+
+export const RULES: Rule[] = [r1, r2, r3, r4, r5, r6, r7, r8, r11, r12, r14, r15, r16, r17];
 
 export function ruleById(id: string): Rule | undefined {
   return RULES.find((r) => r.id === id);

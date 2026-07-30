@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { Calculator, ChevronDown, Clock, DollarSign, MapPin, Package, PackagePlus, Receipt } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
+import { PurchaseNeedsBanner } from '@/components/purchasing/PurchaseNeedsBanner';
 
 interface SummarySectionsProps {
   isNew: boolean;
@@ -56,6 +57,16 @@ export function SummarySections(props: SummarySectionsProps) {
 
   return (
     <>
+      {/* Faixa de compras: some sozinha quando não há falta nem cotação aberta.
+          Busca os próprios dados para não engordar o contrato de props desta seção. */}
+      <PurchaseNeedsBanner
+        serviceOrderId={orderId}
+        serviceOrderNumber={orderData?.service_order_number ?? form?.service_order_number}
+        clientName={orderData?.clients?.name}
+        status={orderData?.status ?? form?.status}
+        isNew={isNew}
+      />
+
       {/* G - Linked Purchase Orders */}
       {!isNew && orderId && linkedPOs && linkedPOs.length > 0 && (
         <section className="rounded-xl border bg-card shadow-sm overflow-hidden">

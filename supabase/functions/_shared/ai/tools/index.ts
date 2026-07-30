@@ -14,6 +14,7 @@ import { crmTools } from "./crm.ts";
 import { fieldOpsTools } from "./field-ops.ts";
 import { routeOpsTools } from "./route-ops.ts";
 import { surveyOpsTools } from "./survey-ops.ts";
+import { routeDraftingTools } from "./route-drafting.ts";
 import { autonomyTools } from "./autonomy.ts";
 import { contactTools } from "./contacts.ts";
 import { entityMemoryTools } from "./entity-memory.ts";
@@ -53,6 +54,7 @@ export const allTools: ToolDef[] = [
   ...fieldOpsTools,
   ...routeOpsTools,
   ...surveyOpsTools,
+  ...routeDraftingTools,
   ...autonomyTools,
   ...entity360Tools,
   ...registryCrudTools,

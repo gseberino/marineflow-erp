@@ -47,6 +47,17 @@ const PAGES = [
   { path: '/v2/purchase-orders', modes: ['light', 'dark'], slug: 'po', themeVia: 'storage' },
   { path: '/v2/crm', modes: ['light', 'dark'], slug: 'crm', themeVia: 'storage' },
   { path: '/v2/external-quotes/catalog', modes: ['light', 'dark'], slug: 'catalog', themeVia: 'storage' },
+  /* Compras: o mapa de cotação é o pior caso de largura do sistema (itens ×
+     fornecedores). Foi desenhado como bloco-por-item justamente para caber —
+     estas entradas são o que prova que continua cabendo. */
+  { path: '/purchasing', modes: ['light', 'dark'], slug: 'purchasing-hub', themeVia: 'storage' },
+  { path: '/purchasing/quotes', modes: ['light', 'dark'], slug: 'quotes-list', themeVia: 'storage' },
+  /* Telas nascidas depois do inventário original do redesign (auditoria
+     30/07/2026): tudo que entra no sistema entra também neste crivo. */
+  { path: '/day-board', modes: ['light', 'dark'], slug: 'dayboard', themeVia: 'storage' },
+  { path: '/v2/financial?tab=banks', modes: ['light', 'dark'], slug: 'fin-banks', themeVia: 'storage' },
+  { path: '/v2/financial?tab=inbox', modes: ['light', 'dark'], slug: 'fin-inbox', themeVia: 'storage' },
+  { path: '/v2/financial?tab=rules', modes: ['light', 'dark'], slug: 'fin-rules', themeVia: 'storage' },
 ];
 
 if (!EMAIL || !PASSWORD) {
@@ -73,7 +84,9 @@ for (const pg of PAGES) {
   // Primeira visita usa timeout largo: o Vite compila a página sob demanda
   // no dev server e a transformação fria pode passar de 20s.
   await page.goto(`${BASE}${pg.path}`, { waitUntil: 'networkidle', timeout: 60000 });
-  await page.waitForSelector('.themev2', { timeout: 60000 });
+  // Tema global (R1): .themev2 vive no <html>, que o Playwright não considera
+  // "visível" — esperar por presença (attached), não visibilidade.
+  await page.waitForSelector('.themev2', { timeout: 60000, state: 'attached' });
 
   for (const mode of pg.modes) {
     if (pg.themeVia === 'buttons') {
@@ -82,7 +95,7 @@ for (const pg of PAGES) {
     } else {
       await page.evaluate((m) => localStorage.setItem('mf-v2-theme', m), mode);
       await page.reload({ waitUntil: 'networkidle' });
-      await page.waitForSelector('.themev2', { timeout: 20000 });
+      await page.waitForSelector('.themev2', { timeout: 20000, state: 'attached' });
     }
     for (const width of VIEWPORTS) {
       await page.setViewportSize({ width, height: 900 });

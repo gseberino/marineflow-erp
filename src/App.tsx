@@ -1,6 +1,6 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, type ReactNode } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Navigate, Route, Routes, useSearchParams } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -82,6 +82,9 @@ const ExternalQuoteDetailPage = lazy(() => import("./pages/ExternalQuoteDetailPa
 const ExternalSellerLeadsPage = lazy(() => import("./pages/ExternalSellerLeadsPage"));
 const ExternalProductCatalogPage = lazy(() => import("./pages/ExternalProductCatalogPage"));
 const PurchaseOrdersPage = lazy(() => import("./pages/PurchaseOrdersPage"));
+const PurchasingHubPage = lazy(() => import("./pages/PurchasingHubPage"));
+const QuoteRequestsPage = lazy(() => import("./pages/QuoteRequestsPage"));
+const QuoteRequestDetailPage = lazy(() => import("./pages/QuoteRequestDetailPage"));
 const AIActivityPage = lazy(() => import("./pages/AIActivityPage"));
 
 /**
@@ -112,8 +115,25 @@ function RouteLoading() {
  */
 function FinanceiroLegadoOuV2() {
   const [params] = useSearchParams();
+  const location = useLocation();
   if (params.get('legacy') === '1') return <FinancialPage />;
-  return <Navigate to="/v2/financial" replace />;
+  // Preserva a query (?tab=payables etc.) na travessia para a v2.
+  return <Navigate to={'/v2/financial' + location.search} replace />;
+}
+
+/**
+ * Redesign em todo o ERP (30/07/2026): generalização do padrão acima para
+ * TODAS as telas com gêmea v2. Redireciona preservando :params e query string;
+ * `?legacy=1` ainda abre a tela antiga — saída de emergência enquanto a
+ * transição não termina (o código v1 permanece no repositório).
+ */
+function LegadoOuV2({ to, legacy }: { to: string; legacy: ReactNode }) {
+  const params = useParams();
+  const location = useLocation();
+  if (new URLSearchParams(location.search).get('legacy') === '1') return <>{legacy}</>;
+  let path = to;
+  for (const [k, v] of Object.entries(params)) path = path.replace(`:${k}`, v ?? '');
+  return <Navigate to={path + location.search} replace />;
 }
 
 const App = () => (
@@ -144,13 +164,11 @@ const App = () => (
                     <AppLayout>
                       <Routes>
                         <Route path="/" element={
-                          <ProtectedRoute roles={['admin', 'financial', 'technician', 'seller']} groupId="operacional">
-                            <Dashboard />
-                          </ProtectedRoute>
+                          <ProtectedRoute roles={['admin', 'financial', 'technician', 'seller']} groupId="operacional"><LegadoOuV2 to="/v2/dashboard" legacy={<Dashboard />} /></ProtectedRoute>
                         } />
-                        <Route path="/crm" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><CRMKanbanPage /></ProtectedRoute>} />
-                        <Route path="/service-orders" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><ServiceOrderList /></ProtectedRoute>} />
-                        <Route path="/quotes" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><QuoteList /></ProtectedRoute>} />
+                        <Route path="/crm" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><LegadoOuV2 to="/v2/crm" legacy={<CRMKanbanPage />} /></ProtectedRoute>} />
+                        <Route path="/service-orders" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><LegadoOuV2 to="/v2/service-orders" legacy={<ServiceOrderList />} /></ProtectedRoute>} />
+                        <Route path="/quotes" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><LegadoOuV2 to="/v2/quotes" legacy={<QuoteList />} /></ProtectedRoute>} />
                         {/* Fase 1 UI v2 — telas gêmeas em rota paralela; as v1 acima permanecem intactas */}
                         <Route path="/v2/service-orders" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><OrdersListV2 mode="orders" /></ProtectedRoute>} />
                         <Route path="/v2/quotes" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><OrdersListV2 mode="quotes" /></ProtectedRoute>} />
@@ -162,7 +180,7 @@ const App = () => (
                         <Route path="/v2/audit-log" element={<ProtectedRoute roles={['admin']}><AuditLogV2 /></ProtectedRoute>} />
                         <Route path="/v2/reports" element={<ProtectedRoute roles={['admin','financial']}><ReportsV2 /></ProtectedRoute>} />
                         <Route path="/v2/inventory/smart-purchase" element={<ProtectedRoute roles={['admin','financial']}><SmartPurchaseV2 /></ProtectedRoute>} />
-                        <Route path="/v2/inventory" element={<ProtectedRoute roles={['admin','financial']}><InventoryV2 /></ProtectedRoute>} />
+                        <Route path="/v2/inventory" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><InventoryV2 /></ProtectedRoute>} />
                         <Route path="/v2/purchase-orders" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><PurchaseOrdersV2 /></ProtectedRoute>} />
                         <Route path="/v2/clients/:id" element={<ProtectedRoute roles={['admin','financial','technician','seller']}><ClientDetailV2 /></ProtectedRoute>} />
                         <Route path="/v2/vessels/:id" element={<ProtectedRoute roles={['admin','financial','technician','seller']}><VesselDetailV2 /></ProtectedRoute>} />
@@ -189,21 +207,31 @@ const App = () => (
                         <Route path="/v2/products" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><ProductsListV2 /></ProtectedRoute>} />
                         <Route path="/v2/services" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><ServicesListV2 /></ProtectedRoute>} />
                         <Route path="/v2/suppliers" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><SuppliersListV2 /></ProtectedRoute>} />
-                        <Route path="/purchase-orders" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><PurchaseOrdersPage /></ProtectedRoute>} />
-                        <Route path="/service-orders/new" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><ServiceOrderDetail /></ProtectedRoute>} />
-                        <Route path="/service-orders/:id" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><ServiceOrderDetail /></ProtectedRoute>} />
-                        <Route path="/clients" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><ClientList /></ProtectedRoute>} />
-                        <Route path="/clients/:id" element={<ProtectedRoute roles={['admin','financial','technician','seller']}><ClientDetail /></ProtectedRoute>} />
-                        <Route path="/vessels" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><VesselList /></ProtectedRoute>} />
-                        <Route path="/vessels/:id" element={<ProtectedRoute roles={['admin','financial','technician','seller']}><VesselDetail /></ProtectedRoute>} />
-                        <Route path="/marinas" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><MarinaList /></ProtectedRoute>} />
-                        <Route path="/products" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><ProductList /></ProtectedRoute>} />
-                        <Route path="/suppliers" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><SupplierList /></ProtectedRoute>} />
-                        <Route path="/services" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><ServiceList /></ProtectedRoute>} />
-                        <Route path="/inventory" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><InventoryPage /></ProtectedRoute>} />
-                        <Route path="/inventory/smart-purchase" element={<ProtectedRoute roles={['admin','financial']}><SmartPurchasePage /></ProtectedRoute>} />
-                        <Route path="/inventory/import-xml" element={<ProtectedRoute roles={['admin']}><ImportFiscalXML /></ProtectedRoute>} />
-                        <Route path="/fiscal/emissao" element={<ProtectedRoute roles={['admin']}><FiscalEmission /></ProtectedRoute>} />
+
+                        <Route path="/purchase-orders" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><LegadoOuV2 to="/v2/purchase-orders" legacy={<PurchaseOrdersPage />} /></ProtectedRoute>} />
+                        <Route path="/service-orders/new" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><LegadoOuV2 to="/v2/service-orders/new" legacy={<ServiceOrderDetail />} /></ProtectedRoute>} />
+                        <Route path="/service-orders/:id" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><LegadoOuV2 to="/v2/service-orders/:id" legacy={<ServiceOrderDetail />} /></ProtectedRoute>} />
+                        <Route path="/clients" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><LegadoOuV2 to="/v2/clients" legacy={<ClientList />} /></ProtectedRoute>} />
+                        <Route path="/clients/:id" element={<ProtectedRoute roles={['admin','financial','technician','seller']}><LegadoOuV2 to="/v2/clients/:id" legacy={<ClientDetail />} /></ProtectedRoute>} />
+                        <Route path="/vessels" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><LegadoOuV2 to="/v2/vessels" legacy={<VesselList />} /></ProtectedRoute>} />
+                        <Route path="/vessels/:id" element={<ProtectedRoute roles={['admin','financial','technician','seller']}><LegadoOuV2 to="/v2/vessels/:id" legacy={<VesselDetail />} /></ProtectedRoute>} />
+                        <Route path="/marinas" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><LegadoOuV2 to="/v2/marinas" legacy={<MarinaList />} /></ProtectedRoute>} />
+                        <Route path="/products" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><LegadoOuV2 to="/v2/products" legacy={<ProductList />} /></ProtectedRoute>} />
+                        <Route path="/suppliers" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><LegadoOuV2 to="/v2/suppliers" legacy={<SupplierList />} /></ProtectedRoute>} />
+                        <Route path="/services" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><LegadoOuV2 to="/v2/services" legacy={<ServiceList />} /></ProtectedRoute>} />
+                        <Route path="/inventory" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><LegadoOuV2 to="/v2/inventory" legacy={<InventoryPage />} /></ProtectedRoute>} />
+                        <Route path="/inventory/smart-purchase" element={<ProtectedRoute roles={['admin','financial']}><LegadoOuV2 to="/v2/inventory/smart-purchase" legacy={<SmartPurchasePage />} /></ProtectedRoute>} />
+                        <Route path="/inventory/import-xml" element={<ProtectedRoute roles={['admin']}><LegadoOuV2 to="/v2/inventory/import-xml" legacy={<ImportFiscalXML />} /></ProtectedRoute>} />
+                        <Route path="/fiscal/emissao" element={<ProtectedRoute roles={['admin']}><LegadoOuV2 to="/v2/fiscal/emissao" legacy={<FiscalEmission />} /></ProtectedRoute>} />
+                        {/* Compras: telas NOVAS, então não existe versão antiga delas. As
+                            rotas sem prefixo ficam como atalho e caem na v2 preservando :id
+                            e query, pelo mesmo LegadoOuV2 do resto do ERP. */}
+                        <Route path="/purchasing" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><LegadoOuV2 to="/v2/purchasing" legacy={<PurchasingHubPage />} /></ProtectedRoute>} />
+                        <Route path="/purchasing/quotes" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><LegadoOuV2 to="/v2/purchasing/quotes" legacy={<QuoteRequestsPage />} /></ProtectedRoute>} />
+                        <Route path="/purchasing/quotes/:id" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><LegadoOuV2 to="/v2/purchasing/quotes/:id" legacy={<QuoteRequestDetailPage />} /></ProtectedRoute>} />
+                        <Route path="/v2/purchasing" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><PurchasingHubPage /></ProtectedRoute>} />
+                        <Route path="/v2/purchasing/quotes" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><QuoteRequestsPage /></ProtectedRoute>} />
+                        <Route path="/v2/purchasing/quotes/:id" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><QuoteRequestDetailPage /></ProtectedRoute>} />
                         <Route path="/agenda" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><AgendaPage /></ProtectedRoute>} />
                         <Route path="/day-board" element={<ProtectedRoute roles={['admin','financial','technician']} groupId="operacional"><DayBoardPage /></ProtectedRoute>} />
                         {/* Financeiro migrado para a v2 em 30/07/2026. Links antigos,
@@ -216,71 +244,45 @@ const App = () => (
                           </ProtectedRoute>
                         } />
                         <Route path="/collections" element={
-                          <ProtectedRoute roles={['admin', 'financial']} groupId="operacional">
-                            <CollectionsPage />
-                          </ProtectedRoute>
+                          <ProtectedRoute roles={['admin', 'financial']} groupId="operacional"><LegadoOuV2 to="/v2/collections" legacy={<CollectionsPage />} /></ProtectedRoute>
                         } />
                         <Route path="/commissions" element={
-                          <ProtectedRoute roles={['admin', 'financial']} groupId="financeiro">
-                            <CommissionsPage />
-                          </ProtectedRoute>
+                          <ProtectedRoute roles={['admin', 'financial']} groupId="financeiro"><LegadoOuV2 to="/v2/commissions" legacy={<CommissionsPage />} /></ProtectedRoute>
                         } />
                         <Route path="/external-quotes" element={
-                          <ProtectedRoute roles={['external_seller','admin','financial','seller']}>
-                            <ExternalQuoteListPage />
-                          </ProtectedRoute>
+                          <ProtectedRoute roles={['external_seller','admin','financial','seller']}><LegadoOuV2 to="/v2/external-quotes" legacy={<ExternalQuoteListPage />} /></ProtectedRoute>
                         } />
                         <Route path="/external-quotes/new" element={
-                          <ProtectedRoute roles={['external_seller','admin','financial','seller']}>
-                            <ExternalQuoteNewPage />
-                          </ProtectedRoute>
+                          <ProtectedRoute roles={['external_seller','admin','financial','seller']}><LegadoOuV2 to="/v2/external-quotes/new" legacy={<ExternalQuoteNewPage />} /></ProtectedRoute>
                         } />
                         <Route path="/external-quotes/approval" element={
-                          <ProtectedRoute roles={['admin', 'financial']} groupId="vendas-externas">
-                            <ExternalQuoteApprovalPage />
-                          </ProtectedRoute>
+                          <ProtectedRoute roles={['admin', 'financial']} groupId="vendas-externas"><LegadoOuV2 to="/v2/external-quotes/approval" legacy={<ExternalQuoteApprovalPage />} /></ProtectedRoute>
                         } />
                         <Route path="/external-quotes/leads" element={
-                          <ProtectedRoute roles={['admin','financial']}>
-                            <ExternalSellerLeadsPage />
-                          </ProtectedRoute>
+                          <ProtectedRoute roles={['admin','financial']}><LegadoOuV2 to="/v2/external-quotes/leads" legacy={<ExternalSellerLeadsPage />} /></ProtectedRoute>
                         } />
                         <Route path="/external-quotes/catalog" element={
-                          <ProtectedRoute roles={['external_seller','admin','financial','seller']}>
-                            <ExternalProductCatalogPage />
-                          </ProtectedRoute>
+                          <ProtectedRoute roles={['external_seller','admin','financial','seller']}><LegadoOuV2 to="/v2/external-quotes/catalog" legacy={<ExternalProductCatalogPage />} /></ProtectedRoute>
                         } />
                         <Route path="/external-quotes/:id" element={
-                          <ProtectedRoute roles={['external_seller','admin','financial','seller']}>
-                            <ExternalQuoteDetailPage />
-                          </ProtectedRoute>
+                          <ProtectedRoute roles={['external_seller','admin','financial','seller']}><LegadoOuV2 to="/v2/external-quotes/:id" legacy={<ExternalQuoteDetailPage />} /></ProtectedRoute>
                         } />
-                        <Route path="/reports" element={<ProtectedRoute roles={['admin', 'financial']} groupId="financeiro"><ReportsPage /></ProtectedRoute>} />
+                        <Route path="/reports" element={<ProtectedRoute roles={['admin', 'financial']} groupId="financeiro"><LegadoOuV2 to="/v2/reports" legacy={<ReportsPage />} /></ProtectedRoute>} />
                         <Route path="/prospecting" element={
-                          <ProtectedRoute roles={['admin']} groupId="operacional">
-                            <ActiveProspectingPage />
-                          </ProtectedRoute>
+                          <ProtectedRoute roles={['admin']} groupId="operacional"><LegadoOuV2 to="/v2/prospecting" legacy={<ActiveProspectingPage />} /></ProtectedRoute>
                         } />
-                        <Route path="/whatsapp/leads" element={<ProtectedRoute roles={['admin','financial','seller']} groupId="whatsapp"><WhatsAppLeadsPage /></ProtectedRoute>} />
+                        <Route path="/whatsapp/leads" element={<ProtectedRoute roles={['admin','financial','seller']} groupId="whatsapp"><LegadoOuV2 to="/v2/whatsapp/leads" legacy={<WhatsAppLeadsPage />} /></ProtectedRoute>} />
                         <Route path="/whatsapp/logs" element={
-                          <ProtectedRoute roles={['admin']} groupId="whatsapp">
-                            <WhatsAppLogsPage />
-                          </ProtectedRoute>
+                          <ProtectedRoute roles={['admin']} groupId="whatsapp"><LegadoOuV2 to="/v2/whatsapp/logs" legacy={<WhatsAppLogsPage />} /></ProtectedRoute>
                         } />
                         <Route path="/whatsapp/scheduled" element={
-                          <ProtectedRoute roles={['admin', 'financial']} groupId="whatsapp">
-                            <WhatsAppScheduledPage />
-                          </ProtectedRoute>
+                          <ProtectedRoute roles={['admin', 'financial']} groupId="whatsapp"><LegadoOuV2 to="/v2/whatsapp/scheduled" legacy={<WhatsAppScheduledPage />} /></ProtectedRoute>
                         } />
                         <Route path="/whatsapp/status" element={
-                          <ProtectedRoute roles={['admin', 'financial', 'seller']} groupId="whatsapp">
-                            <WhatsAppStatusPage />
-                          </ProtectedRoute>
+                          <ProtectedRoute roles={['admin', 'financial', 'seller']} groupId="whatsapp"><LegadoOuV2 to="/v2/whatsapp/status" legacy={<WhatsAppStatusPage />} /></ProtectedRoute>
                         } />
                         <Route path="/audit-log" element={
-                          <ProtectedRoute roles={['admin']} groupId="sistema">
-                            <AuditLogPage />
-                          </ProtectedRoute>
+                          <ProtectedRoute roles={['admin']} groupId="sistema"><LegadoOuV2 to="/v2/audit-log" legacy={<AuditLogPage />} /></ProtectedRoute>
                         } />
                         <Route path="/ai-activity" element={
                           <ProtectedRoute roles={['admin']} groupId="sistema">
@@ -288,9 +290,7 @@ const App = () => (
                           </ProtectedRoute>
                         } />
                         <Route path="/settings" element={
-                          <ProtectedRoute roles={['admin']} groupId="sistema">
-                            <SettingsPage />
-                          </ProtectedRoute>
+                          <ProtectedRoute roles={['admin']} groupId="sistema"><LegadoOuV2 to="/v2/settings" legacy={<SettingsPage />} /></ProtectedRoute>
                         } />
                         <Route path="/tools/encoding-fixer" element={
                           <ProtectedRoute roles={['admin']} groupId="sistema">
