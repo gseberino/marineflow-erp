@@ -73,7 +73,8 @@ export const whatsappTools: ToolDef[] = [
   {
     name: "send_supplier_quote_request",
     description:
-      "Envia um pedido de COTAÇÃO por WhatsApp a um ou mais FORNECEDORES (ação sensível — pede confirmação). Informe supplier_ids (ache com suggest_suppliers) e os itens a cotar. As respostas dos fornecedores chegam na caixa normal do WhatsApp — a consolidação é manual (MVP). NÃO cria ordem de compra. MOSTRE a prévia da mensagem e a lista de fornecedores antes de confirmar.",
+      "Envia um pedido de COTAÇÃO por WhatsApp a um ou mais FORNECEDORES (ação sensível — pede confirmação). Informe supplier_ids (ache com suggest_suppliers) e os itens a cotar. MOSTRE a prévia da mensagem e a lista de fornecedores antes de confirmar. " +
+      "DEPOIS DO ENVIO o ciclo CONTINUA e é sua responsabilidade conduzi-lo: quando a resposta do fornecedor chegar, use read_supplier_messages (ou read_supplier_media para áudio/PDF/imagem) e registre cada preço com record_quote_response; monte o comparativo com get_quote_comparison; devolva o custo ao orçamento com apply_quote_price; e gere a compra com create_purchase_order_from_quote. NÃO pare no envio.",
     input_schema: {
       type: "object",
       properties: {
