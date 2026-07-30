@@ -1,7 +1,13 @@
 # MarineFlow — Compras & Cotação: dar corpo ao que existe e fechar o ciclo
 
-> **STATUS 29/07/2026 — EXECUTADO.** Branch `session/compras` (worktree
-> `marineflow-erp--compras`), 5 commits, aguardando integração+deploy autorizados.
+> **STATUS 30/07/2026 — EM PRODUÇÃO.** Integrado (`origin/main`), Vercel deployado
+> pela integração GitHub, edge `task-automations` deployada e 2 migrations aplicadas
+> com autorização (CHECK de `agenda_tasks` + RLS de compras por cargo).
+> **As duas regras provadas em produção:** R16 criou 3 tarefas de compra e R17 criou
+> 3 cobranças de cotação parada (COT-00001/2/3, prioridade urgente — 5 dias úteis sem
+> nenhum preço). A R17 subiu quebrada e foi consertada na mesma sessão: o CHECK de
+> `agenda_tasks` não conhecia `quote_request`, o INSERT falhava com 23514 e o motor
+> engolia no `catch` por regra — cron 200, regra sem efeito. Lição registrada.
 > Decisões do dono: D1 = cotação→OC **com compra direta também possível** · D2 = **os dois**
 > (diálogo na hora + faixa + tarefa) · D3 = peças em falta + itens de texto livre ·
 > D4 = não separar v1/v2 (um componente por tela, servido nas duas rotas).
