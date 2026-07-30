@@ -949,6 +949,79 @@ dinheiro vaza. Relógio, materiais e aprendizado entram depois, sobre uma base j
 
 ---
 
+## 10-bis. Frente transversal: a IA no ponto de uso (pedido do dono, 30/07/2026)
+
+O dono pediu quatro coisas que não são uma fase nova — atravessam todas. Registradas aqui
+com o desenho, a pesquisa que as sustenta e onde divergi.
+
+### O que foi pedido
+1. O roteiro deve **nascer dos serviços já lançados** na OS ou no orçamento, sugerido pela IA,
+   com o usuário ajustando.
+2. Um **campo de conversa** junto ao roteiro para acrescentar, corrigir e completar.
+3. O mesmo tratamento nas **Tarefas** da OS.
+4. Na linha de serviço/produto, um **menu de ações rápidas de IA**: criar tarefa, criar roteiro,
+   lançar materiais complementares, cotar com fornecedor, comprar online, separar material.
+
+### P23. A ação certa aparece onde o trabalho está, não numa tela à parte
+Salesforce (Agent Quick Actions em record pages) e Dynamics ("de sistema de registro a sistema de
+ação") convergiram no mesmo lugar: a ação de IA mora **no registro**, não num assistente separado.
+O ganho é de contexto — o botão já sabe de que serviço, de que OS e de que cliente se trata, e o
+usuário não redigita o que a tela já mostra.
+
+### P24. Menos botões, e só os que o contexto justifica
+Aqui a literatura é um aviso, não um incentivo. *AI fatigue* é fenômeno medido: 95% das empresas
+não veem retorno do investimento em IA, e a causa apontada não é o modelo — é proliferação de
+funcionalidade sem critério. A NN/g mostra por que a descoberta falha: ícone de *sparkles* sem
+significado estabelecido, rótulo proprietário ("Rufus") em vez de linguagem clara, e botão em
+lugar não convencional.
+→ **Um** ponto de entrada por linha, com no máximo **5 ações**, e cada ação aparece só quando o
+contexto a justifica (divulgação progressiva contextual):
+
+| Ação | Só aparece quando |
+|---|---|
+| Gerar roteiro deste serviço | linha de serviço sem passos ainda |
+| Criar tarefa de separação | há peças na OS e ela está agendada |
+| Lançar materiais complementares | linha de serviço com kit cadastrado |
+| Cotar com fornecedor | linha de produto sem estoque suficiente |
+| Comprar online | produto com fornecedor e link cadastrados |
+
+Se todas aparecem sempre, viraram ruído — e o menu terá falhado.
+
+### P25. Instrução de uma linha, não conversa
+**Aqui divirjo do pedido.** A pesquisa de padrões de 2026 é direta: *"chat de IA é o padrão mais
+over-aplicado; nem toda funcionalidade quer ser um chat — às vezes um botão, uma ação inline ou um
+prompt de uma vez só é melhor"*.
+
+Um chat ao lado do roteiro tem três custos concretos: a conversa se perde ao sair da tela, o
+contexto cresce a cada turno (e o custo com ele), e — o mais grave para este projeto — **conversa
+livre não produz diff estruturado**, que é justamente o combustível da Fase 7.
+
+→ Proposta: um **campo de instrução de uma linha** ("o que ajustar no roteiro?"), que aceita
+linguagem natural igual ao chat, mas devolve **alterações propostas passo a passo**, com aceitar
+ou descartar em cada uma. O histórico das instruções fica no registro. Isso entrega o que o dono
+quer — corrigir e completar falando — e ainda alimenta o aprendizado, porque cada aceite ou recusa
+vira uma linha em `ai_suggestion_reviews`.
+
+Se depois de usar ficar claro que falta conversa de verdade, o campo vira chat sem retrabalho: a
+mesma tool, com histórico.
+
+### P26. O botão não tem lógica própria — ele chama a tool que já existe
+As 154 tools do agente já implementam as regras (autonomia, cargo, preço oculto para técnico). A
+ação rápida é **atalho com contexto pré-preenchido**, nunca uma segunda implementação da mesma
+regra. Consequências: a tela e o WhatsApp passam pelo mesmo caminho, as ações de risco médio/alto
+continuam pedindo confirmação pela política existente, e nada precisa ser reimplementado quando a
+regra mudar.
+
+### Onde cada pedido entra nas fases
+| Pedido | Fase | Situação |
+|---|---|---|
+| Roteiro sugerido a partir dos serviços lançados | **IA-1, já prevista** | ficou faltando — é o próximo item |
+| Instrução de uma linha no roteiro | Fase 7 (usa `ai_suggestion_reviews`) | desenho acima |
+| Mesmo tratamento nas Tarefas | Fase 7 | reusa `agenda_tasks` |
+| Menu de ações rápidas por linha | frente própria, depois da Fase 5 | depende do kit de materiais existir |
+
+---
+
 ## 11. Decisões
 
 ### Tomadas em 29/07/2026
