@@ -1,6 +1,6 @@
 import { lazy, Suspense } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useSearchParams } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -103,6 +103,19 @@ function RouteLoading() {
   );
 }
 
+/**
+ * Rota `/financial` durante a transição para a v2.
+ *
+ * Redirecionar em vez de trocar o componente preserva o endereço na barra: quem chegou por
+ * um link antigo vê que agora o Financeiro mora em outro lugar, em vez de ficar com uma
+ * tela nova sob um endereço velho — e o próximo favorito já sai certo.
+ */
+function FinanceiroLegadoOuV2() {
+  const [params] = useSearchParams();
+  if (params.get('legacy') === '1') return <FinancialPage />;
+  return <Navigate to="/v2/financial" replace />;
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <I18nProvider>
@@ -193,9 +206,13 @@ const App = () => (
                         <Route path="/fiscal/emissao" element={<ProtectedRoute roles={['admin']}><FiscalEmission /></ProtectedRoute>} />
                         <Route path="/agenda" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><AgendaPage /></ProtectedRoute>} />
                         <Route path="/day-board" element={<ProtectedRoute roles={['admin','financial','technician']} groupId="operacional"><DayBoardPage /></ProtectedRoute>} />
+                        {/* Financeiro migrado para a v2 em 30/07/2026. Links antigos,
+                            favoritos e telas que apontam para cá continuam funcionando —
+                            caem na versão nova. `?legacy=1` ainda abre a antiga, que é a
+                            saída de emergência enquanto a transição não termina. */}
                         <Route path="/financial" element={
                           <ProtectedRoute roles={['admin', 'financial']} groupId="financeiro">
-                            <FinancialPage />
+                            <FinanceiroLegadoOuV2 />
                           </ProtectedRoute>
                         } />
                         <Route path="/collections" element={

@@ -190,7 +190,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
       label: 'Financeiro',
       icon: DollarSign,
       items: [
-        { label: 'Financeiro', icon: DollarSign, path: '/financial', roles: ['admin', 'financial'] },
+        // Primeira tela migrada para a v2 (30/07/2026). O menu aponta direto para lá em
+        // vez de passar por um redirecionamento: assim o endereço que aparece na barra é
+        // o de verdade, e a rota antiga fica só como saída de emergência (?legacy=1).
+        { label: 'Financeiro', icon: DollarSign, path: '/v2/financial', roles: ['admin', 'financial'] },
         { label: 'Comissões', icon: Users, path: '/commissions', roles: ['admin', 'financial'] },
         { label: 'Emissão Fiscal (NF-e)', icon: FileText, path: '/fiscal/emissao', roles: ['admin'] },
         { label: 'Relatórios', icon: BarChart3, path: '/reports', roles: ['admin', 'financial'] },

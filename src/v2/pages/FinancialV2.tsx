@@ -19,6 +19,9 @@ import { PaymentDialog } from '@/components/PaymentDialog';
 import { PayableFormDialog } from '@/components/PayableFormDialog';
 import { DREPanel } from '@/components/DREPanel';
 import { BankReconciliation } from '@/components/BankReconciliation';
+import { BankSourcesPanel } from '@/components/BankSourcesPanel';
+import { FinanceReviewInbox, type SementeDeRegra } from '@/components/FinanceReviewInbox';
+import { FinanceRulesPanel, EditorDeRegra } from '@/components/FinanceRulesPanel';
 import { AgingReportPanel } from '@/components/AgingReportPanel';
 import { ReimbursementsPanel } from '@/components/ReimbursementsPanel';
 import { PageShell } from '@/v2/components/PageShell';
@@ -118,10 +121,11 @@ export default function FinancialV2() {
   const payables = useMemo(() => (payData ?? []) as unknown as PayableRow[], [payData]);
 
   const tab = searchParams.get('tab') || 'overview';
-  const setTab = (v: string) => {
-    if (v === 'receivables') { navigate('/v2/receivables'); return; }
+  // Toda aba se comporta como aba. A de Recebíveis costumava NAVEGAR para outra página, e
+  // o efeito para quem usa era a tela inteira trocar ao clicar numa aba — parecia bug
+  // porque, do lado de fora, é bug: aba que leva embora não é aba.
+  const setTab = (v: string) =>
     setSearchParams((prev) => { prev.set('tab', v); return prev; }, { replace: true });
-  };
 
   const [payFilters, setPayFilters] = useState<FinancialFilters>({ ...defaultFilters });
   const [payOsSearch, setPayOsSearch] = useState('');
@@ -131,6 +135,9 @@ export default function FinancialV2() {
   const [paymentTarget, setPaymentTarget] = useState<{ receivable?: PayableRow; payable?: PayableRow } | null>(null);
   const [showNewPayable, setShowNewPayable] = useState(false);
   const [editingPayable, setEditingPayable] = useState<PayableRow | null>(null);
+  // Regra criada a partir de uma linha da caixa de entrada: o editor abre preenchido, sem
+  // obrigar a redigitar o fornecedor que está na tela.
+  const [sementeRegra, setSementeRegra] = useState<SementeDeRegra | null>(null);
 
   const filteredPayables = useMemo(() => {
     const base = (applyFilters(payables as never[], payFilters, 'payable') as unknown as PayableRow[])
@@ -311,6 +318,12 @@ export default function FinancialV2() {
             <TabsTrigger value="receivables">{t.financial.tabReceivables}</TabsTrigger>
             <TabsTrigger value="payables">{t.financial.tabPayables}</TabsTrigger>
             <TabsTrigger value="reconciliation">{t.financial.tabReconciliation}</TabsTrigger>
+            {/* Conciliar é ligar dinheiro ao que já existe; a caixa de entrada é o que
+                passou pela conta e nunca virou lançamento. Trabalhos com ritmos
+                diferentes — o usuário pediu para manter separados. */}
+            <TabsTrigger value="inbox">Caixa de entrada</TabsTrigger>
+            <TabsTrigger value="rules">Regras</TabsTrigger>
+            <TabsTrigger value="banks">Contas bancárias</TabsTrigger>
             <TabsTrigger value="aging">Aging</TabsTrigger>
           </TabsList>
 
@@ -548,10 +561,24 @@ export default function FinancialV2() {
             )}
           </TabsContent>
 
-          {/* ── CONCILIAÇÃO / AGING ── */}
+          {/* ── CONCILIAÇÃO / CAIXA DE ENTRADA / REGRAS / CONTAS / AGING ── */}
           <TabsContent value="reconciliation" className="mt-4"><BankReconciliation /></TabsContent>
+          <TabsContent value="inbox" className="mt-4">
+            <FinanceReviewInbox onCriarRegra={setSementeRegra} />
+          </TabsContent>
+          <TabsContent value="rules" className="mt-4"><FinanceRulesPanel /></TabsContent>
+          <TabsContent value="banks" className="mt-4"><BankSourcesPanel /></TabsContent>
           <TabsContent value="aging" className="mt-4"><AgingReportPanel /></TabsContent>
         </Tabs>
+
+        {/* Saída para a versão anterior enquanto a confiança na nova não se firma. Some
+            quando a transição terminar — até lá, ficar preso é pior que ver um link. */}
+        <p className="mt-8 text-center text-xs text-muted-foreground">
+          Faltou alguma coisa?{' '}
+          <a href="/financial?legacy=1" className="underline underline-offset-2 hover:text-foreground">
+            Abrir a versão anterior
+          </a>
+        </p>
       </PageShell>
 
       {paymentTarget && (
@@ -560,6 +587,14 @@ export default function FinancialV2() {
           onOpenChange={() => setPaymentTarget(null)}
           receivable={paymentTarget.receivable as never}
           payable={paymentTarget.payable as never}
+        />
+      )}
+      {sementeRegra && (
+        <EditorDeRegra
+          key={sementeRegra.match_value}
+          aberto
+          onFechar={() => setSementeRegra(null)}
+          regra={sementeRegra}
         />
       )}
       <PayableFormDialog open={showNewPayable} onOpenChange={setShowNewPayable} />
