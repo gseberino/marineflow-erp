@@ -25,6 +25,9 @@ import {
   agingLevel, buildQuoteComparison, businessDaysSince, computeBasketTotal,
   suggestBestBasket, type Offer,
 } from '@/lib/quote-comparison';
+import {
+  priceDelta, usePriceHistory, type ProductPriceStats,
+} from '@/hooks/use-price-history';
 
 /**
  * Mapa de cotação — onde a decisão de compra acontece.
@@ -101,6 +104,12 @@ export default function QuoteRequestDetailPage() {
     for (const i of quote?.quote_request_items ?? []) map.set(i.id, i);
     return map;
   }, [quote]);
+
+  // Régua de julgamento: o que já foi pago por estes itens. Sem isso, "R$ 200" é só
+  // um número; com isso, é "60% acima do que você pagou em maio".
+  const { data: priceHistory } = usePriceHistory(
+    (quote?.quote_request_items ?? []).map(i => i.product_id),
+  );
 
   if (isLoading) {
     return (
@@ -387,6 +396,7 @@ export default function QuoteRequestDetailPage() {
             const offers = Object.values(row.offers).sort((a, b) => a.unitPrice - b.unitPrice);
             const item = itemById.get(row.itemId);
             const chosenSupplier = chosen[row.itemId];
+            const history = item?.product_id ? priceHistory?.[item.product_id] : undefined;
             return (
               <div key={row.itemId} className="rounded-xl border bg-card shadow-sm">
                 <div className="flex flex-wrap items-baseline justify-between gap-2 border-b p-3">
@@ -397,6 +407,17 @@ export default function QuoteRequestDetailPage() {
                     </p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       {fmtQty(row.quantity)} {item?.product_id ? 'un · do catálogo' : 'un · texto livre'}
+                      {history && (
+                        <>
+                          {' · '}
+                          <span title={`${history.entryCount} compra(s) registrada(s)`}>
+                            última compra {fmtBRL(history.lastPrice)}
+                            {history.lastSupplierName ? ` (${history.lastSupplierName})` : ''}
+                            {' em '}
+                            {new Date(history.lastPurchasedAt).toLocaleDateString('pt-BR')}
+                          </span>
+                        </>
+                      )}
                     </p>
                   </div>
                   {row.unquoted && (
@@ -414,6 +435,7 @@ export default function QuoteRequestDetailPage() {
                       supplierName={supplierById.get(offer.supplierId)?.name ?? 'Fornecedor'}
                       isChosen={chosenSupplier === offer.supplierId}
                       disabled={!isOpen}
+                      history={history}
                       onChoose={() => handleChoose(row.itemId, offer.supplierId)}
                     />
                   ))}
@@ -531,14 +553,18 @@ export default function QuoteRequestDetailPage() {
 }
 
 function OfferRow({
-  offer, supplierName, isChosen, disabled, onChoose,
+  offer, supplierName, isChosen, disabled, history, onChoose,
 }: {
   offer: Offer;
   supplierName: string;
   isChosen: boolean;
   disabled: boolean;
+  history?: ProductPriceStats;
   onChoose: () => void;
 }) {
+  // Comparação com o que já foi PAGO — régua diferente da média entre fornecedores.
+  // Uma oferta pode ser a melhor da cotação e ainda assim um reajuste grande.
+  const delta = priceDelta(offer.unitPrice, history);
   return (
     <div className={cn('flex flex-wrap items-center gap-x-3 gap-y-1 p-3', isChosen && 'bg-primary/5')}>
       <div className="min-w-0 flex-1">
@@ -554,6 +580,17 @@ function OfferRow({
               <AlertTriangle className="h-3 w-3" />
               {/* Uma string única: fragmentar em nós separados atrapalha leitor de tela. */}
               <span>{`${Math.round(offer.deviationFromMean * 100)}% acima da média`}</span>
+            </span>
+          )}
+          {delta && (delta.pricier || delta.cheaper) && (
+            <span
+              className={cn(
+                'font-medium',
+                delta.pricier ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400',
+              )}
+              title="comparado ao último preço pago por este item"
+            >
+              {`· ${delta.pct > 0 ? '+' : ''}${delta.pct}% vs. última compra`}
             </span>
           )}
           {offer.source !== 'manual' && <span className="opacity-70">· via {offer.source}</span>}
