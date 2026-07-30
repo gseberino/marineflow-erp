@@ -1,37 +1,32 @@
-import { ReactNode, useState } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 import { Moon, Search, Sun } from 'lucide-react';
 import { V2CommandPalette } from './V2CommandPalette';
-
-type Mode = 'light' | 'dark';
-const STORAGE_KEY = 'mf-v2-theme';
+import { getThemeMode, THEME_EVENT, toggleThemeMode, type ThemeMode } from '@/v2/theme';
 
 /**
- * Casca das páginas v2: aplica o escopo .themev2 (Estaleiro Claro / Ponte de
- * Comando) e oferece o alternador ☀/🌙 persistido em localStorage — interino
- * até o tema migrar para o AppLayout na aposentadoria das telas v1.
- * Limitação conhecida: diálogos v1 portalizados (Radix) ficam fora do escopo
- * e seguem o tema v1 até a migração global.
+ * Casca das páginas v2. O tema agora é GLOBAL (classe .themev2 no <html>,
+ * ver src/v2/theme.ts) — esta casca só cuida do layout, dos botões flutuantes
+ * (busca ⌘K e alternador ☀/🌙) e da paleta de comandos. Vários alternadores
+ * (aqui e no header do AppLayout) ficam em sincronia via THEME_EVENT.
  */
 export function V2Shell({ children, standalone = false }: { children: ReactNode; standalone?: boolean }) {
-  const [mode, setMode] = useState<Mode>(() =>
-    typeof localStorage !== 'undefined' && localStorage.getItem(STORAGE_KEY) === 'dark' ? 'dark' : 'light',
-  );
+  const [mode, setMode] = useState<ThemeMode>(getThemeMode);
 
-  const toggle = () =>
-    setMode((m) => {
-      const next: Mode = m === 'light' ? 'dark' : 'light';
-      localStorage.setItem(STORAGE_KEY, next);
-      return next;
-    });
+  useEffect(() => {
+    const onChange = (e: Event) => setMode((e as CustomEvent<ThemeMode>).detail);
+    window.addEventListener(THEME_EVENT, onChange);
+    return () => window.removeEventListener(THEME_EVENT, onChange);
+  }, []);
+
+  const toggle = () => toggleThemeMode();
 
   return (
     <div
       className={
         standalone
-          ? 'themev2 min-h-screen bg-background p-4 text-foreground transition-colors lg:p-6'
-          : 'themev2 -m-4 min-h-full bg-background p-4 text-foreground transition-colors lg:-m-6 lg:p-6'
+          ? 'min-h-screen bg-background p-4 text-foreground transition-colors lg:p-6'
+          : '-m-4 min-h-full bg-background p-4 text-foreground transition-colors lg:-m-6 lg:p-6'
       }
-      data-mode={mode}
     >
       {children}
       <div className="fixed bottom-5 left-5 z-40 flex flex-col gap-2">

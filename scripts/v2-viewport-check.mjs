@@ -73,7 +73,9 @@ for (const pg of PAGES) {
   // Primeira visita usa timeout largo: o Vite compila a página sob demanda
   // no dev server e a transformação fria pode passar de 20s.
   await page.goto(`${BASE}${pg.path}`, { waitUntil: 'networkidle', timeout: 60000 });
-  await page.waitForSelector('.themev2', { timeout: 60000 });
+  // Tema global (R1): .themev2 vive no <html>, que o Playwright não considera
+  // "visível" — esperar por presença (attached), não visibilidade.
+  await page.waitForSelector('.themev2', { timeout: 60000, state: 'attached' });
 
   for (const mode of pg.modes) {
     if (pg.themeVia === 'buttons') {
@@ -82,7 +84,7 @@ for (const pg of PAGES) {
     } else {
       await page.evaluate((m) => localStorage.setItem('mf-v2-theme', m), mode);
       await page.reload({ waitUntil: 'networkidle' });
-      await page.waitForSelector('.themev2', { timeout: 20000 });
+      await page.waitForSelector('.themev2', { timeout: 20000, state: 'attached' });
     }
     for (const width of VIEWPORTS) {
       await page.setViewportSize({ width, height: 900 });

@@ -32,6 +32,29 @@ import { Button } from '@/components/ui/button';
 import { usePushNotifications, requestPushPermission } from '@/hooks/use-push-notifications';
 import { useSuggestions } from '@/hooks/use-agenda';
 import { toast } from 'sonner';
+import { Moon, Sun } from 'lucide-react';
+import { getThemeMode, THEME_EVENT, toggleThemeMode, type ThemeMode } from '@/v2/theme';
+
+/** Alternador ☀/🌙 do header — mesmo estado global dos botões das páginas v2. */
+function ThemeToggle() {
+  const [mode, setMode] = useState<ThemeMode>(getThemeMode);
+  useEffect(() => {
+    const onChange = (e: Event) => setMode((e as CustomEvent<ThemeMode>).detail);
+    window.addEventListener(THEME_EVENT, onChange);
+    return () => window.removeEventListener(THEME_EVENT, onChange);
+  }, []);
+  return (
+    <button
+      type="button"
+      onClick={() => toggleThemeMode()}
+      aria-label={mode === 'light' ? 'Mudar para tema escuro' : 'Mudar para tema claro'}
+      title={mode === 'light' ? 'Tema escuro (Ponte de Comando)' : 'Tema claro (Estaleiro Claro)'}
+      className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+    >
+      {mode === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+    </button>
+  );
+}
 
 // ── HBR Systems brand mark (inline SVG) ──────────────────────────────────────
 function HbrMark({ size = 32 }: { size?: number }) {
@@ -460,6 +483,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           </Link>
           <div className="flex-1" />
           <div className="flex items-center gap-3">
+            <ThemeToggle />
             <DiagnosticExportButton />
             <PendingActionsBell />
             <WhatsAppBell />

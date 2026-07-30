@@ -8,7 +8,12 @@
    A estrutura é idêntica nos dois temas; só a paleta muda (decisão do portão).
 ──────────────────────────────────────────────────────────────────────────── */
 
-.themev2 {
+/* :root.themev2 = tema global no <html> (redesign em todo o ERP): a
+   especificidade (0,2,0) garante vitória sobre o :root v1 do index.css
+   independentemente da ordem de injeção dos CSS pelo Vite. O seletor .themev2
+   simples continua valendo para escopos locais (ex.: /design-preview). */
+.themev2,
+:root.themev2 {
   --background: 210 25% 98%;
   --foreground: 210 45% 16%;
 
@@ -63,7 +68,8 @@
   --chart-5: 4 62% 44%;
 }
 
-.themev2[data-mode='dark'] {
+.themev2[data-mode='dark'],
+:root.themev2[data-mode='dark'] {
   --background: 213 52% 8%;
   --foreground: 210 27% 93%;
 
