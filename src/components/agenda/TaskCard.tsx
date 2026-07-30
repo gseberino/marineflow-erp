@@ -87,9 +87,19 @@ function TaskActionButton({ task, onScheduleOs }: { task: any; onScheduleOs?: (t
     payable: { label: 'Registrar pagamento', onClick: openPayment },
     purchase_order: { label: 'Receber OC', onClick: (e) => { e.stopPropagation(); navigate('/purchase-orders'); } },
     stock_item: { label: 'Repor', onClick: (e) => { e.stopPropagation(); navigate('/inventory/smart-purchase'); } },
-    service_order: task.automation_key?.startsWith('r1:') && onScheduleOs
-      ? { label: 'Agendar OS', onClick: (e) => { e.stopPropagation(); onScheduleOs(task); } }
-      : undefined,
+    // A tarefa de compra (R16) leva direto para a OS, onde a faixa de compras tem o
+    // "Resolver" com cotar / gerar OC — em vez de largar o usuário na lista de OCs.
+    service_order: task.automation_key?.startsWith('r16:')
+      ? {
+          label: 'Resolver compra',
+          onClick: (e) => {
+            e.stopPropagation();
+            if (task.related_entity_id) navigate(`/service-orders/${task.related_entity_id}`);
+          },
+        }
+      : task.automation_key?.startsWith('r1:') && onScheduleOs
+        ? { label: 'Agendar OS', onClick: (e) => { e.stopPropagation(); onScheduleOs(task); } }
+        : undefined,
   };
   const action = actions[et];
   if (!action) return null;

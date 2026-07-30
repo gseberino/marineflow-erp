@@ -101,3 +101,97 @@ Deno.test("isResolved r1: OS agendada ou status mudado resolve", async () => {
     null,
   );
 });
+
+// R16 é a rede do aviso de compra da aprovação: se estes testes falharem, a tarefa
+// pode ficar viva para item que já chegou (ruído) ou morrer com item ainda faltando
+// (a OS para sem ninguém saber).
+Deno.test("isResolved r16: reserva e OC aberta contam; falta real mantém a tarefa", async () => {
+  const r16 = ruleById("r16")!;
+
+  // O mock distingue as tabelas porque a regra consulta quatro em sequência.
+  const mkDb = (opts: {
+    so?: unknown;
+    parts?: unknown[];
+    avail?: unknown[];
+    poItems?: unknown[];
+  }) => ({
+    from: (table: string) => {
+      if (table === "service_orders") {
+        return { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: opts.so }) }) }) };
+      }
+      if (table === "service_order_parts") {
+        return { select: () => ({ eq: async () => ({ data: opts.parts ?? [] }) }) };
+      }
+      if (table === "product_availability") {
+        return { select: () => ({ in: async () => ({ data: opts.avail ?? [] }) }) };
+      }
+      // purchase_order_items: dois .in() encadeados (produto e status da OC)
+      return {
+        select: () => ({ in: () => ({ in: async () => ({ data: opts.poItems ?? [] }) }) }),
+      };
+    },
+  });
+
+  const so = { status: "approved" };
+  const parts = [{ product_id: "p1", quantity: 6 }];
+
+  // físico cobre e nada está reservado → resolvida
+  assertEquals(
+    await r16.isResolved(
+      mkDb({ so, parts, avail: [{ id: "p1", stock_quantity: 10, reserved_quantity: 0 }] }),
+      { automation_key: "r16:so:x" },
+    ),
+    "Compra resolvida (em estoque ou já pedida)",
+  );
+
+  // físico existe mas está TODO reservado para outras OS → segue faltando
+  assertEquals(
+    await r16.isResolved(
+      mkDb({ so, parts, avail: [{ id: "p1", stock_quantity: 10, reserved_quantity: 10 }] }),
+      { automation_key: "r16:so:x" },
+    ),
+    null,
+  );
+
+  // sem estoque, mas já pedido em OC aberta → resolvida (está a caminho)
+  assertEquals(
+    await r16.isResolved(
+      mkDb({
+        so, parts,
+        avail: [{ id: "p1", stock_quantity: 0, reserved_quantity: 0 }],
+        poItems: [{ product_id: "p1", quantity: 6, received_qty: 0 }],
+      }),
+      { automation_key: "r16:so:x" },
+    ),
+    "Compra resolvida (em estoque ou já pedida)",
+  );
+
+  // OC parcialmente recebida não cobre o resto → segue faltando
+  assertEquals(
+    await r16.isResolved(
+      mkDb({
+        so, parts,
+        avail: [{ id: "p1", stock_quantity: 0, reserved_quantity: 0 }],
+        poItems: [{ product_id: "p1", quantity: 6, received_qty: 4 }],
+      }),
+      { automation_key: "r16:so:x" },
+    ),
+    null,
+  );
+
+  // OS saiu do ciclo de execução → não faz sentido comprar
+  assertEquals(
+    await r16.isResolved(mkDb({ so: { status: "cancelled" } }), { automation_key: "r16:so:x" }),
+    "OS mudou para cancelled",
+  );
+  assertEquals(
+    await r16.isResolved(mkDb({ so: undefined }), { automation_key: "r16:so:x" }),
+    "OS não existe mais",
+  );
+
+  // peças removidas da OS
+  assertEquals(
+    await r16.isResolved(mkDb({ so, parts: [] }), { automation_key: "r16:so:x" }),
+    "OS não tem mais peças lançadas",
+  );
+});

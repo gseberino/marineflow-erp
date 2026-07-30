@@ -488,7 +488,127 @@ const r15: Rule = {
   },
 };
 
-export const RULES: Rule[] = [r1, r2, r3, r4, r5, r6, r7, r8, r11, r12, r14, r15];
+// R16: OS comprometida com item faltando para executar.
+//
+// É a rede do aviso que aparece na aprovação do orçamento: quem clica em "Depois" no
+// diálogo não perde a pendência, ela volta como tarefa. Uma tarefa POR OS (não por
+// item) — cinco peças faltando é uma ida ao fornecedor, não cinco tarefas.
+//
+// A conta é a necessidade LÍQUIDA, igual à da tela (src/lib/purchase-needs.ts):
+// falta = necessário − (físico − reservado) − saldo de OC aberta. Sem descontar a
+// reserva, duas OS enxergariam a mesma peça; sem descontar a OC, a tarefa reapareceria
+// para algo que já está a caminho.
+//
+// Rascunho fica fora de propósito: orçamento não aprovado não gera compra.
+const r16: Rule = {
+  id: 'r16',
+  label: 'OS comprometida com item a comprar',
+  defaultEnabled: true,
+  async find(db) {
+    const { data: orders } = await db
+      .from('service_orders')
+      .select('id, service_order_number, status, client_id, clients(name)')
+      .in('status', ['approved', 'scheduled', 'in_progress', 'awaiting_parts'])
+      .limit(80);
+    const list = orders || [];
+    if (!list.length) return [];
+
+    const ids = list.map((o: any) => o.id);
+    const [{ data: parts }, { data: avail }, { data: poItems }] = await Promise.all([
+      db.from('service_order_parts')
+        .select('service_order_id, product_id, quantity')
+        .in('service_order_id', ids),
+      db.from('product_availability').select('id, stock_quantity, reserved_quantity'),
+      db.from('purchase_order_items')
+        .select('product_id, quantity, received_qty, purchase_orders!inner(status)')
+        .in('purchase_orders.status', ['draft', 'sent', 'partial']),
+    ]);
+
+    const availById = new Map<string, number>();
+    for (const a of avail || []) {
+      availById.set(a.id, Number(a.stock_quantity || 0) - Number(a.reserved_quantity || 0));
+    }
+    const onOrderById = new Map<string, number>();
+    for (const i of poItems || []) {
+      const pending = Math.max(0, Number(i.quantity || 0) - Number(i.received_qty || 0));
+      onOrderById.set(i.product_id, (onOrderById.get(i.product_id) || 0) + pending);
+    }
+
+    const shortageByOrder = new Map<string, number>();
+    for (const p of parts || []) {
+      const available = Math.max(0, availById.get(p.product_id) || 0);
+      const onOrder = onOrderById.get(p.product_id) || 0;
+      if (Math.max(0, Number(p.quantity || 0) - available - onOrder) > 0) {
+        shortageByOrder.set(p.service_order_id, (shortageByOrder.get(p.service_order_id) || 0) + 1);
+      }
+    }
+
+    return list
+      .filter((o: any) => shortageByOrder.has(o.id))
+      .map((o: any) => {
+        const n = shortageByOrder.get(o.id) || 0;
+        return {
+          automation_key: keyOf('r16', 'so', o.id),
+          title: `Comprar ${n} ${n === 1 ? 'item' : 'itens'} da OS ${o.service_order_number}` +
+            (o.clients?.name ? ` — ${o.clients.name}` : ''),
+          // Aguardando peças é o caso em que a OS já está parada esperando.
+          priority: (o.status === 'awaiting_parts' ? 'urgent' : 'high') as 'urgent' | 'high',
+          assignee: 'admin' as const,
+          due_at: dueAt(todayISO()),
+          related_entity_type: 'service_order',
+          related_entity_id: o.id,
+          client_id: o.client_id,
+          notes: 'Abra a OS e use "Resolver" na faixa de compras: dá para cotar com fornecedores ou gerar a ordem de compra.',
+        };
+      });
+  },
+  async isResolved(db, task) {
+    const id = entityIdFromKey(task.automation_key);
+    const { data: so } = await db.from('service_orders').select('status').eq('id', id).maybeSingle();
+    if (!so) return 'OS não existe mais';
+    if (['completed', 'invoiced', 'cancelled', 'draft'].includes(so.status)) {
+      return `OS mudou para ${so.status}`;
+    }
+
+    const { data: parts } = await db
+      .from('service_order_parts')
+      .select('product_id, quantity')
+      .eq('service_order_id', id);
+    if (!parts?.length) return 'OS não tem mais peças lançadas';
+
+    const productIds = parts.map((p: any) => p.product_id);
+    const [{ data: avail }, { data: poItems }] = await Promise.all([
+      db.from('product_availability')
+        .select('id, stock_quantity, reserved_quantity')
+        .in('id', productIds),
+      db.from('purchase_order_items')
+        .select('product_id, quantity, received_qty, purchase_orders!inner(status)')
+        .in('product_id', productIds)
+        .in('purchase_orders.status', ['draft', 'sent', 'partial']),
+    ]);
+
+    const availById = new Map<string, number>();
+    for (const a of avail || []) {
+      availById.set(a.id, Number(a.stock_quantity || 0) - Number(a.reserved_quantity || 0));
+    }
+    const onOrderById = new Map<string, number>();
+    for (const i of poItems || []) {
+      const pending = Math.max(0, Number(i.quantity || 0) - Number(i.received_qty || 0));
+      onOrderById.set(i.product_id, (onOrderById.get(i.product_id) || 0) + pending);
+    }
+
+    const stillShort = parts.some((p: any) => {
+      const available = Math.max(0, availById.get(p.product_id) || 0);
+      const onOrder = onOrderById.get(p.product_id) || 0;
+      return Math.max(0, Number(p.quantity || 0) - available - onOrder) > 0;
+    });
+
+    // Gerar a OC já resolve: o item passa a contar como "a caminho".
+    return stillShort ? null : 'Compra resolvida (em estoque ou já pedida)';
+  },
+};
+
+export const RULES: Rule[] = [r1, r2, r3, r4, r5, r6, r7, r8, r11, r12, r14, r15, r16];
 
 export function ruleById(id: string): Rule | undefined {
   return RULES.find((r) => r.id === id);

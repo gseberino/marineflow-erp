@@ -1017,7 +1017,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
 
       // Stock check: only for actual OS (non-draft). During the quote phase
       // the OS doesn't exist yet, so creating a PO at this point makes no sense —
-      // the PO flow is triggered later at the moment of conversion (StockConfirmationDialog).
+      // the PO flow is triggered later at the moment of conversion (PurchaseNeedsDialog).
       if (!isNew && orderId && draft.quantity > 0 && orderData?.status !== 'draft') {
         const { data: prodData } = await (supabase as any)
           .from('products')

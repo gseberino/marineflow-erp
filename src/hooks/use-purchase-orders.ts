@@ -297,6 +297,107 @@ export function useCreatePOFromOS() {
   });
 }
 
+// ── Create POs from a shortage list, grouped by supplier ──────────────────────
+
+export interface ShortageForPO {
+  productId: string | null;
+  description: string;
+  quantity: number;
+  unitCost: number;
+}
+
+/**
+ * Gera as ordens de compra dos itens em falta de uma OS, UMA POR FORNECEDOR.
+ *
+ * Substitui o laço que criava uma OC por item (o fluxo antigo do diálogo de estoque):
+ * cinco peças do mesmo fornecedor viravam cinco pedidos, o que ninguém faz na prática.
+ *
+ * O fornecedor preferencial vem de `products.supplier_id`. O fluxo antigo lia
+ * `product_suppliers`, tabela que está VAZIA em produção — por isso toda OC nasceria
+ * sem fornecedor. Item sem fornecedor conhecido cai num pedido "a definir", que o
+ * usuário completa na tela de ordens de compra.
+ */
+export function useCreatePOsFromShortages() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (params: {
+      serviceOrderId: string;
+      items: ShortageForPO[];
+      expectedDate?: string | null;
+    }) => {
+      if (!params.items.length) throw new Error('Nenhum item em falta para comprar.');
+
+      const productIds = params.items.map(i => i.productId).filter((id): id is string => !!id);
+      const supplierByProduct = new Map<string, string | null>();
+      if (productIds.length) {
+        const { data } = await supabase
+          .from('products')
+          .select('id, supplier_id')
+          .in('id', productIds);
+        for (const p of (data ?? []) as any[]) supplierByProduct.set(p.id, p.supplier_id ?? null);
+      }
+
+      // Chave 'none' agrupa tudo que não tem fornecedor conhecido num pedido só.
+      const groups = new Map<string, ShortageForPO[]>();
+      for (const item of params.items) {
+        const supplierId = (item.productId ? supplierByProduct.get(item.productId) : null) ?? 'none';
+        const list = groups.get(supplierId) ?? [];
+        list.push(item);
+        groups.set(supplierId, list);
+      }
+
+      const created: { id: string; po_number: string }[] = [];
+      for (const [supplierKey, items] of groups) {
+        const poNumber = await generatePONumber();
+        const { data: po, error } = await supabase
+          .from('purchase_orders')
+          .insert({
+            po_number: poNumber,
+            supplier_id: supplierKey === 'none' ? null : supplierKey,
+            service_order_id: params.serviceOrderId,
+            expected_date: params.expectedDate ?? null,
+            status: 'draft',
+          } as any)
+          .select('id, po_number')
+          .single();
+        if (error) throw error;
+
+        const rows = items.map(i => ({
+          purchase_order_id: (po as any).id,
+          product_id: i.productId,
+          description: i.description,
+          quantity: i.quantity,
+          unit_cost: i.unitCost,
+        }));
+        const { error: itemsErr } = await supabase.from('purchase_order_items').insert(rows as any);
+        if (itemsErr) throw itemsErr;
+        created.push(po as any);
+      }
+
+      // A OS passa a esperar peça — só avança de estados em que isso faz sentido.
+      await supabase
+        .from('service_orders')
+        .update({ status: 'awaiting_parts' })
+        .eq('id', params.serviceOrderId)
+        .in('status', ['open', 'in_progress', 'approved', 'scheduled']);
+
+      return created;
+    },
+    onSuccess: (created) => {
+      qc.invalidateQueries({ queryKey: ['purchase-orders'] });
+      qc.invalidateQueries({ queryKey: ['service-orders'] });
+      qc.invalidateQueries({ queryKey: ['purchase-needs'] });
+      const nums = created.map(p => p.po_number).join(', ');
+      toast.success(
+        created.length > 1
+          ? `${created.length} ordens de compra criadas (${nums}). OS movida para "Aguardando Peças".`
+          : `Ordem de compra ${nums} criada. OS movida para "Aguardando Peças".`,
+      );
+    },
+    onError: (e: any) => toast.error(e.message || 'Erro ao gerar as ordens de compra'),
+  });
+}
+
 // ── Query POs linked to a specific service order ───────────────────────────────
 
 export function useSOLinkedPOs(serviceOrderId: string | undefined) {

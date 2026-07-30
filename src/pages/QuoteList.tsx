@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { PageHeader } from '@/components/PageHeader';
 import { QuoteStatusQuickChange } from '@/components/QuoteStatusQuickChange';
-import { StockConfirmationDialog } from '@/components/StockConfirmationDialog';
+import { PurchaseNeedsDialog } from '@/components/purchasing/PurchaseNeedsDialog';
 import { useI18n } from '@/i18n';
 import { useServiceOrders, useDuplicateServiceOrder, useUpdateServiceOrderStatus } from '@/hooks/use-service-orders';
 import { priorityConfig } from '@/lib/constants';
@@ -529,7 +529,7 @@ export default function QuoteList() {
         target={whatsAppTarget}
       />
       {stockConfirm && (
-        <StockConfirmationDialog
+        <PurchaseNeedsDialog
           open={!!stockConfirm}
           onOpenChange={v => { if (!v) setStockConfirm(null); }}
           serviceOrderId={stockConfirm.id}

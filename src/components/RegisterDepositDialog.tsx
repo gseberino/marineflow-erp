@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Loader2, DollarSign, Info, Percent, Tag, Hash, Paperclip, X, CalendarClock } from 'lucide-react';
-import { StockConfirmationDialog } from '@/components/StockConfirmationDialog';
+import { PurchaseNeedsDialog } from '@/components/purchasing/PurchaseNeedsDialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -346,7 +346,7 @@ export function RegisterDepositDialog({
   return (
     <>
     {stockConfirmOpen && (
-      <StockConfirmationDialog
+      <PurchaseNeedsDialog
         open={stockConfirmOpen}
         onOpenChange={v => {
           setStockConfirmOpen(v);

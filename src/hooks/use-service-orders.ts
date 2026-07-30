@@ -172,6 +172,10 @@ export function useUpdateServiceOrderStatus() {
       }
 
       const updates: Record<string, any> = { status };
+      // Vira true na PRIMEIRA saída de rascunho — é o instante em que o orçamento
+      // passa a ser trabalho comprometido e faz sentido perguntar sobre compra.
+      // Quem chama usa isso para abrir o aviso de necessidade de compra.
+      let justConverted = false;
 
       // On first transition out of draft: mark conversion + swap prefix ORÇ→OS
       if (status !== 'draft') {
@@ -181,6 +185,7 @@ export function useUpdateServiceOrderStatus() {
           .eq('id', id)
           .single();
         if (current?.status === 'draft' && !current?.converted_to_os_at) {
+          justConverted = true;
           updates.converted_to_os_at = new Date().toISOString();
           // Preserva o grand_total do orçamento aprovado para comparação futura (valor orçado vs realizado)
           if (!current?.original_quote_amount && current?.grand_total) {
@@ -240,12 +245,15 @@ export function useUpdateServiceOrderStatus() {
         new_value: { status },
       });
 
-      return data;
+      return { ...(data as any), justConverted } as any;
     },
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ['service-orders'] });
       qc.invalidateQueries({ queryKey: ['service-orders', vars.id] });
       qc.invalidateQueries({ queryKey: ['receivables'] });
+      // A reserva de estoque muda com o status (modelo v2), então o que "falta comprar"
+      // muda junto — invalidar aqui evita a tela mostrar necessidade velha.
+      qc.invalidateQueries({ queryKey: ['purchase-needs'] });
     },
   });
 }
@@ -828,7 +836,7 @@ export function useDuplicateServiceOrder() {
       }
 
       // 4. Copy parts — NOTE: never deduct stock on a duplicate.
-      // Stock is only affected when an OS is actually executed (via StockConfirmationDialog).
+      // Stock is only affected when an OS is actually executed (via PurchaseNeedsDialog).
       if (source.service_order_parts?.length > 0) {
         const parts = source.service_order_parts.map((p: any) => ({
           service_order_id: newId,

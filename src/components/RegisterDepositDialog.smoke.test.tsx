@@ -26,7 +26,7 @@ vi.mock('@/hooks/use-payment-conditions', () => ({
   }),
 }));
 // Evita puxar a árvore do passo de estoque (não é renderizado com o diálogo fechado, mas o import existe).
-vi.mock('@/components/StockConfirmationDialog', () => ({ StockConfirmationDialog: () => null }));
+vi.mock('@/components/purchasing/PurchaseNeedsDialog', () => ({ PurchaseNeedsDialog: () => null }));
 
 function renderDialog() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });

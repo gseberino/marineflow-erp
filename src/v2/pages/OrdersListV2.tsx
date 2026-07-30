@@ -29,7 +29,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { MultiFilterBar } from '@/components/MultiFilterBar';
 import { StatusQuickChange } from '@/components/StatusQuickChange';
 import { QuoteStatusQuickChange } from '@/components/QuoteStatusQuickChange';
-import { StockConfirmationDialog } from '@/components/StockConfirmationDialog';
+import { PurchaseNeedsDialog } from '@/components/purchasing/PurchaseNeedsDialog';
 import { PDFOptionsDialog, type PDFAction } from '@/components/PDFOptionsDialog';
 import { WhatsAppSendHistoryDialog } from '@/components/WhatsAppSendHistoryDialog';
 import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/SendViaWhatsAppDialog';
@@ -810,7 +810,7 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
         target={whatsAppTarget}
       />
       {stockConfirm && (
-        <StockConfirmationDialog
+        <PurchaseNeedsDialog
           open={!!stockConfirm}
           onOpenChange={(v) => { if (!v) setStockConfirm(null); }}
           serviceOrderId={stockConfirm.id}
