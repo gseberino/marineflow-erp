@@ -570,8 +570,11 @@ const r16: Rule = {
         const n = shortageByOrder.get(o.id) || 0;
         return {
           automation_key: keyOf('r16', 'so', o.id),
-          title: `Comprar ${n} ${n === 1 ? 'item' : 'itens'} da OS ${o.service_order_number}` +
-            (o.clients?.name ? ` — ${o.clients.name}` : ''),
+          // Sem o prefixo "da OS": existem registros comprometidos cujo número ainda é
+          // ORÇ- (o status andou por fora da conversão), e "da OS ORÇ-00070" fica errado.
+          // O próprio número já diz o que é.
+          title: `Comprar ${n} ${n === 1 ? 'item' : 'itens'} — ${o.service_order_number}` +
+            (o.clients?.name ? ` (${o.clients.name})` : ''),
           // Aguardando peças é o caso em que a OS já está parada esperando.
           priority: (o.status === 'awaiting_parts' ? 'urgent' : 'high') as 'urgent' | 'high',
           assignee: 'admin' as const,
