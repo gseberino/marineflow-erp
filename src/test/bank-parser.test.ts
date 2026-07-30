@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   parseOFX, parseCSV, parseFile, dedupeByRef, decodeStatementFile, detectFileSource,
 } from '@/lib/bank-parser';
+import { nomeNoHistorico } from '../../supabase/functions/_shared/banking/pluggy';
 
 const ofxSGML = `
 OFXHEADER:100
@@ -169,5 +170,36 @@ describe('detectFileSource / parseFile', () => {
     const { transactions, source_type } = parseFile(ofxSGML + ofxSGML, 'extrato.ofx');
     expect(transactions).toHaveLength(2);
     expect(source_type).toBe('bank');
+  });
+});
+
+describe('nome da contraparte a partir do histórico', () => {
+  // Existe porque o banco manda o CNPJ e deixa o nome vazio em parte das transações — o
+  // nome costuma estar no próprio histórico, mas só quando ele não é a narração da
+  // operação. Confundir os dois encheria o cadastro de "TRANSF ENVIADA PIX".
+  it('aceita nome de pessoa e razão social', () => {
+    expect(nomeNoHistorico('ACRISIO LOPES CANCADO FILHO')).toBe('ACRISIO LOPES CANCADO FILHO');
+    expect(nomeNoHistorico('KAMELL COMERCIO GLOBAL LTDA')).toBe('KAMELL COMERCIO GLOBAL LTDA');
+  });
+
+  it('recusa a narração da operação', () => {
+    for (const d of [
+      'TRANSF ENVIADA PIX', 'PGTO FATURA CARTAO C6', 'CDB C6 LIM.GARANT.',
+      'TARIFA MENSAL', 'IOF LIMITE CONTA', 'TRIBUTOS FEDERAIS DARF NUMERADO',
+      'Vendas', 'Sem descrição', 'PAGAMENTO RECEBIDO',
+    ]) {
+      expect(nomeNoHistorico(d)).toBeNull();
+    }
+  });
+
+  it('tira o rabicho de terminal de cartão', () => {
+    expect(nomeNoHistorico('PREMEL - ITAJAI        ITAJAI        BRA')).toBe('PREMEL - ITAJAI');
+    expect(nomeNoHistorico('LOJAS TAMOYO LTDA      ITAJAI        BRA')).toBe('LOJAS TAMOYO LTDA');
+  });
+
+  it('recusa vazio e ruído curto', () => {
+    expect(nomeNoHistorico(null)).toBeNull();
+    expect(nomeNoHistorico('  ')).toBeNull();
+    expect(nomeNoHistorico('AB')).toBeNull();
   });
 });

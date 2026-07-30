@@ -180,6 +180,42 @@ function somenteDigitos(v: string | null | undefined): string | null {
  *    mesma linha de entrar de novo a cada sincronização, já que a janela de busca sempre
  *    se sobrepõe ao que já foi importado.
  */
+/**
+ * Termos que descrevem a OPERAÇÃO, não quem está do outro lado.
+ *
+ * Saíram do extrato real. Um histórico que começa por qualquer um deles é o banco narrando
+ * o que fez ("transferência enviada", "pagamento de fatura"), e tomar isso por nome de
+ * fornecedor encheria o cadastro de "TRANSF ENVIADA PIX".
+ */
+const HISTORICO_GENERICO =
+  /^(TRANSF|TRANSFER|PIX\b|PGTO|PAGAMENTO|FATURA|SALDO|CDB|APLICACAO|RESGATE|TARIFA|IOF|JUROS|MULTA|DARF|TRIBUTO|DAS\b|GPS\b|FGTS|VENDAS|CREDITO|DEBITO|ESTORNO|DEVOLUCAO|COMPRA|SEM DESCRICAO|PAGAMENTO RECEBIDO|VALOR ADICIONADO)/i;
+
+/**
+ * Usa o histórico como nome da contraparte quando o banco não informou o nome.
+ *
+ * POR QUE ISTO EXISTE: em 162 movimentações o banco mandou o CNPJ da contraparte e deixou
+ * o campo do nome vazio — nome e documento saem do MESMO objeto no pacote do provedor, e
+ * como nunca aparece nome sem documento, dá para afirmar que o campo veio vazio da origem,
+ * não que a leitura o perdeu. Em boa parte desses casos o nome está no próprio histórico
+ * ("ACRISIO LOPES CANCADO FILHO"), e o mesmo vale para compra em estabelecimento, onde não
+ * existe contraparte de Pix mas existe o nome da loja ("PREMEL - ITAJAI").
+ *
+ * Devolve null quando o histórico é a narração da operação: preencher com "TRANSF ENVIADA
+ * PIX" seria trocar um campo vazio honesto por um dado falso, e o vazio pelo menos avisa
+ * que ninguém sabe quem é.
+ */
+export function nomeNoHistorico(descricao?: string | null): string | null {
+  const limpo = (descricao || "").trim();
+  if (limpo.length < 4) return null;
+  // Sem tirar o acento, "Sem descrição" escapa da lista — e esse texto é justamente o
+  // fallback que este arquivo escreve quando o banco não manda histórico nenhum, então
+  // ele voltaria como se fosse o nome de um fornecedor.
+  const semAcento = limpo.normalize("NFD").replace(/[̀-ͯ]/g, "");
+  if (HISTORICO_GENERICO.test(semAcento)) return null;
+  // Sufixos de terminal de cartão ("PREMEL - ITAJAI  ITAJAI  BRA") não são parte do nome.
+  return limpo.replace(/\s{2,}[A-Z\s]{2,}\s+BRA\s*$/i, "").trim().slice(0, 120) || null;
+}
+
 export function mapTransaction(
   tx: PluggyTransaction,
   sourceType: "bank" | "credit_card" = "bank",
@@ -200,7 +236,7 @@ export function mapTransaction(
     // Só grava como EndToEndId o que tem cara de EndToEndId: outros métodos usam o mesmo
     // campo de referência para números que não identificam nada no SPI.
     pix_end_to_end_id: ehPix && referencia && PIX_E2E.test(referencia) ? referencia : null,
-    counterparty_name: contraparte?.name ?? null,
+    counterparty_name: contraparte?.name ?? nomeNoHistorico(tx.description || tx.descriptionRaw),
     counterparty_document: somenteDigitos(contraparte?.documentNumber?.value),
     balance_after: tx.balance ?? null,
     provider: "pluggy",
