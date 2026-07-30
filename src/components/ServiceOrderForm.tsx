@@ -1019,9 +1019,14 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       // the OS doesn't exist yet, so creating a PO at this point makes no sense —
       // the PO flow is triggered later at the moment of conversion (PurchaseNeedsDialog).
       if (!isNew && orderId && draft.quantity > 0 && orderData?.status !== 'draft') {
+        // O embed é LEFT JOIN (sem `!inner`) de propósito: product_suppliers está vazia
+        // em produção, e um `!inner` fazia o INNER JOIN eliminar o próprio produto do
+        // resultado. prodData vinha null SEMPRE, available caía para 0 e o alerta de
+        // falta disparava mesmo com o estoque cheio. Um embed só, trazendo lead_time_days
+        // junto — os dois embeds da mesma relação também eram redundantes.
         const { data: prodData } = await (supabase as any)
           .from('products')
-          .select('stock_quantity, reserved_quantity, minimum_stock, product_suppliers(supplier_id, suppliers(id, name)), product_suppliers!inner(lead_time_days)')
+          .select('stock_quantity, reserved_quantity, minimum_stock, product_suppliers(supplier_id, lead_time_days, suppliers(id, name))')
           .eq('id', productId)
           .maybeSingle();
         // No modelo v2, disponível = físico − reservado (o físico não é pré-baixado por orçamentos).
