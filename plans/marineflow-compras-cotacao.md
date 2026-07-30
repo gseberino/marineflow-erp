@@ -30,10 +30,20 @@
 >    `'minimum_stock'` em vez da coluna.
 > 4. Entrada por XML listava todas as OCs sem sugerir a do fornecedor da nota.
 >
-> **Não feito de propósito** (precisa de migration/autorização): recalibrar a RLS
-> `USING(true)` das 5 tabelas de compras; dropar `product_suppliers`; histórico de preço
-> por fornecedor na tela; frete/desconto **persistidos** por fornecedor (hoje são estado
-> da sessão de comparação, o que não exigiu migration nenhuma).
+> **Feito depois, na mesma sessão:** RLS das 5 tabelas recalibrada para
+> `is_admin_or_financial` (uma política por comando, `TO authenticated`, revoke de anon —
+> aplicada e provada com `set role anon`); histórico de preço por fornecedor na tela
+> (`src/hooks/use-price-history.ts`, a partir das notas de entrada); e mais dois bugs:
+> a R17 quebrada pelo CHECK e o alerta de estoque que disparava sempre por causa de um
+> `!inner` sobre tabela vazia.
+>
+> **Correção de uma recomendação anterior:** `product_suppliers` **NÃO deve ser dropada**.
+> Está vazia, mas tem hook CRUD próprio e 4 pontos de uso (fornecedores v1/v2, form da OS).
+> É uma feature nunca usada, não uma tabela morta.
+>
+> **Ainda em aberto:** frete/desconto por fornecedor são estado da sessão de comparação
+> (persistir exigiria migration); rodar `scripts/v2-viewport-check.mjs` nas rotas novas
+> (exige as credenciais demo).
 
 
 > Plano elaborado em 29/07/2026 a pedido do dono: **(a)** dar uma tela à cotação, para
