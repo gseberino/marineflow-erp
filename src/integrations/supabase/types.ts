@@ -6137,6 +6137,7 @@ export type Database = {
           quantity: number
           serial_number: string | null
           service_order_id: string
+          service_order_service_id: string | null
           source: string
           unit_cost_snapshot: number
           unit_sale_snapshot: number
@@ -6158,6 +6159,7 @@ export type Database = {
           quantity: number
           serial_number?: string | null
           service_order_id: string
+          service_order_service_id?: string | null
           source?: string
           unit_cost_snapshot: number
           unit_sale_snapshot: number
@@ -6179,6 +6181,7 @@ export type Database = {
           quantity?: number
           serial_number?: string | null
           service_order_id?: string
+          service_order_service_id?: string | null
           source?: string
           unit_cost_snapshot?: number
           unit_sale_snapshot?: number
@@ -6243,6 +6246,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
+          },
+          {
+            foreignKeyName: "service_order_parts_service_order_service_id_fkey"
+            columns: ["service_order_service_id"]
+            isOneToOne: false
+            referencedRelation: "service_order_services"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -6525,6 +6535,8 @@ export type Database = {
           approved_by: string | null
           assigned_user_id: string | null
           block: string | null
+          block_key: string | null
+          block_note: string | null
           blocked_note: string | null
           blocked_reason_code: string | null
           completed_at: string | null
@@ -6559,6 +6571,8 @@ export type Database = {
           approved_by?: string | null
           assigned_user_id?: string | null
           block?: string | null
+          block_key?: string | null
+          block_note?: string | null
           blocked_note?: string | null
           blocked_reason_code?: string | null
           completed_at?: string | null
@@ -6593,6 +6607,8 @@ export type Database = {
           approved_by?: string | null
           assigned_user_id?: string | null
           block?: string | null
+          block_key?: string | null
+          block_note?: string | null
           blocked_note?: string | null
           blocked_reason_code?: string | null
           completed_at?: string | null
@@ -7302,6 +7318,8 @@ export type Database = {
           active: boolean
           affects: string[] | null
           answer_type: string
+          applies_to_system: string | null
+          applies_to_verb: string | null
           approved_at: string | null
           approved_by: string | null
           ask_remotely: boolean
@@ -7315,7 +7333,7 @@ export type Database = {
           price_impact: string
           question: string
           seq: number
-          service_id: string
+          service_id: string | null
           updated_at: string
           version: number
         }
@@ -7323,6 +7341,8 @@ export type Database = {
           active?: boolean
           affects?: string[] | null
           answer_type?: string
+          applies_to_system?: string | null
+          applies_to_verb?: string | null
           approved_at?: string | null
           approved_by?: string | null
           ask_remotely?: boolean
@@ -7336,7 +7356,7 @@ export type Database = {
           price_impact?: string
           question: string
           seq: number
-          service_id: string
+          service_id?: string | null
           updated_at?: string
           version?: number
         }
@@ -7344,6 +7364,8 @@ export type Database = {
           active?: boolean
           affects?: string[] | null
           answer_type?: string
+          applies_to_system?: string | null
+          applies_to_verb?: string | null
           approved_at?: string | null
           approved_by?: string | null
           ask_remotely?: boolean
@@ -7357,7 +7379,7 @@ export type Database = {
           price_impact?: string
           question?: string
           seq?: number
-          service_id?: string
+          service_id?: string | null
           updated_at?: string
           version?: number
         }
@@ -8914,6 +8936,20 @@ export type Database = {
           title: string
         }[]
       }
+      compose_survey_for_service: {
+        Args: { p_mode?: string; p_service_id: string }
+        Returns: {
+          answer_type: string
+          ask_remotely: boolean
+          help_text: string
+          id: string
+          options: Json
+          origem: string
+          price_impact: string
+          question: string
+          seq: number
+        }[]
+      }
       compute_next_run: {
         Args: {
           _day_of_month: number
@@ -8940,6 +8976,7 @@ export type Database = {
         Args: { p_min_casos?: number; p_service_id: string }
         Returns: Json
       }
+      frase_legivel: { Args: { p_texto: string }; Returns: string }
       generate_service_order_steps: {
         Args: { p_service_order_id: string }
         Returns: number
@@ -9156,6 +9193,7 @@ export type Database = {
           sku: string
         }[]
       }
+      service_system_label: { Args: { p_system: string }; Returns: string }
       set_fiscal_next_number: {
         Args: {
           p_document_type: string

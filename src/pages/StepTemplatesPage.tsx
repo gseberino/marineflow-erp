@@ -14,6 +14,7 @@ import {
   pendingApproval, groupTemplatesByService, type StepTemplate,
 } from '@/hooks/use-step-templates';
 import { StepBlocksSection } from '@/components/StepBlocksSection';
+import { SurveyQuestionsSection } from '@/components/SurveyQuestionsSection';
 import { formatMinutes } from '@/hooks/use-service-steps';
 
 /**
@@ -87,13 +88,16 @@ export default function StepTemplatesPage() {
   return (
     <div className="p-4 lg:p-6 space-y-4">
       <div>
-        <h1 className="text-lg font-semibold">Roteiros padrão</h1>
+        <h1 className="text-lg font-semibold">Moldes do catálogo</h1>
         <p className="text-sm text-muted-foreground">
-          O passo a passo de cada serviço do catálogo. É daqui que o roteiro de cada OS nasce.
+          O que se pergunta antes de orçar e o passo a passo de quem executa. É daqui que
+          nascem o levantamento e o roteiro de cada OS — nada entra em uso sem a sua assinatura.
         </p>
       </div>
 
       <StepBlocksSection />
+
+      <SurveyQuestionsSection />
 
       <div className="pt-2">
         <h2 className="text-sm font-semibold">Roteiros escritos por serviço</h2>

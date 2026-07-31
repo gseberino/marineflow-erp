@@ -24,6 +24,10 @@ export interface ServiceOrderStep {
   template_id: string | null;
   seq: number;
   block: string | null;
+  /** Chave estável do bloco: 'abertura:gas', 'linha:<uuid>', 'fechamento:gas'. */
+  block_key: string | null;
+  /** Escopo do bloco compartilhado: a quais serviços da OS ele se aplica. */
+  block_note: string | null;
   title: string;
   detail: string | null;
   kind: StepKind;
@@ -59,7 +63,8 @@ export interface StopReason {
 }
 
 const STEP_SELECT = `
-  id, service_order_id, service_order_service_id, template_id, seq, block, title, detail,
+  id, service_order_id, service_order_service_id, template_id, seq, block, block_key, block_note,
+  title, detail,
   kind, mode, standard_minutes, is_killer, requires_photo, requires_measure, measure_unit,
   measure_value, status, na_reason, blocked_reason_code, blocked_note, assigned_user_id,
   started_at, completed_at, actual_minutes, origin, notes,
@@ -398,15 +403,47 @@ export function summarizeRoute(steps: ServiceOrderStep[]): RouteSummary {
 }
 
 /** Agrupa por bloco preservando a ordem de seq. */
-export function groupStepsByBlock(steps: ServiceOrderStep[]): Array<{ block: string; steps: ServiceOrderStep[] }> {
-  const groups: Array<{ block: string; steps: ServiceOrderStep[] }> = [];
+export function groupStepsByBlock(
+  steps: ServiceOrderStep[],
+): Array<{ block: string; blockKey: string | null; note: string | null; steps: ServiceOrderStep[] }> {
+  const groups: Array<{ block: string; blockKey: string | null; note: string | null; steps: ServiceOrderStep[] }> = [];
   for (const step of steps) {
     const label = step.block || 'Roteiro';
     const last = groups[groups.length - 1];
     if (last && last.block === label) last.steps.push(step);
-    else groups.push({ block: label, steps: [step] });
+    else groups.push({ block: label, blockKey: step.block_key ?? null, note: step.block_note ?? null, steps: [step] });
   }
   return groups;
+}
+
+/**
+ * Material da OS, para a separação antes de sair e para a lista por etapa.
+ *
+ * `service_order_service_id` nulo = material da OS inteira (é o caso de todo
+ * lançamento manual). Com dono, aparece dentro do bloco daquele serviço.
+ */
+export interface RouteMaterial {
+  id: string;
+  quantity: number;
+  notes: string | null;
+  service_order_service_id: string | null;
+  products?: { name: string; sku: string | null; unit: string | null } | null;
+}
+
+export function useRouteMaterials(serviceOrderId: string | undefined) {
+  return useQuery({
+    queryKey: ['route-materials', serviceOrderId],
+    enabled: !!serviceOrderId,
+    queryFn: async (): Promise<RouteMaterial[]> => {
+      const { data, error } = await supabase
+        .from('service_order_parts')
+        .select('id, quantity, notes, service_order_service_id, products(name, sku, unit)')
+        .eq('service_order_id', serviceOrderId!)
+        .order('created_at');
+      if (error) throw error;
+      return (data || []) as unknown as RouteMaterial[];
+    },
+  });
 }
 
 /** O próximo passo a executar: em andamento primeiro, senão o primeiro pendente. */
