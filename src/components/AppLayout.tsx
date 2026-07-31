@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Users, Ship, Anchor, Package, ClipboardList,
   DollarSign, BarChart3, Settings, ChevronLeft, ChevronRight, Menu, TrendingUp,
   Warehouse, Building2, Wrench, History, LogOut, CalendarDays, MessageCircle, CreditCard,
-  Database, ChevronDown, Rocket, ShoppingCart, FileDown, Target, CheckCircle2, Bell, CalendarClock, Truck, Camera, FileText, Bot, Boxes, LayoutGrid,
+  Database, ChevronDown, Rocket, ShoppingCart, FileDown, Target, CheckCircle2, Bell, CalendarClock, Truck, Camera, FileText, Bot, Boxes, LayoutGrid, ListChecks,
   Sparkles, ArrowLeftRight, TrendingDown
 } from 'lucide-react';
 import {
@@ -168,6 +168,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
         { label: 'Orçamentos', icon: FileText, path: '/v2/quotes' },
         { label: 'Agenda', icon: CalendarDays, path: '/agenda' },
         { label: 'Quadro do Dia', icon: LayoutGrid, path: '/day-board', roles: ['admin', 'financial', 'technician'] },
+        { label: 'Roteiros Padrão', icon: ListChecks, path: '/step-templates', roles: ['admin', 'financial', 'technician'] },
         { label: 'Motor de Vendas', icon: Rocket, path: '/v2/prospecting', roles: ['admin'] },
         { label: 'Cobranças', icon: CreditCard, path: '/v2/collections', roles: ['admin', 'financial'] },
       ],

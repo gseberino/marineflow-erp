@@ -24,6 +24,7 @@ const ProductList = lazy(() => import("./pages/ProductList"));
 const InventoryPage = lazy(() => import("./pages/InventoryPage"));
 const AgendaPage = lazy(() => import("./pages/AgendaPage"));
 const DayBoardPage = lazy(() => import("./pages/DayBoardPage"));
+const StepTemplatesPage = lazy(() => import("./pages/StepTemplatesPage"));
 const FinancialPage = lazy(() => import("./pages/FinancialPage"));
 const ReportsPage = lazy(() => import("./pages/ReportsPage"));
 const CollectionsPage = lazy(() => import("./pages/CollectionsPage"));
@@ -234,6 +235,7 @@ const App = () => (
                         <Route path="/v2/purchasing/quotes/:id" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><QuoteRequestDetailPage /></ProtectedRoute>} />
                         <Route path="/agenda" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><AgendaPage /></ProtectedRoute>} />
                         <Route path="/day-board" element={<ProtectedRoute roles={['admin','financial','technician']} groupId="operacional"><DayBoardPage /></ProtectedRoute>} />
+                        <Route path="/step-templates" element={<ProtectedRoute roles={['admin','financial','technician']} groupId="operacional"><StepTemplatesPage /></ProtectedRoute>} />
                         {/* Financeiro migrado para a v2 em 30/07/2026. Links antigos,
                             favoritos e telas que apontam para cá continuam funcionando —
                             caem na versão nova. `?legacy=1` ainda abre a antiga, que é a
