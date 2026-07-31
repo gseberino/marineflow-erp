@@ -1141,6 +1141,13 @@ export type Database = {
             foreignKeyName: "ai_operator_drafts_converted_service_order_id_fkey"
             columns: ["converted_service_order_id"]
             isOneToOne: false
+            referencedRelation: "v_service_order_margin"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_operator_drafts_converted_service_order_id_fkey"
+            columns: ["converted_service_order_id"]
+            isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
           },
@@ -1163,6 +1170,13 @@ export type Database = {
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_operator_drafts_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_margin"
             referencedColumns: ["id"]
           },
           {
@@ -1544,6 +1558,13 @@ export type Database = {
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_operator_sessions_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_margin"
             referencedColumns: ["id"]
           },
           {
@@ -2125,6 +2146,13 @@ export type Database = {
             foreignKeyName: "bank_charges_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "v_service_order_margin"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bank_charges_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
           },
@@ -2272,6 +2300,13 @@ export type Database = {
             columns: ["reconciled_service_order_id"]
             isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bank_transactions_reconciled_service_order_id_fkey"
+            columns: ["reconciled_service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_margin"
             referencedColumns: ["id"]
           },
           {
@@ -2626,6 +2661,13 @@ export type Database = {
             foreignKeyName: "collections_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "v_service_order_margin"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "collections_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
           },
@@ -2691,6 +2733,13 @@ export type Database = {
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "commissions_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_margin"
             referencedColumns: ["id"]
           },
           {
@@ -2920,6 +2969,13 @@ export type Database = {
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "entity_open_loops_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_margin"
             referencedColumns: ["id"]
           },
           {
@@ -3348,6 +3404,13 @@ export type Database = {
             columns: ["converted_service_order_id"]
             isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "external_quotes_converted_service_order_id_fkey"
+            columns: ["converted_service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_margin"
             referencedColumns: ["id"]
           },
           {
@@ -4116,6 +4179,13 @@ export type Database = {
             foreignKeyName: "invoices_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "v_service_order_margin"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoices_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
           },
@@ -4460,6 +4530,13 @@ export type Database = {
             columns: ["linked_service_order_id"]
             isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payables_linked_service_order_id_fkey"
+            columns: ["linked_service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_margin"
             referencedColumns: ["id"]
           },
           {
@@ -5299,6 +5376,13 @@ export type Database = {
             foreignKeyName: "purchase_orders_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "v_service_order_margin"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_orders_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
           },
@@ -5485,6 +5569,13 @@ export type Database = {
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_requests_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_margin"
             referencedColumns: ["id"]
           },
           {
@@ -5696,6 +5787,13 @@ export type Database = {
             foreignKeyName: "receivables_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "v_service_order_margin"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "receivables_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
           },
@@ -5870,6 +5968,13 @@ export type Database = {
             foreignKeyName: "service_cases_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "v_service_order_margin"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_cases_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
           },
@@ -5992,6 +6097,13 @@ export type Database = {
             foreignKeyName: "service_order_expenses_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "v_service_order_margin"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_expenses_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
           },
@@ -6025,6 +6137,7 @@ export type Database = {
           quantity: number
           serial_number: string | null
           service_order_id: string
+          source: string
           unit_cost_snapshot: number
           unit_sale_snapshot: number
           updated_at: string
@@ -6045,6 +6158,7 @@ export type Database = {
           quantity: number
           serial_number?: string | null
           service_order_id: string
+          source?: string
           unit_cost_snapshot: number
           unit_sale_snapshot: number
           updated_at?: string
@@ -6065,6 +6179,7 @@ export type Database = {
           quantity?: number
           serial_number?: string | null
           service_order_id?: string
+          source?: string
           unit_cost_snapshot?: number
           unit_sale_snapshot?: number
           updated_at?: string
@@ -6113,6 +6228,13 @@ export type Database = {
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_parts_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_margin"
             referencedColumns: ["id"]
           },
           {
@@ -6174,6 +6296,13 @@ export type Database = {
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_photos_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_margin"
             referencedColumns: ["id"]
           },
           {
@@ -6295,6 +6424,13 @@ export type Database = {
             foreignKeyName: "service_order_services_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "v_service_order_margin"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_services_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
           },
@@ -6362,6 +6498,13 @@ export type Database = {
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_signatures_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_margin"
             referencedColumns: ["id"]
           },
           {
@@ -6516,6 +6659,13 @@ export type Database = {
             foreignKeyName: "service_order_steps_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "v_service_order_margin"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_steps_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
           },
@@ -6573,6 +6723,13 @@ export type Database = {
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_technicians_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_margin"
             referencedColumns: ["id"]
           },
           {
@@ -6905,6 +7062,83 @@ export type Database = {
             columns: ["vessel_id"]
             isOneToOne: false
             referencedRelation: "vessels"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      service_step_blocks: {
+        Row: {
+          active: boolean
+          applies_to_system: string | null
+          applies_to_verb: string | null
+          approved_at: string | null
+          approved_by: string | null
+          block_role: string
+          created_at: string
+          detail: string | null
+          id: string
+          is_killer: boolean
+          kind: string
+          measure_unit: string | null
+          mode: string
+          origin: string
+          requires_measure: string | null
+          requires_photo: boolean
+          seq: number
+          standard_minutes: number | null
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          applies_to_system?: string | null
+          applies_to_verb?: string | null
+          approved_at?: string | null
+          approved_by?: string | null
+          block_role: string
+          created_at?: string
+          detail?: string | null
+          id?: string
+          is_killer?: boolean
+          kind?: string
+          measure_unit?: string | null
+          mode?: string
+          origin?: string
+          requires_measure?: string | null
+          requires_photo?: boolean
+          seq: number
+          standard_minutes?: number | null
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          applies_to_system?: string | null
+          applies_to_verb?: string | null
+          approved_at?: string | null
+          approved_by?: string | null
+          block_role?: string
+          created_at?: string
+          detail?: string | null
+          id?: string
+          is_killer?: boolean
+          kind?: string
+          measure_unit?: string | null
+          mode?: string
+          origin?: string
+          requires_measure?: string | null
+          requires_photo?: boolean
+          seq?: number
+          standard_minutes?: number | null
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_step_blocks_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "app_users"
             referencedColumns: ["id"]
           },
         ]
@@ -7274,6 +7508,13 @@ export type Database = {
             foreignKeyName: "service_surveys_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "v_service_order_margin"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_surveys_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
           },
@@ -7291,6 +7532,9 @@ export type Database = {
           active: boolean | null
           billing_unit: string
           category: string | null
+          classification_confidence: number | null
+          classified_at: string | null
+          classified_by: string | null
           created_at: string | null
           currency: string | null
           default_price: number | null
@@ -7298,16 +7542,24 @@ export type Database = {
           description: string | null
           field_factor: number
           id: string
+          material_kit_product_id: string | null
           name: string
           requires_survey: boolean
+          service_system: string | null
+          service_verb: string | null
           standard_minutes: number | null
           standard_source: string | null
+          supplies_cap: number | null
+          supplies_pct: number | null
           updated_at: string | null
         }
         Insert: {
           active?: boolean | null
           billing_unit?: string
           category?: string | null
+          classification_confidence?: number | null
+          classified_at?: string | null
+          classified_by?: string | null
           created_at?: string | null
           currency?: string | null
           default_price?: number | null
@@ -7315,16 +7567,24 @@ export type Database = {
           description?: string | null
           field_factor?: number
           id?: string
+          material_kit_product_id?: string | null
           name: string
           requires_survey?: boolean
+          service_system?: string | null
+          service_verb?: string | null
           standard_minutes?: number | null
           standard_source?: string | null
+          supplies_cap?: number | null
+          supplies_pct?: number | null
           updated_at?: string | null
         }
         Update: {
           active?: boolean | null
           billing_unit?: string
           category?: string | null
+          classification_confidence?: number | null
+          classified_at?: string | null
+          classified_by?: string | null
           created_at?: string | null
           currency?: string | null
           default_price?: number | null
@@ -7332,13 +7592,47 @@ export type Database = {
           description?: string | null
           field_factor?: number
           id?: string
+          material_kit_product_id?: string | null
           name?: string
           requires_survey?: boolean
+          service_system?: string | null
+          service_verb?: string | null
           standard_minutes?: number | null
           standard_source?: string | null
+          supplies_cap?: number | null
+          supplies_pct?: number | null
           updated_at?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "services_material_kit_product_id_fkey"
+            columns: ["material_kit_product_id"]
+            isOneToOne: false
+            referencedRelation: "product_availability"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "services_material_kit_product_id_fkey"
+            columns: ["material_kit_product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "services_material_kit_product_id_fkey"
+            columns: ["material_kit_product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_entradas_pendentes"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "services_material_kit_product_id_fkey"
+            columns: ["material_kit_product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_variancia"
+            referencedColumns: ["product_id"]
+          },
+        ]
       }
       supplier_product_mappings: {
         Row: {
@@ -7578,6 +7872,13 @@ export type Database = {
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "time_entries_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_margin"
             referencedColumns: ["id"]
           },
           {
@@ -7963,6 +8264,13 @@ export type Database = {
             foreignKeyName: "whatsapp_messages_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "v_service_order_margin"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_messages_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
           },
@@ -8157,6 +8465,13 @@ export type Database = {
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_scheduled_sends_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_margin"
             referencedColumns: ["id"]
           },
           {
@@ -8484,6 +8799,31 @@ export type Database = {
           },
         ]
       }
+      v_service_order_margin: {
+        Row: {
+          client_id: string | null
+          custo_mao_de_obra: number | null
+          custo_material: number | null
+          custo_material_extra: number | null
+          faturado: number | null
+          horas_reais: number | null
+          id: string | null
+          margem_pct: number | null
+          margem_reais: number | null
+          service_order_number: string | null
+          status: string | null
+          taxa_materiais: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_orders_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       vw_os_profitability: {
         Row: {
           client_name: string | null
@@ -8512,6 +8852,10 @@ export type Database = {
       ai_op_can_reject: {
         Args: { _pending_action_id: string; _user_id: string }
         Returns: boolean
+      }
+      apply_service_material_kit: {
+        Args: { p_service_id: string; p_service_order_id: string }
+        Returns: Json
       }
       archive_old_fiscal_drafts: { Args: { p_days?: number }; Returns: number }
       backfill_message_identity: {
@@ -8551,6 +8895,24 @@ export type Database = {
       cancel_service_order_cascade: {
         Args: { p_reason: string; p_service_order_id: string }
         Returns: Json
+      }
+      classify_service_text: { Args: { p_texto: string }; Returns: Json }
+      compose_route_for_service: {
+        Args: { p_service_id: string }
+        Returns: {
+          block: string
+          detail: string
+          is_killer: boolean
+          kind: string
+          measure_unit: string
+          mode: string
+          origem_bloco: string
+          requires_measure: string
+          requires_photo: boolean
+          seq: number
+          standard_minutes: number
+          title: string
+        }[]
       }
       compute_next_run: {
         Args: {
@@ -8972,6 +9334,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {},
   },
