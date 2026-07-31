@@ -1,3 +1,20 @@
+-- ⚠ APLICADA EM PRODUÇÃO SOMENTE EM 31/07/2026, e com uma diferença.
+--
+-- Este arquivo foi commitado em 29/07 (caf5246) mas NUNCA chegou ao banco —
+-- descoberto ao conciliar pg_policies com o repositório: só 8 policies tinham
+-- regra de cargo, e as 8 eram de outra frente. As tabelas internas seguiam
+-- abertas a vendedor externo por dois dias.
+--
+-- Ao aplicar, os 5 ALTER de purchase_orders, purchase_order_items,
+-- quote_requests, quote_request_items e quote_responses foram OMITIDOS: aquelas
+-- policies não existem mais. A frente de Compras (rls_compras_por_cargo, 30/07)
+-- as substituiu por policies granulares por comando, já com regra de cargo em
+-- USING e WITH CHECK — verificado uma a uma. Mantê-los faria a migration inteira
+-- falhar, porque ALTER POLICY exige que o nome exista.
+--
+-- Efeito medido: policies com regra de cargo passaram de 8 para 33.
+--
+-- ─────────────────────────────────────────────────────────────────────────────
 -- Restringe as políticas "permitir tudo" (RLS Policy Always True) de 19 tabelas
 -- INTERNAS ao perfil de EQUIPE, fechando o risco latente do recurso de vendedor
 -- externo (role external_seller) ANTES de o primeiro ser cadastrado.
