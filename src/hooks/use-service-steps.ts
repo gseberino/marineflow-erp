@@ -14,7 +14,8 @@ import { supabase } from '@/integrations/supabase/client';
 export type StepStatus = 'pending' | 'in_progress' | 'done' | 'not_applicable' | 'blocked';
 export type StepKind = 'do' | 'check' | 'safety' | 'evidence' | 'handoff';
 export type StepMode = 'read_do' | 'do_confirm';
-export type StepOrigin = 'template' | 'ai' | 'manual' | 'client_request';
+/** 'composed' = veio dos blocos (abertura do sistema + corpo do verbo + fechamento). */
+export type StepOrigin = 'template' | 'ai' | 'manual' | 'client_request' | 'composed';
 
 export interface ServiceOrderStep {
   id: string;
