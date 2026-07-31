@@ -1,0 +1,585 @@
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Ciclo do Serviço — os 23 blocos componíveis (conteúdo da composição, P27)
+-- Plano: plans/marineflow-execucao-os-roteiro.md, seção 10-ter
+--
+-- A migration anterior (20260731040000) criou a mecânica: a tabela
+-- service_step_blocks e compose_route_for_service(). Faltava o CONTEÚDO —
+-- sem blocos, o compositor devolve zero passos para os 261 serviços.
+--
+-- Roteiro = abertura do SISTEMA + corpo do VERBO + fechamento do SISTEMA.
+--   7 aberturas + 7 fechamentos (um par por sistema) + 9 corpos (um por verbo)
+--   = 23 blocos, 116 passos, cobrindo o catálogo inteiro.
+--
+-- TUDO ENTRA COMO origin='ai' + active=false: nada disso vale antes da
+-- assinatura do dono em /step-templates. A trava do banco
+-- (block_ai_precisa_aprovacao) já impede bloco de IA ativo sem approved_by.
+--
+-- REGRA DE CONTEÚDO (instrução do dono): nenhum número de torque, pressão,
+-- temperatura ou norma foi inventado aqui. Onde o procedimento depende de um
+-- valor, o passo diz "conferir no manual" e é marcado como medição
+-- (requires_measure) — o técnico anota o que mediu, e o valor de referência
+-- vem do fabricante, não deste arquivo.
+--
+-- Os standard_minutes são ESTIMATIVA inicial, não histórico: time_entries está
+-- vazia e nenhuma OS tem hora apontada (ver P7 do plano). Eles existem para
+-- somar uma previsão desde o primeiro dia e devem ser corrigidos assim que o
+-- roteiro rodar de verdade.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ─── 0. O registro de revisão precisa saber falar de bloco ──────────────────
+-- suggestion_type é lista fechada: sem isto, a aprovação de bloco na tela
+-- falharia no INSERT de ai_suggestion_reviews e o diff proposto×aprovado —
+-- que é o sinal de aprendizado da Fase 7 — seria perdido em silêncio.
+alter table public.ai_suggestion_reviews
+  drop constraint if exists ai_suggestion_reviews_suggestion_type_check;
+alter table public.ai_suggestion_reviews
+  add constraint ai_suggestion_reviews_suggestion_type_check
+  check (suggestion_type in ('survey_question','step','duration','material',
+                             'quote_line','step_template','step_block'));
+
+-- ─── 1. Os blocos ───────────────────────────────────────────────────────────
+-- Idempotente: só insere se ainda não houver bloco de IA cadastrado. Rodar de
+-- novo não duplica nem sobrescreve o que o dono já tiver revisado.
+do $$
+begin
+  if exists (select 1 from public.service_step_blocks) then
+    raise notice 'service_step_blocks já tem conteúdo — nada inserido.';
+    return;
+  end if;
+
+  insert into public.service_step_blocks
+    (block_role, applies_to_system, applies_to_verb, seq, title, detail, kind, mode,
+     standard_minutes, is_killer, requires_photo, requires_measure, measure_unit,
+     origin, active)
+  values
+
+  -- ═════════════════════════════════════════════════════════════════════════
+  -- ABERTURAS — pertencem ao SISTEMA
+  -- "Todo trabalho em 12V DC começa desligando a alimentação, seja geladeira,
+  --  bomba ou guincho" (o dono, 31/07). O bloco de segurança é do sistema.
+  -- ═════════════════════════════════════════════════════════════════════════
+
+  -- ── Elétrico DC (12/24V) — 54 serviços, o núcleo da HBR ──────────────────
+  ('abertura','eletrico_dc',null,1,
+   'Avisar quem está a bordo antes de cortar a energia',
+   'Desligar o banco derruba geladeira, bomba e alarme junto. Avisar evita perda de comida e susto — e evita que alguém religue no meio do serviço.',
+   'do','do_confirm',5,false,false,null,null,'ai',false),
+  ('abertura','eletrico_dc',null,2,
+   'Desligar a alimentação e desconectar o negativo do banco',
+   'Chave geral, disjuntores e o negativo do banco. Enquanto o negativo estiver ligado, qualquer ferramenta que tocar o positivo e a estrutura fecha o circuito.',
+   'safety','read_do',10,true,false,null,null,'ai',false),
+  ('abertura','eletrico_dc',null,3,
+   'Confirmar ausência de tensão com multímetro no ponto onde vai trabalhar',
+   'Desligar não é o passo — confirmar é. Medir no ponto exato, não no quadro. Banco de lítio não dá sinal de que está energizado. Anotar o que mediu.',
+   'safety','read_do',5,true,false,'tensao_v','V','ai',false),
+  ('abertura','eletrico_dc',null,4,
+   'Fotografar a ligação atual antes de desconectar',
+   'Barramento, fusíveis, quadro e a ligação do equipamento. Esta foto é a única referência se algo precisar voltar como estava.',
+   'evidence','read_do',10,true,true,null,null,'ai',false),
+  ('abertura','eletrico_dc',null,5,
+   'Etiquetar nas duas pontas cada cabo que for solto',
+   'Cabo sem identificação vira hora perdida na remontagem — e cabo trocado de lugar vira equipamento queimado.',
+   'do','do_confirm',15,false,false,null,null,'ai',false),
+
+  -- ── Elétrico AC (110/220V) — poucos serviços, o maior risco ──────────────
+  -- Bloco escrito com atenção redobrada por pedido do dono: aqui o erro mata.
+  ('abertura','eletrico_ac',null,1,
+   'Cortar TODAS as fontes de AC: cabo de cais, gerador e inversor',
+   'O quadro AC continua vivo pelo inversor mesmo com o cabo do cais fora e o gerador parado. Desligar as três fontes e confirmar uma a uma antes de abrir qualquer coisa.',
+   'safety','read_do',15,true,false,null,null,'ai',false),
+  ('abertura','eletrico_ac',null,2,
+   'Travar e etiquetar o disjuntor desligado, com seu nome',
+   'Bloqueio físico e etiqueta. Ninguém religa por engano o que está travado — e a etiqueta diz a quem perguntar. Fotografar o bloqueio.',
+   'safety','read_do',10,true,true,null,null,'ai',false),
+  ('abertura','eletrico_ac',null,3,
+   'Testar o instrumento, medir o circuito, testar o instrumento de novo',
+   'Confirme o multímetro numa fonte viva, meça o circuito (tem que dar zero) e confirme o instrumento outra vez. Instrumento com pilha fraca "prova" que tudo está desligado. Anotar a tensão medida no circuito.',
+   'safety','read_do',10,true,false,'tensao_v','V','ai',false),
+  ('abertura','eletrico_ac',null,4,
+   'Conferir a continuidade do aterramento antes de mexer',
+   'Estrutura metálica sem terra contínuo é choque esperando acontecer — e, na água, é risco de choque em quem estiver nadando ao redor. Valor de referência: conferir no manual do equipamento ou no projeto da instalação.',
+   'check','read_do',10,true,false,'continuidade_terra','Ω','ai',false),
+  ('abertura','eletrico_ac',null,5,
+   'Fotografar o quadro e a ligação atual antes de desconectar',
+   'Fase, neutro e terra de cada circuito. Em AC, remontar por memória é como ninguém deveria trabalhar.',
+   'evidence','read_do',10,true,true,null,null,'ai',false),
+
+  -- ── Gás GLP — 10 serviços, risco físico máximo ───────────────────────────
+  ('abertura','gas',null,1,
+   'Fechar o registro do cilindro e confirmar que fechou',
+   'Fechar e conferir — registro empenado ou meio-aberto engana. Nenhum passo seguinte acontece antes deste estar confirmado.',
+   'safety','read_do',5,true,false,null,null,'ai',false),
+  ('abertura','gas',null,2,
+   'Despressurizar a linha antes de abrir qualquer conexão',
+   'Com o registro fechado, deixar o aparelho queimar o gás que ficou na tubulação até apagar sozinho. Abrir conexão com a linha pressurizada libera gás dentro do ambiente.',
+   'safety','read_do',10,true,false,null,null,'ai',false),
+  ('abertura','gas',null,3,
+   'Abrir e manter a ventilação durante todo o serviço',
+   'GLP é mais pesado que o ar: ele desce e se acumula no ponto mais baixo — porão, gaveta, fundo de armário — onde ninguém sente cheiro em pé. Ventilar no começo não basta; tem que ficar aberto.',
+   'safety','read_do',5,true,false,null,null,'ai',false),
+  ('abertura','gas',null,4,
+   'Eliminar toda fonte de ignição da área',
+   'Chama, cigarro, ferramenta que faz faísca — e também ligar ou desligar interruptor, que faz centelha dentro do contato. Ter extintor ao alcance da mão antes de começar.',
+   'safety','read_do',5,true,false,null,null,'ai',false),
+  ('abertura','gas',null,5,
+   'Fotografar a instalação atual: cilindro, registro, mangueira e aparelho',
+   'O percurso inteiro da linha, não só a peça que vai ser mexida. Em instalação de gás, o que estava errado antes é parte do que você precisa poder mostrar.',
+   'evidence','read_do',10,true,true,null,null,'ai',false),
+
+  -- ── Hidráulico — 26 serviços ─────────────────────────────────────────────
+  ('abertura','hidraulico',null,1,
+   'Fechar o registro e cortar a energia da bomba d''água',
+   'Bomba com pressostato liga sozinha assim que a pressão cai. Fechar o registro não basta: tem que desligar o disjuntor dela, senão ela dispara com a linha aberta na sua mão.',
+   'safety','read_do',5,true,false,null,null,'ai',false),
+  ('abertura','hidraulico',null,2,
+   'Despressurizar abrindo a torneira mais alta e a mais baixa',
+   'A linha guarda pressão mesmo com a bomba desligada. Abrir os dois extremos esvazia e evita o jato ao soltar a conexão.',
+   'do','read_do',10,true,false,null,null,'ai',false),
+  ('abertura','hidraulico',null,3,
+   'Proteger contra respingo o que estiver embaixo',
+   'Em barco e motorhome, embaixo da tubulação quase sempre tem eletrônica, forro ou madeira. Pano e balde antes de soltar, não depois de molhar.',
+   'safety','do_confirm',10,false,false,null,null,'ai',false),
+  ('abertura','hidraulico',null,4,
+   'Fotografar a ligação atual e o percurso da tubulação',
+   'Registrar por onde passa e como está conectado antes de desmontar.',
+   'evidence','read_do',10,false,true,null,null,'ai',false),
+
+  -- ── Eletrônico / dados — 35 serviços ─────────────────────────────────────
+  ('abertura','eletronico',null,1,
+   'Registrar a configuração atual antes de desconectar',
+   'Endereço de rede, canais, sensibilidade, calibração, senha e versão de firmware. Reconfigurar do zero por falta desse registro custa mais que o serviço em si.',
+   'evidence','read_do',15,true,true,null,null,'ai',false),
+  ('abertura','eletronico',null,2,
+   'Desligar a alimentação do equipamento e do barramento de dados',
+   'Soltar ou encaixar conector de dados com o equipamento energizado queima porta — e a porta queimada só aparece no teste final.',
+   'safety','read_do',10,true,false,null,null,'ai',false),
+  ('abertura','eletronico',null,3,
+   'Fotografar os conectores ligados antes de soltar',
+   'Um conector parecido com o outro é a causa mais comum de retorno em eletrônica embarcada.',
+   'evidence','do_confirm',10,false,true,null,null,'ai',false),
+  ('abertura','eletronico',null,4,
+   'Confirmar se o equipamento depende de conta, licença ou assinatura',
+   'Starlink, roteador, plotter com carta náutica, rastreador: sem a conta do cliente o equipamento não volta a funcionar. Descobrir isso no fim do serviço vira retorno.',
+   'check','read_do',10,true,false,null,null,'ai',false),
+
+  -- ── Refrigeração — 15 serviços ───────────────────────────────────────────
+  ('abertura','refrigeracao',null,1,
+   'Medir e registrar a temperatura antes de mexer',
+   'Sem o "antes" não há como provar a melhora depois — nem saber se o problema era o equipamento. Anotar a temperatura medida.',
+   'check','read_do',15,true,false,'temperatura_c','°C','ai',false),
+  ('abertura','refrigeracao',null,2,
+   'Desligar a alimentação e esperar o compressor parar',
+   'Não trabalhar com o compressor em ciclo. Esperar parar de verdade, não só apagar o painel.',
+   'safety','read_do',10,true,false,null,null,'ai',false),
+  ('abertura','refrigeracao',null,3,
+   'Inspecionar e fotografar o circuito de gás refrigerante e a fixação',
+   'Circuito selado só é aberto por quem tem habilitação e equipamento de recolhimento — soltar gás na atmosfera não é opção. Se o serviço exigir abrir o circuito, parar aqui e escalar.',
+   'safety','read_do',10,true,true,null,null,'ai',false),
+  ('abertura','refrigeracao',null,4,
+   'Conferir ventilação e dreno do local',
+   'Equipamento de refrigeração encaixotado sem passagem de ar não gela, por melhor que esteja. Vale olhar antes de culpar a peça.',
+   'check','do_confirm',10,false,false,null,null,'ai',false),
+
+  -- ── Mecânico — 11 serviços ───────────────────────────────────────────────
+  ('abertura','mecanico',null,1,
+   'Escorar e travar o conjunto contra movimento antes de soltar a fixação',
+   'Guincho, plataforma, porta e slide guardam energia em mola, peso ou pistão a gás. Escorar antes de soltar — durante já é tarde.',
+   'safety','read_do',10,true,false,null,null,'ai',false),
+  ('abertura','mecanico',null,2,
+   'Cortar a energia do que se move sozinho e avisar',
+   'Guincho, slide-out, degrau elétrico e fechadura podem ser acionados por controle remoto por outra pessoa, sem ver onde está sua mão. Desligar o disjuntor e avisar quem está a bordo.',
+   'safety','read_do',10,true,false,null,null,'ai',false),
+  ('abertura','mecanico',null,3,
+   'Fotografar a montagem, a posição e a ordem das peças antes de desmontar',
+   'Sentido de montagem, ordem das arruelas e posição de regulagem. É o que permite remontar igual.',
+   'evidence','read_do',10,true,true,null,null,'ai',false),
+  ('abertura','mecanico',null,4,
+   'Separar e identificar a parafusaria por posição',
+   'Parafuso trocado de lugar é folga na remontagem ou rosca espanada.',
+   'do','do_confirm',10,false,false,null,null,'ai',false),
+
+  -- ═════════════════════════════════════════════════════════════════════════
+  -- CORPOS — pertencem ao VERBO
+  -- ═════════════════════════════════════════════════════════════════════════
+
+  -- ── Instalação — 78 serviços, o verbo mais comum ─────────────────────────
+  ('corpo',null,'instalacao',1,
+   'Conferir material e equipamento contra a lista do orçamento',
+   'Item por item, antes de abrir nada. Descobrir falta de material com o veículo aberto custa o dia inteiro.',
+   'check','read_do',20,true,false,null,null,'ai',false),
+  ('corpo',null,'instalacao',2,
+   'Definir o posicionamento e confirmar com o cliente antes de furar',
+   'Ventilação, acesso para manutenção futura, comprimento de cabo e estética. Mudar de lugar depois significa refazer a passagem inteira.',
+   'do','read_do',25,true,true,null,null,'ai',false),
+  ('corpo',null,'instalacao',3,
+   'Conferir o que passa atrás do ponto antes de furar ou cortar',
+   'Fiação, tubulação de gás, linha de água, tanque, reforço estrutural. Em barco e motorhome o furo às cegas atinge o que não se vê — e o estrago aparece semanas depois.',
+   'safety','read_do',10,true,false,null,null,'ai',false),
+  ('corpo',null,'instalacao',4,
+   'Fixar o equipamento com suporte definitivo',
+   'Fixação que aguenta vibração e movimento. O que é provisório na instalação continua provisório para sempre.',
+   'do','do_confirm',45,false,false,null,null,'ai',false),
+  ('corpo',null,'instalacao',5,
+   'Executar as ligações com proteção mecânica em toda a passagem',
+   'Passa-muro em cada travessia de anteparo, folga para vibração e nada apoiado em quina viva. É a passagem que falha, não o equipamento.',
+   'do','do_confirm',60,false,false,null,null,'ai',false),
+  ('corpo',null,'instalacao',6,
+   'Testar o funcionamento ANTES de fechar acessos e forros',
+   'Testar com tudo ainda acessível. Fechar antes de testar é o erro que dobra o serviço.',
+   'check','read_do',20,true,false,null,null,'ai',false),
+
+  -- ── Substituição — 40 serviços ───────────────────────────────────────────
+  ('corpo',null,'substituicao',1,
+   'Confirmar que a peça nova é equivalente à que sai',
+   'Modelo, tensão, capacidade, sentido de rotação, bitola de conexão e medidas de fixação — as duas lado a lado, antes de desmontar. Peça errada descoberta no meio da troca deixa o cliente sem o equipamento.',
+   'check','read_do',15,true,false,null,null,'ai',false),
+  ('corpo',null,'substituicao',2,
+   'Registrar o estado e a ligação da peça que sai',
+   'Foto da ligação e do estado da peça. É o que sustenta a conversa de garantia e mostra ao cliente por que a troca era necessária.',
+   'evidence','read_do',10,true,true,null,null,'ai',false),
+  ('corpo',null,'substituicao',3,
+   'Remover a peça antiga preservando fixação e conexões',
+   'Sem arrancar terminal nem forçar rosca: o que fica é a base da peça nova.',
+   'do','do_confirm',30,false,false,null,null,'ai',false),
+  ('corpo',null,'substituicao',4,
+   'Conferir e preparar o ponto onde a peça nova entra',
+   'Corrosão, furo alargado, terminal queimado, mangueira ressecada, base trincada. Peça nova em ponto ruim falha de novo — e a culpa cai na peça.',
+   'do','read_do',20,true,false,null,null,'ai',false),
+  ('corpo',null,'substituicao',5,
+   'Instalar a peça nova e refazer as conexões',
+   null,
+   'do','do_confirm',45,false,false,null,null,'ai',false),
+  ('corpo',null,'substituicao',6,
+   'Separar a peça antiga para devolver ao cliente',
+   'A peça que saiu volta ao cliente, ou vai para descarte com o aval dele. Nunca some — é dele.',
+   'handoff','do_confirm',15,false,false,null,null,'ai',false),
+
+  -- ── Reparo — 14 serviços ─────────────────────────────────────────────────
+  ('corpo',null,'reparo',1,
+   'Reproduzir o defeito e registrar como ele se manifesta',
+   'Reparar sem ter visto o defeito acontecer é apostar. Se não conseguir reproduzir, escrever isso na OS em vez de mexer no escuro.',
+   'check','read_do',20,true,false,null,null,'ai',false),
+  ('corpo',null,'reparo',2,
+   'Identificar a causa antes de trocar qualquer coisa',
+   'Trocar peça por eliminação gasta o dinheiro do cliente e deixa a causa no lugar. Se a peça queimou, alguma coisa a queimou.',
+   'do','read_do',30,true,false,null,null,'ai',false),
+  ('corpo',null,'reparo',3,
+   'Decidir se o reparo é durável ou se o certo é substituir',
+   'Se o reparo não vai durar, dizer antes de fazer e deixar a escolha com o cliente. Reparo que volta em um mês custa a confiança e ainda entra na garantia.',
+   'check','read_do',15,true,false,null,null,'ai',false),
+  ('corpo',null,'reparo',4,
+   'Executar o reparo',
+   null,
+   'do','do_confirm',60,false,false,null,null,'ai',false),
+  ('corpo',null,'reparo',5,
+   'Confirmar que o defeito não se repete na condição em que aparecia',
+   'Testar na mesma situação em que falhava — com carga, com o motor ligado, com o mar batendo. Funcionar parado não prova nada.',
+   'check','read_do',20,true,false,null,null,'ai',false),
+  ('corpo',null,'reparo',6,
+   'Registrar na OS a causa encontrada e o que foi feito',
+   'A causa e a solução ficam na OS, não na memória de quem fez. É isso que faz o próximo atendimento começar informado — e hoje esse campo está vazio em todas as OS.',
+   'evidence','read_do',15,true,false,null,null,'ai',false),
+
+  -- ── Diagnóstico — 20 serviços ────────────────────────────────────────────
+  ('corpo',null,'diagnostico',1,
+   'Ouvir o cliente e registrar a queixa nas palavras dele',
+   '"Desliga sozinho quando ligo o ar" vale mais que "defeito elétrico". A fala do cliente contém a condição do defeito.',
+   'check','read_do',15,true,false,null,null,'ai',false),
+  ('corpo',null,'diagnostico',2,
+   'Reproduzir o sintoma e registrar em que condição ele aparece',
+   'Quando acontece, com o que ligado, depois de quanto tempo. Defeito intermitente não reproduzido continua intermitente depois do serviço.',
+   'check','read_do',20,true,true,null,null,'ai',false),
+  ('corpo',null,'diagnostico',3,
+   'Inspeção visual antes de qualquer instrumento',
+   'Corrosão, cabo solto, conector esverdeado, fusível queimado, mangueira ressecada, marca de aquecimento. A maior parte dos defeitos se enxerga antes de se medir.',
+   'check','read_do',20,false,false,null,null,'ai',false),
+  ('corpo',null,'diagnostico',4,
+   'Medir os pontos-chave e anotar os valores encontrados',
+   'Anotar o valor, não "ok" — o número é o que permite comparar no próximo atendimento. Valores de referência do equipamento: conferir no manual do fabricante.',
+   'check','read_do',30,true,false,'medicoes_diagnostico',null,'ai',false),
+  ('corpo',null,'diagnostico',5,
+   'Fechar com um parecer: causa provável, o que foi descartado e o que fazer',
+   'Inclusive quando não achou: dizer o que foi testado e descartado vale muito mais que "nada constatado", e é o que permite continuar de onde parou.',
+   'handoff','read_do',20,true,false,null,null,'ai',false),
+
+  -- ── Manutenção — 3 serviços ──────────────────────────────────────────────
+  ('corpo',null,'manutencao',1,
+   'Registrar o estado e as leituras antes de mexer',
+   'Manutenção sem "antes" vira opinião. Fotos e valores medidos na chegada.',
+   'check','read_do',15,true,true,null,null,'ai',false),
+  ('corpo',null,'manutencao',2,
+   'Executar a rotina de manutenção do equipamento',
+   'Itens, produtos e periodicidade da rotina: conferir no manual do fabricante — cada equipamento tem o seu.',
+   'do','read_do',45,false,false,null,null,'ai',false),
+  ('corpo',null,'manutencao',3,
+   'Inspecionar o que costuma falhar: fixação, conexão, corrosão, desgaste',
+   'A manutenção vale pelo que ela encontra antes de quebrar, não pela limpeza.',
+   'check','read_do',25,true,false,null,null,'ai',false),
+  ('corpo',null,'manutencao',4,
+   'Medir de novo e comparar com as leituras da chegada',
+   'A comparação é o resultado do serviço. Anotar os valores.',
+   'check','read_do',15,false,false,'medicoes_manutencao',null,'ai',false),
+  ('corpo',null,'manutencao',5,
+   'Anotar o que está no limite e recomendar o próximo prazo',
+   'Peça que ainda funciona mas está no fim é a próxima OS — e o cliente prefere saber agora a parar no meio da viagem.',
+   'handoff','do_confirm',10,false,false,null,null,'ai',false),
+
+  -- ── Remoção / desmontagem — 4 serviços ───────────────────────────────────
+  ('corpo',null,'remocao',1,
+   'Confirmar o escopo: o que sai, o que fica e o que volta ao cliente',
+   'Combinado antes evita remover o que o cliente queria manter — e isso não tem desfazer.',
+   'check','read_do',10,true,false,null,null,'ai',false),
+  ('corpo',null,'remocao',2,
+   'Fotografar tudo antes de desmontar',
+   'Se um dia alguém for remontar ou instalar outro no lugar, estas fotos são o projeto que não existe.',
+   'evidence','read_do',15,true,true,null,null,'ai',false),
+  ('corpo',null,'remocao',3,
+   'Identificar e etiquetar cabos, mangueiras e fixações antes de soltar',
+   'Etiquetar nas duas pontas. Cabo que fica no lugar sem identificação vira mistério para o próximo.',
+   'do','read_do',20,true,false,null,null,'ai',false),
+  ('corpo',null,'remocao',4,
+   'Remover o equipamento e a infraestrutura combinada',
+   null,
+   'do','do_confirm',60,false,false,null,null,'ai',false),
+  ('corpo',null,'remocao',5,
+   'Tratar o que ficou: tampar furos, isolar pontas vivas, vedar passagens',
+   'Ponta de cabo energizada sem isolação e furo aberto no casco ou na lataria são o que transforma uma remoção simples em sinistro. Nada fica exposto.',
+   'safety','read_do',30,true,true,null,null,'ai',false),
+  ('corpo',null,'remocao',6,
+   'Separar o que volta ao cliente, o que se reaproveita e o que é descarte',
+   null,
+   'handoff','do_confirm',15,false,false,null,null,'ai',false),
+
+  -- ── Configuração / parametrização — 5 serviços ───────────────────────────
+  ('corpo',null,'configuracao',1,
+   'Registrar a configuração atual antes de mudar qualquer parâmetro',
+   'Sem o registro do que estava, não há como voltar se a nova configuração piorar.',
+   'evidence','read_do',15,true,true,null,null,'ai',false),
+  ('corpo',null,'configuracao',2,
+   'Confirmar com o cliente o que o sistema precisa fazer',
+   'Consumo, autonomia esperada, prioridade de fonte, comportamento com gerador. Parametrizar sem isso é adivinhar o uso.',
+   'check','read_do',15,true,false,null,null,'ai',false),
+  ('corpo',null,'configuracao',3,
+   'Aplicar os parâmetros conforme o manual do equipamento e a ficha da bateria',
+   'Cada valor — tensão de carga, corrente, limites de proteção — vem do manual do fabricante e da ficha técnica da bateria. Parâmetro de carga errado em lítio encurta a vida do banco sem dar nenhum sinal na hora.',
+   'do','read_do',45,true,false,null,null,'ai',false),
+  ('corpo',null,'configuracao',4,
+   'Testar cada modo de operação',
+   'Na fonte, fora dela, com carga alta, com bateria baixa, com gerador. O modo que ninguém testa é o que falha no fim de semana do cliente.',
+   'check','read_do',30,true,false,null,null,'ai',false),
+  ('corpo',null,'configuracao',5,
+   'Registrar na OS a configuração final e as senhas',
+   'Parâmetros aplicados, versão de firmware e senhas de acesso. É o que permite atender remoto da próxima vez.',
+   'evidence','read_do',15,true,true,null,null,'ai',false),
+  ('corpo',null,'configuracao',6,
+   'Ensinar o cliente a operar e mostrar o que não deve mexer',
+   'Cliente que mexe no parâmetro errado abre um chamado que parece defeito.',
+   'handoff','read_do',20,false,false,null,null,'ai',false),
+
+  -- ── Adequação — 1 serviço no catálogo, mas é o que mais cresce em campo ──
+  ('corpo',null,'adequacao',1,
+   'Levantar o que existe hoje e o que falta para atender',
+   'Fotografar e listar o estado atual. A adequação começa por saber de onde se está partindo.',
+   'check','read_do',30,true,true,null,null,'ai',false),
+  ('corpo',null,'adequacao',2,
+   'Definir o escopo da adequação e o que fica fora',
+   'Adequação é o serviço que mais cresce durante a execução. O que aparecer além do combinado vira orçamento novo, não "já que está aberto, aproveita".',
+   'check','read_do',20,true,false,null,null,'ai',false),
+  ('corpo',null,'adequacao',3,
+   'Executar a adequação combinada',
+   null,
+   'do','do_confirm',90,false,false,null,null,'ai',false),
+  ('corpo',null,'adequacao',4,
+   'Testar o que foi mexido E o que ficou ao redor',
+   'Mexer no quadro afeta circuito que estava funcionando. Testar o entorno, não só o que foi trocado — senão o cliente descobre por você.',
+   'check','read_do',25,true,false,null,null,'ai',false),
+  ('corpo',null,'adequacao',5,
+   'Registrar o antes e o depois',
+   'Em adequação, o valor entregue só fica visível na comparação.',
+   'evidence','read_do',15,true,true,null,null,'ai',false),
+
+  -- ── Logística / mão de obra / deslocamento — 7 serviços ──────────────────
+  ('corpo',null,'logistica',1,
+   'Confirmar endereço, acesso e com quem falar antes de sair',
+   'Marina, portaria, chave, autorização de entrada e horário permitido. Viagem perdida por portão fechado é custo integral e não se cobra de ninguém.',
+   'check','read_do',10,true,false,null,null,'ai',false),
+  ('corpo',null,'logistica',2,
+   'Conferir ferramenta e material antes de sair',
+   'A ferramenta que faltou está sempre a uma hora de distância.',
+   'check','read_do',15,true,false,null,null,'ai',false),
+  ('corpo',null,'logistica',3,
+   'Registrar saída e chegada',
+   'Deslocamento é hora de trabalho e precisa aparecer no custo da OS. Sem isso, a margem do serviço mente.',
+   'evidence','do_confirm',5,false,false,null,null,'ai',false),
+  ('corpo',null,'logistica',4,
+   'Fotografar o estado do bem na retirada e na entrega',
+   'Foto nas duas pontas. É o que resolve, sem discussão, a conversa sobre avaria que já existia.',
+   'evidence','read_do',15,true,true,null,null,'ai',false),
+  ('corpo',null,'logistica',5,
+   'Obter o aceite de quem recebe',
+   'Nome de quem recebeu e confirmação. Entrega sem aceite é entrega sem prova.',
+   'handoff','read_do',10,true,false,null,null,'ai',false),
+
+  -- ═════════════════════════════════════════════════════════════════════════
+  -- FECHAMENTOS — pertencem ao SISTEMA
+  -- É aqui que se prova que o sistema voltou seguro. Simétrico à abertura:
+  -- o que foi desligado tem que ser reenergizado com teste, não com fé.
+  -- ═════════════════════════════════════════════════════════════════════════
+
+  -- ── Elétrico DC ──────────────────────────────────────────────────────────
+  ('fechamento','eletrico_dc',null,1,
+   'Conferir polaridade e aperto de todos os terminais antes de energizar',
+   'Polaridade invertida em lítio destrói equipamento no instante em que o circuito fecha. Torque de aperto de cada terminal: conferir no manual do fabricante — anotar o valor usado.',
+   'safety','read_do',15,true,false,'torque_nm','N·m','ai',false),
+  ('fechamento','eletrico_dc',null,2,
+   'Energizar por etapas e medir a tensão nos pontos principais',
+   'Ligar uma proteção de cada vez, medindo. Se algo estiver errado, é assim que se descobre antes de virar fumaça. Anotar a tensão do banco.',
+   'check','read_do',15,true,false,'tensao_v','V','ai',false),
+  ('fechamento','eletrico_dc',null,3,
+   'Testar cada circuito e cada consumidor, com o cliente junto',
+   'Um a um, ligando de verdade. O cliente vendo funcionar é metade da entrega.',
+   'check','do_confirm',20,false,false,null,null,'ai',false),
+  ('fechamento','eletrico_dc',null,4,
+   'Verificar aquecimento dos terminais de potência sob carga',
+   'Ligar as cargas, esperar alguns minutos e voltar para conferir os terminais. Crimpagem ruim só se revela com corrente passando — e aí já é com o cliente na estrada.',
+   'check','read_do',10,true,false,null,null,'ai',false),
+  ('fechamento','eletrico_dc',null,5,
+   'Identificar os circuitos no quadro e fotografar a instalação concluída',
+   'Quem for atender daqui a dois anos depende dessa identificação. E a foto do concluído é o que fecha a OS.',
+   'evidence','do_confirm',15,true,true,null,null,'ai',false),
+
+  -- ── Elétrico AC ──────────────────────────────────────────────────────────
+  ('fechamento','eletrico_ac',null,1,
+   'Conferir fase, neutro e terra antes de reenergizar',
+   'Cada condutor no seu lugar e o terra contínuo. Em embarcação, ligação errada de neutro e terra coloca corrente na água ao redor do barco — risco para quem estiver nadando, não só para quem toca.',
+   'safety','read_do',15,true,false,null,null,'ai',false),
+  ('fechamento','eletrico_ac',null,2,
+   'Testar o dispositivo de proteção pelo botão de teste',
+   'Apertar o botão e ver desarmar. Se o circuito não tiver dispositivo de proteção, registrar isso na OS como pendência e informar o cliente — não seguir em silêncio.',
+   'check','read_do',10,true,false,null,null,'ai',false),
+  ('fechamento','eletrico_ac',null,3,
+   'Retirar o bloqueio e reenergizar avisando quem está a bordo',
+   'A trava sai por quem colocou, depois de conferir que ninguém está com a mão no circuito.',
+   'safety','read_do',10,true,false,null,null,'ai',false),
+  ('fechamento','eletrico_ac',null,4,
+   'Medir a tensão nas tomadas e conferir que não há tensão na estrutura',
+   'Entre estrutura metálica e terra tem que dar zero. Qualquer leitura diferente de zero é fuga: não entregar assim. Anotar as tensões medidas.',
+   'check','read_do',15,true,false,'tensao_v','V','ai',false),
+  ('fechamento','eletrico_ac',null,5,
+   'Fotografar o quadro fechado e identificado',
+   null,
+   'evidence','do_confirm',10,false,true,null,null,'ai',false),
+
+  -- ── Gás GLP ──────────────────────────────────────────────────────────────
+  ('fechamento','gas',null,1,
+   'Teste de estanqueidade em todas as juntas que foram mexidas',
+   'Com solução espumante ou detector — NUNCA com chama. Junta por junta, inclusive as que você só encostou. Bolha significa refazer a conexão, não apertar mais. Pressão e tempo do teste: conferir no manual da instalação; anotar o valor e a unidade.',
+   'safety','read_do',20,true,true,'pressao_teste',null,'ai',false),
+  ('fechamento','gas',null,2,
+   'Verificar estado e validade de mangueira, abraçadeiras e regulador',
+   'A data está impressa na própria peça — ler, não estimar. Ressecada, trincada ou vencida não volta para o lugar, mesmo que não esteja vazando hoje.',
+   'check','read_do',10,true,false,null,null,'ai',false),
+  ('fechamento','gas',null,3,
+   'Acender o aparelho e observar a chama',
+   'Chama estável e azul. Amarela, oscilante ou deixando fuligem indica combustão ruim — não entregar assim, mesmo que acenda.',
+   'check','read_do',15,true,true,null,null,'ai',false),
+  ('fechamento','gas',null,4,
+   'Ventilar, conferir ausência de cheiro de gás e testar o detector',
+   'Se a instalação tem detector ou válvula solenoide, testar o acionamento. Qualquer cheiro residual: fechar o registro e reinvestigar antes de sair.',
+   'check','read_do',10,true,false,null,null,'ai',false),
+  ('fechamento','gas',null,5,
+   'Orientar o cliente: registro, ventilação e o que fazer se sentir cheiro de gás',
+   'Onde fica o registro, por que manter a ventilação e a regra do cheiro: fechar o registro, ventilar, não acionar nenhum interruptor e chamar. Isso faz parte da entrega.',
+   'handoff','read_do',10,true,false,null,null,'ai',false),
+
+  -- ── Hidráulico ───────────────────────────────────────────────────────────
+  ('fechamento','hidraulico',null,1,
+   'Reabrir o registro devagar e pressurizar o sistema',
+   'Devagar: golpe de pressão encontra a conexão mais fraca.',
+   'do','read_do',10,false,false,null,null,'ai',false),
+  ('fechamento','hidraulico',null,2,
+   'Inspecionar cada conexão mexida com a linha pressurizada, com pano seco',
+   'Pano seco em cada junta. Vazamento pequeno só aparece depois de alguns minutos sob pressão — esperar antes de dar por encerrado.',
+   'check','read_do',15,true,false,null,null,'ai',false),
+  ('fechamento','hidraulico',null,3,
+   'Ciclar a bomba e confirmar que ela desarma sozinha',
+   'Bomba que não desliga com o sistema pressurizado é pressostato ruim ou vazamento em algum ponto. Não é normal e não se entrega assim.',
+   'check','do_confirm',10,true,false,null,null,'ai',false),
+  ('fechamento','hidraulico',null,4,
+   'Conferir se não ficou água acumulada embaixo e secar',
+   'Água parada em cima de forro ou de eletrônica é o dano que aparece semanas depois, quando ninguém liga mais ao serviço.',
+   'check','read_do',10,false,false,null,null,'ai',false),
+  ('fechamento','hidraulico',null,5,
+   'Fotografar a conexão concluída antes de fechar o acesso',
+   'Depois que o forro fecha, ninguém mais vê. Esta foto é o que resolve discussão de garantia.',
+   'evidence','read_do',5,true,true,null,null,'ai',false),
+
+  -- ── Eletrônico / dados ───────────────────────────────────────────────────
+  ('fechamento','eletronico',null,1,
+   'Energizar e confirmar que o equipamento inicializa',
+   null,
+   'check','do_confirm',10,false,false,null,null,'ai',false),
+  ('fechamento','eletronico',null,2,
+   'Restaurar a configuração e conferir contra o registro do início',
+   'Item por item contra o que foi anotado na abertura. Configuração parcial é a origem do "funcionava melhor antes".',
+   'check','read_do',20,true,false,null,null,'ai',false),
+  ('fechamento','eletronico',null,3,
+   'Testar a função na condição real de uso',
+   'Sinal, alcance, imagem, som, precisão — como o cliente usa, não só na tela de teste do aparelho.',
+   'check','read_do',20,true,false,null,null,'ai',false),
+  ('fechamento','eletronico',null,4,
+   'Registrar na OS a configuração final e a versão de firmware',
+   'Senhas, canais, endereços e firmware. Sem isso, o próximo atendimento começa do zero — e provavelmente será remoto.',
+   'evidence','read_do',10,true,true,null,null,'ai',false),
+  ('fechamento','eletronico',null,5,
+   'Entregar mostrando ao cliente o que mudou e como usar',
+   null,
+   'handoff','do_confirm',10,false,false,null,null,'ai',false),
+
+  -- ── Refrigeração ─────────────────────────────────────────────────────────
+  ('fechamento','refrigeracao',null,1,
+   'Ligar e acompanhar até o compressor entrar em regime',
+   'Não adianta ligar e sair. O comportamento no primeiro ciclo completo é o que diz se resolveu.',
+   'check','read_do',20,true,false,null,null,'ai',false),
+  ('fechamento','refrigeracao',null,2,
+   'Medir a temperatura e comparar com a da chegada',
+   'Precisa de tempo de funcionamento para valer — o número do primeiro minuto não diz nada. Tempo de estabilização e faixa esperada: conferir no manual do equipamento. Anotar a temperatura final.',
+   'check','read_do',15,true,false,'temperatura_c','°C','ai',false),
+  ('fechamento','refrigeracao',null,3,
+   'Verificar o consumo do equipamento em funcionamento',
+   'Consumo fora do esperado indica problema mesmo com o equipamento gelando — e é a conta do cliente que paga. Valor de referência: conferir no manual. Anotar a corrente medida.',
+   'check','do_confirm',10,false,false,'corrente_a','A','ai',false),
+  ('fechamento','refrigeracao',null,4,
+   'Conferir dreno, vedação e ausência de condensação onde não deve',
+   'Condensação escorrendo dentro de armário ou sobre fiação estraga o que está embaixo.',
+   'check','do_confirm',10,false,false,null,null,'ai',false),
+  ('fechamento','refrigeracao',null,5,
+   'Fotografar o concluído e orientar sobre limpeza e ventilação',
+   'A maior parte das chamadas de "não gela" é obstrução de ventilação ou serpentina suja. Explicar isso evita a próxima visita.',
+   'handoff','do_confirm',10,false,true,null,null,'ai',false),
+
+  -- ── Mecânico ─────────────────────────────────────────────────────────────
+  ('fechamento','mecanico',null,1,
+   'Conferir o aperto de toda a fixação',
+   'Torque de cada fixação: conferir no manual do fabricante e anotar o valor usado. Aperto "no sentimento" em peça que se move é o que solta na estrada ou no mar.',
+   'safety','read_do',15,true,false,'torque_nm','N·m','ai',false),
+  ('fechamento','mecanico',null,2,
+   'Retirar escoras e travas e testar o movimento à mão',
+   'À mão primeiro, sentindo folga e interferência, antes de deixar o motor fazer força.',
+   'check','read_do',10,true,false,null,null,'ai',false),
+  ('fechamento','mecanico',null,3,
+   'Testar o ciclo completo com energia, acompanhando',
+   'Ciclo inteiro, ida e volta, observando ruído, folga e fim de curso — e ficando fora da linha de movimento.',
+   'check','read_do',15,true,false,null,null,'ai',false),
+  ('fechamento','mecanico',null,4,
+   'Lubrificar e proteger os pontos que pedem',
+   'Produto e periodicidade: conferir no manual. Em ambiente marinho, proteção contra corrosão é parte do serviço, não extra.',
+   'do','do_confirm',10,false,false,null,null,'ai',false),
+  ('fechamento','mecanico',null,5,
+   'Fotografar a montagem concluída e recolher ferramenta e sobras',
+   'Ferramenta esquecida dentro de compartimento que se move vira ruído, dano ou acidente.',
+   'evidence','do_confirm',10,false,true,null,null,'ai',false);
+
+  raise notice 'Blocos componíveis inseridos: %',
+    (select count(*) from public.service_step_blocks);
+end $$;

@@ -1093,11 +1093,33 @@ acima de 600Wh — exatamente os bancos LiFePO4 que a HBR instala).
 
 ### Sequência proposta
 1. **Classificar o catálogo**: os 261 serviços ganham verbo + sistema. Palavra-chave resolve a
-   maioria; a IA fecha o resto; o dono revisa só o que ficou duvidoso.
-2. **Escrever os ~23 blocos** — a IA rascunha, o dono aprova na tela que já existe.
-3. **Compositor de roteiro**: gerar passos = abertura do sistema + corpo do verbo + fechamento.
+   maioria; a IA fecha o resto; o dono revisa só o que ficou duvidoso. ✅ *keyword feita*
+2. **Escrever os ~23 blocos** — a IA rascunha, o dono aprova na tela que já existe. ✅ *feito*
+3. **Compositor de roteiro**: gerar passos = abertura do sistema + corpo do verbo + fechamento. ✅
 4. **Backfill**: os 37 nomes de texto livre viram serviços de catálogo, já classificados.
 5. **Sugestão na linha do orçamento**, com o classificador rodando ao digitar.
+
+### Estado dos blocos (31/07/2026)
+Os 23 blocos estão no banco: **116 passos**, todos `origin='ai'` e `active=false`, aguardando
+assinatura em `/step-templates` (seção "Blocos componíveis", que mostra quantos serviços cada
+bloco alcança). Migration `20260731170000_ciclo_servico_blocos_componiveis`.
+
+| | Escrito | Passos |
+|---|---|---|
+| Aberturas (por sistema) | 7 | 31 |
+| Corpos (por verbo) | 9 | 50 |
+| Fechamentos (por sistema) | 7 | 35 |
+
+Cobertura sobre os 261 serviços ativos, com a classificação por palavra-chave que já rodou:
+**150 (57,5%) ganham roteiro completo**, 91 (34,9%) só o corpo do verbo, 4 só abertura+fechamento
+e 16 nenhum passo — os 107 que a IA ainda precisa classificar são exatamente o que fecha essa conta.
+
+Regra de conteúdo seguida à risca (instrução do dono): **nenhum torque, pressão, temperatura ou
+norma foi inventado**. Onde o procedimento depende de um valor, o passo diz "conferir no manual" e
+é marcado como medição — o técnico anota o que mediu e a referência vem do fabricante.
+
+Lacuna conhecida: o sistema **`estrutural`** (4 serviços) não tem par de blocos — a tabela do P27
+o agrupa com "mecânico", e escrever um 8º par é decisão do dono, não suposição da IA.
 
 ---
 
