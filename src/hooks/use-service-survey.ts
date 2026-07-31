@@ -74,21 +74,26 @@ export function useCaseEstimate(serviceId: string | undefined) {
 }
 
 /** Perguntas do serviço, já na ordem de impacto no preço e com teto de 9 (P16). */
+/**
+ * O questionário de um serviço, montado por composição.
+ *
+ * Pergunta escrita para o serviço específico ganha; se não houver nenhuma,
+ * compõe pelo sistema e pelo verbo do serviço — os mesmos eixos do roteiro.
+ * Sem isso seriam 261 questionários para escrever e manter, um por serviço.
+ * O corte em 9 (P16) é feito no banco, na ordem de impacto no preço.
+ */
 export function useSurveyQuestions(serviceId: string | undefined, mode: 'local' | 'remoto' = 'local') {
   return useQuery({
     queryKey: ['survey-questions', serviceId, mode],
     enabled: !!serviceId,
     queryFn: async (): Promise<SurveyQuestion[]> => {
-      const { data, error } = await supabase
-        .from('service_survey_templates')
-        .select('id, seq, question, help_text, answer_type, options, price_impact, ask_remotely')
-        .eq('service_id', serviceId!)
-        .eq('active', true);
+      const { data, error } = await supabase.rpc('compose_survey_for_service', {
+        p_service_id: serviceId!,
+        p_mode: mode,
+      });
       if (error) throw error;
       return ((data || []) as unknown as SurveyQuestion[])
-        .filter((q) => (mode === 'remoto' ? q.ask_remotely : true))
-        .sort((a, b) => (IMPACT_ORDER[a.price_impact] ?? 1) - (IMPACT_ORDER[b.price_impact] ?? 1) || a.seq - b.seq)
-        .slice(0, 9);
+        .sort((a, b) => (IMPACT_ORDER[a.price_impact] ?? 1) - (IMPACT_ORDER[b.price_impact] ?? 1) || a.seq - b.seq);
     },
   });
 }

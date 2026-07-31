@@ -13,6 +13,8 @@ function step(over: Partial<ServiceOrderStep> = {}): ServiceOrderStep {
     template_id: null,
     seq: 1,
     block: null,
+    block_key: null,
+    block_note: null,
     title: 'Passo',
     detail: null,
     kind: 'do',

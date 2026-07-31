@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildRouteSheetHtml } from './route-sheet';
-import type { ServiceOrderStep } from '@/hooks/use-service-steps';
+import type { ServiceOrderStep, RouteMaterial } from '@/hooks/use-service-steps';
 
 function step(over: Partial<ServiceOrderStep> = {}): ServiceOrderStep {
   return {
@@ -10,6 +10,8 @@ function step(over: Partial<ServiceOrderStep> = {}): ServiceOrderStep {
     template_id: null,
     seq: 1,
     block: 'Preparação',
+    block_key: null,
+    block_note: null,
     title: 'Desligar o disjuntor geral',
     detail: null,
     kind: 'do',
@@ -85,7 +87,7 @@ describe('folha A4 do roteiro', () => {
       step({ id: 'a', standard_minutes: 45 }),
       step({ id: 'b', standard_minutes: 90 }),
     ]);
-    expect(html).toContain('Previsto: 2h15');
+    expect(html).toContain('Previsto: <b>2h15</b>');
   });
 
   it('sempre traz as duas assinaturas e a instrução do que fazer ao travar', () => {
@@ -93,5 +95,77 @@ describe('folha A4 do roteiro', () => {
     expect(html).toContain('Assinatura do técnico');
     expect(html).toContain('Assinatura do cliente');
     expect(html).toContain('Travou?');
+  });
+});
+
+/**
+ * Pedidos do dono em 31/07: marca discreta, espaço para escrever à mão e a
+ * separação de materiais — "inclusive o que será usado em cada uma das etapas".
+ */
+describe('folha do roteiro — marca, anotações e materiais', () => {
+  const material = (over: Partial<RouteMaterial> = {}): RouteMaterial => ({
+    id: over.id || 'm1',
+    quantity: 2,
+    notes: null,
+    service_order_service_id: null,
+    products: { name: 'Cabo 16mm² preto', sku: 'CB-16-PT', unit: 'm' },
+    ...over,
+  });
+
+  it('traz a marca da empresa no cabeçalho e o endereço no rodapé', () => {
+    const html = buildRouteSheetHtml(
+      { ...header, companyName: 'HBR Marine Solutions', companyLogoUrl: 'https://x/logo.png',
+        companyAddress: 'Itajaí-SC' },
+      [step()],
+    );
+    expect(html).toContain('HBR Marine Solutions');
+    expect(html).toContain('https://x/logo.png');
+    expect(html).toContain('Itajaí-SC');
+  });
+
+  it('lista a separação de materiais com quantidade, unidade e SKU', () => {
+    const html = buildRouteSheetHtml(header, [step()], [material()]);
+    expect(html).toContain('Separação de materiais');
+    expect(html).toContain('2 m');
+    expect(html).toContain('Cabo 16mm² preto');
+    expect(html).toContain('CB-16-PT');
+  });
+
+  it('mostra o material da etapa dentro do bloco daquele serviço', () => {
+    const html = buildRouteSheetHtml(
+      header,
+      [step({ block: '2 · Instalação de multimídia', block_key: 'linha:abc' })],
+      [material({ id: 'm2', service_order_service_id: 'abc' })],
+    );
+    expect(html).toContain('Material desta etapa:');
+  });
+
+  it('não pendura material de outra linha no bloco errado', () => {
+    const html = buildRouteSheetHtml(
+      header,
+      [step({ block: '2 · Instalação', block_key: 'linha:abc' })],
+      [material({ id: 'm3', service_order_service_id: 'OUTRA-LINHA' })],
+    );
+    // Aparece só na separação geral, nunca como material da etapa.
+    expect(html).not.toContain('Material desta etapa:');
+    expect(html).toContain('Separação de materiais');
+  });
+
+  it('escreve o escopo do bloco compartilhado, que era o que faltava', () => {
+    const html = buildRouteSheetHtml(header, [
+      step({
+        block: '1 · Antes de mexer — Eletrônico',
+        block_key: 'abertura:eletronico',
+        block_note: 'Vale para os 3 serviços desta OS: multimídia, câmeras e Starlink.',
+      }),
+    ]);
+    expect(html).toContain('Vale para os 3 serviços desta OS');
+  });
+
+  it('abre os três espaços de escrita à mão', () => {
+    const html = buildRouteSheetHtml(header, [step()]);
+    expect(html).toContain('Observações deste bloco');
+    expect(html).toContain('O que encontrei');
+    expect(html).toContain('Material usado além do previsto');
   });
 });

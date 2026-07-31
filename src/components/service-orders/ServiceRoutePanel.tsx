@@ -13,10 +13,11 @@ import { StepFocusMode } from './StepFocusMode';
 import { printRouteSheet } from '@/lib/route-sheet';
 import {
   useServiceOrderSteps, useGenerateSteps, useReorderSteps, useDeleteStep,
-  useCreateStep, useReopenStep, useStopReasons, useReviewAiStep,
+  useCreateStep, useReopenStep, useStopReasons, useReviewAiStep, useRouteMaterials,
   summarizeRoute, groupStepsByBlock, formatMinutes, isAiDraft,
   type ServiceOrderStep,
 } from '@/hooks/use-service-steps';
+import { useAppSettings } from '@/hooks/use-app-settings';
 
 const STATUS_LABEL: Record<string, string> = {
   pending: 'a fazer',
@@ -60,6 +61,8 @@ export function ServiceRoutePanel({
 }) {
   const { data: steps = [], isLoading } = useServiceOrderSteps(serviceOrderId);
   const { data: reasons = [] } = useStopReasons();
+  const { data: materials = [] } = useRouteMaterials(serviceOrderId);
+  const { data: settings } = useAppSettings();
   const generate = useGenerateSteps();
   const reorder = useReorderSteps();
   const remove = useDeleteStep();
@@ -115,8 +118,12 @@ export function ServiceRoutePanel({
   function handlePrint() {
     const ok = printRouteSheet(
       { orderNumber: orderNumber || 'OS', clientName, assetName, assetType, marinaName,
-        technicianName, scheduledAt, shareUrl },
+        technicianName, scheduledAt, shareUrl,
+        companyName: settings?.company_name || null,
+        companyLogoUrl: settings?.company_logo_url || null,
+        companyAddress: settings?.company_address || null },
       steps,
+      materials,
     );
     if (!ok) toast.error('O navegador bloqueou a janela de impressão. Libere o pop-up e tente de novo.');
   }
@@ -252,6 +259,11 @@ export function ServiceRoutePanel({
             <p className="text-[11px] uppercase tracking-wide text-muted-foreground font-medium">
               {group.block}
             </p>
+            {/* Bloco compartilhado precisa dizer a que serviços se aplica —
+                sem isso ele parece órfão no meio do roteiro. */}
+            {group.note && (
+              <p className="text-[11px] leading-snug text-muted-foreground">{group.note}</p>
+            )}
             {group.steps.map((step) => {
               const index = steps.findIndex((s) => s.id === step.id);
               return (
