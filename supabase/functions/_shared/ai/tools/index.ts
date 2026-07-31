@@ -15,6 +15,7 @@ import { fieldOpsTools } from "./field-ops.ts";
 import { routeOpsTools } from "./route-ops.ts";
 import { surveyOpsTools } from "./survey-ops.ts";
 import { routeDraftingTools } from "./route-drafting.ts";
+import { materialsOpsTools } from "./materials-ops.ts";
 import { autonomyTools } from "./autonomy.ts";
 import { contactTools } from "./contacts.ts";
 import { entityMemoryTools } from "./entity-memory.ts";
@@ -55,6 +56,7 @@ export const allTools: ToolDef[] = [
   ...routeOpsTools,
   ...surveyOpsTools,
   ...routeDraftingTools,
+  ...materialsOpsTools,
   ...autonomyTools,
   ...entity360Tools,
   ...registryCrudTools,
