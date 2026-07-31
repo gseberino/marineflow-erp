@@ -1022,6 +1022,85 @@ regra mudar.
 
 ---
 
+## 10-ter. Roteiro por COMPOSIÇÃO — cobrir o catálogo inteiro sem escrever 4.500 passos
+
+Pedido do dono (31/07): cadastrar no catálogo os serviços que só existem como texto livre,
+gerar roteiro para tudo, e fazer a IA sugerir o roteiro **na hora em que a linha é digitada**
+no orçamento. A frase que resolveu o desenho foi dele: *"para instalar qualquer equipamento
+elétrico tem que desligar a alimentação — o sistema identifica isso e gera o roteiro"*.
+
+### O problema de escala
+O catálogo tem **261 serviços ativos** e 37 nomes que só vivem como texto em OS. Escrever 9
+passos para cada um são ~2.700 passos — impossível de escrever e pior ainda de manter: mudou o
+procedimento de segurança elétrica, mudam 78 roteiros à mão.
+
+### P27. O roteiro se compõe; não se enumera
+```
+Roteiro = [abertura do SISTEMA] + [corpo do VERBO] + [fechamento do SISTEMA]
+```
+O bloco de segurança não pertence ao serviço — pertence ao **sistema** que ele toca. Todo
+trabalho em 12V DC começa desligando e confirmando ausência de tensão, seja instalação de
+geladeira, troca de bomba ou reparo de guincho.
+
+**Dois eixos, extraídos do catálogo real da HBR:**
+
+| Eixo VERBO (o que se faz) | Qtd no catálogo |
+|---|---|
+| Instalação | 78 |
+| Substituição | 40 |
+| Diagnóstico | 20 |
+| Reparo | 14 |
+| Logística / mão de obra | 7 |
+| Configuração | 5 |
+| Remoção / desmontagem | 4 |
+| Manutenção | 3 |
+| Adequação | 1 |
+| A classificar ("SERVIÇO DE …") | 89 |
+
+| Eixo SISTEMA (o que se toca) | Bloco de abertura |
+|---|---|
+| Elétrico DC (12/24V) | desligar, confirmar ausência de tensão, fotografar ligação atual |
+| Elétrico AC (110/220V) | desligar disjuntor, travar, testar, aterramento |
+| Gás GLP | fechar registro, ventilar, teste de estanqueidade ao fim |
+| Hidráulico | despressurizar, fechar registro, proteger contra respingo |
+| Eletrônico / dados | anotar configuração atual antes de desconectar |
+| Refrigeração | verificar carga e nível antes de mexer |
+| Mecânico / estrutural | apoiar, travar contra movimento |
+
+**A conta muda de figura:** 7 blocos de abertura + 7 de fechamento + ~9 corpos de verbo = **~23
+blocos escritos e revisados uma vez**, cobrindo os 261 serviços. Mudou a regra de segurança de
+gás? Um bloco corrigido conserta todos os serviços de gás de uma vez.
+
+### P28. A sugestão nasce na linha do orçamento, não numa tela à parte
+Quando alguém digita *"Instalação de chuveiro elétrico 12V"*, o classificador identifica
+**verbo = instalação** e **sistema = elétrico DC** e monta o esqueleto na hora. O usuário aprova,
+ajusta ou descarta — e o serviço, se ainda não existir no catálogo, é cadastrado junto.
+
+Classificação em duas camadas, e a ordem importa: **palavra-chave primeiro** (barata,
+determinística, audível — "bateria/inversor/DC-DC/fusível" → elétrico DC), **IA só no que sobrar**.
+A IA não deve ser chamada para reconhecer "instalação de bateria" — isso é um `LIKE`.
+
+### P29. Escopo é o que a HBR faz, e o catálogo já diz qual é
+Elétrica e eletrônica embarcada são o núcleo, mas o histórico mostra gás (aquecedor, ramal GLP,
+fogão), hidráulica (bomba d'água, mangueira, registro), refrigeração, áudio/vídeo, mecânica leve
+(guincho, fechadura, amortecedor) e náutica (transducer, luz de fundeio, isolador galvânico).
+Fora do escopo por decisão do dono: **pintura, para-brisa e laminação de fibra** — exigem
+conhecimento e equipamento de outra natureza.
+
+Norma aplicável ao que a HBR mais faz: **ABYC E-11** (sistemas AC/DC em barcos, com queda de
+tensão máxima de 3% em circuito crítico e 10% no resto) e **ABYC E-13** (instalação de lítio
+acima de 600Wh — exatamente os bancos LiFePO4 que a HBR instala).
+
+### Sequência proposta
+1. **Classificar o catálogo**: os 261 serviços ganham verbo + sistema. Palavra-chave resolve a
+   maioria; a IA fecha o resto; o dono revisa só o que ficou duvidoso.
+2. **Escrever os ~23 blocos** — a IA rascunha, o dono aprova na tela que já existe.
+3. **Compositor de roteiro**: gerar passos = abertura do sistema + corpo do verbo + fechamento.
+4. **Backfill**: os 37 nomes de texto livre viram serviços de catálogo, já classificados.
+5. **Sugestão na linha do orçamento**, com o classificador rodando ao digitar.
+
+---
+
 ## 11. Decisões
 
 ### Tomadas em 29/07/2026
