@@ -34,10 +34,15 @@ const { blocos, servicos, perguntas, q, mut } = vi.hoisted(() => {
       kind: 'safety', mode: 'read_do', is_killer: true,
       requires_measure: 'torque_nm', measure_unit: 'N·m' },
   ];
+  // Serve aos dois hooks que leem `services`: o alcance dos blocos e a fila de
+  // classificação a conferir.
   const servicos = [
-    { service_verb: 'instalacao', service_system: 'gas' },
-    { service_verb: 'instalacao', service_system: 'eletrico_dc' },
-    { service_verb: 'reparo', service_system: 'gas' },
+    { id: 'sv1', name: 'CT - Instalação e Fixação', service_verb: 'instalacao',
+      service_system: 'gas', classified_by: 'ai', classification_confidence: 0.3 },
+    { id: 'sv2', name: 'Instalação de bateria', service_verb: 'instalacao',
+      service_system: 'eletrico_dc', classified_by: 'keyword', classification_confidence: 0.9 },
+    { id: 'sv3', name: 'Reparo de aquecedor', service_verb: 'reparo',
+      service_system: 'gas', classified_by: 'ai', classification_confidence: 0.6 },
   ];
   const perguntas = [
     { id: 'q1', service_id: null, applies_to_system: 'gas', applies_to_verb: null, seq: 1,
@@ -56,7 +61,8 @@ vi.mock('@/integrations/supabase/client', () => ({
   supabase: {
     from: (tabela: string) => {
       const o: any = {};
-      for (const k of ['select', 'order', 'eq', 'update', 'insert', 'delete']) o[k] = () => o;
+      for (const k of ['select', 'order', 'eq', 'lt', 'gt', 'is', 'not', 'in',
+                       'update', 'insert', 'delete']) o[k] = () => o;
       o.then = (res: any) =>
         Promise.resolve({
           data: tabela === 'service_step_blocks' ? blocos
@@ -122,6 +128,20 @@ describe('StepTemplatesPage — smoke de render dos blocos componíveis', () => 
     expect(screen.getByText('medir (N·m)')).toBeTruthy();
     expect(screen.getByText('crítico')).toBeTruthy();
     expect(screen.getByText('rascunho da IA — aguarda sua decisão')).toBeTruthy();
+  });
+
+  it('lista a classificação incerta para conferência, com a confiança à mostra', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByText('Classificação a conferir')).toBeTruthy();
+    await user.click(await screen.findByText(/serviço\(s\) para conferir/));
+
+    // O mock não filtra por confiança (quem filtra é o banco), mas o que a tela
+    // precisa mostrar é o nome e o quanto a IA duvidou.
+    expect(await screen.findByText('CT - Instalação e Fixação')).toBeTruthy();
+    expect(screen.getByText('confiança 0.3')).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: /Confirmar/ }).length).toBeGreaterThan(0);
   });
 
   it('mostra as perguntas de levantamento com o selo de quem pode responder', async () => {
