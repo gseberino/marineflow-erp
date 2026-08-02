@@ -6354,6 +6354,7 @@ export type Database = {
           quantity: number
           service_id: string | null
           service_order_id: string
+          service_system: string | null
           started_at: string | null
           technician_user_id: string | null
           unit_price_snapshot: number
@@ -6377,6 +6378,7 @@ export type Database = {
           quantity?: number
           service_id?: string | null
           service_order_id: string
+          service_system?: string | null
           started_at?: string | null
           technician_user_id?: string | null
           unit_price_snapshot?: number
@@ -6400,6 +6402,7 @@ export type Database = {
           quantity?: number
           service_id?: string | null
           service_order_id?: string
+          service_system?: string | null
           started_at?: string | null
           technician_user_id?: string | null
           unit_price_snapshot?: number
@@ -6443,6 +6446,20 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
+          },
+          {
+            foreignKeyName: "service_order_services_service_system_fkey"
+            columns: ["service_system"]
+            isOneToOne: false
+            referencedRelation: "service_systems"
+            referencedColumns: ["slug"]
+          },
+          {
+            foreignKeyName: "service_order_services_service_system_fkey"
+            columns: ["service_system"]
+            isOneToOne: false
+            referencedRelation: "v_service_systems_status"
+            referencedColumns: ["slug"]
           },
         ]
       }
@@ -7157,6 +7174,20 @@ export type Database = {
             referencedRelation: "app_users"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "step_blocks_system_fk"
+            columns: ["applies_to_system"]
+            isOneToOne: false
+            referencedRelation: "service_systems"
+            referencedColumns: ["slug"]
+          },
+          {
+            foreignKeyName: "step_blocks_system_fk"
+            columns: ["applies_to_system"]
+            isOneToOne: false
+            referencedRelation: "v_service_systems_status"
+            referencedColumns: ["slug"]
+          },
         ]
       }
       service_step_templates: {
@@ -7405,6 +7436,20 @@ export type Database = {
             referencedRelation: "services"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "survey_tpl_system_fk"
+            columns: ["applies_to_system"]
+            isOneToOne: false
+            referencedRelation: "service_systems"
+            referencedColumns: ["slug"]
+          },
+          {
+            foreignKeyName: "survey_tpl_system_fk"
+            columns: ["applies_to_system"]
+            isOneToOne: false
+            referencedRelation: "v_service_systems_status"
+            referencedColumns: ["slug"]
+          },
         ]
       }
       service_surveys: {
@@ -7549,6 +7594,39 @@ export type Database = {
           },
         ]
       }
+      service_systems: {
+        Row: {
+          active: boolean
+          created_at: string
+          is_physical: boolean
+          name: string
+          short_name: string | null
+          slug: string
+          sort: number
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          is_physical?: boolean
+          name: string
+          short_name?: string | null
+          slug: string
+          sort?: number
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          is_physical?: boolean
+          name?: string
+          short_name?: string | null
+          slug?: string
+          sort?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       services: {
         Row: {
           active: boolean | null
@@ -7653,6 +7731,20 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_estoque_variancia"
             referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "services_system_fk"
+            columns: ["service_system"]
+            isOneToOne: false
+            referencedRelation: "service_systems"
+            referencedColumns: ["slug"]
+          },
+          {
+            foreignKeyName: "services_system_fk"
+            columns: ["service_system"]
+            isOneToOne: false
+            referencedRelation: "v_service_systems_status"
+            referencedColumns: ["slug"]
           },
         ]
       }
@@ -8846,6 +8938,45 @@ export type Database = {
           },
         ]
       }
+      v_service_systems_status: {
+        Row: {
+          active: boolean | null
+          is_physical: boolean | null
+          name: string | null
+          passos_abertura: number | null
+          passos_fechamento: number | null
+          perguntas: number | null
+          servicos: number | null
+          short_name: string | null
+          slug: string | null
+          sort: number | null
+        }
+        Insert: {
+          active?: boolean | null
+          is_physical?: boolean | null
+          name?: string | null
+          passos_abertura?: never
+          passos_fechamento?: never
+          perguntas?: never
+          servicos?: never
+          short_name?: string | null
+          slug?: string | null
+          sort?: number | null
+        }
+        Update: {
+          active?: boolean | null
+          is_physical?: boolean | null
+          name?: string | null
+          passos_abertura?: never
+          passos_fechamento?: never
+          perguntas?: never
+          servicos?: never
+          short_name?: string | null
+          slug?: string | null
+          sort?: number | null
+        }
+        Relationships: []
+      }
       vw_os_profitability: {
         Row: {
           client_name: string | null
@@ -9042,6 +9173,14 @@ export type Database = {
       is_admin: { Args: { _user_id: string }; Returns: boolean }
       is_admin_or_financial: { Args: { _user_id: string }; Returns: boolean }
       is_external_seller: { Args: { _user_id: string }; Returns: boolean }
+      lines_missing_system: {
+        Args: { p_service_order_id: string }
+        Returns: {
+          line_id: string
+          service_name: string
+          service_verb: string
+        }[]
+      }
       log_app_error: {
         Args: {
           p_action?: string

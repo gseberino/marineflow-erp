@@ -10,6 +10,8 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { MoneyInput } from '@/components/MoneyInput';
+import { useServiceSystems } from '@/hooks/use-service-systems';
+import { VERBOS, VERB_LABEL } from '@/hooks/use-service-classification';
 
 interface Props {
   open: boolean;
@@ -22,24 +24,31 @@ export function ServiceFormDialog({ open, onOpenChange, editData, onCreated }: P
   const { t } = useI18n();
   const create = useCreateService();
   const update = useUpdateService();
+  const { data: sistemas = [] } = useServiceSystems();
 
-  const [form, setForm] = useState({
+  // `category` (texto livre) foi aposentado em 02/08: estava vazio em 257 dos
+  // 262 serviços e concorria com service_system, que é o que de fato classifica
+  // — é ele que traz a abertura e o fechamento de segurança do roteiro.
+  const VAZIO = {
     name: '',
     description: '',
-    category: '',
+    service_system: '',
+    service_verb: '',
     billing_unit: 'hour',
     default_price: 0,
     currency: 'BRL',
     active: true,
     default_warranty_days: 0,
-  });
+  };
+  const [form, setForm] = useState(VAZIO);
 
   useEffect(() => {
     if (editData) {
       setForm({
         name: editData.name || '',
         description: editData.description || '',
-        category: editData.category || '',
+        service_system: editData.service_system || '',
+        service_verb: editData.service_verb || '',
         billing_unit: editData.billing_unit || 'hour',
         default_price: editData.default_price || 0,
         currency: editData.currency || 'BRL',
@@ -47,8 +56,9 @@ export function ServiceFormDialog({ open, onOpenChange, editData, onCreated }: P
         default_warranty_days: editData.default_warranty_days ?? 0,
       });
     } else {
-      setForm({ name: '', description: '', category: '', billing_unit: 'hour', default_price: 0, currency: 'BRL', active: true, default_warranty_days: 0 });
+      setForm(VAZIO);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editData, open]);
 
   const set = (field: string, value: any) => setForm((p) => ({ ...p, [field]: value }));
@@ -56,8 +66,16 @@ export function ServiceFormDialog({ open, onOpenChange, editData, onCreated }: P
   const handleSave = async () => {
     if (!form.name.trim()) return;
     try {
-      const { name, ...rest } = form;
-      const payload = { ...rest, service_name: name };
+      // A coluna é `name`. O código antigo mandava `service_name`, que não
+      // existe no schema — salvar por este diálogo falhava em silêncio para
+      // quem não olhava o toast de erro.
+      // Vazio vira null de propósito: '' violaria a FK de service_systems, e
+      // sistema nulo tem significado ("depende da OS").
+      const payload = {
+        ...form,
+        service_system: form.service_system || null,
+        service_verb: form.service_verb || null,
+      };
       if (editData?.id) {
         await update.mutateAsync({ id: editData.id, ...payload });
         toast.success(t.services.updateSuccess);
@@ -94,11 +112,39 @@ export function ServiceFormDialog({ open, onOpenChange, editData, onCreated }: P
             <Label>{t.common.description}</Label>
             <Textarea value={form.description} onChange={(e) => set('description', e.target.value)} rows={2} className="mt-1" />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          {/* Os dois eixos que geram o roteiro. O sistema decide a preparação e
+              o fechamento de segurança; o verbo decide o corpo. Deixar o sistema
+              em branco é dizer "depende da OS" — aí quem monta a OS escolhe. */}
+          <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <Label>{t.services.category}</Label>
-              <Input value={form.category} onChange={(e) => set('category', e.target.value)} className="mt-1" />
+              <Label>Categoria (sistema)</Label>
+              <Select value={form.service_system} onValueChange={(v) => set('service_system', v)}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Depende da OS" />
+                </SelectTrigger>
+                <SelectContent>
+                  {sistemas.map((s) => (
+                    <SelectItem key={s.slug} value={s.slug}>{s.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
+            <div>
+              <Label>O que se faz (verbo)</Label>
+              <Select value={form.service_verb} onValueChange={(v) => set('service_verb', v)}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Não definido" />
+                </SelectTrigger>
+                <SelectContent>
+                  {VERBOS.map((v) => (
+                    <SelectItem key={v} value={v}>{VERB_LABEL[v] ?? v}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
             <div>
               <Label>{t.services.billingUnit}</Label>
               <Select value={form.billing_unit} onValueChange={(v) => set('billing_unit', v)}>

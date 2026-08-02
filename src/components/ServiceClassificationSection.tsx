@@ -5,12 +5,14 @@ import { Badge } from '@/components/ui/badge';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
-import { Check, ChevronDown, ChevronRight, Loader2, Tags } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Loader2, Pencil, Tags } from 'lucide-react';
 import { toast } from 'sonner';
 import {
-  useServicesToReview, useConfirmClassification, SISTEMAS, VERBOS,
-  SYSTEM_LABEL, VERB_LABEL, type ClassifiedService,
+  useServicesToReview, useConfirmClassification, VERBOS,
+  VERB_LABEL, type ClassifiedService,
 } from '@/hooks/use-service-classification';
+import { useServiceSystems } from '@/hooks/use-service-systems';
+import { ServiceFormDialog } from '@/components/ServiceFormDialog';
 
 /**
  * Fila de revisão da classificação do catálogo.
@@ -21,10 +23,14 @@ import {
  */
 export function ServiceClassificationSection() {
   const { data: servicos = [], isLoading } = useServicesToReview();
+  const { data: sistemas = [] } = useServiceSystems();
   const confirm = useConfirmClassification();
 
   const [aberto, setAberto] = useState(false);
   const [edicoes, setEdicoes] = useState<Record<string, { system: string | null; verb: string | null }>>({});
+  // Revisar a classificação e corrigir nome, descrição ou preço são a mesma
+  // conversa — não faz sentido mandar o dono procurar o serviço noutra tela.
+  const [editandoServico, setEditandoServico] = useState<ClassifiedService | null>(null);
 
   function valor(s: ClassifiedService) {
     return edicoes[s.id] ?? { system: s.service_system, verb: s.service_verb };
@@ -106,8 +112,8 @@ export function ServiceClassificationSection() {
                         <SelectValue placeholder="Sistema" />
                       </SelectTrigger>
                       <SelectContent>
-                        {SISTEMAS.map((x) => (
-                          <SelectItem key={x} value={x}>{SYSTEM_LABEL[x] ?? x}</SelectItem>
+                        {sistemas.map((x) => (
+                          <SelectItem key={x.slug} value={x.slug}>{x.name}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -129,6 +135,13 @@ export function ServiceClassificationSection() {
                     <Button size="sm" disabled={confirm.isPending} onClick={() => confirmar(s)}>
                       <Check className="mr-1.5 h-3.5 w-3.5" /> Confirmar
                     </Button>
+                    <Button
+                      size="sm" variant="outline"
+                      title="Editar nome, descrição, preço e demais dados do serviço"
+                      onClick={() => setEditandoServico(s)}
+                    >
+                      <Pencil className="mr-1.5 h-3.5 w-3.5" /> Editar serviço
+                    </Button>
                   </div>
                 </div>
               );
@@ -136,6 +149,12 @@ export function ServiceClassificationSection() {
           </div>
         )}
       </Card>
+
+      <ServiceFormDialog
+        open={!!editandoServico}
+        onOpenChange={(aberto) => { if (!aberto) setEditandoServico(null); }}
+        editData={editandoServico}
+      />
     </section>
   );
 }

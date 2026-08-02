@@ -18,6 +18,12 @@ import {
   type ServiceOrderStep,
 } from '@/hooks/use-service-steps';
 import { useAppSettings } from '@/hooks/use-app-settings';
+import {
+  useServiceSystems, useLinesMissingSystem, useSetLineSystem,
+} from '@/hooks/use-service-systems';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
 
 const STATUS_LABEL: Record<string, string> = {
   pending: 'a fazer',
@@ -63,6 +69,11 @@ export function ServiceRoutePanel({
   const { data: reasons = [] } = useStopReasons();
   const { data: materials = [] } = useRouteMaterials(serviceOrderId);
   const { data: settings } = useAppSettings();
+  // Serviço genérico ("diagnóstico no local") só ganha bloco de segurança
+  // depois que alguém disser qual sistema ele toca NESTA OS.
+  const { data: semSistema = [] } = useLinesMissingSystem(serviceOrderId);
+  const { data: sistemas = [] } = useServiceSystems();
+  const setLineSystem = useSetLineSystem();
   const generate = useGenerateSteps();
   const reorder = useReorderSteps();
   const remove = useDeleteStep();
@@ -160,6 +171,46 @@ export function ServiceRoutePanel({
       </div>
 
       {isLoading && <p className="text-sm text-muted-foreground">Carregando roteiro…</p>}
+
+      {/* Serviço genérico sem sistema definido: sem esta resposta o roteiro sai
+          SEM bloco de segurança. Antes isso acontecia calado — um diagnóstico em
+          sistema de gás saía sem "fechar o registro". Agora pergunta. */}
+      {semSistema.length > 0 && (
+        <div className="space-y-2 rounded-md border border-amber-500/50 bg-amber-50 p-3 dark:bg-amber-950/30">
+          <p className="flex items-center gap-1.5 text-sm font-medium">
+            <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+            {semSistema.length === 1
+              ? 'Um serviço desta OS serve a vários sistemas'
+              : `${semSistema.length} serviços desta OS servem a vários sistemas`}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Diga o que cada um vai tocar para o roteiro trazer a preparação de segurança certa.
+            Sem isso, eles entram sem bloco de abertura nem de fechamento.
+          </p>
+          {semSistema.map((linha) => (
+            <div key={linha.line_id} className="flex flex-wrap items-center gap-2">
+              <span className="min-w-0 flex-1 truncate text-sm">{linha.service_name}</span>
+              <Select
+                onValueChange={(sistema) =>
+                  setLineSystem.mutate({ lineId: linha.line_id, system: sistema }, {
+                    onSuccess: () => toast.success('Sistema definido para esta linha.'),
+                    onError: (e: any) => toast.error(e?.message || 'Erro ao definir'),
+                  })
+                }
+              >
+                <SelectTrigger className="h-9 w-full sm:w-56">
+                  <SelectValue placeholder="O que este serviço toca?" />
+                </SelectTrigger>
+                <SelectContent>
+                  {sistemas.map((s) => (
+                    <SelectItem key={s.slug} value={s.slug}>{s.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Sugestões da IA: separadas, e cada uma exige uma decisão. Aceitar em
           lote seria o mesmo que não revisar — e é assim que passo errado entra. */}
