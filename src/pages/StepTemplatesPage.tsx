@@ -16,6 +16,7 @@ import {
 import { StepBlocksSection } from '@/components/StepBlocksSection';
 import { SurveyQuestionsSection } from '@/components/SurveyQuestionsSection';
 import { ServiceClassificationSection } from '@/components/ServiceClassificationSection';
+import { ServiceSystemsSection } from '@/components/ServiceSystemsSection';
 import { formatMinutes } from '@/hooks/use-service-steps';
 
 /**
@@ -95,6 +96,8 @@ export default function StepTemplatesPage() {
           nascem o levantamento e o roteiro de cada OS — nada entra em uso sem a sua assinatura.
         </p>
       </div>
+
+      <ServiceSystemsSection />
 
       <ServiceClassificationSection />
 
