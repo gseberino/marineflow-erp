@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -26,7 +27,8 @@ import { useI18n } from '@/i18n';
 import { useFinancialCategories } from '@/hooks/use-financial-categories';
 import {
   useFinanceReviewQueue, useGerarPropostas, useAprovarPropostas, useRecusarPropostas,
-  useMarcarDuplicata, LIMITE_LOTE, type PropostaFinanceira, type Correcao,
+  useMarcarDuplicata, useCriarCategoriaDespesa,
+  LIMITE_LOTE, type PropostaFinanceira, type Correcao,
 } from '@/hooks/use-finance-review';
 import {
   Sparkles, Check, X, ChevronDown, ArrowLeftRight, TrendingDown, Info, RefreshCw,
@@ -83,6 +85,90 @@ function IdentificacaoDaTransacao({ tx }: { tx: PropostaFinanceira['bank_transac
     </dl>
   );
 }
+
+/**
+ * Seletor de categoria que também CRIA a categoria que falta.
+ *
+ * Sem isto, encontrar uma despesa que não se encaixa em nada obriga a sair da tela, achar
+ * o cadastro, criar, voltar e reencontrar a linha — e o caminho mais curto passa a ser
+ * jogar tudo em "Outras despesas". São 87 lançamentos lá, de 52 fornecedores diferentes:
+ * a lacuna não estava na disciplina de quem classifica, estava no custo de classificar
+ * direito.
+ */
+function SeletorDeCategoria({
+  valor, onMudar, categorias, grupoSugerido,
+}: {
+  valor: string;
+  onMudar: (v: string) => void;
+  categorias: { name: string }[];
+  /** Grupo do DRE que a proposta deduziu — a categoria nova nasce no lugar certo. */
+  grupoSugerido: string | null;
+}) {
+  const criar = useCriarCategoriaDespesa();
+  const [abrindo, setAbrindo] = useState(false);
+  const [nome, setNome] = useState('');
+
+  const confirmar = () => {
+    const limpo = nome.trim();
+    if (!limpo) return;
+    criar.mutate(
+      { name: limpo, dre_group: grupoSugerido },
+      {
+        onSuccess: () => {
+          onMudar(limpo);           // já aplica na linha que motivou a criação
+          setNome('');
+          setAbrindo(false);
+        },
+      },
+    );
+  };
+
+  if (abrindo) {
+    return (
+      <div className="flex max-w-sm items-center gap-1">
+        <Input
+          autoFocus
+          value={nome}
+          onChange={(e) => setNome(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') confirmar();
+            if (e.key === 'Escape') setAbrindo(false);
+          }}
+          placeholder="Nome da categoria nova"
+          className="h-8 text-xs"
+        />
+        <Button size="sm" className="h-8" disabled={!nome.trim() || criar.isPending} onClick={confirmar}>
+          Criar
+        </Button>
+        <Button size="sm" variant="ghost" className="h-8" onClick={() => setAbrindo(false)}>
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <Select
+      value={valor}
+      onValueChange={(v) => (v === NOVA_CATEGORIA ? setAbrindo(true) : onMudar(v))}
+    >
+      <SelectTrigger className="h-8 text-xs">
+        <SelectValue placeholder="Escolher categoria" />
+      </SelectTrigger>
+      <SelectContent>
+        {categorias.map((c) => (
+          <SelectItem key={c.name} value={c.name}>{c.name}</SelectItem>
+        ))}
+        <SelectItem value={NOVA_CATEGORIA} className="font-medium text-primary">
+          + Criar categoria nova…
+        </SelectItem>
+      </SelectContent>
+    </Select>
+  );
+}
+
+/** Valor sentinela do item "criar": não pode colidir com nome de categoria real. */
+const NOVA_CATEGORIA = '__nova__';
 
 /** CNPJ e CPF em máscara: 14 dígitos crus são ilegíveis para conferir de olho. */
 function formatarDocumento(doc: string | null): string | null {
@@ -160,17 +246,13 @@ function LinhaProposta({
 
           {/* A categoria é a decisão principal da tela: fica editável na linha, sempre. */}
           {!transferencia && (
-            <div className="mt-2 max-w-xs">
-              <Select value={categoria} onValueChange={(v) => onCorrigir({ ...correcao, category: v })}>
-                <SelectTrigger className="h-8 text-xs">
-                  <SelectValue placeholder="Escolher categoria" />
-                </SelectTrigger>
-                <SelectContent>
-                  {categorias.map((c) => (
-                    <SelectItem key={c.name} value={c.name}>{c.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="mt-2 max-w-sm">
+              <SeletorDeCategoria
+                valor={categoria}
+                onMudar={(v) => onCorrigir({ ...correcao, category: v })}
+                categorias={categorias}
+                grupoSugerido={p.dre_group}
+              />
             </div>
           )}
 

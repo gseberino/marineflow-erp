@@ -153,6 +153,43 @@ export function useAprovarPropostas() {
   });
 }
 
+/**
+ * Cria uma categoria de despesa sem sair da tela onde ela fez falta.
+ *
+ * Nasce no mesmo grupo do DRE que a proposta deduziu: uma categoria sem grupo fica fora do
+ * resultado, e o gestor não teria como perceber que o número parou de fechar.
+ */
+export function useCriarCategoriaDespesa() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (v: { name: string; dre_group: string | null }) => {
+      const { data, error } = await supabase
+        .from('financial_categories')
+        .insert({
+          name: v.name,
+          type: 'payable',
+          dre_group: v.dre_group ?? 'despesa_operacional',
+          active: true,
+          sort_order: 900,   // no fim da lista: o que é novo ainda não provou seu lugar
+        } as never)
+        .select('name')
+        .single();
+      if (error) throw error;
+      return (data as any).name as string;
+    },
+    onSuccess: (nome) => {
+      toast.success(`Categoria "${nome}" criada`);
+      qc.invalidateQueries({ queryKey: ['financial-categories'] });
+    },
+    onError: (e: Error) => {
+      const msg = /duplicate key|financial_categories_nome_tipo/i.test(e.message)
+        ? 'Já existe uma categoria de despesa com esse nome.'
+        : e.message || 'Não foi possível criar a categoria';
+      toast.error(msg);
+    },
+  });
+}
+
 /** Uma regra que o gestor ensinou — ou que a IA propôs e aguarda o aceite dele. */
 export interface RegraFinanceira {
   id: string;

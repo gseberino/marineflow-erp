@@ -156,3 +156,23 @@ describe('ações da linha', () => {
     expect(await screen.findByText('Pela sua regra')).toBeInTheDocument();
   });
 });
+
+describe('criar categoria sem sair da tela', () => {
+  it('oferece criar quando nenhuma categoria serve', async () => {
+    // São 87 lançamentos em "Outras despesas" de 52 fornecedores diferentes. A lacuna não
+    // era disciplina de quem classifica — era o custo de classificar direito.
+    const user = userEvent.setup();
+    renderInbox();
+    const seletores = await screen.findAllByRole('combobox');
+    await user.click(seletores[0]);
+    expect(await screen.findByText(/Criar categoria nova/)).toBeInTheDocument();
+  });
+
+  it('escolher "criar" abre o campo do nome, sem trocar de tela', async () => {
+    const user = userEvent.setup();
+    renderInbox();
+    await user.click((await screen.findAllByRole('combobox'))[0]);
+    await user.click(await screen.findByText(/Criar categoria nova/));
+    expect(await screen.findByPlaceholderText(/Nome da categoria nova/)).toBeInTheDocument();
+  });
+});
