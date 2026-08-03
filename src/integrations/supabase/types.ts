@@ -7188,6 +7188,20 @@ export type Database = {
             referencedRelation: "v_service_systems_status"
             referencedColumns: ["slug"]
           },
+          {
+            foreignKeyName: "step_blocks_verb_fk"
+            columns: ["applies_to_verb"]
+            isOneToOne: false
+            referencedRelation: "service_verbs"
+            referencedColumns: ["slug"]
+          },
+          {
+            foreignKeyName: "step_blocks_verb_fk"
+            columns: ["applies_to_verb"]
+            isOneToOne: false
+            referencedRelation: "v_service_verbs_status"
+            referencedColumns: ["slug"]
+          },
         ]
       }
       service_step_templates: {
@@ -7450,6 +7464,20 @@ export type Database = {
             referencedRelation: "v_service_systems_status"
             referencedColumns: ["slug"]
           },
+          {
+            foreignKeyName: "survey_tpl_verb_fk"
+            columns: ["applies_to_verb"]
+            isOneToOne: false
+            referencedRelation: "service_verbs"
+            referencedColumns: ["slug"]
+          },
+          {
+            foreignKeyName: "survey_tpl_verb_fk"
+            columns: ["applies_to_verb"]
+            isOneToOne: false
+            referencedRelation: "v_service_verbs_status"
+            referencedColumns: ["slug"]
+          },
         ]
       }
       service_surveys: {
@@ -7627,6 +7655,36 @@ export type Database = {
         }
         Relationships: []
       }
+      service_verbs: {
+        Row: {
+          active: boolean
+          created_at: string
+          is_fieldwork: boolean
+          name: string
+          slug: string
+          sort: number
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          is_fieldwork?: boolean
+          name: string
+          slug: string
+          sort?: number
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          is_fieldwork?: boolean
+          name?: string
+          slug?: string
+          sort?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       services: {
         Row: {
           active: boolean | null
@@ -7744,6 +7802,20 @@ export type Database = {
             columns: ["service_system"]
             isOneToOne: false
             referencedRelation: "v_service_systems_status"
+            referencedColumns: ["slug"]
+          },
+          {
+            foreignKeyName: "services_verb_fk"
+            columns: ["service_verb"]
+            isOneToOne: false
+            referencedRelation: "service_verbs"
+            referencedColumns: ["slug"]
+          },
+          {
+            foreignKeyName: "services_verb_fk"
+            columns: ["service_verb"]
+            isOneToOne: false
+            referencedRelation: "v_service_verbs_status"
             referencedColumns: ["slug"]
           },
         ]
@@ -8972,6 +9044,39 @@ export type Database = {
           perguntas?: never
           servicos?: never
           short_name?: string | null
+          slug?: string | null
+          sort?: number | null
+        }
+        Relationships: []
+      }
+      v_service_verbs_status: {
+        Row: {
+          active: boolean | null
+          is_fieldwork: boolean | null
+          name: string | null
+          passos_corpo: number | null
+          perguntas: number | null
+          servicos: number | null
+          slug: string | null
+          sort: number | null
+        }
+        Insert: {
+          active?: boolean | null
+          is_fieldwork?: boolean | null
+          name?: string | null
+          passos_corpo?: never
+          perguntas?: never
+          servicos?: never
+          slug?: string | null
+          sort?: number | null
+        }
+        Update: {
+          active?: boolean | null
+          is_fieldwork?: boolean | null
+          name?: string | null
+          passos_corpo?: never
+          perguntas?: never
+          servicos?: never
           slug?: string | null
           sort?: number | null
         }

@@ -5,13 +5,13 @@ import { Badge } from '@/components/ui/badge';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
-import { Check, ChevronDown, ChevronRight, Loader2, Pencil, Tags } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, EyeOff, Loader2, Pencil, Tags } from 'lucide-react';
 import { toast } from 'sonner';
 import {
-  useServicesToReview, useConfirmClassification, VERBOS,
-  VERB_LABEL, type ClassifiedService,
+  useServicesToReview, useConfirmClassification, useDeactivateService,
+  type ClassifiedService,
 } from '@/hooks/use-service-classification';
-import { useServiceSystems } from '@/hooks/use-service-systems';
+import { useServiceSystems, useServiceVerbs } from '@/hooks/use-service-systems';
 import { ServiceFormDialog } from '@/components/ServiceFormDialog';
 
 /**
@@ -24,7 +24,9 @@ import { ServiceFormDialog } from '@/components/ServiceFormDialog';
 export function ServiceClassificationSection() {
   const { data: servicos = [], isLoading } = useServicesToReview();
   const { data: sistemas = [] } = useServiceSystems();
+  const { data: verbos = [] } = useServiceVerbs();
   const confirm = useConfirmClassification();
+  const desativar = useDeactivateService();
 
   const [aberto, setAberto] = useState(false);
   const [edicoes, setEdicoes] = useState<Record<string, { system: string | null; verb: string | null }>>({});
@@ -126,8 +128,8 @@ export function ServiceClassificationSection() {
                         <SelectValue placeholder="Verbo" />
                       </SelectTrigger>
                       <SelectContent>
-                        {VERBOS.map((x) => (
-                          <SelectItem key={x} value={x}>{VERB_LABEL[x] ?? x}</SelectItem>
+                        {verbos.map((x) => (
+                          <SelectItem key={x.slug} value={x.slug}>{x.name}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -141,6 +143,19 @@ export function ServiceClassificationSection() {
                       onClick={() => setEditandoServico(s)}
                     >
                       <Pencil className="mr-1.5 h-3.5 w-3.5" /> Editar serviço
+                    </Button>
+                    {/* Classificar o que não deveria existir é trabalho jogado
+                        fora — daqui mesmo se tira do catálogo. */}
+                    <Button
+                      size="sm" variant="ghost" className="text-destructive"
+                      title="Tirar do catálogo — as OS antigas não são afetadas"
+                      disabled={desativar.isPending}
+                      onClick={() => desativar.mutate(s, {
+                        onSuccess: () => toast.success(`"${s.name}" saiu do catálogo.`),
+                        onError: (e: any) => toast.error(e?.message || 'Erro ao inativar'),
+                      })}
+                    >
+                      <EyeOff className="mr-1.5 h-3.5 w-3.5" /> Não usar mais
                     </Button>
                   </div>
                 </div>
