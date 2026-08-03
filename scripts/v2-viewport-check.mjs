@@ -69,7 +69,12 @@ if (!EMAIL || !PASSWORD) {
 mkdirSync(OUT, { recursive: true });
 
 const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+/* Contexto explícito, e não browser.newPage(): a suíte troca de página a cada
+   tela para não acumular memória (ver o loop adiante), e páginas do MESMO
+   contexto compartilham localStorage — que é onde a sessão do Supabase vive.
+   Com browser.newPage() cada página nasceria isolada e deslogada. */
+const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+let page = await context.newPage();
 let failures = 0;
 
 // Login pela UI (mesmo caminho do usuário real)
@@ -126,6 +131,16 @@ for (const pg of PAGES) {
      telas seguintes — inclusive as de compras, que vêm no fim da lista — sem
      verificação nenhuma, sem que isso ficasse evidente na saída. */
   try {
+    /* Página nova a cada tela. Sem isso, o Chrome ia acumulando memória ao
+       longo das ~290 combinações (screenshots de página inteira em listas
+       longas) e, por volta da metade da suíte, telas pesadas simplesmente
+       paravam de renderizar — a falha migrava entre services e suppliers e
+       sumia quando a tela era aberta isolada. O contexto é o mesmo, então a
+       sessão continua válida e não é preciso relogar. */
+    const anterior = page;
+    page = await context.newPage();
+    await anterior.close();
+
     await page.setViewportSize({ width: 1280, height: 900 });
     // Primeira visita usa timeout largo: o Vite compila a página sob demanda
     // no dev server e a transformação fria pode passar de 20s.
