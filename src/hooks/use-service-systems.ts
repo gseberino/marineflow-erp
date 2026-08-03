@@ -120,6 +120,82 @@ export function useUpdateServiceSystem() {
   });
 }
 
+// ── Tipos de serviço (verbos) ────────────────────────────────────────────────
+// Mesma mecânica das categorias. O verbo traz o corpo do roteiro; a categoria
+// traz a abertura e o fechamento de segurança.
+
+export interface ServiceVerb {
+  slug: string;
+  name: string;
+  is_fieldwork: boolean;
+  sort: number;
+  active: boolean;
+}
+
+export interface ServiceVerbStatus extends ServiceVerb {
+  passos_corpo: number;
+  perguntas: number;
+  servicos: number;
+}
+
+export function useServiceVerbs() {
+  return useQuery({
+    queryKey: ['service-verbs'],
+    queryFn: async (): Promise<ServiceVerb[]> => {
+      const { data, error } = await supabase
+        .from('service_verbs')
+        .select('slug, name, is_fieldwork, sort, active')
+        .eq('active', true)
+        .order('sort');
+      if (error) throw error;
+      return (data || []) as unknown as ServiceVerb[];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useServiceVerbsStatus() {
+  return useQuery({
+    queryKey: ['service-verbs-status'],
+    queryFn: async (): Promise<ServiceVerbStatus[]> => {
+      const { data, error } = await supabase
+        .from('v_service_verbs_status')
+        .select('*')
+        .order('sort');
+      if (error) throw error;
+      return (data || []) as unknown as ServiceVerbStatus[];
+    },
+  });
+}
+
+/** Tipo de serviço sem corpo escrito não gera passo nenhum. */
+export function verbIncomplete(v: ServiceVerbStatus): boolean {
+  return v.passos_corpo === 0;
+}
+
+export function useCreateServiceVerb() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { name: string; is_fieldwork: boolean }) => {
+      const slug = slugify(input.name);
+      if (!slug) throw new Error('Dê um nome ao tipo de serviço.');
+
+      const { error } = await supabase.from('service_verbs').insert({
+        slug, name: input.name.trim(), is_fieldwork: input.is_fieldwork, sort: 500,
+      });
+      if (error) {
+        if (error.code === '23505') throw new Error('Já existe um tipo com esse nome.');
+        throw error;
+      }
+      return slug;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['service-verbs'] });
+      qc.invalidateQueries({ queryKey: ['service-verbs-status'] });
+    },
+  });
+}
+
 // ── Sistema da linha da OS ───────────────────────────────────────────────────
 
 export interface LineMissingSystem {

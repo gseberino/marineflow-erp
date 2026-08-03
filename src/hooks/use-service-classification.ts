@@ -61,6 +61,32 @@ export function useServicesToReview() {
  * Passa a `classified_by='human'` com confiança 1: a partir daí nenhuma
  * varredura automática mexe nisso de novo, e o diff alimenta o aprendizado.
  */
+/**
+ * Tira o serviço do catálogo.
+ *
+ * Inativar, não apagar: as OS antigas que o referenciam continuam intactas e o
+ * nome fica preservado no snapshot da linha. Ele só some de quem monta
+ * orçamento — e da fila de revisão, porque classificar o que não se vende mais
+ * é trabalho jogado fora.
+ */
+export function useDeactivateService() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (service: ClassifiedService) => {
+      const { error } = await supabase
+        .from('services')
+        .update({ active: false })
+        .eq('id', service.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['services-to-review'] });
+      qc.invalidateQueries({ queryKey: ['services'] });
+      qc.invalidateQueries({ queryKey: ['step-blocks-impact'] });
+    },
+  });
+}
+
 export function useConfirmClassification() {
   const qc = useQueryClient();
   return useMutation({

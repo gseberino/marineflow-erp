@@ -17,6 +17,7 @@ import { StepBlocksSection } from '@/components/StepBlocksSection';
 import { SurveyQuestionsSection } from '@/components/SurveyQuestionsSection';
 import { ServiceClassificationSection } from '@/components/ServiceClassificationSection';
 import { ServiceSystemsSection } from '@/components/ServiceSystemsSection';
+import { ServiceVerbsSection } from '@/components/ServiceVerbsSection';
 import { formatMinutes } from '@/hooks/use-service-steps';
 
 /**
@@ -98,6 +99,8 @@ export default function StepTemplatesPage() {
       </div>
 
       <ServiceSystemsSection />
+
+      <ServiceVerbsSection />
 
       <ServiceClassificationSection />
 
