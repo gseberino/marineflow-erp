@@ -98,15 +98,23 @@ describe("pontuação por valor", () => {
     expect(scoreCandidate(tx({ amount: 6000 }), cand({ amount: 1000 }))).toBeNull();
   });
 
+  // Os dois casos abaixo agora exigem remetente identificado: valor aproximado sozinho
+  // deixou de sustentar sugestão (ver "identidade do remetente manda mais que o valor").
   it("aceita diferença dentro da tolerância e reporta o valor", () => {
-    const s = scoreCandidate(tx({ amount: 5970 }), cand({ amount: 6000 }));
+    const s = scoreCandidate(
+      tx({ amount: 5970, counterparty_document: "12345678901" }),
+      cand({ amount: 6000, clientDocument: "123.456.789-01" }),
+    );
     expect(s).not.toBeNull();
     expect(s!.difference).toBe(-30);
     expect(s!.reasons.some((r) => r.signal === "valor")).toBe(true);
   });
 
   it("relata quando entrou mais do que o esperado (possível juros)", () => {
-    const s = scoreCandidate(tx({ amount: 6120 }), cand({ amount: 6000 }));
+    const s = scoreCandidate(
+      tx({ amount: 6120, counterparty_document: "12345678901" }),
+      cand({ amount: 6000, clientDocument: "123.456.789-01" }),
+    );
     expect(s!.difference).toBe(120);
     expect(s!.reasons.find((r) => r.signal === "valor")!.detail).toContain("a mais");
   });
@@ -367,5 +375,80 @@ describe("ordenação e aplicação automática", () => {
 
   it("devolve lista vazia quando nada é plausível", () => {
     expect(suggestMatches(tx({ amount: 6000 }), [cand({ amount: 50 })])).toHaveLength(0);
+  });
+});
+
+describe("identidade do remetente manda mais que o valor", () => {
+  // Caso real: entrou R$ 18.001,04 do CPF de Lucenira Maria de Melo, e o motor sugeriu a
+  // OS-00060, cuja cliente é Charline Martins. Casou só porque o valor batia com o sinal —
+  // nada no cálculo notava que eram duas pessoas diferentes.
+
+  it("valor aproximado NÃO sustenta sugestão de remetente não identificado", () => {
+    // Sem documento que bata, sem nome no histórico e sem memória, um valor perto é só
+    // coincidência aritmética. Antes isto virava sugestão.
+    const r = scoreCandidate(
+      tx({ amount: 5950, description: "PIX RECEBIDO", counterparty_name: "FULANO DESCONHECIDO" }),
+      cand({ amount: 6000, clientName: "Marina do Sol" }),
+      DEFAULT_MATCH_OPTIONS,
+    );
+    expect(r).toBeNull();
+  });
+
+  it("mas valor EXATO continua valendo, mesmo sem identificação", () => {
+    // O usuário definiu assim: sem reconhecer o remetente, exige-se o valor exato.
+    const r = scoreCandidate(
+      tx({ amount: 6000, description: "PIX RECEBIDO" }),
+      cand({ amount: 6000, clientName: "Marina do Sol" }),
+      DEFAULT_MATCH_OPTIONS,
+    );
+    expect(r).not.toBeNull();
+  });
+
+  it("valor aproximado volta a valer quando o remetente é reconhecido", () => {
+    const r = scoreCandidate(
+      tx({ amount: 5950, counterparty_document: "12345678901" }),
+      cand({ amount: 6000, clientName: "Marina do Sol", clientDocument: "123.456.789-01" }),
+      DEFAULT_MATCH_OPTIONS,
+    );
+    expect(r).not.toBeNull();
+    expect(r!.reasons.some((x) => x.detail.includes("dentro da tolerância"))).toBe(true);
+  });
+
+  it("documento divergente derruba a pontuação e diz o porquê", () => {
+    const iguais = scoreCandidate(
+      tx({ amount: 6000, counterparty_document: "06150839940" }),
+      cand({ amount: 6000, clientName: "Charline Martins", clientDocument: "061.508.399-40" }),
+      DEFAULT_MATCH_OPTIONS,
+    );
+    const divergentes = scoreCandidate(
+      tx({ amount: 6000, counterparty_name: "LUCENIRA MARIA DE MELO", counterparty_document: "79973019920" }),
+      cand({ amount: 6000, clientName: "Charline Martins", clientDocument: "061.508.399-40" }),
+      DEFAULT_MATCH_OPTIONS,
+    );
+
+    expect(divergentes!.score).toBeLessThan(iguais!.score);
+    // O gestor precisa LER que são pessoas diferentes antes de confirmar.
+    expect(divergentes!.reasons.some((x) => /não é Charline Martins/.test(x.detail))).toBe(true);
+  });
+
+  it("não elimina o terceiro que paga por outro — só rebaixa", () => {
+    // Cônjuge ou empresa do titular pagando é comum demais para virar bloqueio.
+    const r = scoreCandidate(
+      tx({ amount: 6000, counterparty_name: "LUCENIRA MARIA DE MELO", counterparty_document: "79973019920" }),
+      cand({ amount: 6000, clientName: "Charline Martins", clientDocument: "061.508.399-40" }),
+      DEFAULT_MATCH_OPTIONS,
+    );
+    expect(r).not.toBeNull();
+    expect(r!.autoApply).toBe(false);
+  });
+
+  it("documento que confere com valor exato segue sendo certeza", () => {
+    const r = scoreCandidate(
+      tx({ amount: 6000, counterparty_document: "06150839940" }),
+      cand({ amount: 6000, clientDocument: "061.508.399-40", clientName: "Charline Martins" }),
+      DEFAULT_MATCH_OPTIONS,
+    );
+    expect(r!.tier).toBe("certain");
+    expect(r!.autoApply).toBe(true);
   });
 });

@@ -31,6 +31,13 @@ type TabType = 'pending' | 'reconciled' | 'ignored';
 /** Separa o trabalho diário (conciliar) da configuração (de onde vêm os dados). */
 type SecaoType = 'conciliar' | 'fontes';
 
+/** CPF/CNPJ com máscara: 11 ou 14 dígitos crus não se conferem de olho. */
+function formatarDoc(doc: string): string {
+  if (doc.length === 14) return doc.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
+  if (doc.length === 11) return doc.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+  return doc;
+}
+
 export function BankReconciliation() {
   const { t, formatCurrency, formatDate } = useI18n();
   const qc = useQueryClient();
@@ -636,6 +643,22 @@ export function BankReconciliation() {
                         <StatusBadge className="bg-accent/15 text-accent">{t.financial.sourceCard}</StatusBadge>
                       )}
                     </div>
+                    {/* Quem mandou o dinheiro. Faltava — e sem isso não há como julgar uma
+                        sugestão: o motor podia apontar a OS de um cliente para um pagamento
+                        vindo de outra pessoa, e a tela não dava como perceber. */}
+                    {(tx.counterparty_name || tx.counterparty_document) && (
+                      <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                        <span className="shrink-0">
+                          {tx.transaction_type === 'credit' ? 'De:' : 'Para:'}
+                        </span>
+                        <span className="truncate font-medium text-foreground">
+                          {tx.counterparty_name || 'não informado'}
+                        </span>
+                        {tx.counterparty_document && (
+                          <span className="tabular-nums">{formatarDoc(tx.counterparty_document)}</span>
+                        )}
+                      </p>
+                    )}
                     {/* A correspondência aparece aqui, na linha fechada: antes ela só existia
                         depois de abrir a transação, e o resumo "N sugestões" não levava a lugar nenhum. */}
                     {melhor ? (
@@ -653,7 +676,19 @@ export function BankReconciliation() {
                           {melhor.score}%
                         </StatusBadge>
                       </p>
-                    ) : internalTransferTx.has(tx.id) ? (
+                    ) : null}
+
+                    {/* Divergência de identidade sobe para a linha fechada, em vez de ficar
+                        no tooltip do botão: é a informação que impede uma baixa errada, e
+                        quem confirma no automático nunca passaria o mouse ali. */}
+                    {melhor?.reasons.some((r) => r.detail.includes('não é')) && (
+                      <p className="mt-1 flex items-start gap-1.5 rounded-md border border-warning/40 bg-warning/10 p-1.5 text-xs text-warning">
+                        <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                        <span>{melhor.reasons.find((r) => r.detail.includes('não é'))!.detail}</span>
+                      </p>
+                    )}
+
+                    {melhor ? null : internalTransferTx.has(tx.id) ? (
                       <p className="text-xs mt-1 text-muted-foreground">
                         Parece transferência entre contas da empresa — não é receita nem despesa
                       </p>

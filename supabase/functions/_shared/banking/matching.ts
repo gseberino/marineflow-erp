@@ -33,6 +33,22 @@ const W_DATE = 15;     // proximidade do vencimento
 const BONUS_DOCNUM = 12; // número do orçamento/OS citado no histórico do extrato
 const BONUS_MEMORIA = 18; // teto do reforço por conciliações anteriores com o mesmo cliente
 
+/**
+ * Desconto quando os dois lados têm documento e eles DISCORDAM.
+ *
+ * Pesa mais que o acerto de nome inteiro (15) de propósito: documento é identidade, nome é
+ * aproximação. Uma entrada de R$ 18.001,04 do CPF de Lucenira casava com a OS de Charline
+ * porque o valor batia com o sinal — e nada no cálculo notava que eram duas pessoas
+ * diferentes. Não elimina o candidato, porque terceiro pagando por outro é comum; rebaixa
+ * e escreve o motivo.
+ *
+ * Calibrado em 20 de propósito: com valor exato (45) e data no vencimento (15), o total
+ * cai para 40 — acima do corte de 35, logo o candidato ainda APARECE, mas como sugestão
+ * fraca e com o aviso à vista. Uma penalidade de 30 zeraria a sugestão, e aí o gestor não
+ * veria nem o alerta: some da tela o caso que ele mais precisa julgar.
+ */
+const PENALIDADE_DOCUMENTO_DIVERGENTE = 20;
+
 /** Sufixos societários e ruído que atrapalham a comparação de nomes. */
 const NAME_NOISE = new Set([
   "LTDA", "ME", "EPP", "EIRELI", "SA", "S", "A", "CIA", "COMERCIO", "COMERCIAL",
@@ -288,10 +304,42 @@ export function scoreCandidate(
   // ── Camada de probabilidade ────────────────────────────────────────────────
   let score = 0;
 
+  const searchText = `${tx.description} ${tx.counterparty_name || ""}`;
+  const overlap = nameOverlap(candidate.clientName, searchText);
+
+  /**
+   * O remetente CONTRADIZ o candidato: os dois lados têm documento e eles diferem.
+   *
+   * Não elimina — terceiro pagando por outro é comum (cônjuge, empresa do titular). Mas
+   * não pode ser tratado como ausência de informação: quando os dois documentos são
+   * conhecidos e discordam, isso é evidência CONTRA, e o gestor precisa ler isso escrito
+   * antes de confirmar.
+   */
+  const documentoContradiz = docDigits.length >= 11 && candDocDigits.length >= 11
+    && docDigits !== candDocDigits;
+
+  /**
+   * Há algo ligando este remetente a este candidato?
+   *
+   * É o que separa "pagamento identificado" de "valor que por acaso é parecido". Sem
+   * nenhum vínculo, um valor aproximado é só coincidência aritmética — e coincidência
+   * aritmética não deve virar sugestão de baixa.
+   */
+  const identificado = documentMatch
+    || overlap > 0
+    || (!!candidate.clientId && (memory?.get(candidate.clientId) ?? 0) > 0)
+    || documentCited(candidate.documentNumber, searchText);
+
   // Valor: pontuação cheia dentro da tolerância, decaindo até 25% de diferença.
   if (absDiff < 0.01) {
     score += W_AMOUNT;
     reasons.push({ signal: "valor", detail: "Valor exato", points: W_AMOUNT });
+  } else if (!identificado) {
+    // A tolerância é um privilégio de quem já foi reconhecido. Aqui não foi: nem o
+    // documento bate, nem o nome aparece, nem existe histórico. Aceitar valor aproximado
+    // neste estado é o que fazia uma entrada de um remetente casar com a OS de outro
+    // cliente só porque os números ficaram perto.
+    return null;
   } else if (absDiff <= tolerance) {
     const pts = Math.round(W_AMOUNT * 0.9);
     score += pts;
@@ -315,6 +363,15 @@ export function scoreCandidate(
     });
   }
 
+  if (documentoContradiz) {
+    score -= PENALIDADE_DOCUMENTO_DIVERGENTE;
+    reasons.push({
+      signal: "documento",
+      detail: `Quem enviou (${tx.counterparty_name || "CPF/CNPJ " + formatDoc(docDigits)}) não é ${candidate.clientName || "o cliente"} — confira se foi um terceiro pagando`,
+      points: -PENALIDADE_DOCUMENTO_DIVERGENTE,
+    });
+  }
+
   if (documentMatch) {
     score += W_DOCUMENT;
     reasons.push({
@@ -324,8 +381,6 @@ export function scoreCandidate(
     });
   }
 
-  const searchText = `${tx.description} ${tx.counterparty_name || ""}`;
-  const overlap = nameOverlap(candidate.clientName, searchText);
   if (overlap > 0) {
     const pts = Math.round(W_NAME * overlap);
     if (pts > 0) {
@@ -451,6 +506,13 @@ function scoreDate(
   }
 
   return { ok: true };
+}
+
+/** CPF/CNPJ com máscara: dígitos crus não se conferem de olho. */
+function formatDoc(doc: string): string {
+  if (doc.length === 14) return doc.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5");
+  if (doc.length === 11) return doc.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+  return doc;
 }
 
 function formatBRL(value: number): string {
