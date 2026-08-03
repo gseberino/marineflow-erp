@@ -127,7 +127,16 @@ export function useUpdateServiceSystem() {
 export interface ServiceVerb {
   slug: string;
   name: string;
-  is_fieldwork: boolean;
+  /**
+   * true = o trabalho mexe no sistema e expõe a energia, então recebe a
+   * abertura e o fechamento de segurança da categoria.
+   * false = observa, mede e documenta sem intervir.
+   *
+   * O critério é a EXPOSIÇÃO, não o lugar: um levantamento de projeto acontece
+   * no barco e continua sendo observação. Chamava-se `is_fieldwork` até 03/08,
+   * o que fazia a pergunta errada — e o dono percebeu.
+   */
+  intervem_no_sistema: boolean;
   sort: number;
   active: boolean;
 }
@@ -144,7 +153,7 @@ export function useServiceVerbs() {
     queryFn: async (): Promise<ServiceVerb[]> => {
       const { data, error } = await supabase
         .from('service_verbs')
-        .select('slug, name, is_fieldwork, sort, active')
+        .select('slug, name, intervem_no_sistema, sort, active')
         .eq('active', true)
         .order('sort');
       if (error) throw error;
@@ -176,18 +185,34 @@ export function verbIncomplete(v: ServiceVerbStatus): boolean {
 export function useCreateServiceVerb() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { name: string; is_fieldwork: boolean }) => {
+    mutationFn: async (input: { name: string; intervem_no_sistema: boolean }) => {
       const slug = slugify(input.name);
       if (!slug) throw new Error('Dê um nome ao tipo de serviço.');
 
       const { error } = await supabase.from('service_verbs').insert({
-        slug, name: input.name.trim(), is_fieldwork: input.is_fieldwork, sort: 500,
+        slug, name: input.name.trim(), intervem_no_sistema: input.intervem_no_sistema, sort: 500,
       });
       if (error) {
         if (error.code === '23505') throw new Error('Já existe um tipo com esse nome.');
         throw error;
       }
       return slug;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['service-verbs'] });
+      qc.invalidateQueries({ queryKey: ['service-verbs-status'] });
+    },
+  });
+}
+
+export function useUpdateServiceVerb() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      slug, patch,
+    }: { slug: string; patch: Partial<Pick<ServiceVerb, 'name' | 'active' | 'intervem_no_sistema' | 'sort'>> }) => {
+      const { error } = await supabase.from('service_verbs').update(patch).eq('slug', slug);
+      if (error) throw error;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['service-verbs'] });

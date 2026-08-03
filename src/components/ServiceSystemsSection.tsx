@@ -6,11 +6,12 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import {
-  AlertTriangle, ChevronDown, ChevronRight, Layers3, Loader2, Plus,
+  AlertTriangle, Check, ChevronDown, ChevronRight, Layers3, Loader2, Pencil, Plus, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
-  useServiceSystemsStatus, useCreateServiceSystem, systemIncomplete, slugify,
+  useServiceSystemsStatus, useCreateServiceSystem, useUpdateServiceSystem,
+  systemIncomplete, slugify, type ServiceSystemStatus,
 } from '@/hooks/use-service-systems';
 
 /**
@@ -24,9 +25,29 @@ import {
 export function ServiceSystemsSection() {
   const { data: sistemas = [], isLoading } = useServiceSystemsStatus();
   const criar = useCreateServiceSystem();
+  const atualizar = useUpdateServiceSystem();
 
   const [aberto, setAberto] = useState(false);
   const [novo, setNovo] = useState({ name: '', is_physical: true });
+  const [editando, setEditando] = useState<string | null>(null);
+  const [rascunho, setRascunho] = useState({ name: '', short_name: '' });
+
+  function abrirEdicao(s: ServiceSystemStatus) {
+    setEditando(s.slug);
+    setRascunho({ name: s.name, short_name: s.short_name || '' });
+  }
+
+  function salvar(slug: string) {
+    const nome = rascunho.name.trim();
+    if (!nome) return;
+    atualizar.mutate(
+      { slug, patch: { name: nome, short_name: rascunho.short_name.trim() || nome } },
+      {
+        onSuccess: () => { setEditando(null); toast.success('Categoria atualizada.'); },
+        onError: (e: any) => toast.error(e?.message || 'Erro ao salvar'),
+      },
+    );
+  }
 
   function handleCriar() {
     const nome = novo.name.trim();
@@ -98,25 +119,66 @@ export function ServiceSystemsSection() {
           <div className="divide-y border-t">
             {sistemas.map((s) => {
               const incompleta = systemIncomplete(s);
+              const emEdicao = editando === s.slug;
               return (
-                <div key={s.slug} className="flex flex-wrap items-center gap-2 p-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="text-sm font-medium">{s.name}</span>
-                      {!s.is_physical && (
-                        <Badge variant="outline" className="text-[10px]">sem risco físico</Badge>
-                      )}
-                      {incompleta && (
-                        <Badge variant="outline" className="border-amber-500 text-[10px] text-amber-700 dark:text-amber-400">
-                          faltam blocos
-                        </Badge>
-                      )}
+                <div key={s.slug} className="p-3">
+                  {emEdicao ? (
+                    <div className="space-y-2">
+                      <Input
+                        value={rascunho.name}
+                        onChange={(e) => setRascunho((r) => ({ ...r, name: e.target.value }))}
+                        placeholder="Nome completo"
+                        className="h-9 w-full sm:w-72"
+                      />
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Input
+                          value={rascunho.short_name}
+                          onChange={(e) => setRascunho((r) => ({ ...r, short_name: e.target.value }))}
+                          placeholder="Nome curto (aparece no roteiro)"
+                          className="h-9 w-full sm:w-56"
+                        />
+                        <Button size="sm" variant="ghost" onClick={() => setEditando(null)}>
+                          <X className="mr-1.5 h-3.5 w-3.5" /> Cancelar
+                        </Button>
+                        <Button
+                          size="sm"
+                          disabled={!rascunho.name.trim() || atualizar.isPending}
+                          onClick={() => salvar(s.slug)}
+                        >
+                          <Check className="mr-1.5 h-3.5 w-3.5" /> Salvar
+                        </Button>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        O nome curto é o que sai no rótulo do bloco: “Antes de mexer —{' '}
+                        {rascunho.short_name.trim() || rascunho.name.trim() || '…'}”.
+                      </p>
                     </div>
-                    <p className="text-[11px] tabular-nums text-muted-foreground">
-                      {s.servicos} serviço(s) · {s.passos_abertura} de abertura ·{' '}
-                      {s.passos_fechamento} de fechamento · {s.perguntas} pergunta(s)
-                    </p>
-                  </div>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-sm font-medium">{s.name}</span>
+                          {!s.is_physical && (
+                            <Badge variant="outline" className="text-[10px]">sem risco físico</Badge>
+                          )}
+                          {incompleta && (
+                            <Badge variant="outline" className="border-amber-500 text-[10px] text-amber-700 dark:text-amber-400">
+                              faltam blocos
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="text-[11px] tabular-nums text-muted-foreground">
+                          {s.servicos} serviço(s) · {s.passos_abertura} de abertura ·{' '}
+                          {s.passos_fechamento} de fechamento · {s.perguntas} pergunta(s)
+                        </p>
+                      </div>
+                      <Button size="sm" variant="outline" className="h-8 px-2"
+                              title="Editar nome da categoria"
+                              onClick={() => abrirEdicao(s)}>
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  )}
                 </div>
               );
             })}

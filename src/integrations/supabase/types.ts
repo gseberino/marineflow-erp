@@ -7817,7 +7817,7 @@ export type Database = {
         Row: {
           active: boolean
           created_at: string
-          is_fieldwork: boolean
+          intervem_no_sistema: boolean
           name: string
           slug: string
           sort: number
@@ -7826,7 +7826,7 @@ export type Database = {
         Insert: {
           active?: boolean
           created_at?: string
-          is_fieldwork?: boolean
+          intervem_no_sistema?: boolean
           name: string
           slug: string
           sort?: number
@@ -7835,7 +7835,7 @@ export type Database = {
         Update: {
           active?: boolean
           created_at?: string
-          is_fieldwork?: boolean
+          intervem_no_sistema?: boolean
           name?: string
           slug?: string
           sort?: number
@@ -9210,7 +9210,7 @@ export type Database = {
       v_service_verbs_status: {
         Row: {
           active: boolean | null
-          is_fieldwork: boolean | null
+          intervem_no_sistema: boolean | null
           name: string | null
           passos_corpo: number | null
           perguntas: number | null
@@ -9220,7 +9220,7 @@ export type Database = {
         }
         Insert: {
           active?: boolean | null
-          is_fieldwork?: boolean | null
+          intervem_no_sistema?: boolean | null
           name?: string | null
           passos_corpo?: never
           perguntas?: never
@@ -9230,7 +9230,7 @@ export type Database = {
         }
         Update: {
           active?: boolean | null
-          is_fieldwork?: boolean | null
+          intervem_no_sistema?: boolean | null
           name?: string | null
           passos_corpo?: never
           perguntas?: never
