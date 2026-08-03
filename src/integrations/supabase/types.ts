@@ -9440,8 +9440,10 @@ export type Database = {
         Args: { p_service_order_id: string }
         Returns: {
           line_id: string
+          motivo_sugestao: string
           service_name: string
           service_verb: string
+          sistema_sugerido: string
         }[]
       }
       log_app_error: {
@@ -9622,6 +9624,13 @@ export type Database = {
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
       stock_model_v2_on: { Args: never; Returns: boolean }
+      suggest_system_for_line: {
+        Args: { p_line_id: string }
+        Returns: {
+          motivo: string
+          sistema: string
+        }[]
+      }
       touch_open_loop: {
         Args: {
           p_evidence?: string

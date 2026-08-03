@@ -10,7 +10,7 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { MoneyInput } from '@/components/MoneyInput';
-import { useServiceSystems } from '@/hooks/use-service-systems';
+import { useServiceSystems, AXIS_LABEL } from '@/hooks/use-service-systems';
 import { VERBOS, VERB_LABEL } from '@/hooks/use-service-classification';
 
 interface Props {
@@ -117,7 +117,7 @@ export function ServiceFormDialog({ open, onOpenChange, editData, onCreated }: P
               em branco é dizer "depende da OS" — aí quem monta a OS escolhe. */}
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <Label>Categoria (sistema)</Label>
+              <Label>{AXIS_LABEL}</Label>
               <Select value={form.service_system} onValueChange={(v) => set('service_system', v)}>
                 <SelectTrigger className="mt-1">
                   <SelectValue placeholder="Depende da OS" />

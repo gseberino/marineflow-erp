@@ -5,6 +5,8 @@ import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ServiceTimer } from '@/components/ServiceTimer';
 import { useServiceOrderSteps } from '@/hooks/use-service-steps';
+import { useLinesMissingSystem } from '@/hooks/use-service-systems';
+import { LineSystemPicker } from './line-system-picker';
 import { useI18n } from '@/i18n';
 import { ServiceCardFormComponent, QuickDiscountPopover, BILLING_UNIT_LABELS } from './form-parts';
 
@@ -53,6 +55,14 @@ export function ServicesSection(props: ServicesSectionProps) {
   const linesWithRoute = useMemo(
     () => new Set(routeSteps.map((s) => s.service_order_service_id).filter(Boolean) as string[]),
     [routeSteps],
+  );
+  // Serviço genérico ("diagnóstico no local") precisa dizer que sistema toca —
+  // e precisa dizer AQUI, porque é o sistema que define o tempo previsto e, com
+  // ele, o valor do orçamento.
+  const { data: semSistema = [] } = useLinesMissingSystem(isNew ? undefined : orderId);
+  const pendentePorLinha = useMemo(
+    () => new Map(semSistema.map((l) => [l.line_id, l])),
+    [semSistema],
   );
   const { t, formatCurrency } = useI18n();
 
@@ -223,17 +233,22 @@ export function ServicesSection(props: ServicesSectionProps) {
                   onDelete: () =>
                     removeService.mutate({ id: s.id, service_order_id: orderId! }),
                   extra: orderId ? (
-                    <ServiceTimer
-                      serviceLineId={s.id}
-                      serviceOrderId={orderId}
-                      startedAt={s.started_at || null}
-                      finishedAt={s.finished_at || null}
-                      elapsedMinutes={s.elapsed_minutes || 0}
-                      managedByRoute={linesWithRoute.has(s.id)}
-                      onUpdate={() =>
-                        queryClient.invalidateQueries({ queryKey: ['so-services', orderId] })
-                      }
-                    />
+                    <>
+                      <ServiceTimer
+                        serviceLineId={s.id}
+                        serviceOrderId={orderId}
+                        startedAt={s.started_at || null}
+                        finishedAt={s.finished_at || null}
+                        elapsedMinutes={s.elapsed_minutes || 0}
+                        managedByRoute={linesWithRoute.has(s.id)}
+                        onUpdate={() =>
+                          queryClient.invalidateQueries({ queryKey: ['so-services', orderId] })
+                        }
+                      />
+                      {pendentePorLinha.has(s.id) && (
+                        <LineSystemPicker linha={pendentePorLinha.get(s.id)!} />
+                      )}
+                    </>
                   ) : undefined,
                 });
               })}
