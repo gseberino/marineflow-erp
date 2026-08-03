@@ -55,7 +55,20 @@ interface Body {
   ids?: string[];
   note?: string;
   /** Correções do gestor antes de aprovar. */
-  overrides?: Record<string, { category?: string; description?: string; amount?: number; date?: string }>;
+  overrides?: Record<string, Correcao>;
+}
+
+interface Correcao {
+  category?: string;
+  description?: string;
+  amount?: number;
+  date?: string;
+  /** A quem a despesa pertence quando não é a um fornecedor. */
+  payeeId?: string | null;
+  /** OS a que a compra pertence — é o que dá custo e margem reais por serviço. */
+  serviceOrderId?: string | null;
+  /** OC que este pagamento quita. */
+  purchaseOrderId?: string | null;
 }
 
 Deno.serve(async (req) => {
@@ -151,6 +164,20 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     .from("finance_rules").select("*").eq("status", "active").limit(500);
   const regras = (regrasRows ?? []) as unknown as RegraFinanceira[];
 
+  // Ordens de compra ainda sem pagamento: é com elas que uma saída pode casar.
+  const { data: ocsAbertas } = await admin
+    .from("purchase_orders")
+    .select("id, po_number, total_amount, supplier_id, service_order_id, expected_date")
+    .is("payable_id", null)
+    .not("status", "in", '("cancelled")')
+    .limit(500);
+  const ocs = (ocsAbertas ?? []) as any[];
+
+  // Favorecidos conhecidos, para reconhecer sócio/diarista pelo CPF do extrato.
+  const { data: favorecidosRows } = await admin
+    .from("payees").select("id, name, document, default_category").eq("active", true).limit(500);
+  const favorecidos = (favorecidosRows ?? []) as any[];
+
   const linhas: Record<string, unknown>[] = [];
   const autoAplicar: Record<string, unknown>[] = [];
   for (const tx of transacoes) {
@@ -179,19 +206,43 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     if (tx.transaction_type !== "debit") continue;
 
     const p = montarProposta(tx, fornecedores, historico, regras);
+
+    // Favorecido pelo documento: CPF é identidade, e reconhecê-lo poupa o gestor de
+    // escolher a mesma pessoa toda vez que ela recebe.
+    const docTx = (tx.counterparty_document || "").replace(/\D/g, "");
+    const favorecido = docTx.length >= 11
+      ? favorecidos.find((f) => String(f.document || "").replace(/\D/g, "") === docTx)
+      : undefined;
+
+    // OC do MESMO fornecedor com valor idêntico — o par é forte o bastante para sugerir,
+    // fraco o bastante para exigir confirmação: duas OCs de igual valor existem.
+    const oc = p.suggestedSupplierId
+      ? ocs.find((o) => o.supplier_id === p.suggestedSupplierId
+          && Math.abs(Number(o.total_amount) - tx.amount) < 0.01)
+      : undefined;
+
     const linha = {
       kind: p.kind,
       bank_transaction_id: p.bankTransactionId,
       title: p.title,
-      reasoning: p.reasoning,
       confidence: p.confidence,
       suggested_amount: p.suggestedAmount,
       suggested_date: p.suggestedDate,
       suggested_category: p.suggestedCategory,
       suggested_description: p.suggestedDescription,
       suggested_supplier_id: p.suggestedSupplierId,
+      suggested_payee_id: favorecido?.id ?? null,
+      // A OC costuma saber para qual serviço a compra foi — herdar isso evita perguntar
+      // duas vezes a mesma coisa.
+      suggested_purchase_order_id: oc?.id ?? null,
+      suggested_service_order_id: oc?.service_order_id ?? null,
       dre_group: p.dreGroup,
       applied_rule_id: p.appliedRuleId,
+      reasoning: [
+        p.reasoning,
+        favorecido && `Favorecido reconhecido pelo CPF/CNPJ: ${favorecido.name}`,
+        oc && `Mesmo valor da ordem de compra ${oc.po_number}, do mesmo fornecedor`,
+      ].filter(Boolean).join(" · "),
     };
     linhas.push(linha);
     // Regra com autonomia foi conferida pelo gestor no momento em que ele a criou; segurar
@@ -357,7 +408,7 @@ async function aprovar(
   admin: DbClient,
   ids: string[],
   userId: string | null,
-  overrides: Record<string, { category?: string; description?: string; amount?: number; date?: string }>,
+  overrides: Record<string, Correcao>,
 ) {
   if (ids.length === 0) return jr({ error: "nenhuma proposta informada" }, 400);
 
@@ -395,12 +446,26 @@ async function aprovar(
           // Sem fornecedor cadastrado, o nome do extrato é a única identificação que
           // existe — melhor guardá-lo do que deixar a despesa anônima.
           supplier_name: p.suggested_supplier_id ? null : descricao,
+          // Favorecido pessoa e OS a que a compra pertence: é o que transforma "saiu
+          // dinheiro" em "este serviço custou isto" e "este sócio retirou aquilo".
+          payee_id: ov.payeeId ?? p.suggested_payee_id ?? null,
+          linked_service_order_id: ov.serviceOrderId ?? p.suggested_service_order_id ?? null,
           origin: "bank_reconciliation",
           bank_transaction_id: p.bank_transaction_id,
         }).select("id").single();
         if (e1) throw e1;
-        await admin.from("finance_review_queue").update({ created_payable_id: (criado as any).id }).eq("id", p.id);
+        const payableId = (criado as any).id as string;
+        await admin.from("finance_review_queue").update({ created_payable_id: payableId }).eq("id", p.id);
         await admin.from("bank_transactions").update({ reconciled: true }).eq("id", p.bank_transaction_id);
+
+        // Quitar a ordem de compra fecha o ciclo do suprimento: sem isto, a OC fica
+        // "enviada" para sempre e ninguém sabe o que já foi pago.
+        const ocId = ov.purchaseOrderId ?? p.suggested_purchase_order_id ?? null;
+        if (ocId) {
+          await admin.from("purchase_orders")
+            .update({ payable_id: payableId, status: "received" })
+            .eq("id", ocId);
+        }
       } else if (p.kind === "create_receivable") {
         // Receita exige cliente (receivables.client_id é NOT NULL) e, sem ele, o
         // lançamento não teria a quem pertencer. Falhar aqui com motivo legível é melhor

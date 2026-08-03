@@ -5,7 +5,7 @@
 // Build e tsc passariam com a regra invertida — e aprovar em lote uma saída de R$ 18 mil é
 // exatamente o erro que o limite existe para impedir.
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { I18nProvider } from '@/i18n';
@@ -61,6 +61,7 @@ vi.mock('@/hooks/use-financial-categories', () => ({
     data: [
       { name: 'Combustível e deslocamento', dre_group: 'custo_direto' },
       { name: 'Peças e materiais', dre_group: 'custo_direto' },
+      { name: 'Pró-labore e retirada', dre_group: 'nao_operacional' },
     ],
     isLoading: false,
   }),
@@ -174,5 +175,46 @@ describe('criar categoria sem sair da tela', () => {
     await user.click((await screen.findAllByRole('combobox'))[0]);
     await user.click(await screen.findByText(/Criar categoria nova/));
     expect(await screen.findByPlaceholderText(/Nome da categoria nova/)).toBeInTheDocument();
+  });
+});
+
+describe('vínculo que a categoria pede', () => {
+  // A categoria diz a que mundo a despesa pertence, e é ela que decide a próxima
+  // pergunta. Mostrar os dois campos em toda linha viraria ruído em quase todas; não
+  // mostrar nenhum deixa R$ 36 mil de pró-labore sem dono e R$ 37 mil de peça sem serviço.
+  it('pede a OS quando é peça ou material', async () => {
+    renderInbox();
+    // p2 é "Peças e materiais".
+    expect(await screen.findByText(/Comprado para qual OS/)).toBeInTheDocument();
+  });
+
+  it('não pergunta nada quando a categoria não pede', async () => {
+    renderInbox();
+    // p1 é combustível: nem favorecido nem OS fazem sentido ali.
+    const combustivel = (await screen.findAllByText(/POSTO AGRICOPEL/))[0].closest('div');
+    expect(within(combustivel!.parentElement!).queryByText(/Quem recebeu/)).not.toBeInTheDocument();
+  });
+
+  it('pede o favorecido quando é pró-labore', async () => {
+    const user = userEvent.setup();
+    renderInbox();
+    // Troca a categoria de p1 para pró-labore e o campo deve aparecer.
+    await user.click((await screen.findAllByRole('combobox'))[0]);
+    await user.click(await screen.findByText('Pró-labore e retirada'));
+    expect(await screen.findByText(/Quem recebeu/)).toBeInTheDocument();
+  });
+
+  it('oferece cadastrar o favorecido que falta', async () => {
+    // Abrir dois Radix Select em sequência exige esperar o primeiro desmontar: enquanto
+    // ele fecha, o overlay deixa a página com pointer-events: none e o clique seguinte
+    // não chega em ninguém.
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    renderInbox();
+    await user.click((await screen.findAllByRole('combobox'))[0]);
+    await user.click(await screen.findByText('Pró-labore e retirada'));
+
+    const gatilhoFavorecido = (await screen.findByText(/Quem recebeu/)).closest('button');
+    await user.click(gatilhoFavorecido!);
+    expect(await screen.findByText(/Cadastrar favorecido/)).toBeInTheDocument();
   });
 });

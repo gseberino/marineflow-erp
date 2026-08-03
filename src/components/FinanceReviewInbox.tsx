@@ -25,6 +25,11 @@ import {
 } from '@/components/ui/tooltip';
 import { useI18n } from '@/i18n';
 import { useFinancialCategories } from '@/hooks/use-financial-categories';
+import { PayeeFormDialog } from '@/components/PayeeFormDialog';
+import {
+  usePayees, useServiceOrdersVinculaveis, ROTULO_TIPO,
+  CATEGORIAS_COM_FAVORECIDO, CATEGORIAS_COM_OS,
+} from '@/hooks/use-payees';
 import {
   useFinanceReviewQueue, useGerarPropostas, useAprovarPropostas, useRecusarPropostas,
   useMarcarDuplicata, useCriarCategoriaDespesa,
@@ -170,6 +175,91 @@ function SeletorDeCategoria({
 /** Valor sentinela do item "criar": não pode colidir com nome de categoria real. */
 const NOVA_CATEGORIA = '__nova__';
 
+/**
+ * O vínculo que a categoria pede — e só ele.
+ *
+ * A categoria diz a que mundo a despesa pertence, então é ela que decide a próxima
+ * pergunta: pró-labore pertence a uma PESSOA, peça pertence a um SERVIÇO. Mostrar os dois
+ * campos em toda linha viraria ruído em quase todas; não mostrar nenhum deixa R$ 36 mil de
+ * pró-labore sem dono e R$ 37 mil de peça sem serviço.
+ */
+function VinculoDaCategoria({
+  categoria, favorecidoId, osId, onMudar, ocupado,
+}: {
+  categoria: string;
+  favorecidoId: string | null;
+  osId: string | null;
+  onMudar: (v: { payeeId?: string | null; serviceOrderId?: string | null }) => void;
+  ocupado: boolean;
+}) {
+  const pedeFavorecido = CATEGORIAS_COM_FAVORECIDO.includes(categoria);
+  const pedeOS = CATEGORIAS_COM_OS.includes(categoria);
+
+  const { data: favorecidos = [] } = usePayees();
+  const { data: ordens = [] } = useServiceOrdersVinculaveis();
+  const [cadastrando, setCadastrando] = useState(false);
+
+  if (!pedeFavorecido && !pedeOS) return null;
+
+  return (
+    <div className="mt-2 flex max-w-lg flex-wrap items-center gap-2">
+      {pedeFavorecido && (
+        <>
+          <Select
+            value={favorecidoId ?? ''}
+            onValueChange={(v) => (v === NOVO_FAVORECIDO ? setCadastrando(true) : onMudar({ payeeId: v }))}
+            disabled={ocupado}
+          >
+            <SelectTrigger className="h-8 max-w-[15rem] text-xs">
+              <SelectValue placeholder="Quem recebeu?" />
+            </SelectTrigger>
+            <SelectContent>
+              {favorecidos.map((f) => (
+                <SelectItem key={f.id} value={f.id}>
+                  {f.name} · {ROTULO_TIPO[f.kind]}
+                </SelectItem>
+              ))}
+              <SelectItem value={NOVO_FAVORECIDO} className="font-medium text-primary">
+                + Cadastrar favorecido…
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          <PayeeFormDialog
+            aberto={cadastrando}
+            onFechar={() => setCadastrando(false)}
+            categoriaSugerida={categoria}
+            onCriado={(id) => onMudar({ payeeId: id })}
+          />
+        </>
+      )}
+
+      {pedeOS && (
+        <Select
+          value={osId ?? ''}
+          onValueChange={(v) => onMudar({ serviceOrderId: v === SEM_OS ? null : v })}
+          disabled={ocupado}
+        >
+          <SelectTrigger className="h-8 max-w-[17rem] text-xs">
+            <SelectValue placeholder="Comprado para qual OS?" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={SEM_OS}>Nenhuma — despesa geral</SelectItem>
+            {ordens.map((o) => (
+              <SelectItem key={o.id} value={o.id}>
+                {o.service_order_number} · {o.clients?.name ?? 'sem cliente'}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+    </div>
+  );
+}
+
+const NOVO_FAVORECIDO = '__novo_favorecido__';
+/** Radix não aceita SelectItem com valor vazio; "nenhuma" precisa de um valor próprio. */
+const SEM_OS = '__sem_os__';
+
 /** CNPJ e CPF em máscara: 14 dígitos crus são ilegíveis para conferir de olho. */
 function formatarDocumento(doc: string | null): string | null {
   if (!doc) return null;
@@ -254,6 +344,16 @@ function LinhaProposta({
                 grupoSugerido={p.dre_group}
               />
             </div>
+          )}
+
+          {!transferencia && (
+            <VinculoDaCategoria
+              categoria={categoria}
+              favorecidoId={correcao?.payeeId ?? p.suggested_payee_id ?? null}
+              osId={correcao?.serviceOrderId ?? p.suggested_service_order_id ?? null}
+              onMudar={(v) => onCorrigir({ ...correcao, ...v })}
+              ocupado={ocupado}
+            />
           )}
 
           <Collapsible open={aberta} onOpenChange={setAberta}>

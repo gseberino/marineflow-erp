@@ -23,6 +23,9 @@ export interface PropostaFinanceira {
   dre_group: string | null;
   /** Regra que classificou esta proposta — permite auditar a regra pelo resultado. */
   applied_rule_id: string | null;
+  suggested_payee_id: string | null;
+  suggested_service_order_id: string | null;
+  suggested_purchase_order_id: string | null;
   created_at: string;
   /** Identificação vinda do extrato, para decidir sem abrir o internet banking. */
   bank_transactions?: {
@@ -46,6 +49,12 @@ export interface Correcao {
   description?: string;
   amount?: number;
   date?: string;
+  /** A quem a despesa pertence, quando não é a um fornecedor (sócio, diarista, prestador). */
+  payeeId?: string | null;
+  /** OS a que a compra pertence — é o que dá custo e margem reais por serviço. */
+  serviceOrderId?: string | null;
+  /** OC que este pagamento quita. */
+  purchaseOrderId?: string | null;
 }
 
 /**
