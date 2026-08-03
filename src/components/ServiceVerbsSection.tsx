@@ -6,41 +6,61 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import {
-  AlertTriangle, ChevronDown, ChevronRight, Hammer, Loader2, Plus,
+  AlertTriangle, Check, ChevronDown, ChevronRight, Hammer, Loader2, Pencil, Plus, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
-  useServiceVerbsStatus, useCreateServiceVerb, verbIncomplete, slugify,
+  useServiceVerbsStatus, useCreateServiceVerb, useUpdateServiceVerb,
+  verbIncomplete, slugify, type ServiceVerbStatus,
 } from '@/hooks/use-service-systems';
 
 /**
  * Tipos de serviço (verbos) — o que se faz.
  *
- * Irmã da tela de categorias, e pela mesma razão: faltava um tipo adequado
- * ("projeto") e sete serviços de assessoria acabaram como "logística", herdando
- * o roteiro de quem viaja — conferir ferramenta antes de sair, fotografar o bem
- * na retirada. Classificação errada não é só desorganização: vira roteiro
- * errado na mão do técnico.
+ * `intervem_no_sistema` responde a uma pergunta só: este trabalho expõe alguém
+ * à energia do sistema? Se sim, o roteiro traz a preparação e o fechamento de
+ * segurança da categoria; se não, traz só o corpo.
  *
- * `is_fieldwork` existe por causa desse caso: projeto tem sistema (elétrico,
- * hidráulico) mas não vai a campo, então não deve receber "desligue a
- * alimentação".
+ * O critério é a exposição, NÃO o lugar — um levantamento de projeto acontece
+ * no barco e continua sendo observação. Até 03/08 este campo se chamava
+ * "vai a campo", que fazia a pergunta errada; o dono percebeu ao ver
+ * "projeto/consultoria" marcado como se nunca saísse do escritório.
  */
 export function ServiceVerbsSection() {
   const { data: verbos = [], isLoading } = useServiceVerbsStatus();
   const criar = useCreateServiceVerb();
+  const atualizar = useUpdateServiceVerb();
 
   const [aberto, setAberto] = useState(false);
-  const [novo, setNovo] = useState({ name: '', is_fieldwork: true });
+  const [novo, setNovo] = useState({ name: '', intervem_no_sistema: true });
+  const [editando, setEditando] = useState<string | null>(null);
+  const [rascunho, setRascunho] = useState({ name: '', intervem_no_sistema: true });
+
+  function abrirEdicao(v: ServiceVerbStatus) {
+    setEditando(v.slug);
+    setRascunho({ name: v.name, intervem_no_sistema: v.intervem_no_sistema });
+  }
+
+  function salvar(slug: string) {
+    const nome = rascunho.name.trim();
+    if (!nome) return;
+    atualizar.mutate(
+      { slug, patch: { name: nome, intervem_no_sistema: rascunho.intervem_no_sistema } },
+      {
+        onSuccess: () => { setEditando(null); toast.success('Tipo de serviço atualizado.'); },
+        onError: (e: any) => toast.error(e?.message || 'Erro ao salvar'),
+      },
+    );
+  }
 
   function handleCriar() {
     const nome = novo.name.trim();
     if (!nome) return;
     criar.mutate(
-      { name: nome, is_fieldwork: novo.is_fieldwork },
+      { name: nome, intervem_no_sistema: novo.intervem_no_sistema },
       {
         onSuccess: () => {
-          setNovo({ name: '', is_fieldwork: true });
+          setNovo({ name: '', intervem_no_sistema: true });
           toast.success('Tipo criado. Agora escreva os passos do corpo dele.');
         },
         onError: (e: any) => toast.error(e?.message || 'Erro ao criar tipo'),
@@ -65,8 +85,10 @@ export function ServiceVerbsSection() {
         <div className="min-w-0">
           <h2 className="text-sm font-semibold">Tipos de serviço</h2>
           <p className="text-xs text-muted-foreground">
-            O tipo decide o corpo do roteiro — o miolo do que se faz. A categoria decide a
-            preparação e o fechamento de segurança ao redor dele.
+            O tipo decide o corpo do roteiro — o miolo do que se faz. Marque
+            <strong> mexe no sistema</strong> quando o trabalho expõe alguém à energia (elétrica,
+            gás, pressão): é isso que faz o roteiro trazer a preparação e o fechamento de segurança
+            da categoria. Observar, medir e fotografar não expõe, mesmo indo até o barco.
           </p>
         </div>
       </div>
@@ -96,27 +118,76 @@ export function ServiceVerbsSection() {
 
         {aberto && (
           <div className="divide-y border-t">
-            {verbos.map((v) => (
-              <div key={v.slug} className="flex flex-wrap items-center gap-2 p-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-sm font-medium">{v.name}</span>
-                    {!v.is_fieldwork && (
-                      <Badge variant="outline" className="text-[10px]">não vai a campo</Badge>
-                    )}
-                    {verbIncomplete(v) && (
-                      <Badge variant="outline" className="border-amber-500 text-[10px] text-amber-700 dark:text-amber-400">
-                        sem corpo
-                      </Badge>
-                    )}
-                  </div>
-                  <p className="text-[11px] tabular-nums text-muted-foreground">
-                    {v.servicos} serviço(s) · {v.passos_corpo} passo(s) de corpo ·{' '}
-                    {v.perguntas} pergunta(s)
-                  </p>
+            {verbos.map((v) => {
+              const emEdicao = editando === v.slug;
+              return (
+                <div key={v.slug} className="p-3">
+                  {emEdicao ? (
+                    <div className="space-y-2">
+                      <Input
+                        value={rascunho.name}
+                        onChange={(e) => setRascunho((r) => ({ ...r, name: e.target.value }))}
+                        className="h-9 w-full sm:w-64"
+                      />
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            id={`mexe-${v.slug}`}
+                            checked={rascunho.intervem_no_sistema}
+                            onCheckedChange={(x) => setRascunho((r) => ({ ...r, intervem_no_sistema: x }))}
+                          />
+                          <Label htmlFor={`mexe-${v.slug}`} className="text-xs font-normal">
+                            mexe no sistema
+                          </Label>
+                        </div>
+                        <Button size="sm" variant="ghost" onClick={() => setEditando(null)}>
+                          <X className="mr-1.5 h-3.5 w-3.5" /> Cancelar
+                        </Button>
+                        <Button
+                          size="sm"
+                          disabled={!rascunho.name.trim() || atualizar.isPending}
+                          onClick={() => salvar(v.slug)}
+                        >
+                          <Check className="mr-1.5 h-3.5 w-3.5" /> Salvar
+                        </Button>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        {rascunho.intervem_no_sistema
+                          ? 'Recebe a preparação e o fechamento de segurança da categoria do serviço.'
+                          : 'Só o corpo: sem preparação de segurança, mesmo com categoria preenchida.'}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-sm font-medium">{v.name}</span>
+                          {v.intervem_no_sistema ? (
+                            <Badge variant="outline" className="text-[10px]">mexe no sistema</Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-[10px]">só observa</Badge>
+                          )}
+                          {verbIncomplete(v) && (
+                            <Badge variant="outline" className="border-amber-500 text-[10px] text-amber-700 dark:text-amber-400">
+                              sem corpo
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="text-[11px] tabular-nums text-muted-foreground">
+                          {v.servicos} serviço(s) · {v.passos_corpo} passo(s) de corpo ·{' '}
+                          {v.perguntas} pergunta(s)
+                        </p>
+                      </div>
+                      <Button size="sm" variant="outline" className="h-8 px-2"
+                              title="Editar nome e critério de segurança"
+                              onClick={() => abrirEdicao(v)}>
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
 
             <div className="space-y-2 bg-muted/30 p-3">
               <Label className="text-xs">Novo tipo de serviço</Label>
@@ -129,11 +200,11 @@ export function ServiceVerbsSection() {
                 />
                 <div className="flex items-center gap-2">
                   <Switch
-                    id="campo"
-                    checked={novo.is_fieldwork}
-                    onCheckedChange={(v) => setNovo((n) => ({ ...n, is_fieldwork: v }))}
+                    id="mexe-novo"
+                    checked={novo.intervem_no_sistema}
+                    onCheckedChange={(v) => setNovo((n) => ({ ...n, intervem_no_sistema: v }))}
                   />
-                  <Label htmlFor="campo" className="text-xs font-normal">vai a campo</Label>
+                  <Label htmlFor="mexe-novo" className="text-xs font-normal">mexe no sistema</Label>
                 </div>
                 <Button size="sm" disabled={!novo.name.trim() || criar.isPending} onClick={handleCriar}>
                   <Plus className="mr-1.5 h-3.5 w-3.5" /> Criar
@@ -142,9 +213,9 @@ export function ServiceVerbsSection() {
               {novo.name.trim() && (
                 <p className="text-[11px] text-muted-foreground">
                   Identificador: <code>{slugify(novo.name)}</code>
-                  {novo.is_fieldwork
+                  {novo.intervem_no_sistema
                     ? ' · recebe a preparação e o fechamento da categoria do serviço'
-                    : ' · não recebe preparação de segurança, mesmo com categoria preenchida'}
+                    : ' · só o corpo, sem preparação de segurança'}
                 </p>
               )}
             </div>
