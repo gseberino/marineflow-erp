@@ -12,7 +12,7 @@ import {
 import { useServiceOrders } from '@/hooks/use-service-orders';
 import { useClients } from '@/hooks/use-clients';
 import { useSuppliers } from '@/hooks/use-suppliers';
-import { OPERATIONAL_EXPENSE_CATEGORIES } from '@/lib/expense-categories';
+import { CategoriaDespesaSelect } from '@/components/CategoriaDespesaSelect';
 import { parseFile, decodeStatementFile, type BankTransaction } from '@/lib/bank-parser';
 import {
   useReconcileSuggestions, useAutoReconcile, useApplySuggestion, useApplyGroup, useAnalyzeWithAI,
@@ -985,14 +985,15 @@ export function BankReconciliation() {
                           ) : (
                             <div>
                               <Label>{t.financial.expenseCategory}</Label>
-                              <Select value={newForm.expense_category} onValueChange={v => setNewForm({ ...newForm, expense_category: v })}>
-                                <SelectTrigger><SelectValue placeholder={t.financial.expenseCategory} /></SelectTrigger>
-                                <SelectContent>
-                                  {OPERATIONAL_EXPENSE_CATEGORIES.map(c => (
-                                    <SelectItem key={c} value={c}>{c}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                              {/* Mesmo seletor da Caixa de entrada: as duas telas
+                                  classificam para o mesmo plano de contas, e a categoria
+                                  que falta pode ser criada aqui. */}
+                              <CategoriaDespesaSelect
+                                valor={newForm.expense_category}
+                                onMudar={v => setNewForm({ ...newForm, expense_category: v })}
+                                className="h-10"
+                                placeholder={t.financial.expenseCategory}
+                              />
                             </div>
                           )}
                         </div>

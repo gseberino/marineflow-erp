@@ -171,12 +171,12 @@ export function useAprovarPropostas() {
 export function useCriarCategoriaDespesa() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (v: { name: string; dre_group: string | null }) => {
+    mutationFn: async (v: { name: string; dre_group: string | null; type?: 'payable' | 'receivable' }) => {
       const { data, error } = await supabase
         .from('financial_categories')
         .insert({
           name: v.name,
-          type: 'payable',
+          type: v.type ?? 'payable',
           dre_group: v.dre_group ?? 'despesa_operacional',
           active: true,
           sort_order: 900,   // no fim da lista: o que é novo ainda não provou seu lugar
