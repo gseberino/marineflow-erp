@@ -198,10 +198,21 @@ export function useCreateServiceVerb() {
 
 // ── Sistema da linha da OS ───────────────────────────────────────────────────
 
+/**
+ * Como este eixo se chama na interface, em todas as telas.
+ *
+ * O dono notou que a mesma coisa aparecia como "Sistema" numa tela e
+ * "Categoria (sistema)" na outra. Um nome só, num lugar só.
+ */
+export const AXIS_LABEL = 'Sistema / categoria';
+
 export interface LineMissingSystem {
   line_id: string;
   service_name: string;
   service_verb: string | null;
+  /** Palpite da regra, para o campo já vir preenchido. Sempre editável. */
+  sistema_sugerido: string | null;
+  motivo_sugestao: string | null;
 }
 
 /**

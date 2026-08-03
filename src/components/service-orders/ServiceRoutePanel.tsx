@@ -188,25 +188,36 @@ export function ServiceRoutePanel({
             Sem isso, eles entram sem bloco de abertura nem de fechamento.
           </p>
           {semSistema.map((linha) => (
-            <div key={linha.line_id} className="flex flex-wrap items-center gap-2">
-              <span className="min-w-0 flex-1 truncate text-sm">{linha.service_name}</span>
-              <Select
-                onValueChange={(sistema) =>
-                  setLineSystem.mutate({ lineId: linha.line_id, system: sistema }, {
-                    onSuccess: () => toast.success('Sistema definido para esta linha.'),
-                    onError: (e: any) => toast.error(e?.message || 'Erro ao definir'),
-                  })
-                }
-              >
-                <SelectTrigger className="h-9 w-full sm:w-56">
-                  <SelectValue placeholder="O que este serviço toca?" />
-                </SelectTrigger>
-                <SelectContent>
-                  {sistemas.map((s) => (
-                    <SelectItem key={s.slug} value={s.slug}>{s.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div key={linha.line_id} className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="min-w-0 flex-1 truncate text-sm">{linha.service_name}</span>
+                <Select
+                  // Vem preenchido com o palpite da regra — mas visível e
+                  // editável, porque ela erra: não reconhece toda palavra e se
+                  // confunde quando o problema fala de dois sistemas.
+                  defaultValue={linha.sistema_sugerido ?? undefined}
+                  onValueChange={(sistema) =>
+                    setLineSystem.mutate({ lineId: linha.line_id, system: sistema }, {
+                      onSuccess: () => toast.success('Sistema definido para esta linha.'),
+                      onError: (e: any) => toast.error(e?.message || 'Erro ao definir'),
+                    })
+                  }
+                >
+                  <SelectTrigger className="h-9 w-full sm:w-56">
+                    <SelectValue placeholder="O que este serviço toca?" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sistemas.map((s) => (
+                      <SelectItem key={s.slug} value={s.slug}>{s.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {linha.sistema_sugerido && linha.motivo_sugestao && (
+                <p className="text-[11px] text-muted-foreground">
+                  Sugerido {linha.motivo_sugestao} — confira antes de confirmar.
+                </p>
+              )}
             </div>
           ))}
         </div>

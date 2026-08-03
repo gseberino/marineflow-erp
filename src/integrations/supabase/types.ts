@@ -2215,6 +2215,9 @@ export type Database = {
           balance_after: number | null
           bank_connection_id: string | null
           bank_ref_id: string | null
+          counterparty_account: string | null
+          counterparty_bank: string | null
+          counterparty_branch: string | null
           counterparty_document: string | null
           counterparty_name: string | null
           created_at: string | null
@@ -2222,6 +2225,11 @@ export type Database = {
           dismissed_reason: string | null
           id: string
           import_batch_id: string | null
+          installment_label: string | null
+          merchant_document: string | null
+          merchant_name: string | null
+          payment_method: string | null
+          payment_reason: string | null
           pix_end_to_end_id: string | null
           provider: string
           reconciled: boolean | null
@@ -2236,6 +2244,9 @@ export type Database = {
           balance_after?: number | null
           bank_connection_id?: string | null
           bank_ref_id?: string | null
+          counterparty_account?: string | null
+          counterparty_bank?: string | null
+          counterparty_branch?: string | null
           counterparty_document?: string | null
           counterparty_name?: string | null
           created_at?: string | null
@@ -2243,6 +2254,11 @@ export type Database = {
           dismissed_reason?: string | null
           id?: string
           import_batch_id?: string | null
+          installment_label?: string | null
+          merchant_document?: string | null
+          merchant_name?: string | null
+          payment_method?: string | null
+          payment_reason?: string | null
           pix_end_to_end_id?: string | null
           provider?: string
           reconciled?: boolean | null
@@ -2257,6 +2273,9 @@ export type Database = {
           balance_after?: number | null
           bank_connection_id?: string | null
           bank_ref_id?: string | null
+          counterparty_account?: string | null
+          counterparty_bank?: string | null
+          counterparty_branch?: string | null
           counterparty_document?: string | null
           counterparty_name?: string | null
           created_at?: string | null
@@ -2264,6 +2283,11 @@ export type Database = {
           dismissed_reason?: string | null
           id?: string
           import_batch_id?: string | null
+          installment_label?: string | null
+          merchant_document?: string | null
+          merchant_name?: string | null
+          payment_method?: string | null
+          payment_reason?: string | null
           pix_end_to_end_id?: string | null
           provider?: string
           reconciled?: boolean | null
@@ -2681,6 +2705,7 @@ export type Database = {
           id: string
           paid_at: string | null
           payable_id: string | null
+          payee_id: string | null
           percentage: number | null
           service_order_id: string | null
           status: string | null
@@ -2694,6 +2719,7 @@ export type Database = {
           id?: string
           paid_at?: string | null
           payable_id?: string | null
+          payee_id?: string | null
           percentage?: number | null
           service_order_id?: string | null
           status?: string | null
@@ -2707,6 +2733,7 @@ export type Database = {
           id?: string
           paid_at?: string | null
           payable_id?: string | null
+          payee_id?: string | null
           percentage?: number | null
           service_order_id?: string | null
           status?: string | null
@@ -2719,6 +2746,13 @@ export type Database = {
             columns: ["payable_id"]
             isOneToOne: false
             referencedRelation: "payables"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "commissions_payee_id_fkey"
+            columns: ["payee_id"]
+            isOneToOne: false
+            referencedRelation: "payees"
             referencedColumns: ["id"]
           },
           {
@@ -3465,6 +3499,9 @@ export type Database = {
           suggested_client_id: string | null
           suggested_date: string | null
           suggested_description: string | null
+          suggested_payee_id: string | null
+          suggested_purchase_order_id: string | null
+          suggested_service_order_id: string | null
           suggested_supplier_id: string | null
           title: string
           updated_at: string
@@ -3490,6 +3527,9 @@ export type Database = {
           suggested_client_id?: string | null
           suggested_date?: string | null
           suggested_description?: string | null
+          suggested_payee_id?: string | null
+          suggested_purchase_order_id?: string | null
+          suggested_service_order_id?: string | null
           suggested_supplier_id?: string | null
           title: string
           updated_at?: string
@@ -3515,6 +3555,9 @@ export type Database = {
           suggested_client_id?: string | null
           suggested_date?: string | null
           suggested_description?: string | null
+          suggested_payee_id?: string | null
+          suggested_purchase_order_id?: string | null
+          suggested_service_order_id?: string | null
           suggested_supplier_id?: string | null
           title?: string
           updated_at?: string
@@ -3561,6 +3604,48 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "clients"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_review_queue_suggested_payee_id_fkey"
+            columns: ["suggested_payee_id"]
+            isOneToOne: false
+            referencedRelation: "payees"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_review_queue_suggested_purchase_order_id_fkey"
+            columns: ["suggested_purchase_order_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_review_queue_suggested_service_order_id_fkey"
+            columns: ["suggested_service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_review_queue_suggested_service_order_id_fkey"
+            columns: ["suggested_service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_review_queue_suggested_service_order_id_fkey"
+            columns: ["suggested_service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_margin"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_review_queue_suggested_service_order_id_fkey"
+            columns: ["suggested_service_order_id"]
+            isOneToOne: false
+            referencedRelation: "vw_os_profitability"
+            referencedColumns: ["os_id"]
           },
           {
             foreignKeyName: "finance_review_queue_suggested_supplier_id_fkey"
@@ -4441,6 +4526,7 @@ export type Database = {
           notes: string | null
           origin: string | null
           paid_amount: number | null
+          payee_id: string | null
           payment_method: string | null
           status: string | null
           sub_category: string | null
@@ -4465,6 +4551,7 @@ export type Database = {
           notes?: string | null
           origin?: string | null
           paid_amount?: number | null
+          payee_id?: string | null
           payment_method?: string | null
           status?: string | null
           sub_category?: string | null
@@ -4489,6 +4576,7 @@ export type Database = {
           notes?: string | null
           origin?: string | null
           paid_amount?: number | null
+          payee_id?: string | null
           payment_method?: string | null
           status?: string | null
           sub_category?: string | null
@@ -4547,6 +4635,13 @@ export type Database = {
             referencedColumns: ["os_id"]
           },
           {
+            foreignKeyName: "payables_payee_id_fkey"
+            columns: ["payee_id"]
+            isOneToOne: false
+            referencedRelation: "payees"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "payables_supplier_id_fkey"
             columns: ["supplier_id"]
             isOneToOne: false
@@ -4554,6 +4649,69 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      payees: {
+        Row: {
+          account_type: string | null
+          active: boolean
+          bank_account: string | null
+          bank_branch: string | null
+          bank_name: string | null
+          commission_percentage: number | null
+          created_at: string
+          default_category: string | null
+          document: string | null
+          email: string | null
+          id: string
+          kind: string
+          name: string
+          notes: string | null
+          phone: string | null
+          pix_key: string | null
+          pix_key_type: string | null
+          updated_at: string
+        }
+        Insert: {
+          account_type?: string | null
+          active?: boolean
+          bank_account?: string | null
+          bank_branch?: string | null
+          bank_name?: string | null
+          commission_percentage?: number | null
+          created_at?: string
+          default_category?: string | null
+          document?: string | null
+          email?: string | null
+          id?: string
+          kind?: string
+          name: string
+          notes?: string | null
+          phone?: string | null
+          pix_key?: string | null
+          pix_key_type?: string | null
+          updated_at?: string
+        }
+        Update: {
+          account_type?: string | null
+          active?: boolean
+          bank_account?: string | null
+          bank_branch?: string | null
+          bank_name?: string | null
+          commission_percentage?: number | null
+          created_at?: string
+          default_category?: string | null
+          document?: string | null
+          email?: string | null
+          id?: string
+          kind?: string
+          name?: string
+          notes?: string | null
+          phone?: string | null
+          pix_key?: string | null
+          pix_key_type?: string | null
+          updated_at?: string
+        }
+        Relationships: []
       }
       payment_condition_presets: {
         Row: {
@@ -9282,8 +9440,10 @@ export type Database = {
         Args: { p_service_order_id: string }
         Returns: {
           line_id: string
+          motivo_sugestao: string
           service_name: string
           service_verb: string
+          sistema_sugerido: string
         }[]
       }
       log_app_error: {
@@ -9464,6 +9624,13 @@ export type Database = {
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
       stock_model_v2_on: { Args: never; Returns: boolean }
+      suggest_system_for_line: {
+        Args: { p_line_id: string }
+        Returns: {
+          motivo: string
+          sistema: string
+        }[]
+      }
       touch_open_loop: {
         Args: {
           p_evidence?: string

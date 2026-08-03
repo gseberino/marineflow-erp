@@ -11,7 +11,7 @@ import {
   useServicesToReview, useConfirmClassification, useDeactivateService,
   type ClassifiedService,
 } from '@/hooks/use-service-classification';
-import { useServiceSystems, useServiceVerbs } from '@/hooks/use-service-systems';
+import { useServiceSystems, useServiceVerbs, AXIS_LABEL } from '@/hooks/use-service-systems';
 import { ServiceFormDialog } from '@/components/ServiceFormDialog';
 
 /**
@@ -111,7 +111,7 @@ export function ServiceClassificationSection() {
                       onValueChange={(x) => setEdicoes((e) => ({ ...e, [s.id]: { ...v, system: x } }))}
                     >
                       <SelectTrigger className="h-9 w-full sm:w-56">
-                        <SelectValue placeholder="Sistema" />
+                        <SelectValue placeholder={AXIS_LABEL} />
                       </SelectTrigger>
                       <SelectContent>
                         {sistemas.map((x) => (
