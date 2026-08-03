@@ -47,9 +47,10 @@ const PAGES = [
   { path: '/v2/purchase-orders', modes: ['light', 'dark'], slug: 'po', themeVia: 'storage' },
   { path: '/v2/crm', modes: ['light', 'dark'], slug: 'crm', themeVia: 'storage' },
   { path: '/v2/external-quotes/catalog', modes: ['light', 'dark'], slug: 'catalog', themeVia: 'storage' },
-  /* Compras: o mapa de cotação é o pior caso de largura do sistema (itens ×
-     fornecedores). Foi desenhado como bloco-por-item justamente para caber —
-     estas entradas são o que prova que continua cabendo. */
+  /* Compras: estas duas são telas de LISTA (cards). O mapa de cotação — o pior
+     caso de largura do sistema (itens × fornecedores) — vive no DETALHE, em
+     /purchasing/quotes/:id, e entra na lista em tempo de execução logo após o
+     login, porque o id varia por ambiente. */
   { path: '/purchasing', modes: ['light', 'dark'], slug: 'purchasing-hub', themeVia: 'storage' },
   { path: '/purchasing/quotes', modes: ['light', 'dark'], slug: 'quotes-list', themeVia: 'storage' },
   /* Telas nascidas depois do inventário original do redesign (auditoria
@@ -76,26 +77,86 @@ await page.goto(`${BASE}/login`, { waitUntil: 'networkidle' });
 await page.fill('input[type="email"]', EMAIL);
 await page.fill('input[type="password"]', PASSWORD);
 await page.click('button[type="submit"]');
-await page.waitForURL((u) => !u.pathname.includes('/login'), { timeout: 20000 });
+
+// A LoginPage não navega quando o signIn falha: mostra um toast e fica em
+// /login. Esperar só pela URL transforma "senha errada", "email não confirmado"
+// e "muitas tentativas" num TimeoutError mudo, que custa uma sessão inteira de
+// diagnóstico. Corremos as duas coisas e relatamos a que chegar primeiro.
+const TOAST = '[data-sonner-toast], [role="status"]';
+const navegou = page
+  .waitForURL((u) => !u.pathname.includes('/login'), { timeout: 30000 })
+  .then(() => null);
+const erroNoToast = page
+  .locator(TOAST)
+  .first()
+  .waitFor({ state: 'visible', timeout: 30000 })
+  .then(() => page.locator(TOAST).first().innerText())
+  .then((t) => t.replace(/\s+/g, ' ').trim());
+
+const desfecho = await Promise.race([navegou, erroNoToast]).catch(
+  () => 'login não concluiu em 30s (sem toast e sem navegação)',
+);
+if (desfecho) {
+  console.error(`login FALHOU: ${desfecho}`);
+  await page.screenshot({ path: join(OUT, 'login-falhou.png'), fullPage: true });
+  await browser.close();
+  process.exit(1);
+}
 console.log('login ok');
 
+/* O mapa de cotação (detalhe) é o pior caso de largura, mas o id varia por
+   ambiente — descobrimos pelo primeiro card da lista em vez de fixar um UUID.
+   Sem cotação cadastrada a entrada é pulada, e o aviso deixa claro que a tela
+   mais crítica do módulo ficou sem cobertura naquela rodada. */
+await page.goto(`${BASE}/purchasing/quotes`, { waitUntil: 'networkidle', timeout: 60000 });
+const primeiraCotacao = await page.evaluate(() => {
+  const a = document.querySelector('a[href*="/purchasing/quotes/"]');
+  return a ? new URL(a.href).pathname : null;
+});
+if (primeiraCotacao) {
+  PAGES.push({ path: primeiraCotacao, modes: ['light', 'dark'], slug: 'quote-detail', themeVia: 'storage' });
+  console.log(`mapa de cotação: ${primeiraCotacao}`);
+} else {
+  console.warn('AVISO: nenhuma cotação cadastrada — mapa de cotação NÃO verificado.');
+}
+
 for (const pg of PAGES) {
-  await page.setViewportSize({ width: 1280, height: 900 });
-  // Primeira visita usa timeout largo: o Vite compila a página sob demanda
-  // no dev server e a transformação fria pode passar de 20s.
-  await page.goto(`${BASE}${pg.path}`, { waitUntil: 'networkidle', timeout: 60000 });
-  // Tema global (R1): .themev2 vive no <html>, que o Playwright não considera
-  // "visível" — esperar por presença (attached), não visibilidade.
-  await page.waitForSelector('.themev2', { timeout: 60000, state: 'attached' });
+  /* Uma página que não carrega é FALHA dela, não motivo para abortar as
+     demais: antes, um timeout aqui derrubava o processo e deixava todas as
+     telas seguintes — inclusive as de compras, que vêm no fim da lista — sem
+     verificação nenhuma, sem que isso ficasse evidente na saída. */
+  try {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    // Primeira visita usa timeout largo: o Vite compila a página sob demanda
+    // no dev server e a transformação fria pode passar de 20s.
+    await page.goto(`${BASE}${pg.path}`, { waitUntil: 'networkidle', timeout: 60000 });
+    // Tema global (R1): .themev2 vive no <html>, que o Playwright não considera
+    // "visível" — esperar por presença (attached), não visibilidade.
+    await page.waitForSelector('.themev2', { timeout: 60000, state: 'attached' });
+  } catch (e) {
+    failures++;
+    console.log(`FAIL  ${pg.slug.padEnd(7)} —— não carregou: ${String(e.message).split('\n')[0]}`);
+    continue;
+  }
 
   for (const mode of pg.modes) {
-    if (pg.themeVia === 'buttons') {
-      await page.click(mode === 'light' ? 'button:has-text("Claro")' : 'button:has-text("Escuro")');
-      await page.waitForTimeout(250);
-    } else {
-      await page.evaluate((m) => localStorage.setItem('mf-v2-theme', m), mode);
-      await page.reload({ waitUntil: 'networkidle' });
-      await page.waitForSelector('.themev2', { timeout: 20000, state: 'attached' });
+    // Mesma regra da navegação: se a troca de tema não completar, é falha
+    // deste modo — as outras telas continuam sendo verificadas.
+    try {
+      if (pg.themeVia === 'buttons') {
+        await page.click(mode === 'light' ? 'button:has-text("Claro")' : 'button:has-text("Escuro")');
+        await page.waitForTimeout(250);
+      } else {
+        await page.evaluate((m) => localStorage.setItem('mf-v2-theme', m), mode);
+        await page.reload({ waitUntil: 'networkidle' });
+        // Mesmo teto da navegação inicial (60s): sob carga acumulada da suíte,
+        // 20s produzia FAIL intermitente em telas pesadas que passam sozinhas.
+        await page.waitForSelector('.themev2', { timeout: 60000, state: 'attached' });
+      }
+    } catch (e) {
+      failures++;
+      console.log(`FAIL  ${pg.slug.padEnd(7)} ${mode.padEnd(5)} —— tema não aplicou: ${String(e.message).split('\n')[0]}`);
+      continue;
     }
     for (const width of VIEWPORTS) {
       await page.setViewportSize({ width, height: 900 });
@@ -133,10 +194,22 @@ for (const pg of PAGES) {
         (report.offenders.length ? `  elementos: ${report.offenders.join(' | ')}` : ''),
       );
 
-      await page.screenshot({
-        path: join(OUT, `${pg.slug}-${mode}-${width}.png`),
-        fullPage: width >= 768,
-      });
+      /* O screenshot é aprovação visual, não é a verificação — esta já rodou
+         acima. Em páginas muito altas (listas longas) o Chrome recusa o
+         fullPage com "Unable to capture screenshot", e derrubar a suíte inteira
+         por causa disso deixava as telas seguintes sem verificação nenhuma.
+         Cai para viewport-only e, se ainda assim falhar, segue em frente. */
+      const alvo = join(OUT, `${pg.slug}-${mode}-${width}.png`);
+      try {
+        await page.screenshot({ path: alvo, fullPage: width >= 768 });
+      } catch {
+        try {
+          await page.screenshot({ path: alvo, fullPage: false });
+          console.warn(`      (screenshot de ${pg.slug} ${mode} ${width}px: só viewport, página alta demais)`);
+        } catch {
+          console.warn(`      (screenshot de ${pg.slug} ${mode} ${width}px falhou — verificação acima vale)`);
+        }
+      }
     }
   }
 }
