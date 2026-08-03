@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useSalvarPayee, ROTULO_TIPO, type TipoFavorecido } from '@/hooks/use-payees';
+import { useSalvarPayee, ROTULO_TIPO, type Favorecido, type TipoFavorecido } from '@/hooks/use-payees';
 
 /** A categoria que motivou o cadastro já diz o que a pessoa é para a empresa. */
 function tipoPelaCategoria(categoria?: string): TipoFavorecido {
@@ -20,29 +20,36 @@ function tipoPelaCategoria(categoria?: string): TipoFavorecido {
 }
 
 export function PayeeFormDialog({
-  aberto, onFechar, categoriaSugerida, onCriado,
+  aberto, onFechar, categoriaSugerida, onCriado, favorecido,
 }: {
   aberto: boolean;
   onFechar: () => void;
   categoriaSugerida?: string;
   onCriado?: (id: string) => void;
+  /** Quando presente, o diálogo edita em vez de criar. */
+  favorecido?: Favorecido;
 }) {
   const salvar = useSalvarPayee();
+  const editando = !!favorecido;
 
-  const [nome, setNome] = useState('');
-  const [tipo, setTipo] = useState<TipoFavorecido>(tipoPelaCategoria(categoriaSugerida));
-  const [documento, setDocumento] = useState('');
-  const [pix, setPix] = useState('');
-  const [tipoPix, setTipoPix] = useState('cpf');
-  const [banco, setBanco] = useState('');
-  const [agencia, setAgencia] = useState('');
-  const [conta, setConta] = useState('');
-  const [telefone, setTelefone] = useState('');
+  const [nome, setNome] = useState(favorecido?.name ?? '');
+  const [tipo, setTipo] = useState<TipoFavorecido>(favorecido?.kind ?? tipoPelaCategoria(categoriaSugerida));
+  const [documento, setDocumento] = useState(favorecido?.document ?? '');
+  const [pix, setPix] = useState(favorecido?.pix_key ?? '');
+  const [tipoPix, setTipoPix] = useState(favorecido?.pix_key_type ?? 'cpf');
+  const [banco, setBanco] = useState(favorecido?.bank_name ?? '');
+  const [agencia, setAgencia] = useState(favorecido?.bank_branch ?? '');
+  const [conta, setConta] = useState(favorecido?.bank_account ?? '');
+  const [telefone, setTelefone] = useState(favorecido?.phone ?? '');
+  const [percentual, setPercentual] = useState(
+    favorecido?.commission_percentage != null ? String(favorecido.commission_percentage) : '',
+  );
 
   const confirmar = () => {
     if (!nome.trim()) return;
     salvar.mutate(
       {
+        id: favorecido?.id,
         name: nome.trim(),
         kind: tipo,
         document: documento || null,
@@ -52,8 +59,9 @@ export function PayeeFormDialog({
         bank_branch: agencia || null,
         bank_account: conta || null,
         phone: telefone || null,
-        default_category: categoriaSugerida ?? null,
-        active: true,
+        commission_percentage: tipo === 'comissionado' && percentual ? Number(percentual) : null,
+        default_category: favorecido?.default_category ?? categoriaSugerida ?? null,
+        active: favorecido?.active ?? true,
       },
       {
         onSuccess: (id) => {
@@ -68,11 +76,11 @@ export function PayeeFormDialog({
     <Dialog open={aberto} onOpenChange={(v) => !v && onFechar()}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Cadastrar favorecido</DialogTitle>
+          <DialogTitle>{editando ? `Editar ${favorecido!.name}` : 'Cadastrar favorecido'}</DialogTitle>
           <DialogDescription>
-            Quem recebe da empresa sem ser fornecedor: sócio, funcionário, diarista ou
-            prestador. Os dados bancários ficam aqui para você não precisar procurá-los no
-            banco a cada pagamento.
+            Quem recebe da empresa sem ser fornecedor: sócio, funcionário, diarista,
+            prestador ou comissionado. Os dados bancários ficam aqui para você não precisar
+            procurá-los no banco a cada pagamento.
           </DialogDescription>
         </DialogHeader>
 
@@ -106,6 +114,23 @@ export function PayeeFormDialog({
               <Input value={telefone} onChange={(e) => setTelefone(e.target.value)} />
             </div>
           </div>
+
+          {/* Só aparece para comissionado: percentual em cadastro de sócio é campo que
+              confunde mais do que serve. */}
+          {tipo === 'comissionado' && (
+            <div className="max-w-[12rem]">
+              <Label className="text-xs">Comissão habitual (%)</Label>
+              <Input
+                type="number" inputMode="decimal" min="0" max="100" step="0.5"
+                value={percentual}
+                onChange={(e) => setPercentual(e.target.value)}
+                placeholder="ex.: 5"
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Vale como padrão nas vendas; sempre editável em cada uma.
+              </p>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div className="sm:col-span-2">

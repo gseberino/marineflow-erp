@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
-export type TipoFavorecido = 'socio' | 'funcionario' | 'diarista' | 'prestador';
+export type TipoFavorecido = 'socio' | 'funcionario' | 'diarista' | 'prestador' | 'comissionado';
 
 export interface Favorecido {
   id: string;
@@ -19,6 +19,7 @@ export interface Favorecido {
   bank_account: string | null;
   account_type: string | null;
   default_category: string | null;
+  commission_percentage: number | null;
   notes: string | null;
   active: boolean;
 }
@@ -28,6 +29,7 @@ export const ROTULO_TIPO: Record<TipoFavorecido, string> = {
   funcionario: 'Funcionário',
   diarista: 'Diarista',
   prestador: 'Prestador de serviço',
+  comissionado: 'Comissionado',
 };
 
 /**

@@ -2705,6 +2705,7 @@ export type Database = {
           id: string
           paid_at: string | null
           payable_id: string | null
+          payee_id: string | null
           percentage: number | null
           service_order_id: string | null
           status: string | null
@@ -2718,6 +2719,7 @@ export type Database = {
           id?: string
           paid_at?: string | null
           payable_id?: string | null
+          payee_id?: string | null
           percentage?: number | null
           service_order_id?: string | null
           status?: string | null
@@ -2731,6 +2733,7 @@ export type Database = {
           id?: string
           paid_at?: string | null
           payable_id?: string | null
+          payee_id?: string | null
           percentage?: number | null
           service_order_id?: string | null
           status?: string | null
@@ -2743,6 +2746,13 @@ export type Database = {
             columns: ["payable_id"]
             isOneToOne: false
             referencedRelation: "payables"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "commissions_payee_id_fkey"
+            columns: ["payee_id"]
+            isOneToOne: false
+            referencedRelation: "payees"
             referencedColumns: ["id"]
           },
           {
@@ -4647,6 +4657,7 @@ export type Database = {
           bank_account: string | null
           bank_branch: string | null
           bank_name: string | null
+          commission_percentage: number | null
           created_at: string
           default_category: string | null
           document: string | null
@@ -4666,6 +4677,7 @@ export type Database = {
           bank_account?: string | null
           bank_branch?: string | null
           bank_name?: string | null
+          commission_percentage?: number | null
           created_at?: string
           default_category?: string | null
           document?: string | null
@@ -4685,6 +4697,7 @@ export type Database = {
           bank_account?: string | null
           bank_branch?: string | null
           bank_name?: string | null
+          commission_percentage?: number | null
           created_at?: string
           default_category?: string | null
           document?: string | null

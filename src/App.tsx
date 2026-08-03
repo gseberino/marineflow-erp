@@ -53,6 +53,7 @@ const ReceivablesV2 = lazy(() => import("./v2/pages/ReceivablesV2"));
 const FinancialV2 = lazy(() => import("./v2/pages/FinancialV2"));
 const CollectionsV2 = lazy(() => import("./v2/pages/CollectionsV2"));
 const CommissionsV2 = lazy(() => import("./v2/pages/CommissionsV2"));
+const PayeesPage = lazy(() => import("./pages/PayeesPage"));
 const AuditLogV2 = lazy(() => import("./v2/pages/AuditLogV2"));
 const ReportsV2 = lazy(() => import("./v2/pages/ReportsV2"));
 const SmartPurchaseV2 = lazy(() => import("./v2/pages/SmartPurchaseV2"));
@@ -178,6 +179,8 @@ const App = () => (
                         <Route path="/v2/financial" element={<ProtectedRoute roles={['admin','financial']}><FinancialV2 /></ProtectedRoute>} />
                         <Route path="/v2/collections" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><CollectionsV2 /></ProtectedRoute>} />
                         <Route path="/v2/commissions" element={<ProtectedRoute roles={['admin','financial']}><CommissionsV2 /></ProtectedRoute>} />
+                        {/* Dado sensível (CPF, conta, Pix): mesma restrição do financeiro. */}
+                        <Route path="/v2/payees" element={<ProtectedRoute roles={['admin','financial']}><PayeesPage /></ProtectedRoute>} />
                         <Route path="/v2/audit-log" element={<ProtectedRoute roles={['admin']}><AuditLogV2 /></ProtectedRoute>} />
                         <Route path="/v2/reports" element={<ProtectedRoute roles={['admin','financial']}><ReportsV2 /></ProtectedRoute>} />
                         <Route path="/v2/inventory/smart-purchase" element={<ProtectedRoute roles={['admin','financial']}><SmartPurchaseV2 /></ProtectedRoute>} />

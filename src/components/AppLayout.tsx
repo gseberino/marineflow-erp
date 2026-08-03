@@ -10,7 +10,7 @@ import {
   DollarSign, BarChart3, Settings, ChevronLeft, ChevronRight, Menu, TrendingUp,
   Warehouse, Building2, Wrench, History, LogOut, CalendarDays, MessageCircle, CreditCard,
   Database, ChevronDown, Rocket, ShoppingCart, FileDown, Target, CheckCircle2, Bell, CalendarClock, Truck, Camera, FileText, Bot, Boxes, LayoutGrid, ListChecks,
-  Sparkles, ArrowLeftRight, TrendingDown
+  Sparkles, ArrowLeftRight, TrendingDown, Wallet
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -238,6 +238,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
         { label: 'Contas a Receber', icon: TrendingUp, path: '/v2/receivables', roles: ['admin', 'financial'] },
         { label: 'Contas a Pagar', icon: TrendingDown, path: '/v2/financial?tab=payables', roles: ['admin', 'financial'] },
         { label: 'Comissões', icon: Users, path: '/v2/commissions', roles: ['admin', 'financial'] },
+        // Sócios, diaristas, prestadores e comissionados — com CPF, Pix e conta.
+        { label: 'Favorecidos', icon: Wallet, path: '/v2/payees', roles: ['admin', 'financial'] },
         { label: 'Emissão Fiscal (NF-e)', icon: FileText, path: '/v2/fiscal/emissao', roles: ['admin'] },
         { label: 'Relatórios', icon: BarChart3, path: '/v2/reports', roles: ['admin', 'financial'] },
       ],
