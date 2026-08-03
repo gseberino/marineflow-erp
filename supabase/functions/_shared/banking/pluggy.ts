@@ -28,13 +28,43 @@ export interface PluggyTransaction {
   type: "CREDIT" | "DEBIT";
   balance?: number | null;
   status?: string | null;
+  /**
+   * Dados de quem está do outro lado. O provedor manda MUITO mais do que só nome e
+   * documento — agência, conta, banco (routingNumber/ISPB), forma de pagamento e a
+   * mensagem que o pagador escreveu. Ler só dois campos obrigava o gestor a abrir o
+   * internet banking para saber de quem era o dinheiro.
+   */
   paymentData?: {
-    payer?: { name?: string | null; documentNumber?: { value?: string | null } | null } | null;
-    receiver?: { name?: string | null; documentNumber?: { value?: string | null } | null } | null;
+    payer?: PluggyParticipante | null;
+    receiver?: PluggyParticipante | null;
     paymentMethod?: string | null;
     referenceNumber?: string | null;
+    receiverReferenceId?: string | null;
     reason?: string | null;
+    authenticationCode?: string | null;
   } | null;
+  /** Compra em estabelecimento: é AQUI que vem o nome e o CNPJ da loja. */
+  merchant?: {
+    name?: string | null;
+    businessName?: string | null;
+    cnpj?: string | null;
+    category?: string | null;
+  } | null;
+  /** Compra no cartão: parcela atual e total, e os 4 últimos dígitos. */
+  creditCardMetadata?: {
+    installmentNumber?: number | null;
+    totalInstallments?: number | null;
+    cardNumber?: string | null;
+  } | null;
+}
+
+interface PluggyParticipante {
+  name?: string | null;
+  branchNumber?: string | null;
+  accountNumber?: string | null;
+  routingNumber?: string | null;
+  routingNumberISPB?: string | null;
+  documentNumber?: { value?: string | null } | null;
 }
 
 /** Linha pronta para entrar em bank_transactions. */
@@ -47,6 +77,19 @@ export interface ExtratoRow {
   pix_end_to_end_id: string | null;
   counterparty_name: string | null;
   counterparty_document: string | null;
+  /** Onde o dinheiro foi parar: banco, agência e conta de quem recebeu (ou pagou). */
+  counterparty_bank: string | null;
+  counterparty_branch: string | null;
+  counterparty_account: string | null;
+  /** PIX, TED, DOC, BOLETO — muda o que se pode cobrar e como se prova o pagamento. */
+  payment_method: string | null;
+  /** A mensagem que o pagador escreveu na transferência. */
+  payment_reason: string | null;
+  /** Nome e CNPJ do estabelecimento, para compra em loja/cartão. */
+  merchant_name: string | null;
+  merchant_document: string | null;
+  /** "3/6" quando é compra parcelada no cartão. */
+  installment_label: string | null;
   balance_after: number | null;
   provider: string;
   source_type: "bank" | "credit_card";
@@ -227,17 +270,37 @@ export function mapTransaction(
   const referencia = tx.paymentData?.referenceNumber ?? null;
   const ehPix = (tx.paymentData?.paymentMethod ?? "").toUpperCase() === "PIX";
 
+  // O estabelecimento identifica melhor que o histórico quando existe: "NETFLIX
+  // ENTRETENIMENTO BRASIL LTDA" contra "EC *NETFLIX SAO PAULO BRA".
+  const loja = tx.merchant;
+  const parcela = tx.creditCardMetadata;
+
   return {
     transaction_date: String(tx.date).slice(0, 10),
     description: tx.description || tx.descriptionRaw || "Sem descrição",
     amount: Math.abs(Number(tx.amount) || 0),
     transaction_type: ehCredito ? "credit" : "debit",
     bank_ref_id: tx.id,
+    counterparty_bank: contraparte?.routingNumber ?? contraparte?.routingNumberISPB ?? null,
+    counterparty_branch: contraparte?.branchNumber ?? null,
+    counterparty_account: contraparte?.accountNumber ?? null,
+    payment_method: tx.paymentData?.paymentMethod ?? null,
+    payment_reason: tx.paymentData?.reason ?? null,
+    merchant_name: loja?.businessName ?? loja?.name ?? null,
+    merchant_document: somenteDigitos(loja?.cnpj),
+    installment_label: parcela?.installmentNumber && parcela?.totalInstallments
+      ? `${parcela.installmentNumber}/${parcela.totalInstallments}`
+      : null,
     // Só grava como EndToEndId o que tem cara de EndToEndId: outros métodos usam o mesmo
     // campo de referência para números que não identificam nada no SPI.
     pix_end_to_end_id: ehPix && referencia && PIX_E2E.test(referencia) ? referencia : null,
-    counterparty_name: contraparte?.name ?? nomeNoHistorico(tx.description || tx.descriptionRaw),
-    counterparty_document: somenteDigitos(contraparte?.documentNumber?.value),
+    // Ordem de confiança: quem o banco nomeou > o estabelecimento > o que dá para ler do
+    // histórico. Compra em loja não tem contraparte de Pix, mas tem merchant — e era essa
+    // a razão de 1.086 lançamentos de cartão ficarem sem identificação nenhuma.
+    counterparty_name: contraparte?.name ?? loja?.businessName ?? loja?.name
+      ?? nomeNoHistorico(tx.description || tx.descriptionRaw),
+    counterparty_document: somenteDigitos(contraparte?.documentNumber?.value)
+      ?? somenteDigitos(loja?.cnpj),
     balance_after: tx.balance ?? null,
     provider: "pluggy",
     source_type: sourceType,

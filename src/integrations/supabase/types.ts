@@ -2215,6 +2215,9 @@ export type Database = {
           balance_after: number | null
           bank_connection_id: string | null
           bank_ref_id: string | null
+          counterparty_account: string | null
+          counterparty_bank: string | null
+          counterparty_branch: string | null
           counterparty_document: string | null
           counterparty_name: string | null
           created_at: string | null
@@ -2222,6 +2225,11 @@ export type Database = {
           dismissed_reason: string | null
           id: string
           import_batch_id: string | null
+          installment_label: string | null
+          merchant_document: string | null
+          merchant_name: string | null
+          payment_method: string | null
+          payment_reason: string | null
           pix_end_to_end_id: string | null
           provider: string
           reconciled: boolean | null
@@ -2236,6 +2244,9 @@ export type Database = {
           balance_after?: number | null
           bank_connection_id?: string | null
           bank_ref_id?: string | null
+          counterparty_account?: string | null
+          counterparty_bank?: string | null
+          counterparty_branch?: string | null
           counterparty_document?: string | null
           counterparty_name?: string | null
           created_at?: string | null
@@ -2243,6 +2254,11 @@ export type Database = {
           dismissed_reason?: string | null
           id?: string
           import_batch_id?: string | null
+          installment_label?: string | null
+          merchant_document?: string | null
+          merchant_name?: string | null
+          payment_method?: string | null
+          payment_reason?: string | null
           pix_end_to_end_id?: string | null
           provider?: string
           reconciled?: boolean | null
@@ -2257,6 +2273,9 @@ export type Database = {
           balance_after?: number | null
           bank_connection_id?: string | null
           bank_ref_id?: string | null
+          counterparty_account?: string | null
+          counterparty_bank?: string | null
+          counterparty_branch?: string | null
           counterparty_document?: string | null
           counterparty_name?: string | null
           created_at?: string | null
@@ -2264,6 +2283,11 @@ export type Database = {
           dismissed_reason?: string | null
           id?: string
           import_batch_id?: string | null
+          installment_label?: string | null
+          merchant_document?: string | null
+          merchant_name?: string | null
+          payment_method?: string | null
+          payment_reason?: string | null
           pix_end_to_end_id?: string | null
           provider?: string
           reconciled?: boolean | null

@@ -24,6 +24,21 @@ export interface PropostaFinanceira {
   /** Regra que classificou esta proposta — permite auditar a regra pelo resultado. */
   applied_rule_id: string | null;
   created_at: string;
+  /** Identificação vinda do extrato, para decidir sem abrir o internet banking. */
+  bank_transactions?: {
+    counterparty_name: string | null;
+    counterparty_document: string | null;
+    counterparty_bank: string | null;
+    counterparty_branch: string | null;
+    counterparty_account: string | null;
+    payment_method: string | null;
+    payment_reason: string | null;
+    merchant_name: string | null;
+    merchant_document: string | null;
+    installment_label: string | null;
+    pix_end_to_end_id: string | null;
+    description: string | null;
+  } | null;
 }
 
 export interface Correcao {
@@ -66,7 +81,13 @@ export function useFinanceReviewQueue() {
     queryFn: async (): Promise<PropostaFinanceira[]> => {
       const { data, error } = await supabase
         .from('finance_review_queue')
-        .select('*')
+        // Traz a identificação da transação junto: sem ela, decidir exige abrir o
+        // internet banking em outra aba, que é exatamente o trabalho que esta tela existe
+        // para eliminar.
+        .select(`*, bank_transactions ( counterparty_name, counterparty_document,
+          counterparty_bank, counterparty_branch, counterparty_account, payment_method,
+          payment_reason, merchant_name, merchant_document, installment_label,
+          pix_end_to_end_id, description )`)
         .eq('status', 'pending')
         .order('confidence', { ascending: false })
         .order('suggested_amount', { ascending: false })

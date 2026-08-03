@@ -126,3 +126,81 @@ describe("origem da conta", () => {
     expect(accountSourceType({ id: "b", type: "BANK", name: "Conta", balance: 0 })).toBe("bank");
   });
 });
+
+describe('dados de identificação que o provedor manda e o código descartava', () => {
+  // O gestor reclamou de ter que abrir o internet banking para saber de quem era o
+  // lançamento. A causa era o tipo TypeScript declarar só nome e documento dentro de
+  // payer/receiver — o JSON chegava inteiro e o código lia dois campos.
+  const base = {
+    id: 'tx-1', description: 'TRANSF ENVIADA PIX', amount: 5000,
+    date: '2026-07-20T00:00:00Z', type: 'DEBIT' as const,
+  };
+
+  it('guarda banco, agência e conta de quem recebeu', () => {
+    const r = mapTransaction({
+      ...base,
+      paymentData: {
+        receiver: {
+          name: 'MARINE EXPRESS LTDA',
+          branchNumber: '0001', accountNumber: '12345-6',
+          routingNumber: '336', routingNumberISPB: '31872495',
+          documentNumber: { value: '68.904.101/0001-20' },
+        },
+        paymentMethod: 'PIX',
+        reason: 'Pagamento peças OS-00060',
+      },
+    } as never);
+
+    expect(r.counterparty_bank).toBe('336');
+    expect(r.counterparty_branch).toBe('0001');
+    expect(r.counterparty_account).toBe('12345-6');
+    expect(r.payment_method).toBe('PIX');
+    // A mensagem do pagador costuma dizer a que a despesa se refere.
+    expect(r.payment_reason).toBe('Pagamento peças OS-00060');
+  });
+
+  it('identifica compra em loja pelo estabelecimento', () => {
+    // Compra em estabelecimento não tem contraparte de Pix, tem merchant — era por isso
+    // que 1.086 lançamentos de cartão ficavam sem identificação nenhuma.
+    const r = mapTransaction({
+      ...base,
+      description: 'EC *NETFLIX SAO PAULO BRA',
+      merchant: {
+        name: 'Netflix', businessName: 'NETFLIX ENTRETENIMENTO BRASIL LTDA.',
+        cnpj: '13.590.585/0001-99', category: 'Video Streaming',
+      },
+    } as never, 'credit_card');
+
+    expect(r.merchant_name).toBe('NETFLIX ENTRETENIMENTO BRASIL LTDA.');
+    expect(r.merchant_document).toBe('13590585000199');
+    // A razão social identifica melhor que o histórico do terminal.
+    expect(r.counterparty_name).toBe('NETFLIX ENTRETENIMENTO BRASIL LTDA.');
+    expect(r.counterparty_document).toBe('13590585000199');
+  });
+
+  it('quem o banco nomeou tem precedência sobre o estabelecimento', () => {
+    const r = mapTransaction({
+      ...base,
+      paymentData: { receiver: { name: 'FORNECEDOR REAL', documentNumber: { value: '68904101000120' } } },
+      merchant: { businessName: 'ADQUIRENTE INTERMEDIARIA', cnpj: '00000000000191' },
+    } as never);
+    expect(r.counterparty_name).toBe('FORNECEDOR REAL');
+    expect(r.counterparty_document).toBe('68904101000120');
+  });
+
+  it('registra a parcela da compra no cartão', () => {
+    const r = mapTransaction({
+      ...base,
+      creditCardMetadata: { installmentNumber: 3, totalInstallments: 6, cardNumber: '1234' },
+    } as never, 'credit_card');
+    expect(r.installment_label).toBe('3/6');
+  });
+
+  it('não inventa campo quando o provedor não manda', () => {
+    const r = mapTransaction(base as never);
+    expect(r.counterparty_bank).toBeNull();
+    expect(r.merchant_name).toBeNull();
+    expect(r.installment_label).toBeNull();
+    expect(r.payment_reason).toBeNull();
+  });
+});

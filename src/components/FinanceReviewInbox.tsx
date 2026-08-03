@@ -45,6 +45,53 @@ function rotuloDaConfianca(c: number): string {
   return 'Baixa';
 }
 
+/**
+ * Tudo que o banco informou sobre a transação, em um lugar só.
+ *
+ * Existe para eliminar a ida ao internet banking: quem decide precisa saber para quem o
+ * dinheiro foi, de qual conta, por qual meio e com que mensagem. Campo ausente
+ * simplesmente não aparece — linha com "—" ocupa espaço e não informa nada.
+ */
+function IdentificacaoDaTransacao({ tx }: { tx: PropostaFinanceira['bank_transactions'] }) {
+  if (!tx) return null;
+
+  const conta = [tx.counterparty_bank && `Banco ${tx.counterparty_bank}`,
+    tx.counterparty_branch && `Ag. ${tx.counterparty_branch}`,
+    tx.counterparty_account && `C/C ${tx.counterparty_account}`].filter(Boolean).join(' · ');
+
+  const linhas: Array<[string, string | null]> = [
+    ['Favorecido', tx.counterparty_name],
+    ['CNPJ/CPF', formatarDocumento(tx.counterparty_document)],
+    ['Conta', conta || null],
+    ['Meio', [tx.payment_method, tx.installment_label && `parcela ${tx.installment_label}`].filter(Boolean).join(' · ') || null],
+    ['Mensagem', tx.payment_reason],
+    ['Estabelecimento', tx.merchant_name],
+    ['Identificador Pix', tx.pix_end_to_end_id],
+    ['Histórico do banco', tx.description],
+  ].filter(([, v]) => !!v) as Array<[string, string]>;
+
+  if (linhas.length === 0) return null;
+
+  return (
+    <dl className="grid grid-cols-1 gap-x-4 gap-y-1 rounded-md border p-2 text-xs sm:grid-cols-2">
+      {linhas.map(([rotulo, valor]) => (
+        <div key={rotulo} className="flex min-w-0 gap-2">
+          <dt className="shrink-0 text-muted-foreground">{rotulo}</dt>
+          <dd className="min-w-0 flex-1 truncate font-medium" title={valor!}>{valor}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/** CNPJ e CPF em máscara: 14 dígitos crus são ilegíveis para conferir de olho. */
+function formatarDocumento(doc: string | null): string | null {
+  if (!doc) return null;
+  if (doc.length === 14) return doc.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
+  if (doc.length === 11) return doc.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+  return doc;
+}
+
 interface LinhaProps {
   p: PropostaFinanceira;
   categorias: { name: string }[];
@@ -135,10 +182,11 @@ function LinhaProposta({
                 <ChevronDown className={`h-3 w-3 transition-transform ${aberta ? 'rotate-180' : ''}`} />
               </button>
             </CollapsibleTrigger>
-            <CollapsibleContent className="mt-2">
+            <CollapsibleContent className="mt-2 space-y-2">
               <p className="rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">
                 {p.reasoning || 'Sem justificativa registrada.'}
               </p>
+              <IdentificacaoDaTransacao tx={p.bank_transactions} />
             </CollapsibleContent>
           </Collapsible>
         </div>
