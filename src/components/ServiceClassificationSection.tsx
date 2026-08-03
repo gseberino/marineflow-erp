@@ -11,7 +11,10 @@ import {
   useServicesToReview, useConfirmClassification, useDeactivateService,
   type ClassifiedService,
 } from '@/hooks/use-service-classification';
-import { useServiceSystems, useServiceVerbs, AXIS_LABEL } from '@/hooks/use-service-systems';
+import {
+  useServiceSystems, useServiceVerbs, AXIS_LABEL, DEPENDS_ON_ORDER,
+  DEPENDS_ON_ORDER_LABEL, systemChoiceToDb, systemDbToChoice,
+} from '@/hooks/use-service-systems';
 import { ServiceFormDialog } from '@/components/ServiceFormDialog';
 
 /**
@@ -107,13 +110,16 @@ export function ServiceClassificationSection() {
 
                   <div className="flex flex-wrap items-center gap-2">
                     <Select
-                      value={v.system ?? ''}
-                      onValueChange={(x) => setEdicoes((e) => ({ ...e, [s.id]: { ...v, system: x } }))}
+                      value={systemDbToChoice(v.system)}
+                      onValueChange={(x) =>
+                        setEdicoes((e) => ({ ...e, [s.id]: { ...v, system: systemChoiceToDb(x) } }))
+                      }
                     >
                       <SelectTrigger className="h-9 w-full sm:w-56">
                         <SelectValue placeholder={AXIS_LABEL} />
                       </SelectTrigger>
                       <SelectContent>
+                        <SelectItem value={DEPENDS_ON_ORDER}>{DEPENDS_ON_ORDER_LABEL}</SelectItem>
                         {sistemas.map((x) => (
                           <SelectItem key={x.slug} value={x.slug}>{x.name}</SelectItem>
                         ))}

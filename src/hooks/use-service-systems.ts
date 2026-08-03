@@ -231,6 +231,26 @@ export function useUpdateServiceVerb() {
  */
 export const AXIS_LABEL = 'Sistema / categoria';
 
+/**
+ * Valor de tela para "este serviço não tem sistema fixo — pergunte na OS".
+ *
+ * No banco isso é NULL, mas o Select não aceita string vazia como valor, e sem
+ * um item explícito não havia como TORNAR um serviço genérico: dava para tirar
+ * o genérico e não para colocar. É este sentinel que fecha o caminho de volta.
+ */
+export const DEPENDS_ON_ORDER = '__depende_da_os__';
+export const DEPENDS_ON_ORDER_LABEL = 'Depende da OS — perguntar a cada uma';
+
+/** Converte a escolha da tela no que vai para o banco. */
+export function systemChoiceToDb(escolha: string | null | undefined): string | null {
+  return !escolha || escolha === DEPENDS_ON_ORDER ? null : escolha;
+}
+
+/** E o caminho inverso, para o Select exibir o item certo. */
+export function systemDbToChoice(valor: string | null | undefined): string {
+  return valor || DEPENDS_ON_ORDER;
+}
+
 export interface LineMissingSystem {
   line_id: string;
   service_name: string;

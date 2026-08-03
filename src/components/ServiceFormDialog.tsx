@@ -10,7 +10,10 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { MoneyInput } from '@/components/MoneyInput';
-import { useServiceSystems, AXIS_LABEL } from '@/hooks/use-service-systems';
+import {
+  useServiceSystems, AXIS_LABEL, DEPENDS_ON_ORDER, DEPENDS_ON_ORDER_LABEL,
+  systemChoiceToDb, systemDbToChoice,
+} from '@/hooks/use-service-systems';
 import { VERBOS, VERB_LABEL } from '@/hooks/use-service-classification';
 
 interface Props {
@@ -118,16 +121,28 @@ export function ServiceFormDialog({ open, onOpenChange, editData, onCreated }: P
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <Label>{AXIS_LABEL}</Label>
-              <Select value={form.service_system} onValueChange={(v) => set('service_system', v)}>
+              <Select
+                value={systemDbToChoice(form.service_system)}
+                onValueChange={(v) => set('service_system', systemChoiceToDb(v) ?? '')}
+              >
                 <SelectTrigger className="mt-1">
-                  <SelectValue placeholder="Depende da OS" />
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  {/* Primeiro item de propósito: é a escolha que transforma o
+                      serviço em genérico, e antes ela não existia. */}
+                  <SelectItem value={DEPENDS_ON_ORDER}>{DEPENDS_ON_ORDER_LABEL}</SelectItem>
                   {sistemas.map((s) => (
                     <SelectItem key={s.slug} value={s.slug}>{s.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {!form.service_system && (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Cada OS vai perguntar qual sistema este serviço toca — e o roteiro sai diferente
+                  conforme a resposta.
+                </p>
+              )}
             </div>
             <div>
               <Label>O que se faz (verbo)</Label>
