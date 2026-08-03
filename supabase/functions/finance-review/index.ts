@@ -366,10 +366,22 @@ async function montarHistoricoPorFornecedor(admin: DbClient): Promise<Map<string
     .not("expense_category", "is", null)
     .limit(5000);
 
+  // Só categorias que EXISTEM no plano de contas podem ser aprendidas.
+  //
+  // Sem esta checagem o motor propagava lixo: "Compras de Mercadorias" entrou por outro
+  // fluxo (importação de nota fiscal), não existe no plano de contas — e portanto não tem
+  // grupo no DRE —, e mesmo assim virou o padrão daquele fornecedor e foi aplicada a
+  // novos lançamentos. Categoria sem grupo é dinheiro que some do resultado, e aprender
+  // a errar transforma um engano em política.
+  const { data: catsValidas } = await admin
+    .from("financial_categories").select("name").eq("type", "payable").eq("active", true);
+  const valida = new Set((catsValidas ?? []).map((c: any) => String(c.name)));
+
   const contagem = new Map<string, Map<string, number>>();
   for (const row of (data ?? []) as any[]) {
     const cat = String(row.expense_category || "").trim();
     if (!cat || cat === "Outras despesas") continue;
+    if (!valida.has(cat)) continue;
     const porCat = contagem.get(row.supplier_id) ?? new Map<string, number>();
     porCat.set(cat, (porCat.get(cat) ?? 0) + 1);
     contagem.set(row.supplier_id, porCat);

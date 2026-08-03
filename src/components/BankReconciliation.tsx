@@ -279,13 +279,25 @@ export function BankReconciliation() {
     try {
       const isCredit = bankTx.transaction_type === 'credit';
       if (isCredit) {
-        const clientId = newForm.client_id || (clients && clients.length > 0 ? clients[0].id : '');
-        if (!clientId) { toast.error('Selecione um cliente'); setIsProcessing(false); return; }
+        // Sem cliente escolhido, PARA. A versão anterior caía no primeiro cliente da
+        // lista quando o campo ficava vazio — atribuía a receita a quem calhasse de ser
+        // o primeiro em ordem alfabética, sem avisar ninguém. Receita no cliente errado
+        // não se descobre olhando o total: só aparece quando alguém cobra quem já pagou.
+        const clientId = newForm.client_id;
+        if (!clientId) {
+          toast.error('Escolha o cliente antes de confirmar');
+          setIsProcessing(false);
+          return;
+        }
         const { data: rec } = await supabase.from('receivables').insert({
           client_id: clientId, service_order_id: newForm.service_order_id || null,
           description: newForm.description, issue_date: bankTx.transaction_date,
           due_date: bankTx.transaction_date, amount: Number(bankTx.amount),
           paid_amount: Number(bankTx.amount), balance_amount: 0, status: 'paid',
+          // Sem isto, TODA receita criada por aqui nascia sem categoria — e os 16
+          // recebíveis existentes provam: 16 de 16 estão em branco, logo invisíveis
+          // para qualquer leitura de resultado por categoria.
+          category: newForm.expense_category || 'Serviços prestados',
           notes: newForm.notes || null,
         }).select().single();
         if (rec) {
@@ -972,7 +984,7 @@ export function BankReconciliation() {
                           </div>
                           {tx.transaction_type === 'credit' ? (
                             <div>
-                              <Label>{t.serviceOrders.client}</Label>
+                              <Label>{t.serviceOrders.client} *</Label>
                               <Select value={newForm.client_id} onValueChange={v => setNewForm({ ...newForm, client_id: v })}>
                                 <SelectTrigger><SelectValue placeholder="Selecionar cliente" /></SelectTrigger>
                                 <SelectContent>
@@ -997,6 +1009,36 @@ export function BankReconciliation() {
                             </div>
                           )}
                         </div>
+                        {/* Entrada também precisa de categoria e de OS: sem categoria a
+                            receita some de qualquer leitura por tipo, e sem OS não há como
+                            saber que aquele dinheiro pagou aquele serviço. O formulário
+                            oferecia os dois apenas para saídas. */}
+                        {tx.transaction_type === 'credit' && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div>
+                              <Label>Categoria da receita</Label>
+                              <CategoriaDespesaSelect
+                                valor={newForm.expense_category}
+                                onMudar={v => setNewForm({ ...newForm, expense_category: v })}
+                                tipo="receivable"
+                                className="h-10"
+                                placeholder="Categoria da receita"
+                              />
+                            </div>
+                            <div>
+                              <Label>{t.financial.linkedOrder}</Label>
+                              <Select value={newForm.service_order_id} onValueChange={v => setNewForm({ ...newForm, service_order_id: v })}>
+                                <SelectTrigger><SelectValue placeholder="OS (opcional)" /></SelectTrigger>
+                                <SelectContent>
+                                  {serviceOrders?.slice(0, 20).map((so: any) => (
+                                    <SelectItem key={so.id} value={so.id}>{so.service_order_number}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                        )}
+
                         {tx.transaction_type === 'debit' && (
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div>
