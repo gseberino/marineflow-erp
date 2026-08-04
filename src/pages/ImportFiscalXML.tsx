@@ -26,6 +26,9 @@ import {
 import { useI18n } from '@/i18n';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { useProducts } from '@/hooks/use-products';
+import {
+  useServiceOrdersForLinking, useLinkNoteItemsToServiceOrders,
+} from '@/hooks/use-note-service-orders';
 import { parseNfeSupplierNote } from '@/lib/nfe-xml-parser';
 import { extractInvokeErrorMessage } from '@/lib/invoke-error';
 
@@ -116,6 +119,11 @@ export default function ImportFiscalXML() {
   const [loadingPreview, setLoadingPreview] = useState(false);
   // Três vias: vincular a nota ao pedido de compra que a originou.
   const [purchaseOrderId, setPurchaseOrderId] = useState<string>('__none');
+  /* Para QUEM a peça foi comprada. O padrão vale para a nota inteira (caso comum:
+     uma compra, uma OS) e cada item pode divergir dele — porque a nota costuma
+     trazer material de mais de uma OS, já que se compra tudo junto pelo frete. */
+  const [defaultServiceOrderId, setDefaultServiceOrderId] = useState<string>('__none');
+  const [itemServiceOrders, setItemServiceOrders] = useState<Record<number, string>>({});
   const [creatingSupplier, setCreatingSupplier] = useState(false);
   const [revertingId, setRevertingId] = useState<string | null>(null);
   // Numa nota com dezenas de itens, os que casaram com certeza são ruído. Este
@@ -151,6 +159,8 @@ export default function ImportFiscalXML() {
     setManualMappings({});
     setPreview(null);
     setSoAtencao(false);
+    setDefaultServiceOrderId('__none');
+    setItemServiceOrders({});
   };
 
   const { data: fiscalNotes, isLoading: loadingNotes } = useFiscalNotes();
@@ -160,6 +170,11 @@ export default function ImportFiscalXML() {
   // Três vias: quando um pedido é vinculado, carrega seus itens para confrontar
   // com a nota (quantidade e preço), pegando divergência de recebimento.
   const { data: linkedPO } = usePurchaseOrder(purchaseOrderId === '__none' ? undefined : purchaseOrderId);
+  const { data: serviceOrdersForLinking } = useServiceOrdersForLinking();
+  const linkItemsToSO = useLinkNoteItemsToServiceOrders();
+
+  /** OS efetiva de um item: a escolha própria dele, ou o padrão da nota. */
+  const soDoItem = (index: number) => itemServiceOrders[index] ?? defaultServiceOrderId;
 
   // Pedidos ABERTOS do fornecedor da nota: são os candidatos plausíveis ao confronto
   // em três vias. Antes a lista trazia todas as ordens de compra do sistema, sem
@@ -370,6 +385,20 @@ export default function ImportFiscalXML() {
       toast.success(
         `Importação confirmada! ${result.movements_created} movimentos · ${result.products_created} produtos criados.`
       );
+
+      /* Vínculo com a OS só agora: as linhas de fiscal_note_items nascem da
+         confirmação (o gatilho as cria), então este é o primeiro momento em que
+         existe onde gravar. Falhar aqui não desfaz a importação — o estoque já
+         entrou e a conta a pagar existe —, por isso o hook avisa em vez de
+         tratar como erro fatal. */
+      const destinos: Record<number, string> = {};
+      for (const it of parsed.items) {
+        const so = soDoItem(it.index);
+        if (so && so !== '__none') destinos[it.index] = so;
+      }
+      if (Object.keys(destinos).length) {
+        await linkItemsToSO.mutateAsync({ noteId: parsed.noteId, byIndex: destinos });
+      }
 
       // Audit
       await writeAuditLog({
@@ -659,6 +688,32 @@ export default function ImportFiscalXML() {
                     </p>
                   )}
                 </div>
+
+                {/* Para QUEM a peça foi comprada. Sem isto, a mercadoria entra no
+                    estoque e a OS continua parada esperando — nada liga uma coisa
+                    à outra, e se duas OS aguardam o mesmo produto ele fica com
+                    quem consumir primeiro. */}
+                <div className="space-y-1">
+                  <Label>Ordem de serviço (opcional)</Label>
+                  <Select value={defaultServiceOrderId} onValueChange={setDefaultServiceOrderId}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Selecione..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none">Compra para estoque</SelectItem>
+                      {(serviceOrdersForLinking ?? []).map((so) => (
+                        <SelectItem key={so.id} value={so.id}>
+                          {so.number}{so.clientName ? ` — ${so.clientName}` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-muted-foreground">
+                    {defaultServiceOrderId === '__none'
+                      ? 'Sem dono: entra no estoque como reposição. Se a compra foi para um serviço, escolha aqui — a OS deixa de esperar quando a peça chegar.'
+                      : 'Vale para todos os itens. Se a nota trouxer peça de mais de uma OS, ajuste item a item na conferência abaixo.'}
+                  </p>
+                </div>
               </div>
 
               {/* Confronto pedido × nota (três vias). Só aparece com um pedido
@@ -839,6 +894,34 @@ export default function ImportFiscalXML() {
                             </SelectContent>
                           </Select>
                         </div>
+
+                        {/* Destino do item: a OS que esperava esta peça, ou estoque.
+                            Só aparece quando o item casou com um produto do catálogo —
+                            item que ainda vai ser criado não tem como estar reservado
+                            para OS nenhuma. */}
+                        {vinculado && (
+                          <div className="mt-1.5 flex items-center gap-2 pl-8">
+                            <span className="shrink-0 text-[11px] text-muted-foreground">para</span>
+                            <Select
+                              value={soDoItem(item.index)}
+                              onValueChange={(val) =>
+                                setItemServiceOrders((prev) => ({ ...prev, [item.index]: val }))
+                              }
+                            >
+                              <SelectTrigger className="h-8 flex-1 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__none" className="text-xs">Estoque (sem OS)</SelectItem>
+                                {(serviceOrdersForLinking ?? []).map((so) => (
+                                  <SelectItem key={so.id} value={so.id} className="text-xs">
+                                    {so.number}{so.clientName ? ` — ${so.clientName}` : ''}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
