@@ -172,21 +172,35 @@ export function BankReconciliation() {
 
   const getSuggestions = (tx: any) => {
     const isCredit = tx.transaction_type === 'credit';
-    const records = isCredit
-      ? (receivables || []).filter(r => r.status !== 'paid' && r.status !== 'cancelled')
-      : (payables || []).filter(p => p.status !== 'paid' && p.status !== 'cancelled');
-    return records
+    const todos = isCredit ? (receivables || []) : (payables || []);
+    const busca = searchMatch.trim().toLowerCase();
+
+    // Quando o usuário BUSCA por texto, o que já foi pago continua na lista.
+    //
+    // Antes, `status !== 'paid'` era aplicado sempre — e isso criava o beco sem saída que
+    // o usuário relatou: ele lança o pagamento à mão, o extrato chega depois, e a conta
+    // some da busca justamente por estar quitada. A transação ficava órfã para sempre,
+    // sem caminho manual nenhum. Quem digita o nome sabe o que procura; esconder o
+    // resultado certo por causa do status é o sistema achando que sabe mais.
+    const candidatos = busca
+      ? todos.filter(r => r.status !== 'cancelled')
+      : todos.filter(r => r.status !== 'paid' && r.status !== 'cancelled');
+
+    return candidatos
       .filter(r => {
-        if (searchMatch) {
+        if (busca) {
           const desc = (r.description || '').toLowerCase();
           const name = isCredit ? ((r as any).clients?.name || '').toLowerCase() : '';
-          return desc.includes(searchMatch.toLowerCase()) || name.includes(searchMatch.toLowerCase());
+          const os = ((r as any).service_orders?.service_order_number || '').toLowerCase();
+          return desc.includes(busca) || name.includes(busca) || os.includes(busca);
         }
-        const amtRatio = Math.abs(Number(r.balance_amount) - tx.amount) / tx.amount;
+        // Sem busca, só o que ainda tem saldo e caiu perto da data.
+        const base = Number(r.balance_amount) || Number(r.amount);
+        const amtRatio = Math.abs(base - tx.amount) / tx.amount;
         const daysDiff = Math.abs(new Date(r.due_date).getTime() - new Date(tx.transaction_date).getTime()) / 86400000;
         return amtRatio <= 0.05 && daysDiff <= 7;
       })
-      .slice(0, 5);
+      .slice(0, 8);
   };
 
   const invalidateAll = () => {
@@ -199,6 +213,41 @@ export function BankReconciliation() {
 
   const handleReconcileExisting = async (bankTx: any, record: any, isReceivable: boolean) => {
     try {
+      // Conta JÁ QUITADA: só amarra o extrato ao pagamento que já existe.
+      //
+      // Registrar outro pagamento aqui criaria uma segunda baixa para o mesmo dinheiro —
+      // o saldo ficaria negativo e o faturamento dobrado. É o caso de quem lançou o
+      // recebimento à mão e depois quer fechar o rastro com o extrato: o pagamento existe,
+      // falta apenas dizer de qual transação ele veio.
+      if (record.status === 'paid') {
+        const { data: pagamento } = await supabase
+          .from('payments')
+          .select('id')
+          .eq(isReceivable ? 'receivable_id' : 'payable_id', record.id)
+          .order('payment_date', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        const { error } = await supabase
+          .from('bank_transactions')
+          .update({
+            reconciled: true,
+            reconciled_payment_id: (pagamento as any)?.id ?? null,
+            reconciled_service_order_id: record.service_order_id ?? null,
+          })
+          .eq('id', bankTx.id);
+        if (error) throw error;
+
+        toast.success(
+          (pagamento as any)?.id
+            ? 'Vinculado ao pagamento que já estava lançado — nada foi cobrado em dobro'
+            : 'Transação vinculada. Não havia pagamento registrado, então nada foi baixado.',
+        );
+        setReconcileId(null);
+        invalidateAll();
+        return;
+      }
+
       await reconcile.mutateAsync({
         bankTransactionId: bankTx.id,
         receivableId: isReceivable ? record.id : undefined,
@@ -918,23 +967,53 @@ export function BankReconciliation() {
                         <p className="text-sm font-medium">
                           {tx.transaction_type === 'credit' ? 'Vincular a um recebível' : 'Vincular a um pagável'}
                         </p>
-                        <Input placeholder="Buscar..." value={searchMatch} onChange={e => setSearchMatch(e.target.value)} className="max-w-xs" />
+                        <div className="max-w-md space-y-1">
+                          <Input
+                            placeholder="Buscar por descrição, cliente ou número da OS…"
+                            value={searchMatch}
+                            onChange={e => setSearchMatch(e.target.value)}
+                          />
+                          {/* Sem esta frase, ninguém descobre que a busca alcança o que já
+                              foi pago — e é justamente esse o caso de quem lançou à mão. */}
+                          <p className="text-xs text-muted-foreground">
+                            Buscando por texto, contas <strong>já quitadas</strong> também
+                            aparecem — use quando você já lançou o pagamento à mão e quer
+                            apenas amarrar o extrato a ele.
+                          </p>
+                        </div>
                         <div className="space-y-1 max-h-40 overflow-y-auto">
                           {getSuggestions(tx).map(r => {
                             const isRec = tx.transaction_type === 'credit';
-                            const amtRatio = Math.abs(Number(r.balance_amount) - Number(tx.amount)) / Number(tx.amount);
+                            const jaPago = r.status === 'paid';
+                            const base = Number(r.balance_amount) || Number(r.amount);
+                            const amtRatio = Math.abs(base - Number(tx.amount)) / Number(tx.amount);
                             const isAutoMatch = amtRatio <= 0.05;
                             return (
-                              <div key={r.id} className={`flex items-center justify-between p-2 rounded border text-sm ${isAutoMatch ? 'border-warning bg-warning/5' : ''}`}>
-                                <div>
+                              <div key={r.id} className={`flex flex-wrap items-center justify-between gap-2 p-2 rounded border text-sm ${
+                                jaPago ? 'border-info/40 bg-info/5' : isAutoMatch ? 'border-warning bg-warning/5' : ''
+                              }`}>
+                                <div className="min-w-0">
                                   <span className="font-medium">{r.description}</span>
                                   {isRec && (r as any).clients && <span className="text-muted-foreground ml-2">— {(r as any).clients.name}</span>}
-                                  {isAutoMatch && <StatusBadge className="bg-warning/15 text-warning ml-2">{t.financial.autoSuggestion}</StatusBadge>}
+                                  {/* Quem já foi pago aparece por outro motivo e faz outra
+                                      coisa ao confirmar — precisa se distinguir na lista. */}
+                                  {jaPago
+                                    ? <StatusBadge className="bg-info/15 text-info ml-2">Já quitado — só vincular</StatusBadge>
+                                    : isAutoMatch && <StatusBadge className="bg-warning/15 text-warning ml-2">{t.financial.autoSuggestion}</StatusBadge>}
                                 </div>
-                                <div className="flex items-center gap-2">
-                                  <span className="font-medium">{formatCurrency(Number(r.balance_amount))}</span>
-                                  <Button size="sm" onClick={() => handleReconcileExisting(tx, r, isRec)} disabled={reconcile.isPending}>
-                                    <Check className="h-3 w-3 mr-1" />{t.financial.confirmReconciliation}
+                                <div className="flex shrink-0 items-center gap-2">
+                                  <span className="font-medium tabular-nums">{formatCurrency(base)}</span>
+                                  <Button
+                                    size="sm"
+                                    variant={jaPago ? 'outline' : 'default'}
+                                    onClick={() => handleReconcileExisting(tx, r, isRec)}
+                                    disabled={reconcile.isPending}
+                                    title={jaPago
+                                      ? 'Amarra esta transação ao pagamento já lançado, sem baixar de novo'
+                                      : undefined}
+                                  >
+                                    <Check className="h-3 w-3 mr-1" />
+                                    {jaPago ? 'Vincular' : t.financial.confirmReconciliation}
                                   </Button>
                                 </div>
                               </div>
