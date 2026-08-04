@@ -11,7 +11,26 @@
 // gestor aprovar no automático) ou vira perigoso (lança dinheiro sozinho). O critério é o
 // mesmo que a literatura de agentes em finanças usa: reversibilidade e alcance da escrita.
 
-import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolCtx, type ToolDef } from "./registry.ts";
+import { blockTechnician, type Role, type ToolCtx, type ToolDef } from "./registry.ts";
+
+/**
+ * Quem pode operar o financeiro pelo agente.
+ *
+ * NÃO usar NON_TECHNICIAN_ROLES aqui: ele inclui seller e external_seller, e a RLS destas
+ * tabelas exige `is_admin_or_financial`. O vendedor veria a ferramenta na lista, o modelo
+ * tentaria usá-la e receberia silêncio — SELECT sob RLS devolve vazio, não erro, então o
+ * agente concluiria "não há regras cadastradas" em vez de "você não tem acesso".
+ */
+const CARGOS_FINANCEIRO: Role[] = ["admin", "financial"];
+
+function bloqueiaSemAcesso(ctx: ToolCtx): { error: string } | null {
+  const bloqueio = blockTechnician(ctx);
+  if (bloqueio) return bloqueio;
+  if (!CARGOS_FINANCEIRO.includes(ctx.userRole as Role)) {
+    return { error: "Apenas administrador ou financeiro podem operar esta parte do sistema." };
+  }
+  return null;
+}
 
 /** Categorias ativas do plano de contas — o agente não pode inventar categoria. */
 async function categoriasValidas(ctx: ToolCtx, tipo: "payable" | "receivable" = "payable") {
@@ -20,6 +39,38 @@ async function categoriasValidas(ctx: ToolCtx, tipo: "payable" | "receivable" = 
     .select("name, dre_group")
     .eq("type", tipo).eq("active", true);
   return (data ?? []) as { name: string; dre_group: string | null }[];
+}
+
+/**
+ * Chama a finance-review com a autenticação que o canal permite.
+ *
+ * Pelo painel existe JWT do usuário. Pelo WhatsApp NÃO existe — o agente monta o contexto
+ * com `jwt: ""` (ai-agent/index.ts), e mandar "Bearer " vazio devolve 401. Nesse caso a
+ * chamada usa o segredo interno e informa QUEM está decidindo, para a aprovação continuar
+ * tendo dono na trilha de auditoria.
+ */
+async function chamarFinanceReview(ctx: ToolCtx, body: Record<string, unknown>) {
+  const url = `${Deno.env.get("SUPABASE_URL")}/functions/v1/finance-review`;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  let corpo = body;
+
+  if (ctx.jwt) {
+    headers.Authorization = `Bearer ${ctx.jwt}`;
+  } else {
+    const segredo = Deno.env.get("CRON_SECRET");
+    if (!segredo) {
+      return { error: "Sem credencial para executar esta ação por este canal." };
+    }
+    headers["x-cron-secret"] = segredo;
+    corpo = { ...body, acting_user_id: ctx.userId };
+  }
+
+  const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(corpo) });
+  const dados = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    return { error: dados?.detail || dados?.error || `finance-review respondeu ${res.status}` };
+  }
+  return dados;
 }
 
 export const financeRulesTools: ToolDef[] = [
@@ -38,11 +89,14 @@ export const financeRulesTools: ToolDef[] = [
           type: "string",
           enum: ["texto", "fornecedor", "documento", "nome_de_quem_recebe"],
           description:
-            "texto = trecho que aparece no histórico do extrato (ex: MERCADOLIVRE). " +
-            "fornecedor = id de fornecedor cadastrado. documento = CNPJ/CPF. " +
-            "nome_de_quem_recebe = nome exato da contraparte.",
+            "texto = trecho que aparece no histórico do extrato (ex: MERCADOLIVRE) — é o mais comum. " +
+            "fornecedor = NOME de fornecedor cadastrado (a ferramenta resolve o cadastro). " +
+            "documento = CNPJ/CPF. nome_de_quem_recebe = nome exato da contraparte no extrato.",
         },
-        valor_de_busca: { type: "string", description: "O trecho, id, documento ou nome procurado." },
+        valor_de_busca: {
+          type: "string",
+          description: "O trecho, nome do fornecedor, documento ou nome procurado.",
+        },
         categoria: { type: "string", description: "Categoria do plano de contas a aplicar." },
         valor_minimo: { type: "number", description: "Opcional: só vale acima deste valor." },
         valor_maximo: { type: "number", description: "Opcional: só vale até este valor." },
@@ -58,9 +112,9 @@ export const financeRulesTools: ToolDef[] = [
     // Média, não alta: a regra não move dinheiro e desfazer é pausá-la. Mas escreve
     // configuração que afeta lançamentos futuros, então passa pela confirmação.
     risk: "medium",
-    roles: NON_TECHNICIAN_ROLES,
+    roles: CARGOS_FINANCEIRO,
     async execute(args, ctx) {
-      const bloqueio = blockTechnician(ctx);
+      const bloqueio = bloqueiaSemAcesso(ctx);
       if (bloqueio) return bloqueio;
 
       const cats = await categoriasValidas(ctx);
@@ -79,12 +133,36 @@ export const financeRulesTools: ToolDef[] = [
         documento: "document",
         nome_de_quem_recebe: "counterparty",
       };
+      const tipo = tipoMap[String(args.reconhecer_por)];
+      let alvo = String(args.valor_de_busca).trim();
+
+      // Regra por fornecedor guarda o ID, mas quem fala diz o NOME — e o agente não tem
+      // como adivinhar um uuid. Resolver aqui evita a regra nascer apontando para um
+      // fornecedor que não existe, que só apareceria como "regra que nunca aplica".
+      if (tipo === "supplier" && !/^[0-9a-f-]{36}$/i.test(alvo)) {
+        const { data: achados } = await ctx.sb
+          .from("suppliers").select("id, name").ilike("name", `%${alvo}%`).limit(5);
+        const lista = (achados ?? []) as { id: string; name: string }[];
+        if (lista.length === 0) {
+          return {
+            error: `Nenhum fornecedor cadastrado com "${alvo}".`,
+            dica: "Confira o nome, ou crie a regra por 'texto' usando um trecho do histórico do extrato.",
+          };
+        }
+        if (lista.length > 1) {
+          return {
+            error: `"${alvo}" corresponde a mais de um fornecedor. Pergunte ao usuário qual é.`,
+            opcoes: lista.map((f) => f.name),
+          };
+        }
+        alvo = lista[0].id;
+      }
 
       const { data, error } = await ctx.sb
         .from("finance_rules")
         .insert({
-          match_type: tipoMap[String(args.reconhecer_por)],
-          match_value: String(args.valor_de_busca).trim(),
+          match_type: tipo,
+          match_value: alvo,
           direction: "debit",
           set_category: cat.name,
           set_dre_group: cat.dre_group,
@@ -127,7 +205,7 @@ export const financeRulesTools: ToolDef[] = [
       },
     },
     risk: "low",
-    roles: NON_TECHNICIAN_ROLES,
+    roles: CARGOS_FINANCEIRO,
     async execute(args, ctx) {
       const mapa: Record<string, string> = {
         ativas: "active", sugeridas: "proposed", pausadas: "paused",
@@ -158,9 +236,9 @@ export const financeRulesTools: ToolDef[] = [
       required: ["regra_id", "nova_situacao"],
     },
     risk: "medium",
-    roles: NON_TECHNICIAN_ROLES,
+    roles: CARGOS_FINANCEIRO,
     async execute(args, ctx) {
-      const bloqueio = blockTechnician(ctx);
+      const bloqueio = bloqueiaSemAcesso(ctx);
       if (bloqueio) return bloqueio;
       const mapa: Record<string, string> = { ativa: "active", pausada: "paused", recusada: "rejected" };
       const { error } = await ctx.sb.from("finance_rules")
@@ -193,9 +271,9 @@ export const financeRulesTools: ToolDef[] = [
       required: ["nome", "grupo"],
     },
     risk: "medium",
-    roles: NON_TECHNICIAN_ROLES,
+    roles: CARGOS_FINANCEIRO,
     async execute(args, ctx) {
-      const bloqueio = blockTechnician(ctx);
+      const bloqueio = bloqueiaSemAcesso(ctx);
       if (bloqueio) return bloqueio;
       const { error } = await ctx.sb.from("financial_categories").insert({
         name: String(args.nome).trim(),
@@ -222,7 +300,7 @@ export const financeRulesTools: ToolDef[] = [
       properties: { tipo: { type: "string", enum: ["despesa", "receita"] } },
     },
     risk: "low",
-    roles: NON_TECHNICIAN_ROLES,
+    roles: CARGOS_FINANCEIRO,
     async execute(args, ctx) {
       const cats = await categoriasValidas(ctx, args.tipo === "receita" ? "receivable" : "payable");
       return { categorias: cats, total: cats.length };
@@ -246,18 +324,11 @@ export const financeRulesTools: ToolDef[] = [
       },
     },
     risk: "medium",
-    roles: NON_TECHNICIAN_ROLES,
+    roles: CARGOS_FINANCEIRO,
     async execute(args, ctx) {
-      const bloqueio = blockTechnician(ctx);
+      const bloqueio = bloqueiaSemAcesso(ctx);
       if (bloqueio) return bloqueio;
-      const url = `${Deno.env.get("SUPABASE_URL")}/functions/v1/finance-review`;
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${ctx.jwt}` },
-        body: JSON.stringify({ action: "generate", incluir_historico: !!args.incluir_historico_antigo }),
-      });
-      if (!res.ok) return { error: `finance-review respondeu ${res.status}` };
-      return await res.json();
+      return await chamarFinanceReview(ctx, { action: "generate", incluir_historico: !!args.incluir_historico_antigo });
     },
   },
 
@@ -271,7 +342,7 @@ export const financeRulesTools: ToolDef[] = [
       properties: { limite: { type: "number" } },
     },
     risk: "low",
-    roles: NON_TECHNICIAN_ROLES,
+    roles: CARGOS_FINANCEIRO,
     async execute(args, ctx) {
       const { data, error } = await ctx.sb
         .from("finance_review_queue")
@@ -304,18 +375,11 @@ export const financeRulesTools: ToolDef[] = [
     // ALTA: cria lançamento contábil. Diferente de criar regra, isto não se desfaz
     // pausando nada — vira despesa registrada com data e valor.
     risk: "high",
-    roles: NON_TECHNICIAN_ROLES,
+    roles: CARGOS_FINANCEIRO,
     async execute(args, ctx) {
-      const bloqueio = blockTechnician(ctx);
+      const bloqueio = bloqueiaSemAcesso(ctx);
       if (bloqueio) return bloqueio;
-      const url = `${Deno.env.get("SUPABASE_URL")}/functions/v1/finance-review`;
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${ctx.jwt}` },
-        body: JSON.stringify({ action: "approve", ids: args.ids }),
-      });
-      if (!res.ok) return { error: `finance-review respondeu ${res.status}` };
-      return await res.json();
+      return await chamarFinanceReview(ctx, { action: "approve", ids: args.ids });
     },
   },
 
@@ -332,16 +396,9 @@ export const financeRulesTools: ToolDef[] = [
     },
     // Baixa: recusar não cria nem apaga nada — a transação volta a ficar pendente.
     risk: "low",
-    roles: NON_TECHNICIAN_ROLES,
+    roles: CARGOS_FINANCEIRO,
     async execute(args, ctx) {
-      const url = `${Deno.env.get("SUPABASE_URL")}/functions/v1/finance-review`;
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${ctx.jwt}` },
-        body: JSON.stringify({ action: "reject", ids: args.ids, note: args.motivo ?? null }),
-      });
-      if (!res.ok) return { error: `finance-review respondeu ${res.status}` };
-      return await res.json();
+      return await chamarFinanceReview(ctx, { action: "reject", ids: args.ids, note: args.motivo ?? null });
     },
   },
 
@@ -364,9 +421,9 @@ export const financeRulesTools: ToolDef[] = [
       required: ["nome", "tipo"],
     },
     risk: "medium",
-    roles: NON_TECHNICIAN_ROLES,
+    roles: CARGOS_FINANCEIRO,
     async execute(args, ctx) {
-      const bloqueio = blockTechnician(ctx);
+      const bloqueio = bloqueiaSemAcesso(ctx);
       if (bloqueio) return bloqueio;
       const { data, error } = await ctx.sb.from("payees").insert({
         name: String(args.nome).trim(),
@@ -396,7 +453,7 @@ export const financeRulesTools: ToolDef[] = [
       },
     },
     risk: "low",
-    roles: NON_TECHNICIAN_ROLES,
+    roles: CARGOS_FINANCEIRO,
     async execute(args, ctx) {
       let q = ctx.sb.from("payees")
         .select("id, name, kind, document, pix_key, commission_percentage")
@@ -424,15 +481,20 @@ export const financeRulesTools: ToolDef[] = [
       required: ["ano"],
     },
     risk: "low",
-    roles: NON_TECHNICIAN_ROLES,
+    roles: CARGOS_FINANCEIRO,
     async execute(args, ctx) {
       const ano = Number(args.ano);
-      const de = args.mes
-        ? `${ano}-${String(args.mes).padStart(2, "0")}-01`
-        : `${ano}-01-01`;
-      const ate = args.mes
-        ? new Date(ano, Number(args.mes), 0).toISOString().slice(0, 10)
-        : `${ano}-12-31`;
+      const mes = args.mes ? Number(args.mes) : null;
+      if (mes !== null && (mes < 1 || mes > 12)) {
+        return { error: "Mês precisa estar entre 1 e 12." };
+      }
+
+      // Último dia do mês calculado em UTC. `new Date(ano, mes, 0).toISOString()` usa o
+      // fuso LOCAL para montar e converte para UTC ao serializar — num servidor a leste de
+      // Greenwich isso volta um dia e o último dia do mês fica de fora do relatório.
+      const ultimoDia = mes ? new Date(Date.UTC(ano, mes, 0)).getUTCDate() : 31;
+      const de = mes ? `${ano}-${String(mes).padStart(2, "0")}-01` : `${ano}-01-01`;
+      const ate = mes ? `${ano}-${String(mes).padStart(2, "0")}-${ultimoDia}` : `${ano}-12-31`;
 
       const [cats, pays, recs] = await Promise.all([
         ctx.sb.from("financial_categories").select("name, type, dre_group"),
@@ -468,7 +530,7 @@ export const financeRulesTools: ToolDef[] = [
         .gte("transaction_date", de).lte("transaction_date", ate);
 
       return {
-        periodo: args.mes ? `${String(args.mes).padStart(2, "0")}/${ano}` : String(ano),
+        periodo: mes ? `${String(mes).padStart(2, "0")}/${ano}` : String(ano),
         receita,
         custo_dos_servicos: custo,
         lucro_bruto: receita - custo,

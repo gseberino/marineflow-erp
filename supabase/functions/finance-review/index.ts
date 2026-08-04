@@ -54,6 +54,8 @@ interface Body {
   incluir_historico?: boolean;
   ids?: string[];
   note?: string;
+  /** Quem está decidindo, quando a chamada é interna (só respeitado com x-cron-secret). */
+  acting_user_id?: string;
   /** Correções do gestor antes de aprovar. */
   overrides?: Record<string, Correcao>;
 }
@@ -85,15 +87,20 @@ Deno.serve(async (req) => {
   const isCron = !!cronSecret && cronSecret === Deno.env.get("CRON_SECRET");
   let userId: string | null = null;
 
+  const body: Body = await req.json().catch(() => ({}));
+
   if (!isCron) {
     const token = (req.headers.get("Authorization") || "").replace("Bearer ", "");
     if (!token) return jr({ error: "unauthorized" }, 401);
     const { data, error } = await admin.auth.getUser(token);
     if (error || !data?.user) return jr({ error: "unauthorized" }, 401);
     userId = data.user.id;
+  } else if (body.acting_user_id) {
+    // Chamada interna autenticada pelo segredo (agente pelo WhatsApp, onde não há JWT de
+    // usuário). A identidade vem no corpo para que a decisão continue tendo dono: sem
+    // isso, toda aprovação feita por voz ficaria registrada como "ninguém".
+    userId = String(body.acting_user_id);
   }
-
-  const body: Body = await req.json().catch(() => ({}));
   const action = body.action ?? "generate";
 
   try {
