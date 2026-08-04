@@ -235,3 +235,34 @@ Deno.test("isResolved r17: preço registrado ou cotação fechada resolve", asyn
     "Cotação não existe mais",
   );
 });
+
+// R18 existe por um caso real: três cotações ficaram 11 dias marcadas como enviadas
+// sem que nenhuma mensagem tivesse saído, e a R17 cobrava resposta de fornecedor que
+// nunca foi perguntado. A tarefa só se resolve quando o envio de fato acontece.
+Deno.test("isResolved r18: só o envio registrado resolve a tarefa", async () => {
+  const r18 = ruleById("r18")!;
+  const mkDb = (row: unknown) => ({
+    from: () => ({
+      select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: row }) }) }),
+    }),
+  });
+
+  // escolhido mas não enviado → a pendência é nossa e continua
+  assertEquals(
+    await r18.isResolved(mkDb({ status: "open", quote_request_sends: [] }), { automation_key: "r18:quote:x" }),
+    null,
+  );
+  assertEquals(
+    await r18.isResolved(mkDb({ status: "open", quote_request_sends: [{ id: "s1" }] }), { automation_key: "r18:quote:x" }),
+    "Cotação enviada",
+  );
+  // fechar a cotação também encerra: não faz sentido cobrar envio do que foi resolvido
+  assertEquals(
+    await r18.isResolved(mkDb({ status: "closed", quote_request_sends: [] }), { automation_key: "r18:quote:x" }),
+    "Cotação fechada",
+  );
+  assertEquals(
+    await r18.isResolved(mkDb(null), { automation_key: "r18:quote:x" }),
+    "Cotação não existe mais",
+  );
+});

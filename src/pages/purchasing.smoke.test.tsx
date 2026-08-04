@@ -54,6 +54,10 @@ vi.mock('@/hooks/use-quote-requests', () => ({
   useCreatePOsFromQuote: mut,
   useCloseQuoteRequest: mut,
   useReopenQuoteRequest: mut,
+  useSendQuoteRequest: mut,
+  // Sem envio registrado: é o estado das cotações reais em produção, e o que
+  // faz a faixa de etapas mostrar "ainda não foi enviada".
+  useQuoteRequestSends: () => ({ data: [] }),
   QUOTE_STATUS_LABELS: { open: 'Aberta', closed: 'Fechada', cancelled: 'Cancelada' },
 }));
 
@@ -118,6 +122,23 @@ describe('mapa de cotação', () => {
       '/purchasing/quotes/q1',
     );
   }
+
+  /* Pina a distinção que custou 11 dias em produção: escolher fornecedor não é
+     ter enviado. As três cotações reais exibiam "enviada a 2 fornecedores" com
+     zero mensagens despachadas, porque sent_supplier_ids é preenchido na criação.
+     Sem envio registrado, a tela tem de dizer que não foi enviada e oferecer o
+     botão — nunca cobrar resposta de quem não foi perguntado. */
+  it('não afirma envio quando o fornecedor só foi escolhido', async () => {
+    renderDetail();
+    // A cotação da fixture tem preços registrados à mão, mas nenhum envio: é
+    // exatamente o estado das três cotações reais de produção.
+    expect(await screen.findByText(/nada enviado/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Enviar aos fornecedores/i })).toBeInTheDocument();
+    // O cabeçalho fala em "a consultar", nunca em quantos "responderam" — essa
+    // conta pressupõe que alguém foi perguntado.
+    expect(screen.getByText(/fornecedor\(es\) a consultar/i)).toBeInTheDocument();
+    expect(screen.queryByText(/de 2 responderam/i)).not.toBeInTheDocument();
+  });
 
   it('renderiza pacotes por fornecedor e marca o melhor', async () => {
     renderDetail();

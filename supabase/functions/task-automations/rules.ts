@@ -632,14 +632,82 @@ const r16: Rule = {
   },
 };
 
+/** Data do primeiro envio da cotação — é dela que corre o prazo do fornecedor. */
+function primeiroEnvio(q: any): string {
+  const datas = (q.quote_request_sends || []).map((s: any) => s.created_at).filter(Boolean).sort();
+  return datas[0] || q.created_at;
+}
+
+// R18: cotação criada e NUNCA enviada — a pendência é nossa, não do fornecedor.
+//
+// Descoberto em 03/08/2026: as três cotações de produção (COT-00001 a 00003, de 23/07)
+// apareciam como enviadas a dois fornecedores cada e não tinham saído. Nenhuma mensagem
+// de WhatsApp citava "COT-", e a fila de envio nunca teve uma linha de cotação. A causa
+// era `sent_supplier_ids` ser preenchido na CRIAÇÃO com quem foi apenas selecionado.
+//
+// Enquanto isso, a R17 abaixo cobrava "fornecedor não respondeu" — de quem nunca foi
+// perguntado. Esta regra separa as duas situações: aqui a ação é NOSSA (enviar).
+const r18: Rule = {
+  id: 'r18',
+  label: 'Cotação criada e não enviada',
+  defaultEnabled: true,
+  async find(db) {
+    const { data, error } = await db
+      .from('quote_requests')
+      .select('id, code, created_at, sent_supplier_ids, service_orders(service_order_number), quote_request_sends(id)')
+      .eq('status', 'open')
+      .limit(100);
+    if (error) throw error;
+
+    return (data || [])
+      .filter((q: any) => {
+        // Sem fornecedor escolhido não há o que enviar — é rascunho, não pendência.
+        if (!(q.sent_supplier_ids || []).length) return false;
+        if ((q.quote_request_sends || []).length > 0) return false;
+        // Um dia útil de tolerância: criar e enviar em seguida é o fluxo normal.
+        return businessDaysBetween(q.created_at, new Date()) >= 1;
+      })
+      .map((q: any) => {
+        const dias = businessDaysBetween(q.created_at, new Date());
+        return {
+          automation_key: keyOf('r18', 'quote', q.id),
+          title: `Enviar a cotação ${q.code} ao fornecedor` +
+            (q.service_orders?.service_order_number ? ` (${q.service_orders.service_order_number})` : ''),
+          priority: (dias >= 3 ? 'urgent' : 'high') as 'urgent' | 'high',
+          assignee: 'admin' as const,
+          due_at: dueAt(todayISO()),
+          related_entity_type: 'quote_request',
+          related_entity_id: q.id,
+          notes: `Criada há ${dias} dia(s) útil(eis) com ${(q.sent_supplier_ids || []).length} fornecedor(es) escolhido(s), ` +
+            `mas o pedido nunca saiu. Abra a cotação e use "Enviar aos fornecedores".`,
+        };
+      });
+  },
+  async isResolved(db, task) {
+    const id = entityIdFromKey(task.automation_key);
+    const { data } = await db
+      .from('quote_requests')
+      .select('status, quote_request_sends(id)')
+      .eq('id', id)
+      .maybeSingle();
+    if (!data) return 'Cotação não existe mais';
+    if (data.status !== 'open') return `Cotação ${data.status === 'closed' ? 'fechada' : 'cancelada'}`;
+    return (data.quote_request_sends || []).length > 0 ? 'Cotação enviada' : null;
+  },
+};
+
 // R17: cotação enviada sem nenhuma resposta.
 //
 // A janela praticada no mercado para o fornecedor responder é de 3 a 5 dias úteis, e a
-// recomendação é lembrete em vez de caçar no inbox. Este é o caso que de fato aconteceu
-// aqui: 3 cotações enviadas em 23/07 e nenhuma resposta registrada até 29/07.
+// recomendação é lembrete em vez de caçar no inbox.
 //
 // Conta em dias ÚTEIS: contar corridos dispararia na segunda-feira por causa do fim de
 // semana. A tarefa é interna — nada é enviado ao fornecedor sem você mandar.
+//
+// EXIGE ENVIO REGISTRADO (03/08/2026). Antes, a regra presumia que toda cotação aberta
+// havia sido enviada e cobrava resposta de fornecedor que nunca recebeu nada. O prazo
+// agora corre do ENVIO, não da criação — que é o momento em que o fornecedor de fato
+// passou a dever resposta. Cotação sem envio é assunto da R18.
 const r17: Rule = {
   id: 'r17',
   label: 'Cotação sem resposta do fornecedor',
@@ -647,7 +715,7 @@ const r17: Rule = {
   async find(db) {
     const { data, error } = await db
       .from('quote_requests')
-      .select('id, code, created_at, service_orders(service_order_number), quote_responses(unit_price)')
+      .select('id, code, created_at, service_orders(service_order_number), quote_responses(unit_price), quote_request_sends(created_at)')
       .eq('status', 'open')
       .limit(100);
 
@@ -662,10 +730,12 @@ const r17: Rule = {
         // e isso a Central de Compras mostra sem precisar de tarefa.
         const hasPrice = (q.quote_responses || []).some((r: any) => Number(r.unit_price) > 0);
         if (hasPrice) return false;
-        return businessDaysBetween(q.created_at, new Date()) >= 3;
+        // Sem envio registrado o fornecedor não deve nada: é caso da R18.
+        if (!(q.quote_request_sends || []).length) return false;
+        return businessDaysBetween(primeiroEnvio(q), new Date()) >= 3;
       })
       .map((q: any) => {
-        const dias = businessDaysBetween(q.created_at, new Date());
+        const dias = businessDaysBetween(primeiroEnvio(q), new Date());
         return {
           automation_key: keyOf('r17', 'quote', q.id),
           title: `Cobrar resposta da cotação ${q.code}` +
@@ -675,7 +745,7 @@ const r17: Rule = {
           due_at: dueAt(todayISO()),
           related_entity_type: 'quote_request',
           related_entity_id: q.id,
-          notes: `Enviada há ${dias} dias úteis sem nenhum preço. A janela normal é de 3 a 5 dias úteis.`,
+            notes: `Enviada há ${dias} dias úteis sem nenhum preço. A janela normal é de 3 a 5 dias úteis.`,
         };
       });
   },
@@ -693,7 +763,7 @@ const r17: Rule = {
   },
 };
 
-export const RULES: Rule[] = [r1, r2, r3, r4, r5, r6, r7, r8, r11, r12, r14, r15, r16, r17];
+export const RULES: Rule[] = [r1, r2, r3, r4, r5, r6, r7, r8, r11, r12, r14, r15, r16, r17, r18];
 
 export function ruleById(id: string): Rule | undefined {
   return RULES.find((r) => r.id === id);

@@ -18,9 +18,11 @@ import { cn } from '@/lib/utils';
 import { useSuppliers } from '@/hooks/use-suppliers';
 import {
   useApplyQuotePrice, useCloseQuoteRequest, useCreatePOsFromQuote, useQuoteRequest,
-  useRecordQuoteResponse, useReopenQuoteRequest, QUOTE_STATUS_LABELS,
+  useRecordQuoteResponse, useReopenQuoteRequest, useSendQuoteRequest,
+  useQuoteRequestSends, QUOTE_STATUS_LABELS,
   type BasketChoice,
 } from '@/hooks/use-quote-requests';
+import { QuoteProgressStrip, type QuoteStep } from '@/components/purchasing/QuoteProgressStrip';
 import {
   agingLevel, buildQuoteComparison, businessDaysSince, computeBasketTotal,
   suggestBestBasket, type Offer,
@@ -53,6 +55,8 @@ export default function QuoteRequestDetailPage() {
   const { data: suppliers } = useSuppliers();
 
   const recordResponse = useRecordQuoteResponse();
+  const sendQuote = useSendQuoteRequest();
+  const { data: sends } = useQuoteRequestSends(id);
   const applyPrice = useApplyQuotePrice();
   const createPOs = useCreatePOsFromQuote();
   const closeQuote = useCloseQuoteRequest();
@@ -138,6 +142,57 @@ export default function QuoteRequestDetailPage() {
   const aging = agingLevel(days);
   const isOpen = quote.status === 'open';
   const noResponses = comparison.respondedSupplierIds.length === 0;
+
+  /* Etapas do ciclo, cada uma apurada de um fato — nunca presumida. A distinção
+     que motivou tudo isto: escolher fornecedor (sent_supplier_ids, preenchido na
+     criação) NÃO é ter enviado. Só há envio quando existe linha em
+     quote_request_sends, e ela só vale como entregue quando a fila confirma. */
+  const escolhidos = (quote.sent_supplier_ids ?? []).length;
+  const envios = sends ?? [];
+  const entregues = envios.filter((s: any) => s.whatsapp_send_queue?.status === 'sent').length;
+  const falhados = envios.filter((s: any) => s.whatsapp_send_queue?.status === 'failed').length;
+  const naFila = envios.length - entregues - falhados;
+
+  const steps: QuoteStep[] = useMemo(() => {
+    const enviouAlgo = envios.length > 0;
+    const respondeu = comparison.respondedSupplierIds.length;
+    const fechada = quote.status === 'closed';
+
+    const detalheEnvio = !enviouAlgo
+      ? escolhidos ? `${escolhidos} fornecedor(es) escolhido(s), nada enviado` : 'nenhum fornecedor escolhido'
+      : [entregues && `${entregues} entregue(s)`, naFila > 0 && `${naFila} na fila`, falhados && `${falhados} falhou/falharam`]
+          .filter(Boolean).join(' · ');
+
+    return [
+      { key: 'criada', label: 'Cotação criada', state: 'done',
+        detail: `${comparison.itemCount} ${comparison.itemCount === 1 ? 'item' : 'itens'}` },
+      { key: 'enviada', label: 'Enviada ao fornecedor', detail: detalheEnvio,
+        state: !enviouAlgo ? 'current' : falhados && !entregues && !naFila ? 'problem' : entregues || naFila ? 'done' : 'current' },
+      { key: 'respondida', label: 'Preços recebidos',
+        detail: enviouAlgo || respondeu
+          ? `${respondeu} de ${escolhidos || '—'} respondeu(ram)`
+          : 'depende do envio',
+        state: respondeu ? 'done' : enviouAlgo ? 'current' : 'pending' },
+      { key: 'escolhida', label: 'Vencedor escolhido',
+        detail: fechada ? 'decidido' : respondeu ? 'pronto para decidir' : undefined,
+        state: fechada ? 'done' : respondeu ? 'current' : 'pending' },
+      { key: 'comprada', label: 'Compra gerada',
+        detail: fechada ? undefined : 'ordem de compra ou compra direta',
+        state: fechada ? 'done' : 'pending' },
+    ];
+  }, [envios.length, entregues, naFila, falhados, escolhidos, comparison.itemCount,
+      comparison.respondedSupplierIds.length, quote.status]);
+
+  /* Só oferece o botão da etapa que de fato trava o ciclo agora. Reenviar é
+     permitido: fornecedor perde mensagem, e insistir é parte do trabalho. */
+  const proximaAcao = isOpen && escolhidos > 0
+    ? {
+        label: envios.length === 0 ? 'Enviar aos fornecedores' : 'Enviar novamente',
+        onClick: () => sendQuote.mutate({ quoteRequestId: quote.id }),
+        loading: sendQuote.isPending,
+        icon: 'send' as const,
+      }
+    : undefined;
 
   function handleChoose(itemId: string, supplierId: string) {
     setChosen(prev => ({ ...prev, [itemId]: prev[itemId] === supplierId ? undefined : supplierId }));
@@ -287,10 +342,17 @@ export default function QuoteRequestDetailPage() {
           </span>
         )}
         <span className="text-muted-foreground">
-          {comparison.itemCount} {comparison.itemCount === 1 ? 'item' : 'itens'} ·{' '}
-          {comparison.respondedSupplierIds.length} de {(quote.sent_supplier_ids ?? []).length || '—'} responderam
+          {comparison.itemCount} {comparison.itemCount === 1 ? 'item' : 'itens'}
+          {/* "de N responderam" só faz sentido depois de perguntar. Antes do envio,
+              N é quem foi escolhido — dizer que não responderam culpa quem nunca
+              recebeu nada. */}
+          {envios.length > 0
+            ? ` · ${comparison.respondedSupplierIds.length} de ${escolhidos || '—'} responderam`
+            : escolhidos ? ` · ${escolhidos} fornecedor(es) a consultar` : ''}
         </span>
       </div>
+
+      <QuoteProgressStrip steps={steps} action={proximaAcao} />
 
       {quote.notes && (
         <p className="rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">{quote.notes}</p>
@@ -301,11 +363,18 @@ export default function QuoteRequestDetailPage() {
           <CardContent className="space-y-3 py-8 text-center">
             <Handshake className="mx-auto h-8 w-8 text-muted-foreground" />
             <div>
-              <p className="font-medium">Nenhum preço registrado ainda</p>
+              <p className="font-medium">
+                {envios.length === 0 ? 'Esta cotação ainda não foi enviada' : 'Nenhum preço registrado ainda'}
+              </p>
+              {/* Não dizer "sem resposta" antes de ter perguntado: era exatamente o que
+                  a tela fazia, e o dono passou 11 dias esperando resposta de um pedido
+                  que nunca saiu. Sem envio, a pendência é NOSSA, não do fornecedor. */}
               <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-                {aging === 'fresh'
-                  ? 'Quando o fornecedor responder, registre o preço item a item abaixo — o comparativo se monta sozinho.'
-                  : `Enviada há ${days} dias úteis sem resposta. A janela normal é de 3 a 5 dias úteis: vale cobrar.`}
+                {envios.length === 0
+                  ? 'Os itens estão prontos e o fornecedor foi escolhido, mas o pedido ainda não saiu. Use o botão acima para enviar.'
+                  : aging === 'fresh'
+                    ? 'Quando o fornecedor responder, registre o preço item a item abaixo — o comparativo se monta sozinho.'
+                    : `Enviada há ${days} dias úteis sem resposta. A janela normal é de 3 a 5 dias úteis: vale cobrar.`}
               </p>
             </div>
           </CardContent>

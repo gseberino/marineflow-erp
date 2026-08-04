@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { normalizeWhatsappPhone, isUsableWhatsappPhone } from '@/lib/ai-whatsapp';
 
 /**
  * Cotações a fornecedores (COT-XXXXX).
@@ -249,6 +250,151 @@ export function useRecordQuoteResponse() {
       qc.invalidateQueries({ queryKey: ['quote-requests'] });
     },
     onError: (e: any) => toast.error(e.message || 'Erro ao registrar resposta'),
+  });
+}
+
+/**
+ * ENVIA a cotação aos fornecedores consultados — o passo que não existia em tela.
+ *
+ * Até 03/08/2026 a cotação era criada aqui e o envio só acontecia pela ferramenta do
+ * agente. Como `sent_supplier_ids` é preenchido na CRIAÇÃO com quem foi apenas
+ * selecionado, o sistema exibia "enviada a 2 fornecedores" para pedidos que nunca
+ * saíram: as três cotações de produção ficaram 11 dias assim, e a regra R16/R17
+ * cobrava resposta de quem jamais foi perguntado.
+ *
+ * Vai pela FILA (whatsapp_send_queue), não por envio direto, por dois motivos: o
+ * worker já roda a cada minuto com repetição automática, e a mensagem sobrevive ao
+ * WhatsApp estar fora do ar — sai sozinha quando voltar, em vez de se perder.
+ *
+ * A mensagem é idêntica à do agente (`send_supplier_quote_request`) de propósito: o
+ * fornecedor não deve receber dois formatos diferentes conforme quem disparou. Por
+ * isso `notes` da cotação NÃO vai junto — é anotação interna, e descrever a aplicação
+ * confunde quem atende.
+ */
+export function useSendQuoteRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ quoteRequestId }: { quoteRequestId: string }) => {
+      const { data: req, error: reqErr } = await supabase
+        .from('quote_requests')
+        .select('id, code, sent_supplier_ids')
+        .eq('id', quoteRequestId)
+        .single();
+      if (reqErr) throw reqErr;
+
+      const supplierIds: string[] = ((req as any).sent_supplier_ids ?? []) as string[];
+      if (!supplierIds.length) throw new Error('Escolha ao menos um fornecedor antes de enviar.');
+
+      const { data: items, error: itErr } = await supabase
+        .from('quote_request_items')
+        .select('position, description, quantity')
+        .eq('quote_request_id', quoteRequestId)
+        .order('position', { ascending: true });
+      if (itErr) throw itErr;
+      if (!items?.length) throw new Error('Esta cotação não tem itens para enviar.');
+
+      const [{ data: suppliers, error: supErr }, { data: settings }] = await Promise.all([
+        supabase.from('suppliers').select('id, name, trade_name, phone, opt_out_whatsapp').in('id', supplierIds),
+        supabase.from('app_settings').select('key, value')
+          .in('key', ['company_name', 'wa_test_mode', 'wa_test_number', 'zapi_test_mode', 'zapi_test_number']),
+      ]);
+      if (supErr) throw supErr;
+
+      const cfg = Object.fromEntries((settings || []).map((s: any) => [s.key, s.value]));
+      const company = cfg['company_name'] || 'nossa empresa';
+      // Mesmo respeito ao modo de teste que o OnMyWayButton: se ligado, tudo vai para
+      // o número de teste — senão um teste dispara mensagem a fornecedor de verdade.
+      const testMode = (cfg['wa_test_mode'] ?? cfg['zapi_test_mode']) === 'true';
+      const testNumber = String(cfg['wa_test_number'] ?? cfg['zapi_test_number'] ?? '').replace(/\D/g, '');
+      if (testMode && !testNumber) throw new Error('Modo de teste ativo sem número de teste configurado.');
+
+      const itemLines = (items as any[])
+        .map((it, i) => `${it.position ?? i + 1}. ${it.quantity ? `${it.quantity}x ` : ''}${it.description ?? ''}`.trimEnd())
+        .join('\n');
+      const message =
+        `Olá, tudo bem? Aqui é da ${company}.\n` +
+        `Gostaríamos de uma cotação (${(req as any).code}):\n${itemLines}\n\n` +
+        `Obrigado!`;
+
+      const { data: auth } = await supabase.auth.getUser();
+      const enviados: string[] = [];
+      const pulados: Array<{ fornecedor: string; motivo: string }> = [];
+
+      for (const sid of supplierIds) {
+        const sup = (suppliers || []).find((s: any) => s.id === sid) as any;
+        const nome = sup?.trade_name || sup?.name || 'Fornecedor';
+        if (!sup) { pulados.push({ fornecedor: nome, motivo: 'não encontrado' }); continue; }
+        if (sup.opt_out_whatsapp) { pulados.push({ fornecedor: nome, motivo: 'pediu para não receber' }); continue; }
+
+        const phone = normalizeWhatsappPhone(sup.phone || '');
+        if (!isUsableWhatsappPhone(phone)) {
+          pulados.push({ fornecedor: nome, motivo: sup.phone ? 'telefone inválido' : 'sem WhatsApp cadastrado' });
+          continue;
+        }
+
+        const { data: queued, error: qErr } = await supabase
+          .from('whatsapp_send_queue')
+          .insert({
+            phone_normalized: testMode ? testNumber : phone,
+            message,
+            source: 'quote_request',
+            source_ref_id: quoteRequestId,
+            priority: 2,
+          } as any)
+          .select('id')
+          .single();
+        if (qErr) { pulados.push({ fornecedor: nome, motivo: qErr.message }); continue; }
+
+        const { error: sendErr } = await supabase.from('quote_request_sends').insert({
+          quote_request_id: quoteRequestId,
+          supplier_id: sid,
+          phone_normalized: testMode ? testNumber : phone,
+          queue_id: (queued as any).id,
+          created_by: auth?.user?.id ?? null,
+        } as any);
+        if (sendErr) { pulados.push({ fornecedor: nome, motivo: sendErr.message }); continue; }
+
+        enviados.push(nome);
+      }
+
+      if (!enviados.length) {
+        throw new Error(
+          pulados.length
+            ? `Nenhum envio saiu. ${pulados.map((p) => `${p.fornecedor}: ${p.motivo}`).join(' · ')}`
+            : 'Nenhum envio saiu.',
+        );
+      }
+      return { enviados, pulados, testMode };
+    },
+    onSuccess: (r, v) => {
+      const base = `Cotação enviada para ${r.enviados.length} fornecedor(es)`;
+      toast.success(r.testMode ? `${base} — modo de teste, foi para o número de teste` : base);
+      if (r.pulados.length) {
+        toast.warning(`Não saiu para: ${r.pulados.map((p) => `${p.fornecedor} (${p.motivo})`).join(' · ')}`);
+      }
+      qc.invalidateQueries({ queryKey: ['quote-requests', v.quoteRequestId] });
+      qc.invalidateQueries({ queryKey: ['quote-request-sends', v.quoteRequestId] });
+      qc.invalidateQueries({ queryKey: ['quote-requests'] });
+    },
+    onError: (e: any) => toast.error(e.message || 'Erro ao enviar a cotação'),
+  });
+}
+
+/** Envios já feitos desta cotação, com o estado real vindo da fila. */
+export function useQuoteRequestSends(quoteRequestId: string | undefined) {
+  return useQuery({
+    queryKey: ['quote-request-sends', quoteRequestId],
+    enabled: !!quoteRequestId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('quote_request_sends')
+        .select('id, supplier_id, phone_normalized, created_at, queue_id, whatsapp_send_queue(status, failed_reason, sent_at)')
+        .eq('quote_request_id', quoteRequestId!)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as any[];
+    },
+    staleTime: 15_000,
   });
 }
 
