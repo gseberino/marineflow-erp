@@ -235,3 +235,30 @@ describe('crédito em cartão nunca é receita', () => {
     expect(motivoDeCreditoEmCartao('credit_card', 'debit', 'MERCADOLIVRE*COMPRA')).toBeNull();
   });
 });
+
+describe('Pix no Crédito não é receita', () => {
+  // O usuário estranhou ver entrada sem origem. É o produto do Nubank: sem saldo, o banco
+  // adiciona o valor na conta usando o limite do cartão, o Pix sai em seguida e a cobrança
+  // vai para a fatura. Nos dados reais, 9 de 9 entradas têm saída idêntica no mesmo dia.
+  it('reconhece na conta corrente, não só no cartão', () => {
+    const m = motivoDeCreditoEmCartao(
+      'bank', 'credit',
+      'Valor adicionado na conta por cartão de crédito | Valor adicionado para PIX no Crédito',
+    );
+    expect(m).toContain('é dívida, não receita');
+  });
+
+  it('funciona com e sem acento no histórico', () => {
+    expect(motivoDeCreditoEmCartao('bank', 'credit', 'VALOR ADICIONADO NA CONTA POR CARTAO')).toBeTruthy();
+    expect(motivoDeCreditoEmCartao('bank', 'credit', 'Valor adicionado na conta por cartão')).toBeTruthy();
+  });
+
+  it('a SAÍDA correspondente continua sendo despesa de verdade', () => {
+    // O gasto real é o Pix que sai. Se ele também fosse ignorado, a despesa sumiria.
+    expect(motivoDeCreditoEmCartao('bank', 'debit', 'Transferência enviada|Gustavo Seberino')).toBeNull();
+  });
+
+  it('entrada comum na conta segue sendo receita', () => {
+    expect(motivoDeCreditoEmCartao('bank', 'credit', 'PIX RECEBIDO DE CLIENTE')).toBeNull();
+  });
+});

@@ -326,8 +326,27 @@ export function motivoDeCreditoEmCartao(
   tipo: string,
   descricao: string,
 ): string | null {
-  if (sourceType !== "credit_card" || tipo !== "credit") return null;
-  const d = (descricao || "").toUpperCase();
+  if (tipo !== "credit") return null;
+  const d = normalizarParaRegra(descricao);
+
+  // ── Crédito que cai na CONTA CORRENTE mas nasce do cartão ────────────────────
+  //
+  // "Pix no Crédito" (Nubank): quando não há saldo, o banco ADICIONA o valor na conta
+  // usando o limite do cartão, o Pix sai em seguida, e a cobrança vai para a fatura.
+  // O extrato mostra as duas pernas — nos dados desta empresa, 9 de 9 entradas têm uma
+  // saída idêntica no mesmo dia.
+  //
+  // Tomar a entrada por receita seria contar dinheiro que não é da empresa: é dívida
+  // assumida no cartão. Pior, o valor já aparece como despesa na saída e de novo no
+  // pagamento da fatura — três registros para um único gasto.
+  if (d.includes("VALOR ADICIONADO NA CONTA POR CARTAO") || d.includes("PIX NO CREDITO")) {
+    return "Limite do cartão adicionado à conta (Pix no Crédito) — é dívida, não receita; "
+      + "a despesa real é a saída correspondente";
+  }
+
+  if (sourceType !== "credit_card") return null;
+
+  // ── Crédito dentro da própria fatura ────────────────────────────────────────
   if (d.includes("PAGAMENTO RECEBIDO")) {
     return "Pagamento da fatura do cartão — a saída já está contada na conta corrente";
   }
@@ -335,6 +354,11 @@ export function motivoDeCreditoEmCartao(
     return "Estorno de compra no cartão — abate a despesa, não é receita";
   }
   return "Ajuste do banco no cartão (atraso, rotativo, encerramento) — não é receita";
+}
+
+/** Sem acento e em caixa alta: o mesmo histórico chega com e sem acentuação. */
+function normalizarParaRegra(texto: string): string {
+  return (texto || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase();
 }
 
 /** Cartão de crédito não é conta corrente: a fatura entra como origem separada. */
