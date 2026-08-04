@@ -3739,6 +3739,7 @@ export type Database = {
           dre_group: string | null
           id: string
           name: string
+          sensitive: boolean
           sort_order: number
           type: string
         }
@@ -3750,6 +3751,7 @@ export type Database = {
           dre_group?: string | null
           id?: string
           name: string
+          sensitive?: boolean
           sort_order?: number
           type: string
         }
@@ -3761,6 +3763,7 @@ export type Database = {
           dre_group?: string | null
           id?: string
           name?: string
+          sensitive?: boolean
           sort_order?: number
           type?: string
         }
@@ -5677,6 +5680,61 @@ export type Database = {
           },
         ]
       }
+      quote_request_sends: {
+        Row: {
+          channel: string
+          created_at: string
+          created_by: string | null
+          id: string
+          phone_normalized: string
+          queue_id: string | null
+          quote_request_id: string
+          supplier_id: string
+        }
+        Insert: {
+          channel?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          phone_normalized: string
+          queue_id?: string | null
+          quote_request_id: string
+          supplier_id: string
+        }
+        Update: {
+          channel?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          phone_normalized?: string
+          queue_id?: string | null
+          quote_request_id?: string
+          supplier_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quote_request_sends_queue_id_fkey"
+            columns: ["queue_id"]
+            isOneToOne: false
+            referencedRelation: "whatsapp_send_queue"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_request_sends_quote_request_id_fkey"
+            columns: ["quote_request_id"]
+            isOneToOne: false
+            referencedRelation: "quote_requests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_request_sends_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       quote_requests: {
         Row: {
           closed_at: string | null
@@ -6513,6 +6571,7 @@ export type Database = {
           service_id: string | null
           service_order_id: string
           service_system: string | null
+          service_verb: string | null
           started_at: string | null
           technician_user_id: string | null
           unit_price_snapshot: number
@@ -6537,6 +6596,7 @@ export type Database = {
           service_id?: string | null
           service_order_id: string
           service_system?: string | null
+          service_verb?: string | null
           started_at?: string | null
           technician_user_id?: string | null
           unit_price_snapshot?: number
@@ -6561,6 +6621,7 @@ export type Database = {
           service_id?: string | null
           service_order_id?: string
           service_system?: string | null
+          service_verb?: string | null
           started_at?: string | null
           technician_user_id?: string | null
           unit_price_snapshot?: number
@@ -6617,6 +6678,20 @@ export type Database = {
             columns: ["service_system"]
             isOneToOne: false
             referencedRelation: "v_service_systems_status"
+            referencedColumns: ["slug"]
+          },
+          {
+            foreignKeyName: "service_order_services_service_verb_fkey"
+            columns: ["service_verb"]
+            isOneToOne: false
+            referencedRelation: "service_verbs"
+            referencedColumns: ["slug"]
+          },
+          {
+            foreignKeyName: "service_order_services_service_verb_fkey"
+            columns: ["service_verb"]
+            isOneToOne: false
+            referencedRelation: "v_service_verbs_status"
             referencedColumns: ["slug"]
           },
         ]
@@ -9312,6 +9387,7 @@ export type Database = {
         Args: { p_reason: string; p_service_order_id: string }
         Returns: Json
       }
+      categoria_e_sensivel: { Args: { nome: string }; Returns: boolean }
       classify_service_text: { Args: { p_texto: string }; Returns: Json }
       compose_route_for_service: {
         Args: { p_service_id: string }
@@ -9352,6 +9428,16 @@ export type Database = {
           _recurrence_type: string
         }
         Returns: string
+      }
+      compute_purchase_needs: {
+        Args: {
+          p_avail: Json
+          p_free: Json
+          p_on_order: Json
+          p_parts: Json
+          p_so_id: string
+        }
+        Returns: Json
       }
       confirm_nfe_import: {
         Args: {
@@ -9410,6 +9496,7 @@ export type Database = {
           title: string
         }[]
       }
+      get_os_purchase_needs: { Args: { p_so_id: string }; Returns: Json }
       get_promo_candidates: {
         Args: { p_limit?: number }
         Returns: {
@@ -9440,10 +9527,12 @@ export type Database = {
         Args: { p_service_order_id: string }
         Returns: {
           line_id: string
-          motivo_sugestao: string
+          origem_sistema: string
+          origem_verbo: string
           service_name: string
           service_verb: string
           sistema_sugerido: string
+          verbo_sugerido: string
         }[]
       }
       log_app_error: {
@@ -9606,6 +9695,10 @@ export type Database = {
           p_series: number
         }
         Returns: number
+      }
+      set_line_classification: {
+        Args: { p_line_id: string; p_system: string; p_verb: string }
+        Returns: undefined
       }
       settle_nfe_stock_and_receivable: {
         Args: { p_document_id: string; p_installments?: Json }
