@@ -720,6 +720,16 @@ export function BankReconciliation() {
                         )}
                       </p>
                     )}
+                    {/* Identificação da transação no banco. É a chave que impede a mesma
+                        entrar duas vezes (índice único), e o que permite conferir contra o
+                        extrato quando dois lançamentos parecem idênticos — mesmo valor,
+                        mesmo dia, mesmo favorecido acontece de verdade. */}
+                    {tx.bank_ref_id && (
+                      <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground"
+                        title={`Identificação no banco: ${tx.bank_ref_id}`}>
+                        {tx.bank_ref_id}
+                      </p>
+                    )}
                     {/* A correspondência aparece aqui, na linha fechada: antes ela só existia
                         depois de abrir a transação, e o resumo "N sugestões" não levava a lugar nenhum. */}
                     {melhor ? (

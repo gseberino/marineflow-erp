@@ -75,6 +75,10 @@ function IdentificacaoDaTransacao({ tx }: { tx: PropostaFinanceira['bank_transac
     ['Estabelecimento', tx.merchant_name],
     ['Identificador Pix', tx.pix_end_to_end_id],
     ['Histórico do banco', tx.description],
+    // O id do provedor é o que garante que a mesma transação não entre duas vezes: existe
+    // índice único sobre ele. Mostrar não é detalhe técnico — é o que permite conferir
+    // contra o extrato do banco quando dois lançamentos parecem iguais.
+    ['Identificação no banco', tx.bank_ref_id],
   ].filter(([, v]) => !!v) as Array<[string, string]>;
 
   if (linhas.length === 0) return null;

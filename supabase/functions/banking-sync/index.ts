@@ -128,11 +128,21 @@ Deno.serve(async (req) => {
 
     if (body.action === "backfill") {
       const atualizadas = resultados.reduce((s, r) => s + Number(r.atualizadas ?? 0), 0);
-      return jr({
-        ok: true,
-        message: `${atualizadas} transação(ões) com identificação preenchida`,
-        resultados,
-      });
+      const jaCompletas = resultados.reduce((s, r) => s + Number(r.ja_completas ?? 0), 0);
+      const comErro = resultados.filter((r) => r.status === "error").length;
+
+      // "0 preenchidas" é ambíguo: pode ser que já estivesse tudo certo, ou que nada tenha
+      // funcionado. Quem lê precisa saber qual dos dois, senão clica de novo achando que
+      // falhou — ou desiste achando que o recurso não serve.
+      const message = comErro > 0
+        ? `${atualizadas} preenchida(s) · ${comErro} conexão(ões) com erro`
+        : atualizadas > 0
+          ? `${atualizadas} transação(ões) ganharam identificação nova`
+          : jaCompletas > 0
+            ? `Nada a preencher: as ${jaCompletas} transações verificadas já tinham tudo que o banco informa`
+            : "O provedor não devolveu identificação para nenhuma transação deste período";
+
+      return jr({ ok: comErro === 0, message, atualizadas, ja_completas: jaCompletas, resultados });
     }
 
     const importadas = resultados.reduce((s, r) => s + Number(r.importadas ?? 0), 0);

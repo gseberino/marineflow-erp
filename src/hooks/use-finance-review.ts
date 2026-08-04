@@ -43,6 +43,8 @@ export interface PropostaFinanceira {
     description: string | null;
     /** 'bank' = conta corrente, 'credit_card' = fatura. Muda onde se confere o gasto. */
     source_type: string | null;
+    /** Id da transação no provedor — é a chave que impede a mesma entrar duas vezes. */
+    bank_ref_id: string | null;
   } | null;
 }
 
@@ -98,7 +100,7 @@ export function useFinanceReviewQueue() {
         .select(`*, bank_transactions ( counterparty_name, counterparty_document,
           counterparty_bank, counterparty_branch, counterparty_account, payment_method,
           payment_reason, merchant_name, merchant_document, installment_label,
-          pix_end_to_end_id, description, source_type )`)
+          pix_end_to_end_id, description, source_type, bank_ref_id )`)
         .eq('status', 'pending')
         .order('confidence', { ascending: false })
         .order('suggested_amount', { ascending: false })
