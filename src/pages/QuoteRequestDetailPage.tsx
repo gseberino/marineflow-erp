@@ -153,35 +153,36 @@ export default function QuoteRequestDetailPage() {
   const falhados = envios.filter((s: any) => s.whatsapp_send_queue?.status === 'failed').length;
   const naFila = envios.length - entregues - falhados;
 
-  const steps: QuoteStep[] = useMemo(() => {
-    const enviouAlgo = envios.length > 0;
-    const respondeu = comparison.respondedSupplierIds.length;
-    const fechada = quote.status === 'closed';
+  /* Cálculo direto, SEM useMemo: este trecho roda depois dos returns antecipados de
+     carregando/não encontrado, e um hook depois de um return condicional muda a
+     quantidade de hooks entre renderizações — foi o React #310 que derrubou a página.
+     Montar cinco objetos é barato; memoizar aqui não pagaria o risco. */
+  const enviouAlgo = envios.length > 0;
+  const respondeu = comparison.respondedSupplierIds.length;
+  const fechada = quote.status === 'closed';
 
-    const detalheEnvio = !enviouAlgo
-      ? escolhidos ? `${escolhidos} fornecedor(es) escolhido(s), nada enviado` : 'nenhum fornecedor escolhido'
-      : [entregues && `${entregues} entregue(s)`, naFila > 0 && `${naFila} na fila`, falhados && `${falhados} falhou/falharam`]
-          .filter(Boolean).join(' · ');
+  const detalheEnvio = !enviouAlgo
+    ? escolhidos ? `${escolhidos} fornecedor(es) escolhido(s), nada enviado` : 'nenhum fornecedor escolhido'
+    : [entregues && `${entregues} entregue(s)`, naFila > 0 && `${naFila} na fila`, falhados && `${falhados} falhou/falharam`]
+        .filter(Boolean).join(' · ');
 
-    return [
-      { key: 'criada', label: 'Cotação criada', state: 'done',
-        detail: `${comparison.itemCount} ${comparison.itemCount === 1 ? 'item' : 'itens'}` },
-      { key: 'enviada', label: 'Enviada ao fornecedor', detail: detalheEnvio,
-        state: !enviouAlgo ? 'current' : falhados && !entregues && !naFila ? 'problem' : entregues || naFila ? 'done' : 'current' },
-      { key: 'respondida', label: 'Preços recebidos',
-        detail: enviouAlgo || respondeu
-          ? `${respondeu} de ${escolhidos || '—'} respondeu(ram)`
-          : 'depende do envio',
-        state: respondeu ? 'done' : enviouAlgo ? 'current' : 'pending' },
-      { key: 'escolhida', label: 'Vencedor escolhido',
-        detail: fechada ? 'decidido' : respondeu ? 'pronto para decidir' : undefined,
-        state: fechada ? 'done' : respondeu ? 'current' : 'pending' },
-      { key: 'comprada', label: 'Compra gerada',
-        detail: fechada ? undefined : 'ordem de compra ou compra direta',
-        state: fechada ? 'done' : 'pending' },
-    ];
-  }, [envios.length, entregues, naFila, falhados, escolhidos, comparison.itemCount,
-      comparison.respondedSupplierIds.length, quote.status]);
+  const steps: QuoteStep[] = [
+    { key: 'criada', label: 'Cotação criada', state: 'done',
+      detail: `${comparison.itemCount} ${comparison.itemCount === 1 ? 'item' : 'itens'}` },
+    { key: 'enviada', label: 'Enviada ao fornecedor', detail: detalheEnvio,
+      state: !enviouAlgo ? 'current' : falhados && !entregues && !naFila ? 'problem' : entregues || naFila ? 'done' : 'current' },
+    { key: 'respondida', label: 'Preços recebidos',
+      detail: enviouAlgo || respondeu
+        ? `${respondeu} de ${escolhidos || '—'} respondeu(ram)`
+        : 'depende do envio',
+      state: respondeu ? 'done' : enviouAlgo ? 'current' : 'pending' },
+    { key: 'escolhida', label: 'Vencedor escolhido',
+      detail: fechada ? 'decidido' : respondeu ? 'pronto para decidir' : undefined,
+      state: fechada ? 'done' : respondeu ? 'current' : 'pending' },
+    { key: 'comprada', label: 'Compra gerada',
+      detail: fechada ? undefined : 'ordem de compra ou compra direta',
+      state: fechada ? 'done' : 'pending' },
+  ];
 
   /* Só oferece o botão da etapa que de fato trava o ciclo agora. Reenviar é
      permitido: fornecedor perde mensagem, e insistir é parte do trabalho. */

@@ -16,7 +16,11 @@ import PurchasingHubPage from './PurchasingHubPage';
 const SUP_A = 'sup-a';
 const SUP_B = 'sup-b';
 
-const { quote, suppliers, mut } = vi.hoisted(() => {
+const { quote, suppliers, mut, ctrl } = vi.hoisted(() => {
+  /* Deixa o teste simular o estado de CARREGANDO. Sem isto o mock entrega os dados
+     prontos na primeira renderização, e a transição carregando→carregado — onde mora
+     o React #310 (hook declarado depois de um return antecipado) — nunca é exercitada. */
+  const ctrl = { loading: false };
   const daysAgo = (n: number) => new Date(Date.now() - n * 86400000).toISOString();
   const items = [
     { id: 'i1', quote_request_id: 'q1', position: 1, description: 'Fusível MIDI 200A', quantity: 6, product_id: 'p1', service_order_part_id: 'part-1', service_order_service_id: null },
@@ -41,12 +45,12 @@ const { quote, suppliers, mut } = vi.hoisted(() => {
     { id: 'sup-b', name: 'Souper Peças', phone: '11888888888' },
   ];
   const mut = () => ({ mutate: () => {}, mutateAsync: async () => ({}), isPending: false });
-  return { quote, suppliers, mut };
+  return { quote, suppliers, mut, ctrl };
 });
 
 vi.mock('@/hooks/use-quote-requests', () => ({
   useQuoteRequests: () => ({ data: [quote], isLoading: false }),
-  useQuoteRequest: () => ({ data: quote, isLoading: false }),
+  useQuoteRequest: () => (ctrl.loading ? { data: undefined, isLoading: true } : { data: quote, isLoading: false }),
   useSOLinkedQuotes: () => ({ data: [quote], isLoading: false }),
   useCreateQuoteRequest: mut,
   useRecordQuoteResponse: mut,
@@ -128,6 +132,34 @@ describe('mapa de cotação', () => {
      zero mensagens despachadas, porque sent_supplier_ids é preenchido na criação.
      Sem envio registrado, a tela tem de dizer que não foi enviada e oferecer o
      botão — nunca cobrar resposta de quem não foi perguntado. */
+  /* Regressão do React #310 (04/08/2026): a faixa de etapas nasceu com um useMemo
+     declarado DEPOIS dos returns de "carregando" e "não encontrado". Na primeira
+     renderização a página sai cedo e roda menos hooks; quando os dados chegam, o
+     useMemo aparece e o React derruba a tela inteira. Passava em tsc, em build e no
+     próprio smoke — porque o mock entregava os dados prontos e a transição nunca
+     acontecia. Este teste força justamente essa passagem. */
+  it('sobrevive à transição de carregando para carregado (React #310)', async () => {
+    ctrl.loading = true;
+    try {
+      const { rerender } = renderDetail();
+      ctrl.loading = false;
+      rerender(
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <I18nProvider>
+            <MemoryRouter initialEntries={['/purchasing/quotes/q1']}>
+              <Routes>
+                <Route path="/purchasing/quotes/:id" element={<QuoteRequestDetailPage />} />
+              </Routes>
+            </MemoryRouter>
+          </I18nProvider>
+        </QueryClientProvider>,
+      );
+      expect(await screen.findByText('COT-00001')).toBeInTheDocument();
+    } finally {
+      ctrl.loading = false;
+    }
+  });
+
   it('não afirma envio quando o fornecedor só foi escolhido', async () => {
     renderDetail();
     // A cotação da fixture tem preços registrados à mão, mas nenhum envio: é
