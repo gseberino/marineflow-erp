@@ -257,7 +257,15 @@ export interface LineMissingSystem {
   service_verb: string | null;
   /** Palpite da regra, para o campo já vir preenchido. Sempre editável. */
   sistema_sugerido: string | null;
-  motivo_sugestao: string | null;
+  verbo_sugerido: string | null;
+  /**
+   * De onde veio cada palpite — e isso muda a confiança que a tela transmite.
+   * 'linha' = lido no texto da própria linha, forte.
+   * 'os'    = deduzido do problema relatado ou das outras linhas, fraco.
+   * null    = a regra não arriscou.
+   */
+  origem_sistema: 'linha' | 'os' | null;
+  origem_verbo: 'linha' | null;
 }
 
 /**
@@ -281,13 +289,26 @@ export function useLinesMissingSystem(serviceOrderId: string | undefined) {
   });
 }
 
-export function useSetLineSystem() {
+/**
+ * Grava os dois eixos da linha.
+ *
+ * Linha de texto livre (sem serviço de catálogo) depende inteiramente disto: é
+ * o verbo dela que traz o corpo do roteiro, e o sistema que traz a segurança.
+ * Sem isso, três das maiores OS abertas ficam invisíveis para o roteiro.
+ */
+export function useSetLineClassification() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ lineId, system }: { lineId: string; system: string }) => {
+    mutationFn: async ({
+      lineId, system, verb,
+    }: { lineId: string; system?: string | null; verb?: string | null }) => {
+      const patch: { service_system?: string | null; service_verb?: string | null } = {};
+      if (system !== undefined) patch.service_system = system || null;
+      if (verb !== undefined) patch.service_verb = verb || null;
+
       const { error } = await supabase
         .from('service_order_services')
-        .update({ service_system: system })
+        .update(patch)
         .eq('id', lineId);
       if (error) throw error;
     },
@@ -297,3 +318,6 @@ export function useSetLineSystem() {
     },
   });
 }
+
+/** @deprecated use useSetLineClassification */
+export const useSetLineSystem = useSetLineClassification;
