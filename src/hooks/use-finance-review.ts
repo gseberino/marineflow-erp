@@ -41,6 +41,8 @@ export interface PropostaFinanceira {
     installment_label: string | null;
     pix_end_to_end_id: string | null;
     description: string | null;
+    /** 'bank' = conta corrente, 'credit_card' = fatura. Muda onde se confere o gasto. */
+    source_type: string | null;
   } | null;
 }
 
@@ -96,7 +98,7 @@ export function useFinanceReviewQueue() {
         .select(`*, bank_transactions ( counterparty_name, counterparty_document,
           counterparty_bank, counterparty_branch, counterparty_account, payment_method,
           payment_reason, merchant_name, merchant_document, installment_label,
-          pix_end_to_end_id, description )`)
+          pix_end_to_end_id, description, source_type )`)
         .eq('status', 'pending')
         .order('confidence', { ascending: false })
         .order('suggested_amount', { ascending: false })

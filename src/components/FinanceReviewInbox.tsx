@@ -37,7 +37,7 @@ import {
 } from '@/hooks/use-finance-review';
 import {
   Sparkles, Check, X, ChevronDown, ArrowLeftRight, TrendingDown, Info, RefreshCw,
-  CopyX, Wand2,
+  CopyX, Wand2, CreditCard, Landmark,
 } from 'lucide-react';
 
 function corDaConfianca(c: number): string {
@@ -245,6 +245,15 @@ function LinhaProposta({
             <span className="font-semibold text-foreground">
               {formatCurrency(Number(p.suggested_amount ?? 0))}
             </span>
+            {/* De onde veio muda onde se confere: gasto de cartão se acha na fatura, gasto
+                de conta no extrato bancário. Sem isso o gestor procura no lugar errado. */}
+            {p.bank_transactions?.source_type && (
+              <Badge variant="outline" className="gap-1 text-xs">
+                {p.bank_transactions.source_type === 'credit_card'
+                  ? <><CreditCard className="h-3 w-3" />Fatura de cartão</>
+                  : <><Landmark className="h-3 w-3" />Conta corrente</>}
+              </Badge>
+            )}
             {transferencia && (
               <Badge variant="secondary" className="text-xs">Não entra no resultado</Badge>
             )}
@@ -365,12 +374,29 @@ export function FinanceReviewInbox({
 
   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
   const [correcoes, setCorrecoes] = useState<Record<string, Correcao>>({});
+  // Trabalhar cartão e conta separados é mais rápido: a fatura tem muitos gastos pequenos
+  // de estabelecimento, a conta tem poucos gastos grandes de fornecedor. Misturar os dois
+  // obriga a trocar de raciocínio a cada linha.
+  const [origem, setOrigem] = useState<'todas' | 'bank' | 'credit_card'>('todas');
+
+  const porOrigem = useMemo(
+    () => (origem === 'todas'
+      ? propostas
+      : propostas.filter((p) => p.bank_transactions?.source_type === origem)),
+    [propostas, origem],
+  );
+
+  const contagem = useMemo(() => ({
+    todas: propostas.length,
+    bank: propostas.filter((p) => p.bank_transactions?.source_type === 'bank').length,
+    credit_card: propostas.filter((p) => p.bank_transactions?.source_type === 'credit_card').length,
+  }), [propostas]);
 
   const { lote, individuais, totalValor } = useMemo(() => {
     const lote: PropostaFinanceira[] = [];
     const individuais: PropostaFinanceira[] = [];
     let totalValor = 0;
-    for (const p of propostas) {
+    for (const p of porOrigem) {
       totalValor += Number(p.suggested_amount ?? 0);
       // Transferência entre contas vai sempre para a revisão individual: confirmar que
       // dois lançamentos são o mesmo dinheiro é decisão de fato, não volume.
@@ -378,7 +404,7 @@ export function FinanceReviewInbox({
       else individuais.push(p);
     }
     return { lote, individuais, totalValor };
-  }, [propostas]);
+  }, [porOrigem]);
 
   const marcar = (id: string, marcada: boolean) => {
     setSelecionadas((s) => {
@@ -444,18 +470,51 @@ export function FinanceReviewInbox({
               despesa — <strong>nenhum pagamento é feito aqui</strong>.
             </p>
           </div>
-          <div className="flex shrink-0 gap-2">
+          <div className="flex shrink-0 flex-wrap gap-2">
             <Button variant="outline" size="sm" disabled={ocupado} onClick={() => gerar.mutate(false)}>
               <RefreshCw className={`mr-2 h-4 w-4 ${gerar.isPending ? 'animate-spin' : ''}`} />
-              Analisar extrato
+              Analisar últimos 90 dias
+            </Button>
+            {/* O parâmetro existia na função desde o início, mas não havia como acioná-lo
+                pela tela — então tudo que passava de 90 dias só aparecia na Conciliação e
+                nunca chegava aqui. Fica separado do botão do dia a dia porque traz uma
+                quantidade de propostas que atrapalha se vier sem querer. */}
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={ocupado}
+              onClick={() => gerar.mutate(true)}
+              title="Varre TODO o extrato, inclusive o que passa de 90 dias"
+            >
+              Incluir histórico antigo
             </Button>
           </div>
         </div>
 
+        {propostas.length > 0 && contagem.credit_card > 0 && contagem.bank > 0 && (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {([
+              ['todas', `Tudo (${contagem.todas})`, null],
+              ['bank', `Conta corrente (${contagem.bank})`, <Landmark key="l" className="h-3 w-3" />],
+              ['credit_card', `Fatura de cartão (${contagem.credit_card})`, <CreditCard key="c" className="h-3 w-3" />],
+            ] as const).map(([valor, rotulo, icone]) => (
+              <Button
+                key={valor}
+                size="sm"
+                variant={origem === valor ? 'default' : 'outline'}
+                className="h-7 gap-1.5 text-xs"
+                onClick={() => setOrigem(valor as never)}
+              >
+                {icone}{rotulo}
+              </Button>
+            ))}
+          </div>
+        )}
+
         {propostas.length > 0 && (
           <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
             {[
-              { rotulo: 'Propostas', valor: String(propostas.length) },
+              { rotulo: 'Propostas', valor: String(porOrigem.length) },
               { rotulo: 'Valor total', valor: formatCurrency(totalValor) },
               { rotulo: `Até ${formatCurrency(LIMITE_LOTE)}`, valor: String(lote.length) },
               { rotulo: 'Revisar uma a uma', valor: String(individuais.length) },
@@ -472,8 +531,9 @@ export function FinanceReviewInbox({
       {propostas.length === 0 && (
         <Card className="p-8 text-center">
           <p className="text-muted-foreground">
-            Nenhuma proposta pendente. Use <strong>Analisar extrato</strong> para o sistema varrer
-            as movimentações dos últimos 90 dias que ainda não viraram lançamento.
+            Nenhuma proposta pendente. <strong>Analisar últimos 90 dias</strong> varre o
+            movimento recente; <strong>Incluir histórico antigo</strong> alcança o extrato
+            inteiro — é onde está a maior parte do que ainda não virou lançamento.
           </p>
         </Card>
       )}
