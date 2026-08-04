@@ -23,7 +23,7 @@
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
-  montarProposta, sugerirRegras,
+  indexarFornecedores, montarProposta, sugerirRegras,
   type FornecedorConhecido, type HistoricoFornecedor, type RegraFinanceira, type TransacaoOrfa,
 } from "../_shared/banking/proposals.ts";
 import { findInternalTransfers } from "../_shared/banking/matching.ts";
@@ -47,6 +47,17 @@ function jr(body: unknown, status = 200) {
 const LIMITE_LOTE = 500;
 /** Janela da fila: o que é mais antigo vira mutirão separado, para não sepultar o dia. */
 const JANELA_DIAS = 90;
+
+/**
+ * Quantas transações o mutirão do histórico resolve por chamada.
+ *
+ * Edge function tem orçamento de CPU por invocação, e o mutirão real tem 1.330 saídas
+ * atrasadas: processá-las de uma vez matava o worker com o erro 546, que chega na tela como
+ * "Edge Function returned a non-2xx status code" — sem corpo, sem motivo, sem nada feito.
+ * Cada chamada resolve um pedaço e devolve quantas faltam; a tela repete até zerar. Assim o
+ * trabalho anda mesmo se uma chamada falhar, em vez de recomeçar do nada.
+ */
+const LOTE_HISTORICO = 200;
 
 interface Body {
   action?: "generate" | "approve" | "reject" | "suggest_rules";
@@ -115,20 +126,64 @@ Deno.serve(async (req) => {
   }
 });
 
+/** Tamanho de página nas leituras longas — é o teto que a API impõe por requisição. */
+const PAGINA = 1000;
+
+/**
+ * Lê uma tabela inteira, em páginas.
+ *
+ * A API devolve no máximo mil linhas por requisição, e cala sobre o resto: uma consulta
+ * truncada tem exatamente a cara de uma consulta completa. Enquanto a fila tinha 21 linhas
+ * e os lançamentos 361, isso nunca apareceu — mas o mutirão do histórico leva os dois para
+ * a casa dos milhares, e aí a leitura truncada faria o motor concluir que uma transação
+ * ainda não foi proposta quando ela JÁ virou despesa aprovada. O resultado seria uma
+ * segunda despesa para o mesmo dinheiro, criada em silêncio por cima do trabalho do gestor.
+ *
+ * A ordenação por uma coluna única não é enfeite: paginar sem ordem estável é o que faz
+ * uma linha aparecer em duas páginas e outra em nenhuma.
+ */
+async function lerTudo<T = Record<string, unknown>>(
+  pagina: (de: number, ate: number) => PromiseLike<{ data: unknown[] | null; error: unknown }>,
+  teto = 10 * PAGINA,
+): Promise<T[]> {
+  const todas: T[] = [];
+  for (let de = 0; de < teto; de += PAGINA) {
+    const { data, error } = await pagina(de, Math.min(de + PAGINA, teto) - 1);
+    if (error) throw error;
+    const linhas = (data ?? []) as T[];
+    todas.push(...linhas);
+    if (linhas.length < PAGINA) break;
+  }
+  return todas;
+}
+
+/** Conjunto de `bank_transaction_id` de uma tabela, sem truncar. */
+async function idsDeTransacao(
+  admin: DbClient,
+  tabela: "finance_review_queue" | "payables" | "receivables",
+  ajustar: (q: any) => any,
+): Promise<Set<string>> {
+  const linhas = await lerTudo<{ bank_transaction_id: string | null }>((de, ate) =>
+    ajustar(admin.from(tabela).select("id, bank_transaction_id").order("id")).range(de, ate)
+  );
+  const ids = new Set<string>();
+  for (const r of linhas) if (r.bank_transaction_id) ids.add(String(r.bank_transaction_id));
+  return ids;
+}
+
 async function gerar(admin: DbClient, incluirHistorico: boolean) {
   const desde = new Date(Date.now() - JANELA_DIAS * 86_400_000).toISOString().slice(0, 10);
 
-  let q = admin
-    .from("bank_transactions")
-    .select("id, transaction_date, description, amount, transaction_type, counterparty_name, counterparty_document, source_type, bank_connection_id")
-    .eq("reconciled", false)
-    .order("transaction_date", { ascending: false })
-    .limit(3000);
-  if (!incluirHistorico) q = q.gte("transaction_date", desde);
-
-  const { data: pendentes, error } = await q;
-  if (error) throw error;
-  const transacoes = (pendentes ?? []) as TransacaoOrfa[];
+  const transacoes = await lerTudo<TransacaoOrfa>((de, ate) => {
+    let q = admin
+      .from("bank_transactions")
+      .select("id, transaction_date, description, amount, transaction_type, counterparty_name, counterparty_document, source_type, bank_connection_id")
+      .eq("reconciled", false)
+      .order("transaction_date", { ascending: false })
+      .order("id");
+    if (!incluirHistorico) q = q.gte("transaction_date", desde);
+    return q.range(de, ate);
+  }, 3000);
   if (transacoes.length === 0) {
     return jr({ ok: true, message: "Nenhuma transação pendente na janela.", criadas: 0 });
   }
@@ -146,24 +201,21 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
   }
 
   // Não propor de novo o que já está na fila ou já virou lançamento.
-  const { data: jaNaFila } = await admin
-    .from("finance_review_queue")
-    .select("bank_transaction_id")
-    .eq("status", "pending");
-  const naFila = new Set((jaNaFila ?? []).map((r: any) => r.bank_transaction_id));
+  const naFila = await idsDeTransacao(admin, "finance_review_queue",
+    (q) => q.eq("status", "pending"));
 
-  const { data: jaLancadas } = await admin
-    .from("payables").select("bank_transaction_id").not("bank_transaction_id", "is", null);
-  const { data: jaLancadasRec } = await admin
-    .from("receivables").select("bank_transaction_id").not("bank_transaction_id", "is", null);
   const lancadas = new Set([
-    ...(jaLancadas ?? []).map((r: any) => r.bank_transaction_id),
-    ...(jaLancadasRec ?? []).map((r: any) => r.bank_transaction_id),
+    ...await idsDeTransacao(admin, "payables",
+      (q) => q.not("bank_transaction_id", "is", null)),
+    ...await idsDeTransacao(admin, "receivables",
+      (q) => q.not("bank_transaction_id", "is", null)),
   ]);
 
   const { data: fornecedoresRows } = await admin
     .from("suppliers").select("id, name, cnpj_cpf, trade_name").limit(2000);
-  const fornecedores = (fornecedoresRows ?? []) as FornecedorConhecido[];
+  // Índice montado uma vez: comparar cada transação com 530 fornecedores limpando o nome
+  // dos dois lados a cada comparação era metade do custo que estourava o limite de CPU.
+  const fornecedores = indexarFornecedores((fornecedoresRows ?? []) as FornecedorConhecido[]);
 
   const historico = await montarHistoricoPorFornecedor(admin);
 
@@ -185,12 +237,24 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     .from("payees").select("id, name, document, default_category").eq("active", true).limit(500);
   const favorecidos = (favorecidosRows ?? []) as any[];
 
+  // Quem ainda não tem proposta nem lançamento. A entrada de um par entra pela saída, e
+  // entrada avulsa fica para a conciliação (ver cabeçalho) — as duas somem daqui.
+  const elegiveis = transacoes.filter((tx) => {
+    if (naFila.has(tx.id) || lancadas.has(tx.id)) return false;
+    if (jaCoberta.has(tx.id)) return false;
+    return tx.transaction_type === "debit";
+  });
+
+  // O corte é sobre os ELEGÍVEIS, não sobre o que veio do banco: as propostas criadas neste
+  // lote entram em `naFila` e são excluídas na chamada seguinte, então repetir a chamada
+  // avança sempre. Cortar a consulta em vez da fila devolveria sempre as mesmas 200 e o
+  // mutirão nunca sairia do lugar.
+  const desteLote = incluirHistorico ? elegiveis.slice(0, LOTE_HISTORICO) : elegiveis;
+  const restantes = elegiveis.length - desteLote.length;
+
   const linhas: Record<string, unknown>[] = [];
   const autoAplicar: Record<string, unknown>[] = [];
-  for (const tx of transacoes) {
-    if (naFila.has(tx.id) || lancadas.has(tx.id)) continue;
-    if (jaCoberta.has(tx.id)) continue;   // é a entrada de um par já proposto pela saída
-
+  for (const tx of desteLote) {
     const par = parPor.get(tx.id);
     if (par) {
       linhas.push({
@@ -208,9 +272,6 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
       });
       continue;
     }
-
-    // Entrada que não é transferência interna fica para a conciliação (ver cabeçalho).
-    if (tx.transaction_type !== "debit") continue;
 
     const p = montarProposta(tx, fornecedores, historico, regras);
 
@@ -284,6 +345,7 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     criadas > 0 ? `${criadas - lancadasSozinhas} proposta(s) para revisar` : "Nada novo para propor",
     lancadasSozinhas > 0 ? `${lancadasSozinhas} lançada(s) pelas suas regras` : "",
     pares.length ? `${pares.length} transferência(s) entre contas` : "",
+    restantes > 0 ? `faltam ${restantes} do histórico` : "",
   ].filter(Boolean);
 
   return jr({
@@ -292,6 +354,8 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     lancadas_por_regra: lancadasSozinhas,
     transferencias_internas: pares.length,
     elegiveis_lote: linhas.filter((l) => Number(l.suggested_amount) < LIMITE_LOTE).length,
+    // Quantas transações antigas sobraram para a próxima chamada. Zero = mutirão terminado.
+    restantes,
     message: partes.join(" · "),
   });
 }
@@ -303,12 +367,19 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
  * observou um padrão, não recebeu uma ordem — e um padrão pode ser três erros iguais.
  */
 async function proporRegras(admin: DbClient) {
-  const { data: lancamentos } = await admin
-    .from("payables")
-    .select("supplier_id, supplier_name, expense_category")
-    .not("expense_category", "is", null)
-    .order("created_at", { ascending: false })
-    .limit(3000);
+  const lancamentos = await lerTudo<{
+    supplier_id: string | null; supplier_name: string | null; expense_category: string;
+  }>((de, ate) =>
+    admin
+      .from("payables")
+      .select("id, supplier_id, supplier_name, expense_category")
+      .not("expense_category", "is", null)
+      // `id` como desempate: ordem instável faz uma linha cair em duas páginas e outra em
+      // nenhuma, e aí a contagem de repetições que vira regra sai errada.
+      .order("created_at", { ascending: false })
+      .order("id")
+      .range(de, ate)
+  , 3000);
 
   const { data: cats } = await admin
     .from("financial_categories").select("name, dre_group").eq("active", true);
@@ -366,12 +437,17 @@ async function proporRegras(admin: DbClient) {
  * seria transformar a lacuna em regra.
  */
 async function montarHistoricoPorFornecedor(admin: DbClient): Promise<Map<string, HistoricoFornecedor>> {
-  const { data } = await admin
-    .from("payables")
-    .select("supplier_id, expense_category")
-    .not("supplier_id", "is", null)
-    .not("expense_category", "is", null)
-    .limit(5000);
+  // Em páginas: depois do mutirão são milhares de lançamentos, e uma leitura truncada
+  // ensinaria o motor com metade da história — sem nada indicando que faltou metade.
+  const data = await lerTudo<{ supplier_id: string; expense_category: string }>((de, ate) =>
+    admin
+      .from("payables")
+      .select("id, supplier_id, expense_category")
+      .not("supplier_id", "is", null)
+      .not("expense_category", "is", null)
+      .order("id")
+      .range(de, ate)
+  );
 
   // Só categorias que EXISTEM no plano de contas podem ser aprendidas.
   //

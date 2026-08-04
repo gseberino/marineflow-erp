@@ -4,7 +4,7 @@
 // uma decisão contábil. Os casos abaixo saíram do extrato real da empresa.
 import { describe, it, expect } from "vitest";
 import {
-  classificar, acharFornecedor, montarProposta,
+  classificar, acharFornecedor, indexarFornecedores, montarProposta,
   sugerirRegras,
   type TransacaoOrfa, type FornecedorConhecido, type HistoricoFornecedor, type RegraFinanceira,
 } from "../../supabase/functions/_shared/banking/proposals";
@@ -78,6 +78,17 @@ describe("classificação por histórico", () => {
     expect(classificar(tx({ description: "SR CONTABILIDADE LTDA" }))?.categoria).toBe("Contabilidade e assessoria");
   });
 
+  it("termo com espaço no fim exige palavra inteira", () => {
+    // "DAS ", "TIM " e "OI " foram escritos com espaço justamente para não casarem dentro
+    // de outra palavra. A normalização apagava o espaço e a exigência sumia: "VENDAS"
+    // virava imposto e "POIS" virava telefonia — categoria errada em silêncio, que é o
+    // erro mais caro deste módulo porque ninguém revisa o que parece certo.
+    expect(classificar(tx({ description: "VENDAS ONLINE MARKETPLACE" }))?.categoria)
+      .not.toBe("Impostos e taxas");
+    expect(classificar(tx({ description: "PAGAMENTO DAS 07/2026" }))?.categoria)
+      .toBe("Impostos e taxas");
+  });
+
   it("devolve nulo quando não reconhece — sem chute", () => {
     // Preferir "não sei" a inventar categoria plausível: categoria errada silenciosa é
     // pior que campo vazio, porque ninguém revisa o que parece certo.
@@ -100,6 +111,21 @@ describe("identificação do fornecedor", () => {
 
   it("não inventa fornecedor quando não há correspondência", () => {
     expect(acharFornecedor(tx({ counterparty_name: "EMPRESA DESCONHECIDA" }), fornecedores)).toBeNull();
+  });
+
+  it("índice pronto acha o mesmo que a lista crua", () => {
+    // O mutirão do histórico passa o índice para não limpar 530 nomes a cada transação —
+    // é o que impede a função de morrer por limite de CPU. Se o índice respondesse
+    // diferente da lista, a economia teria custado a classificação.
+    const indice = indexarFornecedores(fornecedores);
+    for (const t of [
+      tx({ counterparty_document: "68904101000120" }),
+      tx({ counterparty_name: "SR CONTABILIDADE LTDA" }),
+      tx({ counterparty_name: "KAMELL" }),
+      tx({ counterparty_name: "EMPRESA DESCONHECIDA" }),
+    ]) {
+      expect(acharFornecedor(t, indice)).toEqual(acharFornecedor(t, fornecedores));
+    }
   });
 });
 

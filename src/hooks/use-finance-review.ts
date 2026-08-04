@@ -71,6 +71,17 @@ async function invokeReview<T>(body: Record<string, unknown>): Promise<T> {
 
   if (error) {
     const resposta = (error as any)?.context as Response | undefined;
+
+    // 546 é o worker derrubado por limite de recursos: a resposta vem VAZIA, então tentar
+    // ler o corpo não devolve nada e o gestor via só "non-2xx status code" — uma mensagem
+    // que não diz nem o que aconteceu nem o que fazer.
+    if (resposta?.status === 546 || resposta?.status === 504) {
+      throw new Error(
+        'A varredura passou do limite de processamento da função. O que já foi analisado '
+        + 'ficou salvo — repita a ação para continuar de onde parou.',
+      );
+    }
+
     if (resposta && typeof resposta.json === 'function') {
       try {
         const corpo = await resposta.json();
@@ -133,17 +144,65 @@ export function useFinanceReviewCount() {
   });
 }
 
+/**
+ * Teto de rodadas do mutirão. Existe como cinto de segurança, não como limite real: com
+ * 200 transações por rodada isso cobre 4.000 saídas atrasadas, muito acima do atraso
+ * conhecido. O que encerra o mutirão de verdade é `restantes` chegar a zero.
+ */
+const MAX_RODADAS = 20;
+
 export function useGerarPropostas() {
   const qc = useQueryClient();
-  type Resposta = { ok: boolean; criadas: number; message: string; elegiveis_lote?: number };
+  type Resposta = {
+    ok: boolean; criadas: number; message: string;
+    elegiveis_lote?: number;
+    /** Transações antigas que sobraram para a próxima chamada. */
+    restantes?: number;
+  };
+
   return useMutation<Resposta, Error, boolean>({
-    mutationFn: (incluirHistorico: boolean) =>
-      invokeReview<Resposta>({ action: 'generate', incluir_historico: incluirHistorico }),
+    /**
+     * O histórico vem em rodadas porque a função tem orçamento de CPU por chamada, e o
+     * atraso acumulado é de mais de mil saídas: pedir tudo de uma vez matava o worker e
+     * voltava "non-2xx status code" sem nada feito. Cada rodada resolve um pedaço e o
+     * trabalho fica salvo, então parar no meio custa a rodada corrente, não o mutirão.
+     */
+    mutationFn: async (incluirHistorico: boolean) => {
+      const aviso = incluirHistorico ? 'mutirao-historico' : undefined;
+      let acumulado = 0;
+      let rodadas = 0;
+      let r: Resposta;
+
+      do {
+        r = await invokeReview<Resposta>({ action: 'generate', incluir_historico: incluirHistorico });
+        acumulado += Number(r.criadas ?? 0);
+        rodadas += 1;
+
+        // A fila cresce à vista: esperar o fim para mostrar qualquer coisa faria um mutirão
+        // de vários minutos parecer travado.
+        qc.invalidateQueries({ queryKey: ['finance-review-queue'] });
+        qc.invalidateQueries({ queryKey: ['finance-review-count'] });
+
+        if (Number(r.restantes ?? 0) <= 0) break;
+        // Rodada sem criar nada com trabalho declarado: algo travou, e repetir só repetiria
+        // o travamento.
+        if (Number(r.criadas ?? 0) === 0) break;
+
+        toast.loading(`Varrendo o histórico — ${acumulado} prontas, faltam ${r.restantes}`, { id: aviso });
+      } while (rodadas < MAX_RODADAS);
+
+      if (aviso) toast.dismiss(aviso);
+      return rodadas > 1 ? { ...r, criadas: acumulado, message: `${acumulado} transação(ões) do histórico processada(s)` } : r;
+    },
     onSuccess: (r) => {
       toast.success(r.message);
       qc.invalidateQueries({ queryKey: ['finance-review-queue'] });
+      qc.invalidateQueries({ queryKey: ['finance-review-count'] });
     },
-    onError: (e: Error) => toast.error(e.message || 'Não foi possível gerar as propostas'),
+    onError: (e: Error) => {
+      toast.dismiss('mutirao-historico');
+      toast.error(e.message || 'Não foi possível gerar as propostas');
+    },
   });
 }
 

@@ -85,6 +85,30 @@ export const REGRAS_CATEGORIA: RegraCategoria[] = [
 ];
 
 /**
+ * As mesmas regras, com os termos já normalizados — uma vez só, na carga do módulo.
+ *
+ * Normalizar 180 termos constantes DENTRO do laço custava 180 normalizações por transação.
+ * Num mutirão de 1.330 saídas isso vira 240 mil chamadas de `normalizeText` (que faz NFD +
+ * três expressões regulares cada) e derruba a função pelo limite de CPU — o erro 546 que
+ * aparecia como "Edge Function returned a non-2xx status code". Termo constante se
+ * normaliza uma vez.
+ *
+ * `palavraInteira` preserva o que o espaço no fim do termo queria dizer. "DAS ", "TIM " e
+ * "OI " foram escritos assim de propósito, para exigir a palavra inteira — mas
+ * `normalizeText` apara os extremos e a exigência sumia: "DAS" casava dentro de "VENDAS" e
+ * "OI" dentro de "POIS", classificando como imposto ou telefonia o que não é nem um nem
+ * outro. Guardar a exigência à parte é o que faz a lista dizer o que ela sempre quis dizer.
+ */
+const REGRAS_NORMALIZADAS = REGRAS_CATEGORIA.map((regra) => ({
+  regra,
+  termos: regra.termos.map((t) => ({
+    rotulo: t.trim(),
+    valor: normalizeText(t),
+    palavraInteira: /\s$/.test(t),
+  })).filter((t) => t.valor.length > 0),
+}));
+
+/**
  * O que já se decidiu sobre um fornecedor, para não perguntar duas vezes a mesma coisa.
  *
  * É o que salva o caso mais comum e mais caro do extrato: 86 saídas somando R$ 97 mil cujo
@@ -171,17 +195,64 @@ export interface Proposta {
   autoAplicavel: boolean;
 }
 
+/** Nome sem acento, caixa nem sufixo societário — a forma comparável de um nome. */
+function limparNome(s: string): string {
+  return normalizeText(s)
+    .replace(/\b(LTDA|ME|EPP|EIRELI|SA|S A|CIA)\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /** Compara nomes ignorando acento, caixa e sufixo societário. */
-function mesmoNome(a: string, b: string): boolean {
-  const limpa = (s: string) =>
-    normalizeText(s)
-      .replace(/\b(LTDA|ME|EPP|EIRELI|SA|S A|CIA)\b/g, "")
-      .replace(/\s+/g, " ")
-      .trim();
-  const x = limpa(a);
-  const y = limpa(b);
+function mesmoNomeLimpo(x: string, y: string): boolean {
   if (!x || !y) return false;
   return x === y || x.includes(y) || y.includes(x);
+}
+
+/**
+ * Cadastro de fornecedores com os nomes já preparados para comparação.
+ *
+ * Existe pelo mesmo motivo das regras normalizadas: comparar uma transação com 530
+ * fornecedores limpando o nome dos dois lados A CADA comparação são 560 mil limpezas num
+ * mutirão de 1.330 saídas — trabalho que estoura o limite de CPU da função. O cadastro não
+ * muda durante a varredura, então se prepara uma vez.
+ */
+export interface IndiceFornecedores {
+  porDocumento: Map<string, FornecedorConhecido>;
+  porNome: Array<{ fornecedor: FornecedorConhecido; nome: string; fantasia: string }>;
+}
+
+export function indexarFornecedores(fornecedores: FornecedorConhecido[]): IndiceFornecedores {
+  const porDocumento = new Map<string, FornecedorConhecido>();
+  const porNome: IndiceFornecedores["porNome"] = [];
+  for (const f of fornecedores) {
+    const doc = (f.cnpj_cpf || "").replace(/\D/g, "");
+    // Primeiro cadastro vence, como fazia o `find` original: dois fornecedores com o mesmo
+    // CNPJ é erro de cadastro, e trocar qual deles ganha mudaria a classificação sem aviso.
+    if (doc.length >= 11 && !porDocumento.has(doc)) porDocumento.set(doc, f);
+    porNome.push({
+      fornecedor: f,
+      nome: limparNome(f.name || ""),
+      fantasia: f.trade_name ? limparNome(f.trade_name) : "",
+    });
+  }
+  return { porDocumento, porNome };
+}
+
+/**
+ * Índice já montado para este array. Chaveado pelo próprio array (WeakMap), então quem
+ * continua passando a lista crua — os testes, e qualquer chamador futuro — ganha o ganho de
+ * desempenho sem mudar uma linha, e o índice é liberado junto com a lista.
+ */
+const INDICE_POR_LISTA = new WeakMap<FornecedorConhecido[], IndiceFornecedores>();
+
+function obterIndice(f: FornecedorConhecido[] | IndiceFornecedores): IndiceFornecedores {
+  if (!Array.isArray(f)) return f;
+  const pronto = INDICE_POR_LISTA.get(f);
+  if (pronto) return pronto;
+  const novo = indexarFornecedores(f);
+  INDICE_POR_LISTA.set(f, novo);
+  return novo;
 }
 
 /**
@@ -192,30 +263,41 @@ function mesmoNome(a: string, b: string): boolean {
  */
 export function acharFornecedor(
   tx: TransacaoOrfa,
-  fornecedores: FornecedorConhecido[],
+  fornecedores: FornecedorConhecido[] | IndiceFornecedores,
 ): { fornecedor: FornecedorConhecido; porDocumento: boolean } | null {
+  const indice = obterIndice(fornecedores);
+
   const doc = (tx.counterparty_document || "").replace(/\D/g, "");
   if (doc.length >= 11) {
-    const porDoc = fornecedores.find((f) => (f.cnpj_cpf || "").replace(/\D/g, "") === doc);
+    const porDoc = indice.porDocumento.get(doc);
     if (porDoc) return { fornecedor: porDoc, porDocumento: true };
   }
 
   // O extrato traz ora a razão social, ora o nome fantasia — no C6, o fantasia é o mais
   // comum. Procurar só pela razão social perde a maioria dos casos.
-  const alvo = tx.counterparty_name || tx.description;
-  const porNome = fornecedores.find(
-    (f) => mesmoNome(f.name, alvo) || (!!f.trade_name && mesmoNome(f.trade_name, alvo)),
+  const alvo = limparNome(tx.counterparty_name || tx.description);
+  if (!alvo) return null;
+  const achado = indice.porNome.find(
+    (e) => mesmoNomeLimpo(e.nome, alvo) || mesmoNomeLimpo(e.fantasia, alvo),
   );
-  return porNome ? { fornecedor: porNome, porDocumento: false } : null;
+  return achado ? { fornecedor: achado.fornecedor, porDocumento: false } : null;
 }
 
 /** Classifica pelo histórico. Devolve null quando nenhuma regra bate — sem chute. */
 export function classificar(tx: TransacaoOrfa): { categoria: string; dreGroup: string; confianca: number; termo: string } | null {
   const texto = normalizeText(`${tx.description} ${tx.counterparty_name || ""}`);
-  for (const regra of REGRAS_CATEGORIA) {
-    const termo = regra.termos.find((t) => texto.includes(normalizeText(t).trim()));
+  const cercado = ` ${texto} `;
+  for (const { regra, termos } of REGRAS_NORMALIZADAS) {
+    const termo = termos.find((t) =>
+      t.palavraInteira ? cercado.includes(` ${t.valor} `) : texto.includes(t.valor),
+    );
     if (termo) {
-      return { categoria: regra.categoria, dreGroup: regra.dreGroup, confianca: regra.confianca, termo };
+      return {
+        categoria: regra.categoria,
+        dreGroup: regra.dreGroup,
+        confianca: regra.confianca,
+        termo: termo.rotulo,
+      };
     }
   }
   return null;
@@ -231,7 +313,7 @@ export function classificar(tx: TransacaoOrfa): { categoria: string; dreGroup: s
  */
 export function montarProposta(
   tx: TransacaoOrfa,
-  fornecedores: FornecedorConhecido[],
+  fornecedores: FornecedorConhecido[] | IndiceFornecedores,
   historico?: Map<string, HistoricoFornecedor>,
   regras: RegraFinanceira[] = [],
 ): Proposta {
