@@ -70,7 +70,6 @@ import { RegisterDepositDialog } from '@/components/RegisterDepositDialog';
 import { CompletionSendDialog } from '@/components/CompletionSendDialog';
 import { StockAlertDialog } from '@/components/StockAlertDialog';
 import { ReceivePODialog } from '@/components/ReceivePODialog';
-import { OPERATIONAL_EXPENSE_CATEGORIES } from '@/lib/expense-categories';
 import { calculateDisplacement, calculateTravelCost, travelRatesFromSettings } from '@/lib/displacement';
 import { statusConfig, priorityConfig } from '@/lib/constants';
 import { StatusBadge } from '@/components/StatusBadge';

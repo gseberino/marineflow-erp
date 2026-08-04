@@ -10,7 +10,7 @@ import { Switch } from '@/components/ui/switch';
 import { MoneyInput } from '@/components/MoneyInput';
 import { EntityCombobox } from '@/components/EntityCombobox';
 import { StatusBadge } from '@/components/StatusBadge';
-import { OPERATIONAL_EXPENSE_CATEGORIES } from '@/lib/expense-categories';
+import { CategoriaDespesaSelect } from '@/components/CategoriaDespesaSelect';
 import { useI18n } from '@/i18n';
 import type { Dispatch, SetStateAction } from 'react';
 
@@ -88,14 +88,17 @@ export function ExpensesTimeDialogs(props: ExpensesTimeDialogsProps) {
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
                       <Label>{t.products.category}</Label>
-                      <Select value={expForm.category} onValueChange={(v) => setExpForm({ ...expForm, category: v })}>
-                        <SelectTrigger><SelectValue placeholder={t.products.category} /></SelectTrigger>
-                        <SelectContent>
-                          {OPERATIONAL_EXPENSE_CATEGORIES.map((c) => (
-                            <SelectItem key={c} value={c}>{c}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      {/* Mesmo plano de contas do resto do financeiro. A lista fixa de dez
+                          itens que vivia aqui ("Alimentação", "Pedágio") não correspondia a
+                          nenhuma categoria real — uma despesa lançada por aqui cairia fora
+                          do resultado, como já aconteceu com R$ 64 mil por outro caminho.
+                          Trocado enquanto a tabela está vazia: migração zero. */}
+                      <CategoriaDespesaSelect
+                        valor={expForm.category}
+                        onMudar={(v) => setExpForm({ ...expForm, category: v })}
+                        className="h-10"
+                        placeholder={t.products.category}
+                      />
                     </div>
                     <div>
                       <Label>{t.serviceOrders.expenseDate}</Label>
