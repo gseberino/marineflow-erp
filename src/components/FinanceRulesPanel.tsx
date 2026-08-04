@@ -15,14 +15,15 @@ import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useI18n } from '@/i18n';
 import { useSuppliers } from '@/hooks/use-suppliers';
 import {
-  useFinanceRules, useSalvarRegra, useMudarStatusRegra, useProporRegras,
+  useFinanceRules, useSalvarRegra, useMudarStatusRegra, useProporRegras, useLancamentosDaRegra,
   type RegraFinanceira,
 } from '@/hooks/use-finance-review';
 import { useFinancialCategories } from '@/hooks/use-financial-categories';
-import { Sparkles, Plus, Pause, Play, Check, X, Pencil, Wand2 } from 'lucide-react';
+import { Sparkles, Plus, Pause, Play, Check, X, Pencil, Wand2, Receipt, ChevronDown } from 'lucide-react';
 
 const ROTULO_ALVO: Record<RegraFinanceira['match_type'], string> = {
   document: 'CNPJ/CPF',
@@ -47,6 +48,95 @@ export function frasearRegra(r: RegraFinanceira, nomeFornecedor?: string): strin
     : r.max_amount != null ? ` até R$ ${r.max_amount}` : '';
 
   return `${alvo}${faixa} → ${r.set_category ?? '—'}`;
+}
+
+/**
+ * As despesas que embasam a regra.
+ *
+ * "As últimas 5 foram lançadas como Ferramentas, sem exceção" é um resumo — e resumo
+ * esconde o que muda a decisão: um dos cinco pode ser de outro fornecedor de nome
+ * parecido, ou de valor tão fora da curva que denuncia classificação apressada. Sem ver
+ * data, valor e para quem foi, aceitar a regra é confiar, não decidir.
+ */
+function HistoricoDaRegra({ regra }: { regra: RegraFinanceira }) {
+  const { formatCurrency, formatDate } = useI18n();
+  const { data: lancamentos = [], isLoading } = useLancamentosDaRegra(regra);
+
+  if (isLoading) return <Skeleton className="mt-2 h-24 rounded-md" />;
+
+  if (lancamentos.length === 0) {
+    return (
+      <p className="mt-2 rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+        Nenhum lançamento encontrado para este alvo. A regra continua válida para o que
+        vier, mas não há histórico que a sustente — vale conferir antes de aceitar.
+      </p>
+    );
+  }
+
+  const total = lancamentos.reduce((s, l) => s + l.amount, 0);
+  const categorias = new Set(lancamentos.map((l) => l.expense_category).filter(Boolean));
+
+  return (
+    <div className="mt-2 space-y-2">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        <span><b className="text-foreground">{lancamentos.length}</b> lançamento(s)</span>
+        <span>Total <b className="text-foreground">{formatCurrency(total)}</b></span>
+        {/* Mais de uma categoria no histórico é o sinal de que a unanimidade não é real. */}
+        {categorias.size > 1 && (
+          <span className="text-warning">
+            Atenção: {categorias.size} categorias diferentes neste histórico
+          </span>
+        )}
+      </div>
+
+      <div className="overflow-x-auto rounded-md border">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b bg-muted/40 text-muted-foreground">
+              <th className="whitespace-nowrap p-2 text-left font-medium">Data</th>
+              <th className="whitespace-nowrap p-2 text-left font-medium">Para quem</th>
+              <th className="whitespace-nowrap p-2 text-left font-medium">Descrição</th>
+              <th className="whitespace-nowrap p-2 text-left font-medium">Categoria</th>
+              <th className="whitespace-nowrap p-2 text-right font-medium">Valor</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lancamentos.map((l) => (
+              <tr key={l.id} className="border-b last:border-0">
+                <td className="whitespace-nowrap p-2 tabular-nums">{formatDate(l.issue_date)}</td>
+                <td className="max-w-[13rem] p-2">
+                  {/* Operação do próprio banco (juros, tarifa) não tem favorecido. Dizer
+                      isso é melhor que uma célula vazia, que parece dado faltando. */}
+                  <span className="block truncate">
+                    {l.fornecedor || l.contraparte || l.supplier_name
+                      || <span className="italic text-muted-foreground">sem favorecido — operação do banco</span>}
+                  </span>
+                  {(l.documento || l.banco || l.meio) && (
+                    <span className="block truncate text-[11px] text-muted-foreground">
+                      {[l.documento && formatarDoc(l.documento), l.banco && `banco ${l.banco}`, l.meio]
+                        .filter(Boolean).join(' · ')}
+                    </span>
+                  )}
+                </td>
+                <td className="max-w-[15rem] p-2"><span className="block truncate">{l.description}</span></td>
+                <td className="whitespace-nowrap p-2">{l.expense_category ?? '—'}</td>
+                <td className="whitespace-nowrap p-2 text-right font-medium tabular-nums">
+                  {formatCurrency(l.amount)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/** CPF/CNPJ com máscara: dígitos crus não se conferem de olho. */
+function formatarDoc(doc: string): string {
+  if (doc.length === 14) return doc.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
+  if (doc.length === 11) return doc.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+  return doc;
 }
 
 interface EditorProps {
@@ -223,6 +313,21 @@ export function FinanceRulesPanel() {
           {r.reasoning && (
             <p className="mt-1 rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">{r.reasoning}</p>
           )}
+
+          {/* Aberto por padrão nas SUGERIDAS: é onde a decisão acontece, e evidência que
+              exige um clique a mais é evidência que ninguém lê antes de aceitar. */}
+          <Collapsible defaultOpen={r.status === 'proposed'}>
+            <CollapsibleTrigger asChild>
+              <button type="button" className="mt-1 inline-flex items-center gap-1 text-xs text-primary hover:underline">
+                <Receipt className="h-3 w-3" />
+                Ver os lançamentos que embasam
+                <ChevronDown className="h-3 w-3" />
+              </button>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <HistoricoDaRegra regra={r} />
+            </CollapsibleContent>
+          </Collapsible>
         </div>
 
         <div className="flex shrink-0 gap-1">

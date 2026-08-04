@@ -239,6 +239,86 @@ export function useFinanceRules() {
   });
 }
 
+/** Um lançamento que embasa a regra — o que faz aceitar deixar de ser aposta. */
+export interface LancamentoDaRegra {
+  id: string;
+  description: string;
+  amount: number;
+  issue_date: string;
+  expense_category: string | null;
+  supplier_name: string | null;
+  fornecedor: string | null;
+  contraparte: string | null;
+  documento: string | null;
+  banco: string | null;
+  meio: string | null;
+}
+
+/**
+ * As despesas que a regra usou como evidência.
+ *
+ * A sugestão diz "as últimas 5 foram lançadas como Ferramentas, sem exceção" — mas sem ver
+ * QUAIS, quanto e para quem, aceitar é confiar num resumo. E o resumo esconde justamente o
+ * que muda a decisão: um dos cinco pode ser de outro fornecedor com nome parecido, ou de
+ * valor tão diferente que denuncia uma classificação apressada.
+ */
+export function useLancamentosDaRegra(regra: RegraFinanceira | null) {
+  return useQuery({
+    queryKey: ['lancamentos-da-regra', regra?.id, regra?.match_type, regra?.match_value],
+    enabled: !!regra,
+    queryFn: async (): Promise<LancamentoDaRegra[]> => {
+      if (!regra) return [];
+
+      let q = supabase
+        .from('payables')
+        .select(`id, description, amount, issue_date, expense_category, supplier_name,
+                 suppliers ( name ),
+                 bank_transactions ( counterparty_name, counterparty_document,
+                                     counterparty_bank, payment_method )`)
+        .order('issue_date', { ascending: false })
+        .limit(25);
+
+      // Cada tipo de regra procura por um caminho diferente — o mesmo caminho que ela usa
+      // para reconhecer, senão o histórico mostraria coisa que a regra não pegaria.
+      if (regra.match_type === 'supplier') {
+        q = q.eq('supplier_id', regra.match_value);
+      } else if (regra.match_type === 'counterparty') {
+        q = q.ilike('supplier_name', `%${regra.match_value}%`);
+      } else if (regra.match_type === 'text') {
+        q = q.ilike('description', `%${regra.match_value}%`);
+      } else {
+        // Por documento: o vínculo está na transação bancária, não no lançamento.
+        const { data: txs } = await supabase
+          .from('bank_transactions')
+          .select('id')
+          .eq('counterparty_document', regra.match_value.replace(/\D/g, ''))
+          .limit(50);
+        const ids = (txs ?? []).map((t: any) => t.id);
+        if (ids.length === 0) return [];
+        q = q.in('bank_transaction_id', ids);
+      }
+
+      const { data, error } = await q;
+      if (error) throw error;
+
+      return ((data ?? []) as any[]).map((p) => ({
+        id: p.id,
+        description: p.description,
+        amount: Number(p.amount),
+        issue_date: p.issue_date,
+        expense_category: p.expense_category,
+        supplier_name: p.supplier_name,
+        fornecedor: p.suppliers?.name ?? null,
+        contraparte: p.bank_transactions?.counterparty_name ?? null,
+        documento: p.bank_transactions?.counterparty_document ?? null,
+        banco: p.bank_transactions?.counterparty_bank ?? null,
+        meio: p.bank_transactions?.payment_method ?? null,
+      }));
+    },
+    staleTime: 60_000,
+  });
+}
+
 export function useSalvarRegra() {
   const qc = useQueryClient();
   return useMutation({

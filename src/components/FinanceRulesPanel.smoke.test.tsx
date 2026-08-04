@@ -12,7 +12,15 @@ import { I18nProvider } from '@/i18n';
 import { FinanceRulesPanel, frasearRegra } from './FinanceRulesPanel';
 import type { RegraFinanceira } from '@/hooks/use-finance-review';
 
-const { regras, mudarStatusMock, proporMock } = vi.hoisted(() => ({
+const { regras, mudarStatusMock, proporMock, lancamentos } = vi.hoisted(() => ({
+  lancamentos: [
+    { id: 'l1', description: 'Parafusos e fixadores', amount: 1240, issue_date: '2026-07-12',
+      expense_category: 'Ferramentas e equipamentos', supplier_name: null, fornecedor: 'Coremma Ltda',
+      contraparte: null, documento: '12345678000190', banco: '336', meio: 'PIX' },
+    { id: 'l2', description: 'Juros de dívida encerrada', amount: 18.4, issue_date: '2026-07-02',
+      expense_category: 'Juros e encargos', supplier_name: null, fornecedor: null,
+      contraparte: null, documento: null, banco: null, meio: null },
+  ],
   mudarStatusMock: vi.fn(),
   proporMock: vi.fn(),
   regras: [
@@ -49,6 +57,7 @@ vi.mock('@/hooks/use-finance-review', async (importOriginal) => {
     useSalvarRegra: () => ({ mutate: vi.fn(), isPending: false }),
     useMudarStatusRegra: () => ({ mutate: mudarStatusMock, isPending: false }),
     useProporRegras: () => ({ mutate: proporMock, isPending: false }),
+    useLancamentosDaRegra: () => ({ data: lancamentos, isLoading: false }),
   };
 });
 
@@ -130,5 +139,43 @@ describe('frase da regra', () => {
   it('usa o nome do fornecedor quando a regra é por fornecedor', () => {
     const r = { ...base, match_type: 'supplier' as const, match_value: 'f-1' };
     expect(frasearRegra(r, 'Marine Express')).toContain('Marine Express');
+  });
+});
+
+describe('histórico que embasa a regra', () => {
+  // Sem ver as transações, aceitar uma regra é confiar num resumo. O resumo esconde o que
+  // muda a decisão: valor fora da curva, ou um lançamento de outro fornecedor parecido.
+  it('mostra data, favorecido, descrição, categoria e valor', async () => {
+    renderPainel();
+    // O formato da data é decisão do i18n e muda com o locale — o que precisa estar lá é
+    // uma data, não uma grafia específica.
+    // Uma data por lançamento — o formato em si é decisão do i18n e muda com o locale.
+    expect((await screen.findAllByText(/2026/)).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText('Coremma Ltda')).toBeInTheDocument();
+    expect(screen.getByText(/Parafusos e fixadores/)).toBeInTheDocument();
+    expect(screen.getByText(/1\.240,00/)).toBeInTheDocument();
+  });
+
+  it('diz que é operação do banco quando não há favorecido', async () => {
+    // "Juros de dívida encerrada" não tem para quem — e célula vazia parece dado faltando,
+    // não ausência legítima.
+    renderPainel();
+    expect(await screen.findByText(/sem favorecido — operação do banco/)).toBeInTheDocument();
+  });
+
+  it('mostra o documento e o banco de quem recebeu, quando existem', async () => {
+    renderPainel();
+    expect(await screen.findByText(/12\.345\.678\/0001-90/)).toBeInTheDocument();
+  });
+
+  it('avisa quando o histórico tem mais de uma categoria', async () => {
+    // É o sinal de que a "unanimidade" alegada pela sugestão não é real.
+    renderPainel();
+    expect(await screen.findByText(/2 categorias diferentes/)).toBeInTheDocument();
+  });
+
+  it('soma o total do histórico', async () => {
+    renderPainel();
+    expect(await screen.findByText(/Total/)).toBeInTheDocument();
   });
 });
