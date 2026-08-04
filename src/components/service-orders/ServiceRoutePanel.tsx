@@ -213,9 +213,11 @@ export function ServiceRoutePanel({
                   </SelectContent>
                 </Select>
               </div>
-              {linha.sistema_sugerido && linha.motivo_sugestao && (
+              {linha.sistema_sugerido && (
                 <p className="text-[11px] text-muted-foreground">
-                  Sugerido {linha.motivo_sugestao} — confira antes de confirmar.
+                  {linha.origem_sistema === 'linha'
+                    ? 'Sugerido pelo texto desta linha — confira antes de confirmar.'
+                    : 'Palpite fraco, tirado do contexto da OS — confira com atenção.'}
                 </p>
               )}
             </div>
