@@ -6,10 +6,11 @@ import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import {
   AlertTriangle, ArrowDown, ArrowUp, Camera, Check, ListChecks, Play, Plus,
-  Printer, Ruler, ShieldAlert, Sparkles, Trash2, Undo2, Wand2, X,
+  ClipboardPen, Printer, Ruler, ShieldAlert, Sparkles, Trash2, Undo2, Wand2, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { StepFocusMode } from './StepFocusMode';
+import { SheetEntryDialog } from './SheetEntryDialog';
 import { printRouteSheet } from '@/lib/route-sheet';
 import {
   useServiceOrderSteps, useGenerateSteps, useReorderSteps, useDeleteStep,
@@ -81,6 +82,9 @@ export function ServiceRoutePanel({
   const reopen = useReopenStep();
 
   const [focusOpen, setFocusOpen] = useState(false);
+  // Quem executou no papel volta com a folha preenchida: transcrever de uma vez
+  // é o único caminho em que o tempo anotado à mão vira dado.
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [newTitle, setNewTitle] = useState('');
 
   const review = useReviewAiStep();
@@ -163,6 +167,14 @@ export function ServiceRoutePanel({
           </Button>
           <Button size="sm" variant="outline" onClick={handlePrint} disabled={steps.length === 0}>
             <Printer className="h-4 w-4 mr-1.5" /> Imprimir folha
+          </Button>
+          <Button
+            size="sm" variant="outline"
+            onClick={() => setSheetOpen(true)}
+            disabled={steps.length === 0}
+            title="Transcrever a folha preenchida à mão, com o tempo de cada passo"
+          >
+            <ClipboardPen className="mr-1.5 h-4 w-4" /> Lançar folha
           </Button>
           <Button size="sm" onClick={() => setFocusOpen(true)} disabled={steps.length === 0}>
             <Play className="h-4 w-4 mr-1.5" /> Modo foco
@@ -449,6 +461,13 @@ export function ServiceRoutePanel({
         onOpenChange={setFocusOpen}
         steps={steps}
         orderLabel={orderNumber}
+      />
+
+      <SheetEntryDialog
+        serviceOrderId={serviceOrderId}
+        orderNumber={orderNumber}
+        open={sheetOpen}
+        onOpenChange={setSheetOpen}
       />
     </Card>
   );

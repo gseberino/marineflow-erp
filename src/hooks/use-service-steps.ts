@@ -194,15 +194,29 @@ export function useCompleteStep() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({
-      step, measureValue, notes,
-    }: { step: ServiceOrderStep; measureValue?: number | null; notes?: string }) => {
+      step, measureValue, notes, minutes,
+    }: {
+      step: ServiceOrderStep;
+      measureValue?: number | null;
+      notes?: string;
+      /**
+       * Tempo informado à mão, para quem executou no papel.
+       *
+       * Sem isto, quem trabalha com a folha impressa marca o passo depois e o
+       * tempo sai zero — porque a duração vinha só do cronômetro (`started_at`).
+       * Passo feito com tempo zero não gera apontamento de hora nem caso
+       * utilizável: o dia de serviço viraria meia informação.
+       */
+      minutes?: number | null;
+    }) => {
       const now = new Date().toISOString();
+      const duracao = minutes != null && minutes > 0 ? minutes : accumulatedMinutes(step);
       const { error } = await supabase
         .from('service_order_steps')
         .update({
           status: 'done',
           completed_at: now,
-          actual_minutes: accumulatedMinutes(step),
+          actual_minutes: duracao,
           started_at: null,
           ...(measureValue !== undefined ? { measure_value: measureValue } : {}),
           ...(notes !== undefined ? { notes } : {}),
