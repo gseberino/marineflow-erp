@@ -10,7 +10,7 @@ import {
   DollarSign, BarChart3, Settings, ChevronLeft, ChevronRight, Menu, TrendingUp,
   Warehouse, Building2, Wrench, History, LogOut, CalendarDays, MessageCircle, CreditCard,
   Database, ChevronDown, Rocket, ShoppingCart, FileDown, Target, CheckCircle2, Bell, CalendarClock, Truck, Camera, FileText, Bot, Boxes, LayoutGrid, ListChecks,
-  Sparkles, ArrowLeftRight, TrendingDown, Wallet
+  Sparkles, ArrowLeftRight, TrendingDown, Wallet, Wand2, Landmark
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -237,6 +237,11 @@ export function AppLayout({ children }: { children: ReactNode }) {
         // Tela inteira, não aba: tem filtros, régua de cobrança e recibo próprios.
         { label: 'Contas a Receber', icon: TrendingUp, path: '/v2/receivables', roles: ['admin', 'financial'] },
         { label: 'Contas a Pagar', icon: TrendingDown, path: '/v2/financial?tab=payables', roles: ['admin', 'financial'] },
+        // Ficaram de fora na primeira reestruturação por serem "configuração revisitada
+        // raramente". Mas raramente não é nunca — e sem entrada no menu o usuário não
+        // achava as regras que ele mesmo precisa ensinar, nem a tela de conectar banco.
+        { label: 'Regras da IA', icon: Wand2, path: '/v2/financial?tab=rules', roles: ['admin', 'financial'] },
+        { label: 'Contas Bancárias', icon: Landmark, path: '/v2/financial?tab=banks', roles: ['admin', 'financial'] },
         { label: 'Comissões', icon: Users, path: '/v2/commissions', roles: ['admin', 'financial'] },
         // Sócios, diaristas, prestadores e comissionados — com CPF, Pix e conta.
         { label: 'Favorecidos', icon: Wallet, path: '/v2/payees', roles: ['admin', 'financial'] },
