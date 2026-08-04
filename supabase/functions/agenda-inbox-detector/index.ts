@@ -101,6 +101,8 @@ Deno.serve(async (req) => {
     // Menções que caíram num fio já aberto — não viraram sugestão nova. Este número subindo
     // enquanto 'sugestoes' fica estável é o sinal de que o agrupamento está funcionando.
     let reforcados = 0;
+    // Propostas descartadas por virem de mensagem que já rendeu sugestão viva.
+    let repetidas = 0;
     const detalhes: any[] = [];
 
     for (const [phone, convMsgs] of conversations) {
@@ -203,9 +205,40 @@ Deno.serve(async (req) => {
           ...convMsgs,
         ].filter((m, i, arr) => arr.findIndex((x) => x.id === m.id) === i);
 
+        // Sugestões que JÁ estão esperando decisão para este contato.
+        // Duas funções, e as duas importam:
+        //  (a) entram no prompt, para o modelo não propor de novo o mesmo assunto;
+        //  (b) viram uma trava determinística logo abaixo — o modelo pode desobedecer,
+        //      a trava não.
+        // Isto cobre o contato NÃO IDENTIFICADO, que é justamente onde o fio solto não
+        // existe (fio exige cliente/fornecedor) e a duplicata passava batido.
+        const { data: pendentes } = await db.from("agenda_suggestions")
+          .select("title, source_message_id")
+          .eq("source_phone", phone).eq("status", "pending").limit(20);
+        const jaPropostas = ((pendentes as any[]) || []);
+        // Fotografado ANTES do laço: duas propostas da mesma mensagem na MESMA execução
+        // continuam valendo (um áudio pode conter dois pedidos). O que fica barrado é a
+        // mensagem voltar a gerar sugestão numa execução POSTERIOR, com outras palavras.
+        const mensagensJaUsadas = new Set(
+          jaPropostas.map((s) => s.source_message_id).filter(Boolean),
+        );
+        if (jaPropostas.length > 0) {
+          erpContext = [erpContext,
+            "JÁ ESPERANDO DECISÃO deste contato (não proponha de novo):\n" +
+            jaPropostas.map((s) => `- ${s.title}`).join("\n"),
+          ].filter(Boolean).join("\n\n");
+        }
+
         const proposals = await detectInConversation(contextMsgs, contactLabel, new Date(), erpContext);
 
         for (const p of proposals) {
+          // A mensagem que originou esta proposta já rendeu sugestão viva num ciclo
+          // anterior? Então é a mesma coisa dita de outro jeito — descarta.
+          if (p.source_message_id && mensagensJaUsadas.has(p.source_message_id)) {
+            repetidas++;
+            continue;
+          }
+
           // Fase 14 — o assunto já tem fio? Então isto é uma COBRANÇA, não um compromisso
           // novo: reforça o fio existente (mentions +1, evidência mais recente) e segue.
           // É o que impede a segunda sugestão quase idêntica.
@@ -341,7 +374,8 @@ Deno.serve(async (req) => {
         actor_kind: "system", event_type: "agenda_inbox_detector_run", event_category: "data",
         payload: {
           mensagens: rows.length, conversas: conversations.length,
-          sugestoes: created, fios_reforcados: reforcados, detalhes,
+          sugestoes: created, fios_reforcados: reforcados,
+          repetidas_descartadas: repetidas, detalhes,
         },
       }).then(() => {}, () => {});
     }
@@ -352,6 +386,8 @@ Deno.serve(async (req) => {
       conversas_analisadas: conversations.length,
       sugestoes: created,
       fios_reforcados: reforcados,
+      // Sobe quando a mesma mensagem tenta virar sugestão de novo, com outras palavras.
+      repetidas_descartadas: repetidas,
       criadas_automaticamente: autoCreated,
       autonomia: Object.fromEntries(Object.entries(statsByDetector).map(([k, v]) => [
         k, `${v.accepted}/${v.accepted + v.dismissed}`,
