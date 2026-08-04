@@ -14,7 +14,7 @@
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
   pluggyAuth, fetchItem, fetchAccounts, fetchTransactions, listItems,
-  mapTransaction, accountSourceType,
+  mapTransaction, accountSourceType, motivoDeCreditoEmCartao,
 } from "../_shared/banking/pluggy.ts";
 
 type DbClient = SupabaseClient<any, "public", any>;
@@ -46,8 +46,12 @@ interface SyncBody {
   connection_id?: string;
   /** Ignora a janela incremental e varre o período inteiro. */
   full?: boolean;
-  /** `list_items` não sincroniza nada: só mostra o que as credenciais enxergam. */
-  action?: "sync" | "list_items";
+  /**
+   * `list_items` não sincroniza nada: só mostra o que as credenciais enxergam.
+   * `backfill` rebusca o período e ATUALIZA o que já está gravado, em vez de só inserir o
+   * que falta — é o único jeito de preencher campos que passaram a ser lidos depois.
+   */
+  action?: "sync" | "list_items" | "backfill";
 }
 
 Deno.serve(async (req) => {
@@ -116,8 +120,19 @@ Deno.serve(async (req) => {
     const resultados: Array<Record<string, unknown>> = [];
 
     for (const conexao of conexoes) {
-      const resultado = await sincronizarConexao(admin, apiKey, conexao, !!body.full);
+      const resultado = body.action === "backfill"
+        ? await preencherIdentificacao(admin, apiKey, conexao)
+        : await sincronizarConexao(admin, apiKey, conexao, !!body.full);
       resultados.push(resultado);
+    }
+
+    if (body.action === "backfill") {
+      const atualizadas = resultados.reduce((s, r) => s + Number(r.atualizadas ?? 0), 0);
+      return jr({
+        ok: true,
+        message: `${atualizadas} transação(ões) com identificação preenchida`,
+        resultados,
+      });
     }
 
     const importadas = resultados.reduce((s, r) => s + Number(r.importadas ?? 0), 0);
@@ -133,6 +148,91 @@ Deno.serve(async (req) => {
     return jr({ error: "unexpected_error", detail: String((e as Error)?.message ?? e) }, 500);
   }
 });
+
+/**
+ * Rebusca o extrato e preenche os campos de identificação no que JÁ está gravado.
+ *
+ * A sincronização normal só INSERE: o dedupe por `bank_ref_id` barra tudo que já existe,
+ * então transação importada antes de um campo passar a ser lido fica sem ele para sempre.
+ * Foi o que aconteceu com banco, agência, conta, meio de pagamento e estabelecimento —
+ * 1.971 lançamentos vazios porque a leitura só começou depois deles.
+ *
+ * Só toca em coluna que está NULA. Nada que o gestor tenha corrigido à mão é sobrescrito,
+ * e rodar duas vezes não desfaz nada.
+ */
+async function preencherIdentificacao(
+  admin: DbClient,
+  apiKey: string,
+  conexao: any,
+): Promise<Record<string, unknown>> {
+  const rotulo = conexao.label as string;
+  try {
+    const contas = await fetchAccounts(apiKey, conexao.external_id);
+    let atualizadas = 0;
+    let semNovidade = 0;
+
+    for (const conta of contas) {
+      const origem = accountSourceType(conta);
+      const transacoes = await fetchTransactions(apiKey, conta.id, diasAtras(JANELA_INICIAL_DIAS));
+
+      for (const t of transacoes) {
+        const linha = mapTransaction(t, origem);
+
+        // Só o que é identificação. Valor, data e sentido ficam de fora de propósito:
+        // corrigi-los aqui reescreveria silenciosamente lançamento já conferido.
+        const campos: Record<string, unknown> = {};
+        if (linha.counterparty_bank) campos.counterparty_bank = linha.counterparty_bank;
+        if (linha.counterparty_branch) campos.counterparty_branch = linha.counterparty_branch;
+        if (linha.counterparty_account) campos.counterparty_account = linha.counterparty_account;
+        if (linha.payment_method) campos.payment_method = linha.payment_method;
+        if (linha.payment_reason) campos.payment_reason = linha.payment_reason;
+        if (linha.merchant_name) campos.merchant_name = linha.merchant_name;
+        if (linha.merchant_document) campos.merchant_document = linha.merchant_document;
+        if (linha.installment_label) campos.installment_label = linha.installment_label;
+        if (linha.counterparty_name) campos.counterparty_name = linha.counterparty_name;
+        if (linha.counterparty_document) campos.counterparty_document = linha.counterparty_document;
+
+        if (Object.keys(campos).length === 0) { semNovidade++; continue; }
+
+        // `is null` em cada coluna seria uma consulta por campo; mais simples e seguro é
+        // ler o que existe e mandar só o que está vazio.
+        const { data: atual } = await admin
+          .from("bank_transactions")
+          .select("id, counterparty_bank, counterparty_branch, counterparty_account, payment_method, payment_reason, merchant_name, merchant_document, installment_label, counterparty_name, counterparty_document")
+          .eq("bank_ref_id", linha.bank_ref_id)
+          .maybeSingle();
+        if (!atual) continue;
+
+        const paraGravar: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(campos)) {
+          if ((atual as any)[k] == null) paraGravar[k] = v;
+        }
+        if (Object.keys(paraGravar).length === 0) { semNovidade++; continue; }
+
+        const { error } = await admin
+          .from("bank_transactions").update(paraGravar).eq("id", (atual as any).id);
+        if (!error) atualizadas++;
+      }
+    }
+
+    return {
+      conexao: rotulo,
+      status: "ok",
+      atualizadas,
+      ja_completas: semNovidade,
+      mensagem: atualizadas > 0
+        ? `${atualizadas} lançamento(s) ganharam banco, conta ou meio de pagamento`
+        : "Nada a preencher — o provedor não devolveu identificação nova",
+    };
+  } catch (e) {
+    return {
+      conexao: rotulo,
+      status: "error",
+      atualizadas: 0,
+      mensagem: String((e as Error)?.message ?? e),
+    };
+  }
+}
 
 async function sincronizarConexao(
   admin: DbClient,
@@ -177,11 +277,19 @@ async function sincronizarConexao(
       const transacoes = await fetchTransactions(apiKey, conta.id, desde);
       if (transacoes.length === 0) continue;
 
-      const linhas = transacoes.map((t) => ({
-        ...mapTransaction(t, origem),
-        bank_connection_id: conexao.id,
-        reconciled: false,
-      }));
+      const linhas = transacoes.map((t) => {
+        const linha = mapTransaction(t, origem);
+        // Crédito em fatura de cartão já entra resolvido: nunca é receita e só polui a
+        // fila. Ver `motivoDeCreditoEmCartao` para o porquê de ser uma regra estrutural,
+        // e não uma lista de exceções.
+        const ignorar = motivoDeCreditoEmCartao(linha.source_type, linha.transaction_type, linha.description);
+        return {
+          ...linha,
+          bank_connection_id: conexao.id,
+          reconciled: !!ignorar,
+          dismissed_reason: ignorar,
+        };
+      });
 
       for (const linha of linhas) {
         if (!dataMaisRecente || linha.transaction_date > dataMaisRecente) {

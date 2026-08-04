@@ -5,7 +5,7 @@
 // quem é a contraparte, o que conta como Pix) estão travadas por teste.
 import { describe, it, expect } from "vitest";
 import {
-  mapTransaction,
+  mapTransaction, motivoDeCreditoEmCartao,
   accountSourceType,
   type PluggyTransaction,
 } from "../../supabase/functions/_shared/banking/pluggy";
@@ -202,5 +202,36 @@ describe('dados de identificação que o provedor manda e o código descartava',
     expect(r.merchant_name).toBeNull();
     expect(r.installment_label).toBeNull();
     expect(r.payment_reason).toBeNull();
+  });
+});
+
+describe('crédito em cartão nunca é receita', () => {
+  // O usuário achou olhando "PAGAMENTO RECEBIDO": 121 lançamentos, R$ 105.672, esperando
+  // na fila prontos para virar receita falsa. São a outra perna do pagamento da fatura —
+  // o mesmo dinheiro que já sai da conta corrente.
+  it('pagamento da fatura sai da fila com o motivo escrito', () => {
+    const m = motivoDeCreditoEmCartao('credit_card', 'credit', 'PAGAMENTO RECEBIDO');
+    expect(m).toContain('já está contada na conta corrente');
+  });
+
+  it('estorno de compra abate despesa, não vira receita', () => {
+    expect(motivoDeCreditoEmCartao('credit_card', 'credit', 'CREDITO DE "MERCADOLIVRE*7PRODUTOS'))
+      .toContain('Estorno');
+  });
+
+  it('ajuste do banco também não é receita', () => {
+    for (const d of ['CREDITO DE ATRASO', 'ENCERRAMENTO DE DIVIDA', 'CREDITO DE ROTATIVO']) {
+      expect(motivoDeCreditoEmCartao('credit_card', 'credit', d)).toBeTruthy();
+    }
+  });
+
+  it('NÃO mexe em entrada de conta corrente — ali receita existe', () => {
+    // A regra vale pela ORIGEM. Um Pix recebido na conta é receita de verdade e não pode
+    // sair da fila por engano.
+    expect(motivoDeCreditoEmCartao('bank', 'credit', 'PIX RECEBIDO DE CLIENTE')).toBeNull();
+  });
+
+  it('NÃO mexe em despesa de cartão — a compra continua sendo despesa', () => {
+    expect(motivoDeCreditoEmCartao('credit_card', 'debit', 'MERCADOLIVRE*COMPRA')).toBeNull();
   });
 });

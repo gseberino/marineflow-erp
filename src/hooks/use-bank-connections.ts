@@ -133,9 +133,11 @@ export function useListPluggyItems() {
 export function useSyncBank() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { connectionId?: string; full?: boolean } = {}) => {
+    mutationFn: async (
+      input: { connectionId?: string; full?: boolean; action?: 'sync' | 'backfill' } = {},
+    ) => {
       const { data, error } = await supabase.functions.invoke('banking-sync', {
-        body: { connection_id: input.connectionId, full: input.full },
+        body: { connection_id: input.connectionId, full: input.full, action: input.action },
       });
       if (error) {
         const resposta = (error as any)?.context as Response | undefined;

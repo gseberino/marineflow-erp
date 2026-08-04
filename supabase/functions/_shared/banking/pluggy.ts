@@ -307,6 +307,36 @@ export function mapTransaction(
   };
 }
 
+/**
+ * Por que este crédito de cartão não é receita — ou null, se for receita mesmo.
+ *
+ * Dinheiro de cliente NÃO entra pelo cartão de crédito da própria empresa. Todo crédito
+ * numa fatura é uma destas coisas, e nenhuma é faturamento:
+ *   · pagamento da fatura — a perna que espelha a saída da conta corrente. Contar os dois
+ *     lados dobra o valor e quebra o fluxo de caixa;
+ *   · estorno de compra — abate a despesa, não soma receita;
+ *   · ajuste do banco (atraso, rotativo, encerramento de dívida).
+ *
+ * É regra estrutural, não lista de exceções: a origem da transação já basta para decidir.
+ * Os 121 "PAGAMENTO RECEBIDO" que estavam na fila somavam R$ 105.672 esperando virar
+ * receita falsa.
+ */
+export function motivoDeCreditoEmCartao(
+  sourceType: string,
+  tipo: string,
+  descricao: string,
+): string | null {
+  if (sourceType !== "credit_card" || tipo !== "credit") return null;
+  const d = (descricao || "").toUpperCase();
+  if (d.includes("PAGAMENTO RECEBIDO")) {
+    return "Pagamento da fatura do cartão — a saída já está contada na conta corrente";
+  }
+  if (d.startsWith('CREDITO DE "') || d.includes("ESTORNO")) {
+    return "Estorno de compra no cartão — abate a despesa, não é receita";
+  }
+  return "Ajuste do banco no cartão (atraso, rotativo, encerramento) — não é receita";
+}
+
 /** Cartão de crédito não é conta corrente: a fatura entra como origem separada. */
 export function accountSourceType(account: PluggyAccount): "bank" | "credit_card" {
   return (account.type || "").toUpperCase() === "CREDIT" ? "credit_card" : "bank";

@@ -82,6 +82,27 @@ export function BankConnectionsPanel() {
     }
   };
 
+  /**
+   * Preenche banco, conta, meio de pagamento e estabelecimento no que já foi importado.
+   *
+   * Só toca em campo vazio: nada corrigido à mão é sobrescrito, e rodar duas vezes não
+   * desfaz nada. Valor, data e sentido ficam intocados de propósito — reescrevê-los
+   * mudaria em silêncio lançamento que já foi conferido.
+   */
+  const handleCompletarIdentificacao = async () => {
+    try {
+      const r = await sincronizar.mutateAsync({ action: 'backfill' });
+      const comErro = r.resultados.filter(x => x.status === 'error');
+      if (comErro.length > 0) {
+        toast.warning(comErro.map(x => `${x.conexao}: ${x.mensagem}`).join(' · '));
+      } else {
+        toast.success(r.message);
+      }
+    } catch (e: any) {
+      toast.error(e?.message || 'Não consegui completar a identificação');
+    }
+  };
+
   const handleExcluir = async (c: BankConnection) => {
     try {
       await excluir.mutateAsync(c.id);
@@ -105,10 +126,24 @@ export function BankConnectionsPanel() {
         </div>
         <div className="flex gap-2">
           {(conexoes?.length ?? 0) > 0 && (
-            <Button size="sm" onClick={() => handleSincronizar()} disabled={sincronizar.isPending}>
-              <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${sincronizar.isPending ? 'animate-spin' : ''}`} />
-              {sincronizar.isPending ? 'Buscando...' : 'Buscar extrato'}
-            </Button>
+            <>
+              <Button size="sm" onClick={() => handleSincronizar()} disabled={sincronizar.isPending}>
+                <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${sincronizar.isPending ? 'animate-spin' : ''}`} />
+                {sincronizar.isPending ? 'Buscando...' : 'Buscar extrato'}
+              </Button>
+              {/* A sincronização normal só INSERE o que falta: transação importada antes de
+                  um campo passar a ser lido fica sem ele para sempre. Este botão rebusca o
+                  período e preenche o que está vazio, sem tocar em valor nem data. */}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleCompletarIdentificacao}
+                disabled={sincronizar.isPending}
+                title="Rebusca o extrato e preenche banco, conta, meio de pagamento e estabelecimento nas transações antigas"
+              >
+                Completar identificação
+              </Button>
+            </>
           )}
           <Button size="sm" variant="outline" onClick={() => setNovoAberto(v => !v)}>
             <Plus className="h-3.5 w-3.5 mr-1.5" />Conectar conta
