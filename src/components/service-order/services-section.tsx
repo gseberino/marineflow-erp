@@ -103,14 +103,23 @@ export function ServicesSection(props: ServicesSectionProps) {
             onExpand: () => void;
             onDelete: () => void;
             onApplyDiscount?: (pct: number, discountAmount: number) => void;
+            /** Cabe na própria linha, ao lado dos valores (ex.: cronômetro). */
             extra?: React.ReactNode;
+            /**
+             * Ocupa a largura toda LOGO ABAIXO da linha.
+             *
+             * Existe porque a linha é um flex horizontal e o nome do serviço vive
+             * num `flex-1 min-w-0` com truncate: qualquer bloco largo colocado
+             * entre os valores rouba o espaço dele e o nome some — foi o que
+             * aconteceu com o aviso de classificação em 03/08. Bloco largo desce.
+             */
+            below?: React.ReactNode;
           }) => (
             <div
               key={opts.keyId}
-              className={`flex items-center gap-3 px-4 py-3 border-b last:border-0 ${
-                opts.isDraft ? 'bg-amber-50/40' : ''
-              }`}
+              className={`border-b last:border-0 ${opts.isDraft ? 'bg-amber-50/40' : ''}`}
             >
+            <div className="flex items-center gap-3 px-4 py-3">
               <div className="flex-1 min-w-0">
                 <div className="font-medium truncate">
                   {opts.name}
@@ -170,6 +179,8 @@ export function ServicesSection(props: ServicesSectionProps) {
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
+            </div>
+            {opts.below && <div className="px-4 pb-3">{opts.below}</div>}
             </div>
           );
 
@@ -233,22 +244,22 @@ export function ServicesSection(props: ServicesSectionProps) {
                   onDelete: () =>
                     removeService.mutate({ id: s.id, service_order_id: orderId! }),
                   extra: orderId ? (
-                    <>
-                      <ServiceTimer
-                        serviceLineId={s.id}
-                        serviceOrderId={orderId}
-                        startedAt={s.started_at || null}
-                        finishedAt={s.finished_at || null}
-                        elapsedMinutes={s.elapsed_minutes || 0}
-                        managedByRoute={linesWithRoute.has(s.id)}
-                        onUpdate={() =>
-                          queryClient.invalidateQueries({ queryKey: ['so-services', orderId] })
-                        }
-                      />
-                      {pendentePorLinha.has(s.id) && (
-                        <LineSystemPicker linha={pendentePorLinha.get(s.id)!} />
-                      )}
-                    </>
+                    <ServiceTimer
+                      serviceLineId={s.id}
+                      serviceOrderId={orderId}
+                      startedAt={s.started_at || null}
+                      finishedAt={s.finished_at || null}
+                      elapsedMinutes={s.elapsed_minutes || 0}
+                      managedByRoute={linesWithRoute.has(s.id)}
+                      onUpdate={() =>
+                        queryClient.invalidateQueries({ queryKey: ['so-services', orderId] })
+                      }
+                    />
+                  ) : undefined,
+                  // Abaixo da linha, com a largura toda: aqui o aviso não
+                  // disputa espaço com o nome do serviço.
+                  below: orderId && pendentePorLinha.has(s.id) ? (
+                    <LineSystemPicker linha={pendentePorLinha.get(s.id)!} />
                   ) : undefined,
                 });
               })}
