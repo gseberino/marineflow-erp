@@ -18,11 +18,19 @@ export async function fetchPurchaseNeeds(serviceOrderId: string): Promise<Purcha
     supabase
       .from('service_order_parts')
       .select('id, product_id, quantity, unit_cost_snapshot, products(name, unit)')
-      .eq('service_order_id', serviceOrderId),
+      .eq('service_order_id', serviceOrderId)
+      // Ordem FIXA, igual à da RPC. O cálculo consome o estoque linha a linha, então
+      // sem isto o resultado dependia da ordem que o Postgres devolvesse: com estoque
+      // 4 e duas linhas do mesmo produto pedindo 5 e 1, uma ordem acusa dois itens em
+      // falta e a outra acusa um. O total não muda; a distribuição entre as linhas sim.
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true }),
     supabase
       .from('service_order_services')
       .select('id, service_id, name_snapshot, billing_unit_snapshot, quantity, unit_price_snapshot')
-      .eq('service_order_id', serviceOrderId),
+      .eq('service_order_id', serviceOrderId)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true }),
   ]);
   if (partsRes.error) throw partsRes.error;
   if (servicesRes.error) throw servicesRes.error;

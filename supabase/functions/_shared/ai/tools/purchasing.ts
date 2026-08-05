@@ -56,6 +56,55 @@ export const purchasingTools: ToolDef[] = [
     },
   },
   {
+    name: "get_purchase_needs",
+    description:
+      "O que FALTA COMPRAR para executar uma ordem de serviço. Devolve a necessidade LÍQUIDA por item: " +
+      "falta = necessário − disponível (físico menos reservado) − o que já está em ordem de compra aberta. " +
+      "Use ANTES de criar cotação ou ordem de compra para uma OS — é isto que diz o que cotar, em vez de " +
+      "supor pela lista de peças. Cada item vem com status: 'missing' (nada disponível), 'partial' (parte " +
+      "em estoque), 'on_order' (já pedido, só esperar), 'uncatalogued' (material sem cadastro) e 'ok' " +
+      "(estoque cobre). Mão de obra digitada à mão NÃO entra: não se compra instalação de fornecedor de peça.",
+    input_schema: {
+      type: "object",
+      properties: {
+        service_order_id: { type: "string", description: "UUID da OS." },
+      },
+      required: ["service_order_id"],
+    },
+    risk: "low",
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, { sb }) {
+      // Delega ao banco de propósito: a mesma conta existe na tela (TypeScript) e
+      // aqui. Reimplementá-la em Deno criaria uma terceira versão para divergir —
+      // a RPC é a fonte única, com paridade provada contra os testes da lib.
+      const { data, error } = await sb.rpc("get_os_purchase_needs", {
+        p_so_id: args.service_order_id,
+      });
+      if (error) throw error;
+
+      const r = (data ?? {}) as any;
+      const faltando = (r.shortages ?? []) as any[];
+      return {
+        precisa_comprar: !!r.needsPurchase,
+        itens_em_falta: faltando.length,
+        custo_estimado: r.estimatedCost ?? 0,
+        // Só o que falta, que é o que interessa para cotar. A lista completa fica
+        // em `todos_os_itens` para quando a pergunta for sobre o que já tem.
+        faltando: faltando.map((i) => ({
+          descricao: i.description,
+          quantidade_faltando: i.shortage,
+          necessario: i.required,
+          disponivel: i.available,
+          ja_pedido: i.onOrder,
+          situacao: i.status,
+          product_id: i.productId,
+          custo_unitario_conhecido: i.unitCost,
+        })),
+        todos_os_itens: (r.items ?? []).length,
+      };
+    },
+  },
+  {
     name: "list_pending_pos",
     description: "Lista ordens de compra ainda não totalmente recebidas (rascunho, enviada ou parcialmente recebida).",
     input_schema: { type: "object", properties: {} },

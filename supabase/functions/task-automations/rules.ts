@@ -535,34 +535,27 @@ const r16: Rule = {
     if (!list.length) return [];
 
     const ids = list.map((o: any) => o.id);
-    const [{ data: parts }, { data: avail }, { data: poItems }] = await Promise.all([
-      db.from('service_order_parts')
-        .select('service_order_id, product_id, quantity')
-        .in('service_order_id', ids),
-      db.from('product_availability').select('id, stock_quantity, reserved_quantity'),
-      db.from('purchase_order_items')
-        .select('product_id, quantity, received_qty, purchase_orders!inner(status)')
-        .in('purchase_orders.status', ['draft', 'sent', 'partial']),
-    ]);
 
-    const availById = new Map<string, number>();
-    for (const a of avail || []) {
-      availById.set(a.id, Number(a.stock_quantity || 0) - Number(a.reserved_quantity || 0));
-    }
-    const onOrderById = new Map<string, number>();
-    for (const i of poItems || []) {
-      const pending = Math.max(0, Number(i.quantity || 0) - Number(i.received_qty || 0));
-      onOrderById.set(i.product_id, (onOrderById.get(i.product_id) || 0) + pending);
-    }
+    /* A conta vem do banco, não daqui. Até 05/08/2026 esta regra reimplementava em
+       Deno a mesma fórmula que já existia em src/lib/purchase-needs.ts e em
+       compute_purchase_needs — três cópias que divergem em silêncio, porque quem
+       corrige uma não tem como saber das outras.
 
-    const shortageByOrder = new Map<string, number>();
-    for (const p of parts || []) {
-      const available = Math.max(0, availById.get(p.product_id) || 0);
-      const onOrder = onOrderById.get(p.product_id) || 0;
-      if (Math.max(0, Number(p.quantity || 0) - available - onOrder) > 0) {
-        shortageByOrder.set(p.service_order_id, (shortageByOrder.get(p.service_order_id) || 0) + 1);
-      }
-    }
+       Dois ganhos além de eliminar a cópia: passa a enxergar MATERIAL de texto livre
+       (a versão em Deno só olhava service_order_parts, então uma OS cujo item
+       faltando fosse "Cabo 16mm²" digitado à mão não gerava tarefa), e herda o filtro
+       que mantém mão de obra fora — instalação não se compra de fornecedor de peça. */
+    const { data: faltas, error: faltasErr } = await db.rpc('count_purchase_shortages', {
+      p_so_ids: ids,
+    });
+    // Erro aqui não pode virar "nenhuma OS precisa comprar": seria indistinguível do
+    // caso legítimo e a pendência sumiria calada. Levantar faz o motor logar com o id
+    // da regra, que é o que permite achar a causa.
+    if (faltasErr) throw faltasErr;
+
+    const shortageByOrder = new Map<string, number>(
+      Object.entries((faltas ?? {}) as Record<string, number>),
+    );
 
     return list
       .filter((o: any) => shortageByOrder.has(o.id))
