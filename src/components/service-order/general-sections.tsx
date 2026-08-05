@@ -45,6 +45,10 @@ interface GeneralSectionsProps {
   setQuickMarinaName: Dispatch<SetStateAction<string>>;
   isOptimizing: boolean;
   optimizeText: (...args: any[]) => any;
+  /** Lê a descrição e devolve o levantamento meio pronto. Opcional: sem isso a
+      seção segue funcionando como antes, só com o reescrever. */
+  onAnalisarDescricao?: (texto: string) => void;
+  analisandoDescricao?: boolean;
 }
 
 export function GeneralSections(props: GeneralSectionsProps) {
@@ -53,7 +57,7 @@ export function GeneralSections(props: GeneralSectionsProps) {
     clients, allVessels, clientVessels, marinas, appUsers, vesselContacts,
     selectedTechnicians, setSelectedTechnicians,
     setQuickMarinaOpen, setQuickMarinaName,
-    isOptimizing, optimizeText,
+    isOptimizing, optimizeText, onAnalisarDescricao, analisandoDescricao,
   } = props;
   const { t, formatCurrency } = useI18n();
 
@@ -282,19 +286,39 @@ export function GeneralSections(props: GeneralSectionsProps) {
         <div>
           <div className="flex items-center justify-between mb-1">
             <Label>{t.serviceOrders.problemDescription} *</Label>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-6 px-2 text-xs text-primary hover:text-primary hover:bg-primary/10"
-              onClick={async () => {
-                const optimized = await optimizeText(form.problem_description);
-                if (optimized) set('problem_description', optimized);
-              }}
-              disabled={isOptimizing || !form.problem_description || isLocked}
-            >
-              <Sparkles className="h-3 w-3 mr-1" /> IA
-            </Button>
+            <div className="flex items-center gap-1">
+              {/* Analisar vem primeiro porque é o que rende: reescrever deixa o
+                  texto mais bonito, analisar transforma o texto em levantamento
+                  meio pronto. O texto já diz o verbo, o sistema e metade das
+                  respostas — até aqui ninguém lia. */}
+              {onAnalisarDescricao && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-xs text-primary hover:text-primary hover:bg-primary/10"
+                  onClick={() => onAnalisarDescricao(form.problem_description)}
+                  disabled={analisandoDescricao || !form.problem_description || isLocked}
+                >
+                  <Sparkles className="h-3 w-3 mr-1" />
+                  {analisandoDescricao ? 'Lendo…' : 'Analisar'}
+                </Button>
+              )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-xs text-muted-foreground hover:bg-muted"
+                title="Reescrever o texto de forma mais técnica"
+                onClick={async () => {
+                  const optimized = await optimizeText(form.problem_description);
+                  if (optimized) set('problem_description', optimized);
+                }}
+                disabled={isOptimizing || !form.problem_description || isLocked}
+              >
+                Reescrever
+              </Button>
+            </div>
           </div>
           <Textarea value={form.problem_description} onChange={(e) => set('problem_description', e.target.value)} rows={3} disabled={isLocked} />
         </div>
