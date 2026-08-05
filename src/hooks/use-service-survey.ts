@@ -105,7 +105,9 @@ export function useServiceOrderSurvey(serviceOrderId: string | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('service_surveys')
-        .select('*, service_survey_answers(seq, question_snapshot, answer_value, skipped_reason)')
+        .select(
+          '*, service_survey_answers(seq, question_snapshot, answer_value, skipped_reason, photo_path, answered_at)',
+        )
         .eq('service_order_id', serviceOrderId!)
         .order('created_at', { ascending: false })
         .limit(1)
@@ -146,12 +148,37 @@ export function useStartSurvey() {
   });
 }
 
+/**
+ * Sobe a foto do levantamento e devolve o caminho no bucket.
+ *
+ * A coluna `photo_path` existia desde o início e nunca tinha sido usada: dava
+ * para marcar uma pergunta como do tipo "foto" e não havia onde anexar nada.
+ * Em levantamento é a foto que sustenta o preço — quem orça de memória, orça
+ * errado, e quem discorda depois não tem o que olhar.
+ */
+export async function uploadSurveyPhoto(
+  surveyId: string, seq: number, file: File,
+): Promise<string> {
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+  const path = `surveys/${surveyId}/${seq}-${Date.now()}.${ext}`;
+  const { error } = await supabase.storage
+    .from('service-order-photos')
+    .upload(path, file, { upsert: true, contentType: file.type || 'image/jpeg' });
+  if (error) throw error;
+  return path;
+}
+
+/** URL pública da foto — o bucket de fotos de OS já é público. */
+export function surveyPhotoUrl(path: string): string {
+  return supabase.storage.from('service-order-photos').getPublicUrl(path).data.publicUrl;
+}
+
 export function useAnswerSurvey() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: {
       surveyId: string; serviceOrderId?: string; seq: number; question: string;
-      templateId?: string; answer?: string; skippedReason?: string;
+      templateId?: string; answer?: string; skippedReason?: string; photoPath?: string;
     }) => {
       const { error } = await supabase.from('service_survey_answers').upsert(
         {
@@ -161,6 +188,7 @@ export function useAnswerSurvey() {
           question_snapshot: input.question,
           answer_value: input.answer ?? null,
           skipped_reason: input.skippedReason ?? null,
+          ...(input.photoPath ? { photo_path: input.photoPath } : {}),
         },
         { onConflict: 'survey_id,seq' },
       );

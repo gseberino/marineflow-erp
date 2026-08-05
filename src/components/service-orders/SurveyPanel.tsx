@@ -7,11 +7,15 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
-import { AlertTriangle, Camera, Check, ClipboardCheck, Gauge, HelpCircle, Play } from 'lucide-react';
+import {
+  AlertTriangle, Camera, Check, ClipboardCheck, ClipboardList, Gauge, HelpCircle,
+  Loader2, Play,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import {
   useSurveyTrigger, useCaseEstimate, useSurveyQuestions, useServiceOrderSurvey,
   useStartSurvey, useAnswerSurvey, useCloseSurvey, formatMinutes, finalContingency,
+  uploadSurveyPhoto, surveyPhotoUrl,
   type SurveyQuestion,
 } from '@/hooks/use-service-survey';
 
@@ -46,6 +50,17 @@ export function SurveyPanel({
   const [resposta, setResposta] = useState('');
   const [confidence, setConfidence] = useState<'alta' | 'media' | 'baixa' | ''>('');
   const [rationale, setRationale] = useState('');
+  const [foto, setFoto] = useState<string | null>(null);
+  const [subindo, setSubindo] = useState(false);
+
+  /** O que já foi levantado, para a tela devolver o registro em vez de engolir. */
+  const respostas = useMemo(
+    () =>
+      [...(((survey as any)?.service_survey_answers ?? []) as any[])].sort(
+        (a, b) => a.seq - b.seq,
+      ),
+    [survey],
+  );
 
   const ativo = surveyId || (survey?.status && survey.status !== 'closed' ? survey.id : null);
   const fechado = survey?.status === 'closed';
@@ -93,9 +108,12 @@ export function SurveyPanel({
         surveyId: ativo, serviceOrderId, seq: idx + 1,
         question: atual.question, templateId: atual.id,
         answer: skip ? undefined : resposta, skippedReason: skip,
+        // A foto vale mesmo quando a resposta escrita ficou em branco: às vezes
+        // a imagem é a resposta.
+        ...(foto ? { photoPath: foto } : {}),
       },
       {
-        onSuccess: () => { setResposta(''); setIdx((i) => i + 1); },
+        onSuccess: () => { setResposta(''); setFoto(null); setIdx((i) => i + 1); },
         onError: (e: any) => toast.error(e?.message || 'Erro ao gravar a resposta'),
       },
     );
@@ -179,11 +197,52 @@ export function SurveyPanel({
             />
           )}
 
+          {/* A foto sustenta o preço: quem orça de memória orça errado, e quem
+              discordar depois não tem o que olhar. Vale em qualquer pergunta,
+              não só nas do tipo "foto". */}
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs hover:bg-muted">
+              <Camera className="h-3.5 w-3.5" />
+              {foto ? 'Trocar foto' : 'Anexar foto'}
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file || !ativo) return;
+                  setSubindo(true);
+                  try {
+                    setFoto(await uploadSurveyPhoto(ativo, idx + 1, file));
+                    toast.success('Foto anexada.');
+                  } catch (err: any) {
+                    toast.error(err?.message || 'Não deu para subir a foto');
+                  } finally {
+                    setSubindo(false);
+                  }
+                }}
+              />
+            </label>
+            {subindo && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+            {foto && !subindo && (
+              <a
+                href={surveyPhotoUrl(foto)} target="_blank" rel="noreferrer"
+                className="text-xs text-primary underline"
+              >
+                ver foto anexada
+              </a>
+            )}
+          </div>
+
           <div className="grid grid-cols-2 gap-2">
             <Button variant="ghost" onClick={() => gravar('não consegui ver')} disabled={answer.isPending}>
               Não consegui ver
             </Button>
-            <Button onClick={() => gravar()} disabled={!resposta.trim() || answer.isPending}>
+            <Button
+              onClick={() => gravar()}
+              disabled={(!resposta.trim() && !foto) || answer.isPending}
+            >
               Responder
             </Button>
           </div>
@@ -248,6 +307,43 @@ export function SurveyPanel({
           </p>
         )}
       </div>
+
+      {/* O que foi levantado, por extenso.
+          Antes as respostas eram gravadas e nunca mais apareciam: o técnico
+          respondia nove perguntas e nada disso voltava para a tela. Levantamento
+          que não deixa registro visível não sustenta preço nem defende o
+          orçamento quando alguém questiona três semanas depois. */}
+      {respostas.length > 0 && (
+        <div className="space-y-2 rounded-md border p-3">
+          <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            <ClipboardList className="h-3.5 w-3.5" /> O que foi levantado
+          </p>
+          <ul className="space-y-2">
+            {respostas.map((r) => (
+              <li key={r.seq} className="border-b pb-2 text-sm last:border-0 last:pb-0">
+                <p className="text-xs text-muted-foreground">{r.question_snapshot}</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  {r.skipped_reason ? (
+                    <span className="text-sm italic text-muted-foreground">
+                      não respondida — {r.skipped_reason}
+                    </span>
+                  ) : (
+                    <span className="font-medium">{r.answer_value || '—'}</span>
+                  )}
+                  {r.photo_path && (
+                    <a
+                      href={surveyPhotoUrl(r.photo_path)} target="_blank" rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-xs text-primary underline"
+                    >
+                      <Camera className="h-3 w-3" /> foto
+                    </a>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {fechado && survey?.confidence_rationale && (
         <p className="text-xs text-muted-foreground border-t pt-2">

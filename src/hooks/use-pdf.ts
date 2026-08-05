@@ -2,6 +2,39 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import type { PDFData } from '@/lib/pdf-generator';
 
+/**
+ * Monta o levantamento para o documento do cliente.
+ *
+ * Regras que valem a pena estar aqui e não espalhadas no template:
+ *  · só entra levantamento FECHADO — em andamento, meia resposta promete mais
+ *    do que entrega;
+ *  · só entra se houver ao menos uma resposta;
+ *  · a foto vira um indicador, não a imagem: o PDF é assinado e circula por
+ *    e-mail, e embutir foto de campo estoura o tamanho do anexo.
+ */
+function buildSurveyForPdf(raw: unknown): PDFData['survey'] {
+  const lista = (Array.isArray(raw) ? raw : raw ? [raw] : []) as any[];
+  const fechado = lista.find((s) => s?.status === 'closed');
+  if (!fechado) return undefined;
+
+  const answers = [...((fechado.service_survey_answers || []) as any[])]
+    .sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))
+    .map((a) => ({
+      question: a.question_snapshot as string,
+      answer: a.answer_value as string | null,
+      skipped: a.skipped_reason as string | null,
+      hasPhoto: !!a.photo_path,
+    }));
+
+  if (answers.length === 0) return undefined;
+
+  return {
+    answered_at: fechado.closed_at ?? null,
+    rationale: fechado.confidence_rationale ?? null,
+    answers,
+  };
+}
+
 export function usePDFData(serviceOrderId: string | undefined) {
   return useQuery({
     queryKey: ['pdf-data', serviceOrderId],
@@ -17,6 +50,8 @@ export function usePDFData(serviceOrderId: string | undefined) {
             marinas(*),
             service_order_services(*, services(name)),
             service_order_parts(*, products(name, sku, image_url)),
+            service_surveys(closed_at, confidence_rationale, status,
+              service_survey_answers(seq, question_snapshot, answer_value, skipped_reason, photo_path)),
             service_order_expenses(category, description, amount, paid_by),
             payment_condition_presets(label, installments)
           `)
@@ -166,6 +201,9 @@ export function usePDFData(serviceOrderId: string | undefined) {
             description: e.description,
             amount: e.amount,
           })),
+        // Só o levantamento FECHADO vai para o documento do cliente: enquanto
+        // está em andamento, a resposta pela metade diria menos do que promete.
+        survey: buildSurveyForPdf((so as any).service_surveys),
         terms: [
           get('terms_general'),
           get('terms_warranty'),

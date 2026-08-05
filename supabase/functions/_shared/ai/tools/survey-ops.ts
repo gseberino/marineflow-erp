@@ -75,26 +75,32 @@ export const surveyOpsTools: ToolDef[] = [
     async execute(args, { sb, userId }) {
       const modo = args.mode === "remoto" ? "remoto" : "local";
 
-      const { data: perguntas, error: qErr } = await sb
-        .from("service_survey_templates")
-        .select("id, seq, question, help_text, answer_type, options, price_impact, affects, ask_remotely")
-        .eq("service_id", args.service_id)
-        .eq("active", true)
-        .order("price_impact", { ascending: true })  // 'alto' < 'baixo' < 'medio' alfabeticamente; reordenado abaixo
-        .order("seq", { ascending: true });
+      // As perguntas vêm do COMPOSITOR, não de uma busca por service_id.
+      //
+      // Desde 31/07 a pergunta pertence ao sistema ou ao verbo — 77 perguntas em
+      // 16 conjuntos cobrindo os 261 serviços, em vez de um questionário por
+      // serviço. Esta tool ficou para trás naquela migração: continuava
+      // filtrando `service_id = X`, e como as perguntas novas têm service_id
+      // nulo, ela achava ZERO e respondia "este serviço não tem perguntas
+      // cadastradas" para tudo. O agente parecia não conhecer a ferramenta;
+      // na verdade a ferramenta é que estava olhando no lugar errado.
+      //
+      // compose_survey_for_service já aplica a precedência (pergunta escrita
+      // para o serviço ganha; senão compõe por sistema e verbo), a ordem por
+      // impacto no preço e o teto de 9 do P16.
+      const { data: perguntas, error: qErr } = await sb.rpc("compose_survey_for_service", {
+        p_service_id: args.service_id,
+        p_mode: modo,
+      });
       if (qErr) throw qErr;
 
-      const peso: Record<string, number> = { alto: 0, medio: 1, baixo: 2 };
-      const lista = (perguntas || [])
-        .filter((q: any) => (modo === "remoto" ? q.ask_remotely : true))
-        .sort((a: any, b: any) => (peso[a.price_impact] ?? 1) - (peso[b.price_impact] ?? 1) || a.seq - b.seq)
-        .slice(0, 9); // P2/P16: teto de 9 — acima disso ninguém responde com atenção
+      const lista = (perguntas || []) as any[];
 
       if (lista.length === 0) {
         return {
           error: modo === "remoto"
-            ? "Este serviço não tem nenhuma pergunta marcada como respondível pelo cliente. Faça o levantamento no local."
-            : "Este serviço ainda não tem perguntas de levantamento cadastradas. Monte o questionário na tela do serviço antes.",
+            ? "Nenhuma pergunta deste serviço é respondível pelo cliente sem julgamento técnico. Faça o levantamento no local."
+            : "Não há pergunta de levantamento para este serviço. Confira se ele tem sistema e tipo definidos — é deles que as perguntas vêm.",
         };
       }
 
