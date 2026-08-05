@@ -183,6 +183,39 @@ describe('agrupado por favorecido', () => {
     expect(chamada.overrides.g0.category).toBe('Peças e materiais');
   });
 
+  it('diz POR ESCRITO por que não dá para aprovar', async () => {
+    // A explicação existia — num `title` de botão desabilitado, que o navegador nunca
+    // mostra porque não dispara evento de mouse em elemento apagado. O gestor ficava
+    // olhando para um botão morto sem como descobrir o que a tela queria dele.
+    estadoDaFila.dados = miudas;
+    renderInbox();
+    expect(await screen.findByText(/Escolha a categoria acima para poder aprovar/i)).toBeInTheDocument();
+  });
+
+  it('grupo sem nada em lote oferece o caminho, não um botão morto', async () => {
+    // Todas acima do limite: "Nada em lote aqui" era um beco sem saída. Agora o botão
+    // abre as linhas, que é onde a decisão pode ser tomada.
+    const user = userEvent.setup();
+    // 20 é o piso do modo agrupado — abaixo disso a tela mostra a lista simples.
+    estadoDaFila.dados = Array.from({ length: 20 }, (_, i) => ({
+      ...grande, id: `gg${i}`, bank_transaction_id: `tgg${i}`,
+    }));
+    renderInbox();
+    expect(await screen.findByText(/passam de .* — aprove uma a uma/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Revisar as 20/i }));
+    expect(await screen.findAllByText(/aprove aqui/i)).toHaveLength(20);
+  });
+
+  it('marca QUAIS linhas exigem revisão individual', async () => {
+    // O cabeçalho dizia "1 exige revisão individual" e, ao abrir, a linha era idêntica às
+    // outras 22. Contar um problema sem apontá-lo é dar trabalho de procurar.
+    const user = userEvent.setup();
+    estadoDaFila.dados = [...miudas, grande];
+    renderInbox();
+    await user.click(await screen.findByText(/Ver as 23 linhas/));
+    expect(await screen.findAllByText(/aprove aqui/i)).toHaveLength(1);
+  });
+
   it('a linha grande recebe a classificação do grupo, mesmo ficando de fora da aprovação', async () => {
     // É o ponto do desenho: classificar é barato, aprovar é caro. A grande chega à revisão
     // individual já classificada, então o gestor decide UMA coisa, não duas.

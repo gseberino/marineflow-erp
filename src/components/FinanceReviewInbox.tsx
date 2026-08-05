@@ -206,11 +206,19 @@ interface LinhaProps {
   ocupado: boolean;
   /** Em lote a seleção manda; individualmente cada linha tem seus botões. */
   modoLote: boolean;
+  /**
+   * Esta é uma das que o botão do grupo NÃO alcança.
+   *
+   * O cabeçalho do grupo avisava "3 exigem revisão individual", mas ao abrir a lista as
+   * três eram idênticas às outras — o aviso dizia que existiam e não dizia QUAIS. Contar
+   * um problema sem apontá-lo é dar trabalho de procurar.
+   */
+  foraDoLote?: boolean;
 }
 
 function LinhaProposta({
   p, selecionada, onSelecionar, correcao, onCorrigir,
-  onAprovar, onRecusar, onDuplicata, onCriarRegra, ocupado, modoLote,
+  onAprovar, onRecusar, onDuplicata, onCriarRegra, ocupado, modoLote, foraDoLote,
 }: LinhaProps) {
   const { formatCurrency, formatDate } = useI18n();
   const [aberta, setAberta] = useState(false);
@@ -275,6 +283,11 @@ function LinhaProposta({
             )}
             {transferencia && (
               <Badge variant="secondary" className="text-xs">Não entra no resultado</Badge>
+            )}
+            {foraDoLote && !transferencia && (
+              <Badge variant="outline" className="border-amber-500/50 text-xs text-amber-600">
+                Acima de {formatCurrency(LIMITE_LOTE)} — aprove aqui
+              </Badge>
             )}
           </div>
 
@@ -395,7 +408,26 @@ function CartaoDoFavorecido({
   const { formatCurrency, formatDate } = useI18n();
   const [aberto, setAberto] = useState(false);
 
-  const podeAprovar = grupo.emLote.length > 0 && !!categoria && categoria !== SEM_CATEGORIA;
+  const semCategoriaEscolhida = !categoria || categoria === SEM_CATEGORIA;
+  const nadaEmLote = grupo.emLote.length === 0;
+  const podeAprovar = !nadaEmLote && !semCategoriaEscolhida;
+
+  /**
+   * Por que o botão não aprova — ESCRITO NA TELA, não num tooltip.
+   *
+   * A explicação existia, no atributo `title` do botão. Só que navegador não dispara evento
+   * de mouse em elemento desabilitado: a dica nunca aparecia justamente quando era
+   * necessária. Botão apagado sem motivo à vista é o sistema sabendo de algo e não
+   * contando — o gestor fica olhando para uma tela que não responde e não tem como
+   * descobrir o que ela quer.
+   */
+  const motivo = nadaEmLote
+    ? grupo.propostas.length === 1
+      ? `Esta passa de ${formatCurrency(LIMITE_LOTE)} — aprove na linha, abaixo.`
+      : `Todas as ${grupo.propostas.length} passam de ${formatCurrency(LIMITE_LOTE)} (ou são transferências) — aprove uma a uma, abaixo.`
+    : semCategoriaEscolhida
+      ? 'Escolha a categoria acima para poder aprovar.'
+      : null;
 
   return (
     <Card className="p-3">
@@ -455,27 +487,26 @@ function CartaoDoFavorecido({
         </div>
 
         <div className="flex shrink-0 flex-col items-end gap-1">
-          <Button
-            size="sm"
-            disabled={ocupado || !podeAprovar}
-            onClick={onAprovarLote}
-            title={
-              grupo.emLote.length === 0
-                ? 'Todas deste favorecido passam do limite de lote — aprove uma a uma abaixo'
-                : !categoria || categoria === SEM_CATEGORIA
-                  ? 'Escolha a categoria antes de aprovar'
-                  : undefined
-            }
-          >
-            <Check className="mr-2 h-4 w-4" />
-            {grupo.emLote.length > 0
-              ? `Aprovar ${grupo.emLote.length} · ${formatCurrency(grupo.totalEmLote)}`
-              : 'Nada em lote aqui'}
-          </Button>
+          {/* Sem nada em lote, o botão vira o caminho para o que RESOLVE: abrir as linhas.
+              Um botão morto obriga o gestor a adivinhar qual é o próximo passo. */}
+          {nadaEmLote ? (
+            <Button size="sm" variant="outline" disabled={ocupado} onClick={() => setAberto(true)}>
+              <ChevronDown className="mr-2 h-4 w-4" />
+              Revisar {grupo.propostas.length === 1 ? 'esta' : `as ${grupo.propostas.length}`}
+            </Button>
+          ) : (
+            <Button size="sm" disabled={ocupado || !podeAprovar} onClick={onAprovarLote}>
+              <Check className="mr-2 h-4 w-4" />
+              Aprovar {grupo.emLote.length} · {formatCurrency(grupo.totalEmLote)}
+            </Button>
+          )}
           <Button size="sm" variant="ghost" disabled={ocupado} onClick={onCriarRegra}>
             <Wand2 className="mr-2 h-4 w-4" />
             Virar regra
           </Button>
+          {motivo && (
+            <p className="max-w-[16rem] text-right text-xs text-amber-600">{motivo}</p>
+          )}
         </div>
       </div>
 
@@ -821,6 +852,7 @@ export function FinanceReviewInbox({
               <LinhaProposta
                 key={p.id} {...propsComuns(p)} modoLote={false}
                 selecionada={false} onSelecionar={() => {}}
+                foraDoLote={g.individuais.some((i) => i.id === p.id)}
               />
             ))}
           </CartaoDoFavorecido>
