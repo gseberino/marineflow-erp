@@ -13,6 +13,7 @@ import { quoteBuilderTools } from "./quote-builder.ts";
 import { crmTools } from "./crm.ts";
 import { fieldOpsTools } from "./field-ops.ts";
 import { routeOpsTools } from "./route-ops.ts";
+import { soOpsTools } from "./so-ops.ts";
 import { surveyOpsTools } from "./survey-ops.ts";
 import { routeDraftingTools } from "./route-drafting.ts";
 import { materialsOpsTools } from "./materials-ops.ts";
@@ -55,6 +56,7 @@ export const allTools: ToolDef[] = [
   ...crmTools,
   ...fieldOpsTools,
   ...routeOpsTools,
+  ...soOpsTools,
   ...surveyOpsTools,
   ...routeDraftingTools,
   ...materialsOpsTools,
