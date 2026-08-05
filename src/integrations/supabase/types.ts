@@ -9631,6 +9631,20 @@ export type Database = {
           title: string
         }[]
       }
+      compose_survey_for_axes: {
+        Args: { p_mode?: string; p_system?: string; p_verb?: string }
+        Returns: {
+          answer_type: string
+          ask_remotely: boolean
+          help_text: string
+          id: string
+          options: Json
+          origem: string
+          price_impact: string
+          question: string
+          seq: number
+        }[]
+      }
       compose_survey_for_service: {
         Args: { p_mode?: string; p_service_id: string }
         Returns: {
@@ -9887,6 +9901,19 @@ export type Database = {
         }
         Returns: Json
       }
+      related_materials: {
+        Args: { p_min_juntos?: number; p_service_order_id: string }
+        Returns: {
+          de_total: number
+          juntos: number
+          pct: number
+          por_causa_de: string
+          product_id: string
+          product_name: string
+          sale_price: number
+          unit: string
+        }[]
+      }
       remember_reconciliation: {
         Args: {
           p_candidate_kind?: string
@@ -9995,6 +10022,18 @@ export type Database = {
         Returns: {
           motivo: string
           sistema: string
+        }[]
+      }
+      survey_question_catalog: {
+        Args: never
+        Returns: {
+          answer_type: string
+          eixo: string
+          id: string
+          options: Json
+          price_impact: string
+          question: string
+          tipo_eixo: string
         }[]
       }
       survey_suggested_materials: {

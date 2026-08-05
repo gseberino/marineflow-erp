@@ -86,6 +86,11 @@ import { normalizePhoneE164 } from '@/lib/masks';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { recordWhatsAppEvent } from '@/lib/diagnostics';
 import { useAITextOptimizer } from '@/hooks/use-ai-text-optimizer';
+import {
+  useDescriptionAnalysis, type DescriptionAnalysis,
+} from '@/hooks/use-description-analysis';
+import { DescriptionAnalysisDialog } from '@/components/service-orders/DescriptionAnalysisDialog';
+import { RelatedMaterialsPanel } from '@/components/service-orders/RelatedMaterialsPanel';
 
 interface Props {
   orderId?: string;
@@ -173,6 +178,75 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const removeExpense = useRemoveServiceOrderExpense();
   
   const { isOptimizing, optimizeText } = useAITextOptimizer();
+
+  /* A descrição vira levantamento meio pronto.
+     O texto do orçamento já diz o verbo, o sistema e metade das respostas —
+     até aqui o único botão de IA sobre ele reescrevia a redação. */
+  const { analisar, analisando } = useDescriptionAnalysis();
+  const [analise, setAnalise] = useState<DescriptionAnalysis | null>(null);
+  const [analiseAberta, setAnaliseAberta] = useState(false);
+  const [gravandoAnalise, setGravandoAnalise] = useState(false);
+
+  async function analisarDescricao(texto: string) {
+    const r = await analisar(texto);
+    if (!r) {
+      toast.error('Não deu para ler a descrição. Tente com mais detalhes.');
+      return;
+    }
+    setAnalise(r);
+    setAnaliseAberta(true);
+  }
+
+  async function gravarAnaliseComoLevantamento(
+    respostas: Array<{ id: string; question: string; answer: string }>,
+  ) {
+    if (!orderId) {
+      toast.error('Salve o orçamento antes — o levantamento precisa estar preso a ele.');
+      return;
+    }
+    setGravandoAnalise(true);
+    try {
+      const { data: survey, error } = await supabase
+        .from('service_surveys')
+        .insert({
+          service_order_id: orderId,
+          client_id: form.client_id || null,
+          vessel_id: form.vessel_id || null,
+          // Sem serviço escolhido ainda: a descrição vem antes dessa decisão,
+          // e a coluna aceita nulo justamente para permitir este caminho.
+          service_id: null,
+          trigger_reason: 'Lido da descrição do orçamento',
+          mode: 'local',
+          status: 'draft',
+          questions_planned: respostas.length + (analise?.faltam.length ?? 0),
+        })
+        .select('id')
+        .single();
+      if (error) throw error;
+
+      if (respostas.length) {
+        const { error: e2 } = await supabase.from('service_survey_answers').insert(
+          respostas.map((r, i) => ({
+            survey_id: survey.id,
+            template_id: r.id,
+            seq: i + 1,
+            question_snapshot: r.question,
+            answer_value: r.answer,
+          })),
+        );
+        if (e2) throw e2;
+      }
+
+      setAnaliseAberta(false);
+      toast.success(
+        `Levantamento aberto com ${respostas.length} resposta(s). Abra a aba Levantamento para continuar.`,
+      );
+    } catch (e: any) {
+      toast.error(e?.message || 'Erro ao abrir o levantamento');
+    } finally {
+      setGravandoAnalise(false);
+    }
+  }
 
   // Form state
   const [form, setForm] = useState<Record<string, any>>({
@@ -1888,6 +1962,16 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         setQuickMarinaName={setQuickMarinaName}
         isOptimizing={isOptimizing}
         optimizeText={optimizeText}
+        onAnalisarDescricao={analisarDescricao}
+        analisandoDescricao={analisando}
+      />
+
+      <DescriptionAnalysisDialog
+        open={analiseAberta}
+        onOpenChange={setAnaliseAberta}
+        analise={analise}
+        salvando={gravandoAnalise}
+        onConfirmar={gravarAnaliseComoLevantamento}
       />
 
       <ServicesSection
@@ -1961,6 +2045,12 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         removePart={removePart}
         addPart={addPart}
       />
+
+      {/* O que costuma entrar junto com o que já foi lançado, medido no
+          histórico da casa. Fica logo abaixo das peças porque é ali que se
+          percebe a falta — proteção e acessório são o que mais sai do
+          orçamento por descuido e volta como prejuízo. */}
+      <RelatedMaterialsPanel serviceOrderId={orderId} />
 
       <ExpensesTimeDialogs
         isNew={isNew}
