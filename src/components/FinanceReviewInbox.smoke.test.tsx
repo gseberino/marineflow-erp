@@ -4,17 +4,19 @@
 // pode ser aprovado em bloco e o que exige olhar individual acontece na montagem da tela.
 // Build e tsc passariam com a regra invertida — e aprovar em lote uma saída de R$ 18 mil é
 // exatamente o erro que o limite existe para impedir.
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { I18nProvider } from '@/i18n';
 import { FinanceReviewInbox } from './FinanceReviewInbox';
 
-const { propostas, aprovarMock, duplicataMock, regraMock } = vi.hoisted(() => ({
+const { propostas, estadoDaFila, aprovarMock, duplicataMock, regraMock } = vi.hoisted(() => ({
   aprovarMock: vi.fn(),
   duplicataMock: vi.fn(),
   regraMock: vi.fn(),
+  /** Estado que o teste do erro troca — o resto dos casos usa o padrão. */
+  estadoDaFila: { error: null as Error | null },
   propostas: [
     {
       id: 'p1', kind: 'create_payable', status: 'pending',
@@ -48,7 +50,11 @@ vi.mock('@/hooks/use-finance-review', async (importOriginal) => {
   const real = await importOriginal<typeof import('@/hooks/use-finance-review')>();
   return {
     ...real,
-    useFinanceReviewQueue: () => ({ data: propostas, isLoading: false }),
+    useFinanceReviewQueue: () => ({
+      data: estadoDaFila.error ? [] : propostas,
+      isLoading: false,
+      error: estadoDaFila.error,
+    }),
     useGerarPropostas: () => ({ mutate: vi.fn(), isPending: false }),
     useAprovarPropostas: () => ({ mutate: aprovarMock, isPending: false }),
     useRecusarPropostas: () => ({ mutate: vi.fn(), isPending: false }),
@@ -119,6 +125,22 @@ describe('FinanceReviewInbox', () => {
   it('marca a transferência entre contas como fora do resultado', async () => {
     renderInbox();
     expect(await screen.findByText('Não entra no resultado')).toBeInTheDocument();
+  });
+});
+
+describe('falha de leitura', () => {
+  // Aconteceu de verdade: o join da identificação virou ambíguo, a consulta passou a
+  // falhar, e a tela anunciou "nenhuma proposta pendente" com 1.178 esperando decisão —
+  // enquanto o contador do menu, que não usa join, marcava 99+. Consulta que falha não
+  // pode ter a mesma aparência de fila zerada.
+  afterEach(() => { estadoDaFila.error = null; });
+
+  it('diz que falhou em vez de fingir fila vazia', async () => {
+    estadoDaFila.error = new Error('Could not embed because more than one relationship was found');
+    renderInbox();
+    expect(await screen.findByText(/Não foi possível carregar a fila/i)).toBeInTheDocument();
+    expect(screen.getByText(/more than one relationship/)).toBeInTheDocument();
+    expect(screen.queryByText(/Nenhuma proposta pendente/)).not.toBeInTheDocument();
   });
 });
 

@@ -108,7 +108,14 @@ export function useFinanceReviewQueue() {
         // Traz a identificação da transação junto: sem ela, decidir exige abrir o
         // internet banking em outra aba, que é exatamente o trabalho que esta tela existe
         // para eliminar.
-        .select(`*, bank_transactions ( counterparty_name, counterparty_document,
+        //
+        // A chave estrangeira vai ESCRITA no join. Esta tabela chega a `bank_transactions`
+        // por dois caminhos — a transação da proposta e a segunda perna de uma
+        // transferência entre contas —, e diante de dois caminhos a API recusa o join
+        // inteiro (PGRST201) em vez de escolher um. Sem o nome da chave, a consulta falhava
+        // e a fila aparecia VAZIA com 1.178 propostas dentro dela.
+        .select(`*, bank_transactions!finance_review_queue_bank_transaction_id_fkey (
+          counterparty_name, counterparty_document,
           counterparty_bank, counterparty_branch, counterparty_account, payment_method,
           payment_reason, merchant_name, merchant_document, installment_label,
           pix_end_to_end_id, description, source_type, bank_ref_id )`)

@@ -37,7 +37,7 @@ import {
 } from '@/hooks/use-finance-review';
 import {
   Sparkles, Check, X, ChevronDown, ArrowLeftRight, TrendingDown, Info, RefreshCw,
-  CopyX, Wand2, CreditCard, Landmark,
+  CopyX, Wand2, CreditCard, Landmark, AlertTriangle,
 } from 'lucide-react';
 
 function corDaConfianca(c: number): string {
@@ -368,7 +368,7 @@ export function FinanceReviewInbox({
   onCriarRegra?: (semente: SementeDeRegra) => void;
 } = {}) {
   const { formatCurrency } = useI18n();
-  const { data: propostas = [], isLoading } = useFinanceReviewQueue();
+  const { data: propostas = [], isLoading, error: erroDaFila } = useFinanceReviewQueue();
 
   const gerar = useGerarPropostas();
   const aprovar = useAprovarPropostas();
@@ -458,6 +458,28 @@ export function FinanceReviewInbox({
 
   if (isLoading) {
     return <div className="space-y-2">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-20 rounded-xl" />)}</div>;
+  }
+
+  // Consulta que falha não pode se passar por fila vazia. Era exatamente o que acontecia:
+  // o join da identificação quebrou, a lista voltou vazia e a tela anunciou "nenhuma
+  // proposta pendente" enquanto 1.178 esperavam decisão — com o contador do menu, que não
+  // usa join, marcando 99+ ao lado. Erro invisível é pior que erro: some o problema E some
+  // o trabalho.
+  if (erroDaFila) {
+    return (
+      <Card className="border-destructive/40 bg-destructive/5 p-6">
+        <h3 className="flex items-center gap-2 font-semibold text-destructive">
+          <AlertTriangle className="h-4 w-4" />
+          Não foi possível carregar a fila
+        </h3>
+        <p className="mt-2 text-sm text-muted-foreground">
+          As propostas existem — o que falhou foi a leitura desta tela. Nada foi perdido.
+        </p>
+        <p className="mt-2 break-words rounded-md bg-background/60 p-2 font-mono text-xs">
+          {(erroDaFila as Error)?.message ?? String(erroDaFila)}
+        </p>
+      </Card>
+    );
   }
 
   return (
