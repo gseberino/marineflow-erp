@@ -1,4 +1,5 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -274,6 +275,74 @@ export function BankReconciliation() {
     return list.slice(0, 10);
   };
 
+  /**
+   * Um pagamento que cobre VÁRIAS contas.
+   *
+   * O motor já sabia somar contas do mesmo cliente e a função já tinha a ação para baixar
+   * um grupo — a tela nunca ofereceu o gesto. Quem recebe de um cliente que contrata toda
+   * semana e paga quando junta um valor não tinha como conciliar: o depósito não bate com
+   * conta nenhuma sozinha.
+   *
+   * A soma tem de FECHAR com o valor da transação. Enquanto não fecha, o botão fica
+   * indisponível e a diferença aparece escrita — baixar contas que somam menos que o
+   * depósito deixaria dinheiro sem dono, e mais, faria o sistema quitar o que não foi pago.
+   */
+  const [selecionadasParaGrupo, setSelecionadasParaGrupo] = useState<Map<string, { label: string; amount: number; kind: string; clientId: string | null; serviceOrderId: string | null }>>(new Map());
+
+  const somaDoGrupo = useMemo(
+    () => [...selecionadasParaGrupo.values()].reduce((s, c) => s + c.amount, 0),
+    [selecionadasParaGrupo],
+  );
+  const valorDaTransacaoAberta = Number(
+    (transactions ?? []).find((t: any) => t.id === reconcileId)?.amount ?? 0,
+  );
+  const diferencaDoGrupo = Number((valorDaTransacaoAberta - somaDoGrupo).toFixed(2));
+
+  const marcarParaGrupo = (r: any, valor: number, marcar: boolean) => {
+    setSelecionadasParaGrupo((m) => {
+      const n = new Map(m);
+      if (marcar) {
+        n.set(r.id, {
+          label: String(r.description ?? 'Conta'),
+          amount: valor,
+          kind: r.client_id !== undefined && r.client_id !== null ? 'receivable' : 'payable',
+          clientId: r.client_id ?? null,
+          serviceOrderId: r.service_order_id ?? null,
+        });
+      } else n.delete(r.id);
+      return n;
+    });
+  };
+
+  const conciliarGrupo = async (bankTx: any) => {
+    const candidatos = [...selecionadasParaGrupo.entries()].map(([id, c]) => ({
+      kind: c.kind,
+      id,
+      label: c.label,
+      amount: c.amount,
+      direction: bankTx.transaction_type,
+      clientId: c.clientId,
+      serviceOrderId: c.serviceOrderId,
+    }));
+    if (candidatos.length === 0) return;
+    setIsProcessing(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('banking-reconcile', {
+        body: { action: 'apply_group', transaction_id: bankTx.id, candidates: candidatos },
+      });
+      if (error) throw error;
+      const falhas = (data as any)?.falhas ?? [];
+      if (falhas.length > 0) toast.warning((data as any).message, { description: falhas.slice(0, 3).join(' · ') });
+      else toast.success((data as any)?.message ?? 'Contas baixadas');
+      setSelecionadasParaGrupo(new Map());
+      setReconcileId(null);
+      invalidateAll();
+    } catch (e: any) {
+      toast.error(e?.message || 'Não foi possível conciliar o grupo');
+    }
+    setIsProcessing(false);
+  };
+
   const handleReconcileSO = async (bankTx: any, so: any) => {
     setIsProcessing(true);
     try {
@@ -319,6 +388,37 @@ export function BankReconciliation() {
       setReconcileId(null);
       invalidateAll();
     } catch { toast.error('Erro ao conciliar'); }
+    setIsProcessing(false);
+  };
+
+  /** Radix não aceita SelectItem de valor vazio; "cadastrar" precisa de valor próprio. */
+  const NOVO_CLIENTE = '__novo_cliente__';
+  const [cadastrandoCliente, setCadastrandoCliente] = useState(false);
+  const [nomeDoClienteNovo, setNomeDoClienteNovo] = useState('');
+
+  /**
+   * Cadastra o cliente sem sair da conciliação e já o deixa escolhido.
+   *
+   * Só o nome: o resto do cadastro se completa depois, na tela de clientes. Exigir
+   * documento e telefone aqui empurraria o gestor de volta para a outra tela, que é o
+   * problema que isto resolve.
+   */
+  const criarClienteRapido = async () => {
+    const nome = nomeDoClienteNovo.trim();
+    if (!nome) return;
+    setIsProcessing(true);
+    try {
+      const { data, error } = await supabase
+        .from('clients').insert({ name: nome } as never).select('id, name').single();
+      if (error) throw error;
+      setNewForm(f => ({ ...f, client_id: (data as any).id }));
+      setCadastrandoCliente(false);
+      setNomeDoClienteNovo('');
+      qc.invalidateQueries({ queryKey: ['clients'] });
+      toast.success(`Cliente "${(data as any).name}" cadastrado`);
+    } catch (e: any) {
+      toast.error(e?.message || 'Não foi possível cadastrar o cliente');
+    }
     setIsProcessing(false);
   };
 
@@ -991,6 +1091,42 @@ export function BankReconciliation() {
                             apenas amarrar o extrato a ele.
                           </p>
                         </div>
+                        {/* Um pagamento que cobre VÁRIAS contas.
+                            É o caso do cliente que contrata toda semana e paga quando
+                            junta um valor: o depósito não corresponde a conta nenhuma
+                            sozinha, corresponde à soma de quatro. Conciliar uma e deixar
+                            as outras em aberto seria dar o trabalho por feito com três
+                            contas ainda cobrando quem já pagou. */}
+                        {selecionadasParaGrupo.size > 0 && (
+                          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 p-2">
+                            <span className="text-sm">
+                              <strong>{selecionadasParaGrupo.size}</strong> selecionada(s) ·{' '}
+                              <strong className="tabular-nums">{formatCurrency(somaDoGrupo)}</strong>
+                              {Math.abs(diferencaDoGrupo) >= 0.01 && (
+                                <span className={diferencaDoGrupo > 0 ? 'text-warning' : 'text-destructive'}>
+                                  {' '}· {diferencaDoGrupo > 0 ? 'faltam' : 'passa em'}{' '}
+                                  {formatCurrency(Math.abs(diferencaDoGrupo))}
+                                </span>
+                              )}
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <Button size="sm" variant="ghost" onClick={() => setSelecionadasParaGrupo(new Map())}>
+                                Limpar
+                              </Button>
+                              <Button
+                                size="sm"
+                                disabled={reconcile.isPending || Math.abs(diferencaDoGrupo) >= 0.01}
+                                onClick={() => conciliarGrupo(tx)}
+                                title={Math.abs(diferencaDoGrupo) >= 0.01
+                                  ? 'A soma das selecionadas precisa bater com o valor da transação'
+                                  : undefined}
+                              >
+                                <Check className="mr-1 h-3 w-3" />
+                                Conciliar as {selecionadasParaGrupo.size}
+                              </Button>
+                            </div>
+                          </div>
+                        )}
                         <div className="space-y-1 max-h-40 overflow-y-auto">
                           {getSuggestions(tx).map(r => {
                             const isRec = tx.transaction_type === 'credit';
@@ -1002,6 +1138,16 @@ export function BankReconciliation() {
                               <div key={r.id} className={`flex flex-wrap items-center justify-between gap-2 p-2 rounded border text-sm ${
                                 jaPago ? 'border-info/40 bg-info/5' : isAutoMatch ? 'border-warning bg-warning/5' : ''
                               }`}>
+                                {/* Conta já quitada não entra em soma: ela não tem saldo
+                                    para receber parte deste depósito. */}
+                                {!jaPago && (
+                                  <Checkbox
+                                    className="shrink-0"
+                                    checked={selecionadasParaGrupo.has(r.id)}
+                                    onCheckedChange={(v) => marcarParaGrupo(r, base, v === true)}
+                                    aria-label={`Somar ${r.description} a este pagamento`}
+                                  />
+                                )}
                                 <div className="min-w-0">
                                   <span className="font-medium">{r.description}</span>
                                   {isRec && (r as any).clients && <span className="text-muted-foreground ml-2">— {(r as any).clients.name}</span>}
@@ -1074,14 +1220,44 @@ export function BankReconciliation() {
                           {tx.transaction_type === 'credit' ? (
                             <div>
                               <Label>{t.serviceOrders.client} *</Label>
-                              <Select value={newForm.client_id} onValueChange={v => setNewForm({ ...newForm, client_id: v })}>
-                                <SelectTrigger><SelectValue placeholder="Selecionar cliente" /></SelectTrigger>
-                                <SelectContent>
-                                  {clients?.map(c => (
-                                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                              {/* A receita EXIGE cliente — e é o certo, porque receita sem
+                                  dono não se cobra nem se confere. Mas mandar o gestor sair
+                                  da conciliação, cadastrar o cliente noutra tela e voltar
+                                  para achar de novo a mesma transação é o tipo de ida e
+                                  volta que faz a conciliação parar pela metade. */}
+                              {cadastrandoCliente ? (
+                                <div className="flex gap-2">
+                                  <Input
+                                    autoFocus
+                                    placeholder="Nome do cliente novo"
+                                    value={nomeDoClienteNovo}
+                                    onChange={e => setNomeDoClienteNovo(e.target.value)}
+                                    onKeyDown={e => { if (e.key === 'Enter') criarClienteRapido(); }}
+                                  />
+                                  <Button size="sm" onClick={criarClienteRapido}
+                                    disabled={!nomeDoClienteNovo.trim() || isProcessing}>
+                                    Criar
+                                  </Button>
+                                  <Button size="sm" variant="ghost" onClick={() => setCadastrandoCliente(false)}>
+                                    Cancelar
+                                  </Button>
+                                </div>
+                              ) : (
+                                <Select
+                                  value={newForm.client_id}
+                                  onValueChange={v => (v === NOVO_CLIENTE
+                                    ? setCadastrandoCliente(true)
+                                    : setNewForm({ ...newForm, client_id: v }))}
+                                >
+                                  <SelectTrigger><SelectValue placeholder="Selecionar cliente" /></SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value={NOVO_CLIENTE}>+ Cadastrar cliente novo</SelectItem>
+                                    {clients?.map(c => (
+                                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              )}
                             </div>
                           ) : (
                             <div>
