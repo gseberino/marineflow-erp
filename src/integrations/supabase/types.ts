@@ -3856,6 +3856,7 @@ export type Database = {
           product_id: string | null
           q_com: number | null
           quantity: number | null
+          service_order_id: string | null
           sku_internal: string | null
           sku_supplier: string | null
           total_price: number | null
@@ -3880,6 +3881,7 @@ export type Database = {
           product_id?: string | null
           q_com?: number | null
           quantity?: number | null
+          service_order_id?: string | null
           sku_internal?: string | null
           sku_supplier?: string | null
           total_price?: number | null
@@ -3904,6 +3906,7 @@ export type Database = {
           product_id?: string | null
           q_com?: number | null
           quantity?: number | null
+          service_order_id?: string | null
           sku_internal?: string | null
           sku_supplier?: string | null
           total_price?: number | null
@@ -3948,6 +3951,34 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_estoque_variancia"
             referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "fiscal_note_items_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fiscal_note_items_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fiscal_note_items_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_margin"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fiscal_note_items_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "vw_os_profitability"
+            referencedColumns: ["os_id"]
           },
         ]
       }
@@ -6052,6 +6083,87 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      reparo_coremma_20260805: {
+        Row: {
+          amount: number | null
+          balance_amount: number | null
+          bank_transaction_id: string | null
+          cost_center_id: string | null
+          created_at: string | null
+          currency: string | null
+          description: string | null
+          due_date: string | null
+          expense_category: string | null
+          fiscal_note_id: string | null
+          id: string | null
+          issue_date: string | null
+          linked_service_order_id: string | null
+          notes: string | null
+          origin: string | null
+          paid_amount: number | null
+          payee_id: string | null
+          payment_method: string | null
+          reparado_em: string | null
+          status: string | null
+          sub_category: string | null
+          supplier_id: string | null
+          supplier_name: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          amount?: number | null
+          balance_amount?: number | null
+          bank_transaction_id?: string | null
+          cost_center_id?: string | null
+          created_at?: string | null
+          currency?: string | null
+          description?: string | null
+          due_date?: string | null
+          expense_category?: string | null
+          fiscal_note_id?: string | null
+          id?: string | null
+          issue_date?: string | null
+          linked_service_order_id?: string | null
+          notes?: string | null
+          origin?: string | null
+          paid_amount?: number | null
+          payee_id?: string | null
+          payment_method?: string | null
+          reparado_em?: string | null
+          status?: string | null
+          sub_category?: string | null
+          supplier_id?: string | null
+          supplier_name?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          amount?: number | null
+          balance_amount?: number | null
+          bank_transaction_id?: string | null
+          cost_center_id?: string | null
+          created_at?: string | null
+          currency?: string | null
+          description?: string | null
+          due_date?: string | null
+          expense_category?: string | null
+          fiscal_note_id?: string | null
+          id?: string | null
+          issue_date?: string | null
+          linked_service_order_id?: string | null
+          notes?: string | null
+          origin?: string | null
+          paid_amount?: number | null
+          payee_id?: string | null
+          payment_method?: string | null
+          reparado_em?: string | null
+          status?: string | null
+          sub_category?: string | null
+          supplier_id?: string | null
+          supplier_name?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
       }
       saved_filters: {
         Row: {
@@ -9388,6 +9500,10 @@ export type Database = {
         Returns: Json
       }
       categoria_e_sensivel: { Args: { nome: string }; Returns: boolean }
+      classify_free_text_materials: {
+        Args: { p_textos: string[] }
+        Returns: Json
+      }
       classify_service_text: { Args: { p_texto: string }; Returns: Json }
       compose_route_for_service: {
         Args: { p_service_id: string }
@@ -9452,11 +9568,13 @@ export type Database = {
         Args: { _quote_id: string }
         Returns: string
       }
+      count_purchase_shortages: { Args: { p_so_ids: string[] }; Returns: Json }
       estimate_from_cases: {
         Args: { p_min_casos?: number; p_service_id: string }
         Returns: Json
       }
       frase_legivel: { Args: { p_texto: string }; Returns: string }
+      free_text_is_material: { Args: { p_texto: string }; Returns: boolean }
       generate_service_order_steps: {
         Args: { p_service_order_id: string }
         Returns: number
@@ -9577,6 +9695,16 @@ export type Database = {
           p_supplier_id?: string
         }
         Returns: Json
+      }
+      previous_survey_answers: {
+        Args: { p_vessel_id: string }
+        Returns: {
+          answer: string
+          answered_at: string
+          question: string
+          service_order_number: string
+          template_id: string
+        }[]
       }
       produce_composed_product: {
         Args: { p_parent: string; p_qty?: number }
@@ -9717,6 +9845,11 @@ export type Database = {
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
       stock_model_v2_on: { Args: never; Returns: boolean }
+      suggest_nfe_service_orders: { Args: { p_note_id: string }; Returns: Json }
+      suggest_service_orders_for_products: {
+        Args: { p_product_ids: string[] }
+        Returns: Json
+      }
       suggest_system_for_line: {
         Args: { p_line_id: string }
         Returns: {
@@ -9724,6 +9857,7 @@ export type Database = {
           sistema: string
         }[]
       }
+      sync_fiscal_note_items: { Args: { p_note_id: string }; Returns: number }
       touch_open_loop: {
         Args: {
           p_evidence?: string

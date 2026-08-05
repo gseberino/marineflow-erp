@@ -121,12 +121,26 @@ export const surveyOpsTools: ToolDef[] = [
         .single();
       if (error) throw error;
 
+      // O que este ativo já respondeu antes. Metade das perguntas de um
+      // levantamento tem sempre a mesma resposta — onde fica o cilindro, a
+      // distância do banco ao quadro. Perguntar de novo o que não muda gasta o
+      // tempo de quem responde e ensina que levantamento é burocracia.
+      let anteriores: Record<string, any> = {};
+      if (args.vessel_id) {
+        const { data: prev } = await sb.rpc("previous_survey_answers", {
+          p_vessel_id: args.vessel_id,
+        });
+        for (const p of (prev || []) as any[]) anteriores[p.template_id] = p;
+      }
+
       return {
         survey_id: survey.id,
         modo,
         total_perguntas: lista.length,
         instrucao:
           "Faça UMA pergunta por vez, na ordem. Depois de cada resposta, grave com record_survey_answer e chame assess_survey_confidence para saber se já dá para orçar — não faça todas de enfiada.",
+        instrucao_resposta_anterior:
+          "Onde vier 'ja_respondido_antes', CONFIRME em vez de perguntar do zero: 'da última vez o cilindro estava no bagageiro traseiro — continua lá?'. Confirmar é rápido e ainda pega a mudança; repetir a pergunta inteira desperdiça o que já se sabe. Nunca dê a resposta anterior como certa sem o técnico confirmar: o que estava num lugar pode ter mudado.",
         perguntas: lista.map((q: any, i: number) => ({
           ordem: i + 1,
           template_id: q.id,
@@ -135,6 +149,15 @@ export const surveyOpsTools: ToolDef[] = [
           tipo: q.answer_type,
           opcoes: q.options,
           impacto_no_preco: q.price_impact,
+          ...(anteriores[q.id]
+            ? {
+                ja_respondido_antes: {
+                  resposta: anteriores[q.id].answer,
+                  quando: anteriores[q.id].answered_at,
+                  na_os: anteriores[q.id].service_order_number,
+                },
+              }
+            : {}),
         })),
       };
     },

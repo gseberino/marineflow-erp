@@ -9,13 +9,13 @@ import {
 } from '@/components/ui/select';
 import {
   AlertTriangle, Camera, Check, ClipboardCheck, ClipboardList, Gauge, HelpCircle,
-  Loader2, Play,
+  History, Loader2, Play,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   useSurveyTrigger, useCaseEstimate, useSurveyQuestions, useServiceOrderSurvey,
   useStartSurvey, useAnswerSurvey, useCloseSurvey, formatMinutes, finalContingency,
-  uploadSurveyPhoto, surveyPhotoUrl,
+  uploadSurveyPhoto, surveyPhotoUrl, usePreviousAnswers, howLongAgo, canReuseAnswer,
   type SurveyQuestion,
 } from '@/hooks/use-service-survey';
 
@@ -41,6 +41,9 @@ export function SurveyPanel({
   const { data: estimate } = useCaseEstimate(serviceId);
   const { data: questions = [] } = useSurveyQuestions(serviceId, 'local');
   const { data: survey } = useServiceOrderSurvey(serviceOrderId);
+  // O que este mesmo ativo já respondeu antes — para não perguntar de novo o
+  // que não muda de um serviço para o outro.
+  const { data: anteriores = {} } = usePreviousAnswers(vesselId);
   const start = useStartSurvey();
   const answer = useAnswerSurvey();
   const close = useCloseSurvey();
@@ -65,6 +68,8 @@ export function SurveyPanel({
   const ativo = surveyId || (survey?.status && survey.status !== 'closed' ? survey.id : null);
   const fechado = survey?.status === 'closed';
   const atual: SurveyQuestion | undefined = questions[idx];
+  const anterior = atual ? anteriores[atual.id] : undefined;
+  const reaproveitavel = canReuseAnswer(atual, anterior);
 
   const contingencia = useMemo(
     () => (confidence ? finalContingency(estimate, confidence) : estimate?.contingencia_pct ?? null),
@@ -195,6 +200,32 @@ export function SurveyPanel({
               placeholder={atual.answer_type === 'numero' || atual.answer_type === 'medida' ? 'valor' : 'resposta'}
               className="h-10"
             />
+          )}
+
+          {/* O que este ativo respondeu da última vez.
+              Aparece como atalho, nunca preenchido sozinho: o cilindro pode ter
+              mudado de lugar, e confirmar sem olhar é pior que perguntar. Por
+              isso a idade da informação vem junto — resposta de dois anos merece
+              desconfiança, e quem está no local é que sabe se ainda vale. */}
+          {anterior && (
+            <div className="flex flex-wrap items-center gap-2 rounded-md border border-dashed bg-muted/40 p-2">
+              <History className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 text-xs">
+                <span className="text-muted-foreground">
+                  {howLongAgo(anterior.answered_at)}
+                  {anterior.service_order_number ? ` (${anterior.service_order_number})` : ''}:
+                </span>{' '}
+                <strong>{anterior.answer}</strong>
+              </span>
+              {reaproveitavel && (
+                <Button
+                  size="sm" variant="outline" className="h-7 shrink-0 text-xs"
+                  onClick={() => setResposta(anterior.answer)}
+                >
+                  Continua igual
+                </Button>
+              )}
+            </div>
           )}
 
           {/* A foto sustenta o preço: quem orça de memória orça errado, e quem

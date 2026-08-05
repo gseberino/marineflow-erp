@@ -148,6 +148,70 @@ export function useStartSurvey() {
   });
 }
 
+export interface PreviousAnswer {
+  template_id: string;
+  question: string;
+  answer: string;
+  answered_at: string | null;
+  service_order_number: string | null;
+}
+
+/**
+ * O que já se sabe deste ativo, de levantamentos anteriores.
+ *
+ * Metade das perguntas de um levantamento tem a mesma resposta sempre — onde
+ * fica o cilindro, a distância do banco ao quadro, se existe detector de gás.
+ * Perguntar de novo o que não muda gasta o tempo de quem responde e ensina que
+ * o levantamento é burocracia.
+ *
+ * A memória é do ATIVO, não do cliente: o cilindro fica no mesmo lugar do mesmo
+ * motorhome, independentemente de quem o comprou depois.
+ */
+export function usePreviousAnswers(vesselId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['survey-previous-answers', vesselId],
+    enabled: !!vesselId,
+    staleTime: 5 * 60 * 1000,
+    queryFn: async (): Promise<Record<string, PreviousAnswer>> => {
+      const { data, error } = await supabase.rpc('previous_survey_answers', {
+        p_vessel_id: vesselId!,
+      });
+      if (error) throw error;
+      return Object.fromEntries(
+        ((data || []) as unknown as PreviousAnswer[]).map((r) => [r.template_id, r]),
+      );
+    },
+  });
+}
+
+/**
+ * A resposta anterior serve de atalho para esta pergunta?
+ *
+ * Se a pergunta virou "escolha" com outras opções desde a última vez, a resposta
+ * antiga ainda informa quem está no local, mas não pode virar botão: jogá-la no
+ * Select daria um clique que não muda nada na tela.
+ */
+export function canReuseAnswer(
+  question: Pick<SurveyQuestion, 'answer_type' | 'options'> | undefined,
+  previous: PreviousAnswer | undefined,
+): boolean {
+  if (!question || !previous?.answer) return false;
+  if (question.answer_type !== 'escolha') return true;
+  return !!question.options?.includes(previous.answer);
+}
+
+/** "há 3 meses", "há 2 anos" — a idade importa mais que a data exata. */
+export function howLongAgo(iso: string | null | undefined): string {
+  if (!iso) return 'levantamento anterior';
+  const dias = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+  if (dias < 1) return 'hoje';
+  if (dias < 30) return `há ${dias} dia${dias > 1 ? 's' : ''}`;
+  const meses = Math.floor(dias / 30);
+  if (meses < 12) return `há ${meses} ${meses > 1 ? 'meses' : 'mês'}`;
+  const anos = Math.floor(meses / 12);
+  return `há ${anos} ano${anos > 1 ? 's' : ''}`;
+}
+
 /**
  * Sobe a foto do levantamento e devolve o caminho no bucket.
  *
