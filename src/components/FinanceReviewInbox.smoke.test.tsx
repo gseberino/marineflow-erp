@@ -75,6 +75,17 @@ vi.mock('@/hooks/use-financial-categories', () => ({
   }),
 }));
 
+/**
+ * O seletor de categoria do primeiro grupo.
+ *
+ * Por posição não serve: a barra tem o seletor de ORDEM, que também é um combobox e vem
+ * antes. Buscar pelo que ele NÃO é sobrevive a qualquer controle novo no cabeçalho.
+ */
+async function seletorDeCategoria() {
+  const combos = await screen.findAllByRole('combobox');
+  return combos.find((c) => c.getAttribute('aria-label') !== 'Ordem da lista')!;
+}
+
 function renderInbox() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -182,7 +193,7 @@ describe('agrupado por favorecido', () => {
     estadoDaFila.dados = [...miudas, grande];
     renderInbox();
 
-    await user.click((await screen.findAllByRole('combobox'))[0]);
+    await user.click(await seletorDeCategoria());
     await user.click(await screen.findByText('Peças e materiais'));
     await user.click(await screen.findByRole('button', { name: /Aprovar 23/ }));
 
@@ -202,7 +213,7 @@ describe('agrupado por favorecido', () => {
     estadoDaFila.dados = miudas;
     renderInbox();
 
-    await user.click((await screen.findAllByRole('combobox'))[0]);
+    await user.click(await seletorDeCategoria());
     await user.click(await screen.findByText('Peças e materiais'));
     await user.click(await screen.findByRole('button', { name: /Aprovar 22/ }));
 
@@ -221,13 +232,48 @@ describe('agrupado por favorecido', () => {
     }, ...miudas];
     renderInbox();
 
-    await user.click((await screen.findAllByRole('combobox'))[0]);
+    await user.click(await seletorDeCategoria());
     await user.click(await screen.findByText('Peças e materiais'));
     await user.click(await screen.findByRole('button', { name: /Aprovar 23/ }));
 
     const item = await screen.findByText(/ABSURDAMENTE LONGO/);
     expect(item.className).toMatch(/min-w-0/);
     expect(item.className).toMatch(/break-words/);
+  });
+
+  it('marca o grupo inteiro e aprova junto com outro, sem esperar recarga', async () => {
+    // O ganho não é o clique a menos: é não ter de esperar a lista voltar do servidor
+    // entre um grupo e o seguinte. Marca-se o que for, aprova-se de uma vez.
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    estadoDaFila.dados = [...miudas, { ...grande, bank_transactions: { counterparty_name: 'OUTRO LUGAR', source_type: 'bank' } }];
+    renderInbox();
+
+    await user.click(await screen.findByLabelText(/Selecionar as 22 de SPG/i));
+    await user.click(await screen.findByLabelText(/Selecionar as 1 de OUTRO LUGAR/i));
+    expect(await screen.findByText(/selecionada\(s\)/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Aprovar selecionadas/i }));
+    expect(aprovarMock.mock.calls[0][0].ids).toHaveLength(23);
+  });
+
+  it('avisa quando o que está selecionado ainda não tem categoria', async () => {
+    // Aprovar assim cria despesa em "Outras despesas", que é a lacuna que esta tela existe
+    // para fechar. Não impede — às vezes é mesmo "outras" —, mas descobrir depois custa
+    // procurar as linhas uma a uma.
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    estadoDaFila.dados = miudas;
+    renderInbox();
+    await user.click(await screen.findByLabelText(/Selecionar as 22 de SPG/i));
+    expect(await screen.findByText(/22 sem categoria/)).toBeInTheDocument();
+  });
+
+  it('dá para escolher a ordem da lista', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    estadoDaFila.dados = [...miudas, grande];
+    renderInbox();
+    await user.click(await screen.findByLabelText('Ordem da lista'));
+    expect(await screen.findByText('Prontos para aprovar')).toBeInTheDocument();
+    expect(screen.getByText('Favorecido (A-Z)')).toBeInTheDocument();
   });
 
   it('diz POR ESCRITO por que não dá para aprovar', async () => {
@@ -250,7 +296,7 @@ describe('agrupado por favorecido', () => {
     }));
     renderInbox();
 
-    await user.click((await screen.findAllByRole('combobox'))[0]);
+    await user.click(await seletorDeCategoria());
     await user.click(await screen.findByText('Pró-labore e retirada'));
     await user.click(await screen.findByRole('button', { name: /Aprovar 20/ }));
 
@@ -277,7 +323,7 @@ describe('agrupado por favorecido', () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 });
     renderInbox();
 
-    await user.click((await screen.findAllByRole('combobox'))[0]);
+    await user.click(await seletorDeCategoria());
     await user.click(await screen.findByText('Peças e materiais'));
     await user.click(await screen.findByText(/Ver as 23 linhas/));
 
@@ -367,7 +413,7 @@ describe('criar categoria sem sair da tela', () => {
   it('escolher "criar" abre o campo do nome, sem trocar de tela', async () => {
     const user = userEvent.setup();
     renderInbox();
-    await user.click((await screen.findAllByRole('combobox'))[0]);
+    await user.click(await seletorDeCategoria());
     await user.click(await screen.findByText(/Criar categoria nova/));
     expect(await screen.findByPlaceholderText(/Nome da categoria nova/)).toBeInTheDocument();
   });
@@ -394,7 +440,7 @@ describe('vínculo que a categoria pede', () => {
     const user = userEvent.setup();
     renderInbox();
     // Troca a categoria de p1 para pró-labore e o campo deve aparecer.
-    await user.click((await screen.findAllByRole('combobox'))[0]);
+    await user.click(await seletorDeCategoria());
     await user.click(await screen.findByText('Pró-labore e retirada'));
     expect(await screen.findByText(/Quem recebeu/)).toBeInTheDocument();
   });
@@ -405,7 +451,7 @@ describe('vínculo que a categoria pede', () => {
     // não chega em ninguém.
     const user = userEvent.setup({ pointerEventsCheck: 0 });
     renderInbox();
-    await user.click((await screen.findAllByRole('combobox'))[0]);
+    await user.click(await seletorDeCategoria());
     await user.click(await screen.findByText('Pró-labore e retirada'));
 
     const gatilhoFavorecido = (await screen.findByText(/Quem recebeu/)).closest('button');

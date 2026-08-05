@@ -41,11 +41,11 @@ import {
 } from '@/hooks/use-finance-review';
 import {
   Sparkles, Check, X, ChevronDown, ArrowLeftRight, TrendingDown, Info, RefreshCw,
-  CopyX, Wand2, CreditCard, Landmark, AlertTriangle, Users, List, Layers,
+  CopyX, Wand2, CreditCard, Landmark, AlertTriangle, Users, List, Layers, ArrowDownUp,
 } from 'lucide-react';
 import {
-  agruparPorFavorecido, resumoDoAgrupamento, SEM_CATEGORIA,
-  type GrupoDeFavorecido,
+  agruparPorFavorecido, ordenarGrupos, resumoDoAgrupamento, SEM_CATEGORIA, ROTULO_DA_ORDEM,
+  type GrupoDeFavorecido, type OrdemDaFila,
 } from '@/lib/finance-inbox-grouping';
 
 function corDaConfianca(c: number): string {
@@ -218,11 +218,20 @@ interface LinhaProps {
    * um problema sem apontá-lo é dar trabalho de procurar.
    */
   foraDoLote?: boolean;
+  /**
+   * Mostrar o botão de aprovar desta linha.
+   *
+   * Estava colado em `modoLote`: ou a linha tinha caixa de seleção, ou tinha botão. Dentro
+   * de um grupo os dois fazem falta — marcar várias para aprovar juntas E despachar uma
+   * que já está resolvida sem mexer na seleção das outras.
+   */
+  mostrarAprovar?: boolean;
 }
 
 function LinhaProposta({
   p, selecionada, onSelecionar, correcao, onCorrigir,
   onAprovar, onRecusar, onDuplicata, onCriarRegra, ocupado, modoLote, foraDoLote,
+  mostrarAprovar,
 }: LinhaProps) {
   const { formatCurrency, formatDate } = useI18n();
   const [aberta, setAberta] = useState(false);
@@ -337,7 +346,7 @@ function LinhaProposta({
           <div className="flex shrink-0 flex-wrap justify-end gap-1">
             {/* aria-label além do tooltip: botão só de ícone precisa de nome para leitor
                 de tela, e o texto do tooltip não conta — ele só existe no hover. */}
-            {!modoLote && (
+            {(mostrarAprovar ?? !modoLote) && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button size="sm" variant="outline" disabled={ocupado} onClick={onAprovar}
@@ -397,7 +406,8 @@ function LinhaProposta({
  * chega classificada.
  */
 function CartaoDoFavorecido({
-  grupo, categoria, favorecidoId, osId, onMudar, onAprovarLote, onCriarRegra, ocupado, children,
+  grupo, categoria, favorecidoId, osId, onMudar, onAprovarLote, onCriarRegra, ocupado,
+  selecionadas, onSelecionarGrupo, children,
 }: {
   grupo: GrupoDeFavorecido;
   categoria: string;
@@ -407,6 +417,9 @@ function CartaoDoFavorecido({
   onAprovarLote: () => void;
   onCriarRegra: () => void;
   ocupado: boolean;
+  /** Quantas linhas DESTE grupo estão marcadas — decide o estado do checkbox do cabeçalho. */
+  selecionadas: number;
+  onSelecionarGrupo: (marcar: boolean) => void;
   children: ReactNode;
 }) {
   const { formatCurrency, formatDate } = useI18n();
@@ -447,6 +460,15 @@ function CartaoDoFavorecido({
   return (
     <Card className="p-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
+        {/* Marcar o grupo inteiro é o gesto mais comum; o parcial (algumas linhas de dentro
+            escolhidas) precisa se distinguir do nada marcado, senão o gestor não sabe se a
+            seleção dele sobreviveu. */}
+        <Checkbox
+          className="mt-1 shrink-0"
+          checked={selecionadas === 0 ? false : selecionadas === grupo.propostas.length ? true : 'indeterminate'}
+          onCheckedChange={(v) => onSelecionarGrupo(v === true)}
+          aria-label={`Selecionar as ${grupo.propostas.length} de ${grupo.rotulo}`}
+        />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <Users className="h-4 w-4 shrink-0 text-primary" />
@@ -635,6 +657,7 @@ export function FinanceReviewInbox({
    */
   const [modo, setModo] = useState<'favorecido' | 'lista' | null>(null);
   const agrupar = modo === null ? propostas.length >= 20 : modo === 'favorecido';
+  const [ordem, setOrdem] = useState<OrdemDaFila>('decisoes');
 
   const porOrigem = useMemo(
     () => (origem === 'todas'
@@ -688,7 +711,21 @@ export function FinanceReviewInbox({
   // Calculado nos dois modos: é uma passada só na lista, e o botão precisa saber quantos
   // favorecidos existem ANTES de alguém trocar de modo — senão ele oferece "Por favorecido
   // (0)" justamente quando o agrupamento seria útil.
-  const grupos = useMemo(() => agruparPorFavorecido(porOrigem, LIMITE_LOTE), [porOrigem]);
+  const gruposBrutos = useMemo(() => agruparPorFavorecido(porOrigem, LIMITE_LOTE), [porOrigem]);
+
+  /**
+   * A ordem considera a categoria que o gestor ACABOU de escolher, não só a que veio do
+   * banco. Sem isso, "prontos para aprovar" ignoraria justamente o trabalho que ele fez
+   * nos últimos minutos — e o grupo que ele resolveu continuaria no fim da lista.
+   */
+  const grupos = useMemo(
+    () => ordenarGrupos(gruposBrutos, ordem, (g) => {
+      const escolhida = g.propostas.map((p) => correcoes[p.id]?.category).find(Boolean);
+      if (escolhida) return escolhida !== SEM_CATEGORIA;
+      return !g.semCategoria && g.categorias.length === 1;
+    }),
+    [gruposBrutos, ordem, correcoes],
+  );
   const resumo = useMemo(() => resumoDoAgrupamento(grupos), [grupos]);
 
   /**
@@ -750,9 +787,35 @@ export function FinanceReviewInbox({
     });
   };
 
+  /** Marca ou desmarca o grupo inteiro de uma vez. */
+  const marcarGrupo = (g: GrupoDeFavorecido, marcar: boolean) => {
+    setSelecionadas((s) => {
+      const n = new Set(s);
+      for (const p of g.propostas) if (marcar) n.add(p.id); else n.delete(p.id);
+      return n;
+    });
+  };
+
+  // Sobre TUDO que está visível, não só sobre o lote: agrupado, a seleção atravessa grupos.
   const valorSelecionado = useMemo(
-    () => lote.filter((p) => selecionadas.has(p.id)).reduce((s, p) => s + Number(p.suggested_amount ?? 0), 0),
-    [lote, selecionadas],
+    () => porOrigem.filter((p) => selecionadas.has(p.id)).reduce((s, p) => s + Number(p.suggested_amount ?? 0), 0),
+    [porOrigem, selecionadas],
+  );
+
+  /**
+   * Quantas selecionadas seguem sem categoria de verdade.
+   *
+   * Aprovar assim cria despesa em "Outras despesas", que é a lacuna que esta tela existe
+   * para fechar. Não impede — às vezes é mesmo "outras" —, mas avisa antes, porque
+   * descobrir depois significa procurar as linhas uma a uma para corrigir.
+   */
+  const selecionadasSemCategoria = useMemo(
+    () => porOrigem.filter((p) => {
+      if (!selecionadas.has(p.id) || p.kind === 'internal_transfer') return false;
+      const cat = correcoes[p.id]?.category ?? p.suggested_category ?? '';
+      return !cat || cat === SEM_CATEGORIA;
+    }).length,
+    [porOrigem, selecionadas, correcoes],
   );
 
   const propsComuns = (p: PropostaFinanceira) => ({
@@ -876,6 +939,19 @@ export function FinanceReviewInbox({
             >
               <List className="h-3 w-3" />Uma a uma ({porOrigem.length})
             </Button>
+            {agrupar && (
+              <Select value={ordem} onValueChange={(v) => setOrdem(v as OrdemDaFila)}>
+                <SelectTrigger className="h-7 w-auto gap-1.5 text-xs" aria-label="Ordem da lista">
+                  <ArrowDownUp className="h-3 w-3" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(ROTULO_DA_ORDEM) as OrdemDaFila[]).map((o) => (
+                    <SelectItem key={o} value={o} className="text-xs">{ROTULO_DA_ORDEM[o]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             {agrupar && resumo.repetidos > 0 && (
               <span className="text-xs text-muted-foreground">
                 {resumo.propostasEmRepetidos} linhas repetidas se resolvem em{' '}
@@ -914,8 +990,34 @@ export function FinanceReviewInbox({
         </Card>
       )}
 
+      {/* Barra da seleção: fica grudada no topo porque a escolha acontece rolando a lista,
+          e um botão que só existe no fim da página obriga a rolar de volta para usá-lo. */}
+      {agrupar && selecionadas.size > 0 && (
+        <div className="sticky top-2 z-10 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-background/95 p-2 shadow-sm backdrop-blur">
+          <span className="text-sm">
+            <strong>{selecionadas.size}</strong> selecionada(s) ·{' '}
+            <strong>{formatCurrency(valorSelecionado)}</strong>
+            {selecionadasSemCategoria > 0 && (
+              <span className="text-amber-600">
+                {' '}· {selecionadasSemCategoria} sem categoria
+              </span>
+            )}
+          </span>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="ghost" onClick={() => setSelecionadas(new Set())}>
+              Limpar
+            </Button>
+            <Button size="sm" onClick={aprovarSelecionadas}>
+              <Check className="mr-2 h-4 w-4" />
+              Aprovar selecionadas
+            </Button>
+          </div>
+        </div>
+      )}
+
       {agrupar && grupos.map((g) => {
         const estado = estadoDoGrupo(g);
+        const marcadasNoGrupo = g.propostas.filter((p) => selecionadas.has(p.id)).length;
         return (
           <CartaoDoFavorecido
             key={g.chave}
@@ -927,11 +1029,14 @@ export function FinanceReviewInbox({
             onAprovarLote={() => aprovarGrupo(g)}
             onCriarRegra={() => criarRegraDoGrupo(g)}
             ocupado={ocupado}
+            selecionadas={marcadasNoGrupo}
+            onSelecionarGrupo={(marcar) => marcarGrupo(g, marcar)}
           >
             {g.propostas.map((p) => (
               <LinhaProposta
-                key={p.id} {...propsComuns(p)} modoLote={false}
-                selecionada={false} onSelecionar={() => {}}
+                key={p.id} {...propsComuns(p)} modoLote mostrarAprovar
+                selecionada={selecionadas.has(p.id)}
+                onSelecionar={(m) => marcar(p.id, m)}
                 foraDoLote={g.individuais.some((i) => i.id === p.id)}
               />
             ))}

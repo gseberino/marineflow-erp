@@ -4,7 +4,7 @@
 // alguma despesa grande consegue escapar da revisão individual escondida num grupo.
 import { describe, it, expect } from 'vitest';
 import {
-  agruparPorFavorecido, resumoDoAgrupamento, normalizarFavorecido, SEM_CATEGORIA,
+  agruparPorFavorecido, ordenarGrupos, resumoDoAgrupamento, normalizarFavorecido, SEM_CATEGORIA,
 } from '@/lib/finance-inbox-grouping';
 import type { PropostaFinanceira } from '@/hooks/use-finance-review';
 
@@ -154,6 +154,16 @@ describe('agrupamento por favorecido', () => {
     expect(grupos[0].rotulo).toBe('REPETIDO');
   });
 
+  it('dentro do grupo, da mais recente para a mais antiga', () => {
+    const grupos = agruparPorFavorecido([
+      proposta({ nome: 'A', suggested_date: '2026-01-10' }),
+      proposta({ nome: 'A', suggested_date: '2026-06-20' }),
+      proposta({ nome: 'A', suggested_date: '2026-03-15' }),
+    ], LIMITE);
+    expect(grupos[0].propostas.map((p) => p.suggested_date))
+      .toEqual(['2026-06-20', '2026-03-15', '2026-01-10']);
+  });
+
   it('resume o quanto o agrupamento economiza', () => {
     const grupos = agruparPorFavorecido([
       proposta({ nome: 'A' }), proposta({ nome: 'A' }), proposta({ nome: 'A' }),
@@ -163,6 +173,50 @@ describe('agrupamento por favorecido', () => {
     expect(resumoDoAgrupamento(grupos)).toMatchObject({
       grupos: 3, propostas: 6, repetidos: 2, propostasEmRepetidos: 5,
     });
+  });
+});
+
+describe('ordem da fila', () => {
+  // Não existe uma ordem certa — existe a que serve ao que se está fazendo. O que importa
+  // é que cada opção realmente mude a lista, senão o seletor é decoração.
+  const monta = () => agruparPorFavorecido([
+    proposta({ nome: 'ZEBRA', suggested_date: '2026-06-01', suggested_category: 'Peças e materiais' }),
+    proposta({ nome: 'ALFA', suggested_date: '2026-01-01' }),
+    proposta({ nome: 'ALFA', suggested_date: '2026-02-01' }),
+    proposta({ nome: 'ALFA', suggested_date: '2026-03-01' }),
+  ], LIMITE);
+
+  it('mais linhas primeiro é o padrão do mutirão', () => {
+    expect(ordenarGrupos(monta(), 'decisoes').map((g) => g.rotulo)).toEqual(['ALFA', 'ZEBRA']);
+  });
+
+  it('prontos para aprovar sobem, mesmo tendo menos linhas', () => {
+    // ZEBRA tem uma linha só, mas já tem categoria: é despacho imediato.
+    expect(ordenarGrupos(monta(), 'prontos').map((g) => g.rotulo)).toEqual(['ZEBRA', 'ALFA']);
+  });
+
+  it('a tela pode dizer o que a lista não sabe: a categoria recém-escolhida', () => {
+    const escolhido = ordenarGrupos(monta(), 'prontos', (g) => g.rotulo === 'ALFA');
+    expect(escolhido.map((g) => g.rotulo)).toEqual(['ALFA', 'ZEBRA']);
+  });
+
+  it('por data usa a movimentação mais recente do grupo', () => {
+    expect(ordenarGrupos(monta(), 'data').map((g) => g.rotulo)).toEqual(['ZEBRA', 'ALFA']);
+  });
+
+  it('por favorecido respeita acento do português', () => {
+    const grupos = agruparPorFavorecido([
+      proposta({ nome: 'Ótica Central' }), proposta({ nome: 'Auto Peças' }), proposta({ nome: 'Zé Materiais' }),
+    ], LIMITE);
+    expect(ordenarGrupos(grupos, 'favorecido').map((g) => g.rotulo))
+      .toEqual(['Auto Peças', 'Ótica Central', 'Zé Materiais']);
+  });
+
+  it('não altera a lista original', () => {
+    const grupos = monta();
+    const antes = grupos.map((g) => g.rotulo);
+    ordenarGrupos(grupos, 'favorecido');
+    expect(grupos.map((g) => g.rotulo)).toEqual(antes);
   });
 });
 

@@ -134,11 +134,64 @@ export function agruparPorFavorecido(
     mapa.set(chave, grupo);
   }
 
-  // Ordem: primeiro o que rende mais decisão por clique. Um favorecido com 34 propostas
-  // resolve 34 linhas numa escolha; um com uma só resolve uma, e pode esperar.
-  return [...mapa.values()].sort(
-    (a, b) => b.propostas.length - a.propostas.length || b.total - a.total,
-  );
+  // Dentro do grupo, da mais recente para a mais antiga. Extrato se lê por data, e uma
+  // ordem estável é o que permite conferir uma lista longa sem se perder nela.
+  for (const g of mapa.values()) {
+    const porData = (a: PropostaFinanceira, b: PropostaFinanceira) =>
+      String(b.suggested_date ?? '').localeCompare(String(a.suggested_date ?? ''));
+    g.propostas.sort(porData);
+    g.emLote.sort(porData);
+    g.individuais.sort(porData);
+  }
+
+  return ordenarGrupos([...mapa.values()], 'decisoes');
+}
+
+/** Como a fila se apresenta. Cada uma serve a um jeito de trabalhar. */
+export type OrdemDaFila = 'decisoes' | 'prontos' | 'data' | 'favorecido';
+
+export const ROTULO_DA_ORDEM: Record<OrdemDaFila, string> = {
+  decisoes: 'Mais linhas primeiro',
+  prontos: 'Prontos para aprovar',
+  data: 'Mais recentes',
+  favorecido: 'Favorecido (A-Z)',
+};
+
+/**
+ * Ordena os grupos.
+ *
+ * Não existe uma ordem certa — existe a ordem que serve ao que se está fazendo. Fazendo
+ * mutirão, o que rende mais decisão por clique vem primeiro. Querendo despachar o que já
+ * está resolvido, os prontos. Conferindo contra a fatura do mês, a data. Procurando um
+ * fornecedor específico, o alfabeto.
+ *
+ * `jaResolvido` deixa a tela informar o que ela sabe e a lista não: a categoria que o
+ * gestor acabou de escolher no cabeçalho e ainda não aprovou.
+ */
+export function ordenarGrupos(
+  grupos: GrupoDeFavorecido[],
+  ordem: OrdemDaFila,
+  jaResolvido?: (g: GrupoDeFavorecido) => boolean,
+): GrupoDeFavorecido[] {
+  const pronto = (g: GrupoDeFavorecido) =>
+    jaResolvido?.(g) ?? (!g.semCategoria && g.categorias.length === 1);
+
+  const porDecisoes = (a: GrupoDeFavorecido, b: GrupoDeFavorecido) =>
+    b.propostas.length - a.propostas.length || b.total - a.total;
+
+  const copia = [...grupos];
+  switch (ordem) {
+    case 'prontos':
+      // Resolvidos primeiro, e entre eles os que rendem mais — é a fila de despacho.
+      return copia.sort((a, b) => Number(pronto(b)) - Number(pronto(a)) || porDecisoes(a, b));
+    case 'data':
+      return copia.sort((a, b) =>
+        String(b.ultimaData ?? '').localeCompare(String(a.ultimaData ?? '')) || porDecisoes(a, b));
+    case 'favorecido':
+      return copia.sort((a, b) => a.rotulo.localeCompare(b.rotulo, 'pt-BR'));
+    default:
+      return copia.sort(porDecisoes);
+  }
 }
 
 /** Resumo para a barra da tela: o que o agrupamento economiza de decisão. */
