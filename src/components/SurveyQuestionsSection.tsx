@@ -13,6 +13,7 @@ import {
   useUpdateSurveyQuestion, surveyPendingApproval, groupSurveyQuestions,
   type SurveyTemplate,
 } from '@/hooks/use-survey-templates';
+import { SurveyMaterialRules } from './SurveyMaterialRules';
 
 const IMPACT_LABEL: Record<string, string> = {
   alto: 'muda o preço', medio: 'pesa no preço', baixo: 'bom saber',
@@ -232,6 +233,15 @@ export function SurveyQuestionsSection() {
                               </div>
                             )}
                           </div>
+                        )}
+
+                        {/* A regra de material vive junto da pergunta, porque é
+                            dela que nasce: perguntar a distância só se paga se
+                            a distância virar metros de cabo. Só nas perguntas
+                            já aprovadas — ligar material a uma pergunta que
+                            talvez seja descartada é trabalho jogado fora. */}
+                        {!emEdicao && !pendente && q.active && (
+                          <SurveyMaterialRules templateId={q.id} />
                         )}
                       </div>
                     );
