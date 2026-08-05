@@ -276,6 +276,184 @@ export const soOpsTools: ToolDef[] = [
     },
   },
   {
+    name: "remove_service_order_hours",
+    description:
+      "Remove um apontamento de hora da OS e recalcula o total. Use com 'apaga aquela hora', 'apontei errado'. " +
+      "O id vem de get_service_order.",
+    input_schema: {
+      type: "object",
+      properties: { time_entry_id: { type: "string", description: "UUID do apontamento." } },
+      required: ["time_entry_id"],
+    },
+    risk: "medium",
+    async execute(args, { sb }) {
+      const { data: entrada } = await sb
+        .from("time_entries").select("id, service_order_id, duration_minutes")
+        .eq("id", args.time_entry_id).maybeSingle();
+      if (!entrada) return { error: "Apontamento não encontrado." };
+
+      const { error } = await sb.from("time_entries").delete().eq("id", args.time_entry_id);
+      if (error) throw error;
+      // O total da OS conta hora cobrável — remover sem recalcular deixaria o valor
+      // do serviço maior do que o trabalho registrado.
+      await sb.rpc("recalc_so_totals", { so_id: (entrada as any).service_order_id });
+      return { ok: true, minutos_removidos: (entrada as any).duration_minutes };
+    },
+  },
+  {
+    name: "add_service_order_step",
+    description:
+      "Acrescenta um passo ao roteiro da OS ('adiciona um passo de teste de estanqueidade no fim'). " +
+      "Entra no fim da sequência, como passo MANUAL (não sugerido pela IA), já aprovado.",
+    input_schema: {
+      type: "object",
+      properties: {
+        service_order_id: { type: "string" },
+        title: { type: "string", description: "O que fazer, curto e no imperativo ('Testar estanqueidade')." },
+        detail: { type: "string", description: "Detalhe/critério de aceite, se houver." },
+        standard_minutes: { type: "number", description: "Tempo previsto em minutos." },
+      },
+      required: ["service_order_id", "title"],
+    },
+    risk: "low",
+    async execute(args, { sb }) {
+      const { data: ultimo } = await sb
+        .from("service_order_steps").select("seq")
+        .eq("service_order_id", args.service_order_id)
+        .order("seq", { ascending: false }).limit(1);
+      const seq = ((ultimo?.[0] as any)?.seq ?? 0) + 1;
+
+      const { data, error } = await sb.from("service_order_steps").insert({
+        origin: "manual",
+        service_order_id: args.service_order_id,
+        seq,
+        title: args.title,
+        detail: args.detail ?? null,
+        standard_minutes: args.standard_minutes ?? null,
+        status: "pending",
+      }).select("id, seq, title").single();
+      if (error) throw error;
+      return { ok: true, passo: (data as any).seq, titulo: (data as any).title, id: (data as any).id };
+    },
+  },
+  {
+    name: "remove_service_order_step",
+    description:
+      "Exclui um passo do roteiro ('tira o passo 4, não faz sentido aqui'). " +
+      "Se o passo JÁ FOI FEITO, prefira não excluir — o histórico da execução some junto; nesse caso use skip com o motivo.",
+    input_schema: {
+      type: "object",
+      properties: { step_id: { type: "string" } },
+      required: ["step_id"],
+    },
+    risk: "medium",
+    async execute(args, { sb }) {
+      const { data: step } = await sb
+        .from("service_order_steps").select("id, seq, title, status")
+        .eq("id", args.step_id).maybeSingle();
+      if (!step) return { error: "Passo não encontrado." };
+      if ((step as any).status === "done") {
+        return {
+          error: `O passo ${(step as any).seq} já foi executado — excluir apagaria o registro do que foi feito. ` +
+            `Se ele não deveria constar, reabra e marque como não aplicável, com o motivo.`,
+        };
+      }
+      const { error } = await sb.from("service_order_steps").delete().eq("id", args.step_id);
+      if (error) throw error;
+      return { ok: true, removido: (step as any).seq, titulo: (step as any).title };
+    },
+  },
+  {
+    name: "reorder_service_order_step",
+    description:
+      "Troca a posição de um passo no roteiro ('sobe o passo 5', 'o teste tem que vir antes da montagem'). " +
+      "Move uma posição por vez, para cima ou para baixo.",
+    input_schema: {
+      type: "object",
+      properties: {
+        step_id: { type: "string" },
+        direction: { type: "string", enum: ["up", "down"], description: "up = executar antes; down = depois." },
+      },
+      required: ["step_id", "direction"],
+    },
+    risk: "low",
+    async execute(args, { sb }) {
+      const { data: alvo } = await sb
+        .from("service_order_steps").select("id, seq, title, service_order_id")
+        .eq("id", args.step_id).maybeSingle();
+      if (!alvo) return { error: "Passo não encontrado." };
+
+      const subindo = args.direction === "up";
+      const { data: vizinhos } = await sb
+        .from("service_order_steps")
+        .select("id, seq, title")
+        .eq("service_order_id", (alvo as any).service_order_id)
+        [subindo ? "lt" : "gt"]("seq", (alvo as any).seq)
+        .order("seq", { ascending: !subindo })
+        .limit(1);
+
+      const vizinho = vizinhos?.[0] as any;
+      if (!vizinho) {
+        return { ok: true, sem_mudanca: true, motivo: subindo ? "já é o primeiro" : "já é o último" };
+      }
+
+      // Troca direta das sequências: seq só tem restrição de unicidade no template,
+      // não aqui — por isso não precisa de posição temporária.
+      await sb.from("service_order_steps").update({ seq: vizinho.seq }).eq("id", (alvo as any).id);
+      await sb.from("service_order_steps").update({ seq: (alvo as any).seq }).eq("id", vizinho.id);
+
+      return { ok: true, passo: (alvo as any).title, nova_posicao: vizinho.seq, trocou_com: vizinho.title };
+    },
+  },
+  {
+    name: "review_ai_step",
+    description:
+      "Aprova ou descarta um passo que a IA rascunhou ('aprova esses passos', 'descarta o passo 3 que você sugeriu'). " +
+      "Descartar APAGA o passo. Toda decisão vira registro de aprendizado — é assim que as sugestões melhoram.",
+    input_schema: {
+      type: "object",
+      properties: {
+        step_id: { type: "string" },
+        verdict: { type: "string", enum: ["accepted", "edited", "rejected"], description: "accepted = como está; edited = a ideia servia mas o texto mudou; rejected = descartar." },
+        change_summary: { type: "string", description: "Com 'edited', o que mudou — é o sinal mais útil para o aprendizado." },
+      },
+      required: ["step_id", "verdict"],
+    },
+    risk: "medium",
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, { sb, userId }) {
+      const { data: step } = await sb
+        .from("service_order_steps")
+        .select("id, seq, title, detail, kind, standard_minutes, block")
+        .eq("id", args.step_id).maybeSingle();
+      if (!step) return { error: "Passo não encontrado." };
+
+      const s = step as any;
+      if (args.verdict === "rejected") {
+        const { error } = await sb.from("service_order_steps").delete().eq("id", args.step_id);
+        if (error) throw error;
+      } else {
+        const { error } = await sb.from("service_order_steps")
+          .update({ approved_by: userId ?? null, approved_at: new Date().toISOString() })
+          .eq("id", args.step_id);
+        if (error) throw error;
+      }
+
+      await sb.from("ai_suggestion_reviews").insert({
+        suggestion_type: "step",
+        target_table: "service_order_steps",
+        target_id: args.step_id,
+        suggested: { title: s.title, detail: s.detail, kind: s.kind, standard_minutes: s.standard_minutes, block: s.block },
+        approved: args.verdict === "rejected" ? null : { title: s.title, standard_minutes: s.standard_minutes },
+        verdict: args.verdict,
+        change_summary: args.change_summary ?? null,
+        reviewer_id: userId ?? null,
+      });
+
+      return { ok: true, passo: s.seq, titulo: s.title, decisao: args.verdict };
+    },
+  },
+  {
     name: "duplicate_service_order",
     description:
       "Duplica uma OS com todos os itens (peças, serviços), gerando um novo orçamento em rascunho. " +

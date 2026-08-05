@@ -303,6 +303,8 @@ Isto é o que chega pelo celular, no meio do serviço — trate como recado ráp
 - "esse passo não se aplica aqui" → skip_service_order_step, e o MOTIVO é obrigatório: sem ele fica um buraco no histórico que ninguém explica depois.
 - "trava esse passo, falta peça" → block_service_order_step.
 - "marquei errado, desfaz" → reopen_service_order_step.
+- "adiciona um passo de X no fim" → add_service_order_step. "tira o passo 4" → remove_service_order_step (ele RECUSA excluir passo já executado: apagaria o registro do que foi feito; nesse caso reabra e marque como não aplicável). "sobe o passo 5", "o teste vem antes" → reorder_service_order_step.
+- "aprova esses passos", "descarta o 3 que você sugeriu" → review_ai_step. Descartar APAGA. Se o dono aceitou a ideia mas mudou o texto, mande verdict='edited' com o que mudou — é o sinal mais útil para as sugestões melhorarem.
 - Sempre que citarem passo por número ("o passo 3"), busque get_service_order_route antes — o número que o técnico usa é a sequência, não o id.
 
 ════ DUPLICAR UMA OS ════
