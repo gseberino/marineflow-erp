@@ -208,7 +208,7 @@ describe('regra nova alcança a fila', () => {
   it('oferece reaplicar as regras ao que já está esperando decisão', async () => {
     const user = userEvent.setup();
     renderInbox();
-    const botao = await screen.findByRole('button', { name: /Aplicar minhas regras à fila/i });
+    const botao = await screen.findByRole('button', { name: /Revisar a fila/i });
     await user.click(botao);
     expect(reaplicarMock).toHaveBeenCalled();
   });

@@ -722,10 +722,10 @@ export function FinanceReviewInbox({
                 size="sm"
                 disabled={ocupado}
                 onClick={() => reaplicar.mutate()}
-                title="Reavalia as propostas da fila com as regras de hoje — não aprova nada"
+                title="Reaplica suas regras às propostas da fila e junta as parcelas de uma mesma compra — não aprova nada"
               >
                 <Wand2 className={`mr-2 h-4 w-4 ${reaplicar.isPending ? 'animate-pulse' : ''}`} />
-                Aplicar minhas regras à fila
+                Revisar a fila
               </Button>
             )}
           </div>
