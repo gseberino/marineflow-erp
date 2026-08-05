@@ -18,6 +18,7 @@ import {
   uploadSurveyPhoto, surveyPhotoUrl, usePreviousAnswers, howLongAgo, canReuseAnswer,
   type SurveyQuestion,
 } from '@/hooks/use-service-survey';
+import { SuggestedMaterialsPanel } from './SuggestedMaterialsPanel';
 
 /**
  * Levantamento antes de orçar, na tela.
@@ -313,6 +314,22 @@ export function SurveyPanel({
             Fechar levantamento
           </Button>
         </div>
+      )}
+
+      {/* O material que as respostas implicam.
+          É aqui que o levantamento deixa de ser só coleta e passa a compor o
+          orçamento: medir 14 metros e depois digitar o cabo na mão era o
+          trabalho que ele existia para poupar. Aparece assim que há resposta
+          que dispare regra — antes de fechar, porque ver o material ajuda a
+          julgar a própria confiança. */}
+      {/* `ativo` some quando o levantamento fecha, e é justamente aí que o
+          orçamento é montado — por isso este painel usa o levantamento que
+          existe, fechado ou não. */}
+      {(survey?.id ?? surveyId) && (
+        <SuggestedMaterialsPanel
+          surveyId={(survey?.id ?? surveyId) as string}
+          serviceOrderId={serviceOrderId}
+        />
       )}
 
       {/* Estimativa, sempre com os casos que a sustentam */}

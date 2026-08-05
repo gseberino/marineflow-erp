@@ -307,7 +307,55 @@ export const surveyOpsTools: ToolDef[] = [
           : { sem_base: true, mensagem: e.mensagem },
         respostas,
         proximo_passo:
-          "Monte o rascunho do orçamento com esses números e escreva a condição em português (ex.: 'valor válido para acesso pelo compartimento lateral; se for preciso remover o painel, revisamos').",
+          "Monte o rascunho do orçamento com esses números e escreva a condição em português (ex.: 'valor válido para acesso pelo compartimento lateral; se for preciso remover o painel, revisamos'). Depois chame survey_material_list para ver o material que as respostas implicam.",
+      };
+    },
+  },
+
+  {
+    name: "survey_material_list",
+    description:
+      "O material que as respostas de um levantamento implicam, com quantidade já calculada (metragem com folga, contagem por aparelho) e o valor de cada linha. NÃO lança nada — é lista para conferir. Use depois de fechar o levantamento, quando for montar o orçamento.",
+    input_schema: {
+      type: "object",
+      properties: { survey_id: { type: "string" } },
+      required: ["survey_id"],
+    },
+    risk: "low",
+    async execute(args, { sb }) {
+      const { data, error } = await sb.rpc("survey_suggested_materials", {
+        p_survey_id: args.survey_id,
+      });
+      if (error) throw error;
+      const itens = (data || []) as any[];
+
+      if (!itens.length) {
+        return {
+          itens: [],
+          mensagem:
+            "Nenhuma resposta deste levantamento dispara regra de material. Isso é normal: a regra liga uma pergunta a um produto e é escrita na tela de perguntas de levantamento, em 'Ligar material a esta pergunta'.",
+        };
+      }
+
+      const comAlerta = itens.filter((i) => i.alerta);
+      return {
+        itens: itens.map((i) => ({
+          rule_id: i.rule_id,
+          produto: i.product_name,
+          quantidade: i.quantity,
+          unidade: i.unit,
+          valor_linha: i.line_total,
+          calculado_de: i.answer,
+          porque: i.rationale,
+          atencao: i.alerta,
+        })),
+        total: itens.reduce((s, i) => s + Number(i.line_total || 0), 0),
+        // A conta é feita sobre texto digitado em campo. "2,5 m até o inversor
+        // e 2 m até o quadro" tem dois números e o motor lê o primeiro — dizer
+        // o total sem dizer isso seria dar precisão que o dado não tem.
+        instrucao: comAlerta.length
+          ? `ATENÇÃO: ${comAlerta.length} linha(s) com aviso. NÃO some esses valores no orçamento sem apontar o aviso para quem decide — a quantidade sai de uma resposta escrita em campo e pode estar incompleta.`
+          : "Apresente como sugestão a conferir, nunca como fechado. Quem lança é a pessoa, pelo botão 'Lançar no orçamento' na aba de levantamento.",
       };
     },
   },

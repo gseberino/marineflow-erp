@@ -8312,6 +8312,111 @@ export type Database = {
         }
         Relationships: []
       }
+      survey_material_rules: {
+        Row: {
+          active: boolean
+          approved_at: string | null
+          approved_by: string | null
+          condition_type: string
+          created_at: string
+          created_by: string | null
+          id: string
+          match_value: string | null
+          max_value: number | null
+          min_value: number | null
+          origin: string
+          product_id: string
+          qty_factor: number
+          qty_fixed: number
+          qty_mode: string
+          qty_round: string
+          qty_slack_pct: number
+          rationale: string | null
+          template_id: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          approved_at?: string | null
+          approved_by?: string | null
+          condition_type?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          match_value?: string | null
+          max_value?: number | null
+          min_value?: number | null
+          origin?: string
+          product_id: string
+          qty_factor?: number
+          qty_fixed?: number
+          qty_mode?: string
+          qty_round?: string
+          qty_slack_pct?: number
+          rationale?: string | null
+          template_id: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          approved_at?: string | null
+          approved_by?: string | null
+          condition_type?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          match_value?: string | null
+          max_value?: number | null
+          min_value?: number | null
+          origin?: string
+          product_id?: string
+          qty_factor?: number
+          qty_fixed?: number
+          qty_mode?: string
+          qty_round?: string
+          qty_slack_pct?: number
+          rationale?: string | null
+          template_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "survey_material_rules_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "product_availability"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "survey_material_rules_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "survey_material_rules_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_entradas_pendentes"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "survey_material_rules_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_variancia"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "survey_material_rules_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "service_survey_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       task_reminders: {
         Row: {
           channel: string
@@ -9460,6 +9565,10 @@ export type Database = {
         Args: { p_service_id: string; p_service_order_id: string }
         Returns: Json
       }
+      apply_survey_materials: {
+        Args: { p_rule_ids: string[]; p_survey_id: string }
+        Returns: Json
+      }
       archive_old_fiscal_drafts: { Args: { p_days?: number }; Returns: number }
       backfill_message_identity: {
         Args: { p_limit?: number }
@@ -9688,6 +9797,7 @@ export type Database = {
       }
       normalize_alias: { Args: { _s: string }; Returns: string }
       normalize_product_text: { Args: { t: string }; Returns: string }
+      parse_answer_number: { Args: { p_answer: string }; Returns: number }
       preview_nfe_import: {
         Args: {
           p_manual_mappings?: Json
@@ -9844,6 +9954,36 @@ export type Database = {
       }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
+      so_expense_add: {
+        Args: {
+          p_amount: number
+          p_billable?: boolean
+          p_category: string
+          p_description: string
+          p_expense_date?: string
+          p_notes?: string
+          p_paid_by?: string
+          p_so_id: string
+          p_supplier_id?: string
+        }
+        Returns: Json
+      }
+      so_expense_remove: { Args: { p_expense_id: string }; Returns: Json }
+      so_recalc_operational_cost: {
+        Args: { p_so_id: string }
+        Returns: undefined
+      }
+      so_time_entry_add: {
+        Args: {
+          p_billable?: boolean
+          p_minutes: number
+          p_notes?: string
+          p_so_id: string
+          p_started_at?: string
+          p_technician?: string
+        }
+        Returns: Json
+      }
       stock_model_v2_on: { Args: never; Returns: boolean }
       suggest_nfe_service_orders: { Args: { p_note_id: string }; Returns: Json }
       suggest_service_orders_for_products: {
@@ -9855,6 +9995,23 @@ export type Database = {
         Returns: {
           motivo: string
           sistema: string
+        }[]
+      }
+      survey_suggested_materials: {
+        Args: { p_survey_id: string }
+        Returns: {
+          alerta: string
+          answer: string
+          line_total: number
+          product_id: string
+          product_name: string
+          quantity: number
+          question: string
+          rationale: string
+          rule_id: string
+          unit: string
+          unit_cost: number
+          unit_sale: number
         }[]
       }
       sync_fiscal_note_items: { Args: { p_note_id: string }; Returns: number }
