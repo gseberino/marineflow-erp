@@ -80,8 +80,9 @@ export const financeRulesTools: ToolDef[] = [
     description:
       "Ensina o sistema a classificar despesas automaticamente. Use quando o usuário disser algo como " +
       "'toda transação com Mercado Livre é peças e materiais', 'pagamentos para Fulano são sempre pró-labore' " +
-      "ou 'despesas do fornecedor X vão para categoria Y'. A regra vale para o que vier DEPOIS; " +
-      "não altera lançamentos já feitos.",
+      "ou 'despesas do fornecedor X vão para categoria Y'. Ao criar, a regra também " +
+      "reclassifica as propostas que já estão na fila aguardando decisão. Não altera " +
+      "lançamentos já feitos.",
     input_schema: {
       type: "object",
       properties: {
@@ -183,12 +184,21 @@ export const financeRulesTools: ToolDef[] = [
         return { error: error.message };
       }
 
+      // A regra nova alcança de imediato o que JÁ está esperando decisão. Sem isto, quem
+      // ensina "compra na Corema é ferramenta" continua corrigindo à mão as 40 compras da
+      // Corema que já estavam na fila — as linhas que a regra existe para resolver.
+      // Reclassificar troca a sugestão e não aprova nada, então é seguro rodar sozinho.
+      const efeito = await chamarFinanceReview(ctx, { action: "reclassify" });
+
       return {
         ok: true,
         id: (data as any).id,
         resumo: `${args.valor_de_busca} → ${cat.name}`,
-        vale_a_partir_de: "as próximas análises do extrato",
         lanca_sozinha: !!args.lancar_sozinha,
+        propostas_reclassificadas: Number((efeito as any)?.atualizadas ?? 0),
+        vale_para: (efeito as any)?.atualizadas
+          ? `as próximas análises E ${(efeito as any).atualizadas} proposta(s) que já estavam na fila`
+          : "as próximas análises do extrato",
       };
     },
   },

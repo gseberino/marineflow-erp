@@ -32,7 +32,7 @@ import {
 } from '@/hooks/use-payees';
 import {
   useFinanceReviewQueue, useGerarPropostas, useAprovarPropostas, useRecusarPropostas,
-  useMarcarDuplicata, useCriarCategoriaDespesa,
+  useMarcarDuplicata, useCriarCategoriaDespesa, useReaplicarRegras,
   LIMITE_LOTE, type PropostaFinanceira, type Correcao,
 } from '@/hooks/use-finance-review';
 import {
@@ -501,7 +501,9 @@ export function FinanceReviewInbox({
   const aprovar = useAprovarPropostas();
   const recusar = useRecusarPropostas();
   const duplicata = useMarcarDuplicata();
-  const ocupado = gerar.isPending || aprovar.isPending || recusar.isPending || duplicata.isPending;
+  const reaplicar = useReaplicarRegras();
+  const ocupado = gerar.isPending || aprovar.isPending || recusar.isPending
+    || duplicata.isPending || reaplicar.isPending;
 
   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
   const [correcoes, setCorrecoes] = useState<Record<string, Correcao>>({});
@@ -700,6 +702,21 @@ export function FinanceReviewInbox({
             >
               Incluir histórico antigo
             </Button>
+            {/* Roda sozinho ao salvar uma regra; o botão existe para o caso de a regra ter
+                sido criada em outro lugar (pelo agente, por voz) ou de o plano de contas
+                ter mudado depois. */}
+            {propostas.length > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={ocupado}
+                onClick={() => reaplicar.mutate()}
+                title="Reavalia as propostas da fila com as regras de hoje — não aprova nada"
+              >
+                <Wand2 className={`mr-2 h-4 w-4 ${reaplicar.isPending ? 'animate-pulse' : ''}`} />
+                Aplicar minhas regras à fila
+              </Button>
+            )}
           </div>
         </div>
 

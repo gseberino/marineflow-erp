@@ -60,7 +60,7 @@ const JANELA_DIAS = 90;
 const LOTE_HISTORICO = 200;
 
 interface Body {
-  action?: "generate" | "approve" | "reject" | "suggest_rules";
+  action?: "generate" | "approve" | "reject" | "suggest_rules" | "reclassify";
   /** generate: inclui o histórico inteiro, não só a janela. */
   incluir_historico?: boolean;
   ids?: string[];
@@ -116,6 +116,7 @@ Deno.serve(async (req) => {
 
   try {
     if (action === "generate") return await gerar(admin, !!body.incluir_historico);
+    if (action === "reclassify") return await reclassificar(admin);
     if (action === "approve") return await aprovar(admin, body.ids ?? [], userId, body.overrides ?? {});
     if (action === "reject") return await recusar(admin, body.ids ?? [], userId, body.note ?? null);
     if (action === "suggest_rules") return await proporRegras(admin);
@@ -357,6 +358,106 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     // Quantas transações antigas sobraram para a próxima chamada. Zero = mutirão terminado.
     restantes,
     message: partes.join(" · "),
+  });
+}
+
+/**
+ * Reavalia as propostas que já estão na fila com as regras de HOJE.
+ *
+ * A regra era consultada só no nascimento da proposta, e a varredura pula o que já está na
+ * fila — então ensinar "compra na Corema é ferramenta" não alcançava as 40 compras da
+ * Corema já enfileiradas. O gestor criava a regra e continuava corrigindo à mão exatamente
+ * as linhas que a regra existia para resolver: o aprendizado valia só para o futuro, e o
+ * passado ficava de castigo.
+ *
+ * NÃO APROVA NADA. Reclassificar troca a sugestão; aprovar cria lançamento. Mesmo uma
+ * regra com autonomia para lançar sozinha só faz isso com transação nova, onde o gestor
+ * ainda não olhou — varrer a fila inteira lançando em silêncio seria decidir por ele
+ * centenas de vezes de uma vez, com um clique que ele deu para outra coisa.
+ */
+async function reclassificar(admin: DbClient) {
+  const pendentes = await lerTudo<any>((de, ate) =>
+    admin
+      .from("finance_review_queue")
+      .select(`id, kind, bank_transaction_id, suggested_category, suggested_amount,
+               suggested_supplier_id, dre_group, applied_rule_id, confidence, reasoning,
+               bank_transactions!finance_review_queue_bank_transaction_id_fkey (
+                 id, transaction_date, description, amount, transaction_type,
+                 counterparty_name, counterparty_document, source_type )`)
+      .eq("status", "pending")
+      .order("id")
+      .range(de, ate)
+  );
+
+  // Transferência entre contas não se classifica por regra de despesa: ela já é o que é.
+  const alvo = pendentes.filter((p) => p.kind !== "internal_transfer" && p.bank_transactions);
+  if (alvo.length === 0) {
+    return jr({ ok: true, atualizadas: 0, message: "Nenhuma proposta na fila para reavaliar." });
+  }
+
+  const { data: fornecedoresRows } = await admin
+    .from("suppliers").select("id, name, cnpj_cpf, trade_name").limit(2000);
+  const fornecedores = indexarFornecedores((fornecedoresRows ?? []) as FornecedorConhecido[]);
+  const historico = await montarHistoricoPorFornecedor(admin);
+  const { data: regrasRows } = await admin
+    .from("finance_rules").select("*").eq("status", "active").limit(500);
+  const regras = (regrasRows ?? []) as unknown as RegraFinanceira[];
+
+  /**
+   * Uma atualização por CLASSIFICAÇÃO, não por linha.
+   *
+   * Uma regra costuma dizer a mesma coisa sobre dezenas de transações; mandar dezenas de
+   * updates idênticos seria pagar uma ida ao banco por linha e estourar o tempo da função
+   * numa fila de mil. Linhas que terminam com o mesmo resultado viajam juntas.
+   */
+  const porResultado = new Map<string, { payload: Record<string, unknown>; ids: string[] }>();
+  let porRegra = 0;
+
+  for (const p of alvo) {
+    const tx = p.bank_transactions as TransacaoOrfa;
+    const nova = montarProposta(tx, fornecedores, historico, regras);
+
+    const mudou = nova.suggestedCategory !== p.suggested_category
+      || nova.dreGroup !== p.dre_group
+      || (nova.suggestedSupplierId ?? null) !== (p.suggested_supplier_id ?? null)
+      || (nova.appliedRuleId ?? null) !== (p.applied_rule_id ?? null);
+    if (!mudou) continue;
+    if (nova.appliedRuleId) porRegra += 1;
+
+    const payload = {
+      suggested_category: nova.suggestedCategory,
+      dre_group: nova.dreGroup,
+      suggested_supplier_id: nova.suggestedSupplierId,
+      applied_rule_id: nova.appliedRuleId,
+      confidence: nova.confidence,
+      reasoning: nova.reasoning,
+    };
+    const chave = JSON.stringify(payload);
+    const entrada = porResultado.get(chave) ?? { payload, ids: [] as string[] };
+    entrada.ids.push(p.id);
+    porResultado.set(chave, entrada);
+  }
+
+  let atualizadas = 0;
+  for (const { payload, ids } of porResultado.values()) {
+    for (let i = 0; i < ids.length; i += 200) {
+      const lote = ids.slice(i, i + 200);
+      const { error } = await admin
+        .from("finance_review_queue").update(payload).in("id", lote).eq("status", "pending");
+      if (error) throw error;
+      atualizadas += lote.length;
+    }
+  }
+
+  return jr({
+    ok: true,
+    atualizadas,
+    avaliadas: alvo.length,
+    por_regra: porRegra,
+    message: atualizadas === 0
+      ? `Nenhuma das ${alvo.length} propostas da fila mudou de classificação`
+      : `${atualizadas} proposta(s) reclassificada(s)`
+        + (porRegra > 0 ? `, ${porRegra} pelas suas regras` : ""),
   });
 }
 

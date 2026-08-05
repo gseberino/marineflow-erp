@@ -11,10 +11,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { I18nProvider } from '@/i18n';
 import { FinanceReviewInbox } from './FinanceReviewInbox';
 
-const { propostas, estadoDaFila, aprovarMock, duplicataMock, regraMock } = vi.hoisted(() => ({
+const { propostas, estadoDaFila, aprovarMock, duplicataMock, regraMock, reaplicarMock } = vi.hoisted(() => ({
   aprovarMock: vi.fn(),
   duplicataMock: vi.fn(),
   regraMock: vi.fn(),
+  reaplicarMock: vi.fn(),
   /** Estado que os testes de erro e de agrupamento trocam; o resto usa o padrão. */
   estadoDaFila: { error: null as Error | null, dados: null as unknown[] | null },
   propostas: [
@@ -59,6 +60,7 @@ vi.mock('@/hooks/use-finance-review', async (importOriginal) => {
     useAprovarPropostas: () => ({ mutate: aprovarMock, isPending: false }),
     useRecusarPropostas: () => ({ mutate: vi.fn(), isPending: false }),
     useMarcarDuplicata: () => ({ mutate: duplicataMock, isPending: false }),
+    useReaplicarRegras: () => ({ mutate: reaplicarMock, isPending: false }),
   };
 });
 
@@ -196,6 +198,19 @@ describe('agrupado por favorecido', () => {
     // Cabeçalho + 23 linhas, todas com a mesma categoria aplicada.
     expect(selects.length).toBeGreaterThan(23);
     expect(screen.getAllByText('Peças e materiais').length).toBeGreaterThan(1);
+  });
+});
+
+describe('regra nova alcança a fila', () => {
+  // A regra era consultada só quando a proposta nascia, e a varredura pula o que já está
+  // na fila. Quem ensinava "compra na Corema é ferramenta" continuava corrigindo à mão as
+  // 40 compras da Corema já enfileiradas — exatamente o que a regra existia para resolver.
+  it('oferece reaplicar as regras ao que já está esperando decisão', async () => {
+    const user = userEvent.setup();
+    renderInbox();
+    const botao = await screen.findByRole('button', { name: /Aplicar minhas regras à fila/i });
+    await user.click(botao);
+    expect(reaplicarMock).toHaveBeenCalled();
   });
 });
 

@@ -213,6 +213,30 @@ export function useGerarPropostas() {
   });
 }
 
+/**
+ * Reavalia as propostas que já estão na fila com as regras de hoje.
+ *
+ * Sem isto, ensinar uma regra só valia para o futuro: as 40 compras do mesmo fornecedor
+ * que já estavam enfileiradas continuavam pedindo correção manual — justamente as linhas
+ * que a regra foi criada para resolver.
+ */
+export function useReaplicarRegras() {
+  const qc = useQueryClient();
+  type Resposta = { ok: boolean; atualizadas: number; avaliadas: number; por_regra: number; message: string };
+  return useMutation<Resposta, Error, { silencioso?: boolean } | void>({
+    mutationFn: () => invokeReview<Resposta>({ action: 'reclassify' }),
+    onSuccess: (r, v) => {
+      // Quando roda sozinha depois de salvar uma regra, só avisa se ALGO mudou: "nenhuma
+      // proposta mudou" é ruído logo após o gestor ter feito outra coisa.
+      if (!(v && 'silencioso' in v && v.silencioso) || r.atualizadas > 0) {
+        toast.success(r.message);
+      }
+      qc.invalidateQueries({ queryKey: ['finance-review-queue'] });
+    },
+    onError: (e: Error) => toast.error(e.message || 'Não foi possível reaplicar as regras'),
+  });
+}
+
 export function useAprovarPropostas() {
   const qc = useQueryClient();
   return useMutation({
@@ -391,6 +415,7 @@ export function useLancamentosDaRegra(regra: RegraFinanceira | null) {
 
 export function useSalvarRegra() {
   const qc = useQueryClient();
+  const reaplicar = useReaplicarRegras();
   return useMutation({
     mutationFn: async (r: Partial<RegraFinanceira> & { id?: string }) => {
       if (r.id) {
@@ -406,6 +431,10 @@ export function useSalvarRegra() {
     onSuccess: () => {
       toast.success('Regra salva');
       qc.invalidateQueries({ queryKey: ['finance-rules'] });
+      // Ensinar a regra e ver a fila obedecer é o mesmo ato. Deixar isso para um botão
+      // separado é pedir que o gestor descubra sozinho que a regra existe mas não valeu
+      // para nada do que está na tela dele.
+      reaplicar.mutate({ silencioso: true });
     },
     onError: (e: Error) => {
       // Violação do índice de alvo único vira a explicação real do problema: já existe
@@ -421,13 +450,21 @@ export function useSalvarRegra() {
 
 export function useMudarStatusRegra() {
   const qc = useQueryClient();
+  const reaplicar = useReaplicarRegras();
   return useMutation({
     mutationFn: async (v: { id: string; status: RegraFinanceira['status'] }) => {
       const { error } = await supabase
         .from('finance_rules').update({ status: v.status } as never).eq('id', v.id);
       if (error) throw error;
+      return v;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['finance-rules'] }),
+    onSuccess: (v) => {
+      qc.invalidateQueries({ queryKey: ['finance-rules'] });
+      // Aceitar uma regra proposta é o momento em que ela passa a valer — inclusive para o
+      // que já está na fila. Pausar também reavalia: a fila deve parar de refletir uma
+      // regra que o gestor acabou de desligar.
+      if (v.status === 'active' || v.status === 'paused') reaplicar.mutate({ silencioso: true });
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 }
