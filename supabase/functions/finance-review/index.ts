@@ -574,16 +574,10 @@ async function proporRegras(admin: DbClient) {
  */
 async function lerCompraParcelada(
   admin: DbClient,
-  transacaoId: string | null,
+  ancora: PernaDeParcelamento | null,
 ): Promise<CompraParcelada | null> {
-  if (!transacaoId) return null;
-
-  const { data: base } = await admin
-    .from("bank_transactions")
-    .select("id, transaction_date, description, amount, counterparty_name, installment_label")
-    .eq("id", transacaoId)
-    .maybeSingle();
-  const ancora = base as PernaDeParcelamento | null;
+  // A âncora vem junto da proposta, não numa consulta à parte: aprovar um grupo de 23 são
+  // 23 idas ao banco só para descobrir que 22 delas não são parceladas.
   if (!ancora || !lerParcela(ancora.installment_label)) return null;
 
   // Mesmo favorecido e mesmo valor de parcela: o resto do filtro é do agrupador, que sabe
@@ -751,11 +745,19 @@ async function aprovar(
   if (ids.length === 0) return jr({ error: "nenhuma proposta informada" }, 400);
 
   const { data: propostas, error } = await admin
-    .from("finance_review_queue").select("*").in("id", ids).eq("status", "pending");
+    .from("finance_review_queue")
+    // A transação vem junto para não custar uma consulta por linha só para saber se é
+    // compra parcelada — na grande maioria das vezes não é.
+    .select(`*, bank_transactions!finance_review_queue_bank_transaction_id_fkey (
+      id, transaction_date, description, amount, counterparty_name, installment_label )`)
+    .in("id", ids).eq("status", "pending");
   if (error) throw error;
 
   const feitos: string[] = [];
   const falhas: string[] = [];
+  /** Lançamento criado por proposta, para gravar o vínculo junto com o "aprovado". */
+  const criadoPara = new Map<string, string>();
+  const recebidoPara = new Map<string, string>();
 
   for (const p of (propostas ?? []) as any[]) {
     try {
@@ -774,7 +776,9 @@ async function aprovar(
         // Compra parcelada: o lançamento é da COMPRA, e o que ainda não venceu fica como
         // saldo em aberto. Marcar a compra inteira como paga esconderia dívida real do
         // fluxo de caixa — o cartão ainda vai cobrar as parcelas seguintes.
-        const parcelamento = await lerCompraParcelada(admin, p.bank_transaction_id);
+        const parcelamento = await lerCompraParcelada(
+          admin, (p.bank_transactions ?? null) as PernaDeParcelamento | null,
+        );
         const pago = parcelamento ? Math.min(parcelamento.jaPago, valor) : valor;
         const aberto = Number((valor - pago).toFixed(2));
 
@@ -801,8 +805,9 @@ async function aprovar(
           bank_transaction_id: p.bank_transaction_id,
         }).select("id").single();
         if (e1) throw e1;
-        const payableId = (criado as any).id as string;
-        await admin.from("finance_review_queue").update({ created_payable_id: payableId }).eq("id", p.id);
+        // O vínculo com o lançamento vai junto do "aprovado", numa escrita só. Eram duas
+        // idas ao banco por linha para gravar dois campos da mesma linha.
+        criadoPara.set(p.id, (criado as any).id as string);
         await admin.from("bank_transactions").update({ reconciled: true }).eq("id", p.bank_transaction_id);
 
         // As outras parcelas saem da fila junto: são a mesma compra, e deixá-las pendentes
@@ -829,7 +834,7 @@ async function aprovar(
         const ocId = ov.purchaseOrderId ?? p.suggested_purchase_order_id ?? null;
         if (ocId) {
           await admin.from("purchase_orders")
-            .update({ payable_id: payableId, status: "received" })
+            .update({ payable_id: criadoPara.get(p.id), status: "received" })
             .eq("id", ocId);
         }
       } else if (p.kind === "create_receivable") {
@@ -852,12 +857,16 @@ async function aprovar(
           bank_transaction_id: p.bank_transaction_id,
         }).select("id").single();
         if (e2) throw e2;
-        await admin.from("finance_review_queue").update({ created_receivable_id: (criado as any).id }).eq("id", p.id);
+        recebidoPara.set(p.id, (criado as any).id as string);
         await admin.from("bank_transactions").update({ reconciled: true }).eq("id", p.bank_transaction_id);
       }
 
       await admin.from("finance_review_queue").update({
-        status: "approved", decided_by: userId, decided_at: new Date().toISOString(),
+        status: "approved",
+        decided_by: userId,
+        decided_at: new Date().toISOString(),
+        created_payable_id: criadoPara.get(p.id) ?? null,
+        created_receivable_id: recebidoPara.get(p.id) ?? null,
       }).eq("id", p.id);
 
       // Quanto cada regra trabalhou é o que separa regra útil de regra esquecida — e é o

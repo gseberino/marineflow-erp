@@ -210,6 +210,26 @@ describe('agrupado por favorecido', () => {
     expect(aprovarMock.mock.calls[0][0].ids).toHaveLength(22);
   });
 
+  it('a conferência não estoura a janela com nome comprido', async () => {
+    // Filho de flex nasce com `min-width: auto`: sem `min-w-0`, um nome de estabelecimento
+    // longo empurra a linha para fora da caixa e leva o layout junto. O usuário odeia
+    // rolagem lateral, e aqui ela quebrava os elementos gráficos.
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    estadoDaFila.dados = [{
+      ...grande,
+      suggested_description: 'EC *ESTABELECIMENTO COM NOME ABSURDAMENTE LONGO QUE NAO CABE NA LINHA SAO PAULO BRA',
+    }, ...miudas];
+    renderInbox();
+
+    await user.click((await screen.findAllByRole('combobox'))[0]);
+    await user.click(await screen.findByText('Peças e materiais'));
+    await user.click(await screen.findByRole('button', { name: /Aprovar 23/ }));
+
+    const item = await screen.findByText(/ABSURDAMENTE LONGO/);
+    expect(item.className).toMatch(/min-w-0/);
+    expect(item.className).toMatch(/break-words/);
+  });
+
   it('diz POR ESCRITO por que não dá para aprovar', async () => {
     // A explicação existia — num `title` de botão desabilitado, que o navegador nunca
     // mostra porque não dispara evento de mouse em elemento apagado. O gestor ficava

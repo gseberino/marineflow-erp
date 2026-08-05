@@ -524,33 +524,39 @@ function CartaoDoFavorecido({
           útil: não impedir a aprovação, e sim impedir que uma saída grande passe
           despercebida dentro de um total. Uma conferência para o grupo todo, não uma por
           linha. */}
+      {/* `min-w-0` em toda coluna de texto não é detalhe: filho de flex nasce com
+          `min-width: auto`, então um nome de estabelecimento longo empurra a linha para
+          fora da janela em vez de ser cortado, e leva o resto do layout junto. É o que
+          quebrava esta caixa. */}
       <AlertDialog open={confirmando} onOpenChange={setConfirmando}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
+        <AlertDialogContent className="max-w-[min(32rem,calc(100vw-2rem))] overflow-hidden">
+          <AlertDialogHeader className="min-w-0">
+            <AlertDialogTitle className="break-words">
               Aprovar {grupo.propostas.length} de {grupo.rotulo}?
             </AlertDialogTitle>
             <AlertDialogDescription asChild>
-              <div className="space-y-3 text-sm">
-                <p>
+              <div className="min-w-0 space-y-3 text-sm">
+                <p className="break-words">
                   Serão lançadas como <strong>{categoria}</strong>, somando{' '}
                   <strong>{formatCurrency(grupo.total)}</strong>. Isto cria os registros de
                   despesa — nenhum pagamento é feito.
                 </p>
-                <div>
+                <div className="min-w-0">
                   <p className="mb-1 font-medium text-foreground">
                     {exigemOlhar.length === 1
                       ? `1 passa de ${formatCurrency(LIMITE_LOTE)}:`
                       : `${exigemOlhar.length} passam de ${formatCurrency(LIMITE_LOTE)}:`}
                   </p>
-                  <ul className="max-h-48 space-y-1 overflow-y-auto rounded-md border p-2">
+                  <ul className="max-h-48 space-y-1.5 overflow-y-auto rounded-md border p-2">
                     {exigemOlhar.map((p) => (
-                      <li key={p.id} className="flex items-center justify-between gap-3">
-                        <span className="truncate">
-                          {p.suggested_date ? formatDate(p.suggested_date) : '—'} ·{' '}
+                      <li key={p.id} className="flex min-w-0 items-baseline justify-between gap-2">
+                        <span className="min-w-0 flex-1 break-words">
+                          <span className="text-muted-foreground">
+                            {p.suggested_date ? formatDate(p.suggested_date) : '—'}
+                          </span>{' '}
                           {p.suggested_description ?? p.title}
                         </span>
-                        <span className="shrink-0 font-semibold">
+                        <span className="shrink-0 whitespace-nowrap font-semibold text-foreground">
                           {formatCurrency(Number(p.suggested_amount ?? 0))}
                         </span>
                       </li>
@@ -603,8 +609,15 @@ export function FinanceReviewInbox({
   const recusar = useRecusarPropostas();
   const duplicata = useMarcarDuplicata();
   const reaplicar = useReaplicarRegras();
-  const ocupado = gerar.isPending || aprovar.isPending || recusar.isPending
-    || duplicata.isPending || reaplicar.isPending;
+  /**
+   * Só as operações que mexem na fila INTEIRA travam a tela.
+   *
+   * Aprovar, recusar e marcar duplicata agem sobre linhas específicas, que somem na hora
+   * — travar a tela toda enquanto o servidor escreve fazia o gestor esperar por um
+   * trabalho que já não depende dele, e impedia que ele seguisse para o próximo grupo.
+   * Clicar duas vezes na mesma linha não é risco: ela já saiu da lista.
+   */
+  const ocupado = gerar.isPending || reaplicar.isPending;
 
   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
   const [correcoes, setCorrecoes] = useState<Record<string, Correcao>>({});

@@ -244,15 +244,49 @@ export function useAprovarPropostas() {
       invokeReview<{ ok: boolean; aprovadas: number; falhas: string[]; message: string }>({
         action: 'approve', ids: v.ids, overrides: v.overrides ?? {},
       }),
+
+    /**
+     * O que foi aprovado sai da lista NA HORA, sem esperar o servidor.
+     *
+     * Aprovar um grupo de 23 são 23 lançamentos criados um a um lá atrás, e a tela ficava
+     * parada até o último terminar. Mas a decisão é do gestor e já foi tomada no clique:
+     * o que falta é trabalho de escrita, não dúvida sobre o resultado. Fazer a fila
+     * esperar por isso transforma uma decisão instantânea numa espera de segundos, a cada
+     * grupo, dezenas de vezes.
+     *
+     * Se o servidor recusar, a lista volta exatamente como estava e o erro aparece — o
+     * otimismo é sobre o TEMPO da resposta, não sobre ignorar o que ela diz.
+     */
+    onMutate: async (v) => {
+      await qc.cancelQueries({ queryKey: ['finance-review-queue'] });
+      const anterior = qc.getQueryData<PropostaFinanceira[]>(['finance-review-queue']);
+      if (anterior) {
+        const saindo = new Set(v.ids);
+        qc.setQueryData<PropostaFinanceira[]>(
+          ['finance-review-queue'],
+          anterior.filter((p) => !saindo.has(p.id)),
+        );
+      }
+      return { anterior };
+    },
+
     onSuccess: (r) => {
       if (r.falhas?.length) toast.warning(r.message, { description: r.falhas.slice(0, 3).join(' · ') });
       else toast.success(r.message);
-      // Aprovar cria despesa e baixa a transação: as duas listas mudam.
-      for (const k of [['finance-review-queue'], ['payables'], ['receivables'], ['bank-transactions'], ['financial-summary']]) {
+      // Aprovar cria despesa e baixa a transação: as outras listas mudam também.
+      for (const k of [['payables'], ['receivables'], ['bank-transactions'], ['financial-summary'], ['finance-review-count']]) {
         qc.invalidateQueries({ queryKey: k });
       }
     },
-    onError: (e: Error) => toast.error(e.message || 'Não foi possível aprovar'),
+
+    onError: (e: Error, _v, ctx) => {
+      if (ctx?.anterior) qc.setQueryData(['finance-review-queue'], ctx.anterior);
+      toast.error(e.message || 'Não foi possível aprovar');
+    },
+
+    // A verdade vem do servidor no fim, inclusive quando algumas linhas falharam e
+    // continuam pendentes: sem isto elas sumiriam da tela sem terem sido lançadas.
+    onSettled: () => qc.invalidateQueries({ queryKey: ['finance-review-queue'] }),
   });
 }
 
