@@ -237,6 +237,27 @@ export function useReaplicarRegras() {
   });
 }
 
+/**
+ * Pede à IA que classifique o que nem regra nem memória alcançaram.
+ *
+ * A memória só sabe o que já foi decidido; o resto são estabelecimentos que aparecem pela
+ * primeira vez, e nenhuma regra vai adivinhá-los. Custa uma chamada de modelo para a fila
+ * inteira, e a sugestão entra marcada como vinda da IA — para quem revisa saber o peso do
+ * que está lendo.
+ */
+export function useClassificarComIA() {
+  const qc = useQueryClient();
+  type Resposta = { ok: boolean; sugeridas: number; estabelecimentos: number; message: string };
+  return useMutation<Resposta, Error, void>({
+    mutationFn: () => invokeReview<Resposta>({ action: 'classify_ai' }),
+    onSuccess: (r) => {
+      toast.success(r.message);
+      qc.invalidateQueries({ queryKey: ['finance-review-queue'] });
+    },
+    onError: (e: Error) => toast.error(e.message || 'Não foi possível classificar com IA'),
+  });
+}
+
 export function useAprovarPropostas() {
   const qc = useQueryClient();
   return useMutation({

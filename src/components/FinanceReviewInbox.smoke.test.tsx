@@ -61,6 +61,7 @@ vi.mock('@/hooks/use-finance-review', async (importOriginal) => {
     useRecusarPropostas: () => ({ mutate: vi.fn(), isPending: false }),
     useMarcarDuplicata: () => ({ mutate: duplicataMock, isPending: false }),
     useReaplicarRegras: () => ({ mutate: reaplicarMock, isPending: false }),
+    useClassificarComIA: () => ({ mutate: vi.fn(), isPending: false }),
   };
 });
 

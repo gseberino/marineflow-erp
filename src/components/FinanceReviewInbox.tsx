@@ -36,7 +36,7 @@ import {
 } from '@/hooks/use-payees';
 import {
   useFinanceReviewQueue, useGerarPropostas, useAprovarPropostas, useRecusarPropostas,
-  useMarcarDuplicata, useCriarCategoriaDespesa, useReaplicarRegras,
+  useMarcarDuplicata, useCriarCategoriaDespesa, useReaplicarRegras, useClassificarComIA,
   LIMITE_LOTE, type PropostaFinanceira, type Correcao,
 } from '@/hooks/use-finance-review';
 import {
@@ -631,6 +631,13 @@ export function FinanceReviewInbox({
   const recusar = useRecusarPropostas();
   const duplicata = useMarcarDuplicata();
   const reaplicar = useReaplicarRegras();
+  const classificarIA = useClassificarComIA();
+  /** Quantas seguem sem categoria de verdade — é o que a IA teria para fazer. */
+  const semCategoria = useMemo(
+    () => propostas.filter((p) => p.kind !== 'internal_transfer'
+      && (!p.suggested_category || p.suggested_category === SEM_CATEGORIA)).length,
+    [propostas],
+  );
   /**
    * Só as operações que mexem na fila INTEIRA travam a tela.
    *
@@ -900,6 +907,21 @@ export function FinanceReviewInbox({
               >
                 <Wand2 className={`mr-2 h-4 w-4 ${reaplicar.isPending ? 'animate-pulse' : ''}`} />
                 Revisar a fila
+              </Button>
+            )}
+            {/* Só faz sentido quando ainda há o que classificar: a IA entra depois que
+                regra e memória fizeram o que sabiam fazer, no resíduo que nenhuma das
+                duas alcança — estabelecimento que aparece pela primeira vez. */}
+            {semCategoria > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={ocupado}
+                onClick={() => classificarIA.mutate()}
+                title="Pede à IA uma categoria para os estabelecimentos que nunca foram classificados — sugestão, não lançamento"
+              >
+                <Sparkles className={`mr-2 h-4 w-4 ${classificarIA.isPending ? 'animate-pulse' : ''}`} />
+                Classificar {semCategoria} com IA
               </Button>
             )}
           </div>

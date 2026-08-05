@@ -294,6 +294,32 @@ describe("regras que o gestor ensina", () => {
     expect(p.appliedRuleId).toBeNull();
   });
 
+  it("aprende pelo NOME do extrato, não só por fornecedor cadastrado", () => {
+    // A fatura de cartão é quase toda de estabelecimentos que nunca serão fornecedor
+    // cadastrado. Eram eles que ficavam em "Outras despesas" para sempre: o gestor
+    // classificava a mesma padaria pela décima vez e o sistema não aprendia, porque não
+    // tinha onde guardar o que aprendeu.
+    const porNome = new Map([
+      ["LMGCONFEITARIA ITAJAI BRA", { categoria: "Alimentação de campo", dreGroup: "custo_direto", vezes: 4 }],
+    ]);
+    const p = montarProposta(
+      tx({ description: "LMGCONFEITARIA         ITAJAI        BRA" }),
+      fornecedores, undefined, [], porNome,
+    );
+    expect(p.suggestedCategory).toBe("Alimentação de campo");
+    expect(p.reasoning).toContain("Este estabelecimento já foi lançado");
+    expect(p.confidence).toBeGreaterThan(70);
+  });
+
+  it("a regra do gestor ainda vence o que o sistema aprendeu sozinho", () => {
+    const porNome = new Map([
+      ["LOJA X", { categoria: "Alimentação de campo", dreGroup: "custo_direto", vezes: 9 }],
+    ]);
+    const r = regra({ match_type: "text", match_value: "LOJA X", set_category: "Peças e materiais" });
+    const p = montarProposta(tx({ description: "LOJA X" }), fornecedores, undefined, [r], porNome);
+    expect(p.suggestedCategory).toBe("Peças e materiais");
+  });
+
   it("regra de texto casa com o termo COLADO em outra palavra", () => {
     // Nomes reais do extrato: o estabelecimento aparece grudado ("LMGCONFEITARIA") ou
     // abreviado ("CONFEIT BANDEIRANTES", "Farmapam"). Uma regra de trecho tem de pegar os

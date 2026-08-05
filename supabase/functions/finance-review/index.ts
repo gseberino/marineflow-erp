@@ -23,10 +23,12 @@
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
-  indexarFornecedores, montarProposta, sugerirRegras,
+  chaveDoRecebedor, indexarFornecedores, montarProposta, sugerirRegras,
   type FornecedorConhecido, type HistoricoFornecedor, type RegraFinanceira, type TransacaoOrfa,
 } from "../_shared/banking/proposals.ts";
 import { findInternalTransfers } from "../_shared/banking/matching.ts";
+import { callClaude } from "../_shared/ai/anthropic.ts";
+import { MODEL_LITE } from "../_shared/ai/models.ts";
 import {
   agruparParcelamentos, descreverParcelamento, lerParcela,
   type CompraParcelada, type PernaDeParcelamento,
@@ -64,7 +66,7 @@ const JANELA_DIAS = 90;
 const LOTE_HISTORICO = 200;
 
 interface Body {
-  action?: "generate" | "approve" | "reject" | "suggest_rules" | "reclassify";
+  action?: "generate" | "approve" | "reject" | "suggest_rules" | "reclassify" | "classify_ai";
   /** generate: inclui o histórico inteiro, não só a janela. */
   incluir_historico?: boolean;
   ids?: string[];
@@ -121,6 +123,7 @@ Deno.serve(async (req) => {
   try {
     if (action === "generate") return await gerar(admin, !!body.incluir_historico);
     if (action === "reclassify") return await reclassificar(admin);
+    if (action === "classify_ai") return await classificarComIA(admin);
     if (action === "approve") return await aprovar(admin, body.ids ?? [], userId, body.overrides ?? {});
     if (action === "reject") return await recusar(admin, body.ids ?? [], userId, body.note ?? null);
     if (action === "suggest_rules") return await proporRegras(admin);
@@ -222,7 +225,7 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
   // dos dois lados a cada comparação era metade do custo que estourava o limite de CPU.
   const fornecedores = indexarFornecedores((fornecedoresRows ?? []) as FornecedorConhecido[]);
 
-  const historico = await montarHistoricoPorFornecedor(admin);
+  const memoria = await montarMemoria(admin);
 
   const { data: regrasRows } = await admin
     .from("finance_rules").select("*").eq("status", "active").limit(500);
@@ -286,7 +289,7 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
       continue;
     }
 
-    const p = montarProposta(tx, fornecedores, historico, regras);
+    const p = montarProposta(tx, fornecedores, memoria.porFornecedor, regras, memoria.porNome);
 
     // Favorecido pelo documento: CPF é identidade, e reconhecê-lo poupa o gestor de
     // escolher a mesma pessoa toda vez que ela recebe.
@@ -424,7 +427,7 @@ async function reclassificar(admin: DbClient) {
   const { data: fornecedoresRows } = await admin
     .from("suppliers").select("id, name, cnpj_cpf, trade_name").limit(2000);
   const fornecedores = indexarFornecedores((fornecedoresRows ?? []) as FornecedorConhecido[]);
-  const historico = await montarHistoricoPorFornecedor(admin);
+  const memoria = await montarMemoria(admin);
   const { data: regrasRows } = await admin
     .from("finance_rules").select("*").eq("status", "active").limit(500);
   const regras = (regrasRows ?? []) as unknown as RegraFinanceira[];
@@ -441,7 +444,7 @@ async function reclassificar(admin: DbClient) {
 
   for (const p of alvo) {
     const tx = p.bank_transactions as TransacaoOrfa;
-    const nova = montarProposta(tx, fornecedores, historico, regras);
+    const nova = montarProposta(tx, fornecedores, memoria.porFornecedor, regras, memoria.porNome);
 
     const mudou = nova.suggestedCategory !== p.suggested_category
       || nova.dreGroup !== p.dre_group
@@ -494,6 +497,151 @@ async function reclassificar(admin: DbClient) {
     message: partes.length > 0
       ? partes.join(" · ")
       : `Nenhuma das ${alvo.length} propostas da fila mudou`,
+  });
+}
+
+/**
+ * Classifica com IA o que nem regra nem memória alcançaram.
+ *
+ * A memória do sistema só sabe o que já foi decidido: das 151 propostas sem categoria, ela
+ * resolvia 8, porque as outras 143 são estabelecimentos que aparecem pela PRIMEIRA vez.
+ * Nenhuma regra vai adivinhá-los — "MP *GTEKENERGIASU" não contém palavra nenhuma do plano
+ * de contas —, mas um humano lendo o nome sabe o que é. É exatamente o trabalho para o qual
+ * um modelo de linguagem serve, e o único ponto deste módulo onde ele ganha da aritmética.
+ *
+ * TRÊS COISAS QUE MANTÊM ISSO HONESTO
+ *
+ * 1. O plano de contas vai no pedido e a resposta é CONFERIDA contra ele. Categoria
+ *    inventada é descartada, não criada — inventar conta é como o resultado começa a mentir.
+ * 2. Os exemplos são as decisões DO GESTOR, não exemplos genéricos. É o que ensina que
+ *    "peça de barco" aqui é custo direto e não material de escritório.
+ * 3. Nunca aprova. A sugestão entra com confiança modesta e dizendo que veio da IA, para
+ *    que quem revisa saiba o peso do que está lendo.
+ */
+async function classificarComIA(admin: DbClient) {
+  const { valida, grupoDaCategoria } = await lerPlanoDeContas(admin);
+  if (valida.size === 0) return jr({ ok: true, sugeridas: 0, message: "Plano de contas vazio." });
+
+  const pendentes = await lerTudo<any>((de, ate) =>
+    admin
+      .from("finance_review_queue")
+      .select(`id, suggested_category, applied_rule_id,
+               bank_transactions!finance_review_queue_bank_transaction_id_fkey (
+                 counterparty_name, description )`)
+      .eq("status", "pending")
+      .neq("kind", "internal_transfer")
+      .is("applied_rule_id", null)
+      .order("id")
+      .range(de, ate)
+  );
+
+  // Só o que segue sem categoria de verdade: o que a regra ou a memória já resolveram não
+  // volta para a IA opinar por cima.
+  const porNome = new Map<string, { ids: string[]; exemplo: string }>();
+  for (const p of pendentes) {
+    const cat = String(p.suggested_category ?? "").trim();
+    if (cat && cat !== "Outras despesas") continue;
+    const tx = p.bank_transactions;
+    if (!tx) continue;
+    const nome = String(tx.counterparty_name || tx.description || "").trim();
+    if (!nome) continue;
+    const chave = chaveDoRecebedor({ description: String(tx.description ?? ""), counterparty_name: tx.counterparty_name ?? null } as TransacaoOrfa);
+    const atual = porNome.get(chave) ?? { ids: [], exemplo: nome };
+    atual.ids.push(p.id);
+    porNome.set(chave, atual);
+  }
+  if (porNome.size === 0) {
+    return jr({ ok: true, sugeridas: 0, message: "Nada sem categoria para a IA analisar." });
+  }
+
+  // Exemplos vindos do próprio histórico do gestor: é o que ensina a convenção da casa.
+  const memoria = await montarHistoricoPorNome(admin, valida, grupoDaCategoria);
+  const exemplos = [...memoria.entries()].slice(0, 60)
+    .map(([nome, h]) => `${nome} → ${h.categoria}`).join("\n");
+
+  const nomes = [...porNome.entries()].slice(0, 200);
+  const lista = nomes.map(([, v], i) => `${i + 1}. ${v.exemplo}`).join("\n");
+
+  const resposta = await callClaude({
+    model: MODEL_LITE,
+    maxTokens: 8000,
+    system: [{
+      type: "text",
+      text: [
+        "Você classifica despesas de uma empresa de serviços náuticos e elétricos (barcos e motorhomes)",
+        "a partir do NOME DO ESTABELECIMENTO como ele aparece na fatura do cartão.",
+        "",
+        "Categorias permitidas (use EXATAMENTE estes nomes, nada fora da lista):",
+        [...valida].map((c) => `- ${c}`).join("\n"),
+        "",
+        exemplos ? `Como esta empresa já classificou antes:\n${exemplos}` : "",
+        "",
+        "Regras: quando o nome não permitir concluir com segurança, devolva confianca baixa",
+        "em vez de chutar. Prefixos de adquirente (EC *, PAG*, MP *, SPG*) não são o nome:",
+        "ignore-os e olhe o que vem depois.",
+      ].filter(Boolean).join("\n"),
+    }],
+    messages: [{
+      role: "user",
+      content: [{ type: "text", text: `Classifique cada estabelecimento:\n\n${lista}` }],
+    }],
+    tools: [{
+      name: "classificar",
+      description: "Devolve a categoria de cada estabelecimento da lista.",
+      input_schema: {
+        type: "object",
+        properties: {
+          itens: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                numero: { type: "number", description: "O número da linha na lista." },
+                categoria: { type: "string" },
+                confianca: { type: "number", description: "0 a 100." },
+              },
+              required: ["numero", "categoria", "confianca"],
+            },
+          },
+        },
+        required: ["itens"],
+      },
+    }],
+  });
+
+  const chamada = resposta.content.find((b) => b.type === "tool_use") as
+    { input?: { itens?: Array<{ numero: number; categoria: string; confianca: number }> } } | undefined;
+  const itens = chamada?.input?.itens ?? [];
+
+  let sugeridas = 0;
+  let recusadas = 0;
+  for (const item of itens) {
+    const alvo = nomes[Number(item.numero) - 1];
+    if (!alvo) continue;
+    const categoria = String(item.categoria ?? "").trim();
+    // Categoria fora do plano é descartada. Criar conta a partir de um palpite é como o
+    // resultado começa a mentir sem ninguém perceber.
+    if (!valida.has(categoria)) { recusadas += 1; continue; }
+    const confianca = Math.max(20, Math.min(80, Math.round(Number(item.confianca) || 50)));
+
+    const { error } = await admin.from("finance_review_queue").update({
+      suggested_category: categoria,
+      dre_group: grupoDaCategoria.get(categoria) ?? "despesa_operacional",
+      confidence: confianca,
+      reasoning: `Sugerido pela IA a partir do nome "${alvo[1].exemplo}" — confira antes de aprovar`,
+    }).in("id", alvo[1].ids).eq("status", "pending");
+    if (error) throw error;
+    sugeridas += alvo[1].ids.length;
+  }
+
+  return jr({
+    ok: true,
+    sugeridas,
+    estabelecimentos: nomes.length,
+    fora_do_plano: recusadas,
+    message: sugeridas > 0
+      ? `${sugeridas} proposta(s) classificada(s) pela IA em ${nomes.length} estabelecimento(s) — confira antes de aprovar`
+      : "A IA não conseguiu classificar nada com segurança",
   });
 }
 
@@ -673,6 +821,70 @@ async function consolidarParcelamentosNaFila(admin: DbClient): Promise<{ compras
  * verdade — "Outras despesas" é ausência de classificação, e aprender a não classificar
  * seria transformar a lacuna em regra.
  */
+/**
+ * O que já se decidiu para cada NOME do extrato.
+ *
+ * O histórico por fornecedor só alcança quem está cadastrado, e a fatura de cartão é quase
+ * toda de estabelecimentos que nunca serão fornecedor. Eram eles que ficavam em "Outras
+ * despesas" para sempre: o gestor classificava a mesma padaria pela décima vez e o sistema
+ * não aprendia, porque não tinha onde guardar. Aqui a memória passa a ter a chave que a
+ * fatura usa — o nome do estabelecimento.
+ *
+ * Exige DUAS decisões iguais, não uma. Uma classificação isolada pode ter sido um engano, e
+ * repetir um engano com confiança é pior que não sugerir nada.
+ */
+async function montarHistoricoPorNome(
+  admin: DbClient,
+  categoriasValidas: Set<string>,
+  grupoDaCategoria: Map<string, string>,
+): Promise<Map<string, HistoricoFornecedor>> {
+  const linhas = await lerTudo<any>((de, ate) =>
+    admin
+      .from("payables")
+      .select(`id, expense_category,
+               bank_transactions ( counterparty_name, description )`)
+      .not("expense_category", "is", null)
+      .not("bank_transaction_id", "is", null)
+      .order("id")
+      .range(de, ate)
+  );
+
+  const contagem = new Map<string, Map<string, number>>();
+  for (const row of linhas) {
+    const cat = String(row.expense_category || "").trim();
+    if (!cat || cat === "Outras despesas" || !categoriasValidas.has(cat)) continue;
+    const tx = row.bank_transactions;
+    if (!tx) continue;
+    const chave = chaveDoRecebedor({
+      description: String(tx.description ?? ""),
+      counterparty_name: tx.counterparty_name ?? null,
+    } as TransacaoOrfa);
+    if (!chave) continue;
+    const porCat = contagem.get(chave) ?? new Map<string, number>();
+    porCat.set(cat, (porCat.get(cat) ?? 0) + 1);
+    contagem.set(chave, porCat);
+  }
+
+  const historico = new Map<string, HistoricoFornecedor>();
+  for (const [chave, porCat] of contagem) {
+    let melhor = ""; let vezes = 0; let segundo = 0;
+    for (const [cat, n] of porCat) {
+      if (n > vezes) { segundo = vezes; melhor = cat; vezes = n; }
+      else if (n > segundo) segundo = n;
+    }
+    // Duas decisões iguais no mínimo, e a preferida tem de ser a preferida de verdade:
+    // empate significa que o próprio histórico está dividido, e aí ele não ensina nada.
+    if (melhor && vezes >= 2 && vezes > segundo) {
+      historico.set(chave, {
+        categoria: melhor,
+        dreGroup: grupoDaCategoria.get(melhor) ?? "despesa_operacional",
+        vezes,
+      });
+    }
+  }
+  return historico;
+}
+
 async function montarHistoricoPorFornecedor(admin: DbClient): Promise<Map<string, HistoricoFornecedor>> {
   // Em páginas: depois do mutirão são milhares de lançamentos, e uma leitura truncada
   // ensinaria o motor com metade da história — sem nada indicando que faltou metade.
@@ -686,16 +898,7 @@ async function montarHistoricoPorFornecedor(admin: DbClient): Promise<Map<string
       .range(de, ate)
   );
 
-  // Só categorias que EXISTEM no plano de contas podem ser aprendidas.
-  //
-  // Sem esta checagem o motor propagava lixo: "Compras de Mercadorias" entrou por outro
-  // fluxo (importação de nota fiscal), não existe no plano de contas — e portanto não tem
-  // grupo no DRE —, e mesmo assim virou o padrão daquele fornecedor e foi aplicada a
-  // novos lançamentos. Categoria sem grupo é dinheiro que some do resultado, e aprender
-  // a errar transforma um engano em política.
-  const { data: catsValidas } = await admin
-    .from("financial_categories").select("name").eq("type", "payable").eq("active", true);
-  const valida = new Set((catsValidas ?? []).map((c: any) => String(c.name)));
+  const { valida, grupoDaCategoria } = await lerPlanoDeContas(admin);
 
   const contagem = new Map<string, Map<string, number>>();
   for (const row of (data ?? []) as any[]) {
@@ -705,13 +908,6 @@ async function montarHistoricoPorFornecedor(admin: DbClient): Promise<Map<string
     const porCat = contagem.get(row.supplier_id) ?? new Map<string, number>();
     porCat.set(cat, (porCat.get(cat) ?? 0) + 1);
     contagem.set(row.supplier_id, porCat);
-  }
-
-  const grupoDaCategoria = new Map<string, string>();
-  const { data: cats } = await admin
-    .from("financial_categories").select("name, dre_group").eq("active", true);
-  for (const c of (cats ?? []) as any[]) {
-    if (c.dre_group) grupoDaCategoria.set(String(c.name), String(c.dre_group));
   }
 
   const historico = new Map<string, HistoricoFornecedor>();
@@ -727,6 +923,39 @@ async function montarHistoricoPorFornecedor(admin: DbClient): Promise<Map<string
     }
   }
   return historico;
+}
+
+/**
+ * Plano de contas, lido uma vez.
+ *
+ * Só categorias que EXISTEM aqui podem ser aprendidas. Sem esta checagem o motor propagava
+ * lixo: "Compras de Mercadorias" entrou por outro fluxo (importação de nota fiscal), não
+ * tinha grupo no DRE, e mesmo assim virou o padrão de um fornecedor e foi aplicada a novos
+ * lançamentos. Categoria sem grupo é dinheiro que some do resultado, e aprender a errar
+ * transforma um engano em política.
+ */
+async function lerPlanoDeContas(admin: DbClient): Promise<{
+  valida: Set<string>; grupoDaCategoria: Map<string, string>;
+}> {
+  const { data: cats } = await admin
+    .from("financial_categories").select("name, dre_group, type, active").eq("active", true);
+  const valida = new Set<string>();
+  const grupoDaCategoria = new Map<string, string>();
+  for (const c of (cats ?? []) as any[]) {
+    if (c.type === "payable") valida.add(String(c.name));
+    if (c.dre_group) grupoDaCategoria.set(String(c.name), String(c.dre_group));
+  }
+  return { valida, grupoDaCategoria };
+}
+
+/** As duas memórias do motor: por fornecedor cadastrado e por nome do extrato. */
+async function montarMemoria(admin: DbClient) {
+  const { valida, grupoDaCategoria } = await lerPlanoDeContas(admin);
+  const [porFornecedor, porNome] = await Promise.all([
+    montarHistoricoPorFornecedor(admin),
+    montarHistoricoPorNome(admin, valida, grupoDaCategoria),
+  ]);
+  return { porFornecedor, porNome };
 }
 
 /**

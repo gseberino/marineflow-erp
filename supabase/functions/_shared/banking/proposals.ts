@@ -373,11 +373,26 @@ export function classificar(tx: TransacaoOrfa): { categoria: string; dreGroup: s
  * Sem categoria reconhecida, a proposta ainda é feita (o lançamento precisa existir), mas
  * com confiança baixa e categoria genérica, para cair na revisão atenta.
  */
+/** Caixa alta, sem acento e sem pontuação: a chave de quem recebeu, no extrato. */
+export function chaveDoRecebedor(tx: TransacaoOrfa): string {
+  return normalizeText(tx.counterparty_name || tx.description || "");
+}
+
 export function montarProposta(
   tx: TransacaoOrfa,
   fornecedores: FornecedorConhecido[] | IndiceFornecedores,
   historico?: Map<string, HistoricoFornecedor>,
   regras: RegraFinanceira[] = [],
+  /**
+   * O que já se decidiu para cada NOME do extrato.
+   *
+   * O histórico por fornecedor só alcança quem está cadastrado, e a fatura de cartão é
+   * quase toda de estabelecimentos que nunca serão fornecedor — LMGCONFEITARIA, EC
+   * *INOHOUSE, SPG*DEPARTAMENTO. Eram justamente eles que caíam em "Outras despesas" para
+   * sempre: o gestor classificava a mesma padaria pela décima vez e o sistema não
+   * aprendia nada, porque não tinha onde guardar o que aprendeu.
+   */
+  historicoPorNome?: Map<string, HistoricoFornecedor>,
 ): Proposta {
   const ehSaida = tx.transaction_type === "debit";
   const classificacao = classificar(tx);
@@ -404,12 +419,16 @@ export function montarProposta(
   // O que o gestor já decidiu para este fornecedor vale mais que uma regra de texto:
   // a regra é um palpite genérico, isto é a prática da própria empresa. Por isso o
   // histórico SOBRESCREVE a classificação por termo quando há repetição.
-  const aprendido = achado ? historico?.get(achado.fornecedor.id) : undefined;
+  const porFornecedor = achado ? historico?.get(achado.fornecedor.id) : undefined;
+  // Fornecedor cadastrado vale mais que nome de extrato: é identidade contra aproximação.
+  const porNome = historicoPorNome?.get(chaveDoRecebedor(tx));
+  const aprendido = porFornecedor ?? porNome;
   if (aprendido) {
+    const quem = porFornecedor ? "Este fornecedor" : "Este estabelecimento";
     razoes.push(
       aprendido.vezes === 1
-        ? `Da última vez, uma despesa deste fornecedor foi lançada como ${aprendido.categoria}`
-        : `Este fornecedor já foi lançado como ${aprendido.categoria} ${aprendido.vezes} vezes`,
+        ? `Da última vez, uma despesa de ${porFornecedor ? "deste fornecedor" : "aqui"} foi lançada como ${aprendido.categoria}`
+        : `${quem} já foi lançado como ${aprendido.categoria} ${aprendido.vezes} vezes`,
     );
     confianca = Math.min(98, Math.max(confianca, 60 + Math.min(25, aprendido.vezes * 5)));
   }

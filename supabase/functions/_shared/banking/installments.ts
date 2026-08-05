@@ -64,9 +64,8 @@ export interface CompraParcelada {
   anterioresForaDoExtrato: number;
 }
 
-function chaveDaCompra(tx: PernaDeParcelamento, total: number): string {
-  const quem = normalizeText(tx.counterparty_name || tx.description || "");
-  return `${quem}|${tx.amount.toFixed(2)}|${total}`;
+function quemRecebeu(tx: PernaDeParcelamento): string {
+  return normalizeText(tx.counterparty_name || tx.description || "");
 }
 
 /**
@@ -75,16 +74,63 @@ function chaveDaCompra(tx: PernaDeParcelamento, total: number): string {
  * Devolve também `pernaDe`: para cada transação, a chave da compra a que ela pertence —
  * é o que permite ao motor propor a compra UMA vez e não propor as outras pernas.
  */
+interface Perna { tx: PernaDeParcelamento; numero: number; total: number }
+
+/**
+ * Monta a compra a partir das pernas dela. Devolve null quando o conjunto não é coerente.
+ *
+ * O valor da compra é a SOMA das parcelas presentes mais a estimativa das ausentes, não
+ * "parcela × total": quando o parcelamento inteiro está no extrato, isso dá o valor exato
+ * mesmo com o centavo que o cartão joga numa parcela só.
+ */
+function montarCompra(chave: string, itens: Perna[]): CompraParcelada | null {
+  const numeros = new Set(itens.map((i) => i.numero));
+  if (numeros.size !== itens.length) return null;
+
+  const ordenadas = [...itens].sort((a, b) => a.numero - b.numero);
+  const total = ordenadas[0].total;
+  const menor = ordenadas[0].numero;
+  const maior = ordenadas[ordenadas.length - 1].numero;
+
+  const somaPresentes = ordenadas.reduce((s, i) => s + i.tx.amount, 0);
+  const media = somaPresentes / ordenadas.length;
+  const anteriores = menor - 1;
+  const futuras = total - maior;
+
+  const jaPago = somaPresentes + anteriores * media;
+  const aVencer = futuras * media;
+
+  return {
+    chave,
+    rotulo: (ordenadas[0].tx.counterparty_name || ordenadas[0].tx.description || "").trim(),
+    valorDaParcela: Number(media.toFixed(2)),
+    totalDeParcelas: total,
+    valorDaCompra: Number((jaPago + aVencer).toFixed(2)),
+    pernas: ordenadas.map((i) => i.tx),
+    ancora: ordenadas[0].tx,
+    menorParcelaVista: menor,
+    maiorParcelaVista: maior,
+    jaPago: Number(jaPago.toFixed(2)),
+    aVencer: Number(aVencer.toFixed(2)),
+    anterioresForaDoExtrato: anteriores,
+  };
+}
+
 export function agruparParcelamentos(transacoes: PernaDeParcelamento[]): {
   compras: CompraParcelada[];
   pernaDe: Map<string, string>;
 } {
-  const porChave = new Map<string, { tx: PernaDeParcelamento; numero: number; total: number }[]>();
-
+  // Chave: QUEM recebeu e em QUANTAS vezes. O valor da parcela ficou de fora de propósito.
+  //
+  // Exigir valor idêntico parecia seguro e era o defeito: o cartão distribui o centavo que
+  // não divide, então uma compra de R$ 100,01 em 3x vira 33,34 + 33,34 + 33,33. Com o valor
+  // na chave, essa compra virava DUAS — 98 grupos onde havia 64 compras de verdade, e o
+  // gestor classificando a mesma compra duas vezes.
+  const porChave = new Map<string, Perna[]>();
   for (const tx of transacoes) {
     const parcela = lerParcela(tx.installment_label);
     if (!parcela) continue;
-    const chave = chaveDaCompra(tx, parcela.total);
+    const chave = `${quemRecebeu(tx)}|${parcela.total}`;
     const lista = porChave.get(chave) ?? [];
     lista.push({ tx, numero: parcela.numero, total: parcela.total });
     porChave.set(chave, lista);
@@ -94,34 +140,28 @@ export function agruparParcelamentos(transacoes: PernaDeParcelamento[]): {
   const pernaDe = new Map<string, string>();
 
   for (const [chave, itens] of porChave) {
-    // Duas cobranças com o MESMO número de parcela são coisas distintas que colidiram na
-    // chave (mesma loja, mesmo valor, mesmo plano, compras diferentes). Sem como separá-las
-    // com honestidade, ficam de fora e seguem uma a uma — errar juntando é pior.
-    const numeros = new Set(itens.map((i) => i.numero));
-    if (numeros.size !== itens.length) continue;
+    const compra = montarCompra(chave, itens);
+    if (compra) {
+      compras.push(compra);
+      for (const i of itens) pernaDe.set(i.tx.id, chave);
+      continue;
+    }
 
-    itens.sort((a, b) => a.numero - b.numero);
-    const total = itens[0].total;
-    const valorDaParcela = itens[0].tx.amount;
-    const menor = itens[0].numero;
-    const maior = itens[itens.length - 1].numero;
-
-    const compra: CompraParcelada = {
-      chave,
-      rotulo: (itens[0].tx.counterparty_name || itens[0].tx.description || "").trim(),
-      valorDaParcela,
-      totalDeParcelas: total,
-      valorDaCompra: Number((valorDaParcela * total).toFixed(2)),
-      pernas: itens.map((i) => i.tx),
-      ancora: itens[0].tx,
-      menorParcelaVista: menor,
-      maiorParcelaVista: maior,
-      jaPago: Number((valorDaParcela * maior).toFixed(2)),
-      aVencer: Number((valorDaParcela * (total - maior)).toFixed(2)),
-      anterioresForaDoExtrato: menor - 1,
-    };
-    compras.push(compra);
-    for (const i of itens) pernaDe.set(i.tx.id, chave);
+    // Número de parcela repetido: são DUAS compras no mesmo lugar, no mesmo plano, que
+    // caíram na mesma chave. Aí o valor volta a ser o critério — é o que resta para
+    // separá-las. O que continuar ambíguo depois disso segue uma a uma: errar juntando
+    // compras diferentes é pior que deixar duas linhas para o gestor.
+    const porValor = new Map<string, Perna[]>();
+    for (const i of itens) {
+      const k = `${chave}|${i.tx.amount.toFixed(2)}`;
+      porValor.set(k, [...(porValor.get(k) ?? []), i]);
+    }
+    for (const [k, lista] of porValor) {
+      const c = montarCompra(k, lista);
+      if (!c) continue;
+      compras.push(c);
+      for (const i of lista) pernaDe.set(i.tx.id, k);
+    }
   }
 
   return { compras, pernaDe };

@@ -106,9 +106,38 @@ describe('agrupamento da compra', () => {
     expect(agruparParcelamentos(pernas).compras).toHaveLength(2);
   });
 
-  it('colisão indistinguível fica de fora — errar juntando é pior', () => {
-    // Mesma loja, mesmo valor, mesmo plano, e DUAS parcelas "1/3": são duas compras que
-    // colidiram na chave. Nem quem olha à mão consegue separá-las pelo extrato.
+  it('centavo que não divide não parte a compra em duas', () => {
+    // O defeito real: R$ 100,01 em 3x vira 33,34 + 33,34 + 33,33, e a chave que exigia
+    // valor idêntico transformava isso em DUAS compras — 98 grupos onde havia 64.
+    const pernas = [
+      perna({ amount: 33.34, installment_label: '1/3' }),
+      perna({ amount: 33.34, installment_label: '2/3' }),
+      perna({ amount: 33.33, installment_label: '3/3' }),
+    ];
+    const { compras } = agruparParcelamentos(pernas);
+    expect(compras).toHaveLength(1);
+    // Com o parcelamento inteiro no extrato, o valor é a soma exata — sem estimativa.
+    expect(compras[0].valorDaCompra).toBeCloseTo(100.01, 2);
+    expect(compras[0].aVencer).toBe(0);
+  });
+
+  it('duas compras no mesmo plano se separam pelo valor', () => {
+    // Números de parcela repetidos denunciam duas compras na mesma chave; aí o valor volta
+    // a ser o critério que resta para separá-las.
+    const pernas = [
+      perna({ amount: 100, installment_label: '1/3' }),
+      perna({ amount: 100, installment_label: '2/3' }),
+      perna({ amount: 55, installment_label: '1/3' }),
+      perna({ amount: 55, installment_label: '2/3' }),
+    ];
+    const { compras } = agruparParcelamentos(pernas);
+    expect(compras).toHaveLength(2);
+    expect(compras.map((c) => c.valorDaCompra).sort((a, b) => a - b)).toEqual([165, 300]);
+  });
+
+  it('ambiguidade que sobra fica de fora — errar juntando é pior', () => {
+    // Mesma loja, mesmo valor, mesmo plano, e DUAS parcelas "1/3": nem quem olha à mão
+    // separa isso pelo extrato.
     const pernas = [
       perna({ installment_label: '1/3' }),
       perna({ installment_label: '1/3' }),
