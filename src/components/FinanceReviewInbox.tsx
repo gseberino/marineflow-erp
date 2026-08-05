@@ -37,7 +37,7 @@ import {
 } from '@/hooks/use-finance-review';
 import {
   Sparkles, Check, X, ChevronDown, ArrowLeftRight, TrendingDown, Info, RefreshCw,
-  CopyX, Wand2, CreditCard, Landmark, AlertTriangle, Users, List,
+  CopyX, Wand2, CreditCard, Landmark, AlertTriangle, Users, List, Layers,
 } from 'lucide-react';
 import {
   agruparPorFavorecido, resumoDoAgrupamento, SEM_CATEGORIA,
@@ -218,6 +218,9 @@ function LinhaProposta({
   const transferencia = p.kind === 'internal_transfer';
   const categoria = correcao?.category ?? p.suggested_category ?? '';
   const porRegra = !!p.applied_rule_id;
+  // "3/10" → 10. O total é o que interessa aqui; qual parcela chegou primeiro é detalhe
+  // da fatura, não da compra.
+  const parcelas = Number(p.bank_transactions?.installment_label?.split('/')[1]) || null;
 
   return (
     <Card className="p-3">
@@ -260,6 +263,14 @@ function LinhaProposta({
                 {p.bank_transactions.source_type === 'credit_card'
                   ? <><CreditCard className="h-3 w-3" />Fatura de cartão</>
                   : <><Landmark className="h-3 w-3" />Conta corrente</>}
+              </Badge>
+            )}
+            {/* Uma compra, não N despesas: o valor mostrado é o da COMPRA, e o rótulo
+                avisa que ela chega em parcelas para quem for conferir na fatura. */}
+            {parcelas && (
+              <Badge variant="outline" className="gap-1 text-xs">
+                <Layers className="h-3 w-3" />
+                Compra em {parcelas}x
               </Badge>
             )}
             {transferencia && (

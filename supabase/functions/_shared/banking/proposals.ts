@@ -150,10 +150,13 @@ export function acharRegra(
   tx: TransacaoOrfa,
   regras: RegraFinanceira[],
   fornecedorId?: string | null,
+  /** Cadastro, para a regra de fornecedor reconhecer o nome dele no extrato. */
+  fornecedores?: FornecedorConhecido[] | IndiceFornecedores,
 ): RegraFinanceira | null {
   const doc = (tx.counterparty_document || "").replace(/\D/g, "");
   const texto = normalizeText(`${tx.description} ${tx.counterparty_name || ""}`);
   const nome = normalizeText(tx.counterparty_name || "");
+  const tokensDoTexto = new Set(texto.split(" ").filter(Boolean));
 
   const serve = (r: RegraFinanceira): boolean => {
     if (r.status !== "active") return false;
@@ -163,9 +166,46 @@ export function acharRegra(
     return true;
   };
 
+  /**
+   * A regra de fornecedor reconhece o fornecedor pelo NOME dele, não só pelo cadastro
+   * resolvido.
+   *
+   * Quem escreve "compras na PREMEL são peças" está falando de um lugar, não de um uuid.
+   * Mas o cartão escreve "PREMEL - ITAJAI" e a razão social é "PREMEL MAT. ELETRICOS
+   * LTDA": nenhum dos dois contém o outro, então a resolução automática não liga os dois e
+   * a regra que o gestor criou a dedo simplesmente não valia para as compras que ele tinha
+   * na frente. O elo é a palavra que identifica — a primeira do nome.
+   *
+   * Aqui a permissividade é justificada porque a instrução é EXPLÍCITA: o gestor apontou
+   * este fornecedor. A resolução automática, que ninguém pediu, continua exigente.
+   */
+  const cadastro = fornecedores ? obterIndice(fornecedores) : null;
+  const regraDeFornecedorCasa = (r: RegraFinanceira): boolean => {
+    if (r.match_type !== "supplier") return false;
+    if (fornecedorId && r.match_value === fornecedorId) return true;
+    if (!cadastro) return false;
+
+    const f = cadastro.porNome.find((e) => e.fornecedor.id === r.match_value);
+    if (!f) return false;
+
+    // Documento do fornecedor no extrato: identidade, sem discussão.
+    const docF = (f.fornecedor.cnpj_cpf || "").replace(/\D/g, "");
+    if (doc.length >= 11 && docF === doc) return true;
+
+    for (const candidato of [f.nome, f.fantasia]) {
+      if (!candidato) continue;
+      if (mesmoNomeLimpo(candidato, limparNome(tx.counterparty_name || tx.description))) return true;
+      // Palavra-cabeça do nome do fornecedor presente no histórico. Exige 4 letras para
+      // não deixar um "SUL" ou "MAR" arrastar meia fatura junto.
+      const cabeca = candidato.split(" ")[0];
+      if (cabeca.length >= 4 && tokensDoTexto.has(cabeca)) return true;
+    }
+    return false;
+  };
+
   const ordem: Array<(r: RegraFinanceira) => boolean> = [
     (r) => r.match_type === "document" && doc.length >= 11 && r.match_value.replace(/\D/g, "") === doc,
-    (r) => r.match_type === "supplier" && !!fornecedorId && r.match_value === fornecedorId,
+    regraDeFornecedorCasa,
     (r) => r.match_type === "counterparty" && !!nome && normalizeText(r.match_value) === nome,
     (r) => r.match_type === "text" && texto.includes(normalizeText(r.match_value).trim()),
   ];
@@ -203,10 +243,32 @@ function limparNome(s: string): string {
     .trim();
 }
 
-/** Compara nomes ignorando acento, caixa e sufixo societário. */
+/**
+ * Compara nomes ignorando acento, caixa e sufixo societário.
+ *
+ * A CONTENÇÃO É ANCORADA, e isso não é rigor gratuito: a versão que aceitava qualquer
+ * substring atribuiu 160 despesas ao fornecedor errado. O cadastro da Coremma tinha nome
+ * fantasia "Itajai" — a CIDADE —, e "ITAJAI" é substring de todo estabelecimento de Itajaí
+ * que aparece na fatura. "PREMEL - ITAJAI" virou Coremma; com o fornecedor errado veio o
+ * histórico aprendido dele, que sobrepôs a classificação certa. Um dado de cadastro ruim
+ * contaminou o resultado inteiro sem uma linha de erro em lugar nenhum.
+ *
+ * Palavra única só casa quando é a CABEÇA do nome, porque é assim que nome de empresa
+ * funciona: o que identifica vem primeiro e o resto qualifica. "KAMELL" casa com "KAMELL
+ * COMERCIO GLOBAL"; "ITAJAI" não casa com "PREMEL ITAJAI".
+ */
 function mesmoNomeLimpo(x: string, y: string): boolean {
   if (!x || !y) return false;
-  return x === y || x.includes(y) || y.includes(x);
+  if (x === y) return true;
+
+  const [curto, longo] = x.length <= y.length ? [x, y] : [y, x];
+  if (!longo.includes(curto)) return false;
+
+  // Nome composto contido no outro é evidência forte — e é o caso do extrato que corta
+  // ("MARINE EXPRESS COMERCIAL IMPOR" dentro da razão social inteira).
+  if (curto.includes(" ")) return true;
+
+  return curto.length >= 3 && longo.startsWith(`${curto} `);
 }
 
 /**
@@ -362,11 +424,15 @@ export function montarProposta(
   // A regra do gestor vem POR ÚLTIMO e vence tudo, de propósito: ela não é mais um palpite
   // a ser ponderado, é uma instrução. Quem escreveu "PIX para Fulano é pró-labore" não
   // quer que uma regra de texto genérica discorde disso.
-  const regra = acharRegra(tx, regras, fornecedorId);
+  const regra = acharRegra(tx, regras, fornecedorId, fornecedores);
   if (regra) {
     if (regra.set_category) categoria = regra.set_category;
     if (regra.set_dre_group) dreGroup = regra.set_dre_group;
     if (regra.set_supplier_id) fornecedorId = regra.set_supplier_id;
+    // Regra de fornecedor também diz DE QUEM é a despesa, não só o que ela é. Sem isto a
+    // compra continuaria atribuída a quem a resolução automática errou — e o custo por
+    // fornecedor seguiria mentindo mesmo com a categoria já corrigida.
+    else if (regra.match_type === "supplier") fornecedorId = regra.match_value;
     razoes.length = 0;   // o motivo passa a ser a regra; o resto virou ruído
     razoes.push(`Regra sua: ${descreverRegra(regra)}`);
     confianca = regra.autonomy === "apply" ? 99 : 95;

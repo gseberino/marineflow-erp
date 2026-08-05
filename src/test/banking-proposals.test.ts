@@ -113,6 +113,31 @@ describe("identificação do fornecedor", () => {
     expect(acharFornecedor(tx({ counterparty_name: "EMPRESA DESCONHECIDA" }), fornecedores)).toBeNull();
   });
 
+  it("cidade no campo de nome fantasia não sequestra o fornecedor", () => {
+    // Caso real, e caro: o cadastro da Coremma tinha nome fantasia "Itajai" — a CIDADE.
+    // Como o casamento aceitava qualquer substring, todo estabelecimento de Itajaí na
+    // fatura virou Coremma: 160 despesas atribuídas ao fornecedor errado, e com elas o
+    // histórico aprendido do errado sobrepondo a classificação certa.
+    const comCidade: FornecedorConhecido[] = [
+      { id: "f-coremma", name: "Coremma Ltda", cnpj_cpf: null, trade_name: "Itajai" },
+      { id: "f-premel", name: "PREMEL MAT. ELETRICOS LTDA", cnpj_cpf: "00.725.876/0008-71" },
+    ];
+    expect(acharFornecedor(tx({ counterparty_name: "PREMEL - ITAJAI" }), comCidade)).toBeNull();
+    // E o que é de fato a Coremma continua sendo reconhecido.
+    expect(acharFornecedor(tx({ counterparty_name: "COREMMA LTDA" }), comCidade)?.fornecedor.id)
+      .toBe("f-coremma");
+  });
+
+  it("palavra única casa quando é a cabeça do nome, não no meio", () => {
+    expect(acharFornecedor(tx({ counterparty_name: "KAMELL COMERCIO GLOBAL LTDA" }), fornecedores)?.fornecedor.id)
+      .toBe("f-kamell");
+    // "MELL" está dentro de "KAMELL", mas não identifica ninguém.
+    expect(acharFornecedor(
+      tx({ counterparty_name: "LOJA MELL" }),
+      [{ id: "f-x", name: "MELL", cnpj_cpf: null }],
+    )).toBeNull();
+  });
+
   it("índice pronto acha o mesmo que a lista crua", () => {
     // O mutirão do histórico passa o índice para não limpar 530 nomes a cada transação —
     // é o que impede a função de morrer por limite de CPU. Se o índice respondesse
@@ -235,6 +260,38 @@ describe("regras que o gestor ensina", () => {
       fornecedores, undefined, [porTexto, porDoc],
     );
     expect(p.suggestedCategory).toBe("Certa");
+  });
+
+  it("regra de fornecedor alcança o nome que o cartão escreve", () => {
+    // O que o gestor quis dizer: "compras na PREMEL são peças e materiais". O que o
+    // sistema via: um uuid que a resolução automática nunca ligava a "PREMEL - ITAJAI",
+    // porque nem a razão social contém esse texto nem o contrário. A regra existia,
+    // estava ativa, e não valia justamente para as compras que ele tinha na frente.
+    const cadastro: FornecedorConhecido[] = [
+      { id: "f-premel", name: "PREMEL MAT. ELETRICOS LTDA", cnpj_cpf: "00.725.876/0008-71" },
+    ];
+    const r = regra({
+      id: "r-premel", match_type: "supplier", match_value: "f-premel",
+      set_category: "Peças e materiais", set_dre_group: "custo_direto", set_supplier_id: null,
+    });
+    const p = montarProposta(
+      tx({ description: "PREMEL - ITAJAI        ITAJAI        BRA", counterparty_name: "PREMEL - ITAJAI" }),
+      cadastro, undefined, [r],
+    );
+    expect(p.suggestedCategory).toBe("Peças e materiais");
+    expect(p.appliedRuleId).toBe("r-premel");
+    // E diz de QUEM é a despesa: sem isso o custo por fornecedor seguiria errado.
+    expect(p.suggestedSupplierId).toBe("f-premel");
+  });
+
+  it("cabeça curta demais não arrasta meia fatura", () => {
+    const cadastro: FornecedorConhecido[] = [{ id: "f-sul", name: "SUL Comercio", cnpj_cpf: null }];
+    const r = regra({ id: "r-sul", match_type: "supplier", match_value: "f-sul", set_category: "Errada" });
+    const p = montarProposta(
+      tx({ description: "POSTO SUL NAVEGANTES", counterparty_name: "POSTO SUL" }),
+      cadastro, undefined, [r],
+    );
+    expect(p.appliedRuleId).toBeNull();
   });
 
   it("respeita a faixa de valor da regra", () => {

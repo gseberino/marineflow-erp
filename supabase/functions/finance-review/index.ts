@@ -27,6 +27,10 @@ import {
   type FornecedorConhecido, type HistoricoFornecedor, type RegraFinanceira, type TransacaoOrfa,
 } from "../_shared/banking/proposals.ts";
 import { findInternalTransfers } from "../_shared/banking/matching.ts";
+import {
+  agruparParcelamentos, descreverParcelamento, lerParcela,
+  type CompraParcelada, type PernaDeParcelamento,
+} from "../_shared/banking/installments.ts";
 
 type DbClient = SupabaseClient<any, "public", any>;
 
@@ -178,7 +182,7 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
   const transacoes = await lerTudo<TransacaoOrfa>((de, ate) => {
     let q = admin
       .from("bank_transactions")
-      .select("id, transaction_date, description, amount, transaction_type, counterparty_name, counterparty_document, source_type, bank_connection_id")
+      .select("id, transaction_date, description, amount, transaction_type, counterparty_name, counterparty_document, source_type, bank_connection_id, installment_label")
       .eq("reconciled", false)
       .order("transaction_date", { ascending: false })
       .order("id");
@@ -238,11 +242,19 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     .from("payees").select("id, name, document, default_category").eq("active", true).limit(500);
   const favorecidos = (favorecidosRows ?? []) as any[];
 
-  // Quem ainda não tem proposta nem lançamento. A entrada de um par entra pela saída, e
-  // entrada avulsa fica para a conciliação (ver cabeçalho) — as duas somem daqui.
+  // Compra parcelada é UMA compra: a proposta nasce na parcela mais antiga, com o valor
+  // total, e as outras pernas não viram despesa separada.
+  const { compras, pernaDe } = agruparParcelamentos(transacoes as unknown as PernaDeParcelamento[]);
+  const compraPorChave = new Map(compras.map((c) => [c.chave, c]));
+  const ancoras = new Set(compras.map((c) => c.ancora.id));
+
+  // Quem ainda não tem proposta nem lançamento. A entrada de um par entra pela saída,
+  // entrada avulsa fica para a conciliação (ver cabeçalho) e parcela que não é a âncora
+  // entra pela compra — as três somem daqui.
   const elegiveis = transacoes.filter((tx) => {
     if (naFila.has(tx.id) || lancadas.has(tx.id)) return false;
     if (jaCoberta.has(tx.id)) return false;
+    if (pernaDe.has(tx.id) && !ancoras.has(tx.id)) return false;
     return tx.transaction_type === "debit";
   });
 
@@ -290,12 +302,17 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
           && Math.abs(Number(o.total_amount) - tx.amount) < 0.01)
       : undefined;
 
+    // A despesa é a COMPRA, não a parcela. Sem isto, dez parcelas de R$ 102,40 viravam dez
+    // despesas — dez classificações para o mesmo fato e um custo por fornecedor que não
+    // fecha com nota nenhuma.
+    const compra = compraPorChave.get(pernaDe.get(tx.id) ?? "");
+
     const linha = {
       kind: p.kind,
       bank_transaction_id: p.bankTransactionId,
-      title: p.title,
+      title: compra ? `${p.title} (${compra.totalDeParcelas}x)`.slice(0, 160) : p.title,
       confidence: p.confidence,
-      suggested_amount: p.suggestedAmount,
+      suggested_amount: compra ? compra.valorDaCompra : p.suggestedAmount,
       suggested_date: p.suggestedDate,
       suggested_category: p.suggestedCategory,
       suggested_description: p.suggestedDescription,
@@ -308,6 +325,7 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
       dre_group: p.dreGroup,
       applied_rule_id: p.appliedRuleId,
       reasoning: [
+        compra && descreverParcelamento(compra),
         p.reasoning,
         favorecido && `Favorecido reconhecido pelo CPF/CNPJ: ${favorecido.name}`,
         oc && `Mesmo valor da ordem de compra ${oc.po_number}, do mesmo fornecedor`,
@@ -376,6 +394,11 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
  * centenas de vezes de uma vez, com um clique que ele deu para outra coisa.
  */
 async function reclassificar(admin: DbClient) {
+  // Antes de reclassificar, juntar o que é a mesma compra: classificar dez vezes a mesma
+  // coisa é trabalho que não deveria existir, e vale a pena eliminá-lo antes de gastar
+  // uma decisão com ele.
+  const parcelamentos = await consolidarParcelamentosNaFila(admin);
+
   const pendentes = await lerTudo<any>((de, ate) =>
     admin
       .from("finance_review_queue")
@@ -392,7 +415,10 @@ async function reclassificar(admin: DbClient) {
   // Transferência entre contas não se classifica por regra de despesa: ela já é o que é.
   const alvo = pendentes.filter((p) => p.kind !== "internal_transfer" && p.bank_transactions);
   if (alvo.length === 0) {
-    return jr({ ok: true, atualizadas: 0, message: "Nenhuma proposta na fila para reavaliar." });
+    return jr({
+      ok: true, atualizadas: 0, ...parcelamentos,
+      message: "Nenhuma proposta na fila para reavaliar.",
+    });
   }
 
   const { data: fornecedoresRows } = await admin
@@ -449,15 +475,25 @@ async function reclassificar(admin: DbClient) {
     }
   }
 
+  const partes = [
+    atualizadas > 0
+      ? `${atualizadas} proposta(s) reclassificada(s)` + (porRegra > 0 ? `, ${porRegra} pelas suas regras` : "")
+      : "",
+    parcelamentos.compras > 0
+      ? `${parcelamentos.compras} compra(s) parcelada(s) juntada(s), ${parcelamentos.retiradas} linha(s) a menos`
+      : "",
+  ].filter(Boolean);
+
   return jr({
     ok: true,
     atualizadas,
     avaliadas: alvo.length,
     por_regra: porRegra,
-    message: atualizadas === 0
-      ? `Nenhuma das ${alvo.length} propostas da fila mudou de classificação`
-      : `${atualizadas} proposta(s) reclassificada(s)`
-        + (porRegra > 0 ? `, ${porRegra} pelas suas regras` : ""),
+    compras_parceladas: parcelamentos.compras,
+    linhas_retiradas: parcelamentos.retiradas,
+    message: partes.length > 0
+      ? partes.join(" · ")
+      : `Nenhuma das ${alvo.length} propostas da fila mudou`,
   });
 }
 
@@ -527,6 +563,112 @@ async function proporRegras(admin: DbClient) {
     propostas: padroes.length,
     message: `${padroes.length} regra(s) sugerida(s) a partir do que você já decidiu`,
   });
+}
+
+/**
+ * Recompõe a compra parcelada a partir de UMA das suas parcelas.
+ *
+ * Recalcula em vez de guardar a lista de pernas na proposta: entre propor e aprovar pode
+ * ter chegado mais uma parcela do extrato, e uma lista congelada deixaria essa parcela
+ * órfã na fila, virando uma segunda despesa da mesma compra.
+ */
+async function lerCompraParcelada(
+  admin: DbClient,
+  transacaoId: string | null,
+): Promise<CompraParcelada | null> {
+  if (!transacaoId) return null;
+
+  const { data: base } = await admin
+    .from("bank_transactions")
+    .select("id, transaction_date, description, amount, counterparty_name, installment_label")
+    .eq("id", transacaoId)
+    .maybeSingle();
+  const ancora = base as PernaDeParcelamento | null;
+  if (!ancora || !lerParcela(ancora.installment_label)) return null;
+
+  // Mesmo favorecido e mesmo valor de parcela: o resto do filtro é do agrupador, que sabe
+  // recusar colisão indistinguível.
+  let q = admin
+    .from("bank_transactions")
+    .select("id, transaction_date, description, amount, counterparty_name, installment_label")
+    .eq("amount", ancora.amount)
+    .not("installment_label", "is", null)
+    .limit(60);
+  q = ancora.counterparty_name
+    ? q.eq("counterparty_name", ancora.counterparty_name)
+    : q.eq("description", ancora.description);
+
+  const { data: irmas } = await q;
+  const { compras, pernaDe } = agruparParcelamentos((irmas ?? []) as PernaDeParcelamento[]);
+  const chave = pernaDe.get(ancora.id);
+  return (chave && compras.find((c) => c.chave === chave)) || null;
+}
+
+/**
+ * Junta o que já está na fila como parcelas soltas numa proposta só, da compra.
+ *
+ * A varredura pula o que já está enfileirado, então as compras parceladas propostas antes
+ * desta regra existir continuariam como dez linhas para sempre. Aqui a proposta da parcela
+ * mais antiga vira a proposta da compra e as outras saem de cena — sem tocar em nada que
+ * já virou lançamento.
+ */
+async function consolidarParcelamentosNaFila(admin: DbClient): Promise<{ compras: number; retiradas: number }> {
+  const pendentes = await lerTudo<any>((de, ate) =>
+    admin
+      .from("finance_review_queue")
+      .select(`id, bank_transaction_id, suggested_amount, title, reasoning,
+               bank_transactions!finance_review_queue_bank_transaction_id_fkey (
+                 id, transaction_date, description, amount, counterparty_name, installment_label )`)
+      .eq("status", "pending")
+      .not("bank_transaction_id", "is", null)
+      .order("id")
+      .range(de, ate)
+  );
+
+  const propostaDaTransacao = new Map<string, any>();
+  const pernas: PernaDeParcelamento[] = [];
+  for (const p of pendentes) {
+    const tx = p.bank_transactions as PernaDeParcelamento | null;
+    if (!tx?.installment_label) continue;
+    propostaDaTransacao.set(tx.id, p);
+    pernas.push(tx);
+  }
+  if (pernas.length === 0) return { compras: 0, retiradas: 0 };
+
+  const { compras } = agruparParcelamentos(pernas);
+  let consolidadas = 0;
+  let retiradas = 0;
+
+  for (const c of compras) {
+    // A proposta fica na parcela mais antiga que TENHA proposta — a âncora pode já ter
+    // sido lançada ou recusada antes, e nesse caso a compra segue pela mais antiga viva.
+    const dona = c.pernas.map((p) => propostaDaTransacao.get(p.id)).find(Boolean);
+    if (!dona) continue;
+
+    const outras = c.pernas
+      .map((p) => propostaDaTransacao.get(p.id))
+      .filter((p) => p && p.id !== dona.id)
+      .map((p) => p.id as string);
+
+    const { error } = await admin.from("finance_review_queue").update({
+      suggested_amount: c.valorDaCompra,
+      title: /\(\d+x\)$/.test(String(dona.title)) ? dona.title : `${dona.title} (${c.totalDeParcelas}x)`.slice(0, 160),
+      reasoning: [descreverParcelamento(c), dona.reasoning].filter(Boolean).join(" · ").slice(0, 1000),
+    }).eq("id", dona.id).eq("status", "pending");
+    if (error) throw error;
+    consolidadas += 1;
+
+    if (outras.length > 0) {
+      const { error: e2 } = await admin.from("finance_review_queue").update({
+        status: "superseded",
+        decision_note: "Parcela da mesma compra — decidida na proposta da compra",
+      }).in("id", outras).eq("status", "pending");
+      if (e2) throw e2;
+      retiradas += outras.length;
+    }
+  }
+
+  return { compras: consolidadas, retiradas };
 }
 
 /**
@@ -629,14 +771,23 @@ async function aprovar(
           .update({ reconciled: true, dismissed_reason: "Transferência entre contas próprias" })
           .in("id", [p.bank_transaction_id, p.related_transaction_id].filter(Boolean));
       } else if (p.kind === "create_payable") {
+        // Compra parcelada: o lançamento é da COMPRA, e o que ainda não venceu fica como
+        // saldo em aberto. Marcar a compra inteira como paga esconderia dívida real do
+        // fluxo de caixa — o cartão ainda vai cobrar as parcelas seguintes.
+        const parcelamento = await lerCompraParcelada(admin, p.bank_transaction_id);
+        const pago = parcelamento ? Math.min(parcelamento.jaPago, valor) : valor;
+        const aberto = Number((valor - pago).toFixed(2));
+
         const { data: criado, error: e1 } = await admin.from("payables").insert({
-          description: descricao,
+          description: parcelamento
+            ? `${descricao} (compra em ${parcelamento.totalDeParcelas}x)`.slice(0, 200)
+            : descricao,
           issue_date: data,
           due_date: data,
           amount: valor,
-          paid_amount: valor,
-          balance_amount: 0,
-          status: "paid",           // saiu do banco: já está pago por definição
+          paid_amount: pago,
+          balance_amount: aberto,
+          status: aberto > 0.005 ? "partially_paid" : "paid",
           expense_category: categoria,
           supplier_id: p.suggested_supplier_id,
           // Sem fornecedor cadastrado, o nome do extrato é a única identificação que
@@ -653,6 +804,25 @@ async function aprovar(
         const payableId = (criado as any).id as string;
         await admin.from("finance_review_queue").update({ created_payable_id: payableId }).eq("id", p.id);
         await admin.from("bank_transactions").update({ reconciled: true }).eq("id", p.bank_transaction_id);
+
+        // As outras parcelas saem da fila junto: são a mesma compra, e deixá-las pendentes
+        // faria a próxima varredura propô-las de novo, uma despesa por parcela — o defeito
+        // que este agrupamento existe para acabar.
+        if (parcelamento) {
+          const outras = parcelamento.pernas
+            .map((perna) => perna.id)
+            .filter((id) => id !== p.bank_transaction_id);
+          if (outras.length > 0) {
+            await admin.from("bank_transactions").update({
+              reconciled: true,
+              dismissed_reason: `Parcela da compra lançada em ${data} (${parcelamento.totalDeParcelas}x)`,
+            }).in("id", outras);
+            await admin.from("finance_review_queue").update({
+              status: "superseded",
+              decision_note: "Faz parte de uma compra parcelada já lançada",
+            }).in("bank_transaction_id", outras).eq("status", "pending");
+          }
+        }
 
         // Quitar a ordem de compra fecha o ciclo do suprimento: sem isto, a OC fica
         // "enviada" para sempre e ninguém sabe o que já foi pago.
