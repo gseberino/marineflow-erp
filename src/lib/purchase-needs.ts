@@ -93,6 +93,19 @@ export interface FreeTextInput {
   billing_unit_snapshot: string;
   quantity: number | string;
   unit_price_snapshot?: number | string | null;
+  /**
+   * O item é MATERIAL (compra-se) ou mão de obra digitada à mão?
+   *
+   * Vem classificado de fora porque a regra vive no banco
+   * (`free_text_is_material`), e reimplementá-la aqui criaria mais uma cópia de
+   * uma regra que já existe em três linguagens. Quando ausente, o comportamento
+   * é o antigo: todo texto livre com unidade 'unit' conta como compra.
+   *
+   * O caso real que motivou isto (OS-00060): "Instalação 2x Carregador DC/DC" e
+   * "Cabo elétrico 16mm²" chegam ao banco IDÊNTICOS — service_id nulo, unidade
+   * 'unit' — e os dois apareciam na mesma lista de itens a cotar.
+   */
+  is_material?: boolean;
 }
 
 export interface AvailabilityInput {
@@ -125,7 +138,10 @@ function num(v: number | string | null | undefined): number {
 
 /** Um item de texto livre só conta como compra se for material, não mão de obra. */
 export function isPurchasableFreeText(item: FreeTextInput): boolean {
-  return item.service_id === null && PURCHASABLE_BILLING_UNITS.has(item.billing_unit_snapshot);
+  if (item.service_id !== null) return false;
+  if (!PURCHASABLE_BILLING_UNITS.has(item.billing_unit_snapshot)) return false;
+  // Classificação explícita manda; sem ela, mantém o comportamento anterior.
+  return item.is_material !== false;
 }
 
 export function computePurchaseNeeds(input: ComputeInput): PurchaseNeeds {

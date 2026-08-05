@@ -63,10 +63,34 @@ export async function fetchPurchaseNeeds(serviceOrderId: string): Promise<Purcha
     }));
   }
 
+  /* Mão de obra digitada como texto livre não é compra. A separação vive no banco
+     (`free_text_is_material`) e é consultada em lote — reimplementar a regra aqui
+     criaria mais uma cópia de algo que já existe em TypeScript, Deno e SQL.
+     Caso real (OS-00060): "Instalação 2x Carregador DC/DC" e "Cabo 16mm²" chegam
+     idênticos — service_id nulo, unidade 'unit' — e os dois apareciam para cotar. */
+  const livres = (servicesRes.data ?? []) as any[];
+  const candidatos = livres
+    .filter((s) => s.service_id === null && s.billing_unit_snapshot === 'unit')
+    .map((s) => s.name_snapshot)
+    .filter(Boolean);
+
+  let ehMaterial: Record<string, boolean> = {};
+  if (candidatos.length) {
+    const { data, error } = await (supabase.rpc as any)('classify_free_text_materials', {
+      p_textos: [...new Set(candidatos)],
+    });
+    // Falha na classificação não pode esconder material a comprar: sem resposta,
+    // todos seguem entrando (comportamento anterior), e no máximo sobra ruído.
+    if (!error) ehMaterial = (data ?? {}) as Record<string, boolean>;
+  }
+
   return computePurchaseNeeds({
     serviceOrderId,
     parts,
-    freeTextItems: (servicesRes.data ?? []) as any[],
+    freeTextItems: livres.map((s) => ({
+      ...s,
+      is_material: ehMaterial[s.name_snapshot],
+    })),
     availability,
     onOrder,
   });

@@ -145,6 +145,26 @@ describe('computePurchaseNeeds — itens de texto livre', () => {
     expect(isPurchasableFreeText({ ...material, service_id: 'svc-1' })).toBe(false);
   });
 
+  /* Caso real da OS-00060: a tela sugeria cotar "Instalação 2x Carregador DC/DC"
+     junto com "Cabo 16mm²". Os dois chegam ao banco idênticos — service_id nulo,
+     unidade 'unit' —, então a distinção precisa vir classificada de fora. */
+  it('mão de obra digitada à mão não vira item de compra', () => {
+    const r = computePurchaseNeeds(input({
+      freeTextItems: [
+        { ...material, id: 'cabo', name_snapshot: 'Cabo elétrico 16mm²', is_material: true },
+        { ...material, id: 'instal', name_snapshot: 'Instalação 2x Carregador DC/DC 50A', is_material: false },
+      ],
+    }));
+    expect(r.items).toHaveLength(1);
+    expect(r.items[0].description).toBe('Cabo elétrico 16mm²');
+    expect(isPurchasableFreeText({ ...material, is_material: false })).toBe(false);
+  });
+
+  it('sem classificação, mantém o comportamento antigo (tudo entra)', () => {
+    const r = computePurchaseNeeds(input({ freeTextItems: [material] }));
+    expect(r.items).toHaveLength(1);
+  });
+
   it('ignora quantidade zero ou negativa', () => {
     const r = computePurchaseNeeds(input({
       freeTextItems: [{ ...material, quantity: 0 }, { ...material, id: 's2', quantity: -1 }],
