@@ -112,7 +112,9 @@ export const fieldOpsTools: ToolDef[] = [
   {
     name: "log_service_order_progress",
     description:
-      "Registra uma nota de PROGRESSO do serviço na OS (fica no histórico do técnico, com data e hora). Use para relatos do dia a dia: 'troquei as duas baterias', 'faltou peça X', 'cliente pediu mais um serviço'. Se veio de áudio, registre o que foi falado.",
+      "Registra uma nota de PROGRESSO do serviço na OS — texto no histórico, sem medir tempo. Use para relatos do dia a dia: 'troquei as duas baterias', 'faltou peça X', 'cliente pediu mais um serviço'. Se veio de áudio, registre o que foi falado. " +
+      "NÃO use quando a frase disser QUANTO TEMPO durou ('trabalhei 2h', 'fiquei 1h30 lá', 'foram 45 minutos') — isso é APONTAMENTO DE HORA e vai em log_service_order_hours, que grava a duração de verdade e entra no controle de tempo da OS. Uma nota de progresso não registra hora nenhuma. " +
+      "Na dúvida entre as duas: tem número de duração na frase? então é log_service_order_hours.",
     input_schema: {
       type: "object",
       properties: {

@@ -108,7 +108,9 @@ export const soOpsTools: ToolDef[] = [
   {
     name: "log_service_order_hours",
     description:
-      "Aponta HORA TRABALHADA na OS. Use quando disserem 'trabalhei 2h nessa OS', 'fiquei 1h30 lá', 'foram 45 minutos'. " +
+      "Aponta HORA TRABALHADA na OS — grava a DURAÇÃO no controle de tempo. Use SEMPRE que a frase disser quanto tempo durou: " +
+      "'trabalhei 2h nessa OS', 'fiquei 1h30 lá', 'foram 45 minutos', 'passei a manhã toda nisso — umas 4h'. " +
+      "Não confunda com log_service_order_progress, que só escreve um texto no histórico e NÃO registra tempo: se há duração na frase, é aqui. " +
       "Aceita duração em texto ('2h', '1h30', '90min') ou minutos. Sem técnico informado, é de quem está falando. " +
       "Sem horário de início, conta para trás a partir de agora — é como se aponta hora na prática, depois do trabalho feito.",
     input_schema: {

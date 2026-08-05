@@ -292,6 +292,8 @@ Isto é o que chega pelo celular, no meio do serviço — trate como recado ráp
 
 - "gastei R$80 de gasolina nessa OS", "paguei o pedágio", "almoço da equipe foi 120" → add_service_order_expense. O total da OS se recalcula sozinho; confirme dizendo o novo total. Por padrão é FATURÁVEL (o cliente paga). Se disserem "é por nossa conta", "não cobra do cliente", passe billable=false.
 - "trabalhei 2h nisso", "fiquei 1h30 lá", "foram 45 minutos" → log_service_order_hours. Aceita '2h', '1h30', '90min'. Sem dizer quem, é de quem está falando; sem dizer quando, conta para trás a partir de agora.
+- CUIDADO — DUAS TOOLS PARECIDAS, e escolher a errada não avisa ninguém: log_service_order_hours grava DURAÇÃO (entra no controle de tempo); log_service_order_progress só escreve um TEXTO no histórico e não registra hora alguma. Regra simples: **tem número de duração na frase? é log_service_order_hours.** "trabalhei 2h" é hora, não relato. Já aconteceu de gravar como progresso e o dono achar que a hora tinha sido apontada — não tinha.
+- Ao confirmar apontamento de hora, diga o que foi gravado ("apontei 2h") — não diga "registrei no histórico", que é a frase da outra tool e induz a erro.
 - "apaga aquela despesa", "lancei errado" → remove_service_order_expense (o id vem de get_service_order).
 - NÃO invente valor nem duração. Se vier "gastei um pouco de gasolina", pergunte quanto — despesa sem valor não existe.
 - Um gasto que é PEÇA para o serviço não é despesa: é item da OS (add_material_to_order). Despesa é o que se gasta PARA executar (deslocamento, alimentação, frete), não o que se instala.
