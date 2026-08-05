@@ -9,12 +9,12 @@ import {
 } from '@/components/ui/select';
 import {
   AlertTriangle, Camera, Check, ClipboardCheck, ClipboardList, Gauge, HelpCircle,
-  History, Loader2, Play,
+  History, Loader2, Play, RotateCcw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   useSurveyTrigger, useCaseEstimate, useSurveyQuestions, useServiceOrderSurvey,
-  useStartSurvey, useAnswerSurvey, useCloseSurvey, formatMinutes, finalContingency,
+  useStartSurvey, useAnswerSurvey, useCloseSurvey, useReopenSurvey, formatMinutes, finalContingency,
   uploadSurveyPhoto, surveyPhotoUrl, usePreviousAnswers, howLongAgo, canReuseAnswer,
   type SurveyQuestion,
 } from '@/hooks/use-service-survey';
@@ -48,10 +48,14 @@ export function SurveyPanel({
   const start = useStartSurvey();
   const answer = useAnswerSurvey();
   const close = useCloseSurvey();
+  const reabrir = useReopenSurvey();
 
   const [surveyId, setSurveyId] = useState<string | null>(null);
   const [idx, setIdx] = useState(0);
   const [resposta, setResposta] = useState('');
+  // Correção de resposta já gravada, por seq. Vale com o levantamento fechado.
+  const [corrigindo, setCorrigindo] = useState<number | null>(null);
+  const [correcao, setCorrecao] = useState('');
   const [confidence, setConfidence] = useState<'alta' | 'media' | 'baixa' | ''>('');
   const [rationale, setRationale] = useState('');
   const [foto, setFoto] = useState<string | null>(null);
@@ -370,23 +374,74 @@ export function SurveyPanel({
             {respostas.map((r) => (
               <li key={r.seq} className="border-b pb-2 text-sm last:border-0 last:pb-0">
                 <p className="text-xs text-muted-foreground">{r.question_snapshot}</p>
-                <div className="flex flex-wrap items-center gap-2">
-                  {r.skipped_reason ? (
-                    <span className="text-sm italic text-muted-foreground">
-                      não respondida — {r.skipped_reason}
-                    </span>
-                  ) : (
-                    <span className="font-medium">{r.answer_value || '—'}</span>
-                  )}
-                  {r.photo_path && (
-                    <a
-                      href={surveyPhotoUrl(r.photo_path)} target="_blank" rel="noreferrer"
-                      className="inline-flex items-center gap-1 text-xs text-primary underline"
+                {corrigindo === r.seq ? (
+                  /* Corrigir vale mesmo com o levantamento fechado. Quem mede
+                     erra, e o que estava travado era só a tela: o banco sempre
+                     permitiu. Levantamento intocável obriga a refazer tudo por
+                     causa de um número — ou, pior, a deixar o número errado
+                     sustentando o preço. */
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <Input
+                      autoFocus
+                      value={correcao}
+                      onChange={(e) => setCorrecao(e.target.value)}
+                      className="h-8 flex-1 text-sm"
+                    />
+                    <Button size="sm" variant="ghost" className="h-8" onClick={() => setCorrigindo(null)}>
+                      Cancelar
+                    </Button>
+                    <Button
+                      size="sm" className="h-8"
+                      disabled={!correcao.trim() || answer.isPending}
+                      onClick={() =>
+                        answer.mutate(
+                          {
+                            surveyId: (survey?.id ?? surveyId) as string,
+                            serviceOrderId, seq: r.seq,
+                            question: r.question_snapshot,
+                            templateId: r.template_id ?? undefined,
+                            answer: correcao.trim(),
+                          },
+                          {
+                            onSuccess: () => {
+                              setCorrigindo(null);
+                              toast.success('Resposta corrigida.');
+                            },
+                            onError: (e: any) => toast.error(e?.message || 'Erro ao corrigir'),
+                          },
+                        )}
                     >
-                      <Camera className="h-3 w-3" /> foto
-                    </a>
-                  )}
-                </div>
+                      Salvar
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-2">
+                    {r.skipped_reason ? (
+                      <span className="text-sm italic text-muted-foreground">
+                        não respondida — {r.skipped_reason}
+                      </span>
+                    ) : (
+                      <span className="font-medium">{r.answer_value || '—'}</span>
+                    )}
+                    {r.photo_path && (
+                      <a
+                        href={surveyPhotoUrl(r.photo_path)} target="_blank" rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-primary underline"
+                      >
+                        <Camera className="h-3 w-3" /> foto
+                      </a>
+                    )}
+                    <button
+                      className="text-xs text-muted-foreground underline hover:text-foreground"
+                      onClick={() => {
+                        setCorrigindo(r.seq);
+                        setCorrecao(r.answer_value || '');
+                      }}
+                    >
+                      corrigir
+                    </button>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
@@ -397,6 +452,26 @@ export function SurveyPanel({
         <p className="text-xs text-muted-foreground border-t pt-2">
           <strong>Quem levantou anotou:</strong> {survey.confidence_rationale}
         </p>
+      )}
+
+      {/* Fechar não é ponto sem volta. Foi-se ao local de novo, achou-se o que
+          faltava — reabrir devolve a fila de perguntas de onde parou, sem
+          apagar nada do que já foi respondido. */}
+      {fechado && (
+        <Button
+          variant="outline" size="sm" className="w-full"
+          disabled={reabrir.isPending}
+          onClick={() =>
+            reabrir.mutate(
+              { surveyId: survey!.id, serviceOrderId },
+              {
+                onSuccess: () => toast.success('Levantamento reaberto — as respostas foram mantidas.'),
+                onError: (e: any) => toast.error(e?.message || 'Erro ao reabrir'),
+              },
+            )}
+        >
+          <RotateCcw className="mr-1.5 h-4 w-4" /> Reabrir para completar
+        </Button>
       )}
     </Card>
   );

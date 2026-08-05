@@ -175,9 +175,15 @@ as $fn$
       when 'contem' then q.answer_value ilike '%' || r.match_value || '%'
       when 'sim'    then lower(trim(q.answer_value)) in ('sim', 's', 'true')
       when 'nao'    then lower(trim(q.answer_value)) in ('não', 'nao', 'n', 'false')
+      -- Faixa é [min, max): inclusiva embaixo, EXCLUSIVA em cima. Faixas
+      -- contíguas ("até 60" e "de 60 a 100") são o uso normal, e com o topo
+      -- inclusivo uma corrente de exatamente 60 A casaria com as duas — duas
+      -- proteções para o mesmo circuito, na mesma proposta. Na dúvida sobe
+      -- para a faixa maior, que é o lado seguro: fusível de 60 A com 60 A
+      -- passando abre em serviço.
       when 'faixa'  then q.numero is not null
                         and (r.min_value is null or q.numero >= r.min_value)
-                        and (r.max_value is null or q.numero <= r.max_value)
+                        and (r.max_value is null or q.numero < r.max_value)
       else false
     end
   ),

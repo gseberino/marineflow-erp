@@ -106,7 +106,11 @@ export function useServiceOrderSurvey(serviceOrderId: string | undefined) {
       const { data, error } = await supabase
         .from('service_surveys')
         .select(
-          '*, service_survey_answers(seq, question_snapshot, answer_value, skipped_reason, photo_path, answered_at)',
+          // template_id vem junto porque a correção de uma resposta precisa
+          // regravá-lo: sem ele a resposta deixa de casar com a pergunta do
+          // catálogo, e some tanto do histórico do ativo quanto das regras de
+          // material.
+          '*, service_survey_answers(seq, template_id, question_snapshot, answer_value, skipped_reason, photo_path, answered_at)',
         )
         .eq('service_order_id', serviceOrderId!)
         .order('created_at', { ascending: false })
@@ -293,6 +297,36 @@ export function useCloseSurvey() {
           contingency_pct: base === null ? null : base + ajuste,
           cases_used: (input.estimate?.baseado_em as any) ?? null,
           answered_at: new Date().toISOString(),
+        })
+        .eq('id', input.surveyId);
+      if (error) throw error;
+    },
+    onSuccess: (_r, input) => {
+      qc.invalidateQueries({ queryKey: ['service-survey', input.serviceOrderId] });
+    },
+  });
+}
+
+/**
+ * Reabre um levantamento fechado, sem apagar nada.
+ *
+ * Fechar não pode ser ponto sem volta: voltou-se ao local, achou-se o que
+ * faltava, e obrigar a refazer as nove perguntas do zero é o caminho mais curto
+ * para ninguém mais levantar nada. A confiança e a estimativa são limpas de
+ * propósito — foram um julgamento sobre um conjunto de respostas que agora vai
+ * mudar, e mantê-las seria carimbar de novo o que não foi reavaliado.
+ */
+export function useReopenSurvey() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { surveyId: string; serviceOrderId?: string }) => {
+      const { error } = await supabase
+        .from('service_surveys')
+        .update({
+          status: 'draft',
+          confidence: null,
+          confidence_rationale: null,
+          answered_at: null,
         })
         .eq('id', input.surveyId);
       if (error) throw error;
