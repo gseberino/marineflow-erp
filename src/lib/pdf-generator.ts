@@ -73,6 +73,24 @@ export type PDFData = {
     bank_account?: string;
     pix_key?: string;
   };
+  /**
+   * Levantamento feito antes de orçar.
+   *
+   * Vai para o documento porque é ele que sustenta o preço diante do cliente:
+   * "medi a distância do banco ao quadro, são 14 metros — daí a bitola e o
+   * valor do cabo". Sem isso o orçamento é um número sem defesa, e a conversa
+   * de desconto começa do zero.
+   */
+  survey?: {
+    answered_at?: string | null;
+    rationale?: string | null;
+    answers: Array<{
+      question: string;
+      answer?: string | null;
+      skipped?: string | null;
+      hasPhoto?: boolean;
+    }>;
+  };
   serviceOrder: {
     service_order_number: string;
     status: string;
@@ -947,6 +965,41 @@ ${companyHeaderHTML(data.company, docTypeLabel, docNumber)}
   <div class="section-title">${isQuote ? 'Objetivo do Projeto / Diagnóstico' : 'Relato do Problema'}</div>
   <div style="white-space:pre-wrap;font-size:11px;line-height:1.6;">${esc(data.serviceOrder.problem_description || 'Nenhuma descrição fornecida.')}</div>
 </div>
+
+${(data.survey?.answers?.length || 0) > 0 ? `
+<div class="card">
+  <div class="section-title">Levantamento Técnico no Local</div>
+  <div style="font-size:10px;color:var(--text-muted);margin-bottom:6px;">
+    O que foi verificado antes de orçar${data.survey?.answered_at
+      ? ` — ${new Date(data.survey.answered_at).toLocaleDateString('pt-BR')}`
+      : ''}.
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:52%;">Verificado</th>
+        <th style="width:48%;">Constatação</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${data.survey!.answers
+        .map((a) => `
+        <tr>
+          <td style="font-size:10px;">${esc(a.question)}</td>
+          <td style="font-size:10px;">${
+            a.skipped
+              ? `<span style="color:var(--text-muted);font-style:italic;">não foi possível verificar — ${esc(a.skipped)}</span>`
+              : esc(a.answer || '—')
+          }${a.hasPhoto ? ' <span style="color:var(--primary);">📷</span>' : ''}</td>
+        </tr>`)
+        .join('')}
+    </tbody>
+  </table>
+  ${data.survey?.rationale ? `
+  <div style="margin-top:8px;font-size:10px;line-height:1.5;">
+    <strong>Conclusão de quem levantou:</strong> ${esc(data.survey.rationale)}
+  </div>` : ''}
+</div>` : ''}
 
 ${data.services.length > 0 ? `
 <div class="section-title">Cronograma de Serviços / Mão de Obra</div>
