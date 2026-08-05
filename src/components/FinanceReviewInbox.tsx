@@ -11,7 +11,7 @@
 // PRINCÍPIO DE INTERFACE (correção de 29/07): toda ação que o gestor precisa tomar fica NA
 // LINHA, visível. A versão anterior escondia a troca de categoria dentro do "por que o
 // sistema propôs isto" — ação atrás de explicação é ação que não existe.
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -37,8 +37,12 @@ import {
 } from '@/hooks/use-finance-review';
 import {
   Sparkles, Check, X, ChevronDown, ArrowLeftRight, TrendingDown, Info, RefreshCw,
-  CopyX, Wand2, CreditCard, Landmark, AlertTriangle,
+  CopyX, Wand2, CreditCard, Landmark, AlertTriangle, Users, List,
 } from 'lucide-react';
+import {
+  agruparPorFavorecido, resumoDoAgrupamento, SEM_CATEGORIA,
+  type GrupoDeFavorecido,
+} from '@/lib/finance-inbox-grouping';
 
 function corDaConfianca(c: number): string {
   if (c >= 85) return 'bg-success/10 text-success border-success/30';
@@ -355,6 +359,129 @@ function LinhaProposta({
   );
 }
 
+/**
+ * Um favorecido e tudo que se deve a ele, como uma decisão só.
+ *
+ * A escolha de desenho que importa: a CATEGORIA vale para o grupo inteiro, mas o botão de
+ * aprovar só alcança o que está abaixo do limite de lote. Classificar é barato e
+ * reversível; aprovar cria lançamento. Assim as 34 compras no mesmo lugar viram uma
+ * pergunta, e a saída de R$ 4 mil do mesmo favorecido continua pedindo olho — só que já
+ * chega classificada.
+ */
+function CartaoDoFavorecido({
+  grupo, categoria, favorecidoId, osId, onMudar, onAprovarLote, onCriarRegra, ocupado, children,
+}: {
+  grupo: GrupoDeFavorecido;
+  categoria: string;
+  favorecidoId: string | null;
+  osId: string | null;
+  onMudar: (c: Correcao) => void;
+  onAprovarLote: () => void;
+  onCriarRegra: () => void;
+  ocupado: boolean;
+  children: ReactNode;
+}) {
+  const { formatCurrency, formatDate } = useI18n();
+  const [aberto, setAberto] = useState(false);
+
+  const podeAprovar = grupo.emLote.length > 0 && !!categoria && categoria !== SEM_CATEGORIA;
+
+  return (
+    <Card className="p-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <Users className="h-4 w-4 shrink-0 text-primary" />
+            <span className="truncate font-medium">{grupo.rotulo}</span>
+            <Badge variant="secondary" className="shrink-0 text-xs">
+              {grupo.propostas.length === 1 ? '1 proposta' : `${grupo.propostas.length} propostas`}
+            </Badge>
+            {grupo.semCategoria && (
+              <Badge variant="outline" className="shrink-0 border-amber-500/50 text-xs text-amber-600">
+                sem categoria
+              </Badge>
+            )}
+            {/* Duas categorias no mesmo favorecido é o sistema em dúvida, não variedade
+                legítima — e é exatamente onde uma escolha sua vale mais. */}
+            {grupo.categorias.length > 1 && (
+              <Badge variant="outline" className="shrink-0 text-xs">
+                {grupo.categorias.length} categorias diferentes
+              </Badge>
+            )}
+          </div>
+
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+            <span className="font-semibold text-foreground">{formatCurrency(grupo.total)}</span>
+            {grupo.primeiraData && grupo.ultimaData && (
+              <span>
+                {grupo.primeiraData === grupo.ultimaData
+                  ? formatDate(grupo.primeiraData)
+                  : `${formatDate(grupo.primeiraData)} a ${formatDate(grupo.ultimaData)}`}
+              </span>
+            )}
+            {grupo.individuais.length > 0 && (
+              <span className="text-amber-600">
+                {grupo.individuais.length} exige(m) revisão individual
+              </span>
+            )}
+          </div>
+
+          <div className="mt-2 max-w-sm">
+            <CategoriaDespesaSelect
+              valor={categoria}
+              onMudar={(v) => onMudar({ category: v })}
+              grupoSugerido={grupo.propostas[0]?.dre_group ?? null}
+            />
+          </div>
+
+          <VinculoDaCategoria
+            categoria={categoria}
+            favorecidoId={favorecidoId}
+            osId={osId}
+            onMudar={(v) => onMudar(v)}
+            ocupado={ocupado}
+          />
+        </div>
+
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <Button
+            size="sm"
+            disabled={ocupado || !podeAprovar}
+            onClick={onAprovarLote}
+            title={
+              grupo.emLote.length === 0
+                ? 'Todas deste favorecido passam do limite de lote — aprove uma a uma abaixo'
+                : !categoria || categoria === SEM_CATEGORIA
+                  ? 'Escolha a categoria antes de aprovar'
+                  : undefined
+            }
+          >
+            <Check className="mr-2 h-4 w-4" />
+            {grupo.emLote.length > 0
+              ? `Aprovar ${grupo.emLote.length} · ${formatCurrency(grupo.totalEmLote)}`
+              : 'Nada em lote aqui'}
+          </Button>
+          <Button size="sm" variant="ghost" disabled={ocupado} onClick={onCriarRegra}>
+            <Wand2 className="mr-2 h-4 w-4" />
+            Virar regra
+          </Button>
+        </div>
+      </div>
+
+      <Collapsible open={aberto} onOpenChange={setAberto}>
+        <CollapsibleTrigger asChild>
+          <button type="button" className="mt-2 inline-flex items-center gap-1 text-xs text-primary hover:underline">
+            <Info className="h-3 w-3" />
+            {aberto ? 'Esconder' : `Ver as ${grupo.propostas.length} linhas`}
+            <ChevronDown className={`h-3 w-3 transition-transform ${aberto ? 'rotate-180' : ''}`} />
+          </button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="mt-2 space-y-2">{children}</CollapsibleContent>
+      </Collapsible>
+    </Card>
+  );
+}
+
 export interface SementeDeRegra {
   match_type: 'counterparty' | 'supplier';
   match_value: string;
@@ -382,6 +509,16 @@ export function FinanceReviewInbox({
   // de estabelecimento, a conta tem poucos gastos grandes de fornecedor. Misturar os dois
   // obriga a trocar de raciocínio a cada linha.
   const [origem, setOrigem] = useState<'todas' | 'bank' | 'credit_card'>('todas');
+
+  /**
+   * Agrupado por favorecido só quando há volume que justifique.
+   *
+   * Com meia dúzia de propostas o agrupamento só acrescenta um clique para abrir cada
+   * grupo; com mil, ele é a diferença entre 253 decisões e 558. O limiar deixa a tela do
+   * dia a dia como sempre foi e liga o modo de mutirão sozinho, quando ele passa a valer.
+   */
+  const [modo, setModo] = useState<'favorecido' | 'lista' | null>(null);
+  const agrupar = modo === null ? propostas.length >= 20 : modo === 'favorecido';
 
   const porOrigem = useMemo(
     () => (origem === 'todas'
@@ -430,6 +567,55 @@ export function FinanceReviewInbox({
     const overrides: Record<string, Correcao> = {};
     for (const id of ids) if (correcoes[id]) overrides[id] = correcoes[id];
     aprovar.mutate({ ids, overrides }, { onSuccess: () => setSelecionadas(new Set()) });
+  };
+
+  // Calculado nos dois modos: é uma passada só na lista, e o botão precisa saber quantos
+  // favorecidos existem ANTES de alguém trocar de modo — senão ele oferece "Por favorecido
+  // (0)" justamente quando o agrupamento seria útil.
+  const grupos = useMemo(() => agruparPorFavorecido(porOrigem, LIMITE_LOTE), [porOrigem]);
+  const resumo = useMemo(() => resumoDoAgrupamento(grupos), [grupos]);
+
+  /**
+   * A categoria que vale para o grupo.
+   *
+   * Sai da correção já feita; se não houve, só assume a sugestão do sistema quando ela é a
+   * MESMA em todas as linhas. Grupo em que o sistema hesitou entre duas categorias começa
+   * em branco de propósito: preencher com uma delas esconderia a hesitação, e o botão de
+   * aprovar aplicaria a escolha do sistema como se fosse a sua.
+   */
+  const estadoDoGrupo = (g: GrupoDeFavorecido): Correcao => {
+    const corrigida = g.propostas.map((p) => correcoes[p.id]).find((c) => c?.category);
+    const unica = g.categorias.length === 1 ? g.categorias[0] : '';
+    return {
+      category: corrigida?.category ?? (unica === SEM_CATEGORIA ? '' : unica),
+      payeeId: g.propostas.map((p) => correcoes[p.id]?.payeeId ?? p.suggested_payee_id).find(Boolean) ?? null,
+      serviceOrderId: g.propostas.map((p) => correcoes[p.id]?.serviceOrderId ?? p.suggested_service_order_id).find(Boolean) ?? null,
+    };
+  };
+
+  /** Uma escolha no cabeçalho vira correção em cada linha — inclusive nas grandes. */
+  const corrigirGrupo = (g: GrupoDeFavorecido, c: Correcao) => {
+    setCorrecoes((m) => {
+      const n = { ...m };
+      for (const p of g.propostas) n[p.id] = { ...n[p.id], ...c };
+      return n;
+    });
+  };
+
+  const aprovarGrupo = (g: GrupoDeFavorecido) => {
+    const ids = g.emLote.map((p) => p.id);
+    if (ids.length === 0) return;
+    const overrides: Record<string, Correcao> = {};
+    for (const id of ids) if (correcoes[id]) overrides[id] = correcoes[id];
+    aprovar.mutate({ ids, overrides });
+  };
+
+  const criarRegraDoGrupo = (g: GrupoDeFavorecido) => {
+    onCriarRegra?.({
+      match_type: g.supplierId ? 'supplier' : 'counterparty',
+      match_value: g.supplierId ?? g.rotulo,
+      set_category: estadoDoGrupo(g).category || null,
+    });
   };
 
   const criarRegraDaLinha = (p: PropostaFinanceira) => {
@@ -537,13 +723,38 @@ export function FinanceReviewInbox({
           </div>
         )}
 
+        {propostas.length >= 20 && (
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <Button
+              size="sm" variant={agrupar ? 'default' : 'outline'}
+              className="h-7 gap-1.5 text-xs" onClick={() => setModo('favorecido')}
+            >
+              <Users className="h-3 w-3" />Por favorecido ({grupos.length})
+            </Button>
+            <Button
+              size="sm" variant={!agrupar ? 'default' : 'outline'}
+              className="h-7 gap-1.5 text-xs" onClick={() => setModo('lista')}
+            >
+              <List className="h-3 w-3" />Uma a uma ({porOrigem.length})
+            </Button>
+            {agrupar && resumo.repetidos > 0 && (
+              <span className="text-xs text-muted-foreground">
+                {resumo.propostasEmRepetidos} linhas repetidas se resolvem em{' '}
+                {resumo.repetidos === 1 ? 'uma decisão' : `${resumo.repetidos} decisões`}
+              </span>
+            )}
+          </div>
+        )}
+
         {propostas.length > 0 && (
           <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
             {[
               { rotulo: 'Propostas', valor: String(porOrigem.length) },
               { rotulo: 'Valor total', valor: formatCurrency(totalValor) },
-              { rotulo: `Até ${formatCurrency(LIMITE_LOTE)}`, valor: String(lote.length) },
-              { rotulo: 'Revisar uma a uma', valor: String(individuais.length) },
+              { rotulo: agrupar ? 'Favorecidos' : `Até ${formatCurrency(LIMITE_LOTE)}`,
+                valor: String(agrupar ? grupos.length : lote.length) },
+              { rotulo: agrupar ? 'Sem categoria' : 'Revisar uma a uma',
+                valor: String(agrupar ? resumo.semCategoria : individuais.length) },
             ].map((k) => (
               <div key={k.rotulo} className="rounded-lg border p-2">
                 <p className="truncate text-xs text-muted-foreground">{k.rotulo}</p>
@@ -564,7 +775,31 @@ export function FinanceReviewInbox({
         </Card>
       )}
 
-      {lote.length > 0 && (
+      {agrupar && grupos.map((g) => {
+        const estado = estadoDoGrupo(g);
+        return (
+          <CartaoDoFavorecido
+            key={g.chave}
+            grupo={g}
+            categoria={estado.category ?? ''}
+            favorecidoId={estado.payeeId ?? null}
+            osId={estado.serviceOrderId ?? null}
+            onMudar={(c) => corrigirGrupo(g, c)}
+            onAprovarLote={() => aprovarGrupo(g)}
+            onCriarRegra={() => criarRegraDoGrupo(g)}
+            ocupado={ocupado}
+          >
+            {g.propostas.map((p) => (
+              <LinhaProposta
+                key={p.id} {...propsComuns(p)} modoLote={false}
+                selecionada={false} onSelecionar={() => {}}
+              />
+            ))}
+          </CartaoDoFavorecido>
+        );
+      })}
+
+      {!agrupar && lote.length > 0 && (
         <div className="space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 p-2">
             <div className="flex items-center gap-2">
@@ -600,7 +835,7 @@ export function FinanceReviewInbox({
         </div>
       )}
 
-      {individuais.length > 0 && (
+      {!agrupar && individuais.length > 0 && (
         <div className="space-y-2">
           <div className="rounded-lg border bg-muted/30 p-2">
             <p className="text-sm font-medium">

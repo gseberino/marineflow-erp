@@ -15,8 +15,8 @@ const { propostas, estadoDaFila, aprovarMock, duplicataMock, regraMock } = vi.ho
   aprovarMock: vi.fn(),
   duplicataMock: vi.fn(),
   regraMock: vi.fn(),
-  /** Estado que o teste do erro troca — o resto dos casos usa o padrão. */
-  estadoDaFila: { error: null as Error | null },
+  /** Estado que os testes de erro e de agrupamento trocam; o resto usa o padrão. */
+  estadoDaFila: { error: null as Error | null, dados: null as unknown[] | null },
   propostas: [
     {
       id: 'p1', kind: 'create_payable', status: 'pending',
@@ -51,7 +51,7 @@ vi.mock('@/hooks/use-finance-review', async (importOriginal) => {
   return {
     ...real,
     useFinanceReviewQueue: () => ({
-      data: estadoDaFila.error ? [] : propostas,
+      data: estadoDaFila.error ? [] : (estadoDaFila.dados ?? propostas),
       isLoading: false,
       error: estadoDaFila.error,
     }),
@@ -125,6 +125,77 @@ describe('FinanceReviewInbox', () => {
   it('marca a transferência entre contas como fora do resultado', async () => {
     renderInbox();
     expect(await screen.findByText('Não entra no resultado')).toBeInTheDocument();
+  });
+});
+
+describe('agrupado por favorecido', () => {
+  // Metade da fila cai em "Outras despesas", e essas vêm de poucos favorecidos repetidos:
+  // 34 compras no mesmo lugar são UMA pergunta. O agrupamento existe para isso — mas não
+  // pode virar um atalho para aprovar despesa grande sem olhar.
+  const miudas = Array.from({ length: 22 }, (_, i) => ({
+    id: `g${i}`, kind: 'create_payable', status: 'pending',
+    bank_transaction_id: `tg${i}`, related_transaction_id: null,
+    title: 'Despesa: SPG*LOJA CURITIBA', reasoning: null, confidence: 30,
+    suggested_amount: 9, suggested_date: '2026-03-01',
+    suggested_category: 'Outras despesas', suggested_description: 'SPG*LOJA CURITIBA',
+    suggested_supplier_id: null, dre_group: 'despesa_operacional',
+    created_at: '2026-03-01T10:00:00Z',
+    bank_transactions: { counterparty_name: 'SPG*LOJA CURITIBA', source_type: 'credit_card' },
+  }));
+  const grande = {
+    ...miudas[0], id: 'g-grande', bank_transaction_id: 'tg-grande', suggested_amount: 4000,
+  };
+
+  afterEach(() => { estadoDaFila.dados = null; aprovarMock.mockClear(); });
+
+  it('junta o favorecido repetido numa decisão só', async () => {
+    estadoDaFila.dados = [...miudas, grande];
+    renderInbox();
+    // O badge do grupo, não o resumo da barra: são 23 linhas numa decisão só.
+    expect(await screen.findByText('23 propostas')).toBeInTheDocument();
+    expect(screen.getByText(/1 exige\(m\) revisão individual/)).toBeInTheDocument();
+    expect(screen.getByText(/23 linhas repetidas se resolvem em uma decisão/)).toBeInTheDocument();
+  });
+
+  it('não aprova sem categoria escolhida', async () => {
+    estadoDaFila.dados = miudas;
+    renderInbox();
+    expect(await screen.findByRole('button', { name: /Aprovar 22/ })).toBeDisabled();
+  });
+
+  it('uma categoria no cabeçalho aprova as 22 — e deixa a de R$ 4 mil de fora', async () => {
+    estadoDaFila.dados = [...miudas, grande];
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    renderInbox();
+
+    await user.click((await screen.findAllByRole('combobox'))[0]);
+    await user.click(await screen.findByText('Peças e materiais'));
+
+    const botao = await screen.findByRole('button', { name: /Aprovar 22/ });
+    await user.click(botao);
+
+    const [chamada] = aprovarMock.mock.calls[0];
+    expect(chamada.ids).toHaveLength(22);
+    expect(chamada.ids).not.toContain('g-grande');
+    // A categoria escolhida uma vez vale para todas as linhas aprovadas.
+    expect(chamada.overrides.g0.category).toBe('Peças e materiais');
+  });
+
+  it('a linha grande recebe a classificação do grupo, mesmo ficando de fora da aprovação', async () => {
+    // É o ponto do desenho: classificar é barato, aprovar é caro. A grande chega à revisão
+    // individual já classificada, então o gestor decide UMA coisa, não duas.
+    estadoDaFila.dados = [...miudas, grande];
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    renderInbox();
+
+    await user.click((await screen.findAllByRole('combobox'))[0]);
+    await user.click(await screen.findByText('Peças e materiais'));
+    await user.click(await screen.findByText(/Ver as 23 linhas/));
+
+    const selects = await screen.findAllByRole('combobox');
+    // Cabeçalho + 23 linhas, todas com a mesma categoria aplicada.
+    expect(selects.length).toBeGreaterThan(23);
+    expect(screen.getAllByText('Peças e materiais').length).toBeGreaterThan(1);
   });
 });
 
