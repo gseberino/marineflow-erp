@@ -73,6 +73,57 @@ async function chamarFinanceReview(ctx: ToolCtx, body: Record<string, unknown>) 
   return dados;
 }
 
+/**
+ * Quantas transações do extrato esta regra alcança.
+ *
+ * Regra que não pega nada nasce calada e assim permanece: o gestor acha que ensinou o
+ * sistema, a fila continua igual, e não há erro em lugar nenhum para investigar. Foi o que
+ * aconteceu com uma regra por NOME criada como "POSTO PAULINHO" enquanto o extrato escreve
+ * "POSTO PAULINHO NAVEGANTES BRA" — a comparação por nome é do nome inteiro, então ela
+ * nunca valeria para nada.
+ *
+ * `alcanca_por_trecho` existe para dar o diagnóstico junto do sintoma: quando o alvo não
+ * casa como está mas apareceria como pedaço de texto, o problema é o TIPO da regra, não a
+ * grafia — e a resposta pode dizer isso em vez de deixar o usuário adivinhando.
+ */
+async function alcanceDaRegra(
+  ctx: ToolCtx,
+  tipo: string,
+  valor: string,
+): Promise<{ alcanca: number; alcanca_por_trecho?: number }> {
+  const base = () => ctx.sb
+    .from("bank_transactions")
+    .select("id", { count: "exact", head: true })
+    .eq("transaction_type", "debit");
+
+  const escapado = valor.replace(/[%_]/g, "");
+  const porTrecho = await base()
+    .or(`description.ilike.%${escapado}%,counterparty_name.ilike.%${escapado}%`);
+  const trecho = porTrecho.count ?? 0;
+
+  if (tipo === "text") return { alcanca: trecho };
+
+  if (tipo === "counterparty") {
+    const exato = await base().ilike("counterparty_name", escapado);
+    return { alcanca: exato.count ?? 0, alcanca_por_trecho: trecho };
+  }
+
+  if (tipo === "document") {
+    const digitos = valor.replace(/\D/g, "");
+    const r = await base().eq("counterparty_document", digitos);
+    return { alcanca: r.count ?? 0 };
+  }
+
+  // Fornecedor: o motor reconhece pelo documento OU pelo nome dele no histórico, então a
+  // contagem aqui usa o nome cadastrado como trecho — a mesma evidência que a regra usa.
+  const { data: f } = await ctx.sb
+    .from("suppliers").select("name, cnpj_cpf").eq("id", valor).maybeSingle();
+  const nome = String((f as any)?.name ?? "").split(/\s+/)[0] ?? "";
+  if (!nome) return { alcanca: 0 };
+  const r = await base().or(`description.ilike.%${nome}%,counterparty_name.ilike.%${nome}%`);
+  return { alcanca: r.count ?? 0 };
+}
+
 export const financeRulesTools: ToolDef[] = [
   // ── ENSINAR: muda o que o sistema propõe, não o que ele já lançou ──────────────
   {
@@ -96,7 +147,14 @@ export const financeRulesTools: ToolDef[] = [
         },
         valor_de_busca: {
           type: "string",
-          description: "O trecho, nome do fornecedor, documento ou nome procurado.",
+          description:
+            "O trecho, nome do fornecedor, documento ou nome procurado. " +
+            "Com reconhecer_por='texto', VÁRIOS trechos podem vir separados por vírgula e " +
+            "cada um vira uma regra — use isso quando o usuário listar sinônimos e " +
+            "abreviações para a mesma categoria (ex: 'PANIFIC, PADAR, CONFEIT'). " +
+            "O trecho casa em qualquer parte do histórico, inclusive colado a outras " +
+            "letras: 'CONFEIT' pega 'LMGCONFEITARIA'. Prefira o radical curto e sem " +
+            "acento, que cobre as variações de uma vez.",
         },
         categoria: { type: "string", description: "Categoria do plano de contas a aplicar." },
         valor_minimo: { type: "number", description: "Opcional: só vale acima deste valor." },
@@ -159,29 +217,53 @@ export const financeRulesTools: ToolDef[] = [
         alvo = lista[0].id;
       }
 
-      const { data, error } = await ctx.sb
-        .from("finance_rules")
-        .insert({
-          match_type: tipo,
-          match_value: alvo,
-          direction: "debit",
-          set_category: cat.name,
-          set_dre_group: cat.dre_group,
-          min_amount: args.valor_minimo ?? null,
-          max_amount: args.valor_maximo ?? null,
-          autonomy: args.lancar_sozinha ? "apply" : "suggest",
-          origin: "user",
-          status: "active",
-          reasoning: "Criada pelo assistente a pedido do usuário.",
-        })
-        .select("id")
-        .single();
+      /**
+       * Vários trechos numa tacada, quando a regra é por texto.
+       *
+       * O usuário pediu seis termos para "Alimentação de campo" — PANIFICADORA, PANIFIC,
+       * PADARIA, PADAR, CONFEITARIA, CONFEIT — e o assistente criou UM. Os outros cinco
+       * simplesmente não existiam, e a tela seguia sem classificar padaria nenhuma sem
+       * nada indicando que faltava regra. Quem lista sinônimos está descrevendo UMA
+       * intenção; obrigá-lo a repetir o pedido seis vezes é transformar a ferramenta em
+       * formulário.
+       */
+      const alvos = tipo === "text"
+        ? [...new Set(alvo.split(/[,;]/).map((t) => t.trim()).filter(Boolean))]
+        : [alvo];
 
-      if (error) {
-        if (/uma_por_alvo|duplicate key/i.test(error.message)) {
-          return { error: "Já existe uma regra ativa para este mesmo alvo. Edite a existente." };
+      const criadas: Array<Record<string, unknown>> = [];
+      const recusadas: string[] = [];
+
+      for (const valor of alvos) {
+        const { data, error } = await ctx.sb
+          .from("finance_rules")
+          .insert({
+            match_type: tipo,
+            match_value: valor,
+            direction: "debit",
+            set_category: cat.name,
+            set_dre_group: cat.dre_group,
+            min_amount: args.valor_minimo ?? null,
+            max_amount: args.valor_maximo ?? null,
+            autonomy: args.lancar_sozinha ? "apply" : "suggest",
+            origin: "user",
+            status: "active",
+            reasoning: "Criada pelo assistente a pedido do usuário.",
+          })
+          .select("id")
+          .single();
+
+        if (error) {
+          recusadas.push(/uma_por_alvo|duplicate key/i.test(error.message)
+            ? `${valor}: já existe uma regra ativa para este alvo`
+            : `${valor}: ${error.message}`);
+          continue;
         }
-        return { error: error.message };
+        criadas.push({ id: (data as any).id, alvo: valor, ...await alcanceDaRegra(ctx, tipo, valor) });
+      }
+
+      if (criadas.length === 0) {
+        return { error: "Nenhuma regra criada.", detalhes: recusadas };
       }
 
       // A regra nova alcança de imediato o que JÁ está esperando decisão. Sem isto, quem
@@ -190,15 +272,22 @@ export const financeRulesTools: ToolDef[] = [
       // Reclassificar troca a sugestão e não aprova nada, então é seguro rodar sozinho.
       const efeito = await chamarFinanceReview(ctx, { action: "reclassify" });
 
+      // Regra que não alcança nada é regra morta, e hoje ela nascia calada. Dizer o número
+      // na hora é o que separa "ensinei o sistema" de "achei que tinha ensinado".
+      const mortas = criadas.filter((c) => Number(c.alcanca ?? 0) === 0);
+
       return {
         ok: true,
-        id: (data as any).id,
-        resumo: `${args.valor_de_busca} → ${cat.name}`,
+        categoria: cat.name,
+        regras_criadas: criadas,
+        nao_criadas: recusadas.length > 0 ? recusadas : undefined,
         lanca_sozinha: !!args.lancar_sozinha,
         propostas_reclassificadas: Number((efeito as any)?.atualizadas ?? 0),
-        vale_para: (efeito as any)?.atualizadas
-          ? `as próximas análises E ${(efeito as any).atualizadas} proposta(s) que já estavam na fila`
-          : "as próximas análises do extrato",
+        aviso: mortas.length > 0
+          ? `Estas não alcançam nenhuma transação do extrato hoje: ${mortas.map((m) => m.alvo).join(", ")}. `
+            + "Confira a grafia — e, se o alvo era um nome de estabelecimento, prefira "
+            + "reconhecer_por='texto' com um trecho curto, porque a regra por nome exige o nome inteiro."
+          : undefined,
       };
     },
   },

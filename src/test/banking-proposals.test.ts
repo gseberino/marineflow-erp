@@ -294,6 +294,37 @@ describe("regras que o gestor ensina", () => {
     expect(p.appliedRuleId).toBeNull();
   });
 
+  it("regra de texto casa com o termo COLADO em outra palavra", () => {
+    // Nomes reais do extrato: o estabelecimento aparece grudado ("LMGCONFEITARIA") ou
+    // abreviado ("CONFEIT BANDEIRANTES", "Farmapam"). Uma regra de trecho tem de pegar os
+    // dois — quem escreve "CONFEIT" está descrevendo um pedaço de texto, não uma palavra.
+    const casos: Array<[string, string]> = [
+      ["CONFEIT", "LMGCONFEITARIA         ITAJAI        BRA"],
+      ["CONFEIT", "CONFEIT BANDEIRANTES   ITAJAI        BRA"],
+      ["PANIFIC", "PANIFICBANDEIRANTES"],
+      ["FARMA", "Farmapam 1/2"],
+      ["PADAR", "PADARIADOZE"],
+    ];
+    for (const [termo, descricao] of casos) {
+      const r = regra({ id: `r-${termo}`, match_type: "text", match_value: termo, set_category: "Alimentação de campo" });
+      const p = montarProposta(tx({ description: descricao }), fornecedores, undefined, [r]);
+      expect(p.suggestedCategory, `${termo} deveria casar com ${descricao}`)
+        .toBe("Alimentação de campo");
+    }
+  });
+
+  it("regra por nome da contraparte é EXATA — e é isso que a torna frágil", () => {
+    // Documentado aqui de propósito: a regra por nome compara o nome inteiro, então
+    // "POSTO PAULINHO" NÃO alcança "POSTO PAULINHO NAVEGANTES BRA". Uma regra assim nasce
+    // morta e nada avisa. É o motivo de a criação passar a dizer quantas ela alcança.
+    const r = regra({ match_type: "counterparty", match_value: "POSTO PAULINHO", set_category: "Combustível e deslocamento" });
+    const p = montarProposta(
+      tx({ description: "POSTO PAULINHO NAVEGANTES BRA", counterparty_name: "POSTO PAULINHO         NAVEGANTES    BRA" }),
+      fornecedores, undefined, [r],
+    );
+    expect(p.appliedRuleId).toBeNull();
+  });
+
   it("respeita a faixa de valor da regra", () => {
     const r = regra({ match_type: "text", match_value: "MARINE", min_amount: 1000, set_category: "Investimento" });
     const pequena = montarProposta(tx({ description: "MARINE EXPRESS", amount: 300 }), fornecedores, undefined, [r]);
