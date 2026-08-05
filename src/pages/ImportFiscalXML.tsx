@@ -28,6 +28,7 @@ import { writeAuditLog } from '@/hooks/use-audit-log';
 import { useProducts } from '@/hooks/use-products';
 import {
   useServiceOrdersForLinking, useLinkNoteItemsToServiceOrders,
+  useServiceOrderSuggestionsForProducts,
 } from '@/hooks/use-note-service-orders';
 import { parseNfeSupplierNote } from '@/lib/nfe-xml-parser';
 import { extractInvokeErrorMessage } from '@/lib/invoke-error';
@@ -175,6 +176,34 @@ export default function ImportFiscalXML() {
 
   /** OS efetiva de um item: a escolha própria dele, ou o padrão da nota. */
   const soDoItem = (index: number) => itemServiceOrders[index] ?? defaultServiceOrderId;
+
+  /* O sistema já sabe quem está esperando cada peça — então propõe, em vez de pedir
+     que o usuário descubra. Usa os product_id que o preview casou, portanto funciona
+     ANTES da confirmação, que é quando a decisão acontece. */
+  const { data: sugestoesOS } = useServiceOrderSuggestionsForProducts(
+    ((preview?.items ?? []) as any[]).map((p) => p.product_id),
+  );
+  const sugestaoDoItem = (index: number) => {
+    const pv = ((preview?.items ?? []) as any[]).find((p) => p.index === index);
+    return pv?.product_id ? sugestoesOS?.[pv.product_id] : undefined;
+  };
+  /** Itens com sugestão que ainda não foram decididos — o que o botão resolveria. */
+  const sugestoesPendentes = ((preview?.items ?? []) as any[]).filter((p) => {
+    const s = p.product_id ? sugestoesOS?.[p.product_id] : undefined;
+    return s && soDoItem(p.index) !== s.service_order_id;
+  });
+
+  const aplicarSugestoes = () => {
+    const novos: Record<number, string> = {};
+    for (const p of sugestoesPendentes) {
+      const s = sugestoesOS?.[p.product_id];
+      if (s) novos[p.index] = s.service_order_id;
+    }
+    setItemServiceOrders((prev) => ({ ...prev, ...novos }));
+    toast.success(
+      `${Object.keys(novos).length} ${Object.keys(novos).length === 1 ? 'item vinculado' : 'itens vinculados'} à OS que estava esperando`,
+    );
+  };
 
   // Pedidos ABERTOS do fornecedor da nota: são os candidatos plausíveis ao confronto
   // em três vias. Antes a lista trazia todas as ordens de compra do sistema, sem
@@ -713,6 +742,19 @@ export default function ImportFiscalXML() {
                       ? 'Sem dono: entra no estoque como reposição. Se a compra foi para um serviço, escolha aqui — a OS deixa de esperar quando a peça chegar.'
                       : 'Vale para todos os itens. Se a nota trouxer peça de mais de uma OS, ajuste item a item na conferência abaixo.'}
                   </p>
+                  {/* O sistema sabe quem está esperando: propõe e o usuário confirma,
+                      em vez de ter que descobrir OS por OS. */}
+                  {sugestoesPendentes.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={aplicarSugestoes}
+                      className="mt-1 w-full rounded-md border border-primary/30 bg-primary/5 px-2 py-1.5 text-left text-[11px] leading-snug text-primary hover:bg-primary/10"
+                    >
+                      <strong>{sugestoesPendentes.length}</strong>{' '}
+                      {sugestoesPendentes.length === 1 ? 'item desta nota está' : 'itens desta nota estão'}{' '}
+                      reservado(s) para OS que aguardam material — clique para vincular.
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -900,7 +942,7 @@ export default function ImportFiscalXML() {
                             item que ainda vai ser criado não tem como estar reservado
                             para OS nenhuma. */}
                         {vinculado && (
-                          <div className="mt-1.5 flex items-center gap-2 pl-8">
+                          <div className="mt-1.5 flex flex-wrap items-center gap-2 pl-8">
                             <span className="shrink-0 text-[11px] text-muted-foreground">para</span>
                             <Select
                               value={soDoItem(item.index)}
@@ -920,6 +962,26 @@ export default function ImportFiscalXML() {
                                 ))}
                               </SelectContent>
                             </Select>
+                            {/* Só aparece enquanto a sugestão NÃO foi seguida: depois de
+                                aceita, repetir a informação vira ruído. */}
+                            {(() => {
+                              const s = sugestaoDoItem(item.index);
+                              if (!s || soDoItem(item.index) === s.service_order_id) return null;
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setItemServiceOrders((prev) => ({ ...prev, [item.index]: s.service_order_id }))
+                                  }
+                                  className="rounded border border-primary/30 bg-primary/5 px-1.5 py-0.5 text-[10px] text-primary hover:bg-primary/10"
+                                  title={s.outras > 0
+                                    ? `Outras ${s.outras} OS também esperam esta peça — confira antes de vincular.`
+                                    : 'Esta OS reservou esta peça e aguarda material.'}
+                                >
+                                  {s.os} espera esta peça{s.outras > 0 ? ` (+${s.outras})` : ''}
+                                </button>
+                              );
+                            })()}
                           </div>
                         )}
                       </div>

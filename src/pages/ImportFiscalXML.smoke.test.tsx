@@ -48,6 +48,7 @@ vi.mock('@/hooks/use-audit-log', () => ({ writeAuditLog: async () => {} }));
 vi.mock('@/hooks/use-note-service-orders', () => ({
   useServiceOrdersForLinking: () => ({ data: ordensServico }),
   useNfeServiceOrderSuggestions: () => ({ data: {} }),
+  useServiceOrderSuggestionsForProducts: () => ({ data: {} }),
   useLinkNoteItemsToServiceOrders: () => ({ mutateAsync: async () => ({ vinculados: 0 }), isPending: false }),
 }));
 

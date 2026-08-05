@@ -74,6 +74,40 @@ export function useNfeServiceOrderSuggestions(noteId: string | undefined) {
   });
 }
 
+export interface ProductSuggestion {
+  service_order_id: string;
+  os: string;
+  status: string;
+  quantidade_na_os: number;
+  /** Quantas OUTRAS OS também esperam esta peça — se >0, há disputa. */
+  outras: number;
+}
+
+/**
+ * A sugestão que serve na hora da decisão: a partir dos produtos que o preview já
+ * casou, qual OS está esperando cada peça.
+ *
+ * Existe separada de `useNfeServiceOrderSuggestions` por uma razão de tempo: aquela
+ * lê de `fiscal_note_items`, que só passa a existir DEPOIS da confirmação — e a
+ * escolha do destino acontece ANTES, na conferência. Aqui basta o product_id, que o
+ * preview entrega sem gravar nada.
+ */
+export function useServiceOrderSuggestionsForProducts(productIds: (string | null | undefined)[]) {
+  const ids = [...new Set(productIds.filter((id): id is string => !!id))].sort();
+  return useQuery({
+    queryKey: ['so-suggestions-by-product', ids],
+    enabled: ids.length > 0,
+    queryFn: async (): Promise<Record<string, ProductSuggestion>> => {
+      const { data, error } = await (supabase.rpc as any)('suggest_service_orders_for_products', {
+        p_product_ids: ids,
+      });
+      if (error) throw error;
+      return (data ?? {}) as Record<string, ProductSuggestion>;
+    },
+    staleTime: 30_000,
+  });
+}
+
 /**
  * Grava o vínculo DEPOIS da confirmação da importação.
  *
