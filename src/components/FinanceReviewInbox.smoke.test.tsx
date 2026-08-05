@@ -165,22 +165,49 @@ describe('agrupado por favorecido', () => {
     expect(await screen.findByRole('button', { name: /Aprovar 22/ })).toBeDisabled();
   });
 
-  it('uma categoria no cabeçalho aprova as 22 — e deixa a de R$ 4 mil de fora', async () => {
-    estadoDaFila.dados = [...miudas, grande];
+  // NOTA DE PROJETO: havia aqui um teste garantindo que o grupo aprovasse SÓ as abaixo de
+  // R$ 500, deixando a de R$ 4 mil de fora. A regra mudou por decisão do gestor, com um
+  // argumento melhor que o original: o que exige atenção é a incerteza, não o valor —
+  // pró-labore, salários e impostos são altos por natureza, e travar cada um deles pedia
+  // a mesma decisão dezenas de vezes. O que o limite tinha de útil virou a conferência
+  // abaixo, onde as maiores aparecem uma a uma antes do clique. Na lista solta, onde a
+  // classificação ainda é palpite do sistema, o limite continua valendo.
+
+  it('aprova o grupo inteiro, inclusive as grandes, depois de confirmar', async () => {
+    // O limite de valor existe como aproximação de "quanto isto merece de conferência", e
+    // serve enquanto a classificação é palpite. Com a categoria definida no cabeçalho, a
+    // decisão já foi tomada — segurar a de R$ 4 mil para perguntar de novo seria pedir a
+    // mesma coisa duas vezes. O que sobra do limite é mostrar as maiores ANTES do clique.
     const user = userEvent.setup({ pointerEventsCheck: 0 });
+    estadoDaFila.dados = [...miudas, grande];
     renderInbox();
 
     await user.click((await screen.findAllByRole('combobox'))[0]);
     await user.click(await screen.findByText('Peças e materiais'));
+    await user.click(await screen.findByRole('button', { name: /Aprovar 23/ }));
 
-    const botao = await screen.findByRole('button', { name: /Aprovar 22/ });
-    await user.click(botao);
+    // A grande aparece na conferência, com valor à vista.
+    expect(await screen.findByText(/1 passa de/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Aprovar as 23/ }));
 
     const [chamada] = aprovarMock.mock.calls[0];
-    expect(chamada.ids).toHaveLength(22);
-    expect(chamada.ids).not.toContain('g-grande');
+    expect(chamada.ids).toHaveLength(23);
+    expect(chamada.ids).toContain('g-grande');
     // A categoria escolhida uma vez vale para todas as linhas aprovadas.
     expect(chamada.overrides.g0.category).toBe('Peças e materiais');
+  });
+
+  it('grupo sem nenhuma grande aprova direto, sem conferência', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    estadoDaFila.dados = miudas;
+    renderInbox();
+
+    await user.click((await screen.findAllByRole('combobox'))[0]);
+    await user.click(await screen.findByText('Peças e materiais'));
+    await user.click(await screen.findByRole('button', { name: /Aprovar 22/ }));
+
+    expect(aprovarMock).toHaveBeenCalled();
+    expect(aprovarMock.mock.calls[0][0].ids).toHaveLength(22);
   });
 
   it('diz POR ESCRITO por que não dá para aprovar', async () => {
@@ -192,18 +219,25 @@ describe('agrupado por favorecido', () => {
     expect(await screen.findByText(/Escolha a categoria acima para poder aprovar/i)).toBeInTheDocument();
   });
 
-  it('grupo sem nada em lote oferece o caminho, não um botão morto', async () => {
-    // Todas acima do limite: "Nada em lote aqui" era um beco sem saída. Agora o botão
-    // abre as linhas, que é onde a decisão pode ser tomada.
-    const user = userEvent.setup();
+  it('grupo em que TODAS passam do limite ainda se resolve de uma vez', async () => {
+    // Era o pior caso do desenho antigo: "Nada em lote aqui", botão morto, e vinte
+    // decisões idênticas pela frente. Justamente o caso das categorias previsíveis —
+    // pró-labore, salários, impostos —, onde o valor alto é a norma e não a exceção.
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
     // 20 é o piso do modo agrupado — abaixo disso a tela mostra a lista simples.
     estadoDaFila.dados = Array.from({ length: 20 }, (_, i) => ({
       ...grande, id: `gg${i}`, bank_transaction_id: `tgg${i}`,
     }));
     renderInbox();
-    expect(await screen.findByText(/passam de .* — aprove uma a uma/i)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /Revisar as 20/i }));
-    expect(await screen.findAllByText(/aprove aqui/i)).toHaveLength(20);
+
+    await user.click((await screen.findAllByRole('combobox'))[0]);
+    await user.click(await screen.findByText('Pró-labore e retirada'));
+    await user.click(await screen.findByRole('button', { name: /Aprovar 20/ }));
+
+    // Todas as vinte aparecem na conferência, com valor — uma leitura, não vinte cliques.
+    expect(await screen.findByText(/20 passam de/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Aprovar as 20/ }));
+    expect(aprovarMock.mock.calls[0][0].ids).toHaveLength(20);
   });
 
   it('marca QUAIS linhas exigem revisão individual', async () => {

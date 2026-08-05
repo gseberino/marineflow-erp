@@ -21,6 +21,10 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { useI18n } from '@/i18n';
@@ -408,9 +412,24 @@ function CartaoDoFavorecido({
   const { formatCurrency, formatDate } = useI18n();
   const [aberto, setAberto] = useState(false);
 
+  const [confirmando, setConfirmando] = useState(false);
+
   const semCategoriaEscolhida = !categoria || categoria === SEM_CATEGORIA;
-  const nadaEmLote = grupo.emLote.length === 0;
-  const podeAprovar = !nadaEmLote && !semCategoriaEscolhida;
+  /**
+   * O que exige atenção é a INCERTEZA, não o valor.
+   *
+   * O limite de R$ 500 existia como aproximação de "quanto isto merece de conferência".
+   * Serve enquanto a classificação é um palpite — mas depois que a categoria está
+   * definida, seja por escolha sua no cabeçalho do grupo, seja por uma regra que você
+   * escreveu, a decisão JÁ FOI TOMADA. Um pró-labore de R$ 3 mil resolvido por regra não
+   * precisa da mesma conferência que uma saída de R$ 600 sem categoria; pedir confirmação
+   * linha a linha ali é fazer a mesma pergunta várias vezes.
+   *
+   * O que sobra do limite é o que ele tinha de útil: as maiores ficam VISÍVEIS antes do
+   * clique, listadas uma a uma, em vez de sumirem dentro de um total.
+   */
+  const podeAprovar = grupo.propostas.length > 0 && !semCategoriaEscolhida;
+  const exigemOlhar = grupo.individuais;
 
   /**
    * Por que o botão não aprova — ESCRITO NA TELA, não num tooltip.
@@ -421,13 +440,9 @@ function CartaoDoFavorecido({
    * contando — o gestor fica olhando para uma tela que não responde e não tem como
    * descobrir o que ela quer.
    */
-  const motivo = nadaEmLote
-    ? grupo.propostas.length === 1
-      ? `Esta passa de ${formatCurrency(LIMITE_LOTE)} — aprove na linha, abaixo.`
-      : `Todas as ${grupo.propostas.length} passam de ${formatCurrency(LIMITE_LOTE)} (ou são transferências) — aprove uma a uma, abaixo.`
-    : semCategoriaEscolhida
-      ? 'Escolha a categoria acima para poder aprovar.'
-      : null;
+  const motivo = semCategoriaEscolhida
+    ? 'Escolha a categoria acima para poder aprovar.'
+    : null;
 
   return (
     <Card className="p-3">
@@ -487,19 +502,14 @@ function CartaoDoFavorecido({
         </div>
 
         <div className="flex shrink-0 flex-col items-end gap-1">
-          {/* Sem nada em lote, o botão vira o caminho para o que RESOLVE: abrir as linhas.
-              Um botão morto obriga o gestor a adivinhar qual é o próximo passo. */}
-          {nadaEmLote ? (
-            <Button size="sm" variant="outline" disabled={ocupado} onClick={() => setAberto(true)}>
-              <ChevronDown className="mr-2 h-4 w-4" />
-              Revisar {grupo.propostas.length === 1 ? 'esta' : `as ${grupo.propostas.length}`}
-            </Button>
-          ) : (
-            <Button size="sm" disabled={ocupado || !podeAprovar} onClick={onAprovarLote}>
-              <Check className="mr-2 h-4 w-4" />
-              Aprovar {grupo.emLote.length} · {formatCurrency(grupo.totalEmLote)}
-            </Button>
-          )}
+          <Button
+            size="sm"
+            disabled={ocupado || !podeAprovar}
+            onClick={() => (exigemOlhar.length > 0 ? setConfirmando(true) : onAprovarLote())}
+          >
+            <Check className="mr-2 h-4 w-4" />
+            Aprovar {grupo.propostas.length} · {formatCurrency(grupo.total)}
+          </Button>
           <Button size="sm" variant="ghost" disabled={ocupado} onClick={onCriarRegra}>
             <Wand2 className="mr-2 h-4 w-4" />
             Virar regra
@@ -509,6 +519,55 @@ function CartaoDoFavorecido({
           )}
         </div>
       </div>
+
+      {/* As maiores aparecem ANTES do clique, uma a uma. É o que o limite de valor tinha de
+          útil: não impedir a aprovação, e sim impedir que uma saída grande passe
+          despercebida dentro de um total. Uma conferência para o grupo todo, não uma por
+          linha. */}
+      <AlertDialog open={confirmando} onOpenChange={setConfirmando}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Aprovar {grupo.propostas.length} de {grupo.rotulo}?
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-sm">
+                <p>
+                  Serão lançadas como <strong>{categoria}</strong>, somando{' '}
+                  <strong>{formatCurrency(grupo.total)}</strong>. Isto cria os registros de
+                  despesa — nenhum pagamento é feito.
+                </p>
+                <div>
+                  <p className="mb-1 font-medium text-foreground">
+                    {exigemOlhar.length === 1
+                      ? `1 passa de ${formatCurrency(LIMITE_LOTE)}:`
+                      : `${exigemOlhar.length} passam de ${formatCurrency(LIMITE_LOTE)}:`}
+                  </p>
+                  <ul className="max-h-48 space-y-1 overflow-y-auto rounded-md border p-2">
+                    {exigemOlhar.map((p) => (
+                      <li key={p.id} className="flex items-center justify-between gap-3">
+                        <span className="truncate">
+                          {p.suggested_date ? formatDate(p.suggested_date) : '—'} ·{' '}
+                          {p.suggested_description ?? p.title}
+                        </span>
+                        <span className="shrink-0 font-semibold">
+                          {formatCurrency(Number(p.suggested_amount ?? 0))}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={onAprovarLote}>
+              Aprovar as {grupo.propostas.length}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Collapsible open={aberto} onOpenChange={setAberto}>
         <CollapsibleTrigger asChild>
@@ -646,8 +705,16 @@ export function FinanceReviewInbox({
     });
   };
 
+  /**
+   * Aprova o grupo INTEIRO, inclusive o que passa do limite de lote.
+   *
+   * O limite continua valendo onde ele serve — na lista solta, onde a classificação ainda
+   * é palpite do sistema. Aqui não: o grupo só chega a este botão com categoria definida,
+   * e as maiores foram listadas uma a uma antes do clique. Segurar cada uma para perguntar
+   * de novo seria pedir a mesma decisão duas vezes.
+   */
   const aprovarGrupo = (g: GrupoDeFavorecido) => {
-    const ids = g.emLote.map((p) => p.id);
+    const ids = g.propostas.map((p) => p.id);
     if (ids.length === 0) return;
     const overrides: Record<string, Correcao> = {};
     for (const id of ids) if (correcoes[id]) overrides[id] = correcoes[id];
