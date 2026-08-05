@@ -321,7 +321,7 @@ Entrada no menu: grupo **"Estoque & Compras"** já existe em `AppLayout.tsx:171-
 | Dívida | Ação neste plano |
 |---|---|
 | RLS `USING(true)` em `purchase_orders`, `purchase_order_items`, `quote_requests`, `quote_request_items`, `quote_responses` | Recalibrar **na C1**, por comando e por papel (nunca `FOR ALL` — lição da Agenda). Cai 5 dos 23 `rls_policy_always_true` da Fase 2 do roadmap |
-| `product_suppliers` (0 linhas) × `supplier_product_mappings` (31) | Confirmar órfã e **dropar** em migration nomeada, ou documentar o motivo de existir |
+| `product_suppliers` (0 linhas) × `supplier_product_mappings` (31) | ~~Dropar~~ — **RESOLVIDO: NÃO dropar** (ver §0). Está vazia mas tem hook CRUD próprio e 4 pontos de uso; é recurso nunca usado, não tabela morta. Descartá-la quebraria a tela de fornecedores |
 | `SmartPurchasePage` casca + query suspeita | C5 |
 | Descrição desatualizada da tool de envio | C5 (1 linha, pode ir antes de tudo) |
 | Conferência a 3 vias sem dado | C4 |
