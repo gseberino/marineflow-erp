@@ -307,7 +307,7 @@ function AdminHome({
         <div className="rounded-lg border bg-card lg:col-span-2">
           <div className="flex items-center justify-between border-b px-4 py-2.5">
             <h3 className="text-sm font-bold">Próximos 7 dias</h3>
-            <Link to="/agenda" className="flex items-center gap-1 text-xs font-medium text-accent hover:underline">
+            <Link to="/v2/agenda" className="flex items-center gap-1 text-xs font-medium text-accent hover:underline">
               Agenda <ArrowRight className="h-3 w-3" />
             </Link>
           </div>
@@ -444,7 +444,7 @@ function TechnicianHome() {
           <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">{rest.slice(0, 9).map(renderCard)}</div>
         </section>
       )}
-      <Link to="/agenda" className="inline-flex items-center gap-1 text-sm font-medium text-accent hover:underline">
+      <Link to="/v2/agenda" className="inline-flex items-center gap-1 text-sm font-medium text-accent hover:underline">
         Ver agenda completa <ArrowRight className="h-3.5 w-3.5" />
       </Link>
     </>

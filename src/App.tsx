@@ -65,7 +65,7 @@ import {
   VesselDetailV2, ServiceOrderDetailV2, FiscalEmissionV2, SettingsV2, ImportFiscalXMLV2,
   WhatsAppLeadsV2, WhatsAppLogsV2, WhatsAppScheduledV2, WhatsAppStatusV2,
   ActiveProspectingV2, ExternalQuoteListV2, ExternalQuoteNewV2, ExternalQuoteApprovalV2,
-  ExternalSellerLeadsV2, ExternalProductCatalogV2, ExternalQuoteDetailV2,
+  ExternalSellerLeadsV2, ExternalProductCatalogV2, ExternalQuoteDetailV2, AgendaV2,
 } from "./v2/pages/wrapped";
 const ClientsListV2 = lazy(() => import("./v2/pages/ClientsListV2"));
 const VesselsListV2 = lazy(() => import("./v2/pages/VesselsListV2"));
@@ -194,6 +194,8 @@ const App = () => (
                         <Route path="/v2/fiscal/emissao" element={<ProtectedRoute roles={['admin']}><FiscalEmissionV2 /></ProtectedRoute>} />
                         <Route path="/v2/inventory/import-xml" element={<ProtectedRoute roles={['admin']}><ImportFiscalXMLV2 /></ProtectedRoute>} />
                         <Route path="/v2/settings" element={<ProtectedRoute roles={['admin']}><SettingsV2 /></ProtectedRoute>} />
+                        {/* Mesmos cargos da /agenda v1 — a v2 é a mesma tela com tema. */}
+                        <Route path="/v2/agenda" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><AgendaV2 /></ProtectedRoute>} />
                         <Route path="/v2/whatsapp/leads" element={<ProtectedRoute roles={['admin','financial','seller']} groupId="whatsapp"><WhatsAppLeadsV2 /></ProtectedRoute>} />
                         <Route path="/v2/whatsapp/logs" element={<ProtectedRoute roles={['admin']} groupId="whatsapp"><WhatsAppLogsV2 /></ProtectedRoute>} />
                         <Route path="/v2/whatsapp/scheduled" element={<ProtectedRoute roles={['admin','financial']} groupId="whatsapp"><WhatsAppScheduledV2 /></ProtectedRoute>} />

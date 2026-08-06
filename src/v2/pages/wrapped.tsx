@@ -16,6 +16,7 @@ import ExternalQuoteApprovalPage from '@/pages/ExternalQuoteApprovalPage';
 import ExternalSellerLeadsPage from '@/pages/ExternalSellerLeadsPage';
 import ExternalProductCatalogPage from '@/pages/ExternalProductCatalogPage';
 import ExternalQuoteDetailPage from '@/pages/ExternalQuoteDetailPage';
+import AgendaPage from '@/pages/AgendaPage';
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Onda C / Fase 3 · Rotas v2 por CASCA DE TEMA.
@@ -36,6 +37,13 @@ const wrap = (Comp: React.ComponentType) =>
       </V2Shell>
     );
   };
+
+/* A Agenda ficou fora da v2 até agora porque outra sessão a estava reescrevendo ao mesmo
+   tempo (fios soltos, detector, caixa de entrada) — mexer nela em paralelo teria dado
+   conflito. Aquela frente terminou, então ela entra aqui e o mapa v2 fica completo.
+   Casca, não reescrita: a Agenda já é P0-limpa (a Semana empilha no celular, o calendário
+   do mês encolhe os pinos) e o que faltava era tema, alternador claro/escuro e ⌘K. */
+export const AgendaV2 = wrap(AgendaPage);
 
 export const VesselDetailV2 = wrap(VesselDetail);
 export const ServiceOrderDetailV2 = wrap(ServiceOrderDetail);

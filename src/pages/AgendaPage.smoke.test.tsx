@@ -9,6 +9,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { I18nProvider } from '@/i18n';
 import AgendaPage from './AgendaPage';
+import { AgendaV2 } from '@/v2/pages/wrapped';
 
 // vi.mock é içado para o topo do módulo — helpers/fixtures precisam de vi.hoisted
 const { queryBuilder, q, mut, liveTasks, doneTasks, suggestions } = vi.hoisted(() => {
@@ -149,5 +150,19 @@ describe('AgendaPage — smoke de render (todas as visões)', () => {
     expect(screen.getAllByText('Aceitar').length).toBe(2);
     expect(screen.getByText('Seus recados (1)')).toBeTruthy();
     expect(screen.getByText('Detectado nas conversas (1)')).toBeTruthy();
+  });
+
+  it('a rota /v2/agenda renderiza a MESMA agenda dentro da casca de tema', () => {
+    // A v2 da Agenda e casca, nao reescrita: se este teste divergir do de cima, alguem
+    // duplicou a logica em vez de reaproveitar.
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <I18nProvider>
+          <MemoryRouter><AgendaV2 /></MemoryRouter>
+        </I18nProvider>
+      </QueryClientProvider>,
+    );
+    expect(screen.getByText('Cobrar Cliente Alpha — R$ 500')).toBeTruthy();
   });
 });

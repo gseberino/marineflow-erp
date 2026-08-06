@@ -24,7 +24,7 @@ const NAV: { group: string; items: { label: string; to: string; icon: typeof Sea
       { label: 'Ordens de Serviço', to: '/v2/service-orders', icon: ClipboardList },
       { label: 'Orçamentos', to: '/v2/quotes', icon: FileText },
       { label: 'Cobranças', to: '/v2/collections', icon: CreditCard },
-      { label: 'Agenda', to: '/agenda', icon: CalendarDays },
+      { label: 'Agenda', to: '/v2/agenda', icon: CalendarDays },
     ],
   },
   {
