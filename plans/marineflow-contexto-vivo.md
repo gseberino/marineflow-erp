@@ -129,3 +129,44 @@ existem** no banco (`waiting_parts`, `waiting_approval`, `reopened`) e omitia `o
 
 ## 6. Fontes
 [Frameworks de memória de agente 2026](https://atlan.com/know/best-ai-agent-memory-frameworks-2026/) · [vetor vs grafo para memória](https://atlan.com/know/vector-database-vs-knowledge-graph-agent-memory/) · [estado da memória de agentes (mem0)](https://mem0.ai/blog/state-of-ai-agent-memory-2026) · [soluções de memória em grafo comparadas](https://mem0.ai/blog/graph-memory-solutions-ai-agents) · [8 sistemas de memória em produção](https://fountaincity.tech/resources/blog/agent-memory-knowledge-systems-compared/) · [Customer 360 em grafo](https://www.puppygraph.com/blog/customer-360-graph-database) · [grafos de conhecimento em IA agêntica](https://zbrain.ai/knowledge-graphs-for-agentic-ai/) · [memória persistente com Cognee](https://www.cognee.ai/blog/tutorials/beyond-recall-building-persistent-memory-in-ai-agents-with-cognee) · [Salesforce Data 360](https://architect.salesforce.com/docs/architect/fundamentals/guide/data-360-architecture) · [open loops e atenção](https://katehannontherapy.com/blogs/closing-the-loop-how-open-loops-fuel-anxiety)
+
+---
+
+## 8. Estado da frente Agenda (06/08/2026)
+
+### Em produção e medido
+
+| Entrega | Prova |
+|---|---|
+| Identidade dos contatos (F12) | 1,1% → 72,6% das mensagens com contato identificado |
+| Fios soltos por entidade (F13) | 36 abertos, 16 fechados **sozinhos** pelo ERP |
+| Detector com visão de conjunto (F14) | 9 menções viraram reforço em vez de tarefa duplicada; OS-00069 do Vanderlei com `mentions: 3` |
+| R15 — confirmar agendamento vira TAREFA | Filtro validado; **nunca disparou** porque não há OS agendada no sistema |
+| Opt-out respeitado em todo envio | Botão manual + R9 + R13 |
+| Confirmação antes de ligar mensagem ao cliente | Trava determinística: o interruptor não grava antes do aviso |
+| Correções de iPhone (área segura, 100dvh, zoom, textarea 16px) | Aguarda confirmação no aparelho |
+| Trava anti-duplicata por mensagem | 3 repetições barradas em 48h; 0 duplicatas vivas |
+| `/v2/agenda` | Casca de tema; mapa v2 completo |
+
+### Decisões do usuário que continuam abertas
+
+1. **Trocar o padrão v1 → v2.** ~41 rotas v2 prontas; nenhuma redireciona. É a maior
+   alavanca de responsividade que resta e não é decisão minha.
+2. **Botão de confirmar agendamento** — falta o texto exato da mensagem. Recomendação:
+   usar a R15 por uma semana antes; se o vaivém ERP↔WhatsApp incomodar, o botão se paga.
+3. **R9/R13 seguem desligadas** por decisão (risco de bloqueio do número + LGPD).
+4. **Confirmar no iPhone** se as correções de área segura resolveram.
+
+### Dívida conhecida (não é desta frente)
+
+- ~19 erros de `tsc -b` de outras frentes. Neste repo `--noEmit` NÃO checa nada.
+- Timestamps de migration duplicados entre sessões paralelas.
+- RLS permissiva em várias tabelas (o vazamento das minhas views foi corrigido; o
+  problema maior do projeto continua).
+- Um teste intermitente na suíte (uma execução falhou, as seguintes passaram).
+
+### Próximos passos naturais, se a frente continuar
+
+- Piso de materialidade na cobrança (hoje gera tarefa para saldo de R$ 20).
+- Apertar o prompt contra corrente/spam (passou "Ligue pra Carlos em nome de Jesus").
+- Painel de fios no fornecedor — **bloqueado**: não existe tela de detalhe de fornecedor.
