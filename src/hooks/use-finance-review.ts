@@ -258,6 +258,99 @@ export function useClassificarComIA() {
   });
 }
 
+/** Um motivo pelo qual transações saíram da fila, com o que ele levou junto. */
+export interface GrupoIgnorado {
+  kind: string;
+  rotulo: string;
+  motivo: string;
+  transacoes: Array<{
+    id: string; transaction_date: string; description: string; amount: number;
+    counterparty_name: string | null; dismissed_at: string | null;
+  }>;
+  total: number;
+}
+
+export const ROTULO_DA_IGNORADA: Record<string, string> = {
+  duplicata: 'Duplicata da importação',
+  fatura_cartao: 'Pagamento de fatura de cartão',
+  transferencia: 'Transferência entre contas próprias',
+  mecanica_cartao: 'Mecânica do cartão (Pix no Crédito, estorno, ajuste)',
+  parcela: 'Parcela de compra parcelada',
+  manual: 'Ignorada à mão',
+};
+
+/**
+ * O livro das ignoradas.
+ *
+ * Sem esta lista, sair da fila era sumir: 380 transações (R$ 370 mil) saíram de vista com
+ * um texto solto e nada mais — sem quem, sem quando, sem como voltar. Cada caso estava
+ * certo e o conjunto era inauditável, o que dá no mesmo que estar errado para quem precisa
+ * confiar no número.
+ */
+export function useIgnoradas() {
+  return useQuery({
+    queryKey: ['bank-transactions-ignoradas'],
+    queryFn: async (): Promise<GrupoIgnorado[]> => {
+      const { data, error } = await supabase
+        .from('bank_transactions')
+        .select('id, transaction_date, description, amount, counterparty_name, dismissed_reason, dismissed_kind, dismissed_at')
+        .not('dismissed_reason', 'is', null)
+        .order('transaction_date', { ascending: false })
+        .limit(1000);
+      if (error) throw error;
+
+      const porTipo = new Map<string, GrupoIgnorado>();
+      for (const t of (data ?? []) as any[]) {
+        const kind = t.dismissed_kind ?? 'manual';
+        const g = porTipo.get(kind) ?? {
+          kind,
+          rotulo: ROTULO_DA_IGNORADA[kind] ?? kind,
+          motivo: t.dismissed_reason ?? '',
+          transacoes: [],
+          total: 0,
+        };
+        g.transacoes.push({
+          id: t.id, transaction_date: t.transaction_date, description: t.description,
+          amount: Number(t.amount), counterparty_name: t.counterparty_name,
+          dismissed_at: t.dismissed_at,
+        });
+        g.total += Number(t.amount);
+        porTipo.set(kind, g);
+      }
+      return [...porTipo.values()].sort((a, b) => b.transacoes.length - a.transacoes.length);
+    },
+    staleTime: 30_000,
+  });
+}
+
+/**
+ * Devolve à fila o que tinha sido ignorado, desfazendo o efeito.
+ *
+ * Não é só remarcar a linha: aprovar uma compra em 10x tirou nove pernas de vista E criou
+ * um lançamento pela compra inteira. Devolver a perna sem desfazer o lançamento contaria o
+ * mesmo dinheiro duas vezes — por isso o alcance é calculado no servidor.
+ */
+export function useDesfazerIgnorada() {
+  const qc = useQueryClient();
+  type Resposta = {
+    ok: boolean; transacoes: number; lancamentos_apagados: number;
+    propostas_reabertas: number; lancamentos_preservados: string[]; message: string;
+  };
+  return useMutation<Resposta, Error, string[]>({
+    mutationFn: (ids) => invokeReview<Resposta>({ action: 'undismiss', ids }),
+    onSuccess: (r) => {
+      if (r.lancamentos_preservados?.length) {
+        toast.warning(r.message, { description: r.lancamentos_preservados.slice(0, 3).join(' · ') });
+      } else toast.success(r.message);
+      for (const k of [['bank-transactions-ignoradas'], ['bank-transactions'], ['finance-review-queue'],
+        ['finance-review-count'], ['payables'], ['receivables'], ['financial-summary']]) {
+        qc.invalidateQueries({ queryKey: k });
+      }
+    },
+    onError: (e: Error) => toast.error(e.message || 'Não foi possível desfazer'),
+  });
+}
+
 export function useAprovarPropostas() {
   const qc = useQueryClient();
   return useMutation({

@@ -66,7 +66,7 @@ const JANELA_DIAS = 90;
 const LOTE_HISTORICO = 200;
 
 interface Body {
-  action?: "generate" | "approve" | "reject" | "suggest_rules" | "reclassify" | "classify_ai";
+  action?: "generate" | "approve" | "reject" | "suggest_rules" | "reclassify" | "classify_ai" | "undismiss";
   /** generate: inclui o histórico inteiro, não só a janela. */
   incluir_historico?: boolean;
   ids?: string[];
@@ -124,6 +124,7 @@ Deno.serve(async (req) => {
     if (action === "generate") return await gerar(admin, !!body.incluir_historico);
     if (action === "reclassify") return await reclassificar(admin);
     if (action === "classify_ai") return await classificarComIA(admin);
+    if (action === "undismiss") return await desfazerIgnorada(admin, body.ids ?? [], userId);
     if (action === "approve") return await aprovar(admin, body.ids ?? [], userId, body.overrides ?? {});
     if (action === "reject") return await recusar(admin, body.ids ?? [], userId, body.note ?? null);
     if (action === "suggest_rules") return await proporRegras(admin);
@@ -497,6 +498,110 @@ async function reclassificar(admin: DbClient) {
     message: partes.length > 0
       ? partes.join(" · ")
       : `Nenhuma das ${alvo.length} propostas da fila mudou`,
+  });
+}
+
+/**
+ * Devolve à fila uma transação que tinha sido ignorada, desfazendo o que a ignorada causou.
+ *
+ * Ignorar nunca foi só esconder uma linha: aprovar uma compra em 10x tira as outras nove
+ * pernas de vista E cria um lançamento no valor da compra inteira. Desfazer a perna sozinha
+ * devolveria a linha e deixaria o lançamento de pé — o mesmo dinheiro contado duas vezes.
+ * Por isso o alcance é calculado, não assumido: a partir de UMA linha, chega-se à compra
+ * toda, ao lançamento que ela criou e às propostas que foram decididas junto.
+ *
+ * Só apaga lançamento que o próprio motor criou (`origin = 'bank_reconciliation'`). O que
+ * foi lançado à mão fica onde está e é relatado — desfazer uma automação não é licença
+ * para apagar o trabalho de alguém.
+ */
+async function desfazerIgnorada(admin: DbClient, ids: string[], userId: string | null) {
+  if (ids.length === 0) return jr({ error: "nenhuma transação informada" }, 400);
+
+  const { data: alvos, error } = await admin
+    .from("bank_transactions")
+    .select("id, dismissed_kind, counterparty_name, description, amount, transaction_date, installment_label")
+    .in("id", ids)
+    .not("dismissed_reason", "is", null);
+  if (error) throw error;
+  if (!alvos || alvos.length === 0) {
+    return jr({ ok: true, transacoes: 0, message: "Nada para desfazer: estas transações não estão ignoradas." });
+  }
+
+  const afetadas = new Set<string>();
+  for (const tx of alvos as any[]) {
+    afetadas.add(tx.id);
+    // Perna de compra parcelada: o alcance é a compra inteira, não a linha clicada.
+    if (tx.dismissed_kind === "parcela" || tx.installment_label) {
+      const compra = await lerCompraParcelada(admin, tx as PernaDeParcelamento);
+      for (const perna of compra?.pernas ?? []) afetadas.add(perna.id);
+    }
+  }
+
+  // Transferência entre contas tem duas pernas, e a proposta guarda a segunda.
+  const { data: propostas } = await admin
+    .from("finance_review_queue")
+    .select("id, bank_transaction_id, related_transaction_id, created_payable_id, created_receivable_id, status")
+    .or(`bank_transaction_id.in.(${[...afetadas].join(",")}),related_transaction_id.in.(${[...afetadas].join(",")})`);
+  for (const p of (propostas ?? []) as any[]) {
+    if (p.bank_transaction_id) afetadas.add(p.bank_transaction_id);
+    if (p.related_transaction_id) afetadas.add(p.related_transaction_id);
+  }
+
+  const lista = [...afetadas];
+
+  // Lançamentos criados pelo motor a partir destas transações.
+  const { data: pagaveis } = await admin
+    .from("payables").select("id, description, origin").in("bank_transaction_id", lista);
+  const { data: recebiveis } = await admin
+    .from("receivables").select("id, description").in("bank_transaction_id", lista);
+
+  const apagaveis = (pagaveis ?? []).filter((p: any) => p.origin === "bank_reconciliation");
+  const preservados = (pagaveis ?? []).filter((p: any) => p.origin !== "bank_reconciliation");
+
+  if (apagaveis.length > 0) {
+    const { error: e1 } = await admin.from("payables").delete().in("id", apagaveis.map((p: any) => p.id));
+    if (e1) throw e1;
+  }
+  if ((recebiveis ?? []).length > 0) {
+    const { error: e2 } = await admin.from("receivables").delete().in("id", (recebiveis ?? []).map((r: any) => r.id));
+    if (e2) throw e2;
+  }
+
+  // As propostas voltam a PENDENTES: a decisão foi desfeita, então ela precisa ser tomada
+  // de novo — deixá-las aprovadas apontando para um lançamento apagado seria mentir na
+  // trilha de auditoria.
+  const idsPropostas = (propostas ?? []).map((p: any) => p.id);
+  if (idsPropostas.length > 0) {
+    const { error: e3 } = await admin.from("finance_review_queue").update({
+      status: "pending",
+      decided_by: null, decided_at: null,
+      created_payable_id: null, created_receivable_id: null,
+      decision_note: `Reaberta em ${new Date().toISOString().slice(0, 10)}: a transação voltou para a fila`,
+    }).in("id", idsPropostas);
+    if (e3) throw e3;
+  }
+
+  const { error: e4 } = await admin.from("bank_transactions").update({
+    reconciled: false,
+    dismissed_reason: null,
+    dismissed_kind: null,
+    dismissed_at: null,
+    dismissed_by: null,
+    reconciled_payment_id: null,
+  }).in("id", lista);
+  if (e4) throw e4;
+
+  return jr({
+    ok: true,
+    transacoes: lista.length,
+    lancamentos_apagados: apagaveis.length + (recebiveis ?? []).length,
+    propostas_reabertas: idsPropostas.length,
+    lancamentos_preservados: preservados.map((p: any) => p.description),
+    message: `${lista.length} transação(ões) de volta à fila`
+      + (apagaveis.length + (recebiveis ?? []).length > 0
+        ? ` · ${apagaveis.length + (recebiveis ?? []).length} lançamento(s) desfeito(s)` : "")
+      + (preservados.length > 0
+        ? ` · ${preservados.length} lançamento(s) manual(is) preservado(s), confira-os` : ""),
   });
 }
 
@@ -987,6 +1092,8 @@ async function aprovar(
   /** Lançamento criado por proposta, para gravar o vínculo junto com o "aprovado". */
   const criadoPara = new Map<string, string>();
   const recebidoPara = new Map<string, string>();
+  /** Pernas de compra parcelada que saíram de vista junto com a aprovação. */
+  let pernasRetiradas = 0;
 
   for (const p of (propostas ?? []) as any[]) {
     try {
@@ -999,7 +1106,13 @@ async function aprovar(
       if (p.kind === "internal_transfer") {
         // Só marca as duas pernas: nenhum lançamento é criado.
         await admin.from("bank_transactions")
-          .update({ reconciled: true, dismissed_reason: "Transferência entre contas próprias" })
+          .update({
+            reconciled: true,
+            dismissed_reason: "Transferência entre contas próprias",
+            dismissed_kind: "transferencia",
+            dismissed_at: new Date().toISOString(),
+            dismissed_by: userId,
+          })
           .in("id", [p.bank_transaction_id, p.related_transaction_id].filter(Boolean));
       } else if (p.kind === "create_payable") {
         // Compra parcelada: o lançamento é da COMPRA, e o que ainda não venceu fica como
@@ -1050,7 +1163,14 @@ async function aprovar(
             await admin.from("bank_transactions").update({
               reconciled: true,
               dismissed_reason: `Parcela da compra lançada em ${data} (${parcelamento.totalDeParcelas}x)`,
+              dismissed_kind: "parcela",
+              dismissed_at: new Date().toISOString(),
+              dismissed_by: userId,
             }).in("id", outras);
+            // O gestor precisa SABER que outras linhas saíram junto. Elas somem da tela no
+            // mesmo clique, e sumiço silencioso é o que fez 380 transações virarem
+            // desconfiança.
+            pernasRetiradas += outras.length;
             await admin.from("finance_review_queue").update({
               status: "superseded",
               decision_note: "Faz parte de uma compra parcelada já lançada",
@@ -1115,7 +1235,11 @@ async function aprovar(
     ok: falhas.length === 0,
     aprovadas: feitos.length,
     falhas,
-    message: `${feitos.length} lançamento(s) criado(s)` + (falhas.length ? ` · ${falhas.length} falharam` : ""),
+    pernas_de_parcelamento: pernasRetiradas,
+    message: `${feitos.length} lançamento(s) criado(s)`
+      + (pernasRetiradas > 0
+        ? ` · ${pernasRetiradas} parcela(s) da mesma compra saíram da fila junto` : "")
+      + (falhas.length ? ` · ${falhas.length} falharam` : ""),
   });
 }
 

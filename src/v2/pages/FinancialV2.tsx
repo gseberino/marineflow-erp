@@ -22,6 +22,7 @@ import { BankReconciliation } from '@/components/BankReconciliation';
 import { BankSourcesPanel } from '@/components/BankSourcesPanel';
 import { FinanceReviewInbox, type SementeDeRegra } from '@/components/FinanceReviewInbox';
 import { FinanceRulesPanel, EditorDeRegra } from '@/components/FinanceRulesPanel';
+import { IgnoradasPanel } from '@/components/IgnoradasPanel';
 import { AgingReportPanel } from '@/components/AgingReportPanel';
 import { ReimbursementsPanel } from '@/components/ReimbursementsPanel';
 import { PageShell } from '@/v2/components/PageShell';
@@ -325,6 +326,10 @@ export default function FinancialV2() {
                 passou pela conta e nunca virou lançamento. Trabalhos com ritmos
                 diferentes — o usuário pediu para manter separados. */}
             <TabsTrigger value="inbox">Caixa de entrada</TabsTrigger>
+            {/* O que saiu da fila não pode sair do sistema. Sem esta aba, 380 transações
+                tinham virado sumiço — e a suspeita, justa, foi de que a IA as tinha
+                escondido. Toda saída da fila é reversível e diz quem, quando e por quê. */}
+            <TabsTrigger value="ignoradas">Fora da fila</TabsTrigger>
             <TabsTrigger value="rules">Regras</TabsTrigger>
             <TabsTrigger value="banks">Contas bancárias</TabsTrigger>
             <TabsTrigger value="aging">Aging</TabsTrigger>
@@ -569,6 +574,7 @@ export default function FinancialV2() {
           <TabsContent value="inbox" className="mt-4">
             <FinanceReviewInbox onCriarRegra={setSementeRegra} />
           </TabsContent>
+          <TabsContent value="ignoradas" className="mt-4"><IgnoradasPanel /></TabsContent>
           <TabsContent value="rules" className="mt-4"><FinanceRulesPanel /></TabsContent>
           <TabsContent value="banks" className="mt-4"><BankSourcesPanel /></TabsContent>
           <TabsContent value="aging" className="mt-4"><AgingReportPanel /></TabsContent>
