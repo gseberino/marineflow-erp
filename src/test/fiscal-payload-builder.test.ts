@@ -344,8 +344,17 @@ describe("buildNfeDraftPayload — NF-e referenciada na devolução (ide/NFref/r
     expect(p.referenced_documents).toEqual([
       { access_key: "42260750057049000159550020000000011737359835" },
     ]);
-    // Não há mais referência por item.
-    expect(p.items[0].referenced_document).toBeUndefined();
+    // E TAMBÉM por item (det/DFeReferenciado, regra VC02-14).
+    //
+    // O teste dizia "não há mais referência por item" e falhava desde então: a referência
+    // por item voltou de propósito, porque a ordem da devolução não coincide com a da nota
+    // do fornecedor e a inferência por posição da API erraria na devolução parcial. A
+    // Contora roteia por ambiente — cabeçalho em produção até 31/08/2026, por item a partir
+    // de 01/09/2026 —, então os dois níveis vão juntos e quem escolhe é o provedor.
+    expect(p.items[0].referenced_document).toEqual({
+      access_key: "42260750057049000159550020000000011737359835",
+      item: 1,
+    });
   });
 
   it("deduplica chaves repetidas entre itens (uma nota original consolidada)", () => {

@@ -429,12 +429,20 @@ export function useUnignoreBankTransaction() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
+      // Limpa também o rastro da ignorada: uma transação de volta na fila que continuasse
+      // com motivo gravado apareceria nos dois lugares ao mesmo tempo.
       const { error } = await supabase.from('bank_transactions')
-        .update({ reconciled: false, reconciled_payment_id: null, reconciled_service_order_id: null })
+        .update({
+          reconciled: false, reconciled_payment_id: null, reconciled_service_order_id: null,
+          dismissed_reason: null, dismissed_kind: null, dismissed_at: null, dismissed_by: null,
+        } as never)
         .eq('id', id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['bank-transactions'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['bank-transactions'] });
+      qc.invalidateQueries({ queryKey: ['bank-transactions-ignoradas'] });
+    },
   });
 }
 
@@ -538,15 +546,33 @@ export function useReconcile() {
   });
 }
 
+/**
+ * Tira uma transação da fila, deixando rastro.
+ *
+ * Gravava só `reconciled: true` — sem motivo, sem tipo, sem data. A linha virava
+ * indistinguível de uma conciliada de verdade e nem aparecia no livro das ignoradas, que
+ * filtra por motivo. Era o mesmo sumiço que fez 380 transações virarem desconfiança, só
+ * que pela porta da frente.
+ */
 export function useDismissBankTransaction() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from('bank_transactions')
-        .update({ reconciled: true }).eq('id', id);
+    mutationFn: async (v: string | { id: string; reason?: string }) => {
+      const id = typeof v === 'string' ? v : v.id;
+      const motivo = (typeof v === 'string' ? '' : v.reason)?.trim()
+        || 'Tirada da fila pelo gestor, sem motivo informado';
+      const { error } = await supabase.from('bank_transactions').update({
+        reconciled: true,
+        dismissed_reason: motivo,
+        dismissed_kind: 'manual',
+        dismissed_at: new Date().toISOString(),
+      } as never).eq('id', id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['bank-transactions'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['bank-transactions'] });
+      qc.invalidateQueries({ queryKey: ['bank-transactions-ignoradas'] });
+    },
   });
 }
 

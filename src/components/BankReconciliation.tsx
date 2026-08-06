@@ -21,13 +21,28 @@ import {
   CANDIDATE_LABELS, type ReconcileSuggestion, type ReconcileGroup,
 } from '@/hooks/use-reconciliation';
 import { toast } from 'sonner';
-import { Upload, Check, X, Undo2, Sparkles, AlertTriangle } from 'lucide-react';
+import { Upload, Check, X, Undo2, Sparkles, AlertTriangle, EyeOff } from 'lucide-react';
 import { StatusBadge } from '@/components/StatusBadge';
 import { BankConnectionsPanel } from '@/components/BankConnectionsPanel';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase } from '@/integrations/supabase/client';
 
 type ReconcileMode = 'existing' | 'service_order' | 'new' | 'dismiss';
+
+/**
+ * Até quanto de diferença é tarifa, e não decisão.
+ *
+ * O menor entre os dois, como manda a prática de conciliação: percentual sozinho dá folga
+ * absurda em valor grande (0,5% de R$ 50 mil são R$ 250, que não é tarifa nenhuma), e teto
+ * fixo sozinho é rígido demais no valor pequeno. Acima disto a diferença deixa de ser
+ * ruído do banco e vira algo que alguém precisa explicar.
+ */
+/** Quanto desta conta já foi recebido — o que sobra é o que a próxima transação encontra. */
+const record_pago = (r: { paid_amount?: number | null }) => Number(r.paid_amount ?? 0);
+
+const TOLERANCIA_ABSOLUTA = 10;
+const TOLERANCIA_PERCENTUAL = 0.005;
+const CATEGORIA_DA_DIFERENCA = 'Tarifas bancárias';
 type TabType = 'pending' | 'reconciled' | 'ignored';
 /** Separa o trabalho diário (conciliar) da configuração (de onde vêm os dados). */
 type SecaoType = 'conciliar' | 'fontes';
@@ -79,7 +94,9 @@ export function BankReconciliation() {
   const [tab, setTab] = useState<TabType>('pending');
   const [search, setSearch] = useState('');
   const [matchFilter, setMatchFilter] = useState<'all' | 'with' | 'without'>('all');
-  const [sortBy, setSortBy] = useState<'date' | 'amount'>('date');
+  // Começa pela confiança: é a ordem que faz o operador resolver o barato primeiro e
+  // gastar atenção só no que exige decisão.
+  const [sortBy, setSortBy] = useState<'confianca' | 'date' | 'amount'>('confianca');
   const [preview, setPreview] = useState<BankTransaction[] | null>(null);
   const [previewSource, setPreviewSource] = useState<'bank' | 'credit_card'>('bank');
   const [filter, setFilter] = useState<'all' | 'credit' | 'debit'>('all');
@@ -97,8 +114,20 @@ export function BankReconciliation() {
 
   const allTx = transactions || [];
   const pending = allTx.filter(t => !t.reconciled);
-  const reconciledTx = allTx.filter(t => t.reconciled && t.reconciled_payment_id);
-  const ignoredTx = allTx.filter(t => t.reconciled && !t.reconciled_payment_id);
+  /**
+   * Conciliada é conciliada; ignorada é a que tem MOTIVO.
+   *
+   * A regra era "sem pagamento vinculado = ignorada", e ela mentia em 1.628 linhas. A
+   * Caixa de entrada lança a despesa direto no pagável (paid_amount no registro, sem criar
+   * uma linha em `payments`), então toda transação que virou despesa por lá caía na aba de
+   * ignoradas — trabalho feito, aparecendo como trabalho descartado.
+   *
+   * Foi o que o gestor viu quando disse "inúmeras transações foram colocadas como
+   * ignoradas e eu não me recordo de ter feito isso": ele estava certo, e não tinha feito.
+   * A tela é que estava contando errado.
+   */
+  const reconciledTx = allTx.filter(t => t.reconciled && !(t as any).dismissed_reason);
+  const ignoredTx = allTx.filter(t => t.reconciled && !!(t as any).dismissed_reason);
 
   const bestMatch = (txId: string): ReconcileSuggestion | undefined =>
     (suggestionsByTx.get(txId) || [])[0];
@@ -117,9 +146,83 @@ export function BankReconciliation() {
       return alvo.toLowerCase().includes(search.trim().toLowerCase());
     })
     .slice()
-    .sort((a, b) => sortBy === 'amount'
-      ? Number(b.amount) - Number(a.amount)
-      : (a.transaction_date < b.transaction_date ? 1 : -1));
+    .sort((a, b) => {
+      // "Mais confiáveis primeiro" põe o trabalho barato na frente: quem tem candidato
+      // certo resolve num clique, e quem não tem candidato nenhum precisa de decisão. Fazer
+      // o operador descer a lista inteira para descobrir isso é gastar atenção no lugar
+      // errado — o princípio de gestão por exceção que os ERPs aplicam aqui.
+      if (sortBy === 'confianca') {
+        const peso = (t: any) => {
+          const m = bestMatch(t.id);
+          if (m?.tier === 'certain') return 0;
+          if ((groupsByTx.get(t.id) || []).length > 0) return 1;
+          if (m?.tier === 'probable') return 2;
+          if (m) return 3;
+          return 4;
+        };
+        return peso(a) - peso(b) || (a.transaction_date < b.transaction_date ? 1 : -1);
+      }
+      return sortBy === 'amount'
+        ? Number(b.amount) - Number(a.amount)
+        : (a.transaction_date < b.transaction_date ? 1 : -1);
+    });
+
+  /**
+   * Seleção múltipla de TRANSAÇÕES.
+   *
+   * A Caixa de entrada resolve dezenas de linhas por vez e a Conciliação exigia abrir uma,
+   * decidir, esperar, fechar e abrir a próxima. Para um extrato de mil linhas isso não é
+   * lentidão — é o motivo de a conciliação parar pela metade.
+   */
+  const [txSelecionadas, setTxSelecionadas] = useState<Set<string>>(new Set());
+  const marcarTx = (id: string, marcar: boolean) => {
+    setTxSelecionadas((s) => {
+      const n = new Set(s);
+      if (marcar) n.add(id); else n.delete(id);
+      return n;
+    });
+  };
+
+  const selecionadas = filtered.filter((t) => txSelecionadas.has(t.id));
+  const valorSelecionadas = selecionadas.reduce((s, t) => s + Number(t.amount), 0);
+  /** Das selecionadas, quais o motor sabe resolver sozinho. */
+  const certasSelecionadas = selecionadas.filter((t) => bestMatch(t.id)?.tier === 'certain');
+
+  const aplicarCertasSelecionadas = async () => {
+    if (certasSelecionadas.length === 0) return;
+    setIsProcessing(true);
+    let feitas = 0;
+    for (const tx of certasSelecionadas) {
+      const m = bestMatch(tx.id);
+      if (!m) continue;
+      try {
+        await applySuggestion.mutateAsync({ transactionId: tx.id, candidate: m.candidate });
+        feitas += 1;
+      } catch { /* a falha de uma não pode impedir as outras */ }
+    }
+    setIsProcessing(false);
+    setTxSelecionadas(new Set());
+    toast.success(`${feitas} conciliada(s) pela sugestão certa`);
+    refetchEngine();
+    invalidateAll();
+  };
+
+  const ignorarSelecionadas = async () => {
+    const motivo = dismissReason.trim() || 'Ignorada em lote pelo gestor';
+    setIsProcessing(true);
+    let feitas = 0;
+    for (const tx of selecionadas) {
+      try {
+        await dismiss.mutateAsync({ id: tx.id, reason: motivo });
+        feitas += 1;
+      } catch { /* idem */ }
+    }
+    setIsProcessing(false);
+    setTxSelecionadas(new Set());
+    setDismissReason('');
+    toast.success(`${feitas} tirada(s) da fila — ficam em "Fora da fila", com volta`);
+    invalidateAll();
+  };
 
   // Números do topo: o operador precisa saber o tamanho da fila e quanto dela o sistema
   // já sabe explicar, antes de abrir transação por transação.
@@ -249,13 +352,63 @@ export function BankReconciliation() {
         return;
       }
 
+      /**
+       * O depósito quase nunca bate no centavo — e exigir que batesse travava tudo.
+       *
+       * Pix e TED chegam com tarifa descontada, cliente arredonda para baixo, banco cobra
+       * R$ 3,50 de DOC. Sem tolerância, essas linhas ficavam pendentes para sempre porque
+       * o valor "não fecha", e a conta seguia cobrando quem já pagou.
+       *
+       * Três desfechos, e a diferença decide qual:
+       *  · dentro da tolerância  → quita a conta e lança a diferença como tarifa bancária;
+       *  · recebeu MENOS         → baixa parcial, o saldo continua aberto;
+       *  · recebeu MAIS          → quita e o excedente fica para outra conta (ou grupo).
+       */
+      const saldo = Number(record.balance_amount) || Number(record.amount);
+      const recebido = Number(bankTx.amount);
+      const diferenca = Number((saldo - recebido).toFixed(2));
+      const tolerancia = Math.min(TOLERANCIA_ABSOLUTA, saldo * TOLERANCIA_PERCENTUAL);
+      const dentroDaTolerancia = Math.abs(diferenca) <= tolerancia;
+
       await reconcile.mutateAsync({
         bankTransactionId: bankTx.id,
         receivableId: isReceivable ? record.id : undefined,
         payableId: !isReceivable ? record.id : undefined,
-        amount: bankTx.amount,
+        amount: recebido,
       });
-      toast.success(t.financial.confirmReconciliation);
+
+      // Diferença pequena vira despesa de tarifa, com nome — e não um "desconto" anônimo
+      // que ninguém consegue explicar no fim do mês.
+      if (dentroDaTolerancia && diferenca > 0.005) {
+        await supabase.from('payables').insert({
+          description: `Tarifa/diferença na conciliação — ${record.description ?? 'recebimento'}`,
+          issue_date: bankTx.transaction_date, due_date: bankTx.transaction_date,
+          amount: diferenca, paid_amount: diferenca, balance_amount: 0, status: 'paid',
+          expense_category: CATEGORIA_DA_DIFERENCA,
+          origin: 'bank_reconciliation',
+        } as never);
+
+        // E FECHA a conta. Lançar a tarifa e deixar o saldo aberto pelo mesmo valor seria
+        // o pior dos dois mundos: a despesa aparece e a conta segue cobrando o cliente.
+        // Baixar a diferença é justamente o que a tolerância existe para autorizar.
+        await supabase.from(isReceivable ? 'receivables' : 'payables').update({
+          paid_amount: saldo, balance_amount: 0, status: 'paid',
+        } as never).eq('id', record.id);
+
+        toast.success(
+          `Conciliado e quitado. A diferença de ${formatCurrency(diferenca)} virou ${CATEGORIA_DA_DIFERENCA}.`,
+        );
+      } else if (diferenca > 0.005) {
+        toast.success(
+          `Baixa parcial: ${formatCurrency(recebido)} recebidos, ${formatCurrency(diferenca)} continuam em aberto.`,
+        );
+      } else if (diferenca < -0.005) {
+        toast.success(
+          `Conciliado. Entraram ${formatCurrency(-diferenca)} a mais que o saldo desta conta — confira se cobre outra.`,
+        );
+      } else {
+        toast.success(t.financial.confirmReconciliation);
+      }
       setReconcileId(null);
       invalidateAll();
     } catch { toast.error('Erro ao conciliar'); }
@@ -488,8 +641,8 @@ export function BankReconciliation() {
 
   const handleDismiss = async (bankTx: any) => {
     try {
-      await dismiss.mutateAsync(bankTx.id);
-      toast.success('Transação ignorada');
+      await dismiss.mutateAsync({ id: bankTx.id, reason: dismissReason });
+      toast.success('Tirada da fila — fica em "Fora da fila", com volta');
       setReconcileId(null);
       invalidateAll();
     } catch { toast.error('Erro'); }
@@ -765,6 +918,7 @@ export function BankReconciliation() {
               <div className="flex items-center gap-1">
                 <span className="text-xs text-muted-foreground mr-1">Ordenar</span>
                 {([
+                  { v: 'confianca' as const, l: 'Mais confiáveis' },
                   { v: 'date' as const, l: 'Data' },
                   { v: 'amount' as const, l: 'Valor' },
                 ]).map(({ v, l }) => (
@@ -783,6 +937,41 @@ export function BankReconciliation() {
 
           {filtered.length === 0 && <p className="text-sm text-muted-foreground py-4 text-center">{t.common.noResults}</p>}
 
+          {/* Barra da seleção, grudada no topo: a escolha acontece rolando a lista, e um
+              botão que só existe no fim obriga a rolar de volta para usá-lo. */}
+          {txSelecionadas.size > 0 && (
+            <div className="sticky top-2 z-10 mb-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-background/95 p-2 shadow-sm backdrop-blur">
+              <span className="text-sm">
+                <strong>{txSelecionadas.size}</strong> selecionada(s) ·{' '}
+                <strong className="tabular-nums">{formatCurrency(valorSelecionadas)}</strong>
+                {certasSelecionadas.length > 0 && (
+                  <span className="text-success"> · {certasSelecionadas.length} com sugestão certa</span>
+                )}
+              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button size="sm" variant="ghost" onClick={() => setTxSelecionadas(new Set())}>Limpar</Button>
+                <Button
+                  size="sm" variant="outline" disabled={isProcessing || selecionadas.length === 0}
+                  onClick={ignorarSelecionadas}
+                  title="Tira da fila. Ficam em 'Fora da fila', com motivo e botão de voltar."
+                >
+                  <EyeOff className="mr-1 h-3 w-3" />
+                  Tirar da fila
+                </Button>
+                <Button
+                  size="sm" disabled={isProcessing || certasSelecionadas.length === 0}
+                  onClick={aplicarCertasSelecionadas}
+                  title={certasSelecionadas.length === 0
+                    ? 'Nenhuma das selecionadas tem sugestão da camada de certeza'
+                    : undefined}
+                >
+                  <Check className="mr-1 h-3 w-3" />
+                  Conciliar as {certasSelecionadas.length} certas
+                </Button>
+              </div>
+            </div>
+          )}
+
           <div className="space-y-2">
             {filtered.map(tx => {
               const melhor = bestMatch(tx.id);
@@ -796,6 +985,12 @@ export function BankReconciliation() {
                 }`}
               >
                 <div className="flex items-start justify-between p-3 gap-3 flex-wrap">
+                  <Checkbox
+                    className="mt-1 shrink-0"
+                    checked={txSelecionadas.has(tx.id)}
+                    onCheckedChange={(v) => marcarTx(tx.id, v === true)}
+                    aria-label={`Selecionar ${tx.description}`}
+                  />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm text-muted-foreground tabular-nums">{formatDate(tx.transaction_date)}</span>
@@ -1156,7 +1351,36 @@ export function BankReconciliation() {
                                   {jaPago
                                     ? <StatusBadge className="bg-info/15 text-info ml-2">Já quitado — só vincular</StatusBadge>
                                     : isAutoMatch && <StatusBadge className="bg-warning/15 text-warning ml-2">{t.financial.autoSuggestion}</StatusBadge>}
+                                  {/* Uma conta paga em várias transações: o saldo restante
+                                      é o que a próxima transação tem de encontrar. Sem
+                                      mostrar o que já entrou, o operador acha que o valor
+                                      está errado e desiste de conciliar. */}
+                                  {!jaPago && Number(record_pago(r)) > 0.005 && (
+                                    <span className="ml-2 text-xs text-muted-foreground">
+                                      já recebeu {formatCurrency(Number(record_pago(r)))} de{' '}
+                                      {formatCurrency(Number(r.amount))}
+                                    </span>
+                                  )}
                                 </div>
+                                {/* O que vai acontecer com a diferença, ANTES do clique.
+                                    Descobrir depois que a conta ficou aberta por R$ 3,50 —
+                                    ou que fechou com uma tarifa que ninguém pediu — é o
+                                    tipo de surpresa que faz o operador desconfiar da tela. */}
+                                {!jaPago && Math.abs(base - Number(tx.amount)) > 0.005 && (
+                                  <span className="w-full text-xs text-muted-foreground">
+                                    {(() => {
+                                      const dif = Number((base - Number(tx.amount)).toFixed(2));
+                                      const tol = Math.min(TOLERANCIA_ABSOLUTA, base * TOLERANCIA_PERCENTUAL);
+                                      if (dif > 0 && Math.abs(dif) <= tol) {
+                                        return `Confirmar quita a conta e lança ${formatCurrency(dif)} como ${CATEGORIA_DA_DIFERENCA}.`;
+                                      }
+                                      if (dif > 0) {
+                                        return `Confirmar dá baixa parcial: ${formatCurrency(dif)} continuam em aberto.`;
+                                      }
+                                      return `Entraram ${formatCurrency(-dif)} a mais que esta conta — o excedente pode cobrir outra.`;
+                                    })()}
+                                  </span>
+                                )}
                                 <div className="flex shrink-0 items-center gap-2">
                                   <span className="font-medium tabular-nums">{formatCurrency(base)}</span>
                                   <Button
