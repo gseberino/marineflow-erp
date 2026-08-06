@@ -359,4 +359,50 @@ export const surveyOpsTools: ToolDef[] = [
       };
     },
   },
+
+  {
+    name: "size_dc_cable",
+    description:
+      "Dimensiona cabo de corrente contínua pelos dois critérios da ABYC E-11 (ampacidade e queda de tensão, valendo o MAIOR). Use SEMPRE que a conversa envolver bitola, mm², AWG, 'que cabo usar' ou revisão de cabo em orçamento. NUNCA afirme uma bitola sem chamar esta tool — cabo subdimensionado esquenta, e é risco físico, não erro de orçamento. Passe survey_id se houver levantamento; senão informe corrente e comprimento.",
+    input_schema: {
+      type: "object",
+      properties: {
+        survey_id: { type: "string", description: "Levantamento de onde ler as respostas. Preferível." },
+        amps: { type: "number", description: "Corrente máxima do circuito, em ampères." },
+        one_way_meters: { type: "number", description: "Comprimento do trecho em metros, UMA VIA — a função dobra sozinha." },
+        volts: { type: "number", description: "Tensão do sistema (12, 24, 48). Padrão 12." },
+        max_drop_pct: { type: "number", description: "3 para circuito crítico (alimentador principal, navegação, porão), 10 para não crítico. Padrão 3." },
+        engine_space: { type: "boolean", description: "Passa por casa de máquinas / compartimento de motor?" },
+        bundle_size: { type: "number", description: "Quantos condutores no mesmo feixe ou conduíte." },
+      },
+    },
+    risk: "low",
+    async execute(args, { sb }) {
+      const { data, error } = args.survey_id
+        ? await sb.rpc("survey_cable_sizing", { p_survey_id: args.survey_id })
+        : await sb.rpc("dc_cable_sizing", {
+            p_amps: args.amps ?? null,
+            p_one_way_meters: args.one_way_meters ?? null,
+            p_volts: args.volts ?? 12,
+            p_max_drop_pct: args.max_drop_pct ?? 3,
+            p_insulation_c: 105,
+            p_engine_space: args.engine_space ?? false,
+            p_bundle_size: args.bundle_size ?? 1,
+          });
+      if (error) throw error;
+      const r = data as any;
+
+      return {
+        ...r,
+        // O modelo tende a arredondar para um número redondo e apresentá-lo
+        // como veredito. Estas instruções existem para impedir isso: o que
+        // sai daqui é meia conta enquanto a ampacidade não estiver cadastrada.
+        como_dizer: r?.mm2_minimo
+          ? `Para ${r?.lido_do_levantamento?.corrente_a ?? args.amps} A neste trecho, mantendo ${r?.premissas?.queda_max_pct ?? args.max_drop_pct ?? 3}% de queda, o cabo precisa de no mínimo ${r.mm2_minimo} mm².`
+          : "Não deu para dimensionar: faltam dados.",
+        instrucao:
+          "NUNCA apresente a bitola como fechada se 'pronto' for false. Diga sempre qual critério mandou. Se 'ampacidade_cadastrada' for false, repita que só a queda de tensão entrou na conta e que falta conferir a ampacidade na ABYC E-11 ou no Circuit Wizard da Blue Sea. Não reproduza tabela de ampacidade de memória em hipótese alguma.",
+      };
+    },
+  },
 ];
