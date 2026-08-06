@@ -2222,6 +2222,9 @@ export type Database = {
           counterparty_name: string | null
           created_at: string | null
           description: string
+          dismissed_at: string | null
+          dismissed_by: string | null
+          dismissed_kind: string | null
           dismissed_reason: string | null
           id: string
           import_batch_id: string | null
@@ -2251,6 +2254,9 @@ export type Database = {
           counterparty_name?: string | null
           created_at?: string | null
           description: string
+          dismissed_at?: string | null
+          dismissed_by?: string | null
+          dismissed_kind?: string | null
           dismissed_reason?: string | null
           id?: string
           import_batch_id?: string | null
@@ -2280,6 +2286,9 @@ export type Database = {
           counterparty_name?: string | null
           created_at?: string | null
           description?: string
+          dismissed_at?: string | null
+          dismissed_by?: string | null
+          dismissed_kind?: string | null
           dismissed_reason?: string | null
           id?: string
           import_batch_id?: string | null
@@ -2303,6 +2312,13 @@ export type Database = {
             columns: ["bank_connection_id"]
             isOneToOne: false
             referencedRelation: "bank_connections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bank_transactions_dismissed_by_fkey"
+            columns: ["dismissed_by"]
+            isOneToOne: false
+            referencedRelation: "app_users"
             referencedColumns: ["id"]
           },
           {
@@ -2907,6 +2923,42 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      dc_ampacity_ratings: {
+        Row: {
+          amps_outside_engine_space: number
+          awg: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          insulation_c: number
+          mm2: number
+          notes: string | null
+          source: string
+        }
+        Insert: {
+          amps_outside_engine_space: number
+          awg?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          insulation_c: number
+          mm2: number
+          notes?: string | null
+          source: string
+        }
+        Update: {
+          amps_outside_engine_space?: number
+          awg?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          insulation_c?: number
+          mm2?: number
+          notes?: string | null
+          source?: string
+        }
+        Relationships: []
       }
       entity_open_loops: {
         Row: {
@@ -9692,6 +9744,27 @@ export type Database = {
         Returns: string
       }
       count_purchase_shortages: { Args: { p_so_ids: string[] }; Returns: Json }
+      dc_cable_min_mm2_by_drop: {
+        Args: {
+          p_amps: number
+          p_max_drop_pct?: number
+          p_one_way_meters: number
+          p_volts?: number
+        }
+        Returns: number
+      }
+      dc_cable_sizing: {
+        Args: {
+          p_amps: number
+          p_bundle_size?: number
+          p_engine_space?: boolean
+          p_insulation_c?: number
+          p_max_drop_pct?: number
+          p_one_way_meters: number
+          p_volts?: number
+        }
+        Returns: Json
+      }
       estimate_from_cases: {
         Args: { p_min_casos?: number; p_service_id: string }
         Returns: Json
@@ -10024,6 +10097,7 @@ export type Database = {
           sistema: string
         }[]
       }
+      survey_cable_sizing: { Args: { p_survey_id: string }; Returns: Json }
       survey_question_catalog: {
         Args: never
         Returns: {
