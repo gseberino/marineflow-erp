@@ -76,7 +76,12 @@ function colunasPorTabela(): Map<string, Set<string>> {
  * aponta para a ordem (`service_order_id`).
  */
 function relacoesEntre(): Map<string, number> {
-  const src = readFileSync(TYPES, 'utf8');
+  // Mesma normalização de `colunasPorTabela`, e pelo mesmo motivo: `^ {6}(\w+): \{$` não
+  // casa nada num arquivo com CRLF, porque o `\r` fica entre o `{` e o fim da linha. Sem
+  // isso este parser devolve ZERO relações no Windows — e um verificador de ambiguidade
+  // que não encontra relação nenhuma aprova qualquer query, que é justamente o modo de
+  // falha contra o qual este arquivo inteiro foi escrito.
+  const src = readFileSync(TYPES, 'utf8').replace(/\r\n/g, '\n');
   // Chaves DISTINTAS por par. Contar ocorrências não serve: os tipos gerados
   // repetem a mesma FK uma vez para cada view que referencia a tabela, e isso
   // faria `products` e `product_categories` — ligadas por uma chave só —
