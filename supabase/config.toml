@@ -90,3 +90,9 @@ verify_jwt = false
 # só usuário logado no ERP pode pedir Connect Token.
 [functions.pluggy-webhook]
 verify_jwt = false
+
+# Reconciliação de custo de IA com o OpenRouter: chamada só pelo pg_cron, que manda
+# x-cron-secret e nenhum JWT. Com verify_jwt=true o gateway devolve
+# UNAUTHORIZED_NO_AUTH_HEADER antes de o código rodar — o cron falharia em silêncio.
+[functions.ai-cost-reconcile]
+verify_jwt = false

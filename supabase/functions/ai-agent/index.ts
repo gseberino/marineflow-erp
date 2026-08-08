@@ -145,7 +145,7 @@ function rowToChatMessage(row: MessageRow): ChatMessage {
 function buildMessageRows(
   sessionId: string,
   newMessages: ChatMessage[],
-  usageLog: Array<{ inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens?: number }>,
+  usageLog: Array<{ inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens?: number; generationId?: string }>,
   model: string,
   source: "web" | "whatsapp" = "web",
 ) {
@@ -168,6 +168,9 @@ function buildMessageRows(
         // Sem esta coluna não dá para separar GRAVAÇÃO de cache (1,25x no TTL de 5min, 2x no de
         // 1h) de entrada não-cacheada (1x) — e é exatamente essa a variável que o TTL muda.
         cache_creation_tokens: usage?.cacheCreationInputTokens ?? null,
+        // Chave para a função ai-cost-reconcile buscar o custo REALMENTE cobrado no OpenRouter,
+        // em vez de estimar por tabela de preço (que ignora markup e promoção).
+        openrouter_generation_id: usage?.generationId ?? null,
         model,
       };
     }

@@ -41,6 +41,11 @@ export type ClaudeUsage = {
   outputTokens: number;
   cacheReadInputTokens: number;
   cacheCreationInputTokens: number;
+  /** id da geração no OpenRouter. É a chave para consultar depois, em
+   * `GET /api/v1/generation?id=`, o CUSTO REALMENTE COBRADO (total_cost,
+   * cache_discount) em vez de estimar por tabela de preço. Ver a função
+   * `ai-cost-reconcile`. Ausente se a resposta não trouxer id. */
+  generationId?: string;
 };
 
 export type CallClaudeParams = {
@@ -190,6 +195,7 @@ export async function callClaude(params: CallClaudeParams): Promise<CallClaudeRe
         outputTokens: json.usage?.completion_tokens ?? 0,
         cacheReadInputTokens: json.usage?.prompt_tokens_details?.cached_tokens ?? 0,
         cacheCreationInputTokens: json.usage?.prompt_tokens_details?.cache_write_tokens ?? 0,
+        generationId: typeof json.id === "string" ? json.id : undefined,
       };
       const stopReason = finishReasonToStopReason(choice?.finish_reason);
       console.log(`[openrouter] model=${params.model} finish_reason=${choice?.finish_reason} usage=${JSON.stringify(usage)}`);
