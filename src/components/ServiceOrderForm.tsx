@@ -70,7 +70,8 @@ import { WhatsAppSendHistoryDialog } from '@/components/WhatsAppSendHistoryDialo
 import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/SendViaWhatsAppDialog';
 import { useWhatsAppSendHistory } from '@/hooks/use-whatsapp-send-log';
 import { CheckCircle2, XCircle, History as HistoryIcon, Send, Sparkles } from 'lucide-react';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { documentTypeFor, documentLabelFor, isQuoteStatus } from '@/lib/document-type';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
@@ -81,7 +82,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Plus, Trash2, AlertTriangle, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle, Copy, Download, Loader2, DollarSign, Percent, Hash } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, AlertTriangle, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle, Copy, Download, Loader2, DollarSign, Percent, Hash, MoreHorizontal } from 'lucide-react';
 import { toast } from 'sonner';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { writeAuditLog } from '@/hooks/use-audit-log';
@@ -150,6 +151,63 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       }`,
     );
     return true;
+  };
+
+  /* As duas ações de WhatsApp, que a barra oferecia com nomes que não
+     explicavam a diferença: "WhatsApp" abria o wa.me com o LINK público, e
+     "Enviar WhatsApp" mandava o DOCUMENTO pela Evolution. Quem não construiu a
+     tela não tinha como saber qual era qual. Agora são dois itens do menu,
+     nomeados pelo que fazem. */
+  const abrirPreviewLinkWhatsApp = () => {
+    if (!orderData?.share_token) return;
+    const url = `${window.location.origin}/view/${orderData.share_token}`;
+    const phoneRaw = (orderData?.clients as any)?.whatsapp || (orderData?.clients as any)?.phone || '';
+    const phone = normalizePhoneE164(phoneRaw);
+    const clientName = (orderData?.clients as any)?.name || '';
+    const rotulo = isQuoteStatus(currentStatus) ? 'do Orçamento' : 'da Ordem de Serviço';
+    const msg = `Olá${clientName ? ' ' + clientName : ''}, segue o link ${rotulo} ${orderData.service_order_number}: ${url}`;
+    setWaEditPhone(phone);
+    setWaEditMessage(msg);
+    setWaPreview({ phone, message: msg, url, clientName });
+    void writeAuditLog({
+      table_name: 'service_orders',
+      record_id: orderData.id,
+      action: 'whatsapp_preview' as any,
+      new_value: {
+        share_token: orderData.share_token,
+        public_url: url,
+        phone_raw: String(phoneRaw),
+        phone_normalized: phone,
+        client_name: clientName,
+      },
+      reason: 'Abriu pré-visualização do WhatsApp',
+    });
+    recordWhatsAppEvent({
+      source: 'detail_dialog',
+      action: 'preview',
+      serviceOrderId: orderData.id,
+      serviceOrderNumber: orderData.service_order_number,
+      shareToken: orderData.share_token,
+      phoneRaw: String(phoneRaw),
+      phoneNormalized: phone,
+    });
+  };
+
+  const enviarDocumentoPorWhatsApp = () => {
+    if (!orderData?.share_token) return;
+    setWhatsAppTarget({
+      kind: 'service_order',
+      serviceOrderId: orderData.id,
+      serviceOrderNumber: orderData.service_order_number,
+      shareToken: orderData.share_token,
+      clientId: (orderData?.clients as any)?.id || (orderData as any)?.client_id || null,
+      clientName: (orderData?.clients as any)?.name || null,
+      clientPhone: (orderData?.clients as any)?.whatsapp || (orderData?.clients as any)?.phone || null,
+      // Mesmo critério do botão de imprimir: rascunho é orçamento, o resto é OS.
+      // Antes havia duas opções, e a errada mandava ao cliente o documento que
+      // aquela tela não era.
+      documentType: documentTypeFor(currentStatus),
+    });
   };
 
   const openPdfDialog = (type: 'quote' | 'service_order' | 'invoice') => {
@@ -1672,189 +1730,79 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           <h1 className="text-2xl font-bold truncate">
             {isNew ? t.serviceOrders.newOrder : orderData?.service_order_number}
           </h1>
+          {/* UM menu, em vez de sete controles soltos.
+              A barra tinha Imprimir, Fatura, WhatsApp, Enviar WhatsApp,
+              Duplicar e Cancelar lado a lado — mais o status e o salvar. Numa
+              tela onde se passa o tempo montando o orçamento, seis botões que
+              quase nunca se usa disputam atenção com os dois que se usa sempre.
+              Fora do menu ficam só esses dois: o status, que também INFORMA em
+              que pé está, e o salvar. */}
           {!isNew && (
-            <div className="flex items-center gap-2 mt-1">
-              <StatusBadge className={statusConfig[currentStatus]?.className || ''}>
-                {(t.status as Record<string, string>)[currentStatus]}
-              </StatusBadge>
-              <span className={priorityConfig[form.priority]?.className || ''}>
-                {(t.priority as Record<string, string>)[form.priority]}
-              </span>
-              {lastWaSend && (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={() => setShowZapiHistory(true)}
-                        className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs hover:bg-muted transition-colors"
-                        aria-label="Ver histórico de envios WhatsApp"
-                      >
-                        {lastWaSend.success ? (
-                          <CheckCircle2 className="h-3.5 w-3.5 text-success" />
-                        ) : (
-                          <XCircle className="h-3.5 w-3.5 text-destructive" />
-                        )}
-                        <span className={lastWaSend.success ? 'text-success' : 'text-destructive'}>
-                          WhatsApp: {lastWaSend.success ? 'enviado' : 'falhou'}
-                        </span>
-                        <HistoryIcon className="h-3 w-3 text-muted-foreground" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" className="max-w-xs">
-                      <div className="text-xs space-y-1">
-                        <div className="font-medium">
-                          Último envio: {new Date(lastWaSend.changed_at).toLocaleString('pt-BR')}
-                        </div>
-                        {!lastWaSend.success && (
-                          <div className="text-destructive">
-                            {(lastWaSend.new_value as any)?.provider_result?.error
-                              || (lastWaSend.new_value as any)?.zapi_response?.error
-                              || lastWaSend.reason
-                              || `HTTP ${(lastWaSend.new_value as any)?.http_status ?? '?'}`}
-                          </div>
-                        )}
-                        <div className="text-muted-foreground italic">Clique para ver histórico completo</div>
-                      </div>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              )}
-            </div>
-          )}
-        </div>
-        <div ref={topActionsRef} className="flex gap-2 flex-wrap">
-          {!isNew && (
-            <>
-              {/* UM botão, do documento que esta tela é.
-                  Havia dois — "Orçamento" e "OS" — de quando a mesma tela
-                  servia aos dois papéis. Depois da separação, o par virou
-                  armadilha: dentro de uma OS o botão "Orçamento" gerava um
-                  documento com validade e sem apontamento, e dentro de um
-                  orçamento o botão "OS" gerava o contrário. Nenhum dos dois
-                  fazia sentido no lugar em que estava.
-                  Rascunho é orçamento; o resto é ordem de serviço — o mesmo
-                  critério que decide as abas desta tela.
-                  A janela cuida do resto: a validade só aparece para orçamento,
-                  e ela é que oferece imprimir e baixar. */}
-              <Button
-                variant="outline" size="sm" className="gap-1"
-                onClick={() => openPdfDialog(currentStatus === 'draft' ? 'quote' : 'service_order')}
-              >
-                {currentStatus === 'draft'
-                  ? <FileText className="h-4 w-4" />
-                  : <Printer className="h-4 w-4" />}
-                Imprimir / Baixar
-              </Button>
-              {(currentStatus === 'completed' || currentStatus === 'invoiced') && (
-                <Button variant="outline" size="sm" onClick={() => openPdfDialog('invoice')} className="gap-1">
-                  <Receipt className="h-4 w-4" />
-                  Fatura
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-1">
+                  <MoreHorizontal className="h-4 w-4" />
+                  Ações
+                  <ChevronDown className="h-3 w-3 opacity-60" />
                 </Button>
-              )}
-              {orderData?.share_token && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1 border-green-600 text-green-700 hover:bg-green-50 hover:text-green-800 dark:hover:bg-green-950"
-                  onClick={() => {
-                    const url = `${window.location.origin}/view/${orderData.share_token}`;
-                    const phoneRaw = (orderData?.clients as any)?.whatsapp || (orderData?.clients as any)?.phone || '';
-                    const phone = normalizePhoneE164(phoneRaw);
-                    const clientName = (orderData?.clients as any)?.name || '';
-                    const msg = `Olá${clientName ? ' ' + clientName : ''}, segue o link da Ordem de Serviço ${orderData.service_order_number}: ${url}`;
-                    setWaEditPhone(phone);
-                    setWaEditMessage(msg);
-                    setWaPreview({ phone, message: msg, url, clientName });
-                    void writeAuditLog({
-                      table_name: 'service_orders',
-                      record_id: orderData.id,
-                      action: 'whatsapp_preview' as any,
-                      new_value: {
-                        share_token: orderData.share_token,
-                        public_url: url,
-                        phone_raw: String(phoneRaw),
-                        phone_normalized: phone,
-                        client_name: clientName,
-                      },
-                      reason: 'Abriu pré-visualização do WhatsApp',
-                    });
-                    recordWhatsAppEvent({
-                      source: 'detail_dialog',
-                      action: 'preview',
-                      serviceOrderId: orderData.id,
-                      serviceOrderNumber: orderData.service_order_number,
-                      shareToken: orderData.share_token,
-                      phoneRaw: String(phoneRaw),
-                      phoneNormalized: phone,
-                    });
-                  }}
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-60">
+                <DropdownMenuItem
+                  onClick={() => openPdfDialog(documentTypeFor(currentStatus))}
+                  className="gap-2"
                 >
-                  <MessageCircle className="h-4 w-4" />
-                  WhatsApp
-                </Button>
-              )}
-              {orderData?.share_token && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="gap-1 border-accent text-accent hover:bg-accent/10"
-                    >
+                  {isQuoteStatus(currentStatus)
+                    ? <FileText className="h-4 w-4" />
+                    : <Printer className="h-4 w-4" />}
+                  Imprimir / Baixar
+                </DropdownMenuItem>
+
+                {(currentStatus === 'completed' || currentStatus === 'invoiced') && (
+                  <DropdownMenuItem onClick={() => openPdfDialog('invoice')} className="gap-2">
+                    <Receipt className="h-4 w-4" /> Fatura
+                  </DropdownMenuItem>
+                )}
+
+                {orderData?.share_token && (
+                  <>
+                    <DropdownMenuSeparator />
+                    {/* Os nomes dizem o que sai: um manda o arquivo, o outro
+                        manda o endereço. Antes eram "Enviar WhatsApp" e
+                        "WhatsApp". */}
+                    <DropdownMenuItem onClick={enviarDocumentoPorWhatsApp} className="gap-2">
                       <Send className="h-4 w-4" />
-                      Enviar WhatsApp
-                      <ChevronDown className="h-3 w-3 opacity-60" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem
-                      onClick={() => setWhatsAppTarget({
-                        kind: 'service_order',
-                        serviceOrderId: orderData.id,
-                        serviceOrderNumber: orderData.service_order_number,
-                        shareToken: orderData.share_token,
-                        clientId: (orderData?.clients as any)?.id || (orderData as any)?.client_id || null,
-                        clientName: (orderData?.clients as any)?.name || null,
-                        clientPhone: (orderData?.clients as any)?.whatsapp || (orderData?.clients as any)?.phone || null,
-                        documentType: 'service_order',
-                      })}
-                    >
-                      <Printer className="h-4 w-4 mr-2" /> Enviar OS
+                      Enviar {documentLabelFor(currentStatus)} por WhatsApp
                     </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => setWhatsAppTarget({
-                        kind: 'service_order',
-                        serviceOrderId: orderData.id,
-                        serviceOrderNumber: orderData.service_order_number,
-                        shareToken: orderData.share_token,
-                        clientId: (orderData?.clients as any)?.id || (orderData as any)?.client_id || null,
-                        clientName: (orderData?.clients as any)?.name || null,
-                        clientPhone: (orderData?.clients as any)?.whatsapp || (orderData?.clients as any)?.phone || null,
-                        documentType: 'quote',
-                      })}
-                    >
-                      <FileText className="h-4 w-4 mr-2" /> Enviar Orçamento
+                    <DropdownMenuItem onClick={abrirPreviewLinkWhatsApp} className="gap-2">
+                      <MessageCircle className="h-4 w-4" /> Enviar link por WhatsApp
                     </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleDuplicate}
-                disabled={isNew || duplicate.isPending}
-                className="gap-1"
-              >
-                <Copy className="h-4 w-4" />
-                Duplicar
-              </Button>
-            </>
-          )}
-          {!isNew && !isLocked && currentStatus !== 'cancelled' && (
-            <Button variant="outline" size="sm" className="text-destructive" onClick={() => setShowCancelDialog(true)}>
-              <Ban className="h-4 w-4 mr-1" /> {t.serviceOrders.cancelOS}
-            </Button>
+                  </>
+                )}
+
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={handleDuplicate}
+                  disabled={duplicate.isPending}
+                  className="gap-2"
+                >
+                  <Copy className="h-4 w-4" /> Duplicar
+                </DropdownMenuItem>
+
+                {!isLocked && currentStatus !== 'cancelled' && (
+                  <>
+                    <DropdownMenuSeparator />
+                    {/* Cancelar fica por último e separado: é a única daqui que
+                        não tem volta fácil. */}
+                    <DropdownMenuItem
+                      onClick={() => setShowCancelDialog(true)}
+                      className="gap-2 text-destructive focus:text-destructive"
+                    >
+                      <Ban className="h-4 w-4" /> {t.serviceOrders.cancelOS}
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
           {!isNew && !isLocked && validTransitions.length > 0 && (
             <Select value={currentStatus} onValueChange={handleStatusChange}>
