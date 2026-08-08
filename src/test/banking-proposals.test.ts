@@ -294,6 +294,42 @@ describe("regras que o gestor ensina", () => {
     expect(p.appliedRuleId).toBeNull();
   });
 
+  it("MCC classifica o que o nome não entrega", () => {
+    // "MP *GTEKENERGIASU" e "EC *INOHOUSE" não contêm palavra nenhuma do plano de contas —
+    // é o caso em que ler o texto não funciona e mandar para a IA era o único recurso. O
+    // MCC vem da bandeira, é o mesmo no mundo inteiro e não depende de como a maquininha
+    // escreve o nome.
+    const p = montarProposta(
+      tx({ description: "MP *GTEKENERGIASU", payee_mcc: "5251" }), fornecedores,
+    );
+    expect(p.suggestedCategory).toBe("Ferramentas e equipamentos");
+    expect(p.reasoning).toContain("MCC 5251");
+    expect(p.confidence).toBeGreaterThanOrEqual(90);
+  });
+
+  it("MCC vence o histórico aprendido, mas perde para a regra do gestor", () => {
+    // Fato da bandeira ganha da prática da casa; instrução explícita ganha dos dois.
+    const porNome = new Map([
+      ["LOJA Z", { categoria: "Alimentação de campo", dreGroup: "custo_direto", vezes: 9 }],
+    ]);
+    const comMcc = montarProposta(
+      tx({ description: "LOJA Z", payee_mcc: "5541" }), fornecedores, undefined, [], porNome,
+    );
+    expect(comMcc.suggestedCategory).toBe("Combustível e deslocamento");
+
+    const r = regra({ match_type: "text", match_value: "LOJA Z", set_category: "Peças e materiais" });
+    const comRegra = montarProposta(
+      tx({ description: "LOJA Z", payee_mcc: "5541" }), fornecedores, undefined, [r], porNome,
+    );
+    expect(comRegra.suggestedCategory).toBe("Peças e materiais");
+  });
+
+  it("MCC desconhecido não vira palpite — devolve o campo seguinte", () => {
+    const p = montarProposta(tx({ description: "POSTO AGRICOPEL", payee_mcc: "9999" }), fornecedores);
+    expect(p.suggestedCategory).toBe("Combustível e deslocamento"); // caiu na regra de texto
+    expect(p.reasoning).not.toContain("MCC");
+  });
+
   it("aprende pelo NOME do extrato, não só por fornecedor cadastrado", () => {
     // A fatura de cartão é quase toda de estabelecimentos que nunca serão fornecedor
     // cadastrado. Eram eles que ficavam em "Outras despesas" para sempre: o gestor

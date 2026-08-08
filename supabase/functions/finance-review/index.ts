@@ -186,8 +186,12 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
   const transacoes = await lerTudo<TransacaoOrfa>((de, ate) => {
     let q = admin
       .from("bank_transactions")
-      .select("id, transaction_date, description, amount, transaction_type, counterparty_name, counterparty_document, source_type, bank_connection_id, installment_label")
+      .select("id, transaction_date, description, amount, transaction_type, counterparty_name, counterparty_document, source_type, bank_connection_id, installment_label, payee_mcc, tx_status")
       .eq("reconciled", false)
+      // Transação PENDENTE não vira lançamento: o banco ainda pode mudar o valor ou
+      // cancelá-la. Criar despesa em cima disso é construir sobre areia — e desfazer
+      // depois custa mais que esperar o fechamento.
+      .or("tx_status.is.null,tx_status.neq.PENDING")
       .order("transaction_date", { ascending: false })
       .order("id");
     if (!incluirHistorico) q = q.gte("transaction_date", desde);
@@ -1115,14 +1119,25 @@ async function aprovar(
           })
           .in("id", [p.bank_transaction_id, p.related_transaction_id].filter(Boolean));
       } else if (p.kind === "create_payable") {
-        // Compra parcelada: o lançamento é da COMPRA, e o que ainda não venceu fica como
-        // saldo em aberto. Marcar a compra inteira como paga esconderia dívida real do
-        // fluxo de caixa — o cartão ainda vai cobrar as parcelas seguintes.
+        /**
+         * Compra no cartão é DESPESA, nunca conta a pagar.
+         *
+         * A versão anterior deixava as parcelas futuras como saldo em aberto, "para não
+         * esconder dívida". O efeito foi o oposto: 41 compras parceladas viraram contas a
+         * pagar de R$ 33 mil — e o gestor não deve isso ao LOJISTA. A compra está paga do
+         * ponto de vista dele; quem ele deve é o BANCO, e essa dívida é a fatura, uma só.
+         * Manter as duas contava a mesma dívida duas vezes.
+         *
+         * A competência continua certa: a despesa inteira é reconhecida na data da compra,
+         * e o pagamento da fatura é não operacional — sai do resultado, então nada é
+         * contado em dobro no DRE. O financiamento com o banco pertence à fatura (Fase B3),
+         * não a cada compra.
+         */
         const parcelamento = await lerCompraParcelada(
           admin, (p.bank_transactions ?? null) as PernaDeParcelamento | null,
         );
-        const pago = parcelamento ? Math.min(parcelamento.jaPago, valor) : valor;
-        const aberto = Number((valor - pago).toFixed(2));
+        const pago = valor;
+        const aberto = 0;
 
         const { data: criado, error: e1 } = await admin.from("payables").insert({
           description: parcelamento

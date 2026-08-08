@@ -170,6 +170,49 @@ Deno.serve(async (req) => {
  * Só toca em coluna que está NULA. Nada que o gestor tenha corrigido à mão é sobrescrito,
  * e rodar duas vezes não desfaz nada.
  */
+/**
+ * Colunas que o backfill pode preencher — todas de IDENTIFICAÇÃO.
+ *
+ * Valor, data e sentido ficam fora de propósito: corrigi-los aqui reescreveria em silêncio
+ * lançamento que o gestor já conferiu. A lista virou constante porque ela cresce a cada
+ * campo novo que passamos a ler, e o `if` por campo já tinha deixado quatro de fora.
+ */
+const PREENCHIVEIS = [
+  "counterparty_bank", "counterparty_branch", "counterparty_account",
+  "payment_method", "payment_reason", "merchant_name", "merchant_document",
+  "installment_label", "counterparty_name", "counterparty_document",
+  "payee_mcc", "card_last_digits", "bill_id", "provider_category",
+  "merchant_category", "tx_status", "authentication_code",
+  "receiver_reference_id", "provider_account_id", "pix_end_to_end_id",
+] as const;
+
+/**
+ * Guarda o payload cru de algumas transações, para descobrir onde está o EndToEndId.
+ *
+ * O motor casa transação com cobrança pelo EndToEndId — único no SPI, prova irrefutável —
+ * e o campo está vazio em 2.141 linhas, o que deixa INERTE a camada de certeza da
+ * conciliação. Sem ver o payload real não dá para saber se o provedor manda em outro
+ * campo, se aquela instituição não manda, ou se o método não vem escrito "PIX". Quarenta
+ * amostras respondem isso; adivinhar, não.
+ *
+ * Falha em silêncio de propósito: isto é diagnóstico, não pode derrubar a sincronização.
+ */
+async function guardarAmostra(admin: DbClient, tx: any, origem: string): Promise<void> {
+  try {
+    const temSinalDePix = !!tx?.paymentData
+      && /PIX/i.test(JSON.stringify(tx.paymentData ?? {}) + String(tx.description ?? ""));
+    if (!temSinalDePix) return;
+
+    const { count } = await admin
+      .from("pluggy_amostra_payload")
+      .select("id", { count: "exact", head: true });
+    if ((count ?? 0) >= 40) return;
+
+    await admin.from("pluggy_amostra_payload")
+      .upsert({ bank_ref_id: tx.id, source_type: origem, payload: tx }, { onConflict: "bank_ref_id" });
+  } catch { /* diagnóstico nunca derruba a sincronização */ }
+}
+
 async function preencherIdentificacao(
   admin: DbClient,
   apiKey: string,
@@ -187,20 +230,15 @@ async function preencherIdentificacao(
 
       for (const t of transacoes) {
         const linha = mapTransaction(t, origem);
+        await guardarAmostra(admin, t, origem);
 
         // Só o que é identificação. Valor, data e sentido ficam de fora de propósito:
         // corrigi-los aqui reescreveria silenciosamente lançamento já conferido.
         const campos: Record<string, unknown> = {};
-        if (linha.counterparty_bank) campos.counterparty_bank = linha.counterparty_bank;
-        if (linha.counterparty_branch) campos.counterparty_branch = linha.counterparty_branch;
-        if (linha.counterparty_account) campos.counterparty_account = linha.counterparty_account;
-        if (linha.payment_method) campos.payment_method = linha.payment_method;
-        if (linha.payment_reason) campos.payment_reason = linha.payment_reason;
-        if (linha.merchant_name) campos.merchant_name = linha.merchant_name;
-        if (linha.merchant_document) campos.merchant_document = linha.merchant_document;
-        if (linha.installment_label) campos.installment_label = linha.installment_label;
-        if (linha.counterparty_name) campos.counterparty_name = linha.counterparty_name;
-        if (linha.counterparty_document) campos.counterparty_document = linha.counterparty_document;
+        for (const k of PREENCHIVEIS) {
+          const v = (linha as any)[k];
+          if (v !== null && v !== undefined && v !== "") campos[k] = v;
+        }
 
         if (Object.keys(campos).length === 0) { semNovidade++; continue; }
 
@@ -208,7 +246,7 @@ async function preencherIdentificacao(
         // ler o que existe e mandar só o que está vazio.
         const { data: atual } = await admin
           .from("bank_transactions")
-          .select("id, counterparty_bank, counterparty_branch, counterparty_account, payment_method, payment_reason, merchant_name, merchant_document, installment_label, counterparty_name, counterparty_document")
+          .select(`id, ${PREENCHIVEIS.join(", ")}`)
           .eq("bank_ref_id", linha.bank_ref_id)
           .maybeSingle();
         if (!atual) continue;

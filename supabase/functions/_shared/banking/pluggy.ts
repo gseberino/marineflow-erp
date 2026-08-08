@@ -50,12 +50,26 @@ export interface PluggyTransaction {
     cnpj?: string | null;
     category?: string | null;
   } | null;
-  /** Compra no cartão: parcela atual e total, e os 4 últimos dígitos. */
+  /** Compra no cartão: parcela, últimos dígitos e o MCC do estabelecimento. */
   creditCardMetadata?: {
     installmentNumber?: number | null;
     totalInstallments?: number | null;
     cardNumber?: string | null;
+    /**
+     * Merchant Category Code (ISO 18245).
+     *
+     * A chave UNIVERSAL de tipo de estabelecimento: 5812 é restaurante em qualquer
+     * adquirente do mundo, 5541 é posto, 5251 é loja de ferragens. Resolve de forma
+     * determinística e auditável o que hoje mandamos a IA adivinhar pelo nome — e
+     * "MP *GTEKENERGIASU" é exatamente o caso em que adivinhar pelo nome não funciona.
+     */
+    payeeMCC?: string | number | null;
+    billId?: string | null;
   } | null;
+  /** Categorização do próprio provedor (produto de enriquecimento deles). */
+  category?: string | null;
+  categoryId?: string | null;
+  accountId?: string | null;
 }
 
 interface PluggyParticipante {
@@ -93,6 +107,18 @@ export interface ExtratoRow {
   balance_after: number | null;
   provider: string;
   source_type: "bank" | "credit_card";
+  /** MCC (ISO 18245) do estabelecimento — classificação determinística. */
+  payee_mcc: string | null;
+  card_last_digits: string | null;
+  bill_id: string | null;
+  /** Categoria atribuída pelo próprio provedor. */
+  provider_category: string | null;
+  merchant_category: string | null;
+  /** PENDING | POSTED. Pendente não vira proposta de lançamento. */
+  tx_status: string | null;
+  authentication_code: string | null;
+  receiver_reference_id: string | null;
+  provider_account_id: string | null;
 }
 
 /** Autentica e devolve a apiKey de curta duração usada no header X-API-KEY. */
@@ -304,6 +330,20 @@ export function mapTransaction(
     balance_after: tx.balance ?? null,
     provider: "pluggy",
     source_type: sourceType,
+
+    // ── O que o provedor manda e nós ignorávamos ──────────────────────────────
+    // Compra em loja NÃO tem contraparte — não é transferência, não há payer nem
+    // receiver. Quem identifica ali é o estabelecimento e o MCC. Ler cartão com o
+    // modelo de transferência é a razão de 96% das compras ficarem sem documento.
+    payee_mcc: parcela?.payeeMCC != null ? String(parcela.payeeMCC).padStart(4, "0") : null,
+    card_last_digits: parcela?.cardNumber?.slice(-4) ?? null,
+    bill_id: parcela?.billId ?? null,
+    provider_category: tx.category ?? null,
+    merchant_category: loja?.category ?? null,
+    tx_status: tx.status ?? null,
+    authentication_code: tx.paymentData?.authenticationCode ?? null,
+    receiver_reference_id: tx.paymentData?.receiverReferenceId ?? null,
+    provider_account_id: tx.accountId ?? null,
   };
 }
 

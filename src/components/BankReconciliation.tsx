@@ -7,7 +7,6 @@ import { Label } from '@/components/ui/label';
 import { useI18n } from '@/i18n';
 import {
   useBankTransactions, useImportBankTransactions, useReconcile, useDismissBankTransaction,
-  useUnignoreBankTransaction,
   useReceivables, usePayables, useCreateReceivable, useCreatePayable, useRegisterPayment,
 } from '@/hooks/use-financial';
 import { useServiceOrders } from '@/hooks/use-service-orders';
@@ -20,6 +19,10 @@ import {
   useReconciliationHealth,
   CANDIDATE_LABELS, type ReconcileSuggestion, type ReconcileGroup,
 } from '@/hooks/use-reconciliation';
+// Devolver à fila é a MESMA operação da aba "Fora da fila": ela calcula o alcance no
+// servidor e desfaz o lançamento que a ignorada criou. Ter duas implementações do mesmo
+// gesto é como uma delas fica para trás — foi o que aconteceu com esta.
+import { useDesfazerIgnorada } from '@/hooks/use-finance-review';
 import { toast } from 'sonner';
 import { Upload, Check, X, Undo2, Sparkles, AlertTriangle, EyeOff } from 'lucide-react';
 import { StatusBadge } from '@/components/StatusBadge';
@@ -66,7 +69,7 @@ export function BankReconciliation() {
   const importMutation = useImportBankTransactions();
   const reconcile = useReconcile();
   const dismiss = useDismissBankTransaction();
-  const unignore = useUnignoreBankTransaction();
+  const desfazerIgnorada = useDesfazerIgnorada();
   const createReceivable = useCreateReceivable();
   const createPayable = useCreatePayable();
   const registerPayment = useRegisterPayment();
@@ -720,11 +723,18 @@ export function BankReconciliation() {
     }
   };
 
+  /**
+   * Devolver à fila tem de desfazer o EFEITO, não só a marca.
+   *
+   * O caminho antigo limpava `reconciled` e pronto. Se aquela transação era perna de uma
+   * compra parcelada, o lançamento da compra inteira continuava de pé e a linha voltava
+   * para a fila — o mesmo dinheiro contado duas vezes. O servidor calcula o alcance: da
+   * linha chega à compra, ao lançamento que ela criou e às propostas decididas junto.
+   */
   const handleUnignore = async (id: string) => {
     try {
-      await unignore.mutateAsync(id);
-      toast.success('Transação restaurada');
-    } catch { toast.error('Erro'); }
+      await desfazerIgnorada.mutateAsync([id]);
+    } catch { /* o hook já mostra o erro */ }
   };
 
   const openReconcile = (txId: string, tx: any) => {
@@ -1002,10 +1012,16 @@ export function BankReconciliation() {
                     {/* Quem mandou o dinheiro. Faltava — e sem isso não há como julgar uma
                         sugestão: o motor podia apontar a OS de um cliente para um pagamento
                         vindo de outra pessoa, e a tela não dava como perceber. */}
+                    {/* Compra no cartão NÃO tem remetente — não é transferência, é compra
+                        em estabelecimento. Rotular de "Para:" um campo que nunca virá
+                        preenchido faz o operador procurar um dado que não existe e achar
+                        que o sistema falhou. No cartão o que identifica é a LOJA. */}
                     {(tx.counterparty_name || tx.counterparty_document) && (
                       <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
                         <span className="shrink-0">
-                          {tx.transaction_type === 'credit' ? 'De:' : 'Para:'}
+                          {tx.source_type === 'credit_card'
+                            ? 'Estabelecimento:'
+                            : tx.transaction_type === 'credit' ? 'De:' : 'Para:'}
                         </span>
                         <span className="truncate font-medium text-foreground">
                           {tx.counterparty_name || 'não informado'}
@@ -1666,7 +1682,7 @@ export function BankReconciliation() {
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">Ignorado manualmente</td>
                       <td className="px-4 py-3 text-right">
-                        <Button size="sm" variant="outline" onClick={() => handleUnignore(tx.id)} disabled={unignore.isPending}>
+                        <Button size="sm" variant="outline" onClick={() => handleUnignore(tx.id)} disabled={desfazerIgnorada.isPending}>
                           <Undo2 className="h-3 w-3 mr-1" />{t.financial.undoIgnore}
                         </Button>
                       </td>

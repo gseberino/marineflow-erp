@@ -9,6 +9,7 @@
 // que não sabe em vez de chutar uma categoria plausível.
 
 import { normalizeText } from "./matching.ts";
+import { categoriaPorMcc } from "./mcc.ts";
 
 export interface TransacaoOrfa {
   id: string;
@@ -19,6 +20,8 @@ export interface TransacaoOrfa {
   counterparty_name?: string | null;
   counterparty_document?: string | null;
   source_type?: string | null;
+  /** MCC do estabelecimento (ISO 18245) — classificação determinística no cartão. */
+  payee_mcc?: string | null;
 }
 
 export interface FornecedorConhecido {
@@ -398,10 +401,27 @@ export function montarProposta(
   const classificacao = classificar(tx);
   const achado = ehSaida ? acharFornecedor(tx, fornecedores) : null;
 
+  /**
+   * MCC: o que a bandeira diz que o estabelecimento é.
+   *
+   * Vem atribuído no credenciamento e viaja em toda compra no cartão — 5812 é restaurante
+   * em qualquer adquirente do mundo. Não depende de como a maquininha escreve o nome, o
+   * que é justamente onde a leitura por texto falha: "MP *GTEKENERGIASU" e "EC *INOHOUSE"
+   * não contêm palavra nenhuma do plano de contas, mas carregam MCC.
+   *
+   * Vale mais que regra de texto e que histórico aprendido, e menos que a regra do gestor:
+   * é um fato sobre o estabelecimento, não uma dedução — mas quem manda continua sendo
+   * quem escreveu a instrução.
+   */
+  const porMcc = categoriaPorMcc(tx.payee_mcc);
+
   const razoes: string[] = [];
   let confianca = classificacao?.confianca ?? 30;
 
-  if (classificacao) {
+  if (porMcc) {
+    razoes.push(`Estabelecimento classificado pela bandeira como ${porMcc.rotulo} (MCC ${tx.payee_mcc})`);
+    confianca = 90;
+  } else if (classificacao) {
     razoes.push(`Histórico contém "${classificacao.termo}", que indica ${classificacao.categoria}`);
   } else {
     razoes.push("Nenhuma regra de categoria reconheceu este histórico");
@@ -434,9 +454,12 @@ export function montarProposta(
   }
 
   const nome = tx.counterparty_name || tx.description;
-  let categoria = aprendido?.categoria ?? classificacao?.categoria
+  // Ordem da evidência: fato da bandeira (MCC) > prática da casa (histórico) > palpite de
+  // texto. Antes o histórico vinha primeiro, e um fornecedor mal classificado uma vez
+  // sobrepunha o que a bandeira afirma sobre o estabelecimento.
+  let categoria = porMcc?.categoria ?? aprendido?.categoria ?? classificacao?.categoria
     ?? (ehSaida ? "Outras despesas" : "Outras receitas");
-  let dreGroup = aprendido?.dreGroup ?? classificacao?.dreGroup
+  let dreGroup = porMcc?.dreGroup ?? aprendido?.dreGroup ?? classificacao?.dreGroup
     ?? (ehSaida ? "despesa_operacional" : "receita");
   let fornecedorId = achado?.fornecedor.id ?? null;
 

@@ -140,8 +140,22 @@ export default function FinancialV2() {
   // obrigar a redigitar o fornecedor que está na tela.
   const [sementeRegra, setSementeRegra] = useState<SementeDeRegra | null>(null);
 
+  /**
+   * "Contas a pagar" mostra o que se DEVE, não o histórico de despesa.
+   *
+   * A lista trazia as 1.663 despesas já quitadas junto com as 4 obrigações em aberto —
+   * quase quatrocentas vindas de compra no cartão, cada uma parecendo uma conta a pagar.
+   * Não são: a compra está paga do ponto de vista do gestor, e quem ele deve é o banco,
+   * pela FATURA. Conta a pagar é obrigação viva; despesa liquidada é história, e história
+   * se lê no resultado, não numa lista de cobrança.
+   *
+   * O histórico continua alcançável — é o botão "Mostrar já pagas".
+   */
+  const [mostrarPagas, setMostrarPagas] = useState(false);
+
   const filteredPayables = useMemo(() => {
     const base = (applyFilters(payables as never[], payFilters, 'payable') as unknown as PayableRow[])
+      .filter((p) => mostrarPagas || (p.status !== 'paid' && p.status !== 'cancelled'))
       .filter((p) => !payOsSearch || p.service_orders?.service_order_number?.toLowerCase().includes(payOsSearch.toLowerCase()));
     return [...base].sort((a, b) => {
       const val = (p: PayableRow) =>
@@ -154,7 +168,12 @@ export default function FinancialV2() {
       if (av > bv) return paySort.dir === 'asc' ? 1 : -1;
       return 0;
     });
-  }, [payables, payFilters, payOsSearch, paySort]);
+  }, [payables, payFilters, payOsSearch, paySort, mostrarPagas]);
+
+  const pagasEscondidas = useMemo(
+    () => payables.filter((p) => p.status === 'paid' || p.status === 'cancelled').length,
+    [payables],
+  );
 
   const payTotalBalance = filteredPayables.filter((p) => p.status !== 'paid' && p.status !== 'cancelled').reduce((s, p) => s + Number(p.balance_amount ?? 0), 0);
   const payTotalPaid = filteredPayables.reduce((s, p) => s + Number(p.paid_amount ?? 0), 0);
@@ -457,6 +476,15 @@ export default function FinancialV2() {
                   </Button>
                 </div>
               </div>
+              {/* A lista é de obrigação VIVA. Despesa já quitada — inclusive as centenas
+                  de compras no cartão — é história, e história se lê no resultado, não
+                  numa lista de cobrança. Fica a um clique de distância, não escondida. */}
+              {paySubTab === 'list' && pagasEscondidas > 0 && (
+                <Button size="sm" variant={mostrarPagas ? 'secondary' : 'ghost'}
+                  onClick={() => setMostrarPagas((v) => !v)}>
+                  {mostrarPagas ? 'Só o que está em aberto' : `Mostrar as ${pagasEscondidas} já pagas`}
+                </Button>
+              )}
               <div className="flex gap-2">
                 <Button
                   variant="outline" size="sm" className="gap-1.5"
