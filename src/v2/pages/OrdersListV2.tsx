@@ -123,7 +123,7 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
   const [stockConfirm, setStockConfirm] = useState<{ id: string; number: string } | null>(null);
   const [bulkDownloading, setBulkDownloading] = useState(false);
   const pdfGenCountRef = useRef(0);
-  const { data: pdfData } = usePDFData(pdfTarget?.id);
+  const { data: pdfData, error: pdfError } = usePDFData(pdfTarget?.id);
 
   const { filters, toggle, setField, clearAll, activeCount } = useMultiFilter(
     isOrders
@@ -289,7 +289,17 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
   };
 
   const handleGeneratePDF = (action: PDFAction, options: PDFOptions, validity?: unknown, dueDate?: string) => {
-    if (!pdfData || !pdfTarget) return;
+    // Sair calado aqui foi o que escondeu por dois dias um embed com nome de
+    // coluna errado: o usuário clicava em gerar e nada acontecia.
+    if (!pdfTarget) return;
+    if (!pdfData) {
+      toast.error(
+        `Não deu para montar o documento: ${
+          (pdfError as any)?.message || 'os dados da ordem não carregaram'
+        }`,
+      );
+      return;
+    }
     const payload = { ...pdfData, documentType: pdfTarget.type };
     if (action === 'download') {
       downloadPDF(payload, { ...options, validity, dueDate } as PDFOptions)
@@ -307,8 +317,11 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
       if (!d) throw new Error('Dados não encontrados');
       await downloadPDF({ ...d, documentType: type }, DEFAULT_PDF_OPTIONS);
       toast.success('PDF baixado com sucesso');
-    } catch {
-      toast.error('Erro ao gerar o PDF');
+    } catch (e) {
+      // A mensagem original importa: "coluna X não existe" é diagnóstico,
+      // "Erro ao gerar o PDF" é só a constatação de que algo deu errado.
+      console.error('[PDF] download direto falhou:', e);
+      toast.error(`Erro ao gerar o PDF: ${e instanceof Error ? e.message : 'causa desconhecida'}`);
     }
   };
 
@@ -318,6 +331,7 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
     pdfGenCountRef.current = ids.length;
     let ok = 0;
     let failed = 0;
+    let primeiroErro = '';
     for (let i = 0; i < ids.length; i++) {
       try {
         const d = await fetchPDFData(ids[i]);
@@ -325,8 +339,12 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
         await downloadPDF({ ...d, documentType: isOrders ? 'service_order' : 'quote' }, DEFAULT_PDF_OPTIONS);
         ok++;
         if (i < ids.length - 1) await new Promise((r) => setTimeout(r, 800));
-      } catch {
+      } catch (e) {
         failed++;
+        // Num lote de 20, a causa da primeira falha é o que resolve as outras
+        // 19 — e ela se perdia inteira aqui.
+        console.error(`[PDF] lote falhou em ${ids[i]}:`, e);
+        if (!primeiroErro) primeiroErro = e instanceof Error ? e.message : String(e);
       } finally {
         pdfGenCountRef.current = Math.max(0, pdfGenCountRef.current - 1);
         if (pdfGenCountRef.current === 0) document.body.style.overflow = '';
@@ -335,7 +353,10 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
     setBulkDownloading(false);
     clear();
     if (failed === 0) toast.success(`${ok} PDF${ok > 1 ? 's' : ''} baixado${ok > 1 ? 's' : ''} com sucesso`);
-    else toast.error(`${failed} falhou. ${ok} baixado${ok > 1 ? 's' : ''} com sucesso.`);
+    else toast.error(
+      `${failed} falhou${failed > 1 ? 'ram' : ''}. ${ok} baixado${ok > 1 ? 's' : ''} com sucesso.` +
+      (primeiroErro ? ` Primeira causa: ${primeiroErro}` : ''),
+    );
   };
 
   // wa.me com link público — SEMPRE /view/:token (rota real; corrige o link
