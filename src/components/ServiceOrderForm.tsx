@@ -126,9 +126,33 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   // Wrapper que injeta as tarifas configuráveis em todas as chamadas de cálculo de deslocamento
   const calcTravelCost = (p: Parameters<typeof calculateTravelCost>[0]) => calculateTravelCost(p, travelRates);
   const { data: paymentPresets } = usePaymentConditionPresets();
-  const { data: pdfData } = usePDFData(isNew ? undefined : orderId);
+  const {
+    data: pdfData, error: pdfError, isLoading: pdfLoading,
+  } = usePDFData(isNew ? undefined : orderId);
   const queryClient = useQueryClient();
+
+  /* Quando os dados do PDF não vêm, o usuário precisa saber POR QUÊ.
+     Um embed com nome de coluna errado derrubou a geração de PDF do sistema
+     inteiro e ninguém viu: os botões de baixar ficavam `disabled` e os de
+     abrir o diálogo não faziam nada, porque o diálogo é condicionado a
+     `!!pdfData`. Clicar e não acontecer nada não é falha silenciosa — é falha
+     invisível, que é pior: parece problema de quem clicou. */
+  const pdfIndisponivel = (): boolean => {
+    if (pdfData) return false;
+    if (pdfLoading) {
+      toast.info('Carregando os dados do documento — tente de novo em um instante.');
+      return true;
+    }
+    toast.error(
+      `Não deu para montar o documento: ${
+        (pdfError as any)?.message || 'os dados da ordem não carregaram'
+      }`,
+    );
+    return true;
+  };
+
   const openPdfDialog = (type: 'quote' | 'service_order' | 'invoice') => {
+    if (pdfIndisponivel()) return;
     if (orderId) {
       queryClient.invalidateQueries({ queryKey: ['pdf-data', orderId] });
     }
@@ -136,7 +160,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   };
 
   const handleDirectDownload = async (type: 'quote' | 'service_order' | 'invoice') => {
-    if (!pdfData || !orderId) return;
+    if (!orderId) return;
+    if (pdfIndisponivel()) return;
     setDownloadingType(type);
     try {
       await downloadPDF({ ...pdfData, documentType: type }, DEFAULT_PDF_OPTIONS);
@@ -1723,7 +1748,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 variant="outline"
                 size="sm"
                 onClick={() => handleDirectDownload('quote')}
-                disabled={!pdfData || downloadingType === 'quote'}
+                disabled={downloadingType === 'quote'}
                 title="Baixar Orçamento em PDF"
                 className="gap-1"
               >
@@ -1738,7 +1763,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 variant="outline"
                 size="sm"
                 onClick={() => handleDirectDownload('service_order')}
-                disabled={!pdfData || downloadingType === 'service_order'}
+                disabled={downloadingType === 'service_order'}
                 title="Baixar OS em PDF"
                 className="gap-1"
               >
@@ -1755,7 +1780,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                     variant="outline"
                     size="sm"
                     onClick={() => handleDirectDownload('invoice')}
-                    disabled={!pdfData || downloadingType === 'invoice'}
+                    disabled={downloadingType === 'invoice'}
                     title="Baixar Fatura em PDF"
                     className="gap-1"
                   >

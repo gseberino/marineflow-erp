@@ -29,7 +29,10 @@ function buildSurveyForPdf(raw: unknown): PDFData['survey'] {
   if (answers.length === 0) return undefined;
 
   return {
-    answered_at: fechado.closed_at ?? null,
+    // `answered_at` é o carimbo de fechamento — não existe `closed_at` nesta
+    // tabela. Pedir a coluna errada num embed do PostgREST não devolve o campo
+    // nulo: ele recusa a QUERY INTEIRA com 400, e todo o PDF morre junto.
+    answered_at: fechado.answered_at ?? null,
     rationale: fechado.confidence_rationale ?? null,
     answers,
   };
@@ -50,7 +53,7 @@ export function usePDFData(serviceOrderId: string | undefined) {
             marinas(*),
             service_order_services(*, services(name)),
             service_order_parts(*, products(name, sku, image_url)),
-            service_surveys(closed_at, confidence_rationale, status,
+            service_surveys(answered_at, confidence_rationale, status,
               service_survey_answers(seq, question_snapshot, answer_value, skipped_reason, photo_path)),
             service_order_expenses(category, description, amount, paid_by),
             payment_condition_presets(label, installments)
