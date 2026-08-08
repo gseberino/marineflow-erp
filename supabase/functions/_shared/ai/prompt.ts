@@ -538,7 +538,15 @@ function buildVolatileBlock(ctx: PromptRuntimeCtx): string {
  */
 export function buildSystemBlocks(settings: Record<string, string>, ctx: PromptRuntimeCtx): ClaudeTextBlock[] {
   return [
-    { type: "text", text: buildStableBlock(settings), cache_control: { type: "ephemeral" } },
+    // ttl "1h" em vez do padrão de 5 min. O prefixo cacheado (tools + este bloco) é de ~69k
+    // tokens; com 5 min ele expirava entre as mensagens do dono numa conversa normal — medido
+    // em 07/08/2026: 6 das 24 chamadas do dia foram cache miss, cada uma ~6,5x mais cara que
+    // uma leitura de cache. Os gaps eram de 30-60 min (09:49 -> 10:28 -> 11:16 -> 12:22).
+    // TRADE-OFF: a GRAVAÇÃO passa a custar 2x a entrada base em vez de 1,25x, então isto só se
+    // paga a partir de ~3 leituras por gravação. Na medição eram 4 (24 chamadas / 6 misses).
+    // Em dia de uso esparso (2-3 conversas isoladas) sai mais caro — acompanhar por
+    // v_ai_custo_diario, que separa leitura de gravação justamente para responder isso.
+    { type: "text", text: buildStableBlock(settings), cache_control: { type: "ephemeral", ttl: "1h" } },
     { type: "text", text: buildVolatileBlock(ctx) },
   ];
 }

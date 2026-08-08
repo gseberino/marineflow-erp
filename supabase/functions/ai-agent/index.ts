@@ -145,7 +145,7 @@ function rowToChatMessage(row: MessageRow): ChatMessage {
 function buildMessageRows(
   sessionId: string,
   newMessages: ChatMessage[],
-  usageLog: Array<{ inputTokens: number; outputTokens: number; cacheReadInputTokens: number }>,
+  usageLog: Array<{ inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens?: number }>,
   model: string,
   source: "web" | "whatsapp" = "web",
 ) {
@@ -165,6 +165,9 @@ function buildMessageRows(
         tokens_in: usage?.inputTokens ?? null,
         tokens_out: usage?.outputTokens ?? null,
         cache_read_tokens: usage?.cacheReadInputTokens ?? null,
+        // Sem esta coluna não dá para separar GRAVAÇÃO de cache (1,25x no TTL de 5min, 2x no de
+        // 1h) de entrada não-cacheada (1x) — e é exatamente essa a variável que o TTL muda.
+        cache_creation_tokens: usage?.cacheCreationInputTokens ?? null,
         model,
       };
     }

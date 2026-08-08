@@ -10,7 +10,9 @@
 // núcleo do agente fica igual.
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
-export type ClaudeCacheControl = { type: "ephemeral" };
+/** `ttl` omitido = 5 minutos (padrão da Anthropic). "1h" estende para uma hora, ao custo de uma
+ *  GRAVAÇÃO 2x a entrada base em vez de 1,25x. O OpenRouter repassa o campo para a Anthropic. */
+export type ClaudeCacheControl = { type: "ephemeral"; ttl?: "5m" | "1h" };
 
 export type ClaudeTextBlock = { type: "text"; text: string; cache_control?: ClaudeCacheControl };
 export type ClaudeToolUseBlock = { type: "tool_use"; id: string; name: string; input: Record<string, unknown> };
