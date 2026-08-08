@@ -135,6 +135,46 @@ Deno.serve(async (req) => {
   }
 });
 
+/**
+ * Registra na trilha o que foi feito.
+ *
+ * Tabela de auditoria sem escrita é decoração. E a escrita nunca pode derrubar a operação
+ * que ela registra: falhar em anotar é ruim, desfazer um lançamento correto porque a
+ * anotação falhou é pior.
+ */
+async function anotar(
+  admin: DbClient,
+  registro: {
+    acao: string;
+    autor?: string | null;
+    bank_transaction_id?: string | null;
+    payable_id?: string | null;
+    receivable_id?: string | null;
+    finance_rule_id?: string | null;
+    valor?: number | null;
+    detalhe?: string | null;
+    antes?: unknown;
+    depois?: unknown;
+  },
+): Promise<void> {
+  try {
+    await admin.from("reconciliation_log").insert({
+      acao: registro.acao,
+      autor: registro.autor ?? null,
+      bank_transaction_id: registro.bank_transaction_id ?? null,
+      payable_id: registro.payable_id ?? null,
+      receivable_id: registro.receivable_id ?? null,
+      finance_rule_id: registro.finance_rule_id ?? null,
+      valor: registro.valor ?? null,
+      detalhe: registro.detalhe ?? null,
+      antes: registro.antes ?? null,
+      depois: registro.depois ?? null,
+    });
+  } catch (e) {
+    console.error("[finance-review] falha ao anotar na trilha:", e);
+  }
+}
+
 /** Tamanho de página nas leituras longas — é o teto que a API impõe por requisição. */
 const PAGINA = 1000;
 
@@ -594,6 +634,17 @@ async function desfazerIgnorada(admin: DbClient, ids: string[], userId: string |
     reconciled_payment_id: null,
   }).in("id", lista);
   if (e4) throw e4;
+
+  for (const id of lista) {
+    await anotar(admin, {
+      acao: "devolveu",
+      autor: userId,
+      bank_transaction_id: id,
+      detalhe: `Devolvida à fila · ${apagaveis.length + (recebiveis ?? []).length} lançamento(s) desfeito(s)`,
+      antes: { estado: "ignorada" },
+      depois: { estado: "pendente" },
+    });
+  }
 
   return jr({
     ok: true,
@@ -1232,6 +1283,19 @@ async function aprovar(
         created_payable_id: criadoPara.get(p.id) ?? null,
         created_receivable_id: recebidoPara.get(p.id) ?? null,
       }).eq("id", p.id);
+
+      await anotar(admin, {
+        acao: p.kind === "internal_transfer" ? "ignorou" : "aprovou_proposta",
+        autor: userId,
+        bank_transaction_id: p.bank_transaction_id,
+        payable_id: criadoPara.get(p.id) ?? null,
+        receivable_id: recebidoPara.get(p.id) ?? null,
+        finance_rule_id: p.applied_rule_id ?? null,
+        valor,
+        detalhe: `${categoria} · ${descricao}`.slice(0, 300),
+        antes: { status: "pending", categoria_sugerida: p.suggested_category },
+        depois: { status: "approved", categoria },
+      });
 
       // Quanto cada regra trabalhou é o que separa regra útil de regra esquecida — e é o
       // número que permite auditar uma regra pelo resultado, não pela intenção.

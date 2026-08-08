@@ -1,4 +1,4 @@
-export type Json =
+﻿export type Json =
   | string
   | number
   | boolean
@@ -2037,6 +2037,50 @@ export type Database = {
         }
         Relationships: []
       }
+      bank_balance_checks: {
+        Row: {
+          bank_connection_id: string
+          conferido_em: string
+          diferenca: number | null
+          fecha: boolean
+          id: string
+          observacao: string | null
+          saldo_calculado: number | null
+          saldo_do_provedor: number | null
+          transacoes_no_periodo: number | null
+        }
+        Insert: {
+          bank_connection_id: string
+          conferido_em?: string
+          diferenca?: number | null
+          fecha?: boolean
+          id?: string
+          observacao?: string | null
+          saldo_calculado?: number | null
+          saldo_do_provedor?: number | null
+          transacoes_no_periodo?: number | null
+        }
+        Update: {
+          bank_connection_id?: string
+          conferido_em?: string
+          diferenca?: number | null
+          fecha?: boolean
+          id?: string
+          observacao?: string | null
+          saldo_calculado?: number | null
+          saldo_do_provedor?: number | null
+          transacoes_no_periodo?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bank_balance_checks_bank_connection_id_fkey"
+            columns: ["bank_connection_id"]
+            isOneToOne: false
+            referencedRelation: "bank_connections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       bank_charges: {
         Row: {
           amount: number
@@ -2162,6 +2206,7 @@ export type Database = {
         Row: {
           account_kind: string
           active: boolean
+          consent_expires_at: string | null
           created_at: string
           external_id: string
           id: string
@@ -2173,11 +2218,14 @@ export type Database = {
           last_synced_at: string | null
           last_transaction_date: string | null
           provider: string
+          provider_status: string | null
+          sincronizacoes_vazias: number
           updated_at: string
         }
         Insert: {
           account_kind?: string
           active?: boolean
+          consent_expires_at?: string | null
           created_at?: string
           external_id: string
           id?: string
@@ -2189,11 +2237,14 @@ export type Database = {
           last_synced_at?: string | null
           last_transaction_date?: string | null
           provider?: string
+          provider_status?: string | null
+          sincronizacoes_vazias?: number
           updated_at?: string
         }
         Update: {
           account_kind?: string
           active?: boolean
+          consent_expires_at?: string | null
           created_at?: string
           external_id?: string
           id?: string
@@ -2205,6 +2256,8 @@ export type Database = {
           last_synced_at?: string | null
           last_transaction_date?: string | null
           provider?: string
+          provider_status?: string | null
+          sincronizacoes_vazias?: number
           updated_at?: string
         }
         Relationships: []
@@ -2212,9 +2265,12 @@ export type Database = {
       bank_transactions: {
         Row: {
           amount: number
+          authentication_code: string | null
           balance_after: number | null
           bank_connection_id: string | null
           bank_ref_id: string | null
+          bill_id: string | null
+          card_last_digits: string | null
           counterparty_account: string | null
           counterparty_bank: string | null
           counterparty_branch: string | null
@@ -2229,24 +2285,33 @@ export type Database = {
           id: string
           import_batch_id: string | null
           installment_label: string | null
+          merchant_category: string | null
           merchant_document: string | null
           merchant_name: string | null
+          payee_mcc: string | null
           payment_method: string | null
           payment_reason: string | null
           pix_end_to_end_id: string | null
           provider: string
+          provider_account_id: string | null
+          provider_category: string | null
+          receiver_reference_id: string | null
           reconciled: boolean | null
           reconciled_payment_id: string | null
           reconciled_service_order_id: string | null
           source_type: string
           transaction_date: string
           transaction_type: string
+          tx_status: string | null
         }
         Insert: {
           amount: number
+          authentication_code?: string | null
           balance_after?: number | null
           bank_connection_id?: string | null
           bank_ref_id?: string | null
+          bill_id?: string | null
+          card_last_digits?: string | null
           counterparty_account?: string | null
           counterparty_bank?: string | null
           counterparty_branch?: string | null
@@ -2261,24 +2326,33 @@ export type Database = {
           id?: string
           import_batch_id?: string | null
           installment_label?: string | null
+          merchant_category?: string | null
           merchant_document?: string | null
           merchant_name?: string | null
+          payee_mcc?: string | null
           payment_method?: string | null
           payment_reason?: string | null
           pix_end_to_end_id?: string | null
           provider?: string
+          provider_account_id?: string | null
+          provider_category?: string | null
+          receiver_reference_id?: string | null
           reconciled?: boolean | null
           reconciled_payment_id?: string | null
           reconciled_service_order_id?: string | null
           source_type?: string
           transaction_date: string
           transaction_type: string
+          tx_status?: string | null
         }
         Update: {
           amount?: number
+          authentication_code?: string | null
           balance_after?: number | null
           bank_connection_id?: string | null
           bank_ref_id?: string | null
+          bill_id?: string | null
+          card_last_digits?: string | null
           counterparty_account?: string | null
           counterparty_bank?: string | null
           counterparty_branch?: string | null
@@ -2293,18 +2367,24 @@ export type Database = {
           id?: string
           import_batch_id?: string | null
           installment_label?: string | null
+          merchant_category?: string | null
           merchant_document?: string | null
           merchant_name?: string | null
+          payee_mcc?: string | null
           payment_method?: string | null
           payment_reason?: string | null
           pix_end_to_end_id?: string | null
           provider?: string
+          provider_account_id?: string | null
+          provider_category?: string | null
+          receiver_reference_id?: string | null
           reconciled?: boolean | null
           reconciled_payment_id?: string | null
           reconciled_service_order_id?: string | null
           source_type?: string
           transaction_date?: string
           transaction_type?: string
+          tx_status?: string | null
         }
         Relationships: [
           {
@@ -4901,6 +4981,78 @@ export type Database = {
           },
         ]
       }
+      periodos_fechados: {
+        Row: {
+          ano: number
+          fechado_em: string
+          fechado_por: string | null
+          id: string
+          mes: number
+          motivo_da_reabertura: string | null
+          reaberto_em: string | null
+          reaberto_por: string | null
+        }
+        Insert: {
+          ano: number
+          fechado_em?: string
+          fechado_por?: string | null
+          id?: string
+          mes: number
+          motivo_da_reabertura?: string | null
+          reaberto_em?: string | null
+          reaberto_por?: string | null
+        }
+        Update: {
+          ano?: number
+          fechado_em?: string
+          fechado_por?: string | null
+          id?: string
+          mes?: number
+          motivo_da_reabertura?: string | null
+          reaberto_em?: string | null
+          reaberto_por?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "periodos_fechados_fechado_por_fkey"
+            columns: ["fechado_por"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "periodos_fechados_reaberto_por_fkey"
+            columns: ["reaberto_por"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pluggy_amostra_payload: {
+        Row: {
+          bank_ref_id: string
+          colhida_em: string
+          id: string
+          payload: Json
+          source_type: string
+        }
+        Insert: {
+          bank_ref_id: string
+          colhida_em?: string
+          id?: string
+          payload: Json
+          source_type: string
+        }
+        Update: {
+          bank_ref_id?: string
+          colhida_em?: string
+          id?: string
+          payload?: Json
+          source_type?: string
+        }
+        Relationships: []
+      }
       price_update_suggestions: {
         Row: {
           created_at: string | null
@@ -6095,6 +6247,87 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
+          },
+        ]
+      }
+      reconciliation_log: {
+        Row: {
+          acao: string
+          antes: Json | null
+          autor: string | null
+          bank_transaction_id: string | null
+          depois: Json | null
+          detalhe: string | null
+          finance_rule_id: string | null
+          id: string
+          ocorrido_em: string
+          payable_id: string | null
+          receivable_id: string | null
+          valor: number | null
+        }
+        Insert: {
+          acao: string
+          antes?: Json | null
+          autor?: string | null
+          bank_transaction_id?: string | null
+          depois?: Json | null
+          detalhe?: string | null
+          finance_rule_id?: string | null
+          id?: string
+          ocorrido_em?: string
+          payable_id?: string | null
+          receivable_id?: string | null
+          valor?: number | null
+        }
+        Update: {
+          acao?: string
+          antes?: Json | null
+          autor?: string | null
+          bank_transaction_id?: string | null
+          depois?: Json | null
+          detalhe?: string | null
+          finance_rule_id?: string | null
+          id?: string
+          ocorrido_em?: string
+          payable_id?: string | null
+          receivable_id?: string | null
+          valor?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reconciliation_log_autor_fkey"
+            columns: ["autor"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reconciliation_log_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "bank_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reconciliation_log_finance_rule_id_fkey"
+            columns: ["finance_rule_id"]
+            isOneToOne: false
+            referencedRelation: "finance_rules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reconciliation_log_payable_id_fkey"
+            columns: ["payable_id"]
+            isOneToOne: false
+            referencedRelation: "payables"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reconciliation_log_receivable_id_fkey"
+            columns: ["receivable_id"]
+            isOneToOne: false
+            referencedRelation: "receivables"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -9885,6 +10118,7 @@ export type Database = {
       normalize_alias: { Args: { _s: string }; Returns: string }
       normalize_product_text: { Args: { t: string }; Returns: string }
       parse_answer_number: { Args: { p_answer: string }; Returns: number }
+      periodo_esta_fechado: { Args: { p_data: string }; Returns: boolean }
       preview_nfe_import: {
         Args: {
           p_manual_mappings?: Json

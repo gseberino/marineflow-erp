@@ -187,6 +187,54 @@ const PREENCHIVEIS = [
 ] as const;
 
 /**
+ * Confere o saldo do provedor contra o que as transações explicam.
+ *
+ * É o controle que os ERPs chamam de *proof of completeness*, e ele responde a pergunta
+ * que nenhuma outra verificação responde: **falta alguma transação?** Um lançamento
+ * perdido na sincronização não deixa buraco visível — ele simplesmente não existe para o
+ * sistema, e o sistema não tem como saber o que não recebeu. O saldo é a única testemunha
+ * externa: se o banco diz que sobrou X e a soma das transações explica Y, a diferença é
+ * exatamente o que falta.
+ *
+ * Grava sempre, feche ou não. A série de conferências é o que mostra se a integração
+ * degradou — uma que fecha hoje e não fecha amanhã diz mais que qualquer alerta isolado.
+ */
+async function conferirSaldo(
+  admin: DbClient,
+  conexaoId: string,
+  conta: any,
+  transacoes: any[],
+): Promise<void> {
+  try {
+    const saldoProvedor = Number(conta?.balance);
+    if (!Number.isFinite(saldoProvedor)) return;
+
+    // A transação mais recente traz o saldo APÓS ela — é o ponto de comparação honesto.
+    const comSaldo = transacoes
+      .filter((t) => Number.isFinite(Number(t?.balance)))
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
+    if (!comSaldo) return;
+
+    const saldoCalculado = Number(comSaldo.balance);
+    const diferenca = Number((saldoProvedor - saldoCalculado).toFixed(2));
+    // Um centavo de arredondamento não é falta de transação.
+    const fecha = Math.abs(diferenca) < 0.05;
+
+    await admin.from("bank_balance_checks").insert({
+      bank_connection_id: conexaoId,
+      saldo_do_provedor: saldoProvedor,
+      saldo_calculado: saldoCalculado,
+      diferenca,
+      transacoes_no_periodo: transacoes.length,
+      fecha,
+      observacao: fecha
+        ? null
+        : "Saldo da conta não bate com o saldo após a última transação — pode faltar lançamento na janela sincronizada",
+    });
+  } catch { /* conferência é diagnóstico: nunca derruba a sincronização */ }
+}
+
+/**
  * Guarda o payload cru de algumas transações, para descobrir onde está o EndToEndId.
  *
  * O motor casa transação com cobrança pelo EndToEndId — único no SPI, prova irrefutável —
@@ -320,9 +368,19 @@ async function sincronizarConexao(
     let jaExistiam = 0;
     let dataMaisRecente: string | null = conexao.last_transaction_date ?? null;
 
+    // Saúde da conexão, gravada a cada sincronização: consentimento de Open Finance vence
+    // em 12 meses e o item cai por MFA ou troca de senha. Sem isso a conexão morre calada
+    // e o gestor descobre no fechamento, com o período já perdido.
+    await admin.from("bank_connections").update({
+      provider_status: statusItem || null,
+      consent_expires_at: (item as any)?.consentExpiresAt
+        ?? (item as any)?.consent?.expiresAt ?? null,
+    }).eq("id", conexao.id);
+
     for (const conta of contas) {
       const origem = accountSourceType(conta);
       const transacoes = await fetchTransactions(apiKey, conta.id, desde);
+      await conferirSaldo(admin, conexao.id, conta, transacoes);
       if (transacoes.length === 0) continue;
 
       const linhas = transacoes.map((t) => {
@@ -336,6 +394,10 @@ async function sincronizarConexao(
           bank_connection_id: conexao.id,
           reconciled: !!ignorar,
           dismissed_reason: ignorar,
+          // Sair da fila na importação também deixa rastro: sem tipo, essas linhas não
+          // apareceriam no livro das ignoradas nem teriam como voltar.
+          dismissed_kind: ignorar ? "mecanica_cartao" : null,
+          dismissed_at: ignorar ? new Date().toISOString() : null,
         };
       });
 

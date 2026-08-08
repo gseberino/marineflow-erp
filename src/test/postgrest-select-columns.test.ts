@@ -43,7 +43,14 @@ function arquivosTs(dir: string, achados: string[] = []): string[] {
  * tempo de execução para serem comparados, e `Database` some na compilação.
  */
 function colunasPorTabela(): Map<string, Set<string>> {
-  const src = readFileSync(TYPES, 'utf8');
+  // Normaliza a quebra de linha ANTES de casar.
+  //
+  // O `\n` da expressão não encontra nada num arquivo com CRLF, e o git deste repo
+  // converte na checkout (core.autocrlf) — então o teste passava em quem o escreveu e
+  // falhava em qualquer Windows, lendo ZERO tabelas. Falhar lendo zero é o pior modo:
+  // sem tabela conhecida, a checagem de coluna inexistente vira `continue` em tudo e o
+  // teste que existe para pegar regressão passa a aprovar qualquer coisa.
+  const src = readFileSync(TYPES, 'utf8').replace(/\r\n/g, '\n');
   const mapa = new Map<string, Set<string>>();
   // Cada entrada é `nome_da_tabela: { Row: { col: tipo ... } ... }`
   const re = /^ {6}(\w+): \{\n {8}Row: \{\n([\s\S]*?)\n {8}\}/gm;
@@ -107,7 +114,7 @@ describe('colunas usadas em embed do PostgREST existem no banco', () => {
     for (const arquivo of arquivosTs(RAIZ)) {
       const src = readFileSync(arquivo, 'utf8');
       // `.select(\`...\`)` e `.select('...')`
-      for (const m of src.matchAll(/\.select\(\s*[`'"]([\s\S]*?)[`'"]\s*[,)]/g)) {
+      for (const m of src.replace(/\r\n/g, '\n').matchAll(/\.select\(\s*[`'"]([\s\S]*?)[`'"]\s*[,)]/g)) {
         for (const { tabela, colunas } of embedsDe(m[1])) {
           const conhecidas = tabelas.get(tabela);
           if (!conhecidas) continue;  // função, alias ou hint — fora do escopo
