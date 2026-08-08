@@ -24,6 +24,7 @@ import { FinanceReviewInbox, type SementeDeRegra } from '@/components/FinanceRev
 import { FinanceRulesPanel, EditorDeRegra } from '@/components/FinanceRulesPanel';
 import { IgnoradasPanel } from '@/components/IgnoradasPanel';
 import { FechamentoPanel } from '@/components/FechamentoPanel';
+import { SaudeDoCadastroPanel } from '@/components/SaudeDoCadastroPanel';
 import { AgingReportPanel } from '@/components/AgingReportPanel';
 import { ReimbursementsPanel } from '@/components/ReimbursementsPanel';
 import { PageShell } from '@/v2/components/PageShell';
@@ -354,6 +355,9 @@ export default function FinancialV2() {
             {/* Fechar o mês, ler a trilha e conferir se o extrato está completo — os três
                 controles que separam "o número está certo" de "o número é auditável". */}
             <TabsTrigger value="fechamento">Fechamento</TabsTrigger>
+            {/* Cadastro sujo é o que faz o motor errar em silêncio — foi um nome fantasia
+                com o nome de uma cidade que atribuiu 160 despesas ao fornecedor errado. */}
+            <TabsTrigger value="cadastro">Saúde do cadastro</TabsTrigger>
             <TabsTrigger value="banks">Contas bancárias</TabsTrigger>
             <TabsTrigger value="aging">Aging</TabsTrigger>
           </TabsList>
@@ -608,6 +612,7 @@ export default function FinancialV2() {
           </TabsContent>
           <TabsContent value="ignoradas" className="mt-4"><IgnoradasPanel /></TabsContent>
           <TabsContent value="fechamento" className="mt-4"><FechamentoPanel /></TabsContent>
+          <TabsContent value="cadastro" className="mt-4"><SaudeDoCadastroPanel /></TabsContent>
           <TabsContent value="rules" className="mt-4"><FinanceRulesPanel /></TabsContent>
           <TabsContent value="banks" className="mt-4"><BankSourcesPanel /></TabsContent>
           <TabsContent value="aging" className="mt-4"><AgingReportPanel /></TabsContent>
