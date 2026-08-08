@@ -1726,20 +1726,25 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         <div ref={topActionsRef} className="flex gap-2 flex-wrap">
           {!isNew && (
             <>
-              {/* Um botão por documento, e todos passam pela janela de opções.
-                  Havia um "Baixar" ao lado de cada um que gerava o arquivo na
-                  hora, sem perguntar nada: quem quisesse tirar a comissão ou os
-                  preços unitários do PDF do cliente não tinha onde escolher, e
-                  o arquivo já estava na pasta de downloads. A janela oferece
-                  imprimir e baixar — o atalho não valia o risco de mandar ao
-                  cliente um documento com o que não devia. */}
-              <Button variant="outline" size="sm" onClick={() => openPdfDialog('quote')} className="gap-1">
-                <FileText className="h-4 w-4" />
-                {t.pdf.quote}
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => openPdfDialog('service_order')} className="gap-1">
-                <Printer className="h-4 w-4" />
-                OS
+              {/* UM botão, do documento que esta tela é.
+                  Havia dois — "Orçamento" e "OS" — de quando a mesma tela
+                  servia aos dois papéis. Depois da separação, o par virou
+                  armadilha: dentro de uma OS o botão "Orçamento" gerava um
+                  documento com validade e sem apontamento, e dentro de um
+                  orçamento o botão "OS" gerava o contrário. Nenhum dos dois
+                  fazia sentido no lugar em que estava.
+                  Rascunho é orçamento; o resto é ordem de serviço — o mesmo
+                  critério que decide as abas desta tela.
+                  A janela cuida do resto: a validade só aparece para orçamento,
+                  e ela é que oferece imprimir e baixar. */}
+              <Button
+                variant="outline" size="sm" className="gap-1"
+                onClick={() => openPdfDialog(currentStatus === 'draft' ? 'quote' : 'service_order')}
+              >
+                {currentStatus === 'draft'
+                  ? <FileText className="h-4 w-4" />
+                  : <Printer className="h-4 w-4" />}
+                Imprimir / Baixar
               </Button>
               {(currentStatus === 'completed' || currentStatus === 'invoiced') && (
                 <Button variant="outline" size="sm" onClick={() => openPdfDialog('invoice')} className="gap-1">

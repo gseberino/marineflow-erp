@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowRightCircle, Copy, Download, ExternalLink, FileDown, FileText, History, Loader2,
-  MessageCircle, MoreHorizontal, Plus, Printer, Receipt, Send, Wrench,
+  MessageCircle, MoreHorizontal, Plus, Receipt, Send, Wrench,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -312,20 +312,6 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
     setPdfTarget(null);
   };
 
-  const handleDirectDownload = async (soId: string, type: 'quote' | 'service_order') => {
-    try {
-      const d = await fetchPDFData(soId);
-      if (!d) throw new Error('Dados não encontrados');
-      await downloadPDF({ ...d, documentType: type }, DEFAULT_PDF_OPTIONS);
-      toast.success('PDF baixado com sucesso');
-    } catch (e) {
-      // A mensagem original importa: "coluna X não existe" é diagnóstico,
-      // "Erro ao gerar o PDF" é só a constatação de que algo deu errado.
-      console.error('[PDF] download direto falhou:', e);
-      toast.error(`Erro ao gerar o PDF: ${e instanceof Error ? e.message : 'causa desconhecida'}`);
-    }
-  };
-
   const handleBulkDownload = async (ids: string[], clear: () => void) => {
     if (!ids.length) return;
     setBulkDownloading(true);
@@ -525,26 +511,19 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
           <Copy className="h-4 w-4" /> {isOrders ? 'Duplicar' : 'Duplicar orçamento'}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuSub>
-          <DropdownMenuSubTrigger className="gap-2">
-            <FileDown className="h-4 w-4" /> Documentos
-          </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent>
-            <DropdownMenuItem onClick={() => setPdfTarget({ id: so.id, type: 'quote' })} className="gap-2">
-              <FileText className="h-4 w-4" /> Imprimir Orçamento
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setPdfTarget({ id: so.id, type: 'service_order' })} className="gap-2">
-              <Printer className="h-4 w-4" /> Imprimir OS
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => handleDirectDownload(so.id, 'quote')} className="gap-2">
-              <Download className="h-4 w-4" /> Baixar Orçamento
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => handleDirectDownload(so.id, 'service_order')} className="gap-2">
-              <Download className="h-4 w-4" /> Baixar OS
-            </DropdownMenuItem>
-          </DropdownMenuSubContent>
-        </DropdownMenuSub>
+        {/* Uma opção, do documento que esta lista é.
+            Eram quatro — imprimir/baixar × orçamento/OS —, e numa lista de
+            orçamentos "Baixar OS" gerava um documento sem sentido para aquela
+            linha. As duas de baixar ainda pulavam a janela de opções e punham
+            o arquivo na pasta com tudo dentro, comissão inclusive.
+            A lista já sabe o que é: /v2/quotes é orçamento, /v2/service-orders
+            é ordem de serviço. */}
+        <DropdownMenuItem
+          onClick={() => setPdfTarget({ id: so.id, type: isOrders ? 'service_order' : 'quote' })}
+          className="gap-2"
+        >
+          <FileDown className="h-4 w-4" /> Imprimir / Baixar
+        </DropdownMenuItem>
         <DropdownMenuSub>
           <DropdownMenuSubTrigger className="gap-2">
             <MessageCircle className="h-4 w-4" /> WhatsApp
