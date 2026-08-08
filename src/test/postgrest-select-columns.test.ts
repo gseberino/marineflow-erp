@@ -66,29 +66,87 @@ function colunasPorTabela(): Map<string, Set<string>> {
   return mapa;
 }
 
-/** Embeds `tabela(col, col2, outra(col3))` dentro de um `.select(...)`. */
-function embedsDe(select: string): Array<{ tabela: string; colunas: string[] }> {
-  const achados: Array<{ tabela: string; colunas: string[] }> = [];
-  const re = /(\w+)\s*\(/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(select))) {
-    const tabela = m[1];
-    // Recorta o conteúdo dos parênteses respeitando aninhamento.
-    let nivel = 1, i = re.lastIndex;
-    while (i < select.length && nivel > 0) {
-      if (select[i] === '(') nivel++;
-      else if (select[i] === ')') nivel--;
-      i++;
+/**
+ * Quantas chaves estrangeiras ligam duas tabelas, contando as DUAS direções.
+ *
+ * Quando são duas ou mais, o PostgREST não adivinha qual usar num embed e
+ * recusa a query com PGRST201 — o mesmo estrago do nome de coluna errado: a
+ * query inteira morre. `service_orders` e `service_surveys` são o caso vivo:
+ * a ordem aponta para o levantamento principal (`survey_id`) e o levantamento
+ * aponta para a ordem (`service_order_id`).
+ */
+function relacoesEntre(): Map<string, number> {
+  const src = readFileSync(TYPES, 'utf8');
+  // Chaves DISTINTAS por par. Contar ocorrências não serve: os tipos gerados
+  // repetem a mesma FK uma vez para cada view que referencia a tabela, e isso
+  // faria `products` e `product_categories` — ligadas por uma chave só —
+  // parecerem ambíguas. Foi o que a primeira versão deste teste acusou, em sete
+  // queries que funcionam em produção há meses.
+  const porPar = new Map<string, Set<string>>();
+
+  // Recorta o bloco de CADA tabela antes de olhar dentro. Buscar
+  // `Relationships:` com `[\s\S]*?` a partir do nome da tabela atravessa para a
+  // tabela seguinte quando a atual tem `Relationships: []` — e aí as chaves de
+  // uma são atribuídas à outra. Foi assim que a primeira versão deste parser
+  // acusou `products → suppliers`, que tem uma chave só.
+  const nomes = [...src.matchAll(/^ {6}(\w+): \{$/gm)];
+  for (let i = 0; i < nomes.length; i++) {
+    const tabela = nomes[i][1];
+    const inicio = nomes[i].index!;
+    const fim = i + 1 < nomes.length ? nomes[i + 1].index! : src.length;
+    const bloco = src.slice(inicio, fim);
+
+    for (const rel of bloco.matchAll(
+      /foreignKeyName: "(\w+)"[\s\S]{0,200}?referencedRelation: "(\w+)"/g,
+    )) {
+      const par = [tabela, rel[2]].sort().join('|');
+      if (!porPar.has(par)) porPar.set(par, new Set());
+      porPar.get(par)!.add(rel[1]);
     }
-    const dentro = select.slice(re.lastIndex, i - 1);
-    // Só o primeiro nível: os aninhados vêm nas próximas voltas do laço.
-    const colunas = dentro
-      .replace(/\w+\s*\([^)]*\)/g, '')
-      .split(',')
-      .map((c) => c.trim())
-      .filter((c) => c && !c.includes(':') && !c.includes('!') && /^\w+$/.test(c));
-    achados.push({ tabela, colunas });
   }
+  return new Map([...porPar].map(([par, fks]) => [par, fks.size]));
+}
+
+/**
+ * Embeds de um `.select(...)`, com o PAI de cada um.
+ *
+ * O pai importa: em `service_orders(… service_order_technicians(app_users(…)))`
+ * o `app_users` pende de `service_order_technicians`, não de `service_orders`.
+ * Tratar todo embed como filho do `.from()` acusa ambiguidade onde não há —
+ * foi o que a primeira versão fez com a query da agenda, que roda em produção.
+ */
+function embedsDe(
+  select: string,
+  raiz = '',
+): Array<{ tabela: string; pai: string; colunas: string[] }> {
+  const achados: Array<{ tabela: string; pai: string; colunas: string[] }> = [];
+
+  function percorrer(trecho: string, pai: string) {
+    const re = /(\w+)\s*(?:!\s*\w+\s*)?\(/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(trecho))) {
+      const tabela = m[1];
+      let nivel = 1, i = re.lastIndex;
+      while (i < trecho.length && nivel > 0) {
+        if (trecho[i] === '(') nivel++;
+        else if (trecho[i] === ')') nivel--;
+        i++;
+      }
+      const dentro = trecho.slice(re.lastIndex, i - 1);
+
+      const colunas = dentro
+        .replace(/\w+\s*(?:!\s*\w+\s*)?\([^)]*\)/g, '')
+        .split(',')
+        .map((c) => c.trim())
+        .filter((c) => c && !c.includes(':') && !c.includes('!') && /^\w+$/.test(c));
+
+      achados.push({ tabela, pai, colunas });
+      percorrer(dentro, tabela);   // os aninhados pendem DESTE embed
+      re.lastIndex = i;            // não reprocessa o que já foi consumido
+    }
+  }
+
+  percorrer(select, raiz);
   return achados;
 }
 
@@ -124,6 +182,54 @@ describe('colunas usadas em embed do PostgREST existem no banco', () => {
                 `${arquivo.replace(process.cwd(), '')}: ${tabela}(${col}) — coluna não existe`,
               );
             }
+          }
+        }
+      }
+    }
+
+    expect(problemas, problemas.join('\n')).toEqual([]);
+  });
+});
+
+/**
+ * A segunda metade do mesmo estrago.
+ *
+ * Corrigido o nome da coluna, o PDF continuou sem gerar — desta vez por
+ * PGRST201: duas chaves estrangeiras ligam service_orders e service_surveys, e
+ * sem `!nome_da_fk` o PostgREST recusa a query inteira. Mesmo sintoma, causa
+ * diferente. O teste de colunas não pegava, então este cobre o resto.
+ */
+describe('embeds entre tabelas com mais de uma chave estrangeira', () => {
+  const relacoes = relacoesEntre();
+
+  it('os relacionamentos foram lidos dos tipos', () => {
+    expect(relacoes.size).toBeGreaterThan(50);
+  });
+
+  it('service_orders e service_surveys são o par ambíguo conhecido', () => {
+    const par = ['service_orders', 'service_surveys'].sort().join('|');
+    expect(relacoes.get(par)).toBeGreaterThan(1);
+  });
+
+  it('todo embed de par ambíguo declara qual chave usar', () => {
+    const problemas: string[] = [];
+
+    for (const arquivo of arquivosTs(RAIZ)) {
+      const src = readFileSync(arquivo, 'utf8');
+      for (const m of src.matchAll(/\.from\(\s*['"](\w+)['"]\s*\)([\s\S]{0,400}?)\.select\(\s*[`'"]([\s\S]*?)[`'"]\s*[,)]/g)) {
+        const raiz = m[1];
+        const select = m[3];
+        for (const { tabela, pai } of embedsDe(select, raiz)) {
+          const par = [pai, tabela].sort().join('|');
+          if ((relacoes.get(par) ?? 0) <= 1) continue;
+          // O hint vem colado no nome: `tabela!nome_da_fk(...)`.
+          const temHint = new RegExp(`${tabela}\\s*!\\s*\\w+\\s*\\(`).test(select);
+          if (!temHint) {
+            problemas.push(
+              `${arquivo.replace(process.cwd(), '')}: ${pai} → ${tabela}(…) sem ` +
+              '`!nome_da_fk` — há mais de uma chave entre as duas tabelas, o PostgREST ' +
+              'recusa a query inteira com PGRST201',
+            );
           }
         }
       }

@@ -5,6 +5,14 @@ import type { PDFData } from '@/lib/pdf-generator';
 /**
  * Monta o levantamento para o documento do cliente.
  *
+ * O embed acima precisa do hint `!service_surveys_service_order_id_fkey`
+ * porque há DUAS chaves estrangeiras ligando as duas tabelas, em direções
+ * opostas: `service_orders.survey_id` aponta para o levantamento principal, e
+ * `service_surveys.service_order_id` aponta para a ordem. Sem dizer qual, o
+ * PostgREST recusa a query inteira com PGRST201 — e, como todo o PDF depende
+ * dessa query, o sistema inteiro para de gerar documento. A que interessa aqui
+ * é a segunda: "todos os levantamentos DESTA ordem", da qual se pega o fechado.
+ *
  * Regras que valem a pena estar aqui e não espalhadas no template:
  *  · só entra levantamento FECHADO — em andamento, meia resposta promete mais
  *    do que entrega;
@@ -53,7 +61,8 @@ export function usePDFData(serviceOrderId: string | undefined) {
             marinas(*),
             service_order_services(*, services(name)),
             service_order_parts(*, products(name, sku, image_url)),
-            service_surveys(answered_at, confidence_rationale, status,
+            service_surveys!service_surveys_service_order_id_fkey(
+              answered_at, confidence_rationale, status,
               service_survey_answers(seq, question_snapshot, answer_value, skipped_reason, photo_path)),
             service_order_expenses(category, description, amount, paid_by),
             payment_condition_presets(label, installments)
