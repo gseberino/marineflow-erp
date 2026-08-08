@@ -11,6 +11,7 @@ import { AIChatMessage } from './AIChatMessage';
 import { AIConfirmCard } from './AIConfirmCard';
 import { AIOptionsCard } from './AIOptionsCard';
 import { toast } from 'sonner';
+import { downloadText } from '@/lib/download';
 
 function DraggableAIButton({ onOpen }: { onOpen: () => void }) {
   const [pos, setPos] = React.useState({ bottom: 24, right: 24 });
@@ -117,15 +118,7 @@ export function AIAgentWidget() {
       .map((it) => `${it.role === 'user' ? 'Você' : 'Assistente'}:\n${it.content}\n`);
     if (linhas.length === 0) return;
     const texto = `Conversa com o Assistente IA — ${new Date().toLocaleString('pt-BR')}\n\n${linhas.join('\n')}`;
-    const blob = new Blob([texto], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `conversa-ia-${new Date().toISOString().slice(0, 10)}.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadText(texto, `conversa-ia-${new Date().toISOString().slice(0, 10)}.txt`);
   }, [display]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);

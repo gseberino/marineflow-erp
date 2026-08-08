@@ -45,6 +45,7 @@ import { toast } from 'sonner';
 import { useI18n } from '@/i18n';
 import { statusConfig } from '@/lib/constants';
 import { FilterPresets } from '@/components/FilterPresets';
+import { downloadCSV } from '@/lib/download';
 
 type ViewMode = 'today' | 'week' | 'month' | 'done' | 'inbox';
 
@@ -220,12 +221,7 @@ export default function AgendaPage() {
         esc(t.source), esc(t.related_entity_type), esc(t.completed_at), esc(t.clients?.name),
       ].join(';')),
     ].join('\n');
-    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `tarefas-${view}-${toLocalDateInput(new Date())}.csv`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    downloadCSV(csv, `tarefas-${view}-${toLocalDateInput(new Date())}.csv`);
   };
 
   // Atalhos do PWA e Share Target: consome os parâmetros e limpa a URL,

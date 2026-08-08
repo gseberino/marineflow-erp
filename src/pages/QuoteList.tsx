@@ -22,7 +22,8 @@ import { PDFOptionsDialog } from '@/components/PDFOptionsDialog';
 import { WhatsAppSendHistoryDialog } from '@/components/WhatsAppSendHistoryDialog';
 import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/SendViaWhatsAppDialog';
 import { usePDFData, fetchPDFData } from '@/hooks/use-pdf';
-import { generatePDF, downloadPDF, DEFAULT_PDF_OPTIONS, type PDFOptions } from '@/lib/pdf-generator';
+import { downloadPDF, DEFAULT_PDF_OPTIONS, type PDFOptions } from '@/lib/pdf-generator';
+import { printPDF } from '@/lib/pdf-print';
 import type { PDFAction } from '@/components/PDFOptionsDialog';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { toast } from 'sonner';
@@ -173,9 +174,12 @@ export default function QuoteList() {
         .then(() => toast.success('PDF baixado com sucesso'))
         .catch(() => toast.error('Erro ao gerar o PDF'));
     } else {
-      generatePDF({ ...pdfData, documentType: pdfTarget.type }, { ...options, validity, dueDate })
-        .then(doc => { doc.output('dataurlnewwindow'); })
-        .catch(() => toast.error('Erro ao gerar o PDF'));
+      // Era `.then(doc => doc.output(...))`, de uma época em que generatePDF
+      // devolvia um documento jsPDF. Hoje ela é síncrona e void: o `.then`
+      // estourava um TypeError que impedia o `setPdfTarget(null)` lá embaixo
+      // de rodar — a impressão até acontecia, mas o diálogo ficava preso
+      // aberto. O erro estava no baseline do tsc e ninguém tinha ligado.
+      printPDF({ ...pdfData, documentType: pdfTarget.type }, { ...options, validity, dueDate });
     }
     setPdfTarget(null);
   };

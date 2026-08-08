@@ -12,7 +12,8 @@ import { useServiceOrders, useDuplicateServiceOrder, useUpdateServiceOrderStatus
 import { useWhatsAppSendStatusMap } from '@/hooks/use-whatsapp-send-log';
 import { useMultiFilter } from '@/hooks/use-multi-filter';
 import { usePDFData, fetchPDFData } from '@/hooks/use-pdf';
-import { generatePDF, downloadPDF, DEFAULT_PDF_OPTIONS, type PDFOptions } from '@/lib/pdf-generator';
+import { downloadPDF, DEFAULT_PDF_OPTIONS, type PDFOptions } from '@/lib/pdf-generator';
+import { printPDF } from '@/lib/pdf-print';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { recordWhatsAppEvent } from '@/lib/diagnostics';
@@ -306,7 +307,7 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
         .then(() => toast.success('PDF baixado com sucesso'))
         .catch(() => toast.error('Erro ao gerar o PDF'));
     } else {
-      generatePDF(payload, { ...options, validity } as PDFOptions);
+      printPDF(payload, { ...options, validity } as PDFOptions);
     }
     setPdfTarget(null);
   };

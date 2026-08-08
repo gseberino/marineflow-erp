@@ -206,19 +206,36 @@ export function generatePDF(data: PDFData, options: PDFOptions): void {
     win.document.write(html);
     win.document.close();
     win.focus();
-    setTimeout(() => win.print(), 500);
+    // Meio segundo fixo era uma aposta: com logo da empresa e fotos de produto
+    // numa conexão de celular, o diálogo de impressão abria antes das imagens
+    // chegarem e o papel saía com buracos. Esperar o `load` cobre o caso real;
+    // o timer continua como rede de segurança para quando algum recurso não
+    // resolve nunca (imagem 404 não dispara load).
+    let impresso = false;
+    const imprimir = () => {
+      if (impresso) return;
+      impresso = true;
+      win.print();
+    };
+    win.addEventListener('load', imprimir);
+    setTimeout(imprimir, 3000);
     return;
   }
 
-  // Fallback (popup blocked): invisible iframe approach
+  // Fallback (popup bloqueado): iframe invisível
   const iframe = document.createElement('iframe');
   iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;';
   document.body.appendChild(iframe);
 
   const doc = iframe.contentDocument || iframe.contentWindow?.document;
   if (!doc) {
+    // Sair calado aqui deixava o usuário clicando em "Imprimir" sem nada
+    // acontecer, sem meio de descobrir que a culpa era do bloqueador de popup.
     document.body.removeChild(iframe);
-    return;
+    throw new Error(
+      'O navegador bloqueou a janela de impressão. Libere os pop-ups para este ' +
+      'site, ou use o botão Baixar, que gera o arquivo sem abrir janela.',
+    );
   }
 
   doc.open();
@@ -317,6 +334,29 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
     // de largura cheia a partir da origem — sem clipping à direita nem vazio lateral.
     const captureHeight = container.scrollHeight;
 
+    // Escala da captura, limitada pela ÁREA do canvas.
+    //
+    // O Safari do iPhone e do iPad recusa canvas acima de ~16,7 megapixels e
+    // não avisa: devolve um canvas em branco, e o PDF sai vazio. Com escala 2
+    // fixa, um documento de 8 páginas (≈6000px de altura) daria 1588 × 12000 =
+    // 19 MP e estouraria — que é exatamente o caso de uma OS com muitos itens
+    // e fotos, no celular, que é onde o técnico está.
+    //
+    // Teto de 12 MP com folga para o iOS. Documento curto continua em 2 (a
+    // nitidez que se espera de proposta impressa); só o documento longo perde
+    // resolução, que é melhor que sair em branco.
+    const MAX_CANVAS_MP = 12_000_000;
+    const scale = Math.max(
+      1,
+      Math.min(2, Math.sqrt(MAX_CANVAS_MP / (A4_WIDTH_PX * Math.max(captureHeight, 1)))),
+    );
+    if (scale < 2) {
+      console.info(
+        `[generatePDFBlob] documento longo (${captureHeight}px): escala reduzida para ${scale.toFixed(2)} ` +
+        'para não estourar o limite de canvas do navegador.',
+      );
+    }
+
     const blob: Blob = await html2pdf()
       .from(container)
       .set({
@@ -326,7 +366,7 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
         filename: 'documento.pdf',
         image: { type: 'jpeg', quality: 0.92 },
         html2canvas: {
-          scale: 2,
+          scale,
           useCORS: true,
           backgroundColor: '#ffffff',
           width: A4_WIDTH_PX,
@@ -343,12 +383,22 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
       })
       .outputPdf('blob');
 
-    // Sanity check — blob suspeito (<2KB) costuma significar página em branco
+    // PDF em branco não pode ser entregue como sucesso.
+    //
+    // Antes isto era um console.warn: o arquivo vazio era baixado, o toast
+    // dizia "PDF baixado com sucesso", e o problema só aparecia quando alguém
+    // abria o anexo — muitas vezes o cliente. Falhar aqui é o certo: quem
+    // chama já trata erro e mostra a mensagem.
     if (blob.size < 2000) {
-      console.warn('[generatePDFBlob] PDF suspeito de estar vazio:', {
+      console.error('[generatePDFBlob] PDF saiu vazio:', {
         size: blob.size,
         scrollHeight: container.scrollHeight,
       });
+      throw new Error(
+        'O PDF saiu em branco. Costuma ser imagem de produto que não carregou ' +
+        '(bloqueio de CORS) ou documento longo demais para o navegador. ' +
+        'Tente pela opção de imprimir, que não depende da captura de tela.',
+      );
     }
     return blob;
   } finally {
