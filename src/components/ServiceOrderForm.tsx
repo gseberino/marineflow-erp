@@ -160,21 +160,6 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     setPdfDialogType(type);
   };
 
-  const handleDirectDownload = async (type: 'quote' | 'service_order' | 'invoice') => {
-    if (!orderId) return;
-    if (pdfIndisponivel()) return;
-    setDownloadingType(type);
-    try {
-      await downloadPDF({ ...pdfData, documentType: type }, DEFAULT_PDF_OPTIONS);
-      toast.success('PDF baixado com sucesso');
-    } catch (e: any) {
-      console.error('PDF download failed:', e);
-      toast.error('Erro ao gerar o PDF para download');
-    } finally {
-      setDownloadingType(null);
-    }
-  };
-
   const createSO = useCreateServiceOrder();
   const updateSO = useUpdateServiceOrder();
   const updateStatus = useUpdateServiceOrderStatus();
@@ -1741,54 +1726,26 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         <div ref={topActionsRef} className="flex gap-2 flex-wrap">
           {!isNew && (
             <>
+              {/* Um botão por documento, e todos passam pela janela de opções.
+                  Havia um "Baixar" ao lado de cada um que gerava o arquivo na
+                  hora, sem perguntar nada: quem quisesse tirar a comissão ou os
+                  preços unitários do PDF do cliente não tinha onde escolher, e
+                  o arquivo já estava na pasta de downloads. A janela oferece
+                  imprimir e baixar — o atalho não valia o risco de mandar ao
+                  cliente um documento com o que não devia. */}
               <Button variant="outline" size="sm" onClick={() => openPdfDialog('quote')} className="gap-1">
                 <FileText className="h-4 w-4" />
                 {t.pdf.quote}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleDirectDownload('quote')}
-                disabled={downloadingType === 'quote'}
-                title="Baixar Orçamento em PDF"
-                className="gap-1"
-              >
-                {downloadingType === 'quote' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                Baixar
               </Button>
               <Button variant="outline" size="sm" onClick={() => openPdfDialog('service_order')} className="gap-1">
                 <Printer className="h-4 w-4" />
                 OS
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleDirectDownload('service_order')}
-                disabled={downloadingType === 'service_order'}
-                title="Baixar OS em PDF"
-                className="gap-1"
-              >
-                {downloadingType === 'service_order' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                Baixar
-              </Button>
               {(currentStatus === 'completed' || currentStatus === 'invoiced') && (
-                <>
-                  <Button variant="outline" size="sm" onClick={() => openPdfDialog('invoice')} className="gap-1">
-                    <Receipt className="h-4 w-4" />
-                    Fatura
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleDirectDownload('invoice')}
-                    disabled={downloadingType === 'invoice'}
-                    title="Baixar Fatura em PDF"
-                    className="gap-1"
-                  >
-                    {downloadingType === 'invoice' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                    Baixar
-                  </Button>
-                </>
+                <Button variant="outline" size="sm" onClick={() => openPdfDialog('invoice')} className="gap-1">
+                  <Receipt className="h-4 w-4" />
+                  Fatura
+                </Button>
               )}
               {orderData?.share_token && (
                 <Button
