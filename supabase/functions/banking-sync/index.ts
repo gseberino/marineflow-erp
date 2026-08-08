@@ -245,19 +245,43 @@ async function conferirSaldo(
  *
  * Falha em silêncio de propósito: isto é diagnóstico, não pode derrubar a sincronização.
  */
-async function guardarAmostra(admin: DbClient, tx: any, origem: string): Promise<void> {
-  try {
-    const temSinalDePix = !!tx?.paymentData
-      && /PIX/i.test(JSON.stringify(tx.paymentData ?? {}) + String(tx.description ?? ""));
-    if (!temSinalDePix) return;
+const TETO_DE_AMOSTRAS = 40;
 
+/**
+ * Quantas linhas o backfill grava por chamada.
+ *
+ * Edge function tem orçamento de recursos por invocação. Sem teto, mil escritas seguidas
+ * voltam a encostar no limite — foi assim que o "Completar identificação" morreu com 546.
+ * O que sobra volta na chamada seguinte, e a tela repete até zerar.
+ */
+const LOTE_BACKFILL = 400;
+
+/**
+ * Escolhe as amostras EM MEMÓRIA e grava uma vez só, no fim.
+ *
+ * A primeira versão consultava a contagem e gravava a cada transação — 2.141 idas ao
+ * banco só para decidir se valia guardar mais uma amostra. A função morreu com 546 aos 78
+ * segundos, e o "Completar identificação" parou de funcionar. Diagnóstico que derruba a
+ * operação que ele diagnostica é pior que não ter diagnóstico nenhum.
+ */
+function ehCandidataAAmostra(tx: any): boolean {
+  if (!tx?.paymentData) return false;
+  return /PIX/i.test(JSON.stringify(tx.paymentData) + String(tx.description ?? ""));
+}
+
+async function gravarAmostras(
+  admin: DbClient,
+  candidatas: Array<{ bank_ref_id: string; source_type: string; payload: unknown }>,
+): Promise<void> {
+  if (candidatas.length === 0) return;
+  try {
     const { count } = await admin
       .from("pluggy_amostra_payload")
       .select("id", { count: "exact", head: true });
-    if ((count ?? 0) >= 40) return;
-
+    const espaco = TETO_DE_AMOSTRAS - (count ?? 0);
+    if (espaco <= 0) return;
     await admin.from("pluggy_amostra_payload")
-      .upsert({ bank_ref_id: tx.id, source_type: origem, payload: tx }, { onConflict: "bank_ref_id" });
+      .upsert(candidatas.slice(0, espaco), { onConflict: "bank_ref_id" });
   } catch { /* diagnóstico nunca derruba a sincronização */ }
 }
 
@@ -269,7 +293,31 @@ async function preencherIdentificacao(
   const rotulo = conexao.label as string;
   try {
     const contas = await fetchAccounts(apiKey, conexao.external_id);
-    let atualizadas = 0;
+
+    /**
+     * O que JÁ está gravado, lido de uma vez.
+     *
+     * A versão anterior consultava o banco uma vez por transação para descobrir quais
+     * colunas estavam vazias — 2.141 leituras, mais 2.141 escritas, mais as consultas de
+     * amostra. A função morreu com 546 aos 78 segundos. Uma leitura só resolve: o que
+     * decide o que gravar é a comparação, e ela pode acontecer em memória.
+     */
+    const existentes = new Map<string, Record<string, unknown>>();
+    for (let de = 0; ; de += 1000) {
+      const { data, error } = await admin
+        .from("bank_transactions")
+        .select(`id, bank_ref_id, ${PREENCHIVEIS.join(", ")}`)
+        .eq("bank_connection_id", conexao.id)
+        .order("id")
+        .range(de, de + 999);
+      if (error) throw error;
+      const linhas = (data ?? []) as any[];
+      for (const l of linhas) if (l.bank_ref_id) existentes.set(String(l.bank_ref_id), l);
+      if (linhas.length < 1000) break;
+    }
+
+    const amostras: Array<{ bank_ref_id: string; source_type: string; payload: unknown }> = [];
+    const aGravar: Array<{ id: string; campos: Record<string, unknown> }> = [];
     let semNovidade = 0;
 
     for (const conta of contas) {
@@ -277,47 +325,51 @@ async function preencherIdentificacao(
       const transacoes = await fetchTransactions(apiKey, conta.id, diasAtras(JANELA_INICIAL_DIAS));
 
       for (const t of transacoes) {
-        const linha = mapTransaction(t, origem);
-        await guardarAmostra(admin, t, origem);
+        if (amostras.length < TETO_DE_AMOSTRAS && ehCandidataAAmostra(t)) {
+          amostras.push({ bank_ref_id: t.id, source_type: origem, payload: t });
+        }
 
-        // Só o que é identificação. Valor, data e sentido ficam de fora de propósito:
-        // corrigi-los aqui reescreveria silenciosamente lançamento já conferido.
+        const atual = existentes.get(String(t.id));
+        if (!atual) continue;
+
+        // Só o que é identificação, e só onde está VAZIO. Valor, data e sentido ficam de
+        // fora de propósito: corrigi-los aqui reescreveria em silêncio lançamento que o
+        // gestor já conferiu.
+        const linha = mapTransaction(t, origem);
         const campos: Record<string, unknown> = {};
         for (const k of PREENCHIVEIS) {
           const v = (linha as any)[k];
-          if (v !== null && v !== undefined && v !== "") campos[k] = v;
+          if (v === null || v === undefined || v === "") continue;
+          if (atual[k] == null) campos[k] = v;
         }
 
         if (Object.keys(campos).length === 0) { semNovidade++; continue; }
-
-        // `is null` em cada coluna seria uma consulta por campo; mais simples e seguro é
-        // ler o que existe e mandar só o que está vazio.
-        const { data: atual } = await admin
-          .from("bank_transactions")
-          .select(`id, ${PREENCHIVEIS.join(", ")}`)
-          .eq("bank_ref_id", linha.bank_ref_id)
-          .maybeSingle();
-        if (!atual) continue;
-
-        const paraGravar: Record<string, unknown> = {};
-        for (const [k, v] of Object.entries(campos)) {
-          if ((atual as any)[k] == null) paraGravar[k] = v;
-        }
-        if (Object.keys(paraGravar).length === 0) { semNovidade++; continue; }
-
-        const { error } = await admin
-          .from("bank_transactions").update(paraGravar).eq("id", (atual as any).id);
-        if (!error) atualizadas++;
+        aGravar.push({ id: String(atual.id), campos });
       }
     }
+
+    await gravarAmostras(admin, amostras);
+
+    // Teto por chamada: mesmo com a leitura resolvida, mil escritas seguidas voltariam a
+    // encostar no limite. O que sobra volta na próxima — a tela repete até zerar.
+    const lote = aGravar.slice(0, LOTE_BACKFILL);
+    let atualizadas = 0;
+    for (const { id, campos } of lote) {
+      const { error } = await admin.from("bank_transactions").update(campos).eq("id", id);
+      if (!error) atualizadas++;
+    }
+    const restantes = aGravar.length - lote.length;
 
     return {
       conexao: rotulo,
       status: "ok",
       atualizadas,
+      restantes,
       ja_completas: semNovidade,
+      amostras_colhidas: amostras.length,
       mensagem: atualizadas > 0
-        ? `${atualizadas} lançamento(s) ganharam banco, conta ou meio de pagamento`
+        ? `${atualizadas} lançamento(s) ganharam identificação`
+          + (restantes > 0 ? ` · faltam ${restantes}` : "")
         : "Nada a preencher — o provedor não devolveu identificação nova",
     };
   } catch (e) {
