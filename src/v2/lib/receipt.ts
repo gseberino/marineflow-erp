@@ -1,5 +1,6 @@
 import { supabase } from '@/integrations/supabase/client';
-import { generatePDF, DEFAULT_PDF_OPTIONS, type PDFData } from '@/lib/pdf-generator';
+import { DEFAULT_PDF_OPTIONS, type PDFData } from '@/lib/pdf-generator';
+import { printPDF } from '@/lib/pdf-print';
 import { toast } from 'sonner';
 
 export type ReceivableRow = {
@@ -79,7 +80,7 @@ export async function generateReceivableReceipt(r: ReceivableRow): Promise<void>
         notes: lastPay?.notes || undefined,
       },
     };
-    generatePDF(pdfData, { ...DEFAULT_PDF_OPTIONS });
+    printPDF(pdfData, { ...DEFAULT_PDF_OPTIONS });
   } catch (e) {
     toast.error(e instanceof Error ? e.message : 'Erro ao gerar recibo');
   }

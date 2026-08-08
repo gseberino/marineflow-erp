@@ -20,7 +20,8 @@ import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useWhatsAppSendStatusMap } from '@/hooks/use-whatsapp-send-log';
 import { usePDFData, fetchPDFData } from '@/hooks/use-pdf';
-import { generatePDF, downloadPDF, DEFAULT_PDF_OPTIONS, type PDFOptions } from '@/lib/pdf-generator';
+import { downloadPDF, DEFAULT_PDF_OPTIONS, type PDFOptions } from '@/lib/pdf-generator';
+import { printPDF } from '@/lib/pdf-print';
 import type { PDFAction } from '@/components/PDFOptionsDialog';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { writeAuditLog } from '@/hooks/use-audit-log';
@@ -140,7 +141,7 @@ export default function ServiceOrderList() {
         .catch((e: any) => { console.error(e); toast.error('Erro ao gerar o PDF'); });
       setPdfTarget(null);
     } else {
-      generatePDF({ ...pdfData, documentType: pdfTarget.type }, { ...options, validity });
+      printPDF({ ...pdfData, documentType: pdfTarget.type }, { ...options, validity });
       setPdfTarget(null);
     }
   };

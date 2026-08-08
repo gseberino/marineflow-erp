@@ -6,6 +6,7 @@ import { Download, Upload, CheckCircle, Database, AlertTriangle, ArrowLeft, Load
 import { supabase } from '@/integrations/supabase/client';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useI18n } from '@/i18n';
+import { downloadText } from '@/lib/download';
 
 // The complete list of tables to export
 // The complete list of verified tables to export
@@ -70,16 +71,13 @@ export function MasterDataPanel() {
       backup['_meta'] = [{ version: '1.1', date: new Date().toISOString() }];
 
       const jsonStr = JSON.stringify(backup, null, 2);
-      const blob = new Blob([jsonStr], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `marineflow_backup_${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      
+      downloadText(
+        jsonStr,
+        `marineflow_backup_${new Date().toISOString().slice(0, 10)}.json`,
+        'application/json',
+      );
+
+
       toast.success('Backup exportado com sucesso!');
     } catch (err: any) {
       toast.error('Erro ao exportar dados: ' + (err?.message || 'Tente novamente'));

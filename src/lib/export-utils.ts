@@ -1,3 +1,5 @@
+import { downloadCSV } from './download';
+
 export type ExportColumn = {
   header: string;
   key: string;
@@ -20,13 +22,7 @@ export function exportToCSV(
     }).join(';'),
   );
   const csv = BOM + [header, ...rows].join('\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+  downloadCSV(csv, filename);
 }
 
 export const PRODUCTS_COLUMNS: ExportColumn[] = [
