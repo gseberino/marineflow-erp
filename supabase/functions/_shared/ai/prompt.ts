@@ -538,15 +538,20 @@ function buildVolatileBlock(ctx: PromptRuntimeCtx): string {
  */
 export function buildSystemBlocks(settings: Record<string, string>, ctx: PromptRuntimeCtx): ClaudeTextBlock[] {
   return [
-    // ttl "1h" em vez do padrão de 5 min. O prefixo cacheado (tools + este bloco) é de ~69k
-    // tokens; com 5 min ele expirava entre as mensagens do dono numa conversa normal — medido
-    // em 07/08/2026: 6 das 24 chamadas do dia foram cache miss, cada uma ~6,5x mais cara que
-    // uma leitura de cache. Os gaps eram de 30-60 min (09:49 -> 10:28 -> 11:16 -> 12:22).
-    // TRADE-OFF: a GRAVAÇÃO passa a custar 2x a entrada base em vez de 1,25x, então isto só se
-    // paga a partir de ~3 leituras por gravação. Na medição eram 4 (24 chamadas / 6 misses).
-    // Em dia de uso esparso (2-3 conversas isoladas) sai mais caro — acompanhar por
-    // v_ai_custo_diario, que separa leitura de gravação justamente para responder isso.
-    { type: "text", text: buildStableBlock(settings), cache_control: { type: "ephemeral", ttl: "1h" } },
+    // TTL padrão de 5 minutos. NÃO trocar por "1h" — foi testado e sai mais caro.
+    //
+    // A ideia parecia boa: o prefixo é de ~69k tokens e o cache expirava entre as mensagens do
+    // dono. Mas a simulação sobre 20 dias de histórico real (agrupando as chamadas por turno e
+    // medindo o intervalo ENTRE turnos) mostrou o oposto: US$ 15,03 com 5 min contra US$ 15,15
+    // com 1 h. O TTL longo salvaria 22 cache misses e encareceria 33.
+    //
+    // A razão é o padrão de uso: a maior parte dos misses vem de turnos separados por MAIS de
+    // uma hora, que TTL nenhum alcança — e para esses a gravação passaria de +25% para +100%
+    // da entrada, quadruplicando o custo justamente nos casos que não têm salvação.
+    //
+    // A lição: com prefixo grande, o caro é a GRAVAÇÃO, não a expiração. O caminho para baratear
+    // o miss é encolher o prefixo (Fases 1, 2, 4 e 5 do plano), não estender o cache.
+    { type: "text", text: buildStableBlock(settings), cache_control: { type: "ephemeral" } },
     { type: "text", text: buildVolatileBlock(ctx) },
   ];
 }
