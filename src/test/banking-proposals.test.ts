@@ -324,6 +324,35 @@ describe("regras que o gestor ensina", () => {
     expect(comRegra.suggestedCategory).toBe("Peças e materiais");
   });
 
+  it("os MCCs reais do extrato estão mapeados", () => {
+    // Vieram da medição, não de cabeça: quando o MCC chegou nas 895 transações, metade do
+    // volume caía em códigos que a primeira versão da tabela não conhecia.
+    const esperado: Array<[string, string]> = [
+      ["5734", "Software e assinaturas"],          // Anthropic, OpenAI, OpenRouter, Lovable
+      ["4722", "Hospedagem e Hotelaria"],          // Airbnb
+      ["5912", "Assistência médica/farmacêutica"], // drogarias
+      ["5099", "Peças e materiais"],
+      ["5085", "Peças e materiais"],
+      ["5532", "Manutenção de veículo"],
+      ["5813", "Alimentação de campo"],
+    ];
+    for (const [mcc, categoria] of esperado) {
+      const p = montarProposta(tx({ description: "COMPRA", payee_mcc: mcc }), fornecedores);
+      expect(p.suggestedCategory, `MCC ${mcc}`).toBe(categoria);
+    }
+  });
+
+  it("a regra do gestor ainda vence o MCC do marketplace", () => {
+    // Mercado Livre é etiquetado como loja de software (5734) e vende de tudo. A regra de
+    // texto do gestor — "MERCADOLIVRE é peças e materiais" — tem de continuar mandando,
+    // senão o MCC do adquirente reclassificaria compras de peça como assinatura.
+    const r = regra({ match_type: "text", match_value: "MERCADOLIVRE", set_category: "Peças e materiais" });
+    const p = montarProposta(
+      tx({ description: "MERCADOLIVRE*GATEELET", payee_mcc: "5734" }), fornecedores, undefined, [r],
+    );
+    expect(p.suggestedCategory).toBe("Peças e materiais");
+  });
+
   it("MCC desconhecido não vira palpite — devolve o campo seguinte", () => {
     const p = montarProposta(tx({ description: "POSTO AGRICOPEL", payee_mcc: "9999" }), fornecedores);
     expect(p.suggestedCategory).toBe("Combustível e deslocamento"); // caiu na regra de texto

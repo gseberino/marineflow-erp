@@ -77,7 +77,45 @@ const MAPA: Record<string, CategoriaPorMcc> = {
   // ── Frete ──
   "4215": { categoria: "Frete e importação", dreGroup: "custo_direto", rotulo: "Transportadora/courier" },
   "4214": { categoria: "Frete e importação", dreGroup: "custo_direto", rotulo: "Frete rodoviário" },
+
+  // ── Códigos que APARECERAM no extrato desta empresa ─────────────────────────
+  //
+  // A primeira versão desta tabela foi escrita de cabeça e cobria 34 códigos. Quando o
+  // MCC finalmente chegou nas 895 transações, 34 códigos REAIS estavam de fora — mais da
+  // metade do volume. Os que entram agora vieram do extrato, cada um com os
+  // estabelecimentos que o justificam; o resto continua fora, porque mapear um código
+  // ambíguo é criar erro com aparência de certeza.
+  "5734": { categoria: "Software e assinaturas", dreGroup: "despesa_operacional", rotulo: "Loja de software" },
+  "4722": { categoria: "Hospedagem e Hotelaria", dreGroup: "despesa_operacional", rotulo: "Agência de viagem/hospedagem" },
+  "5912": { categoria: "Assistência médica/farmacêutica", dreGroup: "despesa_operacional", rotulo: "Farmácia/drogaria" },
+  "5099": { categoria: "Peças e materiais", dreGroup: "custo_direto", rotulo: "Bens duráveis (atacado)" },
+  "5085": { categoria: "Peças e materiais", dreGroup: "custo_direto", rotulo: "Suprimentos industriais" },
+  "5532": { categoria: "Manutenção de veículo", dreGroup: "despesa_operacional", rotulo: "Autopeças/pneus" },
+  "5813": { categoria: "Alimentação de campo", dreGroup: "custo_direto", rotulo: "Bar/casa noturna" },
 };
+
+/**
+ * Códigos que aparecem no extrato e que NÃO mapeamos de propósito.
+ *
+ * Documentados para que ninguém os "esqueça" de novo — e para deixar claro que a ausência
+ * é decisão, não descuido. Cada um agrupa coisas demais para uma categoria só:
+ *
+ *   8999 Serviços profissionais    · pessoas físicas avulsas, adquirentes (FROGPAY, PGZ)
+ *   5947 Presentes/novidades       · um estabelecimento só, e não é presente
+ *   8641 Associações               · mensalidade de iate clube — pode ser várias coisas
+ *   5311 Loja de departamento      · de refrigeração a bazar
+ *   5921 Bebidas                   · aqui é água e gás, não bebida
+ *   5999 Varejo diverso            · genérico por definição
+ *   8299 Educação                  · aparece com adquirente no meio
+ *   5199 Não duráveis (atacado)    · genérico
+ *   5942 Livraria                  · é a Amazon vendendo qualquer coisa
+ *
+ * Todos caem na camada seguinte — memória, regra de texto, IA —, que é onde eles têm mais
+ * chance de acertar do que um código que significa "diversos".
+ */
+export const MCCS_AMBIGUOS_CONHECIDOS = [
+  "8999", "5947", "8641", "5311", "5921", "5999", "8299", "5199", "5942",
+];
 
 /**
  * Categoria a partir do MCC. Devolve null quando o código não está mapeado — e null aqui
