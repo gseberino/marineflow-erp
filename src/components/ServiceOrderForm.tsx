@@ -1657,8 +1657,6 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     }
   }, [timeForm.started_at, timeForm.ended_at]);
 
-  if (isLoading) return <div className="space-y-4">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-20 w-full" />)}</div>;
-
   const currentStatus = form.status;
   const validTransitions = STATUS_TRANSITIONS[currentStatus] || [];
   const marina = marinas?.find((m) => m.id === form.marina_id);
@@ -1724,6 +1722,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     const t = setTimeout(() => { void salvarAutomatico(); }, 1500);
     return () => clearTimeout(t);
   }, [salvarAutomatico, isNew, isLoading]);
+
+  if (isLoading) return <div className="space-y-4">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-20 w-full" />)}</div>;
 
 
   const handleCancel = async () => {
