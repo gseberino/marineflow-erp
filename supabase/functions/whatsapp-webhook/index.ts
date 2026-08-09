@@ -44,6 +44,47 @@ function jr(body: unknown, status = 200) {
   });
 }
 
+// Comparação em tempo constante para não vazar o segredo por timing.
+// (mesma implementação já usada em pluggy-webhook)
+function timingSafeEqual(a: string, b: string): boolean {
+  const enc = new TextEncoder();
+  const ab = enc.encode(a);
+  const bb = enc.encode(b);
+  if (ab.length !== bb.length) return false;
+  let diff = 0;
+  for (let i = 0; i < ab.length; i++) diff |= ab[i] ^ bb[i];
+  return diff === 0;
+}
+
+/**
+ * Segredo compartilhado com a Evolution API. Chega SEM Authorization
+ * (verify_jwt=false), então o segredo é a ÚNICA autenticação desta função.
+ *
+ * Aceito por query string (?token=...) OU pelo cabeçalho x-webhook-token: a
+ * Evolution registra a URL do webhook, e nem toda versão permite cabeçalho
+ * customizado — a query string garante que dá para configurar em qualquer uma.
+ *
+ * Fail-closed em tudo: sem secret nos env vars, rejeita; sem token na
+ * requisição, rejeita. Antes desta checagem NÃO pode haver nenhum I/O — é o
+ * que garante que uma requisição anônima não alcance o banco.
+ *
+ * Devolve a Response de recusa, ou null quando a requisição está autorizada.
+ */
+export function verificarSegredo(req: Request): Response | null {
+  const expected = Deno.env.get("EVOLUTION_WEBHOOK_TOKEN");
+  if (!expected) {
+    console.error("[whatsapp-webhook] EVOLUTION_WEBHOOK_TOKEN ausente nos secrets — rejeitando tudo.");
+    return jr({ error: "not_configured" }, 500);
+  }
+  const url = new URL(req.url);
+  const apresentado = url.searchParams.get("token") ?? req.headers.get("x-webhook-token") ?? "";
+  if (!timingSafeEqual(apresentado, expected)) {
+    console.warn(`[whatsapp-webhook] 401 — segredo ausente ou incorreto (${req.method}).`);
+    return jr({ error: "unauthorized" }, 401);
+  }
+  return null;
+}
+
 async function notifyAssignedReminder(
   admin: any,
   phone: string,
@@ -78,8 +119,12 @@ async function notifyAssignedReminder(
   }
 }
 
-Deno.serve(async (req) => {
+export async function handler(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  // Autenticação ANTES de qualquer I/O: requisição sem segredo não toca no banco.
+  const recusa = verificarSegredo(req);
+  if (recusa) return recusa;
 
   const admin = createClient(
     Deno.env.get("SUPABASE_URL")!,
@@ -87,7 +132,7 @@ Deno.serve(async (req) => {
     { auth: { persistSession: false, autoRefreshToken: false } },
   );
 
-  // --- MODO FAXINA E BLINDAGEM (GET) ---
+  // --- DIAGNÓSTICO (GET) ---
   if (req.method === "GET") {
     const url = new URL(req.url);
 
@@ -108,9 +153,11 @@ Deno.serve(async (req) => {
           .eq("direction", "inbound")
           .gte("created_at", since24h);
 
+        // Só o que o diagnóstico devolve: nem telefone nem corpo são buscados,
+        // para não existirem em memória nem em log de erro desta rota.
         const { data: lastMsg } = await admin
           .from("whatsapp_messages")
-          .select("created_at, phone_normalized, body")
+          .select("created_at")
           .eq("direction", "inbound")
           .order("created_at", { ascending: false })
           .limit(1)
@@ -118,7 +165,7 @@ Deno.serve(async (req) => {
 
         const { data: recentMsgs } = await admin
           .from("whatsapp_messages")
-          .select("created_at, phone_normalized, message_type, body")
+          .select("created_at, message_type")
           .eq("direction", "inbound")
           .order("created_at", { ascending: false })
           .limit(5);
@@ -131,6 +178,11 @@ Deno.serve(async (req) => {
           !lastMsg ? "never" :
           minutesSinceLast !== null && minutesSinceLast > 60 ? "stale" : "ok";
 
+        // O diagnóstico responde "o webhook está recebendo?" — e só isso.
+        // Telefone e corpo da mensagem NÃO saem daqui: quem precisa ler conversa
+        // usa o painel, que tem RLS. Mesmo com o segredo correto, esta rota não
+        // é um leitor de mensagens (defesa em profundidade: se o token vazar,
+        // vaza um contador, não a conversa do cliente).
         return jr({
           webhook_url: webhookUrl,
           health_status: healthStatus,
@@ -138,15 +190,9 @@ Deno.serve(async (req) => {
           last_24h: last24h ?? 0,
           last_message_at: lastMsg?.created_at ?? null,
           minutes_since_last: minutesSinceLast,
-          last_message_preview: lastMsg
-            ? { phone: lastMsg.phone_normalized, body: lastMsg.body, is_broadcast: false }
-            : null,
           recent_messages: (recentMsgs || []).map((m) => ({
             at: m.created_at,
-            phone: m.phone_normalized,
             type: m.message_type,
-            body: m.body,
-            is_broadcast: false,
           })),
           checked_at: now.toISOString(),
         });
@@ -155,33 +201,12 @@ Deno.serve(async (req) => {
       }
     }
 
-    try {
-      console.log("[Cleanup] Iniciando limpeza de leads fantasmas...");
-      const { data: leads } = await admin.from("whatsapp_leads").select("id, phone_normalized");
-      if (!leads) return new Response("Nenhum lead encontrado.", { headers: corsHeaders });
-
-      let count = 0;
-      for (const l of leads) {
-        const phone = l.phone_normalized || "";
-        const isWeird = phone.length < 10 || !phone.startsWith("55") || phone.length > 15;
-        if (isWeird) {
-          const { count: msgCount } = await admin
-            .from("whatsapp_messages")
-            .select("*", { count: "exact", head: true })
-            .eq("lead_id", l.id);
-          if (!msgCount || msgCount === 0) {
-            await admin.from("whatsapp_leads").delete().eq("id", l.id);
-            count++;
-          }
-        }
-      }
-      return new Response(
-        `Faxina Concluída! ${count} leads fantasmas removidos. O sistema agora está blindado contra novos registros inválidos.`,
-        { headers: { ...corsHeaders, "Content-Type": "text/plain; charset=utf-8" } },
-      );
-    } catch (e: any) {
-      return new Response("Erro: " + e.message, { status: 500, headers: corsHeaders });
-    }
+    // A "faxina de leads fantasmas" foi REMOVIDA daqui (MF-AUD-053).
+    // Era um DELETE em whatsapp_leads disparado por um GET sem parâmetro — uma
+    // operação destrutiva na rota mais exposta do sistema, e sem confirmação.
+    // É manutenção pontual, não rota de webhook: se precisar de novo, faz-se por
+    // SQL, com o resultado revisado antes de apagar.
+    return jr({ error: "method_not_allowed", hint: "Use ?healthcheck=1" }, 405);
   }
 
   // --- WEBHOOK POST ---
@@ -425,4 +450,6 @@ Deno.serve(async (req) => {
   } catch (err: any) {
     return jr({ error: err.message }, 500);
   }
-});
+}
+
+Deno.serve(handler);

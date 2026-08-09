@@ -1,5 +1,9 @@
 project_id = "okurngvcodmljjicopdp"
 
+# A Evolution API chama sem Authorization, então verify_jwt fica false — mas a função
+# NÃO é anônima: autentica pelo segredo compartilhado EVOLUTION_WEBHOOK_TOKEN, aceito por
+# ?token= na URL ou pelo cabeçalho x-webhook-token, e rejeita tudo se o secret não estiver
+# configurado (mesmo padrão do pluggy-webhook). Ver MF-AUD-053.
 [functions.whatsapp-webhook]
 verify_jwt = false
 
