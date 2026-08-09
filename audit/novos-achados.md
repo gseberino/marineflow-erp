@@ -26,3 +26,38 @@ Não foram corrigidos.
   `deno check` com um `deno.json` próprio em `supabase/functions/` (que isole a resolução de tipos do
   `node_modules` do frontend). Assim o CI executa os testes e ainda verifica tipos.
 - **Evidência:** saída dos dois comandos, executados em 08/08/2026 no worktree `session/p0-webhook`.
+
+---
+
+## [NOVO-002] Eventos da Evolution ligados sem consumidor no código — e `Webhook Base64` como risco de perda de mensagem
+
+- **Encontrado em:** 09/08/2026, durante a T0.1 (o dono ampliou os eventos no Evolution Manager)
+- **Categoria:** G (performance/custo) + A (risco funcional) — **Severidade sugerida:** P2
+- **Descrição:** A instância passou a emitir ~18 eventos: `APPLICATION_STARTUP`, `CHATS_SET/UPDATE/UPSERT`,
+  `CONNECTION_UPDATE`, `CONTACTS_SET/UPDATE/UPSERT`, `GROUP_UPDATE`, `GROUPS_UPSERT`, `LABELS_ASSOCIATION`,
+  `LABELS_EDIT`, `MESSAGES_SET/UPDATE/UPSERT`, `PRESENCE_UPDATE`, `QRCODE_UPDATED`, `SEND_MESSAGE`
+  — além de **`Webhook Base64` ligado**.
+
+  O webhook trata explicitamente `messages.update` (status de entrega) e, para o resto, delega a
+  `provider.parseIncomingWebhook(payload)`; o que não for mensagem retorna `null` e sai como
+  `{ok:true, ignored:"system_or_group"}` (`whatsapp-webhook/index.ts:238-245`). Portanto **todos os eventos
+  novos são invocação paga e descartada**.
+
+  Dois riscos, em ordem de gravidade:
+  1. **`Webhook Base64`**: faz a Evolution embutir o binário da mídia em base64 no corpo do webhook. O código
+     **não lê base64** (`grep -n "base64" whatsapp-webhook/index.ts` → nada); a mídia é obtida por URL em
+     `whatsapp-read-media`. Um vídeo de 5 MB vira ~6,7 MB de JSON inútil por requisição, com risco de estourar
+     o limite de corpo da Edge Function — e aí **a mensagem com mídia não é gravada**.
+  2. **Volume**: `PRESENCE_UPDATE` dispara a cada "digitando"/"online" de qualquer contato; `MESSAGES_SET`,
+     `CHATS_SET` e `CONTACTS_SET` mandam sincronização em massa a cada reconexão da instância.
+- **Recomendação imediata (config, sem código):** desligar `Webhook Base64` e manter ligados apenas
+  `MESSAGES_UPSERT`, `MESSAGES_UPDATE`, `SEND_MESSAGE` e `CONNECTION_UPDATE`.
+- **Oportunidade real (vira tarefa quando houver código):**
+  - `CONTACTS_UPSERT`/`CONTACTS_UPDATE` → o payload traz `pushName`/nome do contato: alimenta direto a
+    identidade de contatos (frente que levou a identificação de 1,1% → 72,6%), sem custo de IA.
+  - `CONNECTION_UPDATE` → detectar queda da instância e avisar o dono; hoje a queda só é percebida pelo
+    silêncio. Casa com o `health_status` que o healthcheck já calcula.
+  - `MESSAGES_DELETE` (hoje desligado) → registrar que o cliente apagou uma mensagem.
+- **Evidência:** prints do Evolution Manager (09/08/2026); `whatsapp-webhook/index.ts:238-245`; ausência de
+  qualquer referência a base64 na função; logs de Edge Function mostrando `POST | 200` seguidos com
+  `?token=` logo após o Save.
