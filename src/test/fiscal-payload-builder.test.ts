@@ -344,8 +344,21 @@ describe("buildNfeDraftPayload — NF-e referenciada na devolução (ide/NFref/r
     expect(p.referenced_documents).toEqual([
       { access_key: "42260750057049000159550020000000011737359835" },
     ]);
-    // Não há mais referência por item.
-    expect(p.items[0].referenced_document).toBeUndefined();
+    // A referência POR ITEM continua sendo enviada, junto com a da nota.
+    //
+    // Este teste dizia "não há mais referência por item" e falhava desde então:
+    // ficou para trás de uma mudança de entendimento sobre o contrato da
+    // Contora, registrada no payload-builder — ela roteia por ambiente
+    // (cabeçalho em produção até 31/08/2026, por item a partir de 01/09/2026;
+    // homologação já vai por item), então as DUAS vão no mesmo payload.
+    //
+    // O `item` é explícito de propósito: a ordem da devolução não coincide com
+    // a da nota do fornecedor, e na devolução parcial há itens excluídos — a
+    // inferência por posição erraria o vínculo.
+    expect(p.items[0].referenced_document).toEqual({
+      access_key: "42260750057049000159550020000000011737359835",
+      item: 1,
+    });
   });
 
   it("deduplica chaves repetidas entre itens (uma nota original consolidada)", () => {
