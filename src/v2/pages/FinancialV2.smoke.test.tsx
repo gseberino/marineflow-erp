@@ -36,9 +36,9 @@ vi.mock('@/hooks/use-service-order-expenses', () => ({
 }));
 
 // Os painéis pesados não são o objeto do teste: o que importa é que a aba os alcança.
-vi.mock('@/components/BankReconciliation', () => ({ BankReconciliation: () => <div>painel conciliação</div> }));
+vi.mock('@/components/ConciliacaoPanel', () => ({ ConciliacaoPanel: () => <div>painel conciliação</div> }));
 vi.mock('@/components/BankSourcesPanel', () => ({ BankSourcesPanel: () => <div>painel contas</div> }));
-vi.mock('@/components/FinanceReviewInbox', () => ({ FinanceReviewInbox: () => <div>painel caixa de entrada</div> }));
+vi.mock('@/components/FinanceReviewInbox', () => ({ FinanceReviewInbox: () => <div>painel extrato</div> }));
 vi.mock('@/components/FinanceRulesPanel', () => ({
   FinanceRulesPanel: () => <div>painel regras</div>,
   EditorDeRegra: () => null,
@@ -68,9 +68,23 @@ describe('FinancialV2 — paridade e navegação', () => {
   it('tem as abas que só existiam na v1', async () => {
     // Sem estas três, migrar o menu para a v2 tiraria do usuário o que ele acabou de ganhar.
     renderFinanceiro();
-    expect(await screen.findByRole('tab', { name: /Caixa de entrada/i })).toBeInTheDocument();
+    // "Caixa de entrada" virou "Extrato": a fila É o extrato, e manter os dois nomes era
+    // manter dois destinos para o mesmo material.
+    expect(await screen.findByRole('tab', { name: /^Extrato$/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /^Regras$/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /Contas bancárias/i })).toBeInTheDocument();
+  });
+
+  it('Extrato vem ANTES de Conciliação — a ordem é o fluxo do trabalho', async () => {
+    // Triar o que o banco trouxe vem primeiro; conferir o que já foi lançado vem depois.
+    // Invertido, a tela sugere que se concilia antes de registrar — que é exatamente a
+    // confusão que esta reorganização desfez.
+    renderFinanceiro();
+    const abas = (await screen.findAllByRole('tab')).map((a) => a.textContent ?? '');
+    const iExtrato = abas.findIndex((r) => /^Extrato$/i.test(r.trim()));
+    const iConcil = abas.findIndex((r) => /Concilia|Reconcil/i.test(r));
+    expect(iExtrato).toBeGreaterThanOrEqual(0);
+    expect(iConcil).toBeGreaterThan(iExtrato);
   });
 
   it('nenhuma aba abre em branco', async () => {
@@ -102,8 +116,8 @@ describe('FinancialV2 — paridade e navegação', () => {
     const user = userEvent.setup();
     renderFinanceiro();
 
-    await user.click(await screen.findByRole('tab', { name: /Caixa de entrada/i }));
-    expect(await screen.findByText('painel caixa de entrada')).toBeInTheDocument();
+    await user.click(await screen.findByRole('tab', { name: /^Extrato$/i }));
+    expect(await screen.findByText('painel extrato')).toBeInTheDocument();
 
     await user.click(screen.getByRole('tab', { name: /^Regras$/i }));
     expect(await screen.findByText('painel regras')).toBeInTheDocument();
