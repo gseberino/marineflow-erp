@@ -70,7 +70,9 @@ import { WhatsAppSendHistoryDialog } from '@/components/WhatsAppSendHistoryDialo
 import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/SendViaWhatsAppDialog';
 import { useWhatsAppSendHistory } from '@/hooks/use-whatsapp-send-log';
 import { CheckCircle2, XCircle, History as HistoryIcon, Send, Sparkles } from 'lucide-react';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { decideAutosave } from '@/lib/autosave-guard';
+import { documentTypeFor, documentLabelFor, isQuoteStatus } from '@/lib/document-type';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
@@ -81,7 +83,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Plus, Trash2, AlertTriangle, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle, Copy, Download, Loader2, DollarSign, Percent, Hash } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, AlertTriangle, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle, Copy, Download, Loader2, DollarSign, Percent, Hash, MoreHorizontal } from 'lucide-react';
 import { toast } from 'sonner';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { writeAuditLog } from '@/hooks/use-audit-log';
@@ -150,6 +152,63 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       }`,
     );
     return true;
+  };
+
+  /* As duas ações de WhatsApp, que a barra oferecia com nomes que não
+     explicavam a diferença: "WhatsApp" abria o wa.me com o LINK público, e
+     "Enviar WhatsApp" mandava o DOCUMENTO pela Evolution. Quem não construiu a
+     tela não tinha como saber qual era qual. Agora são dois itens do menu,
+     nomeados pelo que fazem. */
+  const abrirPreviewLinkWhatsApp = () => {
+    if (!orderData?.share_token) return;
+    const url = `${window.location.origin}/view/${orderData.share_token}`;
+    const phoneRaw = (orderData?.clients as any)?.whatsapp || (orderData?.clients as any)?.phone || '';
+    const phone = normalizePhoneE164(phoneRaw);
+    const clientName = (orderData?.clients as any)?.name || '';
+    const rotulo = isQuoteStatus(currentStatus) ? 'do Orçamento' : 'da Ordem de Serviço';
+    const msg = `Olá${clientName ? ' ' + clientName : ''}, segue o link ${rotulo} ${orderData.service_order_number}: ${url}`;
+    setWaEditPhone(phone);
+    setWaEditMessage(msg);
+    setWaPreview({ phone, message: msg, url, clientName });
+    void writeAuditLog({
+      table_name: 'service_orders',
+      record_id: orderData.id,
+      action: 'whatsapp_preview' as any,
+      new_value: {
+        share_token: orderData.share_token,
+        public_url: url,
+        phone_raw: String(phoneRaw),
+        phone_normalized: phone,
+        client_name: clientName,
+      },
+      reason: 'Abriu pré-visualização do WhatsApp',
+    });
+    recordWhatsAppEvent({
+      source: 'detail_dialog',
+      action: 'preview',
+      serviceOrderId: orderData.id,
+      serviceOrderNumber: orderData.service_order_number,
+      shareToken: orderData.share_token,
+      phoneRaw: String(phoneRaw),
+      phoneNormalized: phone,
+    });
+  };
+
+  const enviarDocumentoPorWhatsApp = () => {
+    if (!orderData?.share_token) return;
+    setWhatsAppTarget({
+      kind: 'service_order',
+      serviceOrderId: orderData.id,
+      serviceOrderNumber: orderData.service_order_number,
+      shareToken: orderData.share_token,
+      clientId: (orderData?.clients as any)?.id || (orderData as any)?.client_id || null,
+      clientName: (orderData?.clients as any)?.name || null,
+      clientPhone: (orderData?.clients as any)?.whatsapp || (orderData?.clients as any)?.phone || null,
+      // Mesmo critério do botão de imprimir: rascunho é orçamento, o resto é OS.
+      // Antes havia duas opções, e a errada mandava ao cliente o documento que
+      // aquela tela não era.
+      documentType: documentTypeFor(currentStatus),
+    });
   };
 
   const openPdfDialog = (type: 'quote' | 'service_order' | 'invoice') => {
@@ -472,6 +531,10 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [generatingCollections, setGeneratingCollections] = useState(false);
   const prevSignedAt = useRef<string | null>(null);
   const topActionsRef = useRef<HTMLDivElement | null>(null);
+  /* Salvamento automático — estado e a memória do que já está gravado. */
+  const [salvandoAuto, setSalvandoAuto] = useState(false);
+  const [salvoEm, setSalvoEm] = useState<string | null>(null);
+  const ultimoSalvoRef = useRef<string | null>(null);
   const bottomSaveRef = useRef<HTMLDivElement | null>(null);
   const [topVisible, setTopVisible] = useState(true);
   const [bottomVisible, setBottomVisible] = useState(false);
@@ -698,6 +761,36 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     totalCharged: soTotalCharged, totalPaid: soTotalPaid,
     balance: soBalance, payStatus: soPayStatus,
   } = computeReceivablesStatus(soReceivables as any);
+
+  /**
+   * Os campos do formulário, prontos para gravar.
+   *
+   * Extraído de handleSave porque o salvamento automático precisa do MESMO
+   * payload — e só dele. O handleSave faz mais coisa: apaga e recria os
+   * técnicos da OS e dispara push para quem entrou. Repetir isso a cada campo
+   * digitado deixaria a OS sem técnico por instantes, várias vezes por minuto.
+   */
+  const montarPayload = () => {
+    const { signed_at: _signedAt, ...formForSave } = form;
+    const uuidOrNull = (v: string | null | undefined) => (v && v.trim() !== '' ? v : null);
+    return {
+      ...formForSave,
+      scheduled_start_at: form.scheduled_start_at || null,
+      scheduled_end_at: form.scheduled_end_at || null,
+      commissioned_user_id: uuidOrNull(form.commissioned_user_id),
+      requested_by_contact_id: uuidOrNull(form.requested_by_contact_id),
+      marina_id: uuidOrNull(form.marina_id),
+      payment_conditions: form.payment_conditions || null,
+      payment_condition_preset_id: uuidOrNull(form.payment_condition_preset_id),
+      grand_total: Math.round(grandTotal * 100) / 100,
+      card_fee_amount: passthroughCardFeeAmount,
+      discount_services_pct: discountServicesPct,
+      discount_parts_pct: discountPartsPct,
+      financial_notes: form.financial_notes || null,
+      payment_method_preferred: form.payment_method_preferred || null,
+      quote_validity_days: form.quote_validity_days || defaultQuoteValidityDays,
+    };
+  };
 
   const handleSave = async () => {
     if (!form.client_id || !form.vessel_id || !form.problem_description) {
@@ -1571,6 +1664,68 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const marina = marinas?.find((m) => m.id === form.marina_id);
   const isLocked = currentStatus === 'invoiced' || currentStatus === 'cancelled';
 
+  /**
+   * Salva sozinho, sem atrapalhar.
+   *
+   * Regras que decidem quando ele NÃO age, e o porquê de cada uma:
+   *
+   *  · ORDEM NOVA não salva sozinha. Criar registro é ato deliberado, e o
+   *    handleSave ainda precisa gravar as peças e serviços de rascunho que só
+   *    existem na tela.
+   *  · SEM CLIENTE, EMBARCAÇÃO OU DESCRIÇÃO não tenta. São obrigatórios, e o
+   *    autosave gritando "preencha o cliente" a cada campo enquanto a pessoa
+   *    monta o orçamento seria pior que não existir.
+   *  · TRAVADA (faturada ou cancelada) não escreve.
+   *  · SEM MUDANÇA REAL não escreve: a comparação é contra o que foi gravado
+   *    por último, então recarregar a tela ou o servidor devolver os mesmos
+   *    dados não dispara gravação.
+   *
+   * Só o sucesso é silencioso — some no rótulo "salvo há instantes". Falha
+   * aparece, porque aí o botão Salvar volta a ser necessário.
+   */
+  const salvarAutomatico = useCallback(async () => {
+    const payload = montarPayload();
+    const assinatura = JSON.stringify(payload);
+
+    // A decisão mora em autosave-guard.ts, com teste. Aqui fica só o efeito.
+    const { salvar } = decideAutosave({
+      isNew, isLocked, orderId,
+      clientId: form.client_id,
+      vesselId: form.vessel_id,
+      problemDescription: form.problem_description,
+      assinaturaAtual: assinatura,
+      assinaturaSalva: ultimoSalvoRef.current,
+    });
+    if (!salvar) return;
+
+    setSalvandoAuto(true);
+    try {
+      await updateSO.mutateAsync({ id: orderId!, ...payload });
+      ultimoSalvoRef.current = assinatura;
+      setSalvoEm(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
+    } catch (e: any) {
+      // Sem toast repetido a cada tentativa: o rótulo do cabeçalho já avisa, e
+      // um erro de rede numa tela aberta há horas viraria uma chuva de avisos.
+      console.error('[autosave] falhou:', e);
+      setSalvoEm(null);
+    } finally {
+      setSalvandoAuto(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isNew, orderId, isLocked, form, grandTotal, passthroughCardFeeAmount,
+      discountServicesPct, discountPartsPct, defaultQuoteValidityDays]);
+
+  /* Dispara 1,5 s depois da última tecla.
+     A referência é a prática corrente: salvar no blur do campo e também alguns
+     segundos após parar de digitar. Aqui um só temporizador cobre os dois — sair
+     do campo também para de digitar —, e evita gravar no meio de uma palavra. */
+  useEffect(() => {
+    if (isNew || isLoading) return;
+    const t = setTimeout(() => { void salvarAutomatico(); }, 1500);
+    return () => clearTimeout(t);
+  }, [salvarAutomatico, isNew, isLoading]);
+
+
   const handleCancel = async () => {
     if (!orderId || cancelReason.length < 5) return;
     try {
@@ -1663,220 +1818,145 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         />
       )}
 
-      {/* Header */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <Button variant="ghost" size="icon" onClick={() => navigate('/service-orders')}>
-          <ArrowLeft className="h-5 w-5" />
-        </Button>
-        <div className="flex-1 min-w-0">
-          <h1 className="text-2xl font-bold truncate">
-            {isNew ? t.serviceOrders.newOrder : orderData?.service_order_number}
-          </h1>
-          {!isNew && (
-            <div className="flex items-center gap-2 mt-1">
-              <StatusBadge className={statusConfig[currentStatus]?.className || ''}>
+      {/* Cabeçalho que acompanha a rolagem.
+          Esta tela é longa — serviços, peças, despesas, financeiro — e quem
+          está montando um orçamento mexe no fim e quer salvar sem voltar ao
+          topo. `sticky` em vez de `fixed`: sticky respeita o fluxo e não
+          precisa de compensação de altura no conteúdo, e no Safari do iPhone
+          não briga com a barra de endereço que aparece e some.
+          `top-0` com a cor de fundo do app, senão o conteúdo passa por baixo e
+          se lê o texto do formulário através da barra. */}
+      <div className="sticky top-0 z-30 -mx-4 border-b bg-background/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:-mx-6 sm:px-6">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-11 w-11 shrink-0 sm:h-10 sm:w-10"
+            onClick={() => navigate('/service-orders')}
+            aria-label="Voltar"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
+
+          {/* O título encolhe; os botões não. `min-w-0` deixa o truncate
+              funcionar dentro do flex — sem ele o número da OS empurraria as
+              ações para fora da tela no celular. */}
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-lg font-bold sm:text-2xl">
+              {isNew ? t.serviceOrders.newOrder : orderData?.service_order_number}
+            </h1>
+            {!isNew && (
+              <p className="truncate text-xs text-muted-foreground">
                 {(t.status as Record<string, string>)[currentStatus]}
-              </StatusBadge>
-              <span className={priorityConfig[form.priority]?.className || ''}>
-                {(t.priority as Record<string, string>)[form.priority]}
-              </span>
-              {lastWaSend && (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={() => setShowZapiHistory(true)}
-                        className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs hover:bg-muted transition-colors"
-                        aria-label="Ver histórico de envios WhatsApp"
+                {salvandoAuto && ' · salvando…'}
+                {!salvandoAuto && salvoEm && ` · salvo ${salvoEm}`}
+              </p>
+            )}
+          </div>
+
+          {/* As ações, num grupo que não quebra linha.
+              Alvos de 44px de altura no celular (o mínimo que a Apple pede e o
+              que a WCAG 2.5.5 recomenda) e 36px a partir de `sm`, onde há
+              mouse e o cursor é preciso. */}
+          <div ref={topActionsRef} className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+            {!isNew && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-11 gap-1 px-3 sm:h-9">
+                    <MoreHorizontal className="h-4 w-4" />
+                    <span className="hidden sm:inline">Ações</span>
+                    <ChevronDown className="h-3 w-3 opacity-60" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-60">
+                  <DropdownMenuItem
+                    onClick={() => openPdfDialog(documentTypeFor(currentStatus))}
+                    className="gap-2"
+                  >
+                    {isQuoteStatus(currentStatus)
+                      ? <FileText className="h-4 w-4" />
+                      : <Printer className="h-4 w-4" />}
+                    Imprimir / Baixar
+                  </DropdownMenuItem>
+
+                  {(currentStatus === 'completed' || currentStatus === 'invoiced') && (
+                    <DropdownMenuItem onClick={() => openPdfDialog('invoice')} className="gap-2">
+                      <Receipt className="h-4 w-4" /> Fatura
+                    </DropdownMenuItem>
+                  )}
+
+                  {orderData?.share_token && (
+                    <>
+                      <DropdownMenuSeparator />
+                      {/* Os nomes dizem o que sai: um manda o arquivo, o outro
+                          manda o endereço. Antes eram "Enviar WhatsApp" e
+                          "WhatsApp", lado a lado. */}
+                      <DropdownMenuItem onClick={enviarDocumentoPorWhatsApp} className="gap-2">
+                        <Send className="h-4 w-4" />
+                        Enviar {documentLabelFor(currentStatus)} por WhatsApp
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={abrirPreviewLinkWhatsApp} className="gap-2">
+                        <MessageCircle className="h-4 w-4" /> Enviar link por WhatsApp
+                      </DropdownMenuItem>
+                    </>
+                  )}
+
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={handleDuplicate} disabled={duplicate.isPending} className="gap-2">
+                    <Copy className="h-4 w-4" /> Duplicar
+                  </DropdownMenuItem>
+
+                  {!isLocked && currentStatus !== 'cancelled' && (
+                    <>
+                      <DropdownMenuSeparator />
+                      {/* Cancelar por último e separado: é a única daqui sem
+                          volta fácil. */}
+                      <DropdownMenuItem
+                        onClick={() => setShowCancelDialog(true)}
+                        className="gap-2 text-destructive focus:text-destructive"
                       >
-                        {lastWaSend.success ? (
-                          <CheckCircle2 className="h-3.5 w-3.5 text-success" />
-                        ) : (
-                          <XCircle className="h-3.5 w-3.5 text-destructive" />
-                        )}
-                        <span className={lastWaSend.success ? 'text-success' : 'text-destructive'}>
-                          WhatsApp: {lastWaSend.success ? 'enviado' : 'falhou'}
-                        </span>
-                        <HistoryIcon className="h-3 w-3 text-muted-foreground" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" className="max-w-xs">
-                      <div className="text-xs space-y-1">
-                        <div className="font-medium">
-                          Último envio: {new Date(lastWaSend.changed_at).toLocaleString('pt-BR')}
-                        </div>
-                        {!lastWaSend.success && (
-                          <div className="text-destructive">
-                            {(lastWaSend.new_value as any)?.provider_result?.error
-                              || (lastWaSend.new_value as any)?.zapi_response?.error
-                              || lastWaSend.reason
-                              || `HTTP ${(lastWaSend.new_value as any)?.http_status ?? '?'}`}
-                          </div>
-                        )}
-                        <div className="text-muted-foreground italic">Clique para ver histórico completo</div>
-                      </div>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              )}
-            </div>
-          )}
-        </div>
-        <div ref={topActionsRef} className="flex gap-2 flex-wrap">
-          {!isNew && (
-            <>
-              {/* Um botão por documento, e todos passam pela janela de opções.
-                  Havia um "Baixar" ao lado de cada um que gerava o arquivo na
-                  hora, sem perguntar nada: quem quisesse tirar a comissão ou os
-                  preços unitários do PDF do cliente não tinha onde escolher, e
-                  o arquivo já estava na pasta de downloads. A janela oferece
-                  imprimir e baixar — o atalho não valia o risco de mandar ao
-                  cliente um documento com o que não devia. */}
-              <Button variant="outline" size="sm" onClick={() => openPdfDialog('quote')} className="gap-1">
-                <FileText className="h-4 w-4" />
-                {t.pdf.quote}
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => openPdfDialog('service_order')} className="gap-1">
-                <Printer className="h-4 w-4" />
-                OS
-              </Button>
-              {(currentStatus === 'completed' || currentStatus === 'invoiced') && (
-                <Button variant="outline" size="sm" onClick={() => openPdfDialog('invoice')} className="gap-1">
-                  <Receipt className="h-4 w-4" />
-                  Fatura
-                </Button>
-              )}
-              {orderData?.share_token && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1 border-green-600 text-green-700 hover:bg-green-50 hover:text-green-800 dark:hover:bg-green-950"
-                  onClick={() => {
-                    const url = `${window.location.origin}/view/${orderData.share_token}`;
-                    const phoneRaw = (orderData?.clients as any)?.whatsapp || (orderData?.clients as any)?.phone || '';
-                    const phone = normalizePhoneE164(phoneRaw);
-                    const clientName = (orderData?.clients as any)?.name || '';
-                    const msg = `Olá${clientName ? ' ' + clientName : ''}, segue o link da Ordem de Serviço ${orderData.service_order_number}: ${url}`;
-                    setWaEditPhone(phone);
-                    setWaEditMessage(msg);
-                    setWaPreview({ phone, message: msg, url, clientName });
-                    void writeAuditLog({
-                      table_name: 'service_orders',
-                      record_id: orderData.id,
-                      action: 'whatsapp_preview' as any,
-                      new_value: {
-                        share_token: orderData.share_token,
-                        public_url: url,
-                        phone_raw: String(phoneRaw),
-                        phone_normalized: phone,
-                        client_name: clientName,
-                      },
-                      reason: 'Abriu pré-visualização do WhatsApp',
-                    });
-                    recordWhatsAppEvent({
-                      source: 'detail_dialog',
-                      action: 'preview',
-                      serviceOrderId: orderData.id,
-                      serviceOrderNumber: orderData.service_order_number,
-                      shareToken: orderData.share_token,
-                      phoneRaw: String(phoneRaw),
-                      phoneNormalized: phone,
-                    });
-                  }}
-                >
-                  <MessageCircle className="h-4 w-4" />
-                  WhatsApp
-                </Button>
-              )}
-              {orderData?.share_token && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="gap-1 border-accent text-accent hover:bg-accent/10"
-                    >
-                      <Send className="h-4 w-4" />
-                      Enviar WhatsApp
-                      <ChevronDown className="h-3 w-3 opacity-60" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem
-                      onClick={() => setWhatsAppTarget({
-                        kind: 'service_order',
-                        serviceOrderId: orderData.id,
-                        serviceOrderNumber: orderData.service_order_number,
-                        shareToken: orderData.share_token,
-                        clientId: (orderData?.clients as any)?.id || (orderData as any)?.client_id || null,
-                        clientName: (orderData?.clients as any)?.name || null,
-                        clientPhone: (orderData?.clients as any)?.whatsapp || (orderData?.clients as any)?.phone || null,
-                        documentType: 'service_order',
-                      })}
-                    >
-                      <Printer className="h-4 w-4 mr-2" /> Enviar OS
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => setWhatsAppTarget({
-                        kind: 'service_order',
-                        serviceOrderId: orderData.id,
-                        serviceOrderNumber: orderData.service_order_number,
-                        shareToken: orderData.share_token,
-                        clientId: (orderData?.clients as any)?.id || (orderData as any)?.client_id || null,
-                        clientName: (orderData?.clients as any)?.name || null,
-                        clientPhone: (orderData?.clients as any)?.whatsapp || (orderData?.clients as any)?.phone || null,
-                        documentType: 'quote',
-                      })}
-                    >
-                      <FileText className="h-4 w-4 mr-2" /> Enviar Orçamento
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleDuplicate}
-                disabled={isNew || duplicate.isPending}
-                className="gap-1"
-              >
-                <Copy className="h-4 w-4" />
-                Duplicar
-              </Button>
-            </>
-          )}
-          {!isNew && !isLocked && currentStatus !== 'cancelled' && (
-            <Button variant="outline" size="sm" className="text-destructive" onClick={() => setShowCancelDialog(true)}>
-              <Ban className="h-4 w-4 mr-1" /> {t.serviceOrders.cancelOS}
-            </Button>
-          )}
-          {!isNew && !isLocked && validTransitions.length > 0 && (
-            <Select value={currentStatus} onValueChange={handleStatusChange}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue>
-                  <span className="text-muted-foreground text-xs mr-1">Status:</span>
-                  <span className="font-medium">{(t.status as Record<string, string>)[currentStatus]}</span>
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={currentStatus} disabled className="opacity-60">
-                  {(t.status as Record<string, string>)[currentStatus]} (atual)
-                </SelectItem>
-                {validTransitions.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    → {(t.status as Record<string, string>)[s]}
+                        <Ban className="h-4 w-4" /> {t.serviceOrders.cancelOS}
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+
+            {/* O seletor de status é largo demais para o celular; lá ele vira
+                um ícone e o status por extenso aparece sob o título. */}
+            {!isNew && !isLocked && validTransitions.length > 0 && (
+              <Select value={currentStatus} onValueChange={handleStatusChange}>
+                <SelectTrigger className="h-11 w-11 justify-center px-0 sm:h-9 sm:w-[190px] sm:justify-between sm:px-3">
+                  <span className="sm:hidden"><RotateCcw className="h-4 w-4" /></span>
+                  <SelectValue className="hidden sm:block">
+                    <span className="mr-1 text-xs text-muted-foreground">Status:</span>
+                    <span className="font-medium">{(t.status as Record<string, string>)[currentStatus]}</span>
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={currentStatus} disabled className="opacity-60">
+                    {(t.status as Record<string, string>)[currentStatus]} (atual)
                   </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-          {!isLocked && (
-            <Button onClick={handleSave} disabled={createSO.isPending || updateSO.isPending}
-              className="bg-accent text-accent-foreground hover:bg-accent/90">
-              {t.common.save}
-            </Button>
-          )}
+                  {validTransitions.map((s) => (
+                    <SelectItem key={s} value={s}>
+                      → {(t.status as Record<string, string>)[s]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+
+            {!isLocked && (
+              <Button
+                onClick={handleSave}
+                disabled={createSO.isPending || updateSO.isPending}
+                className="h-11 bg-accent px-4 text-accent-foreground hover:bg-accent/90 sm:h-9"
+              >
+                {t.common.save}
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 

@@ -89,16 +89,44 @@ export function BankConnectionsPanel() {
    * desfaz nada. Valor, data e sentido ficam intocados de propósito — reescrevê-los
    * mudaria em silêncio lançamento que já foi conferido.
    */
+  /**
+   * Repete em rodadas até zerar.
+   *
+   * O servidor grava no máximo 400 por chamada — sem esse teto ele morria por limite de
+   * recursos e voltava "non-2xx" depois de minutos carregando, sem nada feito. Cada rodada
+   * salva o que fez, então parar no meio custa a rodada corrente, não o trabalho todo.
+   */
   const handleCompletarIdentificacao = async () => {
+    const AVISO = 'backfill-identificacao';
+    let total = 0;
+    let rodadas = 0;
     try {
-      const r = await sincronizar.mutateAsync({ action: 'backfill' });
-      const comErro = r.resultados.filter(x => x.status === 'error');
-      if (comErro.length > 0) {
-        toast.warning(comErro.map(x => `${x.conexao}: ${x.mensagem}`).join(' · '));
-      } else {
-        toast.success(r.message);
+      for (;;) {
+        const r = await sincronizar.mutateAsync({ action: 'backfill' });
+        rodadas += 1;
+
+        const comErro = r.resultados.filter(x => x.status === 'error');
+        if (comErro.length > 0) {
+          toast.dismiss(AVISO);
+          toast.warning(comErro.map(x => `${x.conexao}: ${x.mensagem}`).join(' · '));
+          return;
+        }
+
+        const feitas = r.resultados.reduce((s, x: any) => s + Number(x.atualizadas ?? 0), 0);
+        const faltam = r.resultados.reduce((s, x: any) => s + Number(x.restantes ?? 0), 0);
+        total += feitas;
+
+        // Rodada sem gravar nada com trabalho declarado: algo travou, e repetir só
+        // repetiria o travamento.
+        if (faltam <= 0 || feitas === 0 || rodadas >= 20) break;
+        toast.loading(`Completando identificação — ${total} prontas, faltam ${faltam}`, { id: AVISO });
       }
+      toast.dismiss(AVISO);
+      toast.success(total > 0
+        ? `${total} lançamento(s) ganharam identificação`
+        : 'Nada a preencher — o provedor não devolveu identificação nova');
     } catch (e: any) {
+      toast.dismiss(AVISO);
       toast.error(e?.message || 'Não consegui completar a identificação');
     }
   };
