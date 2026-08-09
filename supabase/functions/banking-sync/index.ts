@@ -210,9 +210,17 @@ async function conferirSaldo(
     if (!Number.isFinite(saldoProvedor)) return;
 
     // A transação mais recente traz o saldo APÓS ela — é o ponto de comparação honesto.
+    //
+    // `!= null` explícito, e não `Number.isFinite(Number(x))`: `Number(null)` é ZERO, e
+    // zero é finito. Com aquele filtro, transação SEM saldo passava e virava saldo zero —
+    // e a conferência acusava diferença igual ao saldo inteiro da conta, sempre. Três
+    // alarmes falsos gravados antes de eu perceber. Verificador que grita sem motivo é
+    // pior que verificador nenhum: ensina a ignorar o aviso.
     const comSaldo = transacoes
-      .filter((t) => Number.isFinite(Number(t?.balance)))
+      .filter((t) => t?.balance != null && Number.isFinite(Number(t.balance)))
       .sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
+    // Sem nenhuma transação com saldo, não há o que conferir. Gravar "não fecha" aqui
+    // seria transformar ausência de dado em acusação.
     if (!comSaldo) return;
 
     const saldoCalculado = Number(comSaldo.balance);
@@ -304,10 +312,17 @@ async function preencherIdentificacao(
      */
     const existentes = new Map<string, Record<string, unknown>>();
     for (let de = 0; ; de += 1000) {
+      // SEM filtrar por conexão, de propósito.
+      //
+      // 149 transações têm `bank_connection_id` nulo — vieram por importação de OFX, antes
+      // de existir conexão. Filtrar por conexão as deixaria de fora em silêncio: elas
+      // simplesmente nunca seriam preenchidas, e nada indicaria isso. O `bank_ref_id` é o
+      // id do provedor e não se repete (conferido: zero duplicatas), então casar por ele
+      // alcança todas.
       const { data, error } = await admin
         .from("bank_transactions")
         .select(`id, bank_ref_id, ${PREENCHIVEIS.join(", ")}`)
-        .eq("bank_connection_id", conexao.id)
+        .not("bank_ref_id", "is", null)
         .order("id")
         .range(de, de + 999);
       if (error) throw error;
