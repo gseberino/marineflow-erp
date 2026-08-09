@@ -45,6 +45,10 @@ export interface PropostaFinanceira {
     source_type: string | null;
     /** Id da transação no provedor — é a chave que impede a mesma entrar duas vezes. */
     bank_ref_id: string | null;
+    /** O que identifica compra de cartão, já que a bandeira não repassa o CNPJ. */
+    payee_mcc: string | null;
+    provider_category: string | null;
+    card_last_digits: string | null;
   } | null;
 }
 
@@ -118,7 +122,8 @@ export function useFinanceReviewQueue() {
           counterparty_name, counterparty_document,
           counterparty_bank, counterparty_branch, counterparty_account, payment_method,
           payment_reason, merchant_name, merchant_document, installment_label,
-          pix_end_to_end_id, description, source_type, bank_ref_id )`)
+          pix_end_to_end_id, description, source_type, bank_ref_id,
+          payee_mcc, provider_category, card_last_digits )`)
         .eq('status', 'pending')
         .order('confidence', { ascending: false })
         .order('suggested_amount', { ascending: false })

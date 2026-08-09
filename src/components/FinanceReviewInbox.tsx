@@ -47,6 +47,7 @@ import {
   agruparPorFavorecido, ordenarGrupos, resumoDoAgrupamento, SEM_CATEGORIA, ROTULO_DA_ORDEM,
   type GrupoDeFavorecido, type OrdemDaFila,
 } from '@/lib/finance-inbox-grouping';
+import { categoriaPorMcc } from '../../supabase/functions/_shared/banking/mcc';
 
 function corDaConfianca(c: number): string {
   if (c >= 85) return 'bg-success/10 text-success border-success/30';
@@ -81,6 +82,13 @@ function IdentificacaoDaTransacao({ tx }: { tx: PropostaFinanceira['bank_transac
     ['Meio', [tx.payment_method, tx.installment_label && `parcela ${tx.installment_label}`].filter(Boolean).join(' · ') || null],
     ['Mensagem', tx.payment_reason],
     ['Estabelecimento', tx.merchant_name],
+    // O que identifica uma compra de CARTÃO. A bandeira não repassa o CNPJ do
+    // estabelecimento — repassa o MCC, que diz o RAMO. Só 4% das compras têm documento,
+    // mas 91% têm MCC: é a identificação que de fato existe nesse meio de pagamento.
+    ['Ramo (MCC)', tx.payee_mcc
+      ? `${categoriaPorMcc(tx.payee_mcc)?.rotulo ?? 'não mapeado'} · ${tx.payee_mcc}` : null],
+    ['Categoria do provedor', tx.provider_category],
+    ['Cartão', tx.card_last_digits ? `····${tx.card_last_digits}` : null],
     ['Identificador Pix', tx.pix_end_to_end_id],
     ['Histórico do banco', tx.description],
     // O id do provedor é o que garante que a mesma transação não entre duas vezes: existe

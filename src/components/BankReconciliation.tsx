@@ -23,6 +23,9 @@ import {
 // servidor e desfaz o lançamento que a ignorada criou. Ter duas implementações do mesmo
 // gesto é como uma delas fica para trás — foi o que aconteceu com esta.
 import { useDesfazerIgnorada } from '@/hooks/use-finance-review';
+// A tabela de MCC vive no módulo compartilhado do motor bancário — importar daqui evita
+// manter duas listas do mesmo código, que é como uma delas fica para trás.
+import { categoriaPorMcc } from '../../supabase/functions/_shared/banking/mcc';
 import { toast } from 'sonner';
 import { Upload, Check, X, Undo2, Sparkles, AlertTriangle, EyeOff } from 'lucide-react';
 import { StatusBadge } from '@/components/StatusBadge';
@@ -1028,6 +1031,31 @@ export function BankReconciliation() {
                         </span>
                         {tx.counterparty_document && (
                           <span className="tabular-nums">{formatarDoc(tx.counterparty_document)}</span>
+                        )}
+                      </p>
+                    )}
+                    {/* O que o cartão TEM, já que não tem CNPJ.
+                        Compra no cartão não traz o CNPJ do estabelecimento: a bandeira
+                        repassa o MCC e o nome do EC, não o documento. Não é falha da
+                        integração — é o que o meio de pagamento carrega. Mas o MCC diz o
+                        RAMO ("Posto de combustível", "Farmácia"), a categoria vem do
+                        provedor e o final do cartão diz qual cartão pagou: 98% das compras
+                        têm ao menos um desses, e a tela não mostrava nenhum. Capturar dado
+                        e não exibi-lo é o mesmo que não ter capturado. */}
+                    {(tx.payee_mcc || tx.provider_category || tx.card_last_digits) && (
+                      <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs">
+                        {tx.payee_mcc && (
+                          <StatusBadge className="bg-primary/10 text-primary">
+                            {categoriaPorMcc(tx.payee_mcc)?.rotulo ?? `Ramo ${tx.payee_mcc}`}
+                          </StatusBadge>
+                        )}
+                        {tx.provider_category && (
+                          <span className="text-muted-foreground">{tx.provider_category}</span>
+                        )}
+                        {tx.card_last_digits && (
+                          <span className="tabular-nums text-muted-foreground">
+                            cartão ····{tx.card_last_digits}
+                          </span>
                         )}
                       </p>
                     )}

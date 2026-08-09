@@ -92,6 +92,8 @@ const MAPA: Record<string, CategoriaPorMcc> = {
   "5085": { categoria: "Peças e materiais", dreGroup: "custo_direto", rotulo: "Suprimentos industriais" },
   "5532": { categoria: "Manutenção de veículo", dreGroup: "despesa_operacional", rotulo: "Autopeças/pneus" },
   "5813": { categoria: "Alimentação de campo", dreGroup: "custo_direto", rotulo: "Bar/casa noturna" },
+  "5300": { categoria: "Alimentação de campo", dreGroup: "custo_direto", rotulo: "Atacadista/clube de compras" },
+  "6513": { categoria: "Aluguel e condomínio", dreGroup: "despesa_operacional", rotulo: "Imobiliária/locação" },
 };
 
 /**
