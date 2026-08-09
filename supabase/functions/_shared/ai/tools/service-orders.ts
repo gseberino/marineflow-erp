@@ -35,6 +35,43 @@ type SoItem = {
   unit_cost?: number;
 };
 
+// Peça identificável que entra como texto livre fica fora do estoque, do BI e da NF-e — o item
+// vira uma linha de "serviço" que ninguém consegue comprar, contar nem faturar. A regra existia
+// só no system prompt, enterrada no meio de ~20k tokens, e era desobedecida na prática: em 60
+// dias, add_material_to_order e remove_service_order_item empataram em 44 usos cada — o padrão
+// de quem adiciona errado e desfaz. Verificar aqui é mais confiável que lembrar lá.
+//
+// AVISA, não bloqueia: a heurística é boa mas não é perfeita, e travar um pedido legítimo por
+// causa de uma palavra seria pior que a doença. O aviso chega no retorno da tool, no momento em
+// que a decisão está sendo tomada.
+const PALAVRAS_DE_ITEM_FISICO = [
+  "cabo", "conector", "bateria", "disjuntor", "fusivel", "fusível", "inversor", "carregador",
+  "controlador", "sensor", "bomba", "motor", "terminal", "parafuso", "lampada", "lâmpada",
+  "farol", "rele", "relé", "antena", "modulo", "módulo", "placa", "filtro", "mangueira",
+  "abracadeira", "abraçadeira", "borne", "tomada", "interruptor", "luminaria", "luminária",
+  "refletor", "alto-falante", "display", "chicote", "painel solar", "porta fusivel", "porta fusível",
+];
+// Sinais de que é mesmo um conjunto/estimativa ou uma cobrança não-física — uso legítimo.
+const PALAVRAS_DE_CONJUNTO = [
+  "materiais", "insumos", "diversos", "conjunto", "kit", "frete", "deslocamento", "taxa",
+  "estimativa", "mao de obra", "mão de obra", "servico", "serviço", "instalacao", "instalação",
+  "hora", "visita", "verba", "sortidos", "variados",
+];
+
+export function avisoDeItemFisico(nome: string): string | null {
+  const n = nome.toLowerCase();
+  if (PALAVRAS_DE_CONJUNTO.some((p) => n.includes(p))) return null;
+  const achou = PALAVRAS_DE_ITEM_FISICO.find((p) => n.includes(p));
+  if (!achou) return null;
+  return (
+    `"${nome}" parece uma peça, não uma cobrança. Item físico deveria ser PRODUTO: create_product ` +
+    `(nome + preço; sem NCM entra como pendente, o que já basta para o orçamento) e depois ` +
+    `add_service_order_item. Como está, a linha ficou em SERVIÇOS — fora do estoque, do BI e da ` +
+    `nota fiscal. Se for mesmo uma estimativa em conjunto, ignore este aviso. Para corrigir: ` +
+    `create_product + add_service_order_item + remove_service_order_item desta linha.`
+  );
+}
+
 async function loadSoItems(sb: any, soId: string): Promise<SoItem[]> {
   const { data: parts } = await sb
     .from("service_order_parts")
@@ -583,7 +620,7 @@ export const serviceOrderTools: ToolDef[] = [
   {
     name: "add_material_to_order",
     description:
-      "Adiciona uma linha de material/insumo de TEXTO LIVRE a uma OS (sem produto de catálogo). ATENÇÃO: esta linha aparece na seção SERVIÇOS da OS — a OS tem só duas seções, Serviços e Peças, NÃO existe uma seção 'Materiais' separada. Use para materiais ESTIMADOS em conjunto (ex.: 'R$ 4.500 em materiais elétricos'). Isto NÃO coloca o item na lista de PEÇAS/PRODUTOS — para levar um material à seção Peças, ele precisa virar produto de catálogo (create_product) e ser adicionado com add_service_order_item.",
+      "Adiciona uma COBRANÇA NÃO-FÍSICA de texto livre a uma OS: frete, deslocamento, taxa, ou um conjunto ESTIMADO de materiais (ex.: 'R$ 4.500 em materiais elétricos'). A linha aparece na seção SERVIÇOS — a OS tem só duas seções, Serviços e Peças, não existe 'Materiais' separada. NÃO use para uma peça identificável (um cabo, um conector, uma bateria): item físico é PRODUTO, vai em create_product + add_service_order_item, senão fica fora do estoque, do BI e da nota fiscal. A tool avisa quando o nome parece item físico.",
     input_schema: {
       type: "object",
       properties: {
@@ -615,7 +652,8 @@ export const serviceOrderTools: ToolDef[] = [
         .single();
       if (error) throw error;
       await recalcSoTotals(sb, args.service_order_id);
-      return { ok: true, material_item: data };
+      const aviso = avisoDeItemFisico(String(args.name || ""));
+      return { ok: true, material_item: data, ...(aviso ? { aviso } : {}) };
     },
   },
   {
@@ -670,12 +708,21 @@ export const serviceOrderTools: ToolDef[] = [
         description: { type: "string", description: "Nome/descrição do item, quando não se tem o item_id." },
         quantity: { type: "number", description: "Nova quantidade (opcional; > 0)." },
         unit_price: { type: "number", description: "Novo preço unitário em R$ (opcional; >= 0)." },
+        new_description: {
+          type: "string",
+          description:
+            "Novo nome do item (opcional). Só vale para linha de SERVIÇO/material de texto livre. Item de PEÇA herda o nome do produto no catálogo — para renomear esse, use update_product (muda em todas as OS).",
+        },
       },
       required: ["service_order_id"],
     },
     risk: "low",
     async execute(args, { sb }) {
-      if (args.quantity == null && args.unit_price == null) return { error: "Informe ao menos quantity ou unit_price para editar." };
+      // new_description existe para não obrigar o ciclo remover+recriar só para trocar um nome —
+      // ciclo que aparecia 44 vezes em 60 dias de auditoria, e que perde as notas da linha.
+      if (args.quantity == null && args.unit_price == null && args.new_description == null) {
+        return { error: "Informe ao menos quantity, unit_price ou new_description para editar." };
+      }
       if (args.quantity != null && Number(args.quantity) <= 0) return { error: "Quantidade deve ser maior que zero. Para remover o item, use remove_service_order_item." };
       if (args.unit_price != null && Number(args.unit_price) < 0) return { error: "Preço não pode ser negativo." };
       if (!args.item_id && !args.description) return { error: "Informe item_id ou description do item a editar." };
@@ -694,9 +741,25 @@ export const serviceOrderTools: ToolDef[] = [
         }
         return { error: "Item não encontrado neste orçamento/OS." };
       }
-      const antes = { quantidade: item.quantity, preco_unitario: item.unit_price, total: item.total };
+      const antes = { quantidade: item.quantity, preco_unitario: item.unit_price, total: item.total, descricao: item.label };
       const newQty = args.quantity != null ? Number(args.quantity) : item.quantity;
       const newPrice = args.unit_price != null ? Number(args.unit_price) : item.unit_price;
+
+      // Renomear só faz sentido na linha de texto livre. Em PEÇA o nome é do produto no
+      // catálogo — mexer ali mudaria o nome em toda OS que usa o produto, então recusamos
+      // em vez de fazer silenciosamente algo de alcance maior que o pedido.
+      const novoNome = typeof args.new_description === "string" ? args.new_description.trim() : null;
+      if (novoNome !== null && novoNome.length === 0) {
+        return { error: "new_description não pode ser vazio." };
+      }
+      if (novoNome && item.table === "service_order_parts") {
+        return {
+          error:
+            `"${item.label}" é um produto do catálogo — o nome vem de lá, não da linha da OS. ` +
+            `Para renomear o produto em TODAS as OS, use update_product. Para trocar só nesta OS, ` +
+            `remova a linha e adicione o produto certo.`,
+        };
+      }
 
       if (item.table === "service_order_parts") {
         // Preço de custo é preservado (snapshot da compra); só recalculamos o custo da linha.
@@ -712,7 +775,12 @@ export const serviceOrderTools: ToolDef[] = [
       } else {
         const { error } = await sb
           .from("service_order_services")
-          .update({ quantity: newQty, unit_price_snapshot: newPrice, line_total: newPrice * newQty })
+          .update({
+            quantity: newQty,
+            unit_price_snapshot: newPrice,
+            line_total: newPrice * newQty,
+            ...(novoNome ? { name_snapshot: novoNome } : {}),
+          })
           .eq("id", item.id);
         if (error) throw error;
       }
@@ -720,9 +788,14 @@ export const serviceOrderTools: ToolDef[] = [
       const totais = await soTotalsSummary(sb, args.service_order_id);
       return {
         ok: true,
-        item: item.label,
+        item: novoNome || item.label,
         antes,
-        depois: { quantidade: newQty, preco_unitario: newPrice, total: Math.round(newPrice * newQty * 100) / 100 },
+        depois: {
+          quantidade: newQty,
+          preco_unitario: newPrice,
+          total: Math.round(newPrice * newQty * 100) / 100,
+          descricao: novoNome || item.label,
+        },
         ...totais,
       };
     },
