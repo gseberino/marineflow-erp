@@ -40,7 +40,7 @@ import {
   LIMITE_LOTE, type PropostaFinanceira, type Correcao,
 } from '@/hooks/use-finance-review';
 import {
-  Sparkles, Check, X, ChevronDown, ArrowLeftRight, TrendingDown, Info, RefreshCw,
+  Sparkles, Check, X, ChevronDown, ArrowLeftRight, TrendingDown, TrendingUp, Info, RefreshCw,
   CopyX, Wand2, CreditCard, Landmark, AlertTriangle, Users, List, Layers, ArrowDownUp,
 } from 'lucide-react';
 import {
@@ -292,9 +292,13 @@ function LinhaProposta({
           {/* min-w-0 + truncate: histórico de banco é longo e sem isto empurra a linha
               para fora da tela. Nunca deve haver rolagem lateral. */}
           <div className="flex flex-wrap items-center gap-2">
+            {/* A seta diz a direção antes de qualquer leitura. Com entrada e saída na mesma
+                lista, desenhar seta de saída em tudo é afirmar algo errado sobre 87 linhas. */}
             {transferencia
               ? <ArrowLeftRight className="h-4 w-4 shrink-0 text-primary" />
-              : <TrendingDown className="h-4 w-4 shrink-0 text-destructive" />}
+              : p.kind === 'create_receivable'
+                ? <TrendingUp className="h-4 w-4 shrink-0 text-success" />
+                : <TrendingDown className="h-4 w-4 shrink-0 text-destructive" />}
             <span className="truncate font-medium">{p.title}</span>
             {porRegra
               ? <Badge variant="secondary" className="shrink-0 text-xs">Pela sua regra</Badge>
@@ -344,6 +348,13 @@ function LinhaProposta({
                 valor={categoria}
                 onMudar={(v) => onCorrigir({ ...correcao, category: v })}
                 grupoSugerido={p.dre_group}
+                /* Entrada tem plano de contas PRÓPRIO — Serviços prestados, Venda de peças,
+                   Sinal e adiantamento, Contrato recorrente, Reembolso de cliente. As seis
+                   sempre existiram; o seletor é que caía no padrão 'payable' e oferecia só
+                   despesa, obrigando a classificar um recebimento como gasto. */
+                tipo={p.kind === 'create_receivable' ? 'receivable' : 'payable'}
+                placeholder={p.kind === 'create_receivable'
+                  ? 'Escolher categoria de receita' : 'Escolher categoria'}
               />
             </div>
           )}
@@ -463,6 +474,17 @@ function CartaoDoFavorecido({
 
   const [confirmando, setConfirmando] = useState(false);
 
+  /**
+   * Grupo de ENTRADA só quando todas são entrada.
+   *
+   * O mesmo favorecido pode ter saída e entrada (uma empresa de quem compramos e que
+   * também nos paga). Num grupo misto, tanto a categoria quanto o cliente escolhidos no
+   * cabeçalho descem para TODAS as linhas — e aí "Serviços prestados" cairia numa despesa.
+   * Na dúvida, o grupo se comporta como saída, que é o caso majoritário e o conservador.
+   */
+  const soEntradas = grupo.propostas.length > 0
+    && grupo.propostas.every((p) => p.kind === 'create_receivable');
+
   const semCategoriaEscolhida = !categoria || categoria === SEM_CATEGORIA;
   /**
    * O que exige atenção é a INCERTEZA, não o valor.
@@ -547,6 +569,11 @@ function CartaoDoFavorecido({
               valor={categoria}
               onMudar={(v) => onMudar({ category: v })}
               grupoSugerido={grupo.propostas[0]?.dre_group ?? null}
+              /* Mesma regra do vínculo abaixo: só oferece plano de receita se TODAS forem
+                 entrada. Num grupo misto a escolha do cabeçalho desce para as saídas
+                 também, e aí a categoria de receita cairia numa despesa. */
+              tipo={soEntradas ? 'receivable' : 'payable'}
+              placeholder={soEntradas ? 'Escolher categoria de receita' : 'Escolher categoria'}
             />
           </div>
 
@@ -555,11 +582,7 @@ function CartaoDoFavorecido({
             favorecidoId={favorecidoId}
             osId={osId}
             clienteId={clienteId}
-            /* Só é grupo de entrada se TODAS forem entrada. Grupo misto (mesmo favorecido
-               com saída e entrada) não pode receber "de qual cliente veio" no cabeçalho —
-               a escolha desceria também para as saídas. */
-            ehReceita={grupo.propostas.length > 0
-              && grupo.propostas.every((p) => p.kind === 'create_receivable')}
+            ehReceita={soEntradas}
             onMudar={(v) => onMudar(v)}
             ocupado={ocupado}
           />
@@ -708,18 +731,44 @@ export function FinanceReviewInbox({
   const agrupar = modo === null ? propostas.length >= 20 : modo === 'favorecido';
   const [ordem, setOrdem] = useState<OrdemDaFila>('decisoes');
 
-  const porOrigem = useMemo(
-    () => (origem === 'todas'
+  /**
+   * Entrada ou saída — o corte que passou a faltar.
+   *
+   * Enquanto só havia despesa nesta fila, filtrar por direção não fazia sentido. Ao abrir
+   * o crédito eu misturei 87 recebimentos com 3 pagamentos numa lista só e não dei a
+   * ferramenta para separá-los. São trabalhos diferentes: saída pergunta "de que categoria
+   * é este gasto", entrada pergunta "de qual cliente veio este dinheiro".
+   */
+  const [direcao, setDirecao] = useState<'todas' | 'saida' | 'entrada'>('todas');
+
+  const porOrigem = useMemo(() => {
+    const porFonte = origem === 'todas'
       ? propostas
-      : propostas.filter((p) => p.bank_transactions?.source_type === origem)),
-    [propostas, origem],
-  );
+      : propostas.filter((p) => p.bank_transactions?.source_type === origem);
+    if (direcao === 'todas') return porFonte;
+    // Transferência entre contas não é nem entrada nem saída: some dos dois recortes, e
+    // continua visível em "Tudo". Classificá-la num dos lados seria afirmar algo falso.
+    const alvo = direcao === 'entrada' ? 'create_receivable' : 'create_payable';
+    return porFonte.filter((p) => p.kind === alvo);
+  }, [propostas, origem, direcao]);
 
   const contagem = useMemo(() => ({
     todas: propostas.length,
     bank: propostas.filter((p) => p.bank_transactions?.source_type === 'bank').length,
     credit_card: propostas.filter((p) => p.bank_transactions?.source_type === 'credit_card').length,
   }), [propostas]);
+
+  /** Contagem por direção respeita a origem já escolhida — senão o número mente. */
+  const contagemPorDirecao = useMemo(() => {
+    const base = origem === 'todas'
+      ? propostas
+      : propostas.filter((p) => p.bank_transactions?.source_type === origem);
+    return {
+      todas: base.length,
+      saida: base.filter((p) => p.kind === 'create_payable').length,
+      entrada: base.filter((p) => p.kind === 'create_receivable').length,
+    };
+  }, [propostas, origem]);
 
   const { lote, individuais, totalValor } = useMemo(() => {
     const lote: PropostaFinanceira[] = [];
@@ -983,6 +1032,29 @@ export function FinanceReviewInbox({
                 variant={origem === valor ? 'default' : 'outline'}
                 className="h-7 gap-1.5 text-xs"
                 onClick={() => setOrigem(valor as never)}
+              >
+                {icone}{rotulo}
+              </Button>
+            ))}
+          </div>
+        )}
+
+        {/* ENTRADA × SAÍDA. Aparece só quando há os dois — um filtro com uma opção viável
+            é ruído. A condição usa a contagem JÁ recortada pela origem, senão o botão
+            apareceria prometendo um corte que devolveria lista vazia. */}
+        {contagemPorDirecao.entrada > 0 && contagemPorDirecao.saida > 0 && (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {([
+              ['todas', `Tudo (${contagemPorDirecao.todas})`, null],
+              ['saida', `Saídas (${contagemPorDirecao.saida})`, <TrendingDown key="s" className="h-3 w-3" />],
+              ['entrada', `Entradas (${contagemPorDirecao.entrada})`, <TrendingUp key="e" className="h-3 w-3" />],
+            ] as const).map(([valor, rotulo, icone]) => (
+              <Button
+                key={valor}
+                size="sm"
+                variant={direcao === valor ? 'default' : 'outline'}
+                className="h-7 gap-1.5 text-xs"
+                onClick={() => setDirecao(valor as never)}
               >
                 {icone}{rotulo}
               </Button>

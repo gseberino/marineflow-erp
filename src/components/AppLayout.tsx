@@ -232,7 +232,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
       // trocar "escondido demais" por "achatado demais" não é ganho.
       items: [
         { label: 'Visão Geral', icon: DollarSign, path: '/v2/financial', roles: ['admin', 'financial'] },
-        { label: 'Caixa de Entrada', icon: Sparkles, path: '/v2/financial?tab=inbox', roles: ['admin', 'financial'] },
+        // "Extrato", igual à aba. Renomear a aba e esquecer o menu deixou os dois nomes
+        // convivendo para o MESMO destino — que é a confusão que a reorganização veio
+        // desfazer, agora causada por mim.
+        { label: 'Extrato', icon: Sparkles, path: '/v2/financial?tab=inbox', roles: ['admin', 'financial'] },
         { label: 'Conciliação', icon: ArrowLeftRight, path: '/v2/financial?tab=reconciliation', roles: ['admin', 'financial'] },
         // Tela inteira, não aba: tem filtros, régua de cobrança e recibo próprios.
         { label: 'Contas a Receber', icon: TrendingUp, path: '/v2/receivables', roles: ['admin', 'financial'] },

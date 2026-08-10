@@ -74,15 +74,24 @@ describe('menu lateral — Financeiro reestruturado', () => {
   it('o trabalho diário virou destino do menu', async () => {
     renderMenu('/v2/financial');
     const links = (await screen.findAllByRole('link')).map((l) => l.textContent?.trim());
-    for (const esperado of ['Caixa de Entrada', 'Conciliação', 'Contas a Receber', 'Contas a Pagar']) {
+    for (const esperado of ['Extrato', 'Conciliação', 'Contas a Receber', 'Contas a Pagar']) {
       expect(links.some((l) => l?.includes(esperado)), `faltou "${esperado}"`).toBe(true);
     }
+  });
+
+  it('o item do menu usa o MESMO nome da aba para onde aponta', async () => {
+    // A classe de erro: renomeei a aba "Caixa de entrada" para "Extrato" e esqueci o menu.
+    // Os dois nomes passaram a conviver para o MESMO destino (?tab=inbox) — exatamente a
+    // confusão que a reorganização veio desfazer. Nome antigo não pode voltar.
+    renderMenu('/v2/financial');
+    const links = (await screen.findAllByRole('link')).map((l) => l.textContent?.trim() ?? '');
+    expect(links.some((l) => /Caixa de Entrada/i.test(l)), 'o nome antigo voltou ao menu').toBe(false);
   });
 
   it('marca só o item da aba em que estou', () => {
     renderMenu('/v2/financial?tab=inbox');
     // Sem tratar a query, Visão Geral, Conciliação e Contas a Pagar acenderiam junto.
-    expect(ativos().filter((r) => r?.includes('Caixa de Entrada'))).toHaveLength(1);
+    expect(ativos().filter((r) => r?.includes('Extrato'))).toHaveLength(1);
     expect(ativos().some((r) => r === 'Visão Geral')).toBe(false);
   });
 
@@ -94,7 +103,7 @@ describe('menu lateral — Financeiro reestruturado', () => {
   it('mostra quantas propostas esperam decisão', async () => {
     renderMenu('/v2/financial');
     // Uma fila de aprovação que ninguém vê é uma fila que ninguém trabalha.
-    const link = (await screen.findAllByRole('link')).find((l) => l.textContent?.includes('Caixa de Entrada'));
+    const link = (await screen.findAllByRole('link')).find((l) => l.textContent?.includes('Extrato'));
     expect(within(link!).getByText('7')).toBeInTheDocument();
   });
 });
