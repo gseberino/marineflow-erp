@@ -65,13 +65,22 @@ vi.mock('@/hooks/use-finance-review', async (importOriginal) => {
   };
 });
 
+// O mock HONRA o `type`, como o hook real (`.eq('type', type)`). Um mock que devolve a
+// mesma lista para tudo esconderia exatamente o defeito que o gestor encontrou: entrada
+// oferecendo plano de contas de despesa.
 vi.mock('@/hooks/use-financial-categories', () => ({
-  useFinancialCategories: () => ({
-    data: [
-      { name: 'Combustível e deslocamento', dre_group: 'custo_direto' },
-      { name: 'Peças e materiais', dre_group: 'custo_direto' },
-      { name: 'Pró-labore e retirada', dre_group: 'nao_operacional' },
-    ],
+  useFinancialCategories: (type?: 'payable' | 'receivable') => ({
+    data: type === 'receivable'
+      ? [
+          { name: 'Serviços prestados', dre_group: 'receita' },
+          { name: 'Venda de peças e produtos', dre_group: 'receita' },
+          { name: 'Sinal e adiantamento', dre_group: 'receita' },
+        ]
+      : [
+          { name: 'Combustível e deslocamento', dre_group: 'custo_direto' },
+          { name: 'Peças e materiais', dre_group: 'custo_direto' },
+          { name: 'Pró-labore e retirada', dre_group: 'nao_operacional' },
+        ],
     isLoading: false,
   }),
 }));
@@ -458,5 +467,73 @@ describe('vínculo que a categoria pede', () => {
     const gatilhoFavorecido = (await screen.findByText(/Quem recebeu/)).closest('button');
     await user.click(gatilhoFavorecido!);
     expect(await screen.findByText(/Cadastrar favorecido/)).toBeInTheDocument();
+  });
+});
+
+/**
+ * Entrada e saída na MESMA fila.
+ *
+ * Ao abrir o crédito, 87 recebimentos passaram a conviver com 3 pagamentos numa lista só,
+ * e a tela — construída quando aqui só havia despesa — não tinha nem filtro por direção
+ * nem plano de contas de receita. O gestor: "está tudo misturado, entradas e saídas... as
+ * categorias continuam sendo de despesas e não de entradas, o que é errado e confuso".
+ */
+describe('entrada e saída convivendo na fila', () => {
+  const entrada = {
+    id: 'e1', kind: 'create_receivable', status: 'pending',
+    bank_transaction_id: 'te1', related_transaction_id: null,
+    title: 'Receita: CRISLAINE REGINA CIOLI', reasoning: 'Nenhuma regra reconheceu este histórico',
+    confidence: 30, suggested_amount: 4500, suggested_date: '2026-07-22',
+    suggested_category: 'Outras receitas', suggested_description: 'CRISLAINE REGINA CIOLI',
+    suggested_supplier_id: null, suggested_client_id: null,
+    dre_group: 'receita', created_at: '2026-07-22T10:00:00Z',
+  };
+
+  afterEach(() => { estadoDaFila.dados = null; });
+
+  it('oferece o corte entrada × saída, com as contagens certas', async () => {
+    estadoDaFila.dados = [propostas[0], propostas[1], entrada];
+    renderInbox();
+    expect(await screen.findByRole('button', { name: /Saídas \(2\)/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Entradas \(1\)/ })).toBeInTheDocument();
+  });
+
+  it('o filtro esconde de fato o outro lado', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    estadoDaFila.dados = [propostas[0], propostas[1], entrada];
+    renderInbox();
+    await user.click(await screen.findByRole('button', { name: /Entradas \(1\)/ }));
+    expect(await screen.findByText(/CRISLAINE/)).toBeInTheDocument();
+    expect(screen.queryByText(/POSTO AGRICOPEL/)).not.toBeInTheDocument();
+  });
+
+  it('some quando só há um dos dois — filtro de uma opção é ruído', async () => {
+    estadoDaFila.dados = [propostas[0], propostas[1]];
+    renderInbox();
+    await screen.findByText(/POSTO AGRICOPEL/);
+    expect(screen.queryByRole('button', { name: /Entradas \(/ })).not.toBeInTheDocument();
+  });
+
+  it('ENTRADA recebe plano de contas de RECEITA, não de despesa', async () => {
+    // O defeito exato que o gestor apontou. `CategoriaDespesaSelect` caía no padrão
+    // 'payable' e oferecia só despesa — obrigando a classificar um recebimento como gasto.
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    estadoDaFila.dados = [entrada];
+    renderInbox();
+
+    await user.click(await seletorDeCategoria());
+    expect(await screen.findByText('Serviços prestados')).toBeInTheDocument();
+    expect(screen.getByText('Venda de peças e produtos')).toBeInTheDocument();
+    expect(screen.queryByText('Peças e materiais')).not.toBeInTheDocument();
+    expect(screen.queryByText('Pró-labore e retirada')).not.toBeInTheDocument();
+  });
+
+  it('SAÍDA continua com plano de despesa', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    estadoDaFila.dados = [propostas[0]];
+    renderInbox();
+    await user.click(await seletorDeCategoria());
+    expect(await screen.findByText('Peças e materiais')).toBeInTheDocument();
+    expect(screen.queryByText('Serviços prestados')).not.toBeInTheDocument();
   });
 });
