@@ -5,6 +5,22 @@ Não foram corrigidos.
 
 ---
 
+## BACKLOG (registrado a pedido do dono, sem implementar)
+
+### Tool de notificação operacional para o técnico, com template fixo
+- **Origem:** decisão do dono sobre NOVO-005 (10/08/2026), ao negar WhatsApp livre ao técnico.
+- **Ideia:** o técnico não dispara nem agenda mensagem pelo assistente — mas há casos operacionais legítimos
+  ("estou a caminho", "cheguei", "serviço concluído") que hoje ou passam por outra pessoa ou não acontecem.
+  Uma tool futura poderia cobrir isso com **template fixo e sem texto livre**: o técnico escolhe o evento, o
+  sistema monta a mensagem, e não há campo onde ele escreva o que quiser.
+- **Por que isso muda o risco:** o problema de dar WhatsApp ao técnico não é o envio — é o **texto livre** para
+  cliente, sem revisão. Template fixo remove essa superfície e mantém a rastreabilidade.
+- **Referências no código:** já existe `OnMyWayButton.tsx` (agenda) fazendo algo próximo pela UI, e
+  `whatsapp_templates` como tabela de modelos. O caminho provável é reaproveitar os dois.
+- **Status:** não implementado, sem prazo. Só entra em execução com pedido explícito.
+
+---
+
 ## [NOVO-001] `deno check`/`deno test` sem `--no-check` falha em qualquer função que importe supabase-js
 
 - **Encontrado em:** T0.1 (MF-AUD-053), ao rodar o gate de teste

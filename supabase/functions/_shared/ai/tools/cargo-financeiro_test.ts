@@ -65,6 +65,38 @@ Deno.test("nenhuma tool toca tabela financeira sem barreira de cargo", () => {
   );
 });
 
+Deno.test("nenhuma tool de WhatsApp fala com cliente sem barreira de cargo", () => {
+  // Decisão do dono (10/08/2026): o técnico não dispara nem agenda WhatsApp pelo
+  // assistente. `schedule_self_reminder` é a exceção declarada — só manda para o próprio
+  // solicitante (busca o telefone por ctx.userId), então não alcança cliente.
+  const EXCECAO = "schedule_self_reminder";
+
+  const infratoras = lerTools()
+    .filter((t) => t.arquivo === "whatsapp.ts" && t.nome !== EXCECAO)
+    .filter((t) => !temBarreiraDeCargo(t.corpo))
+    .map((t) => t.nome);
+
+  assertEquals(
+    infratoras,
+    [],
+    `Tool de WhatsApp sem barreira de cargo: ${infratoras.join(", ")}. ` +
+      "Se a tool fala com cliente, use roles: NON_TECHNICIAN_ROLES + blockTechnician(ctx). " +
+      `Se ela só fala com o próprio usuário, documente a exceção e acrescente-a a EXCECAO.`,
+  );
+});
+
+Deno.test("schedule_self_reminder continua sendo só para o próprio usuário", () => {
+  // Se um dia ela passar a aceitar telefone/cliente, a exceção acima deixa de valer.
+  const tool = lerTools().find((t) => t.nome === "schedule_self_reminder");
+  if (!tool) throw new Error("schedule_self_reminder sumiu — revise a exceção do teste acima.");
+  assertEquals(/ctx\.userId|\buserId\b/.test(tool.corpo), true, "deve resolver o destinatário por userId");
+
+  // Olha o input_schema, não o texto todo: a descrição CITA client_id para instruir o
+  // modelo a não usá-lo ("NÃO use client_id"), e um teste ingênuo confunde as duas coisas.
+  const schema = tool.corpo.match(/input_schema:\s*\{[\s\S]*?\n {4}\}/)?.[0] ?? "";
+  assertEquals(/client_id|to_phone|phone\s*:/.test(schema), false, "não pode aceitar destinatário como parâmetro");
+});
+
 Deno.test("adjust_inventory continua com gate de aprovação e autoria", () => {
   const tool = lerTools().find((t) => t.nome === "adjust_inventory");
   if (!tool) throw new Error("adjust_inventory sumiu — se foi renomeada, atualize este teste.");

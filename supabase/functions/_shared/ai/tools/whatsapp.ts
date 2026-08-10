@@ -1,4 +1,4 @@
-import { NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
+import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
 import { guardaDeEnvio } from "../comms/send-guard.ts";
 import { registrarEnvio } from "../comms/send-log.ts";
 
@@ -59,8 +59,12 @@ export const whatsappTools: ToolDef[] = [
     },
     // "pior caso" para o filtro por cargo — o risco real depende do destinatário.
     risk: "high",
+    roles: NON_TECHNICIAN_ROLES,
     computeRisk: (args) => (args?.client_id ? "high" : "medium"),
-    async execute(args, { sb, jwt }) {
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { sb, jwt } = ctx;
       let phone = args.to_phone;
       if (!phone && args.client_id) {
         const { data: c } = await sb.from("clients").select("whatsapp, phone").eq("id", args.client_id).maybeSingle();
@@ -176,7 +180,11 @@ export const whatsappTools: ToolDef[] = [
     },
     // Sempre envia pro contato da cobrança — sempre cliente, nunca equipe.
     risk: "high",
-    async execute(args, { sb, admin, jwt }) {
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { sb, admin, jwt } = ctx;
       const { data: col, error } = await sb
         .from("collections")
         .select("id, amount, due_date, contact_whatsapp, phone, contact_name, client_id, description")
@@ -225,7 +233,11 @@ export const whatsappTools: ToolDef[] = [
     },
     // Sempre envia pro cliente dono da OS — sempre cliente, nunca equipe.
     risk: "high",
-    async execute(args, { admin, jwt, appOrigin, settings }) {
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { admin, jwt, appOrigin, settings } = ctx;
       const isUUID = UUID_RE.test(String(args.service_order_id || ""));
       let soQuery = admin.from("service_orders").select("id, service_order_number, share_token, client_id");
       soQuery = isUUID ? soQuery.eq("id", args.service_order_id) : soQuery.eq("service_order_number", args.service_order_id);
@@ -269,8 +281,12 @@ export const whatsappTools: ToolDef[] = [
     },
     // "pior caso" para o filtro por cargo — client_id/service_order_id indicam cliente.
     risk: "high",
+    roles: NON_TECHNICIAN_ROLES,
     computeRisk: (args) => (args?.client_id || args?.service_order_id ? "high" : "medium"),
-    async execute(args, { sb, admin, userId }) {
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { sb, admin, userId } = ctx;
       let phone = args.phone;
       const clientId = args.client_id || null;
 
@@ -337,7 +353,11 @@ export const whatsappTools: ToolDef[] = [
       },
     },
     risk: "low",
-    async execute(args, { admin }) {
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { admin } = ctx;
       const status = args.status || "pending";
       const limit = Math.min(Number(args.limit) || 10, 30);
 
@@ -363,13 +383,23 @@ export const whatsappTools: ToolDef[] = [
       required: ["scheduled_id"],
     },
     risk: "low",
-    async execute(args, { admin }) {
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { admin } = ctx;
       const { error } = await admin.from("whatsapp_scheduled_sends").update({ status: "cancelled" }).eq("id", args.scheduled_id);
       if (error) return { error: error.message };
       return { ok: true, cancelled_id: args.scheduled_id };
     },
   },
   {
+    // ÚNICA tool de WhatsApp SEM restrição de cargo, e é de propósito.
+    // Decisão do dono (10/08/2026): o técnico não dispara nem agenda WhatsApp pelo
+    // assistente — as outras oito ganharam NON_TECHNICIAN_ROLES. Esta ficou de fora
+    // porque não fala com ninguém: busca o telefone do PRÓPRIO solicitante em app_users
+    // pelo ctx.userId e agenda para ele mesmo. Não aceita client_id nem telefone livre,
+    // então não há caminho para chegar a um cliente. É ferramenta de trabalho pessoal.
     name: "schedule_self_reminder",
     description:
       "LEMBRETE PARA O PRÓPRIO USUÁRIO (a pessoa que está falando com você), NUNCA para um cliente. Use SEMPRE que o pedido for 'me lembre', 'me avise', 'lembrete pra mim', 'não me deixe esquecer', 'me cutuca amanhã' etc. Agenda uma mensagem de WhatsApp para o número do próprio solicitante. NÃO use client_id, NÃO use schedule_whatsapp_message, NÃO peça confirmação — é uma ação interna e segura.",
@@ -462,7 +492,11 @@ export const whatsappTools: ToolDef[] = [
       },
     },
     risk: "low",
-    async execute(args, { admin }) {
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { admin } = ctx;
       const limit = Math.min(Math.max(Number(args.limit) || 15, 1), 30);
       const since = Number(args.since_hours) > 0
         ? new Date(Date.now() - Number(args.since_hours) * 3_600_000).toISOString()
@@ -504,7 +538,11 @@ export const whatsappTools: ToolDef[] = [
       },
     },
     risk: "low",
-    async execute(args, { admin }) {
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { admin } = ctx;
       const phone = String(args.phone || "").replace(/\D/g, "");
       const name = String(args.name || "").trim();
       if (!phone && !name) return { error: "Diga o telefone ou o nome do contato a silenciar." };
@@ -542,7 +580,11 @@ export const whatsappTools: ToolDef[] = [
       },
     },
     risk: "low",
-    async execute(args, { admin }) {
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { admin } = ctx;
       const phone = String(args.phone || "").replace(/\D/g, "");
       const name = String(args.name || "").trim();
       if (!phone && !name) return { error: "Diga o telefone ou o nome do contato a reativar." };
