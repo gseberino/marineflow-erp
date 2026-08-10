@@ -1,3 +1,5 @@
+import { scopeCss } from './css-scope';
+
 export type PDFDocumentType = 'quote' | 'service_order' | 'invoice' | 'receipt';
 
 export type PDFOptions = {
@@ -305,7 +307,11 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
   //  - padding:0: a margem do PDF vem só dos 12mm do html2pdf (abaixo), evitando
   //    margem dupla (10mm + 40px de padding ≈ 20mm, grossa demais).
   const fix = document.createElement('style');
-  fix.textContent = '.container{max-width:none !important;margin:0 !important;width:100% !important;padding:0 !important;}';
+  // Preso à raiz do documento, como o resto do CSS: `.container` sem escopo
+  // pegaria qualquer elemento de mesma classe na tela do app durante a captura.
+  fix.textContent =
+    `.${PDF_ROOT_CLASS} .container{max-width:none !important;margin:0 !important;` +
+    'width:100% !important;padding:0 !important;}';
   container.insertBefore(fix, container.firstChild);
   wrapper.appendChild(container);
   document.body.appendChild(wrapper);
@@ -583,13 +589,21 @@ function companyHeaderHTML(company: PDFData['company'], docTypeLabel: string, do
   `;
 }
 
+/**
+ * Classe que delimita o documento.
+ *
+ * Tudo do PDF vive dentro dela, e todo o CSS é preso a ela antes de sair —
+ * ver `scopeCss`. Sem isso, baixar o PDF repintava o ERP inteiro por um
+ * segundo, porque `* { margin:0 }` e `body { font-size:11px }` não têm como
+ * saber que só valem para o documento.
+ */
+export const PDF_ROOT_CLASS = 'mf-pdf-doc';
+
 function pageWrapper(title: string, body: string): string {
-  return `<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="UTF-8"/>
-<title>${title}</title>
-<style>
+  // O CSS sai preso à raiz do documento. É isto que impede as regras globais
+  // (`*`, `body`, `h1`) de repintarem o app enquanto o html2canvas captura —
+  // o solavanco visual de um segundo ao clicar em Baixar.
+  const css = scopeCss(`
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
   
   :root {
@@ -667,10 +681,40 @@ function pageWrapper(title: string, body: string): string {
   .badge-primary { background: var(--pdf-primary); color: #fff; }
 
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
-</style>
+
+  /* ── Quebra de página ──────────────────────────────────────────────────
+     Sem estas regras o documento parte onde calhar: card de condições de
+     pagamento cortado ao meio, linha de tabela com o valor numa página e a
+     descrição na outra, título de seção sozinho no pé. Valem para os DOIS
+     caminhos — a impressão do navegador entende \`page-break-*\`, e o
+     html2pdf lê as mesmas regras no modo \`css\`. */
+  .card, .badge, .signature-box { page-break-inside: avoid; break-inside: avoid; }
+  table { page-break-inside: auto; }
+  tr    { page-break-inside: avoid; break-inside: avoid; }
+  /* Cabeçalho de tabela se repete em cada página: tabela longa sem cabeçalho
+     na segunda página obriga a voltar para saber o que é cada coluna. */
+  thead { display: table-header-group; }
+  tfoot { display: table-footer-group; }
+  /* Título nunca fica órfão no pé da página, longe do que ele nomeia. */
+  h1, h2, h3 { page-break-after: avoid; break-after: avoid; }
+  /* Duas linhas soltas no fim ou no começo da página é o que mais suja a
+     leitura de um texto corrido. */
+  p { orphans: 3; widows: 3; }
+
+  /* As cores do documento têm que sair na impressão. Por padrão o navegador
+     remove fundos e imagens ao imprimir para poupar tinta — e o cabeçalho
+     azul, as tarjas e o total em destaque sairiam brancos no papel. */
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+`, `.${PDF_ROOT_CLASS}`);
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<title>${title}</title>
+<style>${css}</style>
 </head>
 <body>
-  <div class="container">${body}</div>
+  <div class="${PDF_ROOT_CLASS}"><div class="container">${body}</div></div>
 </body>
 </html>`;
 }
