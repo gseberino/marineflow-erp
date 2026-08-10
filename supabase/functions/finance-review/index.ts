@@ -297,6 +297,27 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     .from("payees").select("id, name, document, default_category").eq("active", true).limit(500);
   const favorecidos = (favorecidosRows ?? []) as any[];
 
+  // Clientes, para dizer DE QUEM veio uma entrada.
+  //
+  // `receivables.client_id` é NOT NULL: sem cliente a proposta de receita não pode ser
+  // aprovada. Deixar isso 87 vezes para o gestor era trabalho que a máquina já sabia
+  // evitar — ela faz exatamente isto para favorecido desde sempre, só não fazia para
+  // cliente. Medido em 10/08/2026: 81 das 87 entradas trazem CPF/CNPJ no extrato.
+  const { data: clientesRows } = await admin
+    .from("clients").select("id, name, cpf_cnpj").limit(2000);
+  const clientes = (clientesRows ?? []) as any[];
+
+  const clientePorDocumento = new Map<string, any>();
+  const clientePorNome = new Map<string, any>();
+  for (const c of clientes) {
+    const doc = String(c.cpf_cnpj ?? "").replace(/\D/g, "");
+    if (doc.length >= 11) clientePorDocumento.set(doc, c);
+    const nome = String(c.name ?? "").trim().toUpperCase();
+    // Nome ambíguo não indexa: se dois clientes têm o mesmo nome, escolher um seria
+    // sorteio. Some do índice e a decisão volta para quem sabe.
+    if (nome) clientePorNome.set(nome, clientePorNome.has(nome) ? null : c);
+  }
+
   // Compra parcelada é UMA compra: a proposta nasce na parcela mais antiga, com o valor
   // total, e as outras pernas não viram despesa separada.
   const { compras, pernaDe } = agruparParcelamentos(transacoes as unknown as PernaDeParcelamento[]);
@@ -360,6 +381,33 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
       ? favorecidos.find((f) => String(f.document || "").replace(/\D/g, "") === docTx)
       : undefined;
 
+    /**
+     * De quem veio a ENTRADA.
+     *
+     * Documento primeiro, porque é identidade. Nome só por igualdade EXATA — nunca por
+     * conter: foi o casamento por substring que fez todo estabelecimento de Itajaí virar
+     * o fornecedor "Coremma" e atribuiu 160 despesas ao errado, em silêncio.
+     *
+     * Sugestão, não decisão: o gestor troca no seletor, e o motivo escrito abaixo diz em
+     * qual das duas evidências a máquina se apoiou — documento merece mais confiança que
+     * nome, e ele precisa saber a diferença para revisar na medida certa.
+     */
+    let cliente: any;
+    let comoAchouOCliente: string | null = null;
+    if (p.kind === "create_receivable") {
+      if (docTx.length >= 11 && clientePorDocumento.has(docTx)) {
+        cliente = clientePorDocumento.get(docTx);
+        comoAchouOCliente = `Cliente reconhecido pelo CPF/CNPJ: ${cliente.name}`;
+      } else {
+        const nomeTx = String(tx.counterparty_name ?? "").trim().toUpperCase();
+        const porNome = nomeTx ? clientePorNome.get(nomeTx) : undefined;
+        if (porNome) {
+          cliente = porNome;
+          comoAchouOCliente = `Nome idêntico ao do cliente ${porNome.name} — confira antes de aprovar`;
+        }
+      }
+    }
+
     // OC do MESMO fornecedor com valor idêntico — o par é forte o bastante para sugerir,
     // fraco o bastante para exigir confirmação: duas OCs de igual valor existem.
     const oc = p.suggestedSupplierId
@@ -383,6 +431,7 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
       suggested_description: p.suggestedDescription,
       suggested_supplier_id: p.suggestedSupplierId,
       suggested_payee_id: favorecido?.id ?? null,
+      suggested_client_id: cliente?.id ?? null,
       // A OC costuma saber para qual serviço a compra foi — herdar isso evita perguntar
       // duas vezes a mesma coisa.
       suggested_purchase_order_id: oc?.id ?? null,
@@ -393,6 +442,7 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
         compra && descreverParcelamento(compra),
         p.reasoning,
         favorecido && `Favorecido reconhecido pelo CPF/CNPJ: ${favorecido.name}`,
+        comoAchouOCliente,
         oc && `Mesmo valor da ordem de compra ${oc.po_number}, do mesmo fornecedor`,
       ].filter(Boolean).join(" · "),
     };
