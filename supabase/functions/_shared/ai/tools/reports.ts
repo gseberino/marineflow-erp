@@ -1,4 +1,4 @@
-import type { ToolDef } from "./registry.ts";
+import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
 
 export const reportTools: ToolDef[] = [
   {
@@ -10,7 +10,14 @@ export const reportTools: ToolDef[] = [
       required: ["year", "month"],
     },
     risk: "low",
-    async execute(args, { admin }) {
+    // Decisão do dono (09/08/2026): técnico não enxerga nada financeiro. O DRE lê
+    // receivables e payables com service role — era a leitura financeira mais ampla
+    // do agente, aberta a qualquer cargo.
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { admin } = ctx;
       const { year, month } = args;
       const start = new Date(year, month - 1, 1).toISOString();
       const end = new Date(year, month, 0, 23, 59, 59).toISOString();
@@ -52,7 +59,12 @@ export const reportTools: ToolDef[] = [
       required: ["service_order_id"],
     },
     risk: "low",
-    async execute(args, { admin }) {
+    // Lucratividade é margem: custo, preço e resultado da OS. Mesmo critério do DRE.
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { admin } = ctx;
       const { data: so, error } = await admin
         .from("service_orders")
         .select("grand_total, labor_cost_total, parts_cost_total, travel_cost_total, operational_cost_total")

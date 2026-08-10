@@ -31,7 +31,13 @@ export const financialTools: ToolDef[] = [
       required: ["service_order_id"],
     },
     risk: "low",
-    async execute(args, { sb }) {
+    // Decisão do dono (09/08/2026): o cargo técnico não enxerga nada financeiro.
+    // Vale nos dois planos — RLS no banco e tool do agente.
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { sb } = ctx;
       const soId = args.service_order_id;
       const { data: recs, error: recErr } = await sb
         .from("receivables")
@@ -92,7 +98,14 @@ export const financialTools: ToolDef[] = [
       },
     },
     risk: "low",
-    async execute(args, { admin }) {
+    // Roda com service role e devolve as comissões de QUALQUER técnico — é ferramenta de
+    // gestão, não consulta pessoal. Se um dia o técnico precisar ver as próprias, a tool
+    // certa é outra, filtrando por ctx.userId (a RLS de `commissions` já permite isso).
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { admin } = ctx;
       let query = admin.from("commissions").select("*, service_orders(service_order_number)");
       if (args.technician_id) query = query.eq("user_id", args.technician_id);
       if (args.status) query = query.eq("status", args.status);

@@ -113,7 +113,11 @@ export const biTools: ToolDef[] = [
       },
     },
     risk: "low",
+    // BI é leitura de gestão — as demais tools deste arquivo já barram o técnico.
+    roles: NON_TECHNICIAN_ROLES,
     async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
       const days = Math.min(Math.max(Number(args.days) || 30, 7), 365);
       const since = new Date(Date.now() - days * 86400000).toISOString();
       const startToday = new Date(new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10) + "T00:00:00-03:00").toISOString();

@@ -232,8 +232,20 @@ export const productTools: ToolDef[] = [
       },
       required: ["product_id", "new_quantity", "reason"],
     },
-    risk: "low",
-    async execute(args, { admin }) {
+    // MF-AUD-032: sobrescreve `stock_quantity` com valor ABSOLUTO, com service role.
+    // Era `risk: "low"` — executava direto, sem gate, disponível a qualquer cargo, e o
+    // movimento gravado não dizia quem tinha feito. Num sistema que já criou R$ 380 mil
+    // de estoque fantasma, esta é a porta que não pode ficar encostada.
+    //   · risk "high" → não executa: vira pendência em ai_operator_pending_actions e só
+    //     roda pelo fluxo determinístico de confirm_action;
+    //   · restrita a admin/financeiro;
+    //   · o movimento passa a registrar o autor (as colunas já existiam e ficavam nulas).
+    risk: "high",
+    roles: ["admin", "financial"],
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { admin, userId } = ctx;
       const { product_id, new_quantity, reason } = args;
       const { data: prod } = await admin.from("products").select("stock_quantity").eq("id", product_id).single();
       const delta = new_quantity - (prod?.stock_quantity || 0);
@@ -246,6 +258,8 @@ export const productTools: ToolDef[] = [
         quantity_delta: delta,
         movement_type: "manual_adjustment",
         notes: reason,
+        created_by: userId,
+        adjusted_by: userId,
       });
 
       return { ok: true, new_quantity };
@@ -365,7 +379,13 @@ export const productTools: ToolDef[] = [
     description: "Lista produtos com estoque abaixo do mínimo cadastrado.",
     input_schema: { type: "object", properties: {} },
     risk: "low",
-    async execute(_args, { admin }) {
+    // Mesma regra das demais tools de produto neste arquivo (o prompt já diz que técnico
+    // não acessa produtos/preços); esta havia escapado do filtro.
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(_args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { admin } = ctx;
       const { data, error } = await admin
         .from("products")
         .select("id, name, stock_quantity, minimum_stock, unit")

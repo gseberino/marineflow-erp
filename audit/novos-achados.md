@@ -79,3 +79,37 @@ Não foram corrigidos.
 - **Ação recomendada:** dois casos em `pdf-generator.test.ts`. Não foi feito por estar fora do escopo da S3
   (somente leitura).
 - **Evidência:** `audit/diagnostico-terms.md` §6; `grep -rn "showTerms\|terms" src/lib/*.test.ts src/test/*.test.ts` → vazio.
+
+---
+
+## [NOVO-005] 14 tools com service role seguem sem barreira de cargo — fora do escopo da decisão #3
+
+- **Encontrado em:** 10/08/2026, durante a T1.5
+- **Categoria:** F — **Severidade sugerida:** P2
+- **Descrição:** A T1.5 aplicou a decisão #3 (técnico não vê financeiro) e fechou **todas** as tools que
+  tocam as cinco tabelas financeiras. Aproveitando a passagem, também barrei as de gestão que usavam service
+  role sem cargo (`get_task_metrics`, `agent_health_report`, `list_pending_pos`, `list_low_stock`,
+  `get_os_profitability`, `get_technician_commissions`) e endureci `adjust_inventory`.
+
+  **Sobram 14 tools que usam service role e não têm barreira de cargo alguma**, e eu deliberadamente não
+  mexi nelas porque decidir ali seria decidir pelo dono:
+  ```
+  comms-tools.ts    interpret_customer_reply
+  memory.ts         list_memory_notes · forget_note
+  service-orders.ts create_service_order · update_service_order_status
+  whatsapp.ts       send_collection_reminder(high) · send_service_order_link(high) ·
+                    schedule_whatsapp_message(high) · list_scheduled_whatsapp ·
+                    cancel_scheduled_whatsapp · schedule_self_reminder ·
+                    list_unanswered_messages · mute_contact · unmute_contact
+  ```
+  Três grupos, com respostas provavelmente diferentes:
+  1. **OS de campo** (`create_service_order`, `update_service_order_status`) — parecem legítimas para o
+     técnico; é o trabalho dele. Manteria como está.
+  2. **Lembrete pessoal** (`schedule_self_reminder`, `list_memory_notes`) — idem.
+  3. **Comunicação com cliente** (as 8 de WhatsApp, `interpret_customer_reply`) — **aqui é decisão de
+     negócio**: o técnico pode disparar mensagem ao cliente pelo agente? As três de `risk: "high"` já param
+     no gate de aprovação; as `low` executam direto.
+- **Pergunta para o Gustavo:** o cargo técnico pode enviar/agendar WhatsApp para cliente pelo assistente?
+  Se não, aplico `NON_TECHNICIAN_ROLES` nas oito de WhatsApp — é o mesmo diff das outras.
+- **Evidência:** varredura em `audit/`-scratch reproduzida no teste de guarda
+  `supabase/functions/_shared/ai/tools/cargo-financeiro_test.ts`, que hoje cobre só a fatia financeira.

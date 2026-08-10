@@ -1,4 +1,4 @@
-import type { ToolDef } from "./registry.ts";
+import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
 
 // Adaptado ao schema real de ai_operator_memory_notes (scope é vessel/client/global,
 // não user/global como o plano original supunha — ver migration
@@ -107,7 +107,13 @@ export const memoryTools: ToolDef[] = [
       properties: { days: { type: "number", description: "Janela em dias (padrão 7, máx 90)." } },
     },
     risk: "low",
-    async execute(args, { admin }) {
+    // Relatório de saúde do próprio agente (custo, erros, uso): informação de
+    // administração do sistema, não de trabalho de campo.
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { admin } = ctx;
       const days = Math.min(Math.max(Number(args.days) || 7, 1), 90);
       const since = new Date(Date.now() - days * 86400000).toISOString();
       const { data: pa } = await admin

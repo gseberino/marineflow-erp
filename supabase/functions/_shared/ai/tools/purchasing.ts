@@ -109,7 +109,12 @@ export const purchasingTools: ToolDef[] = [
     description: "Lista ordens de compra ainda não totalmente recebidas (rascunho, enviada ou parcialmente recebida).",
     input_schema: { type: "object", properties: {} },
     risk: "low",
-    async execute(_args, { admin }) {
+    // Compras traz custo e fornecedor — mesma regra das demais tools deste arquivo.
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(_args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { admin } = ctx;
       const { data, error } = await admin
         .from("purchase_orders")
         .select("id, po_number, status, expected_date, total_amount, suppliers(name), service_orders(service_order_number)")
