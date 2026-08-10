@@ -23,6 +23,7 @@ import { BankSourcesPanel } from '@/components/BankSourcesPanel';
 import { FinanceReviewInbox, type SementeDeRegra } from '@/components/FinanceReviewInbox';
 import { FinanceRulesPanel, EditorDeRegra } from '@/components/FinanceRulesPanel';
 import { IgnoradasPanel } from '@/components/IgnoradasPanel';
+import { CartoesPanel } from '@/components/CartoesPanel';
 import { FechamentoPanel } from '@/components/FechamentoPanel';
 import { SaudeDoCadastroPanel } from '@/components/SaudeDoCadastroPanel';
 import { AgingReportPanel } from '@/components/AgingReportPanel';
@@ -355,6 +356,10 @@ export default function FinancialV2() {
             {/* O que saiu da fila não pode sair do sistema. Sem esta aba, 380 transações
                 tinham virado sumiço — e a suspeita, justa, foi de que a IA as tinha
                 escondido. Toda saída da fila é reversível e diz quem, quando e por quê. */}
+            {/* Cartão é OUTRO objeto: sem contraparte, sem saída de caixa na data da compra,
+                e pertencente a um ciclo que fecha. Misturá-lo com Pix e transferência foi o
+                que o gestor pediu para desfazer. */}
+            <TabsTrigger value="cartoes">Cartões</TabsTrigger>
             <TabsTrigger value="ignoradas">Fora da fila</TabsTrigger>
             <TabsTrigger value="rules">Regras</TabsTrigger>
             {/* Fechar o mês, ler a trilha e conferir se o extrato está completo — os três
@@ -620,6 +625,7 @@ export default function FinancialV2() {
               volta em fases seguintes, sobre o modelo certo. O arquivo continua no repo
               até a F3 terminar, para nada se perder no caminho. */}
           <TabsContent value="reconciliation" className="mt-4"><ConciliacaoPanel /></TabsContent>
+          <TabsContent value="cartoes" className="mt-4"><CartoesPanel /></TabsContent>
           <TabsContent value="ignoradas" className="mt-4"><IgnoradasPanel /></TabsContent>
           <TabsContent value="fechamento" className="mt-4"><FechamentoPanel /></TabsContent>
           <TabsContent value="cadastro" className="mt-4"><SaudeDoCadastroPanel /></TabsContent>
