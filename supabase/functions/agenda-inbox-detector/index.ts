@@ -9,6 +9,7 @@ import {
   detectInConversation, shouldAutoCreate, loopKeyFromTitle,
   type ConversationMessage, type DetectorStats,
 } from "../_shared/ai/inbox-detector.ts";
+import { verificarCronSecret } from "../_shared/cron-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -25,10 +26,9 @@ const MAX_CONVERSATIONS_PER_RUN = 12; // teto de custo por execução
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
-  const cronSecret = Deno.env.get("CRON_SECRET");
-  if (cronSecret && req.headers.get("x-cron-secret") !== cronSecret) {
-    return jr({ error: "Unauthorized" }, 401);
-  }
+  // Era fail-OPEN (`if (cronSecret && ...)`): sem o env var, a função ficava aberta.
+  const recusa = verificarCronSecret(req, corsHeaders, "agenda-inbox-detector");
+  if (recusa) return recusa;
 
   const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 

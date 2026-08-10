@@ -15,6 +15,7 @@
 // Idempotente: só toca linhas com custo_reconciliado_em nulo.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { verificarCronSecret } from "../_shared/cron-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -43,11 +44,9 @@ type LinhaPendente = {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
-  const cronSecret = Deno.env.get("CRON_SECRET");
-  if (cronSecret) {
-    const incoming = req.headers.get("x-cron-secret");
-    if (incoming !== cronSecret) return jr({ error: "Unauthorized" }, 401);
-  }
+  // Era fail-OPEN (`if (cronSecret) { ... }`): sem o env var, a função ficava aberta.
+  const recusa = verificarCronSecret(req, corsHeaders, "ai-cost-reconcile");
+  if (recusa) return recusa;
 
   const apiKey = Deno.env.get("OPENROUTER_API_KEY");
   if (!apiKey) return jr({ error: "OPENROUTER_API_KEY não configurada" }, 500);

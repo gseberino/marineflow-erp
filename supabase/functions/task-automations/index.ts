@@ -14,6 +14,7 @@ import {
   type RuleCandidate,
 } from "./rules.ts";
 import { expandOccurrences } from "../_shared/recurrence.ts";
+import { verificarCronSecret } from "../_shared/cron-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -398,12 +399,10 @@ async function materializeRecurrences(db: Db) {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
-  const cronSecret = Deno.env.get("CRON_SECRET");
-  if (cronSecret && req.headers.get("x-cron-secret") !== cronSecret) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
+  // Era fail-OPEN: `if (cronSecret && ...)` deixava a função aberta se o env var
+  // sumisse — a proteção evaporava em silêncio, que é o pior modo de falhar.
+  const recusa = verificarCronSecret(req, corsHeaders, "task-automations");
+  if (recusa) return recusa;
 
   const db = createClient(
     Deno.env.get("SUPABASE_URL")!,

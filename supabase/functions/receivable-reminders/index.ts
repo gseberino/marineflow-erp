@@ -4,6 +4,7 @@
 // Mirrors the pattern of scheduling-automations: calls whatsapp-send directly.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { createWhatsAppProvider } from "../_shared/whatsapp/factory.ts";
 import { normalizePhoneNumber } from "../_shared/whatsapp/normalize.ts";
 
@@ -23,14 +24,9 @@ function jr(body: unknown, status = 200) {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
-  // Verifica segredo de cron
-  const cronSecret = Deno.env.get("CRON_SECRET");
-  if (cronSecret) {
-    const incoming = req.headers.get("x-cron-secret");
-    if (incoming !== cronSecret) {
-      return jr({ error: "Unauthorized" }, 401);
-    }
-  }
+  // Era fail-OPEN (`if (cronSecret) { ... }`): sem o env var, a função ficava aberta.
+  const recusa = verificarCronSecret(req, corsHeaders, "receivable-reminders");
+  if (recusa) return recusa;
 
   try {
     const SUPABASE_URL  = Deno.env.get("SUPABASE_URL")!;

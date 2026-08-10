@@ -11,6 +11,7 @@
 // Agendado via pg_cron (jobid 7, */30) — DESATIVADO até validação.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { verificarCronSecret } from "../_shared/cron-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -36,8 +37,10 @@ const REACT_CAP = 10; // teto de reativações por execução (evita rajada no 1
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-  const cronSecret = Deno.env.get("CRON_SECRET");
-  if (cronSecret && req.headers.get("x-cron-secret") !== cronSecret) return jr({ error: "Unauthorized" }, 401);
+  // Era fail-OPEN (`if (cronSecret && ...)`): sem o env var, a função ficava aberta.
+  // Esta dispara follow-up de WhatsApp para CLIENTE — abrir seria mandar mensagem real.
+  const recusa = verificarCronSecret(req, corsHeaders, "ai-whatsapp-followups");
+  if (recusa) return recusa;
 
   try {
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
