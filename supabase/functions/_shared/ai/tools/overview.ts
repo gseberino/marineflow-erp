@@ -15,7 +15,7 @@ export const overviewTools: ToolDef[] = [
   {
     name: "get_situation_overview",
     description:
-      "PANORAMA do negócio agora, numa consulta só: cobranças vencidas, orçamentos parados, mensagens de cliente esperando resposta, agenda de hoje e contas a pagar da semana. Use para 'como estão as coisas?', 'e aí, como tá?', 'me dá um resumo', 'o que preciso resolver hoje?'. Só leitura — não envia nem altera nada. Devolve os totais e uma amostra do topo de cada frente; para a lista completa de uma frente, use a tool específica (get_delinquency_plan, list_service_orders, list_unanswered_messages, list_tasks).",
+      "PANORAMA do negócio agora, numa consulta só: cobranças vencidas, orçamentos parados, mensagens de cliente esperando resposta, agenda de hoje e contas a pagar da semana. Use para perguntas amplas do tipo 'como estão as coisas?', 'o que preciso resolver hoje?'. Só leitura. Devolve os totais e uma amostra do topo de cada frente — a lista completa vem da tool específica de cada uma.",
     input_schema: {
       type: "object",
       properties: {

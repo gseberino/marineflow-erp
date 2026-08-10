@@ -20,7 +20,10 @@ export const uiTools: ToolDef[] = [
   {
     name: "present_options",
     description:
-      "Use quando precisar que o usuário escolha entre opções. Exemplos: múltiplos clientes, múltiplas OSs, sim/não. Prefira sempre esta tool a escrever uma lista em texto. Máximo 6 opções visíveis. Se houver mais de 5 resultados, mostre os 5 mais relevantes + última opção sendo {label:'🔍 Refinar busca — digitar mais detalhes',value:'__refine__'}. Se o usuário escolher __refine__, peça mais informações específicas (sobrenome, telefone, CNPJ).",
+      // A mecânica de "5 melhores + __refine__" estava aqui, na seção DESAMBIGUAÇÃO do system
+      // prompt E implementada em código (AUTO_DISAMBIG, agent.ts) — três cópias da mesma regra.
+      // O código é quem de fato monta essas opções; aqui fica só o contrato.
+      "Use quando precisar que o usuário escolha entre opções (vários clientes, várias OSs, sim/não). Prefira esta tool a escrever a lista em texto. Máximo 6 opções visíveis; o value de cada uma deve ser o UUID real, não o rótulo.",
     input_schema: {
       type: "object",
       properties: {

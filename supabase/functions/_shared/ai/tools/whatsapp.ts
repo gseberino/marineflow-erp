@@ -73,8 +73,10 @@ export const whatsappTools: ToolDef[] = [
   {
     name: "send_supplier_quote_request",
     description:
-      "Envia um pedido de COTAÇÃO por WhatsApp a um ou mais FORNECEDORES (ação sensível — pede confirmação). Informe supplier_ids (ache com suggest_suppliers) e os itens a cotar. MOSTRE a prévia da mensagem e a lista de fornecedores antes de confirmar. " +
-      "DEPOIS DO ENVIO o ciclo CONTINUA e é sua responsabilidade conduzi-lo: quando a resposta do fornecedor chegar, use read_supplier_messages (ou read_supplier_media para áudio/PDF/imagem) e registre cada preço com record_quote_response; monte o comparativo com get_quote_comparison; devolva o custo ao orçamento com apply_quote_price; e gere a compra com create_purchase_order_from_quote. NÃO pare no envio.",
+      // O passo a passo do ciclo (ler resposta -> registrar preço -> comparar -> aplicar ->
+      // gerar OC) vivia aqui E na seção COTAÇÃO A FORNECEDORES do system prompt. Uma cópia
+      // basta, e o lugar do workflow é o prompt — descrição de tool é contrato.
+      "Envia um pedido de COTAÇÃO por WhatsApp a um ou mais FORNECEDORES (ação sensível — pede confirmação). Informe supplier_ids (ache com suggest_suppliers) e os itens a cotar. MOSTRE a prévia da mensagem e a lista de fornecedores antes de confirmar. O envio é o começo do ciclo de cotação, não o fim.",
     input_schema: {
       type: "object",
       properties: {
@@ -451,7 +453,7 @@ export const whatsappTools: ToolDef[] = [
   {
     name: "list_unanswered_messages",
     description:
-      "CAIXA DE ENTRADA — mensagens recebidas que ainda NÃO foram respondidas. Use SEMPRE que o usuário perguntar coisas como 'quem me mandou mensagem?', 'quais mensagens não respondi?', 'tem alguém esperando resposta?', 'resumo do WhatsApp', 'como está a caixa de entrada?', 'o que chegou?'. Retorna os contatos cuja última mensagem recebida veio DEPOIS da última resposta enviada, com nome, há quanto tempo chegou, quantas não lidas, se é cliente conhecido (vinculado) ou outro contato/fornecedor, e uma prévia. Somente leitura — não pede confirmação. Ao responder, priorize clientes conhecidos e as mensagens mais recentes, e sempre mostre o nome e o horário/tempo.",
+      "CAIXA DE ENTRADA — mensagens recebidas ainda NÃO respondidas. Use quando perguntarem quem mandou mensagem, o que chegou, quem está esperando resposta, ou pedirem o resumo do WhatsApp. Retorna os contatos cuja última mensagem recebida veio DEPOIS da última resposta enviada, com nome, há quanto tempo chegou, quantas não lidas, se é cliente vinculado ou outro contato, e uma prévia. Só leitura.",
     input_schema: {
       type: "object",
       properties: {
