@@ -1,0 +1,31 @@
+-- MF-AUD-021 — convergência: o repositório ainda mandava abrir `clients` e `vessels`
+-- para o público anônimo.
+--
+-- NO-OP EM PRODUÇÃO, CORRETIVA EM QUALQUER AMBIENTE NOVO. É esse o ponto.
+--
+-- A migration 20260421131952 criou seis políticas `FOR SELECT TO anon USING (TRUE)`.
+-- Quatro foram removidas por migrations rastreáveis:
+--   · "Public document viewing via share_token"     → 20260729144824
+--   · "Public parts viewing via service order"      → 20260706100000
+--   · "Public services viewing via service order"   → 20260706100000
+--   · "Public company settings viewing"             → 20260723080000
+--
+-- As duas de `clients` e `vessels` NUNCA foram dropadas por nenhuma das 243 migrations
+-- do repositório. O comentário de 20260706100000:99-101 explica o descuido: assumiu que
+-- bastava remover as `staging_open_*`, esquecendo que estas existiam desde abril. E o
+-- raciocínio erra num ponto que vale registrar: políticas PERMISSIVE se somam por OR —
+-- manter uma `USING (TRUE)` ao lado da restrita ANULA a restrita.
+--
+-- Em produção elas já não existem: foram removidas fora do versionamento (provavelmente
+-- pela migration 20260706165104_remove_remaining_open_anon_policies, que está aplicada no
+-- banco e não tem arquivo em disco — MF-AUD-058). Conferido em pg_policies antes de
+-- escrever isto: `clients` e `vessels` têm, para anon, apenas as políticas amarradas ao
+-- cabeçalho x-share-token.
+--
+-- Portanto: aqui não se corrige a produção — corrige-se o REPOSITÓRIO, para que um
+-- ambiente novo (staging, disaster recovery, um segundo cliente do SaaS, `db reset`) não
+-- nasça com a base de clientes e embarcações legível por qualquer portador da chave
+-- publishable, que por definição vai no bundle.
+
+DROP POLICY IF EXISTS "Public clients viewing via service order" ON public.clients;
+DROP POLICY IF EXISTS "Public vessels viewing via service order" ON public.vessels;
