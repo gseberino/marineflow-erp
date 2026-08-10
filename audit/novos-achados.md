@@ -113,3 +113,33 @@ Não foram corrigidos.
   Se não, aplico `NON_TECHNICIAN_ROLES` nas oito de WhatsApp — é o mesmo diff das outras.
 - **Evidência:** varredura em `audit/`-scratch reproduzida no teste de guarda
   `supabase/functions/_shared/ai/tools/cargo-financeiro_test.ts`, que hoje cobre só a fatia financeira.
+
+---
+
+## [NOVO-006] Valores da OS continuam visíveis ao técnico — column-level grant não serve aqui
+
+- **Encontrado em:** 10/08/2026, na T1.7 (decisão #3, item 2: "avaliar column-level grants")
+- **Categoria:** F — **Severidade sugerida:** P2 · **Status:** avaliado, **não aplicado**, por decisão técnica
+- **Descrição:** A decisão #3 pediu para avaliar `REVOKE SELECT (coluna)` nos campos de valor de
+  `service_orders` (`grand_total`, `labor_cost_total`, `parts_cost_total`, `travel_cost_total`,
+  `operational_cost_total`, `card_fee_amount`, `discount_amount`, `tax_amount`…), com a instrução de manter a
+  ocultação atual se quebrasse o frontend. **Quebra.** Motivo:
+
+  1. Column-level grant no Postgres **não omite a coluna** — ele **recusa a consulta inteira** com
+     `42501: permission denied for column`. Não existe "devolver NULL no lugar".
+  2. O PostgREST expande `select=*` para a lista de colunas. O frontend pede `*` em praticamente todo lugar —
+     `SO_SELECT` e `SO_DETAIL_SELECT` (`src/hooks/use-service-orders.ts:15-33`) começam com `*`, e o mesmo
+     vale para `usePDFData`/`fetchPDFData`.
+  3. Resultado: o técnico deixaria de conseguir **abrir a OS**, que é a tela do trabalho dele. Trocaria um
+     problema de confidencialidade por um de operação.
+
+  **O que funcionaria, se um dia virar prioridade:** uma view `service_orders_tecnico` sem as colunas de
+  valor + RLS que direcione o técnico a ela, ou uma coluna calculada que zere valores por cargo. As duas são
+  mudanças de superfície de API, com impacto no frontend — tarefa própria, não um `REVOKE`.
+
+  **Situação atual, dita sem eufemismo:** o técnico **vê os valores da OS** (total, mão de obra, peças) na
+  tela de OS e no PDF. O que a T1.7 fechou foi o acesso às cinco tabelas financeiras — títulos, pagamentos,
+  contas a pagar, notas e extrato bancário. É menos do que "não enxerga nada financeiro" ao pé da letra, e o
+  Gustavo precisa saber disso para decidir se quer a tarefa da view.
+- **Evidência:** `src/hooks/use-service-orders.ts:15-33` (selects com `*`); comportamento documentado do
+  PostgREST/Postgres para grants de coluna.
