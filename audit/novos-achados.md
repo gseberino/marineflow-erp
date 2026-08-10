@@ -61,3 +61,21 @@ Não foram corrigidos.
 - **Evidência:** prints do Evolution Manager (09/08/2026); `whatsapp-webhook/index.ts:238-245`; ausência de
   qualquer referência a base64 na função; logs de Edge Function mostrando `POST | 200` seguidos com
   `?token=` logo após o Save.
+
+---
+
+## [NOVO-004] Nenhum teste cobre os termos e condições do PDF
+
+- **Encontrado em:** 09/08/2026, durante a S3 (diagnóstico do sintoma dos termos)
+- **Categoria:** I (testes) — **Severidade sugerida:** P3
+- **Descrição:** Existem **sete** arquivos de teste de PDF (`pdf-generator`, `pdf-generator.payment-history`,
+  `pdf-canvas-scale`, `pdf-css-isolation`, `pdf-survey`, `pdf-html-isolation`, `pdf-pagination`) e **nenhum**
+  menciona `showTerms` ou `terms` — busca em `src/lib/*.test.ts` e `src/test/*.test.ts` retorna vazio.
+  Os termos são conteúdo contratual que vai ao cliente, e a parte determinística é trivial de cobrir: dado
+  `showTerms: true` e `terms` preenchido, o HTML gerado contém "Condições Gerais e Garantia" e o texto; com
+  `showTerms: false`, não contém. Isso não testa a rasterização do `html2canvas` (que exige navegador), mas
+  trava a metade do problema que é lógica pura — justamente a metade que o diagnóstico da S3 precisou
+  verificar à mão.
+- **Ação recomendada:** dois casos em `pdf-generator.test.ts`. Não foi feito por estar fora do escopo da S3
+  (somente leitura).
+- **Evidência:** `audit/diagnostico-terms.md` §6; `grep -rn "showTerms\|terms" src/lib/*.test.ts src/test/*.test.ts` → vazio.
