@@ -120,7 +120,9 @@ export function PayableFormDialog({ open, onOpenChange, initialData }: Props) {
                   options={(suppliers || []).map(s => ({
                     value: s.id, label: s.name,
                     description: s.cnpj_cpf || undefined,
-                    searchTerms: [s.cnpj_cpf || '', s.contact_email || ''],
+                    // MF-AUD-045: era `contact_email`, que não existe em `suppliers` (a
+                    // coluna é `email`) — buscar fornecedor pelo e-mail nunca funcionou.
+                    searchTerms: [s.cnpj_cpf || '', s.email || ''],
                   }))}
                   onCreate={(typed) => { setQuickSupplierName(typed); setQuickSupplierOpen(true); }}
                   createLabel="+ Cadastrar novo fornecedor"

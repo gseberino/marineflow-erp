@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { buildPDFFilename, type PDFData } from './pdf-generator';
 
-function makeData(overrides: Partial<PDFData> = {}): PDFData {
+/** `Partial` só afrouxa o primeiro nível: um override de `serviceOrder` continuava
+ *  exigindo os ~30 campos do tipo cheio, e era daí que vinha o TS2740 deste arquivo.
+ *  Os testes daqui montam só o que a asserção usa — o tipo tem que permitir isso. */
+type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K] };
+
+function makeData(overrides: DeepPartial<PDFData> = {}): PDFData {
   return {
     documentType: 'service_order',
     company: {

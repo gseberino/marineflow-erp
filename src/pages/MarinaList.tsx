@@ -148,16 +148,20 @@ export default function MarinaList() {
                         )}
                       </td>
                       <td className="px-4 py-3 hidden md:table-cell text-muted-foreground">
+                        {/* MF-AUD-042: eram `contact_phone`/`contact_email`, que não existem
+                            em `marinas` (as colunas são `phone`/`email`) — o telefone nunca
+                            aparecia e o bloco de e-mail nunca renderizava. A gêmea
+                            MarinasListV2 já usava as colunas certas. */}
                         {m.contact_name && (
                           <div className="flex items-center gap-1.5">
                             <Phone className="h-3 w-3 shrink-0" />
-                            {m.contact_name}{m.contact_phone ? ` · ${m.contact_phone}` : ''}
+                            {m.contact_name}{m.phone ? ` · ${m.phone}` : ''}
                           </div>
                         )}
-                        {m.contact_email && (
+                        {m.email && (
                           <div className="flex items-center gap-1.5 text-xs mt-0.5">
                             <Mail className="h-3 w-3 shrink-0" />
-                            {m.contact_email}
+                            {m.email}
                           </div>
                         )}
                       </td>

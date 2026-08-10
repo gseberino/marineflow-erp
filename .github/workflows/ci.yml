@@ -1,0 +1,75 @@
+name: CI
+
+# Por que este arquivo existe (MF-AUD-043):
+# até 10/08/2026 nenhum push rodava teste, typecheck, lint ou build. O único workflow do
+# repositório era de DEPLOY, e estava com o gatilho desligado por falta de segredos. O
+# resultado media-se: `tsc -b` acusava 16 erros que ninguém via, dois deles bugs reais em
+# tela (MF-AUD-042 e MF-AUD-045), e a suíte de 875 testes só rodava se alguém lembrasse.
+#
+# Este workflow NÃO precisa de segredo nenhum — é a diferença que o mantém vivo.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Um push novo no mesmo ramo cancela a execução anterior: o que interessa é o último estado.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    name: Gates bloqueantes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # Ordem escolhida a dedo: o que falha mais rápido e explica melhor vem primeiro.
+      # Typecheck pega erro de coluna inexistente em segundos; o build leva meio minuto.
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Testes (frontend)
+        run: npm test
+
+      - uses: denoland/setup-deno@v1
+        with:
+          deno-version: v2.x
+
+      # `--no-check` está dentro do script, e é dívida consciente: o type-check do Deno
+      # tropeça no node_modules/ do frontend ao resolver @types (NOVO-001 em
+      # audit/novos-achados.md). Os testes rodam; a checagem de tipos das Edge Functions
+      # ainda não é coberta por ninguém — resolver isso pede um deno.json próprio em
+      # supabase/functions/, que é tarefa à parte.
+      - name: Testes (edge functions)
+        run: npm run test:edge
+
+      - name: Build
+        run: npm run build
+
+  lint:
+    name: Lint (reporta, não bloqueia)
+    runs-on: ubuntu-latest
+    # Herdado: 2.455 erros de lint no baseline de 10/08/2026, nenhum deles introduzido
+    # por esta frente. Bloquear aqui seria travar todo o trabalho por uma dívida antiga;
+    # ignorar seria fingir que não existe. Então roda, aparece, e não impede o merge.
+    # Zerar o lint é tarefa própria do Bloco 4 — provavelmente `--fix` por etapas.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: ESLint
+        run: npm run lint

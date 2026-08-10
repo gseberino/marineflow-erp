@@ -135,7 +135,11 @@ export function useUpdateServiceOrder() {
         // total anterior, e propaga o erro (toast.error no chamador).
         const revertPatch: Record<string, any> = {};
         for (const key of Object.keys(values)) revertPatch[key] = (prev as any)?.[key];
-        await supabase.from('service_orders').update(revertPatch).eq('id', id);
+        // `as any` no update: o patch é montado dinamicamente a partir das chaves que a
+        // mutation alterou, então o tipo é Record<string, any> e não casa com o Update
+        // gerado do schema (que rejeita índice de string). O conteúdo vem de `prev`, que
+        // é a própria linha lida do banco.
+        await supabase.from('service_orders').update(revertPatch as any).eq('id', id);
         await recalcTotals(id).catch(() => {});
         throw e;
       }
