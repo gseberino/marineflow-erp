@@ -9,6 +9,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { createWhatsAppProvider } from "../_shared/whatsapp/factory.ts";
 import type { StatusContent } from "../_shared/whatsapp/types.ts";
+import { verificarCronSecret } from "../_shared/cron-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -17,6 +18,10 @@ const corsHeaders = {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  // Autenticação ANTES de qualquer I/O — publicar status é ação visível ao público.
+  const recusa = verificarCronSecret(req, corsHeaders, "whatsapp-status-worker");
+  if (recusa) return recusa;
 
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;

@@ -3,6 +3,7 @@
 // status='pending', invoca whatsapp-send para cada um, e calcula a próxima execução
 // se for recorrente.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { verificarCronSecret } from "../_shared/cron-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -19,6 +20,12 @@ function jr(body: unknown, status = 200) {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  // Autenticação ANTES de qualquer I/O: esta função dispara envios agendados de
+  // verdade. Rodava a cada 30s sem nenhuma validação — só o cabeçalho declarado
+  // no CORS, que não valida coisa alguma.
+  const recusa = verificarCronSecret(req, corsHeaders, "whatsapp-process-scheduled");
+  if (recusa) return recusa;
 
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
