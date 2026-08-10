@@ -36,6 +36,7 @@ import {
 import { verifyPin } from "../_shared/ai/whatsapp-pin.ts";
 import { STATUS_INJETAVEL, colunaDaEntidade } from "../_shared/ai/memory-scope.ts";
 import { podarHistoricoParaLLM } from "../_shared/ai/context-pruning.ts";
+import { filtrarPorCanal } from "../_shared/ai/channel-scope.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -439,8 +440,13 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
     channel: "whatsapp",
   });
 
+  // Cargo e canal, nesta ordem. Os dois filtros são determinísticos, então o conjunto de tools
+  // do WhatsApp é sempre o mesmo — é o que permite ao canal ter seu próprio prefixo cacheável.
   const toolsForRole = aplicarRoteadorDeIntencao(
-    allTools.filter((t) => !t.roles || t.roles.includes((appUser.role as Role) || ("unknown" as Role))),
+    filtrarPorCanal(
+      allTools.filter((t) => !t.roles || t.roles.includes((appUser.role as Role) || ("unknown" as Role))),
+      "whatsapp",
+    ),
     effectiveText,
     settings,
   );
