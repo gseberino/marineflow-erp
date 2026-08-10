@@ -205,22 +205,30 @@ export function generatePDF(data: PDFData, options: PDFOptions): void {
   // instead of the generated PDF when the user taps "Save" in the share sheet.
   const win = window.open('', '_blank');
   if (win) {
-    win.document.write(html);
+    // A janela imprime A SI MESMA, por um script dentro do próprio documento.
+    //
+    // Antes o disparo vinha daqui de fora: `win.addEventListener('load', …)`
+    // mais um `setTimeout(() => win.print(), 3000)`. Dois problemas nisso:
+    //
+    //  · `window.open('')` abre uma janela VAZIA que carrega na hora — o
+    //    `load` já tinha disparado antes de o listener existir, então quem
+    //    imprimia era sempre o timer;
+    //  · chamar `print()` de fora, três segundos depois, atravessa contextos
+    //    de janela. Se o documento foi reescrito nesse meio-tempo, o Chrome
+    //    responde "Failed to execute 'print' on 'Window': The provided
+    //    callback is no longer runnable" — o erro que aparecia na tela do ERP
+    //    mesmo com a impressão funcionando.
+    //
+    // Com o script embutido não há chamada cruzada: o `load` é o da própria
+    // janela, já com o conteúdo dentro, e imprime dali mesmo.
+    const autoPrint =
+      '<script>window.addEventListener("load",function(){' +
+      // Um quadro depois do load, para o layout assentar antes do diálogo.
+      'requestAnimationFrame(function(){setTimeout(function(){window.print();},50);});' +
+      '});<\/script>';
+    win.document.write(html.replace('</body>', `${autoPrint}</body>`));
     win.document.close();
     win.focus();
-    // Meio segundo fixo era uma aposta: com logo da empresa e fotos de produto
-    // numa conexão de celular, o diálogo de impressão abria antes das imagens
-    // chegarem e o papel saía com buracos. Esperar o `load` cobre o caso real;
-    // o timer continua como rede de segurança para quando algum recurso não
-    // resolve nunca (imagem 404 não dispara load).
-    let impresso = false;
-    const imprimir = () => {
-      if (impresso) return;
-      impresso = true;
-      win.print();
-    };
-    win.addEventListener('load', imprimir);
-    setTimeout(imprimir, 3000);
     return;
   }
 
@@ -328,6 +336,37 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
     try { await (document as any).fonts.ready; } catch { /* ignore */ }
   }
 
+  // Paginação decidida AQUI, com as alturas já calculadas pelo navegador.
+  //
+  // O html2pdf fatia a imagem capturada em folhas A4, e imagem não respeita
+  // `page-break-inside` — foi assim que o bloco "Informações para Pagamento"
+  // saiu partido ao meio. Medindo cada bloco antes e marcando onde a página
+  // deve virar, o corte deixa de cair no acaso.
+  //
+  // `.html2pdf__page-break` é a marca que o html2pdf reconhece no modo
+  // `legacy`, que já estava ligado.
+  const alvoDaPaginacao = container.querySelector('.container') ?? container;
+  const filhos = Array.from(alvoDaPaginacao.children).filter(
+    (el) => el instanceof HTMLElement && el.tagName !== 'STYLE',
+  ) as HTMLElement[];
+
+  if (filhos.length > 1) {
+    const blocos = filhos.map((el) => ({
+      altura: el.getBoundingClientRect().height,
+      // Card e tabela são os que não podem partir; o CSS já declara o mesmo,
+      // e aqui a intenção vira medida.
+      indivisivel: el.classList.contains('card') || !!el.querySelector('table'),
+    }));
+
+    const { planPageBreaks } = await import('./pdf-pagination');
+    // Inserir de trás para frente preserva os índices dos anteriores.
+    for (const i of planPageBreaks(blocos).reverse()) {
+      const marca = document.createElement('div');
+      marca.className = 'html2pdf__page-break';
+      filhos[i].parentNode?.insertBefore(marca, filhos[i]);
+    }
+  }
+
   try {
     // Import dinâmico para não pesar o bundle inicial. Falha de rede/timing
     // ("Failed to fetch dynamically imported module") costuma ser passageira —
@@ -385,7 +424,12 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
           y: 0,
         },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
+        // `avoid-all` saiu: ele tenta adivinhar sozinho onde não partir, e é
+        // justamente essa adivinhação que cortava o card de pagamento ao meio.
+        // Agora as quebras são calculadas acima, com as alturas medidas, e
+        // entram como marcas explícitas — que é o que `legacy` lê. `css`
+        // continua para honrar o page-break-* declarado na folha.
+        pagebreak: { mode: ['css', 'legacy'] },
       })
       .outputPdf('blob');
 
