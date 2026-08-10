@@ -1,5 +1,6 @@
 import type { ClaudeTextBlock } from "./anthropic.ts";
 import { exemplaresParaPrompt } from "./comms/exemplars.ts";
+import { statusOsParaPrompt } from "../service-order-status.ts";
 
 export interface PromptRuntimeCtx {
   userName: string;
@@ -13,8 +14,12 @@ export interface PromptRuntimeCtx {
   channel?: "panel" | "whatsapp";
 }
 
-const STATUS_LABELS_TEXT =
-  "draft=Orçamento, open=Aberto, pending=Pendente, approved=Aprovado, scheduled=Agendado, in_progress=Em andamento, waiting_parts=Aguardando peças, waiting_approval=Aguardando aprovação, completed=Concluído, cancelled=Cancelado, invoiced=Faturado, reopened=Reaberto.";
+// MF-AUD-007: esta linha ensinava ao modelo quatro status que o banco REJEITA
+// (`pending`, `waiting_parts`, `waiting_approval`, `reopened`). O modelo aprendia que
+// eram válidos e podia emitir update_service_order_status com um deles — o UPDATE
+// quebrava no CHECK (23514) e o usuário via um erro incompreensível. Agora é gerada da
+// constante única, então o prompt não tem como divergir do banco.
+const STATUS_LABELS_TEXT = statusOsParaPrompt();
 
 /**
  * Bloco ESTÁVEL do system prompt: persona, regras, fluxos, tabela de status,

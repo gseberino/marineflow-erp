@@ -1,5 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+// Fonte única dos status de service_orders, espelhando o CHECK da tabela (MF-AUD-005).
+// Mesmo padrão de import cruzado já usado com _shared/banking/mcc.
+import { STATUS_OS_AGENDAVEIS } from '../../supabase/functions/_shared/service-order-status';
 
 // Tipos de entidade vinculável a uma tarefa (espelha o CHECK de agenda_tasks)
 export type RelatedEntityType =
@@ -158,9 +161,12 @@ export function useSchedulableOrders() {
           clients(name),
           vessels(name)
         `)
-        // Valid schedulable statuses — includes draft/approved so newly created/approved
-        // orders appear in the Agenda scheduling dialog before being assigned a technician
-        .in('status', ['draft', 'pending', 'approved', 'scheduled', 'in_progress', 'waiting_parts', 'waiting_approval', 'reopened'])
+        // MF-AUD-005: a lista era escrita à mão e continha quatro status que o banco
+        // rejeita (`pending`, `waiting_parts`, `waiting_approval`, `reopened`) e — o que
+        // de fato quebrava — NÃO tinha `open`, o status normal de uma OS aberta. Como a
+        // maior parte das OS ativas está em `open`, o dropdown de agendamento aparecia
+        // vazio. Agora vem da constante única, coberta por teste contra o CHECK.
+        .in('status', [...STATUS_OS_AGENDAVEIS])
         .order('created_at', { ascending: false })
         .limit(200);
       if (error) throw error;

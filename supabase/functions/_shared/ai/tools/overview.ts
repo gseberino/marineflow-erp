@@ -1,4 +1,5 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
+import { STATUS_OS_ATIVAS } from "../../service-order-status.ts";
 
 // Macro de LEITURA — "como estão as coisas?" numa chamada só.
 //
@@ -156,7 +157,10 @@ export const overviewTools: ToolDef[] = [
         const { data: activeSos } = await admin
           .from("service_orders")
           .select("id, service_order_number, status, clients(name)")
-          .in("status", ["approved", "scheduled", "in_progress", "waiting_parts", "waiting_approval", "reopened"])
+          // MF-AUD-006: a lista tinha três status inexistentes e faltava `open` — o
+          // agente reportava menos "OS sem próxima ação" do que existiam, ou seja, um
+          // falso "está tudo coberto". Agora vem da constante única.
+          .in("status", [...STATUS_OS_ATIVAS])
           .limit(100);
         const { data: liveTasks } = await admin
           .from("agenda_tasks")

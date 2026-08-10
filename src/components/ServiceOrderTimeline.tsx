@@ -1,4 +1,5 @@
 import { useRecordHistory } from '@/hooks/use-audit-log';
+import { ROTULOS_STATUS_OS } from '../../supabase/functions/_shared/service-order-status';
 import { formatDistanceToNow, format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
@@ -41,17 +42,16 @@ const FIELD_LABELS: Record<string, string> = {
   supplier_id:      'Fornecedor',
 };
 
+// MF-AUD-008: o mapa tinha rótulo para status que não existem (`waiting_parts`,
+// `waiting_approval`, `reopened`, `pending`) e faltavam os reais — `open`,
+// `awaiting_parts`, `awaiting_client`, `draft`, `approved` caíam no fallback e a
+// timeline mostrava a chave crua. Agora vem da fonte única.
+//
+// `paid` fica: a timeline também renderiza mudanças de `payment_status`, que é outra
+// coluna e tem outros valores.
 const STATUS_LABELS: Record<string, string> = {
-  pending:        'Pendente',
-  scheduled:      'Agendada',
-  in_progress:    'Em andamento',
-  waiting_parts:  'Aguardando peças',
-  waiting_approval: 'Aguardando aprovação',
-  completed:      'Concluída',
-  invoiced:       'Faturada',
-  paid:           'Paga',
-  cancelled:      'Cancelada',
-  reopened:       'Reaberta',
+  ...ROTULOS_STATUS_OS,
+  paid: 'Paga',
 };
 
 const PRIORITY_LABELS: Record<string, string> = {
