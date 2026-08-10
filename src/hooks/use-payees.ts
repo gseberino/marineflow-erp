@@ -120,3 +120,30 @@ export function useServiceOrdersVinculaveis() {
     staleTime: 2 * 60_000,
   });
 }
+
+/**
+ * Clientes, só id e nome, para dizer de quem veio uma ENTRADA.
+ *
+ * `receivables.client_id` é NOT NULL: sem escolher aqui, aprovar a receita falha. E o motor
+ * não tem como adivinhar — quem paga por Pix aparece no extrato com o nome da pessoa física
+ * que fez a transferência, que raramente é o nome do cliente cadastrado.
+ *
+ * Existe `useClients()`, mas ele traz `*` de todos. Nesta tela o campo aparece em cada linha
+ * de entrada, então vale carregar só o necessário — e só quando há entrada em tela.
+ */
+export function useClientesParaReceita(ativo = true) {
+  return useQuery({
+    enabled: ativo,
+    queryKey: ['clientes-para-receita'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('clients')
+        .select('id, name')
+        .order('name', { ascending: true })
+        .limit(500);
+      if (error) throw error;
+      return (data ?? []) as Array<{ id: string; name: string }>;
+    },
+    staleTime: 5 * 60_000,
+  });
+}

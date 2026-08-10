@@ -20,6 +20,8 @@ export interface PropostaFinanceira {
   suggested_category: string | null;
   suggested_description: string | null;
   suggested_supplier_id: string | null;
+  /** De quem veio a entrada. Só as propostas de receita usam. */
+  suggested_client_id: string | null;
   dre_group: string | null;
   /** Regra que classificou esta proposta — permite auditar a regra pelo resultado. */
   applied_rule_id: string | null;
@@ -63,6 +65,12 @@ export interface Correcao {
   serviceOrderId?: string | null;
   /** OC que este pagamento quita. */
   purchaseOrderId?: string | null;
+  /**
+   * De quem veio a entrada. `receivables.client_id` é NOT NULL, e o extrato mostra o nome de
+   * quem transferiu — que raramente é o nome do cliente cadastrado. Sem escolher aqui, a
+   * proposta de receita não tem como ser aprovada.
+   */
+  clientId?: string | null;
 }
 
 /**

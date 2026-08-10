@@ -31,7 +31,7 @@ import { useI18n } from '@/i18n';
 import { CategoriaDespesaSelect } from '@/components/CategoriaDespesaSelect';
 import { PayeeFormDialog } from '@/components/PayeeFormDialog';
 import {
-  usePayees, useServiceOrdersVinculaveis, ROTULO_TIPO,
+  usePayees, useServiceOrdersVinculaveis, useClientesParaReceita, ROTULO_TIPO,
   CATEGORIAS_COM_FAVORECIDO, CATEGORIAS_COM_OS,
 } from '@/hooks/use-payees';
 import {
@@ -121,25 +121,50 @@ function IdentificacaoDaTransacao({ tx }: { tx: PropostaFinanceira['bank_transac
  * pró-labore sem dono e R$ 37 mil de peça sem serviço.
  */
 function VinculoDaCategoria({
-  categoria, favorecidoId, osId, onMudar, ocupado,
+  categoria, favorecidoId, osId, clienteId, ehReceita, onMudar, ocupado,
 }: {
   categoria: string;
   favorecidoId: string | null;
   osId: string | null;
-  onMudar: (v: { payeeId?: string | null; serviceOrderId?: string | null }) => void;
+  clienteId: string | null;
+  /** Entrada de dinheiro: pede CLIENTE, não fornecedor. */
+  ehReceita: boolean;
+  onMudar: (v: { payeeId?: string | null; serviceOrderId?: string | null; clientId?: string | null }) => void;
   ocupado: boolean;
 }) {
-  const pedeFavorecido = CATEGORIAS_COM_FAVORECIDO.includes(categoria);
+  const pedeFavorecido = !ehReceita && CATEGORIAS_COM_FAVORECIDO.includes(categoria);
   const pedeOS = CATEGORIAS_COM_OS.includes(categoria);
 
   const { data: favorecidos = [] } = usePayees();
   const { data: ordens = [] } = useServiceOrdersVinculaveis();
+  const { data: clientes = [] } = useClientesParaReceita(ehReceita);
   const [cadastrando, setCadastrando] = useState(false);
 
-  if (!pedeFavorecido && !pedeOS) return null;
+  if (!pedeFavorecido && !pedeOS && !ehReceita) return null;
 
   return (
     <div className="mt-2 flex max-w-lg flex-wrap items-center gap-2">
+      {/* Entrada SEMPRE pede cliente, independente da categoria: receivables.client_id é
+          NOT NULL, então sem esta escolha a aprovação falha com "Escolha o cliente antes de
+          aprovar esta receita". O motor não adivinha — quem paga por Pix aparece no extrato
+          com o nome da pessoa física, que raramente é o nome do cliente cadastrado. */}
+      {ehReceita && (
+        <Select
+          value={clienteId ?? ''}
+          onValueChange={(v) => onMudar({ clientId: v })}
+          disabled={ocupado}
+        >
+          <SelectTrigger className="h-8 max-w-[17rem] text-xs">
+            <SelectValue placeholder="De qual cliente veio?" />
+          </SelectTrigger>
+          <SelectContent>
+            {clientes.map((c) => (
+              <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+
       {pedeFavorecido && (
         <>
           <Select
@@ -328,6 +353,8 @@ function LinhaProposta({
               categoria={categoria}
               favorecidoId={correcao?.payeeId ?? p.suggested_payee_id ?? null}
               osId={correcao?.serviceOrderId ?? p.suggested_service_order_id ?? null}
+              clienteId={correcao?.clientId ?? p.suggested_client_id ?? null}
+              ehReceita={p.kind === 'create_receivable'}
               onMudar={(v) => onCorrigir({ ...correcao, ...v })}
               ocupado={ocupado}
             />
@@ -414,13 +441,14 @@ function LinhaProposta({
  * chega classificada.
  */
 function CartaoDoFavorecido({
-  grupo, categoria, favorecidoId, osId, onMudar, onAprovarLote, onCriarRegra, ocupado,
+  grupo, categoria, favorecidoId, osId, clienteId, onMudar, onAprovarLote, onCriarRegra, ocupado,
   selecionadas, onSelecionarGrupo, children,
 }: {
   grupo: GrupoDeFavorecido;
   categoria: string;
   favorecidoId: string | null;
   osId: string | null;
+  clienteId: string | null;
   onMudar: (c: Correcao) => void;
   onAprovarLote: () => void;
   onCriarRegra: () => void;
@@ -526,6 +554,12 @@ function CartaoDoFavorecido({
             categoria={categoria}
             favorecidoId={favorecidoId}
             osId={osId}
+            clienteId={clienteId}
+            /* Só é grupo de entrada se TODAS forem entrada. Grupo misto (mesmo favorecido
+               com saída e entrada) não pode receber "de qual cliente veio" no cabeçalho —
+               a escolha desceria também para as saídas. */
+            ehReceita={grupo.propostas.length > 0
+              && grupo.propostas.every((p) => p.kind === 'create_receivable')}
             onMudar={(v) => onMudar(v)}
             ocupado={ocupado}
           />
@@ -758,6 +792,7 @@ export function FinanceReviewInbox({
       category: corrigida?.category ?? (unica === SEM_CATEGORIA ? '' : unica),
       payeeId: g.propostas.map((p) => correcoes[p.id]?.payeeId ?? p.suggested_payee_id).find(Boolean) ?? null,
       serviceOrderId: g.propostas.map((p) => correcoes[p.id]?.serviceOrderId ?? p.suggested_service_order_id).find(Boolean) ?? null,
+      clientId: g.propostas.map((p) => correcoes[p.id]?.clientId ?? p.suggested_client_id).find(Boolean) ?? null,
     };
   };
 
@@ -1053,6 +1088,7 @@ export function FinanceReviewInbox({
             key={g.chave}
             grupo={g}
             categoria={estado.category ?? ''}
+            clienteId={estado.clientId ?? null}
             favorecidoId={estado.payeeId ?? null}
             osId={estado.serviceOrderId ?? null}
             onMudar={(c) => corrigirGrupo(g, c)}

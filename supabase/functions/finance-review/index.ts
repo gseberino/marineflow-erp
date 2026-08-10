@@ -88,6 +88,13 @@ interface Correcao {
   serviceOrderId?: string | null;
   /** OC que este pagamento quita. */
   purchaseOrderId?: string | null;
+  /**
+   * De quem veio a entrada. `receivables.client_id` é NOT NULL e o motor não tem como
+   * adivinhar o cliente a partir do extrato com segurança — quem recebeu por Pix aparece
+   * com o nome da pessoa física, não o do cliente cadastrado. Sem este campo, toda proposta
+   * de receita nasceria impossível de aprovar.
+   */
+  clientId?: string | null;
 }
 
 Deno.serve(async (req) => {
@@ -296,14 +303,24 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
   const compraPorChave = new Map(compras.map((c) => [c.chave, c]));
   const ancoras = new Set(compras.map((c) => c.ancora.id));
 
-  // Quem ainda não tem proposta nem lançamento. A entrada de um par entra pela saída,
-  // entrada avulsa fica para a conciliação (ver cabeçalho) e parcela que não é a âncora
-  // entra pela compra — as três somem daqui.
+  // Quem ainda não tem proposta nem lançamento. A entrada de um par entra pela saída e
+  // parcela que não é a âncora entra pela compra — as duas somem daqui.
+  //
+  // ENTRADA AVULSA AGORA ENTRA. Até aqui havia um `return tx.transaction_type === "debit"`
+  // que mandava toda entrada "para a conciliação". A consequência medida em 09/08/2026: 87
+  // créditos somando R$ 628 mil nunca receberam proposta, sumiam da caixa de entrada e
+  // reapareciam na tela de conciliação — que é literalmente o "por que disso?" do gestor.
+  // São os mesmos R$ 628 mil que faltam no DRE.
+  //
+  // A máquina já sabia fazer isso dos dois lados: `montarProposta` devolve
+  // create_receivable para entrada desde sempre, e o approve já trata esse kind. Só este
+  // filtro os mantinha fora. Transferência interna continua protegida: a perna de entrada
+  // sai por `jaCoberta`, então entrada de par não vira receita.
   const elegiveis = transacoes.filter((tx) => {
     if (naFila.has(tx.id) || lancadas.has(tx.id)) return false;
     if (jaCoberta.has(tx.id)) return false;
     if (pernaDe.has(tx.id) && !ancoras.has(tx.id)) return false;
-    return tx.transaction_type === "debit";
+    return tx.transaction_type === "debit" || tx.transaction_type === "credit";
   });
 
   // O corte é sobre os ELEGÍVEIS, não sobre o que veio do banco: as propostas criadas neste
@@ -1256,7 +1273,8 @@ async function aprovar(
         // Receita exige cliente (receivables.client_id é NOT NULL) e, sem ele, o
         // lançamento não teria a quem pertencer. Falhar aqui com motivo legível é melhor
         // que devolver um erro cru de banco para o gestor.
-        if (!p.suggested_client_id) {
+        const clienteId = ov.clientId ?? p.suggested_client_id ?? null;
+        if (!clienteId) {
           throw new Error("Escolha o cliente antes de aprovar esta receita");
         }
         const { data: criado, error: e2 } = await admin.from("receivables").insert({
@@ -1268,7 +1286,7 @@ async function aprovar(
           balance_amount: 0,
           status: "paid",           // entrou no banco: já está recebido
           category: categoria,
-          client_id: p.suggested_client_id,
+          client_id: clienteId,
           bank_transaction_id: p.bank_transaction_id,
         }).select("id").single();
         if (e2) throw e2;

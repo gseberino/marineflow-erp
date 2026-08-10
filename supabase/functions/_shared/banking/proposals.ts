@@ -398,7 +398,12 @@ export function montarProposta(
   historicoPorNome?: Map<string, HistoricoFornecedor>,
 ): Proposta {
   const ehSaida = tx.transaction_type === "debit";
-  const classificacao = classificar(tx);
+  // A lista de termos de `classificar` é 100% de DESPESA — não há uma única categoria de
+  // receita nela. Aplicá-la a uma entrada devolveria, por exemplo, "Peças e materiais /
+  // custo_direto" para um recebimento, e isso entra direto no DRE com cara de certeza.
+  // Entrada fica com "Outras receitas" até uma REGRA sua dizer outra coisa: regra tem
+  // direção e é instrução, não palpite.
+  const classificacao = ehSaida ? classificar(tx) : null;
   const achado = ehSaida ? acharFornecedor(tx, fornecedores) : null;
 
   /**
@@ -442,7 +447,13 @@ export function montarProposta(
   const porFornecedor = achado ? historico?.get(achado.fornecedor.id) : undefined;
   // Fornecedor cadastrado vale mais que nome de extrato: é identidade contra aproximação.
   const porNome = historicoPorNome?.get(chaveDoRecebedor(tx));
-  const aprendido = porFornecedor ?? porNome;
+  // MAS SÓ PARA SAÍDA. Esta memória é construída lendo `payables` — é histórico de DESPESA,
+  // e nada mais. Enquanto entrada nunca chegava aqui isso era inofensivo; agora que chega,
+  // uma empresa de quem compramos E que também nos paga faria a receita herdar
+  // "Peças e materiais / custo_direto". Categoria errada com cara de certeza ninguém revisa,
+  // e o estrago apareceria direto no DRE. Entrada cai para a classificação por texto e, sem
+  // ela, para "Outras receitas" — que é um "não sei" honesto.
+  const aprendido = ehSaida ? (porFornecedor ?? porNome) : undefined;
   if (aprendido) {
     const quem = porFornecedor ? "Este fornecedor" : "Este estabelecimento";
     razoes.push(

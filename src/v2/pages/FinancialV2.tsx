@@ -18,7 +18,7 @@ import { FinancialFilterPanel, applyFilters, defaultFilters, type FinancialFilte
 import { PaymentDialog } from '@/components/PaymentDialog';
 import { PayableFormDialog } from '@/components/PayableFormDialog';
 import { DREPanel } from '@/components/DREPanel';
-import { BankReconciliation } from '@/components/BankReconciliation';
+import { ConciliacaoPanel } from '@/components/ConciliacaoPanel';
 import { BankSourcesPanel } from '@/components/BankSourcesPanel';
 import { FinanceReviewInbox, type SementeDeRegra } from '@/components/FinanceReviewInbox';
 import { FinanceRulesPanel, EditorDeRegra } from '@/components/FinanceRulesPanel';
@@ -342,11 +342,16 @@ export default function FinancialV2() {
                 dois mundos, porque prometia troca de conteúdo e entregava troca de página.
                 Agora é item do menu, onde uma tela inteira deve estar. */}
             <TabsTrigger value="payables">{t.financial.tabPayables}</TabsTrigger>
+            {/* A ORDEM AQUI É O FLUXO DO TRABALHO, e ela mudou.
+                Extrato vem primeiro: é a triagem do que o banco trouxe e ainda não virou
+                lançamento. Conciliação vem depois: confere o que JÁ foi lançado contra o
+                extrato. Antes as duas estavam invertidas e sobrepostas — a aba
+                "Conciliação" listava o extrato inteiro, e a "Caixa de entrada" mostrava
+                2 linhas de 101 porque lia a fila de PROPOSTAS, que só existe para débito.
+                É a separação que QuickBooks (For Review × Reconcile) e NetSuite (Match
+                Bank Data × Reconcile Account Statement) fazem. */}
+            <TabsTrigger value="inbox">Extrato</TabsTrigger>
             <TabsTrigger value="reconciliation">{t.financial.tabReconciliation}</TabsTrigger>
-            {/* Conciliar é ligar dinheiro ao que já existe; a caixa de entrada é o que
-                passou pela conta e nunca virou lançamento. Trabalhos com ritmos
-                diferentes — o usuário pediu para manter separados. */}
-            <TabsTrigger value="inbox">Caixa de entrada</TabsTrigger>
             {/* O que saiu da fila não pode sair do sistema. Sem esta aba, 380 transações
                 tinham virado sumiço — e a suspeita, justa, foi de que a IA as tinha
                 escondido. Toda saída da fila é reversível e diz quem, quando e por quê. */}
@@ -605,11 +610,16 @@ export default function FinancialV2() {
             )}
           </TabsContent>
 
-          {/* ── CONCILIAÇÃO / CAIXA DE ENTRADA / REGRAS / CONTAS / AGING ── */}
-          <TabsContent value="reconciliation" className="mt-4"><BankReconciliation /></TabsContent>
+          {/* ── EXTRATO / CONCILIAÇÃO / REGRAS / CONTAS / AGING ── */}
           <TabsContent value="inbox" className="mt-4">
             <FinanceReviewInbox onCriarRegra={setSementeRegra} />
           </TabsContent>
+          {/* A BankReconciliation (1.727 linhas) foi aposentada aqui por decisão do gestor:
+              ela partia do extrato e chamava aquilo de conciliação. O que ela tinha de bom
+              — tolerância de diferença, conciliação em grupo, criação de cliente na hora —
+              volta em fases seguintes, sobre o modelo certo. O arquivo continua no repo
+              até a F3 terminar, para nada se perder no caminho. */}
+          <TabsContent value="reconciliation" className="mt-4"><ConciliacaoPanel /></TabsContent>
           <TabsContent value="ignoradas" className="mt-4"><IgnoradasPanel /></TabsContent>
           <TabsContent value="fechamento" className="mt-4"><FechamentoPanel /></TabsContent>
           <TabsContent value="cadastro" className="mt-4"><SaudeDoCadastroPanel /></TabsContent>

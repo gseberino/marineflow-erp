@@ -172,6 +172,37 @@ describe("montagem da proposta", () => {
     expect(p.dreGroup).toBe("receita");
   });
 
+  it("entrada NÃO herda categoria de despesa da lista de termos", () => {
+    // A lista de `classificar` é 100% despesa: não há uma categoria de receita nela. Uma
+    // entrada cujo histórico contenha um termo de despesa ("POSTO") não pode virar
+    // "Combustível e deslocamento / custo_direto" — isso entra no DRE com cara de certeza.
+    const saida = montarProposta(tx({ description: "POSTO IPIRANGA COMBUSTIVEL" }), fornecedores);
+    const entrada = montarProposta(
+      tx({ transaction_type: "credit", description: "POSTO IPIRANGA COMBUSTIVEL" }), fornecedores);
+
+    expect(saida.dreGroup).toBe("custo_direto");
+    expect(entrada.dreGroup).toBe("receita");
+    expect(entrada.suggestedCategory).toBe("Outras receitas");
+  });
+
+  it("entrada NÃO herda a memória de fornecedor, que é feita só de despesas", () => {
+    // `montarHistoricoPorFornecedor` lê apenas `payables`. Uma empresa de quem compramos e
+    // que também nos paga faria a receita nascer como "Peças e materiais / custo_direto".
+    const historico = new Map([["f-marine", { categoria: "Peças e materiais", dreGroup: "custo_direto", vezes: 12 }]]);
+    const entrada = montarProposta(
+      tx({
+        transaction_type: "credit",
+        description: "MARINE EXPRESS",
+        counterparty_name: "MARINE EXPRESS COMERCIAL IMPORTADORA E EXPORTADORA LTDA",
+        counterparty_document: "68904101000120",
+      }),
+      fornecedores,
+      historico as never,
+    );
+    expect(entrada.suggestedCategory).toBe("Outras receitas");
+    expect(entrada.dreGroup).toBe("receita");
+  });
+
   it("reconhecer o fornecedor pelo documento aumenta a confiança", () => {
     const semDoc = montarProposta(tx({ description: "MARINE EXPRESS COMERCIAL IMPOR" }), fornecedores);
     const comDoc = montarProposta(
