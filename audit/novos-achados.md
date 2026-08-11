@@ -294,3 +294,35 @@ ninguém (`grep` em `src/` e `supabase/functions/`) — mas existe também uma *
 `service_orders`, cujo default no formulário é **3,5** (`:344,634`). Ou seja, o campo "custo por km" gravado na
 OS pode dizer 3,50 enquanto o total foi calculado a 1,10. **Sugestão:** decidir qual é a chave verdadeira,
 apagar a outra e fazer o formulário gravar a mesma tarifa que usou na conta.
+
+---
+
+## [NOVO-011] Importação de CSV: preço com separador de milhar vira centavos, e "Telefone" vazio apaga o celular
+
+- **Encontrado em:** 11/08/2026, escrevendo a cobertura de teste de `import-detector.ts`
+- **Categoria:** A — **Severidade sugerida:** P1 (a) / P2 (b) · **Status:** registrado, **não corrigido** (regra 3)
+- **Arquivo:linha:** `src/lib/import-detector.ts:170-178` (a) e `:142-143` + `:194-201` (b);
+  entrada pela tela `src/components/ImportWizard.tsx:86-116`
+
+**(a) `1.234,56` é importado como `1.23`.** A conversão é
+`parseFloat(str.replace(',', '.'))` — `replace` com string troca **só a primeira ocorrência** e nada remove o
+ponto de milhar. `"1.234,56"` vira `"1.234.56"`, e `parseFloat` para no segundo ponto: **1.234**. Vale para
+`sale_price`, `cost_price` e `default_price`. O mesmo em `stock_quantity`/`minimum_stock` com `parseInt`:
+`"1.500"` unidades entram como **1**.
+  - **Por que é P1:** é uma carga em lote. O erro entra em centenas de linhas de uma vez, já gravadas,
+    misturadas às certas — e um preço de R$ 1,23 no catálogo não parece "erro de importação", parece cadastro
+    errado. Só aparece quando alguém vender por esse valor.
+  - **Correção sugerida:** normalizar antes de converter — remover separador de milhar e trocar a vírgula
+    decimal (`str.replace(/\./g, '').replace(',', '.')` quando o padrão for pt-BR), decidindo o formato pelo
+    último separador encontrado. Precisa cuidar do caso inverso (`1,234.56` em arquivo en-US).
+
+**(b) Duas colunas mapeadas para `phone`, e a segunda sobrescreve a primeira mesmo vazia.** O mapeamento de
+clientes tem `'Celular': 'phone'` **e** `'Telefone': 'phone'`. `applyMapping` percorre o mapeamento em ordem e
+atribui sempre: se o cadastro tem celular e não tem telefone fixo, o `Telefone` vazio vira `null` e **apaga o
+celular já lido**. É justamente o número que serve para WhatsApp.
+  - **Correção sugerida:** só sobrescrever quando o novo valor não for nulo/vazio (`mapped[t] ??= valor`), ou
+    mapear celular e fixo para campos distintos.
+
+**Cobertura:** `src/lib/import-detector.test.ts` documenta os dois comportamentos com o ID no nome do caso —
+como registro do que acontece hoje, não como aprovação. Quando a correção entrar, esses casos falham e obrigam
+a atualizar a expectativa junto.

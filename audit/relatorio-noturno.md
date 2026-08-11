@@ -338,3 +338,26 @@ física, ICMS do Simples (`CSOSN`) lido igual, e imposto ausente vindo como `und
 uma afirmação ("o fornecedor destacou zero"), `undefined` é silêncio, e a devolução precisa da diferença.
 
 **Gates:** typecheck 0 · vitest **1.046** (eram 1.024; +22) · deno 267 · build OK.
+
+### 5.5 `import-detector.ts` — concluído, **e achou o mais grave da noite**
+
+**Commit:** `test(import): cobre o importador de CSV e registra NOVO-011`
+
+É por aqui que entra catálogo inteiro vindo de outro ERP. 25 casos cobrindo separador, aspas, CRLF, linhas
+irregulares, detecção de formato, contagem de registros e conversão de cada tipo de campo.
+
+**`NOVO-011`, registrado e não corrigido — duas coisas, e a primeira é P1:**
+
+1. **Preço com separador de milhar é destruído: `1.234,56` entra como `1,23`.** A conversão é
+   `parseFloat(str.replace(',', '.'))` — `replace` com string troca **só a primeira ocorrência** e nada tira o
+   ponto de milhar, então `"1.234.56"` é lido até o segundo ponto. Vale para preço de venda, preço de custo e
+   preço de serviço; e em estoque, `"1.500"` unidades entram como **1**. É carga em lote: o erro entra em
+   centenas de linhas de uma vez, já gravadas, misturadas às certas — e R$ 1,23 no catálogo não parece erro de
+   importação, parece cadastro errado. Aparece quando alguém vender por esse valor.
+2. **No cadastro de clientes, `Telefone` vazio apaga o celular.** As duas colunas são mapeadas para o mesmo
+   campo `phone` e a segunda sobrescreve a primeira mesmo quando vem vazia — justamente o número do WhatsApp.
+
+Ambas as correções são de uma linha cada, mas mudam o que já foi importado antes: **vale conferir o catálogo
+atual** por preços suspeitos abaixo de R$ 10 e por clientes sem telefone que deveriam ter celular.
+
+**Gates:** typecheck 0 · vitest **1.070** (eram 1.046; +24) · deno 267 · build OK.
