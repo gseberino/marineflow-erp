@@ -242,6 +242,19 @@ Deno.serve(async (req) => {
     // Ponte OS → payload: quando vem service_order_id e não vieram itens, montamos o
     // destinatário e os itens a partir da Ordem de Serviço (peças). Assim o agente não
     // precisa saber nada de fiscal — ele só diz "de qual OS".
+    // [F-NFSE-01] Mesma ideia, outro documento: para NFS-e a ponte parte dos SERVIÇOS da OS,
+    // não das peças. É a outra metade da separação que o seam `servicos_para_nfse` já
+    // anunciava — peça vai na NF-e, mão de obra vai aqui.
+    if (body.document_type === "nfse" && body.service_order_id && !body.service) {
+      const ponte = await buildNfseBodyFromServiceOrder(admin, body);
+      if (!ponte.ok) return jr({ error: ponte.error, details: ponte.details }, ponte.status);
+      Object.assign(body, ponte.body);
+      if (body.action === "prepare") {
+        return jr({ ok: true, data: { resumo: ponte.resumo, payload_pronto: true } });
+      }
+      body.__resumo_os = ponte.resumo;
+    }
+
     if (body.service_order_id && !Array.isArray(body.items)) {
       const ponte = await buildBodyFromServiceOrder(admin, body);
       if (!ponte.ok) return jr({ error: ponte.error }, ponte.status);
@@ -697,6 +710,152 @@ async function handleHomolog(admin: any, body: any): Promise<Response> {
 }
 
 // deno-lint-ignore no-explicit-any
+/**
+ * [F-NFSE-01] Ponte Ordem de Serviço → corpo da NFS-e.
+ *
+ * A outra metade da separação que o seam `servicos_para_nfse` já anunciava: peça vai na
+ * NF-e, mão de obra vem para cá. Monta o tomador a partir do cliente e o serviço a partir
+ * das linhas de SERVIÇO da OS (`service_order_services`), nunca das peças.
+ *
+ * A CONSOLIDAÇÃO, E POR QUE ELA PODE SE RECUSAR A ACONTECER
+ * O contrato da NFS-e tem UM objeto `service`, não uma lista. Uma OS com cinco linhas de
+ * mão de obra vira UMA nota, com a descrição juntando as linhas e o valor somado. Isso é
+ * fiel enquanto todas as linhas forem do mesmo código de tributação.
+ *
+ * Quando os códigos divergem, esta função PARA e explica. Escolher um dos códigos seria
+ * declarar à prefeitura um serviço que não foi o prestado, e o erro sobreviveria à nota:
+ * ninguém confere código de tributação depois de autorizado. Uma nota por código é a saída,
+ * e quem decide isso é a pessoa, não o sistema.
+ */
+// deno-lint-ignore no-explicit-any
+async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
+  | { ok: true; body: Record<string, unknown>; resumo: Record<string, unknown> }
+  | { ok: false; error: string; status: number; details?: unknown }
+> {
+  const soId = String(body.service_order_id);
+  const { data: so } = await admin
+    .from("service_orders")
+    .select("id, service_order_number, status, client_id")
+    .eq("id", soId)
+    .maybeSingle();
+  if (!so) return { ok: false, error: "Ordem de serviço não encontrada.", status: 404 };
+  if (so.status === "cancelled") {
+    return { ok: false, error: "OS cancelada não pode gerar nota.", status: 422 };
+  }
+  if (!so.client_id) {
+    return { ok: false, error: "Essa OS não tem cliente vinculado — sem tomador não há NFS-e.", status: 422 };
+  }
+
+  const { data: cli } = await admin
+    .from("clients")
+    .select("name, cpf_cnpj, email, address_line_1, address_number, address_complement, neighborhood, city, state, postal_code")
+    .eq("id", so.client_id)
+    .maybeSingle();
+  if (!cli) return { ok: false, error: "Cliente da OS não encontrado.", status: 404 };
+
+  // Linhas de serviço COM o cadastro fiscal junto — é dele que saem código, CNAE e alíquota.
+  const { data: linhas } = await admin
+    .from("service_order_services")
+    .select("name_snapshot, description_snapshot, quantity, unit_price_snapshot, line_total, services(national_tax_code, service_code, cnae, iss_rate, iss_withheld)")
+    .eq("service_order_id", soId);
+
+  const lista = ((linhas as any[]) || []).filter((l) => Number(l.line_total) > 0);
+  if (lista.length === 0) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Essa OS não tem linhas de serviço com valor — a NFS-e é documento de serviço. "
+        + "Se o que há são peças, o documento é a NF-e.",
+    };
+  }
+
+  // Sem cadastro fiscal não há nota. Dizer QUAIS faltam evita a caça ao serviço errado.
+  const semCadastro = lista.filter((l) => !l.services?.national_tax_code);
+  if (semCadastro.length > 0) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Serviço sem cadastro fiscal: "
+        + semCadastro.map((l) => `"${l.name_snapshot}"`).join(", ")
+        + ". Preencha o código de tributação nacional (6 dígitos), o CNAE e a alíquota de ISS "
+        + "no cadastro do serviço antes de emitir.",
+      details: { servicos_sem_cadastro: semCadastro.map((l) => l.name_snapshot) },
+    };
+  }
+
+  const codigos = [...new Set(lista.map((l) => String(l.services.national_tax_code)))];
+  if (codigos.length > 1) {
+    return {
+      ok: false,
+      status: 422,
+      error: `Esta OS tem serviços de códigos de tributação diferentes (${codigos.join(", ")}). `
+        + "A NFS-e declara UM código por nota, então não dá para juntar tudo numa só — "
+        + "escolher um deles declararia à prefeitura um serviço que não foi o prestado. "
+        + "Emita uma nota por código, selecionando os serviços de cada uma.",
+      details: { codigos_encontrados: codigos },
+    };
+  }
+
+  const fiscal = lista[0].services;
+  const total = lista.reduce((a, l) => a + (Number(l.line_total) || 0), 0);
+
+  // Descrição: uma linha por serviço, com quantidade quando maior que 1. A prefeitura e o
+  // cliente leem isto — "Serviços diversos" não serve a nenhum dos dois.
+  const descricao = lista
+    .map((l) => {
+      const q = Number(l.quantity) || 1;
+      const nome = l.name_snapshot || l.description_snapshot || "Serviço";
+      return q > 1 ? `${nome} (${q}x)` : nome;
+    })
+    .join("; ")
+    .slice(0, 500);
+
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+
+  return {
+    ok: true,
+    body: {
+      client_id: so.client_id,
+      origin_type: "service_order",
+      origin_id: so.id,
+      service: {
+        description: descricao,
+        national_tax_code: fiscal.national_tax_code,
+        service_code: fiscal.service_code ?? null,
+        cnae: fiscal.cnae ?? null,
+        iss_rate: fiscal.iss_rate ?? null,
+        iss_withheld: fiscal.iss_withheld === true,
+      },
+      taker: {
+        name: cli.name,
+        document: cli.cpf_cnpj,
+        email: cli.email,
+        address: {
+          street: cli.address_line_1,
+          number: cli.address_number,
+          complement: cli.address_complement,
+          district: cli.neighborhood,
+          city_name: cli.city,
+          state_code: cli.state,
+          postal_code: cli.postal_code,
+        },
+      },
+      amounts: { service_amount: r2(total) },
+    },
+    resumo: {
+      os: so.service_order_number,
+      cliente: cli.name,
+      servicos_na_nota: lista.length,
+      total_servicos: r2(total),
+      codigo_de_tributacao: fiscal.national_tax_code,
+      cnae: fiscal.cnae,
+      iss_rate: fiscal.iss_rate,
+      // Simétrico ao aviso da NF-e: quem emite precisa saber o que NÃO entrou.
+      aviso_nfe: "As peças da OS não entram na NFS-e — elas são NF-e, documento de produto.",
+    },
+  };
+}
+
 /**
  * [F-NFSE-01] Monta e valida o payload da NFS-e a partir do cadastro + do corpo da chamada.
  *
