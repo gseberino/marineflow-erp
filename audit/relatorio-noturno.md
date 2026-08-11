@@ -30,10 +30,10 @@ aqui e pular, nunca decidir.
 `session/noturno`, no worktree `marineflow-erp--noturno`. As únicas conversas com o banco foram dois `SELECT`
 (chaves `pdf_options_%` e as colunas de `service_orders`), nenhuma escrita.
 
-**Gates no HEAD:** typecheck **0** · vitest **1.094** (eram 904 no começo da noite: **+190**) · deno **267** ·
+**Gates no HEAD:** typecheck **0** · vitest **1.111** (eram 904 no começo da noite: **+207**) · deno **267** ·
 build **OK**.
 
-**Quatro defeitos reais foram encontrados** — todos registrados em `audit/novos-achados.md` e **nenhum
+**Cinco defeitos reais foram encontrados** — todos registrados em `audit/novos-achados.md` e **nenhum
 corrigido**, conforme a regra 3. Em ordem de gravidade:
 
 | ID | O quê | Onde dói |
@@ -42,6 +42,7 @@ corrigido**, conforme a regra 3. Em ordem de gravidade:
 | **NOVO-009** | Preço de venda vira **3,6 × 10¹⁸** quando margem+imposto+comissão dão exatamente 100% | O número entra no campo de preço do produto enquanto o aviso "impossível" está na tela |
 | **NOVO-010** | Deslocamento: **4 técnicos custam menos que 1**; e o botão de calcular ignora a tarifa configurada | Toda OS de campo |
 | **NOVO-008** | A view do técnico fecha os valores da OS, mas os **itens** (peça/serviço) continuam com preço no mesmo embed | "O técnico não vê valores" vale do total para cima |
+| **NOVO-012** | Captura rápida da Agenda: **"comprar 3 cabos"** vira tarefa das 03:00 sem o "3"; `30/02` vira 02/03/2027 | Toda tarefa criada pela captura rápida com número no texto |
 
 **Duas decisões esperam por você** (não decidi nenhuma):
 1. **T3.2** — o diálogo de PDF perdeu também o cache local (`localStorage`), não só a escrita em
@@ -418,3 +419,23 @@ nada — só grava o dado torto, e ninguém revisa cadastro antigo.
   a errada**, e agora existe teste dos dois lados mostrando isso.
 
 **Gates:** typecheck 0 · vitest **1.094** (eram 1.070; +24) · deno 267 · build OK.
+
+### 5.7 `quick-task-parser.ts` — concluído, **e achou mais dois**
+
+**Commit:** `test(agenda): cobre a captura rapida e registra NOVO-012`
+
+É o caminho sem IA da Agenda: "amanhã 14h ligar pro João" vira tarefa pronta. Determinístico e com o relógio
+injetável, então dá para testar cada regra sem depender do dia em que a suíte roda. 22 casos: hoje/amanhã com
+e sem til, dia da semana indo para a próxima ocorrência (inclusive a regra de que "terça" numa terça é a
+semana que vem), dd/mm com e sem ano, ano de dois dígitos, hora nas quatro formas (`14h`, `14h30`, `14:30`,
+`às 9`), hora sem dia significando hoje, prioridade e limpeza do título.
+
+**`NOVO-012`, registrado e não corrigido:**
+
+1. **"comprar 3 cabos" vira uma tarefa das 03:00 chamada "comprar cabos".** O reconhecimento de hora aceita
+   número solto de 0 a 23 sem exigir `h`, `:` ou "às" — e numa captura rápida, número solto quase sempre é
+   **quantidade**. Aparece um horário que ninguém pediu **e** some do título o dado que importava.
+2. **`30/02` vira 02/03 do ano seguinte, sem aviso.** `new Date(2026, 1, 30)` não é inválida — o JavaScript
+   normaliza para 2 de março; como já passou, a regra do "ano que vem" empurra para 2027.
+
+**Gates:** typecheck 0 · vitest **1.111** (eram 1.094; +17) · deno 267 · build OK.

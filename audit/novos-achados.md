@@ -326,3 +326,30 @@ celular já lido**. É justamente o número que serve para WhatsApp.
 **Cobertura:** `src/lib/import-detector.test.ts` documenta os dois comportamentos com o ID no nome do caso —
 como registro do que acontece hoje, não como aprovação. Quando a correção entrar, esses casos falham e obrigam
 a atualizar a expectativa junto.
+
+---
+
+## [NOVO-012] Captura rápida da Agenda: quantidade vira horário, e data inexistente vira outro ano
+
+- **Encontrado em:** 11/08/2026, escrevendo a cobertura de teste de `quick-task-parser.ts`
+- **Categoria:** A — **Severidade sugerida:** P2 (a) / P3 (b) · **Status:** registrado, **não corrigido**
+- **Arquivo:linha:** `src/lib/quick-task-parser.ts:61-69` (a) e `:47-56` (b)
+
+**(a) "comprar 3 cabos" vira uma tarefa das 03:00 chamada "comprar cabos".** O reconhecimento de hora aceita
+qualquer número solto de 0 a 23 (`/\s(?:[àa]s\s+)?(\d{1,2})(?:[:h](\d{2}))?h?\s/`), sem exigir o `h`, os dois
+pontos ou o "às". Numa captura rápida, número solto quase sempre é **quantidade**, não horário. O estrago é
+duplo: aparece um horário que ninguém pediu **e** some do título o dado que importava. "comprar 10
+disjuntores" → 10:00, "comprar disjuntores".
+  - **Correção sugerida:** exigir marcador de hora — `h`, `:` ou o prefixo "às"/"as". Número puro só seria
+    hora se estivesse no começo do texto (`"14 ligar pro João"` é raro; `"comprar 3 cabos"` não).
+
+**(b) `30/02` vira 02/03 do ano seguinte, sem aviso.** `new Date(2026, 1, 30)` não é inválida — o JavaScript
+normaliza para 2 de março. A checagem `Number.isNaN(cand.getTime())` nunca dispara. Como a data normalizada já
+passou, a regra do "se passou, é do ano que vem" empurra para **2027**: a tarefa nasce a mais de um ano de
+distância. Mesmo caminho para `31/11`.
+  - **Correção sugerida:** conferir depois de construir se `getDate()`/`getMonth()` batem com o que foi
+    digitado; se não, tratar como "sem data" e deixar o texto no título.
+
+**Cobertura:** `src/lib/quick-task-parser.test.ts` documenta os dois com o ID no nome do bloco, junto de 20
+casos do comportamento correto (hoje/amanhã, dia da semana indo para a próxima ocorrência, dd/mm com e sem
+ano, hora nas quatro formas, prioridade, limpeza do título).
