@@ -353,3 +353,29 @@ distância. Mesmo caminho para `31/11`.
 **Cobertura:** `src/lib/quick-task-parser.test.ts` documenta os dois com o ID no nome do bloco, junto de 20
 casos do comportamento correto (hoje/amanhã, dia da semana indo para a próxima ocorrência, dd/mm com e sem
 ano, hora nas quatro formas, prioridade, limpeza do título).
+
+---
+
+## [NOVO-013] Exportação de CSV: coluna "Marina" repete o nome do barco, aspas mal escapadas e injeção de fórmula
+
+- **Encontrado em:** 11/08/2026, escrevendo a cobertura de teste de `export-utils.ts`
+- **Categoria:** A (a, b) / G-segurança (c) — **Severidade sugerida:** P2 (a) / P3 (b) / P2 (c)
+- **Status:** registrado, **não corrigido** (regra 3)
+- **Arquivo:linha:** `src/lib/export-utils.ts:80` (a), `:20-21` (b), `:16-23` (c)
+
+**(a) No export de embarcações, a coluna "Marina" lê a chave `name`** — que é o nome da **embarcação**. A
+planilha sai com o nome do barco repetido em duas colunas e **nenhuma informação de marina**. Provável
+copiar-e-colar: as duas entradas são `key: 'name'`. A correção depende de como a consulta traz a marina
+(`marinas.name` embedado precisaria de uma chave própria ou de um `transform`).
+
+**(b) Aspas são escapadas mas o campo não é envolvido.** `str.replace(/"/g, '""')` roda sempre, e o envelope
+`"…"` só é aplicado quando há `;` ou quebra de linha. Um produto chamado `cabo "flex" 6mm` chega ao Excel como
+`cabo ""flex"" 6mm`. **Correção:** envolver sempre que a string contiver aspas, além de `;` e `\n`.
+
+**(c) Injeção de fórmula (CSV injection).** Nenhum campo é neutralizado, então um valor de cadastro que
+comece com `=`, `+`, `-` ou `@` é interpretado como **fórmula** ao abrir a planilha. O conteúdo vem do
+usuário (nome, notas, endereço) e o arquivo **sai da empresa** — vai para o contador, para o cliente, para
+outro sistema. **Correção usual:** prefixar com apóstrofo (`'`) ou envolver em aspas com um caractere neutro
+antes do sinal, quando o valor começar com um desses quatro.
+
+**Cobertura:** `src/lib/export-utils.test.ts` — 14 casos, sendo os três acima marcados com o ID.

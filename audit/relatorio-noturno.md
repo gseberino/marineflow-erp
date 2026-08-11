@@ -30,10 +30,10 @@ aqui e pular, nunca decidir.
 `session/noturno`, no worktree `marineflow-erp--noturno`. As únicas conversas com o banco foram dois `SELECT`
 (chaves `pdf_options_%` e as colunas de `service_orders`), nenhuma escrita.
 
-**Gates no HEAD:** typecheck **0** · vitest **1.111** (eram 904 no começo da noite: **+207**) · deno **267** ·
+**Gates no HEAD:** typecheck **0** · vitest **1.125** (eram 904 no começo da noite: **+221**) · deno **267** ·
 build **OK**.
 
-**Cinco defeitos reais foram encontrados** — todos registrados em `audit/novos-achados.md` e **nenhum
+**Seis defeitos reais foram encontrados** — todos registrados em `audit/novos-achados.md` e **nenhum
 corrigido**, conforme a regra 3. Em ordem de gravidade:
 
 | ID | O quê | Onde dói |
@@ -42,6 +42,7 @@ corrigido**, conforme a regra 3. Em ordem de gravidade:
 | **NOVO-009** | Preço de venda vira **3,6 × 10¹⁸** quando margem+imposto+comissão dão exatamente 100% | O número entra no campo de preço do produto enquanto o aviso "impossível" está na tela |
 | **NOVO-010** | Deslocamento: **4 técnicos custam menos que 1**; e o botão de calcular ignora a tarifa configurada | Toda OS de campo |
 | **NOVO-008** | A view do técnico fecha os valores da OS, mas os **itens** (peça/serviço) continuam com preço no mesmo embed | "O técnico não vê valores" vale do total para cima |
+| **NOVO-013** | Export de CSV: coluna "Marina" repete o nome do barco; aspas mal escapadas; **injeção de fórmula** | Arquivo que sai da empresa — contador, cliente, outro sistema |
 | **NOVO-012** | Captura rápida da Agenda: **"comprar 3 cabos"** vira tarefa das 03:00 sem o "3"; `30/02` vira 02/03/2027 | Toda tarefa criada pela captura rápida com número no texto |
 
 **Duas decisões esperam por você** (não decidi nenhuma):
@@ -439,3 +440,24 @@ semana que vem), dd/mm com e sem ano, ano de dois dígitos, hora nas quatro form
    normaliza para 2 de março; como já passou, a regra do "ano que vem" empurra para 2027.
 
 **Gates:** typecheck 0 · vitest **1.111** (eram 1.094; +17) · deno 267 · build OK.
+
+### 5.8 `export-utils.ts` — concluído, **e achou mais três**
+
+**Commit:** `test(export): cobre a exportacao de CSV e registra NOVO-013`
+
+Todo "Exportar" de cadastro passa por aqui, e o arquivo gerado **sai da empresa** — contador, planilha de
+conferência, às vezes outro sistema. Estrutura errada não dá erro em tela: dá coluna deslocada na planilha de
+outra pessoa. 14 casos: BOM (sem ele o Excel abre com acentuação quebrada), ponto e vírgula, envelope de
+aspas quando há separador ou quebra de linha, nulo virando campo vazio em vez de "null", `transform` por
+coluna, lista vazia gerando só cabeçalho.
+
+**`NOVO-013`, registrado e não corrigido:**
+
+1. **No export de embarcações, a coluna "Marina" repete o nome do barco.** As duas entradas do catálogo usam
+   `key: 'name'` — a planilha sai com o nome da embarcação duplicado e **nenhuma informação de marina**.
+2. **Aspas são escapadas mas o campo não é envolvido:** `cabo "flex" 6mm` chega ao Excel como
+   `cabo ""flex"" 6mm`.
+3. **Injeção de fórmula:** um valor de cadastro que comece com `=`, `+`, `-` ou `@` é executado como fórmula
+   ao abrir a planilha. O conteúdo vem do usuário e o arquivo sai da empresa.
+
+**Gates:** typecheck 0 · vitest **1.125** (eram 1.111; +14) · deno 267 · build OK.
