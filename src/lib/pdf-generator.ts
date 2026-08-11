@@ -14,6 +14,16 @@ export type PDFOptions = {
   showSignature: boolean;
   // Optional: include product images in parts table
   showProductImages?: boolean;
+  /**
+   * Via de execução (NOVO-006b): a OS impressa para quem vai executar o serviço, sem NENHUM
+   * valor — nem unitário, nem subtotal, nem total, nem condição de pagamento, nem dados
+   * bancários. Existe porque a folha que vai para o campo circula por marina, terceiro e
+   * ajudante, e o preço combinado com o cliente não tem por que viajar junto.
+   *
+   * É diferente de desmarcar `showServicePrices`/`showPartsPrices`: aqueles escondem a coluna
+   * unitária e mantêm subtotal e total. Aqui não sobra número nenhum.
+   */
+  hideFinancials?: boolean;
   // Invoice-only
   showBankDetails?: boolean;
   showPaymentInstructions?: boolean;
@@ -33,6 +43,7 @@ export const DEFAULT_PDF_OPTIONS: PDFOptions = {
   showTerms: true,
   showSignature: true,
   showProductImages: false,
+  hideFinancials: false,
   showBankDetails: true,
   showPaymentInstructions: true,
 };
@@ -527,8 +538,12 @@ const DOC_TYPE_FILENAME_LABEL: Record<PDFDocumentType, string> = {
  * Monta o nome do arquivo PDF a partir do tipo de documento, número da OS,
  * cliente e embarcação/motorhome. Ex.: "OrdemServico_OS-00123_Joao-Silva_Lancha-Azul.pdf"
  */
-export function buildPDFFilename(data: PDFData): string {
+export function buildPDFFilename(data: PDFData, options?: PDFOptions): string {
   const parts: string[] = [DOC_TYPE_FILENAME_LABEL[data.documentType] || 'Documento'];
+  // A via de execução tem que se distinguir no nome do arquivo: as duas versões da MESMA OS
+  // acabam na mesma pasta de downloads, e a diferença entre elas é justamente o que não pode
+  // ir para a mão errada (NOVO-006b).
+  if (options?.hideFinancials && data.documentType === 'service_order') parts.push('Via-Execucao');
   const soNumber = data.serviceOrder?.service_order_number;
   if (soNumber) parts.push(slugifyForFilename(String(soNumber)));
   const clientName = slugifyForFilename(data.client?.name || '');
@@ -546,7 +561,7 @@ export function buildPDFFilename(data: PDFData): string {
  */
 export async function downloadPDF(data: PDFData, options: PDFOptions): Promise<void> {
   const blob = await generatePDFBlob(data, options);
-  const filename = buildPDFFilename(data);
+  const filename = buildPDFFilename(data, options);
   const url = URL.createObjectURL(blob);
   try {
     const a = document.createElement('a');
@@ -1030,7 +1045,10 @@ function buildPaymentHistorySection(so: PDFData['serviceOrder']): string {
 
 function buildOrderHTML(data: PDFData, options: PDFOptions): string {
   const isQuote = data.documentType === 'quote';
-  const docTypeLabel = isQuote ? 'Orçamento' : 'Ordem de Serviço';
+  // Via de execução (NOVO-006b): documento para o campo, sem valor nenhum. Um orçamento sem
+  // preço não é um documento — é um mal-entendido —, então a opção só vale para a OS.
+  const semValores = !!options.hideFinancials && !isQuote;
+  const docTypeLabel = isQuote ? 'Orçamento' : semValores ? 'Ordem de Serviço — Via de Execução' : 'Ordem de Serviço';
   const docNumber = data.serviceOrder.service_order_number;
 
   const billingUnitLabel: Record<string, string> = {
@@ -1056,8 +1074,9 @@ function buildOrderHTML(data: PDFData, options: PDFOptions): string {
     <tr>
       <td style="font-weight:600;">${esc(s.name)}${s.description ? `<div style="font-weight:400;color:var(--pdf-text-muted);font-size:9px;margin-top:2px;">${esc(s.description)}</div>` : ''}</td>
       <td style="text-align:center;">${s.quantity} ${esc(billingUnitLabel[s.billing_unit] || s.billing_unit)}</td>
+      ${semValores ? '' : `
       ${options.showServicePrices ? `<td style="text-align:right;">${fmtCurrency(s.unit_price)}</td>` : ''}
-      <td style="text-align:right;font-weight:600;">${fmtCurrency(s.line_total)}</td>
+      <td style="text-align:right;font-weight:600;">${fmtCurrency(s.line_total)}</td>`}
     </tr>
   `).join('');
 
@@ -1078,8 +1097,9 @@ function buildOrderHTML(data: PDFData, options: PDFOptions): string {
     <tr>
       <td>${itemCell}</td>
       <td style="text-align:center;">${p.quantity}</td>
+      ${semValores ? '' : `
       ${options.showPartsPrices ? `<td style="text-align:right;">${fmtCurrency(p.unit_price)}</td>` : ''}
-      <td style="text-align:right;font-weight:600;">${fmtCurrency(p.line_total)}</td>
+      <td style="text-align:right;font-weight:600;">${fmtCurrency(p.line_total)}</td>`}
     </tr>
   `;}).join('');
 
@@ -1099,7 +1119,7 @@ function buildOrderHTML(data: PDFData, options: PDFOptions): string {
     </div>
   ` : '';
 
-  const summaryRows = [
+  const summaryRows = semValores ? '' : [
     data.services.length > 0 ? `<tr><td>Subtotal Serviços</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.labor_cost_total)}</td></tr>` : '',
     data.parts.length > 0 ? `<tr><td>Subtotal Peças</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.parts_cost_total)}</td></tr>` : '',
     options.showTravelCost && data.serviceOrder.travel_cost_total > 0 ? `<tr><td>Deslocamento / Logística</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.travel_cost_total)}</td></tr>` : '',
@@ -1127,6 +1147,12 @@ function buildOrderHTML(data: PDFData, options: PDFOptions): string {
 
   const body = `
 ${companyHeaderHTML(data.company, docTypeLabel, docNumber)}
+
+${semValores ? `
+<div style="margin:0 0 12px;padding:8px 12px;border:1px dashed var(--pdf-border);border-radius:6px;background:var(--pdf-bg-light);font-size:10px;color:var(--pdf-text-muted);">
+  <strong style="color:var(--pdf-primary);text-transform:uppercase;">Via de execução</strong> — documento de campo, sem valores.
+  Para a via com preços, condições de pagamento e dados bancários, gere a versão completa desta mesma OS.
+</div>` : ''}
 
 <div class="grid">
   <div class="card">
@@ -1193,10 +1219,11 @@ ${data.services.length > 0 ? `
 <table>
   <thead>
     <tr>
-      <th style="width:55%;">Descrição Técnica</th>
-      <th style="width:15%;text-align:center;">Qtd/Unid</th>
+      <th style="width:${semValores ? '80' : '55'}%;">Descrição Técnica</th>
+      <th style="width:${semValores ? '20' : '15'}%;text-align:center;">Qtd/Unid</th>
+      ${semValores ? '' : `
       ${options.showServicePrices ? '<th style="width:15%;text-align:right;">Unitário</th>' : ''}
-      <th style="width:15%;text-align:right;">Subtotal</th>
+      <th style="width:15%;text-align:right;">Subtotal</th>`}
     </tr>
   </thead>
   <tbody>${serviceRows}</tbody>
@@ -1208,10 +1235,11 @@ ${data.parts.length > 0 ? `
 <table>
   <thead>
     <tr>
-      <th style="width:55%;">Item / Especificação</th>
-      <th style="width:15%;text-align:center;">Qtd</th>
+      <th style="width:${semValores ? '80' : '55'}%;">Item / Especificação</th>
+      <th style="width:${semValores ? '20' : '15'}%;text-align:center;">Qtd</th>
+      ${semValores ? '' : `
       ${options.showPartsPrices ? '<th style="width:15%;text-align:right;">Unitário</th>' : ''}
-      <th style="width:15%;text-align:right;">Subtotal</th>
+      <th style="width:15%;text-align:right;">Subtotal</th>`}
     </tr>
   </thead>
   <tbody>${partsRows}</tbody>
@@ -1225,6 +1253,7 @@ ${!isQuote && data.serviceOrder.technical_notes ? `
 </div>
 ` : ''}
 
+${semValores ? '' : `
 <div style="display:flex;justify-content:flex-end;">
   <div style="width:300px;">
     <table class="summary-table">
@@ -1248,9 +1277,9 @@ ${data.serviceOrder.financial_notes ? `
   <div class="section-title">Observações Financeiras</div>
   <div style="font-size:10px;line-height:1.6;color:var(--pdf-text-main);">${esc(data.serviceOrder.financial_notes)}</div>
 </div>
-` : ''}
+` : ''}`}
 
-${options.showBankDetails !== false && data.bank && (data.bank.bank_name || data.bank.pix_key) ? `
+${!semValores && options.showBankDetails !== false && data.bank && (data.bank.bank_name || data.bank.pix_key) ? `
 <div class="card" style="margin-top:20px; background:rgba(212, 175, 55, 0.03); border:1px solid rgba(212, 175, 55, 0.2);">
   <div class="section-title">Informações para Pagamento${data.serviceOrder.payment_method_preferred ? ` — ${PAYMENT_METHOD_LABELS[data.serviceOrder.payment_method_preferred] || data.serviceOrder.payment_method_preferred}` : ''}</div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;font-size:10px;">

@@ -17,7 +17,7 @@ aqui e pular, nunca decidir.
 |---|---|---|
 | 0 | Mover o lint do `ci.yml` para workflow próprio | ✅ concluída |
 | 1 | T3.2 — preferências de PDF (decisão #4) | ✅ concluída |
-| 2 | NOVO-006b — PDF de execução sem bloco financeiro | ⏳ pendente |
+| 2 | NOVO-006b — PDF de execução sem bloco financeiro | ✅ concluída |
 | 3 | T3.8 — paridade i18n pt-BR × en (MF-AUD-030) | ⏳ pendente |
 | 4 | NOVO-006a — view de `service_orders` sem valores | ⏳ pendente |
 | 5 | Fila infinita — cobertura de teste em módulos categoria I | ⏳ pendente |
@@ -99,3 +99,45 @@ commit imediatamente anterior a esta noite. As duas investigações convergem.
 **Provei que o teste pega a regressão:** reintroduzi a persistência (localStorage + upsert) no diálogo e rodei —
 2 dos 5 casos de `PDFOptionsDialog.no-persist.test.tsx` falharam, exatamente os dois que cobrem escrita. Depois
 revertido; o arquivo no commit é o correto.
+
+---
+
+## 2 — NOVO-006b · Via de execução da OS (PDF sem financeiro) — concluída
+
+**Commit:** `feat(pdf): NOVO-006b via de execucao da OS, sem valor nenhum`
+
+**O que é:** uma opção no diálogo de PDF da **OS** — "Via de execução (sem valores)" — que gera a mesma ordem
+de serviço sem nenhum número de dinheiro: sem unitário, sem subtotal, sem quadro de totais, sem condição de
+pagamento, sem histórico de pagamentos, sem observações financeiras e sem dados bancários/PIX. Fica tudo que
+quem executa precisa: relato do problema, levantamento técnico, serviços com quantidade, peças com SKU e
+quantidade, conclusão técnica, fotos, assinaturas.
+
+**Decisões de desenho (minhas, declaradas):**
+- **Só OS, nunca orçamento.** Orçamento sem preço não é documento, é mal-entendido. A opção nem aparece para
+  orçamento, e se for forçada por código o gerador a ignora.
+- **Nunca é padrão da empresa.** É escolha de um documento: aparece no diálogo, não na tela de padrão, e o
+  diálogo força `hideFinancials: false` ao abrir. Um padrão que apagasse valores sem ninguém pedir seria pior
+  que o problema.
+- **Com ela marcada, os outros toggles ficam desabilitados** — eles decidem *quais* valores aparecem, e aqui
+  não aparece nenhum. Deixá-los clicáveis prometeria um efeito inexistente.
+- **O nome do arquivo muda** (`OrdemServico_Via-Execucao_OS-00777_...`). As duas versões da mesma OS caem na
+  mesma pasta de downloads, e a diferença entre elas é justamente o que não pode ir para a mão errada.
+- **Os termos continuam saindo** se `showTerms` estiver ligado: são garantia e condições gerais, não valores.
+  Se você preferir a folha de campo sem eles, é desmarcar na hora — ou me dizer, que eu inverto o padrão.
+
+**Como o teste segura isso (16 casos):** a asserção principal não lista blocos, varre o HTML inteiro atrás de
+`R$` e de **cada valor do caso em três formatações** (`1.234,56`, `1234.56`, `1234,56`). Testar bloco a bloco
+deixaria passar o próximo bloco novo com dinheiro dentro. E há **contraprova**: o mesmo documento sem a opção
+tem que mostrar tudo — sem isso, um gerador que devolvesse página em branco passaria em todos os outros casos.
+
+**Gates:** typecheck 0 · vitest **943** (eram 926; +17) · deno 267 · build OK.
+
+**Para a revisão matinal:**
+1. Gerar uma via de execução de uma OS real e conferir a olho: nenhum número de dinheiro, e a faixa "Via de
+   execução" no topo.
+2. Conferir que a via completa continua idêntica ao que era (a contraprova cobre isso em teste, mas o
+   documento renderizado só o navegador mostra).
+3. Decidir sobre os termos na via de campo (parágrafo acima).
+4. Esta é a metade **do documento** do NOVO-006. A metade **do banco** é a tarefa 4 (view sem colunas de
+   valor): enquanto ela não for aplicada, o técnico continua vendo os valores **na tela**, mesmo podendo
+   imprimir a via sem eles.

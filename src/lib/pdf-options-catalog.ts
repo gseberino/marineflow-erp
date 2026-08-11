@@ -26,11 +26,16 @@ type CatalogEntry = {
   docTypes: PDFDocumentType[];
   /** só entra na lista do diálogo quando o documento tem peça com foto */
   requiresProductImages?: boolean;
+  /** escolha de um documento específico — não faz sentido como padrão da empresa */
+  perDocumentOnly?: boolean;
+  /** quando ligada, esvazia as demais: os outros toggles perdem efeito */
+  overridesOthers?: boolean;
 };
 
 const QUOTE_LIKE: PDFDocumentType[] = ['quote', 'service_order'];
 
 export const PDF_OPTION_CATALOG: readonly CatalogEntry[] = [
+  { key: 'hideFinancials',                                       fallback: 'Via de execução (sem valores)', docTypes: ['service_order'], perDocumentOnly: true, overridesOthers: true },
   { key: 'showServicePrices',      i18nKey: 'showServicePrices', fallback: 'Preço unitário dos serviços', docTypes: [...QUOTE_LIKE, 'invoice'] },
   { key: 'showPartsPrices',        i18nKey: 'showPartsPrices',   fallback: 'Preço unitário das peças',    docTypes: [...QUOTE_LIKE] },
   { key: 'showTravelCost',         i18nKey: 'showTravelCost',    fallback: 'Custo de deslocamento',       docTypes: [...QUOTE_LIKE, 'invoice'] },
@@ -62,13 +67,16 @@ export function pdfOptionItems(
   documentType: PDFDocumentType,
   labels: Record<string, string> | undefined,
   opts?: { hasProductImages?: boolean; includeConditional?: boolean },
-): Array<{ key: PdfOptionKey; label: string }> {
+): Array<{ key: PdfOptionKey; label: string; overridesOthers: boolean }> {
   const { hasProductImages = false, includeConditional = true } = opts ?? {};
   return PDF_OPTION_CATALOG
     .filter(e => e.docTypes.includes(documentType))
-    .filter(e => !e.requiresProductImages || !includeConditional || hasProductImages)
+    // `includeConditional: false` é a tela de padrão da empresa: lá não há documento, então
+    // a opção de fotos aparece sempre e a escolha por documento (via de execução) não aparece.
+    .filter(e => includeConditional ? (!e.requiresProductImages || hasProductImages) : !e.perDocumentOnly)
     .map(e => ({
       key: e.key,
       label: (e.i18nKey ? labels?.[e.i18nKey] : undefined) || e.fallback,
+      overridesOthers: !!e.overridesOthers,
     }));
 }

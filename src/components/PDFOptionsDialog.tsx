@@ -56,10 +56,15 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
     return d.toISOString().split('T')[0];
   });
 
+  // A via de execução (NOVO-006b) é escolha de UM documento e sempre começa desmarcada: um
+  // padrão que apagasse valores sem ninguém pedir seria pior que o problema que ela resolve.
+  const padraoDaEmpresa = (settings: Record<string, string> | undefined): PDFOptions =>
+    ({ ...resolvePdfOptions(settings, documentType), hideFinancials: false });
+
   useEffect(() => {
     if (open) {
       optionsTouched.current = false;
-      setOptions(resolvePdfOptions(appSettings, documentType));
+      setOptions(padraoDaEmpresa(appSettings));
       setDownloading(false);
       setValidityMode('days');
       setValidityDays(initialValidityDays ?? defaultQuoteValidityDays);
@@ -76,7 +81,8 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
   // o documento com o padrão de fábrica em vez do configurado.
   useEffect(() => {
     if (!open || optionsTouched.current || !appSettings) return;
-    setOptions(resolvePdfOptions(appSettings, documentType));
+    setOptions(padraoDaEmpresa(appSettings));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, appSettings, documentType]);
 
   const titleMap: Record<PDFDocumentType, string> = {
@@ -90,6 +96,11 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
   // padrão da empresa (recibo não tem nenhum). Duas listas separadas divergiriam na primeira
   // opção nova.
   const checkboxItems = pdfOptionItems(documentType, t.pdf as unknown as Record<string, string>, { hasProductImages });
+
+  // "Via de execução" não convive com os outros: ela tira TODOS os valores do documento, e os
+  // demais toggles decidem quais valores aparecem. Deixá-los clicáveis prometeria um efeito
+  // que não existe — então ficam desabilitados enquanto ela estiver marcada.
+  const anulaOsOutros = checkboxItems.some(i => i.overridesOthers && !!options[i.key]);
 
   const triggerAction = async (action: PDFAction) => {
     const validity = documentType === 'quote'
@@ -124,21 +135,25 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
               <p className="text-sm font-medium text-muted-foreground">{t.pdf.itemsToShow}</p>
               <p className="text-xs text-muted-foreground">{t.pdf.optionsScopeHint}</p>
             </div>
-            {checkboxItems.map(({ key, label }) => (
-              <div key={key} className="flex items-center gap-2">
-                <Checkbox
-                  id={key}
-                  checked={!!options[key]}
-                  onCheckedChange={(checked) => {
-                    optionsTouched.current = true;
-                    setOptions(p => ({ ...p, [key]: !!checked }));
-                  }}
-                />
-                <Label htmlFor={key} className="cursor-pointer text-sm">
-                  {label}
-                </Label>
-              </div>
-            ))}
+            {checkboxItems.map(({ key, label, overridesOthers }) => {
+              const desabilitado = anulaOsOutros && !overridesOthers;
+              return (
+                <div key={key} className={`flex items-center gap-2${desabilitado ? ' opacity-50' : ''}`}>
+                  <Checkbox
+                    id={key}
+                    checked={!!options[key]}
+                    disabled={desabilitado}
+                    onCheckedChange={(checked) => {
+                      optionsTouched.current = true;
+                      setOptions(p => ({ ...p, [key]: !!checked }));
+                    }}
+                  />
+                  <Label htmlFor={key} className={`text-sm${desabilitado ? '' : ' cursor-pointer'}`}>
+                    {label}
+                  </Label>
+                </div>
+              );
+            })}
           </div>
         )}
 

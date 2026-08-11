@@ -100,10 +100,27 @@ describe('catálogo de opções de PDF', () => {
     expect(new Set(PDF_OPTION_KEYS).size).toBe(PDF_OPTION_KEYS.length);
   });
 
-  it('orçamento e OS oferecem as mesmas opções', () => {
+  it('orçamento e OS oferecem as mesmas opções, exceto a via de execução', () => {
     const orcamento = pdfOptionItems('quote', labels).map(i => i.key);
     const os = pdfOptionItems('service_order', labels).map(i => i.key);
-    expect(orcamento).toEqual(os);
+    // via de execução (NOVO-006b) é só da OS: orçamento sem preço não é documento
+    expect(os).toContain('hideFinancials');
+    expect(orcamento).not.toContain('hideFinancials');
+    expect(os.filter(k => k !== 'hideFinancials')).toEqual(orcamento);
+  });
+
+  it('a via de execução não aparece como padrão da empresa — é escolha de um documento', () => {
+    const noDialogo = pdfOptionItems('service_order', labels).map(i => i.key);
+    const noPadrao = pdfOptionItems('service_order', labels, { includeConditional: false }).map(i => i.key);
+    expect(noDialogo).toContain('hideFinancials');
+    expect(noPadrao).not.toContain('hideFinancials');
+  });
+
+  it('marca quem anula as outras opções — e é uma só', () => {
+    const anulam = PDF_OPTION_CATALOG.filter(e => e.overridesOthers).map(e => e.key);
+    expect(anulam).toEqual(['hideFinancials']);
+    expect(pdfOptionItems('service_order', labels).find(i => i.key === 'hideFinancials')?.overridesOthers).toBe(true);
+    expect(pdfOptionItems('service_order', labels).find(i => i.key === 'showTerms')?.overridesOthers).toBe(false);
   });
 
   it('fatura tem dados bancários e instruções; orçamento não', () => {
