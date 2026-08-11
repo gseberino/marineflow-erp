@@ -251,6 +251,8 @@ Deno.serve(async (req) => {
     if (body.action === "cancel") return await handleCancel(admin, body);
     if (body.action === "correction") return await handleCorrection(admin, body);
     if (body.action === "diagnostics") return await handleDiagnostics();
+    // [F-NFSE-01] Pré-voo: nada de emitir NFS-e antes do verde.
+    if (body.action === "nfse_health") return await handleNfseHealth(admin);
     if (body.action === "enable_homolog") return await handleEnableHomolog();
     if (body.action === "artifact") return await handleArtifact(admin, body);
     if (body.action === "preview") return await handlePreview(admin, body);
@@ -890,6 +892,95 @@ async function handleArtifact(admin: any, body: any): Promise<Response> {
       ...corsHeaders,
       "Content-Type": contentType,
       "Content-Disposition": `inline; filename="${filename}"`,
+    },
+  });
+}
+
+/**
+ * [F-NFSE-01] Pré-voo da NFS-e — GET /companies/{id}/nfse/health.
+ *
+ * NADA DE EMITIR ANTES DO VERDE. A NFS-e tem dois caminhos e quem decide não é o regime da
+ * empresa, é o MUNICÍPIO: onde ele aderiu ao Sistema Nacional vale o padrão nacional; onde
+ * mantém layout próprio, vale o provedor municipal. Descobrir isso por tentativa e erro
+ * custa numeração fiscal a cada tentativa — e em Itajaí/SC ninguém aqui sabe de antemão
+ * qual dos dois está ativo.
+ *
+ * Read-only: não grava, não emite, não gasta cota.
+ *
+ * Devolve também o que o CADASTRO daqui tem, ao lado do que a Contora diz. Quando o
+ * `nfse_standard` gravado divergir do caminho ativo, a tela mostra os dois e a pessoa
+ * decide — em vez de o sistema "corrigir" sozinho um campo que é decisão fiscal.
+ */
+// deno-lint-ignore no-explicit-any
+async function handleNfseHealth(admin: any): Promise<Response> {
+  const provider = createFiscalProvider();
+
+  const companies = await provider.listCompanies();
+  if (!companies.ok) {
+    return jr({ error: `Não deu para listar as empresas na Contora: ${companies.error}` }, 502);
+  }
+  const empresa = companies.data[0];
+  if (!empresa?.id) {
+    return jr({
+      error: "Nenhuma empresa emissora cadastrada na Contora. O cadastro é feito no console "
+        + "da Contora, não neste app — sem ele não há certificado nem município para emitir.",
+    }, 422);
+  }
+
+  const health = await provider.nfseHealth(empresa.id);
+
+  const { data: settings } = await admin
+    .from("company_fiscal_settings")
+    .select("nfse_standard, nfse_total_tax_rate_sn, nfse_simples_nacional_option, nfse_municipal_registration_in_cnc, nfse_default_series, tax_regime, municipal_registration, ibge_city_code, city_name")
+    .maybeSingle();
+
+  // Pendências que ESTE app consegue detectar sozinho, sem depender do contrato da Contora.
+  // Cada uma corresponde a uma rejeição conhecida — melhor barrar aqui do que descobrir na
+  // prefeitura minutos depois.
+  const pendenciasLocais: string[] = [];
+  const regime = String(settings?.tax_regime ?? "");
+  if (regime === "simples" && settings?.nfse_total_tax_rate_sn == null) {
+    pendenciasLocais.push(
+      "Falta o percentual total de tributos do Simples (nfse_total_tax_rate_sn). O padrão "
+      + "nacional recusa o indicador de tributos para ME/EPP e exige esse percentual — é a "
+      + "rejeição E0712. Não é a alíquota de ISS: é a carga da faixa do Simples na "
+      + "competência, que só a contabilidade sabe.",
+    );
+  }
+  if (settings?.municipal_registration && settings?.nfse_municipal_registration_in_cnc !== false) {
+    pendenciasLocais.push(
+      "A inscrição municipal será enviada. Se o município não tiver dados no CNC NFS-e, o "
+      + "envio volta com E0120 — nesse caso desmarque 'inscrição municipal registrada no CNC'.",
+    );
+  }
+
+  return jr({
+    ok: true,
+    data: {
+      empresa: { id: empresa.id, legal_name: empresa.legalName, document: empresa.document },
+      // `pronto` exige o verde da Contora E nenhuma pendência nossa. Silêncio não é
+      // autorização: se a Contora não afirmar que está pronta, não está.
+      pronto: (health.ok ? health.data.ready : false) && pendenciasLocais.length === 0,
+      contora: health.ok
+        ? {
+          ready: health.data.ready,
+          standard: health.data.standard,
+          city_code: health.data.cityCode,
+          city_name: health.data.cityName,
+          certificate_ok: health.data.certificateOk,
+          certificate_valid_until: health.data.certificateValidUntil,
+          pending: health.data.pending,
+          raw: health.data.raw,
+        }
+        : { erro: health.error, retryable: health.retryable },
+      cadastro: settings ?? null,
+      pendencias_locais: pendenciasLocais,
+      // Divergência é para a PESSOA resolver: qual padrão vale é decisão fiscal, e o
+      // sistema alinhar sozinho esconderia justamente o que precisa ser conferido.
+      divergencia_de_padrao: health.ok && health.data.standard && settings?.nfse_standard
+          && health.data.standard !== settings.nfse_standard
+        ? `A Contora diz que o caminho ativo é "${health.data.standard}", mas o cadastro daqui está como "${settings.nfse_standard}".`
+        : null,
     },
   });
 }
