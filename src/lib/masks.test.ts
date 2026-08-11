@@ -111,7 +111,7 @@ describe('dinheiro — ida e volta do campo digitado', () => {
   });
 
   it('parseMoney entende o texto mascarado — inclusive com milhar', () => {
-    // É a diferença desta implementação para a do importador de CSV (NOVO-011): aqui os
+    // É a diferença desta implementação para a do importador de CSV (NOVO-017): aqui os
     // dígitos são extraídos e divididos por 100, então o ponto de milhar não atrapalha.
     expect(parseMoney('1.299,90')).toBe(1299.9);
     expect(parseMoney('199,90')).toBe(199.9);

@@ -4,7 +4,7 @@
 // Um erro aqui não aparece como erro: aparece como preço, estoque ou telefone errado em
 // centenas de linhas de uma vez, já gravados, misturados aos certos.
 //
-// Dois defeitos reais apareceram enquanto eu escrevia estes casos — `NOVO-011` em
+// Dois defeitos reais apareceram enquanto eu escrevia estes casos — `NOVO-017` em
 // audit/novos-achados.md. Estão documentados abaixo pelo que fazem HOJE, marcados com o ID,
 // para que a correção seja uma decisão e não um efeito colateral.
 import { describe, it, expect } from 'vitest';
@@ -145,11 +145,11 @@ describe('transformValue — converter texto de planilha em dado', () => {
     expect(transformValue('  Cabo 6mm  ', 'name')).toBe('Cabo 6mm');
   });
 
-  // ⚠️ NOVO-011(a) — DEFEITO CONHECIDO, registrado e não corrigido aqui.
+  // ⚠️ NOVO-017(a) — DEFEITO CONHECIDO, registrado e não corrigido aqui.
   // `parseFloat(str.replace(',', '.'))` troca só a PRIMEIRA vírgula e não remove o ponto de
   // milhar: "1.234,56" vira "1.234.56", que o parseFloat lê como 1.234. Um produto de
   // R$ 1.234,56 entra no catálogo por R$ 1,23 — e o mesmo vale para estoque ("1.500" vira 1).
-  it('[NOVO-011] preço com separador de milhar é destruído: 1.234,56 vira 1.23', () => {
+  it('[NOVO-017] preço com separador de milhar é destruído: 1.234,56 vira 1.23', () => {
     expect(transformValue('1.234,56', 'sale_price')).toBe(1.234);
     expect(transformValue('12.500,00', 'cost_price')).toBe(12.5);
     expect(transformValue('1.500', 'stock_quantity')).toBe(1);
@@ -176,11 +176,11 @@ describe('applyMapping — do arquivo para os campos do sistema', () => {
       .toEqual([{ name: '1', sku: null }]);
   });
 
-  // ⚠️ NOVO-011(b) — DEFEITO CONHECIDO, registrado e não corrigido aqui.
+  // ⚠️ NOVO-017(b) — DEFEITO CONHECIDO, registrado e não corrigido aqui.
   // O mapeamento de clientes manda 'Celular' E 'Telefone' para o MESMO campo `phone`. Como o
   // laço percorre o mapeamento em ordem e sobrescreve, um 'Telefone' vazio apaga o celular
   // que já tinha sido lido — e celular é justamente o número que serve para WhatsApp.
-  it('[NOVO-011] duas colunas para o mesmo campo: a última apaga a primeira, mesmo vazia', () => {
+  it('[NOVO-017] duas colunas para o mesmo campo: a última apaga a primeira, mesmo vazia', () => {
     const resultado = applyMapping(
       [{ Celular: '(47) 99999-0000', Telefone: '' }],
       { Celular: 'phone', Telefone: 'phone' },

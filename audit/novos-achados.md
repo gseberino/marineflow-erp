@@ -267,15 +267,15 @@ Não foram corrigidos.
 
 ---
 
-## [NOVO-010] Deslocamento: 4 técnicos custam menos que 3, e a tarifa por km exibida na OS não é a usada no cálculo
+## [NOVO-016] Deslocamento: 4 técnicos custam o mesmo que 1, e a tarifa por km exibida na OS não é a usada no cálculo
 
 - **Encontrado em:** 11/08/2026, escrevendo a cobertura de teste de `displacement.ts`
 - **Categoria:** A — **Severidade sugerida:** P2 · **Status:** registrado, **não corrigido** (regra 3)
 - **Arquivo:linha:** `src/lib/displacement.ts:59` e `:79-93`; `src/components/ServiceOrderForm.tsx:344,634,695`
 
 **(a) A tarifa por hora despenca fora da faixa 1–3.** A tabela é `{1: 90, 2: 170, 3: 250}` e a busca é
-`rates.hourly[technician_count] || rates.hourly[1]`. Com **4 técnicos**, a hora cai para **R$ 90** — menos do
-que com 1... e menos da metade do que com 3. Com `0` ou negativo, idem. O número de técnicos é campo livre no
+`rates.hourly[technician_count] || rates.hourly[1]`. Com **4 técnicos**, a hora cai para **R$ 90** — o mesmo
+que se fosse **um** técnico, e 36% do que custam 3. Com `0` ou negativo, idem. O número de técnicos é campo livre no
 formulário da OS, então basta digitar 4. O `||` também engole um eventual `0` legítimo na tabela.
 **Sugestão:** usar a maior faixa disponível quando o número passar do teto (`hourly[min(n, 3)]`), ou uma
 tarifa por técnico adicional — é decisão comercial, não técnica.
@@ -297,7 +297,7 @@ apagar a outra e fazer o formulário gravar a mesma tarifa que usou na conta.
 
 ---
 
-## [NOVO-011] Importação de CSV: preço com separador de milhar vira centavos, e "Telefone" vazio apaga o celular
+## [NOVO-017] Importação de CSV: preço com separador de milhar vira centavos, e "Telefone" vazio apaga o celular
 
 - **Encontrado em:** 11/08/2026, escrevendo a cobertura de teste de `import-detector.ts`
 - **Categoria:** A — **Severidade sugerida:** P1 (a) / P2 (b) · **Status:** registrado, **não corrigido** (regra 3)
@@ -329,7 +329,7 @@ a atualizar a expectativa junto.
 
 ---
 
-## [NOVO-012] Captura rápida da Agenda: quantidade vira horário, e data inexistente vira outro ano
+## [NOVO-018] Captura rápida da Agenda: quantidade vira horário, e data inexistente vira outro ano
 
 - **Encontrado em:** 11/08/2026, escrevendo a cobertura de teste de `quick-task-parser.ts`
 - **Categoria:** A — **Severidade sugerida:** P2 (a) / P3 (b) · **Status:** registrado, **não corrigido**
@@ -356,7 +356,7 @@ ano, hora nas quatro formas, prioridade, limpeza do título).
 
 ---
 
-## [NOVO-013] Exportação de CSV: coluna "Marina" repete o nome do barco, aspas mal escapadas e injeção de fórmula
+## [NOVO-019] Exportação de CSV: coluna "Marina" repete o nome do barco, aspas mal escapadas e injeção de fórmula
 
 - **Encontrado em:** 11/08/2026, escrevendo a cobertura de teste de `export-utils.ts`
 - **Categoria:** A (a, b) / G-segurança (c) — **Severidade sugerida:** P2 (a) / P3 (b) / P2 (c)
@@ -379,3 +379,92 @@ outro sistema. **Correção usual:** prefixar com apóstrofo (`'`) ou envolver e
 antes do sinal, quando o valor começar com um desses quatro.
 
 **Cobertura:** `src/lib/export-utils.test.ts` — 14 casos, sendo os três acima marcados com o ID.
+
+---
+
+## [NOVO-020] A view do técnico não pode ser ativada como está — dois bloqueios, um deles apaga dado
+
+- **Encontrado em:** 11/08/2026, na revisão pré-merge do `NOVO-006a` (revisores independentes)
+- **Categoria:** A — **Severidade sugerida:** **P1 se ativada** · **Status:** registrado, **não corrigido**
+- **Arquivo:linha:** `src/hooks/use-service-orders.ts:34`, `src/components/ServiceOrderForm.tsx:610-660,774,805`
+
+Com `VIEW_TECNICO_DISPONIVEL = false` e a migration não aplicada, **nada disso acontece hoje**. Os dois
+bloqueios só disparam ao ligar a chave — e os 5 passos de ativação que eu documentei **não cobrem nenhum dos
+dois**. Enquanto não forem resolvidos, a chave não pode ser virada.
+
+**(a) O detalhe da OS falha inteiro para o técnico.** `SO_DETAIL_SELECT` pede
+`payment_condition_presets(*)`, e eu removi `payment_condition_preset_id` da view — é coluna de condição de
+pagamento. Sem a FK, o PostgREST não consegue inferir o relacionamento e responde **400 PGRST200**, o que
+derruba a consulta inteira (não só o embed). `ServiceOrderDetail` cai no ramo de erro e mostra "Erro ao
+carregar ordem de serviço" em **100% das OSs** — a tela de trabalho do técnico. É a mesma classe de defeito já
+registrada em memória: no PostgREST, um embed impossível não volta vazio, volta erro.
+
+**(b) Pior: salvar a OS como técnico apagaria os campos financeiros.** `ServiceOrderForm` semeia o formulário
+com `d.<campo> || <default>` (`:610-660`) e o Salvar envia o formulário **inteiro**
+(`const { signed_at, ...formForSave } = form` → `:774` e `:805`). Lendo da view, os campos que ela não traz
+chegam como `undefined`, viram `0`/`''`/`3.5` no form, e o UPDATE **grava esses zeros na tabela base**:
+`discount_amount`, `tax_amount`, `subcontract_cost_total`, `commission_rate`, `commission_amount`,
+`commissioned_user_id`, `payment_conditions`, `payment_condition_preset_id`, `financial_notes`,
+`discount_services_pct`, `discount_parts_pct`, `travel_cost_per_km`. O técnico anota o serviço que executou,
+clica em Salvar, e o desconto negociado com o cliente vira zero. Silenciosamente.
+
+**Por que o compilador não pega:** o cast `.from(fonte as typeof OS_TABELA)` diz ao TypeScript que a resposta
+tem todas as colunas da tabela. Ele foi posto para permitir compilar antes de a view existir, e o efeito
+colateral é esconder exatamente esta classe de erro.
+
+**Caminho de correção (não feito):** um `SELECT` próprio para o técnico, sem os embeds que dependem de coluna
+removida; e o formulário do técnico precisa parar de reenviar campo que não leu — ou enviando apenas os campos
+que ele pode editar, ou usando um formulário reduzido. Enquanto isso não existir, **a view fica aplicada e
+sem uso** (inócua) ou a tarefa é revertida.
+
+---
+
+## [NOVO-021] Padrão dos PDFs: edição feita durante o "Salvar" é descartada, e a tela diz que salvou
+
+- **Encontrado em:** 11/08/2026, na revisão pré-merge do MF-AUD-014
+- **Categoria:** A — **Severidade sugerida:** P3 · **Status:** registrado, **não corrigido**
+- **Arquivo:linha:** `src/pages/SettingsPage.tsx:1832` (`setDirty(new Set())`) e `:1870-1874` (checkboxes sem `disabled`)
+
+Em `PdfDefaultsSection.salvar()`, o sucesso da mutation limpa o conjunto `dirty` **inteiro** — inclusive tipos
+de documento marcados como alterados **depois** que o upsert já tinha partido. Os checkboxes não ficam
+desabilitados durante o `isPending` (só o botão fica), então a janela é clicável: o round-trip da rede, que em
+4G no celular é de segundos. Resultado: a tela mostra a opção desmarcada, sem indicador de pendência e com
+Salvar desabilitado, enquanto o banco tem o valor antigo. Volta no reload.
+**Correção sugerida (uma linha):** remover de `dirty` apenas as chaves efetivamente enviadas, ou passar
+`disabled={updateSettings.isPending}` aos checkboxes.
+
+---
+
+## [NOVO-022] Toggles de PDF que não fazem o que o rótulo promete (três casos, dois pré-existentes)
+
+- **Encontrado em:** 11/08/2026, na revisão pré-merge (NOVO-006b e T3.8)
+- **Categoria:** A — **Severidade sugerida:** P3 · **Status:** registrado, **não corrigido**
+
+1. **Na via de execução, os outros toggles ficam cinzas mas continuam valendo.** `PDFOptionsDialog.tsx:139`
+   desabilita **todos** os demais quando "Via de execução" é marcada — inclusive os que não decidem valor
+   nenhum. Mas o gerador continua lendo `showTerms` e `showProductImages` com `semValores = true`: quem quiser
+   a folha de campo **sem** os termos não consegue desmarcar, e o bloco imprime assim mesmo.
+   **Correção:** desabilitar só os toggles financeiros (o catálogo já sabe quais são).
+2. **`showPaymentInstructions` não faz nada** (`pdf-generator.ts:1472`, pré-existente). Marcar e desmarcar não
+   muda um byte do PDF; quem apaga o bloco de instruções é `showBankDetails`. O commit da T3.8 deu rótulo em
+   inglês e teste de catálogo a um toggle morto.
+3. **`showSignature` também não faz nada** (`pdf-generator.ts:1302`, pré-existente): o bloco de assinatura sai
+   sempre, mesmo com a opção desligada.
+
+**Consequência comum:** a tela de padrão da empresa (nova) agora **oferece** essas opções ao dono. Configurar
+algo que não tem efeito é pior do que não oferecer.
+
+---
+
+## [NOVO-023] O guarda anti-drift do hash de assinatura lê um arquivo só, e vai ficar verde quando o trigger mudar
+
+- **Encontrado em:** 11/08/2026, na revisão pré-merge da cobertura de teste
+- **Categoria:** I — **Severidade sugerida:** P3 · **Status:** registrado, **não corrigido**
+- **Arquivo:linha:** `src/lib/document-hash.test.ts:145`
+
+O bloco que cobra paridade entre o hash e o trigger procura a migration **pelo nome** (`f41d70d9`, a de
+abril). Se alguém acrescentar um campo ao trigger **numa migration nova** — que é como o trigger seria
+alterado — o teste continua lendo o arquivo antigo, extrai os mesmos 14 campos, todos passam, e a suíte fica
+verde. O cenário que o teste diz impedir passa direto.
+**Correção sugerida:** varrer todas as migrations e usar a definição **mais recente** de
+`detect_so_change_after_signature`, como já faz o teste de status da OS com o `CHECK`.

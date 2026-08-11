@@ -4,7 +4,7 @@
 // Sendo determinístico e com `now` injetável, dá para testar cada regra de interpretação sem
 // depender do relógio — e é o que este arquivo faz.
 //
-// Dois defeitos de interpretação apareceram enquanto eu escrevia: `NOVO-012` em
+// Dois defeitos de interpretação apareceram enquanto eu escrevia: `NOVO-018` em
 // audit/novos-achados.md. Estão documentados aqui pelo que fazem HOJE, marcados com o ID.
 import { describe, it, expect } from 'vitest';
 import { parseQuickTask } from './quick-task-parser';
@@ -109,7 +109,7 @@ describe('título', () => {
   });
 });
 
-describe('[NOVO-012] interpretações erradas conhecidas — documentadas, não aprovadas', () => {
+describe('[NOVO-018] interpretações erradas conhecidas — documentadas, não aprovadas', () => {
   it('quantidade no meio do texto é lida como hora, e some do título', () => {
     // "comprar 3 cabos" vira uma tarefa das 03:00 chamada "comprar cabos". Some a
     // quantidade — que é o dado que importa — e aparece um horário que ninguém pediu.

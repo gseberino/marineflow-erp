@@ -206,7 +206,7 @@ describe('parseNfeSupplierNote — devolução ao fornecedor', () => {
   });
 
   it('a data de emissão é o dia do XML, sem deslocamento de fuso', () => {
-    // dhEmi 23:30 com fuso -03:00 vira 11/09 02:30 UTC — um `new Date().toISOString()`
+    // dhEmi de 11/09 às 23:30 com fuso -03:00 é 12/09 02:30 em UTC — um `toISOString()`
     // devolveria o dia SEGUINTE. O parser corta os 10 primeiros caracteres justamente por
     // isso, e este caso existe para que ninguém "melhore" o código convertendo para Date.
     expect(parseNfeSupplierNote(NOTA_FORNECEDOR)!.issueDate).toBe('2026-09-11');

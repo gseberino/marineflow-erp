@@ -38,12 +38,12 @@ corrigido**, conforme a regra 3. Em ordem de gravidade:
 
 | ID | O quê | Onde dói |
 |---|---|---|
-| **NOVO-011** | Importação de CSV: **`1.234,56` entra como `1,23`**; e `Telefone` vazio **apaga o celular** | Carga em lote de catálogo/cadastro — erro em centenas de linhas de uma vez, já gravadas |
+| **NOVO-017** | Importação de CSV: **`1.234,56` entra como `1,23`**; e `Telefone` vazio **apaga o celular** | Carga em lote de catálogo/cadastro — erro em centenas de linhas de uma vez, já gravadas |
 | **NOVO-009** | Preço de venda vira **3,6 × 10¹⁸** quando margem+imposto+comissão dão exatamente 100% | O número entra no campo de preço do produto enquanto o aviso "impossível" está na tela |
-| **NOVO-010** | Deslocamento: **4 técnicos custam menos que 1**; e o botão de calcular ignora a tarifa configurada | Toda OS de campo |
+| **NOVO-016** | Deslocamento: **4 técnicos custam o mesmo que 1** (e 36% do que custam 3); e o botão de calcular ignora a tarifa configurada | Toda OS de campo |
 | **NOVO-008** | A view do técnico fecha os valores da OS, mas os **itens** (peça/serviço) continuam com preço no mesmo embed | "O técnico não vê valores" vale do total para cima |
-| **NOVO-013** | Export de CSV: coluna "Marina" repete o nome do barco; aspas mal escapadas; **injeção de fórmula** | Arquivo que sai da empresa — contador, cliente, outro sistema |
-| **NOVO-012** | Captura rápida da Agenda: **"comprar 3 cabos"** vira tarefa das 03:00 sem o "3"; `30/02` vira 02/03/2027 | Toda tarefa criada pela captura rápida com número no texto |
+| **NOVO-019** | Export de CSV: coluna "Marina" repete o nome do barco; aspas mal escapadas; **injeção de fórmula** | Arquivo que sai da empresa — contador, cliente, outro sistema |
+| **NOVO-018** | Captura rápida da Agenda: **"comprar 3 cabos"** vira tarefa das 03:00 sem o "3"; `30/02` vira 02/03/2027 | Toda tarefa criada pela captura rápida com número no texto |
 
 **Duas decisões esperam por você** (não decidi nenhuma):
 1. **T3.2** — o diálogo de PDF perdeu também o cache local (`localStorage`), não só a escrita em
@@ -221,8 +221,11 @@ frente de i18n, o número certo hoje é 812 chaves em cada idioma. Nada a corrig
 
 **Commit:** `feat(rls): NOVO-006a view da OS sem valores para o tecnico (migration NAO aplicada)`
 
-> **Estado: pronta para aplicar na revisão matinal, verificação pendente.** A migration existe em disco e
-> está commitada; **o banco não foi tocado**. Nenhuma escrita, nenhum deploy.
+> **⚠️ CORRIGIDO EM 11/08 APÓS REVISÃO — NÃO ATIVAR.** A migration pode ser aplicada (a view fica inerte,
+> ninguém a consulta), mas **virar a chave `VIEW_TECNICO_DISPONIVEL` quebra a tela do técnico e apaga campos
+> financeiros da OS a cada Salvar**. Dois bloqueios encontrados na revisão pré-merge, registrados como
+> `NOVO-020`. Os 5 passos de ativação que escrevi abaixo **não cobrem nenhum dos dois** — leia o achado antes
+> de seguir aquela lista. O banco não foi tocado; nenhuma escrita, nenhum deploy.
 
 **Arquivo:** `supabase/migrations/20260811002500_view_os_sem_valores_para_tecnico.sql`
 
@@ -308,17 +311,17 @@ O caso está no teste com `it.fails` — quando a correção entrar, ele passa a
 
 ### 5.2 `displacement.ts` — concluído, **e achou outro**
 
-**Commit:** `test(deslocamento): cobre displacement e registra NOVO-010`
+**Commit:** `test(deslocamento): cobre displacement e registra NOVO-016`
 
 Deslocamento é dinheiro em toda OS de campo, e a conta multiplica três partes (km, hora de equipe,
 multiplicador de urgência/fim de semana). Erro aqui não aparece como erro — aparece como OS que fechou por
 menos do que custou. 14 casos cobrindo as três partes, os multiplicadores, o fallback de configuração
 inválida (um `travel_km_rate` vazio faria toda viagem sair de graça se o código aceitasse) e arredondamento.
 
-**`NOVO-010`, registrado e não corrigido — três coisas, a primeira é a que dói:**
+**`NOVO-016`, registrado e não corrigido — três coisas, a primeira é a que dói:**
 
-1. **Com 4 técnicos, a hora cai para R$ 90.** A tabela vai até 3 (`{1: 90, 2: 170, 3: 250}`) e a busca é
-   `hourly[n] || hourly[1]`. Quatro técnicos custam **menos que um** — e o número de técnicos é campo livre
+1. **Com 4 técnicos, a hora cai para R$ 90** — o mesmo que com 1 técnico, e 36% do que custam 3. A tabela vai até 3 (`{1: 90, 2: 170, 3: 250}`) e a busca é
+   `hourly[n] || hourly[1]`. Quatro técnicos custam **o mesmo que um** — e o número de técnicos é campo livre
    na tela. Com 0 ou negativo, idem. Corrigir é escolher a regra comercial (usar a maior faixa? tarifa por
    técnico adicional?), por isso não decidi.
 2. **`calculateDisplacement` ignora as tarifas configuradas** — chama o cálculo sem passar `rates`, então usa
@@ -379,12 +382,12 @@ uma afirmação ("o fornecedor destacou zero"), `undefined` é silêncio, e a de
 
 ### 5.5 `import-detector.ts` — concluído, **e achou o mais grave da noite**
 
-**Commit:** `test(import): cobre o importador de CSV e registra NOVO-011`
+**Commit:** `test(import): cobre o importador de CSV e registra NOVO-017`
 
 É por aqui que entra catálogo inteiro vindo de outro ERP. 25 casos cobrindo separador, aspas, CRLF, linhas
 irregulares, detecção de formato, contagem de registros e conversão de cada tipo de campo.
 
-**`NOVO-011`, registrado e não corrigido — duas coisas, e a primeira é P1:**
+**`NOVO-017`, registrado e não corrigido — duas coisas, e a primeira é P1:**
 
 1. **Preço com separador de milhar é destruído: `1.234,56` entra como `1,23`.** A conversão é
    `parseFloat(str.replace(',', '.'))` — `replace` com string troca **só a primeira ocorrência** e nada tira o
@@ -415,7 +418,7 @@ nada — só grava o dado torto, e ninguém revisa cadastro antigo.
 - **Telefone curto demais não é completado por adivinhação.** Um `99999-0000` sem DDD, se ganhasse `55` na
   frente, viraria um número existente de **outra pessoa** — e a mensagem iria para ela.
 - **`parseMoney` acerta o milhar** (`"1.299,90"` → `1299.9`). É exatamente o caso que o importador de CSV erra
-  (NOVO-011): aqui os dígitos são extraídos e divididos por 100, e o ponto de milhar não atrapalha. As duas
+  (NOVO-017): aqui os dígitos são extraídos e divididos por 100, e o ponto de milhar não atrapalha. As duas
   implementações vivem no mesmo repositório fazendo a mesma coisa de jeitos diferentes — **a do importador é
   a errada**, e agora existe teste dos dois lados mostrando isso.
 
@@ -423,7 +426,7 @@ nada — só grava o dado torto, e ninguém revisa cadastro antigo.
 
 ### 5.7 `quick-task-parser.ts` — concluído, **e achou mais dois**
 
-**Commit:** `test(agenda): cobre a captura rapida e registra NOVO-012`
+**Commit:** `test(agenda): cobre a captura rapida e registra NOVO-018`
 
 É o caminho sem IA da Agenda: "amanhã 14h ligar pro João" vira tarefa pronta. Determinístico e com o relógio
 injetável, então dá para testar cada regra sem depender do dia em que a suíte roda. 22 casos: hoje/amanhã com
@@ -431,7 +434,7 @@ e sem til, dia da semana indo para a próxima ocorrência (inclusive a regra de 
 semana que vem), dd/mm com e sem ano, ano de dois dígitos, hora nas quatro formas (`14h`, `14h30`, `14:30`,
 `às 9`), hora sem dia significando hoje, prioridade e limpeza do título.
 
-**`NOVO-012`, registrado e não corrigido:**
+**`NOVO-018`, registrado e não corrigido:**
 
 1. **"comprar 3 cabos" vira uma tarefa das 03:00 chamada "comprar cabos".** O reconhecimento de hora aceita
    número solto de 0 a 23 sem exigir `h`, `:` ou "às" — e numa captura rápida, número solto quase sempre é
@@ -443,7 +446,7 @@ semana que vem), dd/mm com e sem ano, ano de dois dígitos, hora nas quatro form
 
 ### 5.8 `export-utils.ts` — concluído, **e achou mais três**
 
-**Commit:** `test(export): cobre a exportacao de CSV e registra NOVO-013`
+**Commit:** `test(export): cobre a exportacao de CSV e registra NOVO-019`
 
 Todo "Exportar" de cadastro passa por aqui, e o arquivo gerado **sai da empresa** — contador, planilha de
 conferência, às vezes outro sistema. Estrutura errada não dá erro em tela: dá coluna deslocada na planilha de
@@ -451,7 +454,7 @@ outra pessoa. 14 casos: BOM (sem ele o Excel abre com acentuação quebrada), po
 aspas quando há separador ou quebra de linha, nulo virando campo vazio em vez de "null", `transform` por
 coluna, lista vazia gerando só cabeçalho.
 
-**`NOVO-013`, registrado e não corrigido:**
+**`NOVO-019`, registrado e não corrigido:**
 
 1. **No export de embarcações, a coluna "Marina" repete o nome do barco.** As duas entradas do catálogo usam
    `key: 'name'` — a planilha sai com o nome da embarcação duplicado e **nenhuma informação de marina**.
@@ -499,8 +502,8 @@ produção:** sem `push`, sem migration aplicada, sem deploy. As duas únicas id
 leitura, escopadas, e estão descritas nas seções 1 e 4.
 
 O que precisa de você, em uma linha cada:
-1. **NOVO-011** — conferir o catálogo importado (preços abaixo de R$ 10, clientes sem celular). É o mais caro.
-2. **NOVO-009 / NOVO-010 / NOVO-012 / NOVO-013** — correções pequenas, mas duas delas (`hourly[4]` e o
+1. **NOVO-017** — conferir o catálogo importado (preços abaixo de R$ 10, clientes sem celular). É o mais caro.
+2. **NOVO-009 / NOVO-016 / NOVO-018 / NOVO-019** — correções pequenas, mas duas delas (`hourly[4]` e o
    arredondamento do preço) são **decisão comercial**, não técnica.
 3. **Migration da view** — aplicar, regenerar tipos, virar a chave, validar com JWT de técnico (seção 4).
 4. **Duas decisões declaradas** — `localStorage` do diálogo de PDF (seção 1) e `invoicing_status`/

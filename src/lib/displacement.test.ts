@@ -4,9 +4,11 @@
 // multiplicam: quilometragem, hora de equipe e multiplicador de urgência/fim de semana. Um
 // erro aqui não aparece como erro — aparece como uma OS que fechou por menos do que custou.
 //
-// `calculateDisplacement` não é testada aqui de propósito: ela consulta `app_settings` no
-// Supabase, e o que ela faz de próprio (haversine + ida e volta) está coberto indiretamente
-// pelos casos de `calculateTravelCost`. O que ela tem de errado está registrado como NOVO-010.
+// `calculateDisplacement` não é testada aqui: ela consulta `app_settings` no Supabase. E o que
+// ela tem de próprio — a haversine e o × 2 da ida e volta — fica DESCOBERTO, o que precisa ser
+// dito em voz alta: trocar o raio da Terra, inverter lat/lng ou perder o × 2 não quebra teste
+// nenhum, e a distância errada vai direto para travel_distance_km e travel_cost_total da OS.
+// O que ela tem de errado hoje está registrado como NOVO-016.
 import { describe, it, expect } from 'vitest';
 import { calculateTravelCost, travelRatesFromSettings, DEFAULT_TRAVEL_RATES } from './displacement';
 
@@ -123,11 +125,11 @@ describe('calculateTravelCost — a conta que vai para a OS', () => {
     expect(String(custo).split('.')[1]?.length ?? 0).toBeLessThanOrEqual(2);
   });
 
-  // ⚠️ NOVO-010 — comportamento surpreendente, registrado em audit/novos-achados.md.
+  // ⚠️ NOVO-016 — comportamento surpreendente, registrado em audit/novos-achados.md.
   // A tabela de hora vai até 3 técnicos; com 4 o código faz `rates.hourly[4] || rates.hourly[1]`
   // e cai na tarifa de UM técnico. Quatro técnicos custam menos que três — e o número de
   // técnicos é campo livre na tela.
-  it('[NOVO-010] com 4 técnicos, a hora despenca para a tarifa de 1 técnico', () => {
+  it('[NOVO-016] com 4 técnicos, a hora despenca para a tarifa de 1 técnico', () => {
     const params = { distance_km: 0, travel_hours: 1, ferry_cost: 0, travel_type: 'comercial' as const };
     const tres = calculateTravelCost({ ...params, technician_count: 3 });
     const quatro = calculateTravelCost({ ...params, technician_count: 4 });
@@ -136,7 +138,7 @@ describe('calculateTravelCost — a conta que vai para a OS', () => {
     expect(quatro).toBeLessThan(tres); // ...e é justamente o que não deveria ser
   });
 
-  it('[NOVO-010] contagem zerada ou negativa também cai na tarifa de 1 técnico', () => {
+  it('[NOVO-016] contagem zerada ou negativa também cai na tarifa de 1 técnico', () => {
     const params = { distance_km: 0, travel_hours: 1, ferry_cost: 0, travel_type: 'comercial' as const };
     expect(calculateTravelCost({ ...params, technician_count: 0 })).toBe(90);
     expect(calculateTravelCost({ ...params, technician_count: -2 })).toBe(90);

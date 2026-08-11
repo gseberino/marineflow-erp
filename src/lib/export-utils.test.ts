@@ -5,7 +5,7 @@
 // planilha de conferência, às vezes para outro sistema. Estrutura errada aqui não dá erro em
 // tela: dá coluna deslocada na planilha de outra pessoa.
 //
-// Três defeitos apareceram e estão registrados como NOVO-013 — documentados aqui pelo que
+// Três defeitos apareceram e estão registrados como NOVO-019 — documentados aqui pelo que
 // fazem hoje, com o ID no nome do caso.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { exportToCSV, PRODUCTS_COLUMNS, CLIENTS_COLUMNS, VESSELS_COLUMNS } from './export-utils';
@@ -99,9 +99,9 @@ describe('catálogos de colunas', () => {
     }
   });
 
-  // ⚠️ NOVO-013(a) — a coluna "Marina" do export de embarcações lê a chave `name`, que é o
+  // ⚠️ NOVO-019(a) — a coluna "Marina" do export de embarcações lê a chave `name`, que é o
   // nome da EMBARCAÇÃO. A planilha sai com o nome do barco repetido na coluna da marina.
-  it('[NOVO-013] no export de embarcações, "Marina" repete o nome da embarcação', () => {
+  it('[NOVO-019] no export de embarcações, "Marina" repete o nome da embarcação', () => {
     const marina = VESSELS_COLUMNS.find(c => c.header === 'Marina')!;
     const nome = VESSELS_COLUMNS.find(c => c.header === 'Nome')!;
     expect(marina.key).toBe(nome.key); // as duas leem `name` — é o defeito
@@ -115,7 +115,7 @@ describe('catálogos de colunas', () => {
   });
 });
 
-describe('[NOVO-013] escapes que faltam', () => {
+describe('[NOVO-019] escapes que faltam', () => {
   it('aspas sem outro separador saem duplicadas e sem envelope', () => {
     // O código escapa `"` para `""` mas só envolve o campo quando há `;` ou quebra de linha.
     // Resultado: `cabo "flex"` chega ao Excel como `cabo ""flex""`.
