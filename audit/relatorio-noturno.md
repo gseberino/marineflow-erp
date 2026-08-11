@@ -292,3 +292,26 @@ inválida (um `travel_km_rate` vazio faria toda viagem sair de graça se o códi
    formulário. O campo "custo por km" gravado na OS pode dizer 3,50 enquanto o total foi calculado a 1,10.
 
 **Gates:** typecheck 0 · vitest **994** (eram 980; +14) · deno 267 · build OK.
+
+### 5.3 `document-hash.ts` — concluído
+
+**Commit:** `test(assinatura): cobre o hash do documento e amarra ao trigger do banco`
+
+Este hash congela o conteúdo da OS no instante em que o cliente assina e vai para
+`signed_document_hash`. É a peça que responde "o cliente assinou **isto**" quando alguém contesta — e falha
+de dois jeitos silenciosos: deixando de mudar quando o documento muda (alteração posterior passa por
+assinada) ou mudando quando nada mudou (assinatura boa vira suspeita). 30 casos cobrem os dois lados:
+determinismo, ordem dos itens indiferente, `null`/`""`/ausente equivalentes, diferença abaixo de um centavo
+ignorada, espaço nos termos ignorado — e, do outro lado, centavo a mais no total, quantidade, preço unitário,
+item acrescentado, item removido, item renomeado e condição de pagamento, todos mudando o hash.
+
+**O caso que mais vale:** o teste **lê a migration do trigger** `detect_so_change_after_signature` e, para
+cada campo que o banco vigia com `IS DISTINCT FROM`, verifica que mudá-lo muda o hash. Os dois foram escritos
+juntos em abril e nada garantia que continuassem juntos: se alguém acrescentar um campo ao trigger e esquecer
+do hash, o banco passa a pedir re-assinatura de uma alteração que o documento assinado não registra — a prova
+fica incompleta exatamente no caso em que ela é necessária. Hoje os 14 campos batem.
+
+**Provei que pega a regressão:** acrescentei `internal_notes` ao trigger e o caso falhou dizendo
+"internal_notes é vigiado pelo trigger mas não entra no hash". Migration restaurada em seguida.
+
+**Gates:** typecheck 0 · vitest **1.024** (eram 994; +30) · deno 267 · build OK.
