@@ -8,6 +8,8 @@
 import { describe, it, expect } from 'vitest';
 import { DEFAULT_PDF_OPTIONS, resolvePdfOptions } from './pdf-generator';
 import { PDF_OPTION_CATALOG, PDF_OPTION_KEYS, pdfOptionItems } from './pdf-options-catalog';
+import { en } from '@/i18n/en';
+import { ptBR } from '@/i18n/pt-BR';
 
 const labels = {
   showServicePrices: 'Preço unitário dos serviços',
@@ -149,11 +151,27 @@ describe('catálogo de opções de PDF', () => {
     expect(padrao).toContain('showProductImages');
   });
 
-  it('usa o rótulo traduzido quando existe e o texto fixo quando não existe', () => {
+  it('usa o rótulo traduzido quando existe e o texto fixo quando a chave falta', () => {
     const itens = pdfOptionItems('quote', { showTerms: 'Terms and conditions' });
     expect(itens.find(i => i.key === 'showTerms')?.label).toBe('Terms and conditions');
-    // showCardFee ainda não tem tradução (MF-AUD-030) — cai no texto fixo do catálogo
+    // sem a chave no dicionário passado, cai na rede de segurança do catálogo
     expect(itens.find(i => i.key === 'showCardFee')?.label).toBe('Mostrar taxa de cartão');
+  });
+
+  it('toda opção tem tradução nos DOIS idiomas — nenhuma sobra com texto fixo em português', () => {
+    // As cinco que viviam com string pt-BR dentro do componente não apareciam em varredura
+    // de i18n nenhuma: não faltava chave no dicionário, faltava a chave existir.
+    for (const entrada of PDF_OPTION_CATALOG) {
+      expect(ptBR.pdf, `pt-BR.pdf.${entrada.i18nKey} não existe`).toHaveProperty(entrada.i18nKey);
+      expect(en.pdf, `en.pdf.${entrada.i18nKey} não existe`).toHaveProperty(entrada.i18nKey);
+    }
+  });
+
+  it('os rótulos saem no idioma escolhido', () => {
+    const emIngles = pdfOptionItems('service_order', en.pdf as unknown as Record<string, string>);
+    const emPortugues = pdfOptionItems('service_order', ptBR.pdf as unknown as Record<string, string>);
+    expect(emIngles.find(i => i.key === 'hideFinancials')?.label).toBe('Execution copy (no prices)');
+    expect(emPortugues.find(i => i.key === 'hideFinancials')?.label).toBe('Via de execução (sem valores)');
   });
 
   it('sem i18n nenhum, todo item ainda tem rótulo legível', () => {

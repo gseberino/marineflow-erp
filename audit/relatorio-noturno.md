@@ -18,7 +18,7 @@ aqui e pular, nunca decidir.
 | 0 | Mover o lint do `ci.yml` para workflow próprio | ✅ concluída |
 | 1 | T3.2 — preferências de PDF (decisão #4) | ✅ concluída |
 | 2 | NOVO-006b — PDF de execução sem bloco financeiro | ✅ concluída |
-| 3 | T3.8 — paridade i18n pt-BR × en (MF-AUD-030) | ⏳ pendente |
+| 3 | T3.8 — paridade i18n pt-BR × en (MF-AUD-030) | ✅ concluída (achado não reproduziu) |
 | 4 | NOVO-006a — view de `service_orders` sem valores | ⏳ pendente |
 | 5 | Fila infinita — cobertura de teste em módulos categoria I | ⏳ pendente |
 
@@ -141,3 +141,38 @@ tem que mostrar tudo — sem isso, um gerador que devolvesse página em branco p
 4. Esta é a metade **do documento** do NOVO-006. A metade **do banco** é a tarefa 4 (view sem colunas de
    valor): enquanto ela não for aplicada, o técnico continua vendo os valores **na tela**, mesmo podendo
    imprimir a via sem eles.
+
+---
+
+## 3 — T3.8 · Paridade i18n pt-BR × en (MF-AUD-030) — concluída
+
+**Commit:** `test(i18n): MF-AUD-030 trava a paridade pt-BR x en; traduz os rotulos de PDF`
+
+**O achado não reproduz — e isto é o principal desta tarefa.** MF-AUD-030 dizia que
+`address.dontKnowCep` existia em pt-BR e faltava em en (782 × 781 chaves). **Ela está nos dois**, e o
+`git log -S` mostra um único commit tocando a chave em `en.ts` (`38c1acc`, "Add address and suppliers") — ela
+nunca foi removida. Ou a comparação da auditoria tinha um defeito, ou olhou outra cópia do repositório. A
+contagem de hoje é **812 × 812, diferença zero**.
+
+Como não havia o que corrigir, a entrega é a **outra metade** que a própria auditoria recomendava: travar a
+paridade com teste. `src/i18n/paridade.test.ts`, 6 casos, cobre o que o compilador não cobre:
+1. **chave só em pt-BR** — o tipo `TranslationKeys` é derivado de `en`, então o TS cobra pt-BR ⊇ en, mas o
+   excesso só é recusado no literal de primeiro nível: uma chave nova dentro de um objeto aninhado passa;
+2. **texto vazio ou só espaço** — compila liso e some da tela;
+3. **placeholder** (`{cliente}`) num idioma e não no outro — a frase traduzida perde o dado;
+4. **arrays descem por índice** (`agenda.monthNames.0`), então o comprimento também é comparado — uma lista de
+   meses com 11 itens de um lado é o tipo de erro que só aparece em dezembro.
+
+**Dívida que eu mesmo tinha criado, fechada junto:** cinco rótulos do diálogo de PDF viviam como string
+pt-BR dentro do componente (`showCardFee`, `showBankDetails`, `showPaymentInstructions`, `showProductImages`) e
+o `hideFinancials` que criei ontem à noite seria o sexto. Eles **não apareciam em varredura de i18n nenhuma**:
+não faltava chave no dicionário — faltava a chave existir. Agora estão nos dois idiomas, e `i18nKey` virou
+**obrigatório** no tipo do catálogo, então o compilador cobra tradução de qualquer opção nova.
+
+**Limite declarado:** isto **não** é a frente de i18n do MF-AUD-028 (1.052 strings), que depende da decisão #9
+("o inglês é requisito real de produto?") e continua intocada. Mexi só no que eu mesmo consolidei ontem.
+
+**Gates:** typecheck 0 · vitest **951** (eram 943; +8) · deno 267 · build OK.
+
+**Para a revisão matinal:** se você confiava no número 782 × 781 do relatório de auditoria para dimensionar a
+frente de i18n, o número certo hoje é 812 chaves em cada idioma. Nada a corrigir; só a base de cálculo muda.
