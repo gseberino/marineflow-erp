@@ -19,8 +19,8 @@ aqui e pular, nunca decidir.
 | 1 | T3.2 — preferências de PDF (decisão #4) | ✅ concluída |
 | 2 | NOVO-006b — PDF de execução sem bloco financeiro | ✅ concluída |
 | 3 | T3.8 — paridade i18n pt-BR × en (MF-AUD-030) | ✅ concluída (achado não reproduziu) |
-| 4 | NOVO-006a — view de `service_orders` sem valores | ⏳ pendente |
-| 5 | Fila infinita — cobertura de teste em módulos categoria I | ⏳ pendente |
+| 4 | NOVO-006a — view de `service_orders` sem valores | ✅ migration escrita (NÃO aplicada) |
+| 5 | Fila infinita — cobertura de teste em módulos categoria I | 🔄 em curso (1 módulo por commit) |
 
 ---
 
@@ -176,3 +176,94 @@ não faltava chave no dicionário — faltava a chave existir. Agora estão nos 
 
 **Para a revisão matinal:** se você confiava no número 782 × 781 do relatório de auditoria para dimensionar a
 frente de i18n, o número certo hoje é 812 chaves em cada idioma. Nada a corrigir; só a base de cálculo muda.
+
+---
+
+## 4 — NOVO-006a · View da OS sem colunas de valor — migration ESCRITA, **não aplicada**
+
+**Commit:** `feat(rls): NOVO-006a view da OS sem valores para o tecnico (migration NAO aplicada)`
+
+> **Estado: pronta para aplicar na revisão matinal, verificação pendente.** A migration existe em disco e
+> está commitada; **o banco não foi tocado**. Nenhuma escrita, nenhum deploy.
+
+**Arquivo:** `supabase/migrations/20260811002500_view_os_sem_valores_para_tecnico.sql`
+
+**O que ela faz:** cria `public.service_orders_tecnico` — a OS **sem nenhuma coluna de valor** —, com
+`security_invoker = on` (a RLS da tabela base continua valendo; a view restringe **coluna**, nunca **linha**),
+`REVOKE ALL` de `PUBLIC` e de `anon` e `GRANT SELECT` para `authenticated`, tudo na mesma migration.
+
+**As colunas são listadas uma a uma, não `SELECT *`.** Com `*`, toda coluna de valor criada no futuro entraria
+sozinha e ninguém perceberia. O preço é o inverso: coluna operacional nova também não aparece até alguém
+acrescentar — falha para o lado seguro, porque funcionalidade que falta se vê na hora e valor que vaza, não.
+
+**29 colunas ficaram de fora** (valor monetário, percentual de precificação/comissão, forma e condição de
+pagamento). Uma merece destaque: **`share_token` saiu** — ele abre o link público do documento, que mostra os
+valores. Mantê-lo seria fechar a porta e deixar a chave na fechadura.
+
+**Fronteira que quero que você reveja:** `invoicing_status` e `payment_status` **ficaram**. Não são valores, e
+a tela usa `invoicing_status` para bloquear edição de OS faturada — sem ele o técnico editaria o que não deve.
+Eles dizem "foi faturada" e "está paga", não *quanto*. Se a sua leitura da decisão #3 for mais estrita, é
+apagar duas linhas da view.
+
+**O frontend está ligado, mas com a chave desligada.** `src/lib/service-orders-source.ts` decide a fonte por
+cargo e `useServiceOrders`/`useServiceOrder` já a consultam — porém `VIEW_TECNICO_DISPONIVEL = false`, então
+**hoje todo mundo lê da tabela, exatamente como antes**. A chave existe porque as duas metades não sobem
+juntas: a migration é commitada antes de aplicada (regra 1) e o frontend publica a cada push na main. Sem ela,
+a janela entre publicar e aplicar deixaria o técnico consultando uma view inexistente — erro justamente na
+tela do trabalho dele.
+
+**Ordem de operações para ligar:**
+1. aplicar a migration;
+2. **regenerar `src/integrations/supabase/types.ts`** — sem isso `.from()` não conhece a view (hoje há um cast
+   comentado no hook exatamente por causa disso);
+3. virar `VIEW_TECNICO_DISPONIVEL` para `true`;
+4. com JWT de técnico: lista e detalhe abrem, embeds de cliente/embarcação/marina vêm preenchidos, nenhum
+   valor na tela. **Este é o ponto que só o ambiente real responde:** o PostgREST infere relacionamento a
+   partir de view pelas colunas de FK (todas presentes), mas eu não pude provar sem aplicar.
+5. conferir se alguma tela quebra por campo ausente (`grand_total` etc. virão `undefined` para técnico).
+
+**Achado novo registrado, não corrigido — `NOVO-008`:** a view fecha a OS, mas o detalhe é lido com embed dos
+itens (`service_order_parts(*, products(*))`, `service_order_services(*, services(name))`), que têm
+`unit_price`/`total_price` — e `products(*)` traz preço e custo. **Enquanto isso não for fechado, "o técnico
+não vê valores" vale do total para cima; quem quiser somar, soma.** O caminho são views irmãs, e é tarefa
+própria.
+
+**Teste (12 casos):** o roteamento por cargo e — a parte que interessa — a migration é **lida do disco** e
+cobrada: nenhuma das 29 colunas proibidas no `SELECT`, `security_invoker` presente, `REVOKE` de anon presente,
+`GRANT` para authenticated presente, sem `SELECT *`, e as colunas que a tela do técnico precisa continuam lá.
+Sem ler o arquivo, a lista em código estaria sendo testada contra ela mesma. **Provei que pega a regressão:**
+acrescentei `grand_total` à view e o caso falhou nomeando a coluna; revertido em seguida.
+
+**Gates:** typecheck 0 · vitest **963** (eram 951; +12) · deno 267 · build OK.
+
+---
+
+## 5 — Fila infinita · Cobertura de teste em lógica crítica sem teste
+
+Um módulo por commit, do maior risco para o menor. Critério de escolha: lógica que decide dinheiro ou
+integridade de dado, que hoje não tem nenhum teste, e que dá para testar sem banco. **Evitei de propósito
+tudo que é do CashForecastPanel/financeiro**, que roda em outra sessão.
+
+### 5.1 `price-calculator.ts` — concluído, **e achou um defeito real**
+
+**Commit:** `test(preco): cobre price-calculator e registra NOVO-009 (preco 3,6e18)`
+
+São 50 linhas que decidem por quanto a empresa vende, e não tinham teste nenhum. A fórmula é a do Simples
+Nacional — imposto e comissão saem **de dentro** do preço (`custo / (1 - margem - imposto - comissão)`), não
+são somados por cima. Trocar essa divisão pela multiplicação (o erro clássico) não quebra nada, não acusa em
+tela e devolve um preço plausível **e menor** do que deveria: só apareceria no fim do mês. Agora tem um caso
+que compara com o número errado (140 contra 166,67) e falha se alguém inverter.
+
+**O defeito que apareceu — `NOVO-009`, registrado e NÃO corrigido (regra 3):** quando margem + imposto +
+comissão somam **exatamente 100%**, o guard `if (divisor <= 0)` deveria zerar tudo. Em ponto flutuante,
+`1 - 0,6 - 0,3 - 0,1` dá `+2,78e-17` — positivo — e o guard não pega. **O preço sai 3,6 × 10¹⁸.** Pior: como
+`PriceCalculator.tsx` sincroniza o preço calculado para o formulário sempre que ele é maior que zero, esse
+número **entra no campo de preço do produto** enquanto o aviso de "impossível" está na tela.
+
+E depende da combinação: 60+30+10 e 70+20+10 quebram; 50+30+20 e 40+40+20 caem certo. É exatamente o tipo de
+defeito que ninguém consegue reproduzir a partir do relato. A correção é de uma linha (tolerância `1e-9` no
+guard, ou calcular o divisor em pontos percentuais inteiros) e está descrita no achado.
+
+O caso está no teste com `it.fails` — quando a correção entrar, ele passa a acusar e obriga a virar `it()`.
+
+**Gates:** typecheck 0 · vitest **980** (eram 963; +17) · deno 267 · build OK.

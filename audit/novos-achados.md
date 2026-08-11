@@ -215,3 +215,52 @@ Não foram corrigidos.
 
 - **Não corrigido** (regra 3): a suíte do F2-UI não é o escopo da verificação da manhã, e mexer em
   teste alheio durante revisão de merge misturaria diffs.
+## [NOVO-008] Os itens da OS continuam com preço unitário no mesmo embed que a tela do técnico usa
+
+- **Encontrado em:** 11/08/2026, escrevendo a view do NOVO-006a
+- **Categoria:** F — **Severidade sugerida:** P2 · **Status:** registrado, **não corrigido**
+- **Descrição:** a view `service_orders_tecnico` tira as colunas de valor **da OS**, mas o detalhe da OS é
+  lido com embed dos itens — `service_order_parts(*, products(*))` e `service_order_services(*, services(name))`
+  (`src/hooks/use-service-orders.ts:25-35`). As duas tabelas de item têm `unit_price`/`total_price`, e
+  `products(*)` traz o preço e o **custo** do produto. Ou seja: fechar a OS pelo lado da tabela-mãe deixa o
+  preço de cada peça e de cada serviço passando pelo mesmo `select`, e o total é aritmética de somar.
+- **Por que não corrigi junto:** a tarefa era a view de `service_orders`, e ampliar para três views mais os
+  embeds correspondentes muda o desenho da consulta do detalhe — que é a tela mais usada do sistema — sem
+  possibilidade de validar em banco na mesma janela.
+- **Caminho sugerido:** views irmãs `service_order_parts_tecnico` e `service_order_services_tecnico` (mesmas
+  colunas menos preço), e o `SO_DETAIL_SELECT` do técnico apontando para elas. Alternativa mais barata e
+  menos completa: manter os embeds, mas pedir colunas nomeadas em vez de `*` no caminho do técnico.
+- **Consequência prática enquanto não for feito:** a frase "o técnico não vê valores" continua sendo verdade
+  só do total para cima. Quem quiser somar, soma.
+
+---
+
+## [NOVO-009] Preço de venda vira 3,6 × 10¹⁸ quando margem + imposto + comissão dão exatamente 100%
+
+- **Encontrado em:** 11/08/2026, escrevendo a cobertura de teste de `price-calculator.ts`
+- **Categoria:** A — **Severidade sugerida:** P2 · **Status:** registrado, **não corrigido** (regra 3)
+- **Arquivo:linha:** `src/lib/price-calculator.ts:30-39` (o guard), `src/components/PriceCalculator.tsx:53-60`
+  (o que faz o número escapar para o formulário)
+- **Descrição:** a fórmula é `custo / (1 - margem - imposto - comissão)` e existe um guard para o caso
+  impossível: `if (divisor <= 0) return zeros`. O problema é que, em ponto flutuante binário,
+  `1 - 0.6 - 0.3 - 0.1` **não dá zero** — dá `2,7755575615628914e-17`, positivo. O guard não pega, a divisão
+  acontece, e o preço de venda sai **3,6 × 10¹⁸**.
+- **Depende da combinação, e é isso que torna difícil reproduzir pelo relato:**
+
+  | margem + imposto + comissão | divisor calculado | resultado |
+  |---|---|---|
+  | 60 + 30 + 10 | `+2,78e-17` | **preço 3,6e18** |
+  | 70 + 20 + 10 | `+2,78e-17` | **preço 3,6e18** |
+  | 33,33 + 33,33 + 33,34 | `+5,55e-17` | **preço 1,8e18** |
+  | 50 + 30 + 20 | `0` | zeros (correto) |
+  | 40 + 40 + 20 | `-5,55e-17` | zeros (correto) |
+  | 80 + 15 + 5 | `-4,16e-17` | zeros (correto) |
+
+- **Por que não é só cosmético:** `PriceCalculator.tsx:53-60` sincroniza o preço calculado para o formulário
+  do produto sempre que `breakdown.sale_price > 0`. O aviso de "preço impossível" aparece na tela **e o número
+  astronômico já foi gravado no campo**. Quem salvar sem reparar leva o valor para o cadastro.
+- **Correção sugerida (uma linha):** comparar com uma tolerância em vez de zero exato —
+  `if (divisor <= 1e-9)` — ou calcular o divisor a partir da soma em pontos percentuais inteiros
+  (`(100 - margem - imposto - comissão) / 100`), que erra menos por construção.
+- **Cobertura:** `src/lib/price-calculator.test.ts` tem o caso marcado com `it.fails` e o comportamento atual
+  documentado. Quando a correção entrar, o `it.fails` passa a acusar e obriga a virar `it()`.
