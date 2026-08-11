@@ -183,3 +183,35 @@ Não foram corrigidos.
   propósito contra clipping lateral, então exigem teste nos dois eixos.
 - **Bônus latente:** o loop do plugin (`html2pdf.js:369`) usa `getBoundingClientRect()` enquanto insere
   espaçadores no mesmo loop, invalidando as coordenadas dos elementos seguintes.
+
+---
+
+## [NOVO-016] Teste intermitente na suíte do F2-UI — 1 falha em 5 execuções, nome não capturado
+
+- **Encontrado em:** 11/08/2026, na verificação do turno da noite (operador de volta).
+- **Categoria:** I (testes/CI) — **Severidade sugerida:** P3
+- **Onde:** branch `feat/f2-ui-financeiro` @ `ddd13ff`, suíte completa (`vitest run`).
+- **O que aconteceu:** a **primeira** execução da suíte, logo após `git checkout` do branch, terminou
+  com `1 failed | 918 passed (919)`. As **quatro** execuções seguintes, no mesmo commit e no mesmo
+  worktree, deram `919 passed` — inclusive uma com `node_modules/.vite` e `.vitest` apagados.
+
+- **O nome do teste NÃO foi capturado, e isso é falha minha de instrumentação.** O comando daquela
+  primeira rodada filtrava só as linhas de total (`grep "Test Files|Tests"`), então o bloco
+  "Failed Tests" não entrou na saída. Quando fui buscar o nome, já não reproduzia. Registro sem o
+  nome em vez de chutar qual foi.
+
+- **Por que importa mesmo sendo intermitente:** teste que falha 1 em 5 no CI reprova merge por
+  sorteio. Pior, ensina a reagir a vermelho com "roda de novo", que é como uma quebra real passa.
+
+- **Hipótese, não conclusão:** as execuções mostram `environment` entre 90 s e 274 s — muito alto
+  para 78 arquivos. Isso indica contenção de recurso na máquina (várias sessões de IA rodando
+  suíte ao mesmo tempo neste repo), e o candidato mais provável é um `findBy*` estourando timeout
+  sob carga, não um defeito de lógica. **Não verifiquei**, então fica como hipótese.
+
+- **Como pegar da próxima vez:** rodar com saída completa em arquivo
+  (`vitest run > saida.txt 2>&1`) em vez de filtrar no pipe, e considerar
+  `vitest --retry=1` no CI **apenas** se vier acompanhado de relatório de flakes — sem o relatório,
+  o retry esconde o problema em vez de medi-lo.
+
+- **Não corrigido** (regra 3): a suíte do F2-UI não é o escopo da verificação da manhã, e mexer em
+  teste alheio durante revisão de merge misturaria diffs.
