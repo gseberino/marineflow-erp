@@ -1,6 +1,7 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
 import { generatePONumber } from "./purchasing.ts";
 import { chaveTelefone } from "../phone.ts";
+import { recalcularOSComCascata } from "../../receivables/cascata.ts";
 
 // Módulo de COTAÇÃO a fornecedores (Fase 2 · Etapa 1).
 // Operação real: compra sob demanda (sem estoque) → todo orçamento gera cotação.
@@ -620,7 +621,7 @@ export const quoteTools: ToolDef[] = [
       await sb.from("quote_responses").update({ confirmed: false }).eq("quote_request_item_id", item.id);
       await sb.from("quote_responses").update({ confirmed: true }).eq("id", resp.id);
 
-      try { await sb.rpc("recalc_so_totals", { so_id: soId }); } catch { /* best-effort */ }
+      try { await recalcularOSComCascata(sb, soId); } catch { /* best-effort */ }
 
       const { data: soAfter } = await sb.from("service_orders").select("grand_total").eq("id", soId).maybeSingle();
       const { data: partsCost } = await sb.from("service_order_parts").select("line_total_cost").eq("service_order_id", soId);

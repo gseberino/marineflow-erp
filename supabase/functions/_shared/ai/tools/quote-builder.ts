@@ -1,6 +1,7 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolCtx, type ToolDef } from "./registry.ts";
 import { applyStockDelta } from "./service-orders.ts";
 import { resolverItens } from "../keyword-resolver.ts";
+import { recalcularOSComCascata } from "../../receivables/cascata.ts";
 
 // MACRO — cria um orçamento INTEIRO numa única chamada (LLM orquestra, código executa).
 // Ver plans/marineflow-llm-orquestra-codigo-executa.md
@@ -194,7 +195,7 @@ export const quoteBuilderTools: ToolDef[] = [
       if (Object.keys(patch).length) await sb.from("service_orders").update(patch).eq("id", so.id);
 
       // 7. Recalcula o total oficial e lê a margem.
-      try { await sb.rpc("recalc_so_totals", { so_id: so.id }); } catch { /* best-effort */ }
+      try { await recalcularOSComCascata(sb, so.id); } catch { /* best-effort */ }
       const { data: soFinal } = await sb.from("service_orders").select("grand_total").eq("id", so.id).maybeSingle();
       const custoPecas = comProduto.reduce((a, i) => a + i.custo * i.quantidade, 0);
       const grand = Number(soFinal?.grand_total) || 0;
