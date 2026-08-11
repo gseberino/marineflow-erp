@@ -159,3 +159,27 @@ Não foram corrigidos.
   Gustavo precisa saber disso para decidir se quer a tarefa da view.
 - **Evidência:** `src/hooks/use-service-orders.ts:15-33` (selects com `*`); comportamento documentado do
   PostgREST/Postgres para grants de coluna.
+
+---
+
+## [NOVO-007] PDF baixado trunca o fim: altura da captura é congelada antes de o html2pdf inserir os espaçadores
+
+- **Encontrado em:** 10/08/2026, no diagnóstico do P1 do PDF truncado (`audit/diagnostico-pdf-truncado.md`)
+- **Categoria:** A — **Severidade sugerida:** P1 · **Status:** diagnosticado, **não corrigido**
+- **Descrição:** `generatePDFBlob` mede `captureHeight = container.scrollHeight`
+  (`src/lib/pdf-generator.ts:380`) **depois** de inserir as marcas `.html2pdf__page-break` — que são divs
+  vazias e não somam altura — e congela esse valor em `html2canvas.height`/`windowHeight`. Em seguida, o
+  plugin de pagebreak do html2pdf (`node_modules/html2pdf.js/dist/html2pdf.js:420-428`) implementa cada quebra
+  **inserindo uma div de padding de até 1031 px no DOM**, e `toCanvas` (`:771-775`) repassa as opções como
+  estão. O documento cresce, a captura não: o excedente — sempre o **fim** — fica de fora da imagem.
+- **Previsão que confirma:** documento de 1 página (sem quebra, sem espaçador) **não** trunca; o defeito só
+  aparece com 2+ páginas e piora com o comprimento.
+- **Provável causa do sintoma antigo dos termos:** os termos são o penúltimo bloco do documento. O
+  `diagnostico-terms.md` descartou dado e preferência e ficou sem causa — **esta é a causa mais provável**, e
+  as duas investigações se fecham numa só.
+- **Caminho sugerido (não implementado):** inserir os espaçadores nós mesmos **antes** de medir
+  `captureHeight` e tirar `legacy` do `pagebreak.mode`, para que o html2pdf não mexa mais no DOM depois da
+  medição. Alternativa mais simples: não congelar `height`/`windowHeight` — porém essas opções foram postas de
+  propósito contra clipping lateral, então exigem teste nos dois eixos.
+- **Bônus latente:** o loop do plugin (`html2pdf.js:369`) usa `getBoundingClientRect()` enquanto insere
+  espaçadores no mesmo loop, invalidando as coordenadas dos elementos seguintes.
