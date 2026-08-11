@@ -361,3 +361,24 @@ Ambas as correções são de uma linha cada, mas mudam o que já foi importado a
 atual** por preços suspeitos abaixo de R$ 10 e por clientes sem telefone que deveriam ter celular.
 
 **Gates:** typecheck 0 · vitest **1.070** (eram 1.046; +24) · deno 267 · build OK.
+
+### 5.6 `masks.ts` — concluído
+
+**Commit:** `test(cadastro): cobre mascaras, validacao de CPF/CNPJ e normalizacao de telefone`
+
+Funções pequenas usadas em quase toda tela de cadastro, e duas delas passam de "formatação" para dado que
+sai do sistema: `normalizePhoneE164` decide o número **para onde o WhatsApp é enviado**, e
+`maskMoney`/`parseMoney` são a ida e a volta de todo campo de dinheiro digitado. Máscara errada não derruba
+nada — só grava o dado torto, e ninguém revisa cadastro antigo.
+
+24 casos. Os que valem citar:
+- **CPF `111.111.111-11` é recusado.** A sequência repetida fecha a aritmética do dígito verificador e passa
+  em validador ingênuo — é o que mais aparece em cadastro preenchido às pressas.
+- **Telefone curto demais não é completado por adivinhação.** Um `99999-0000` sem DDD, se ganhasse `55` na
+  frente, viraria um número existente de **outra pessoa** — e a mensagem iria para ela.
+- **`parseMoney` acerta o milhar** (`"1.299,90"` → `1299.9`). É exatamente o caso que o importador de CSV erra
+  (NOVO-011): aqui os dígitos são extraídos e divididos por 100, e o ponto de milhar não atrapalha. As duas
+  implementações vivem no mesmo repositório fazendo a mesma coisa de jeitos diferentes — **a do importador é
+  a errada**, e agora existe teste dos dois lados mostrando isso.
+
+**Gates:** typecheck 0 · vitest **1.094** (eram 1.070; +24) · deno 267 · build OK.
