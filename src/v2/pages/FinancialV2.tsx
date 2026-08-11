@@ -18,13 +18,8 @@ import { FinancialFilterPanel, applyFilters, defaultFilters, type FinancialFilte
 import { PaymentDialog } from '@/components/PaymentDialog';
 import { PayableFormDialog } from '@/components/PayableFormDialog';
 import { DREPanel } from '@/components/DREPanel';
-import { ConciliacaoPanel } from '@/components/ConciliacaoPanel';
 import { BankSourcesPanel } from '@/components/BankSourcesPanel';
-import { FinanceReviewInbox, type SementeDeRegra } from '@/components/FinanceReviewInbox';
-import { FinanceRulesPanel, EditorDeRegra } from '@/components/FinanceRulesPanel';
-import { IgnoradasPanel } from '@/components/IgnoradasPanel';
-import { CartoesPanel } from '@/components/CartoesPanel';
-import { FechamentoPanel } from '@/components/FechamentoPanel';
+import { FinanceRulesPanel } from '@/components/FinanceRulesPanel';
 import { SaudeDoCadastroPanel } from '@/components/SaudeDoCadastroPanel';
 import { AgingReportPanel } from '@/components/AgingReportPanel';
 import { ReimbursementsPanel } from '@/components/ReimbursementsPanel';
@@ -139,9 +134,6 @@ export default function FinancialV2() {
   const [paymentTarget, setPaymentTarget] = useState<{ receivable?: PayableRow; payable?: PayableRow } | null>(null);
   const [showNewPayable, setShowNewPayable] = useState(false);
   const [editingPayable, setEditingPayable] = useState<PayableRow | null>(null);
-  // Regra criada a partir de uma linha da caixa de entrada: o editor abre preenchido, sem
-  // obrigar a redigitar o fornecedor que está na tela.
-  const [sementeRegra, setSementeRegra] = useState<SementeDeRegra | null>(null);
 
   /**
    * "Contas a pagar" mostra o que se DEVE, não o histórico de despesa.
@@ -351,20 +343,12 @@ export default function FinancialV2() {
                 2 linhas de 101 porque lia a fila de PROPOSTAS, que só existe para débito.
                 É a separação que QuickBooks (For Review × Reconcile) e NetSuite (Match
                 Bank Data × Reconcile Account Statement) fazem. */}
-            <TabsTrigger value="inbox">Extrato</TabsTrigger>
-            <TabsTrigger value="reconciliation">{t.financial.tabReconciliation}</TabsTrigger>
-            {/* O que saiu da fila não pode sair do sistema. Sem esta aba, 380 transações
-                tinham virado sumiço — e a suspeita, justa, foi de que a IA as tinha
-                escondido. Toda saída da fila é reversível e diz quem, quando e por quê. */}
-            {/* Cartão é OUTRO objeto: sem contraparte, sem saída de caixa na data da compra,
-                e pertencente a um ciclo que fecha. Misturá-lo com Pix e transferência foi o
-                que o gestor pediu para desfazer. */}
-            <TabsTrigger value="cartoes">Cartões</TabsTrigger>
-            <TabsTrigger value="ignoradas">Fora da fila</TabsTrigger>
+            {/* [F2-UI] Extrato, Conciliação, Cartões, Fora da fila e Fechamento SAÍRAM daqui:
+                viraram /v2/financial/extrato e /v2/financial/conciliacao. Manter a aba além da
+                rota daria dois caminhos para o mesmo destino, que é exatamente a confusão que
+                o gestor pediu para desfazer ("não sei se clico na lateral ou em cima"). Os
+                `?tab=` antigos continuam funcionando por redirect, em App.tsx. */}
             <TabsTrigger value="rules">Regras</TabsTrigger>
-            {/* Fechar o mês, ler a trilha e conferir se o extrato está completo — os três
-                controles que separam "o número está certo" de "o número é auditável". */}
-            <TabsTrigger value="fechamento">Fechamento</TabsTrigger>
             {/* Cadastro sujo é o que faz o motor errar em silêncio — foi um nome fantasia
                 com o nome de uma cidade que atribuiu 160 despesas ao fornecedor errado. */}
             <TabsTrigger value="cadastro">Saúde do cadastro</TabsTrigger>
@@ -615,19 +599,11 @@ export default function FinancialV2() {
             )}
           </TabsContent>
 
-          {/* ── EXTRATO / CONCILIAÇÃO / REGRAS / CONTAS / AGING ── */}
-          <TabsContent value="inbox" className="mt-4">
-            <FinanceReviewInbox onCriarRegra={setSementeRegra} />
-          </TabsContent>
-          {/* A BankReconciliation (1.727 linhas) foi aposentada aqui por decisão do gestor:
-              ela partia do extrato e chamava aquilo de conciliação. O que ela tinha de bom
-              — tolerância de diferença, conciliação em grupo, criação de cliente na hora —
-              volta em fases seguintes, sobre o modelo certo. O arquivo continua no repo
-              até a F3 terminar, para nada se perder no caminho. */}
-          <TabsContent value="reconciliation" className="mt-4"><ConciliacaoPanel /></TabsContent>
-          <TabsContent value="cartoes" className="mt-4"><CartoesPanel /></TabsContent>
-          <TabsContent value="ignoradas" className="mt-4"><IgnoradasPanel /></TabsContent>
-          <TabsContent value="fechamento" className="mt-4"><FechamentoPanel /></TabsContent>
+          {/* ── REGRAS / CONTAS / AGING ──
+              A BankReconciliation (1.727 linhas) segue aposentada: ela partia do extrato e
+              chamava aquilo de conciliação. O que ela tinha de bom — tolerância de diferença,
+              conciliação em grupo, criação de cliente na hora — volta em fases seguintes,
+              sobre o modelo certo. O arquivo continua no repo até a F4, para nada se perder. */}
           <TabsContent value="cadastro" className="mt-4"><SaudeDoCadastroPanel /></TabsContent>
           <TabsContent value="rules" className="mt-4"><FinanceRulesPanel /></TabsContent>
           <TabsContent value="banks" className="mt-4"><BankSourcesPanel /></TabsContent>
@@ -652,14 +628,8 @@ export default function FinancialV2() {
           payable={paymentTarget.payable as never}
         />
       )}
-      {sementeRegra && (
-        <EditorDeRegra
-          key={sementeRegra.match_value}
-          aberto
-          onFechar={() => setSementeRegra(null)}
-          regra={sementeRegra}
-        />
-      )}
+      {/* O editor de regra saiu junto com a caixa de entrada que o dispara: agora vive em
+          /v2/financial/extrato, ao lado da lista que o aciona. */}
       <PayableFormDialog open={showNewPayable} onOpenChange={setShowNewPayable} />
       <PayableFormDialog
         open={!!editingPayable}

@@ -88,9 +88,11 @@ describe('menu lateral — Financeiro reestruturado', () => {
     expect(links.some((l) => /Caixa de Entrada/i.test(l)), 'o nome antigo voltou ao menu').toBe(false);
   });
 
-  it('marca só o item da aba em que estou', () => {
-    renderMenu('/v2/financial?tab=inbox');
-    // Sem tratar a query, Visão Geral, Conciliação e Contas a Pagar acenderiam junto.
+  it('[F2-UI] marca só o item da rota em que estou', () => {
+    // Extrato e Conciliação deixaram de ser abas e viraram rota própria. O acendimento
+    // passa a ser por pathname — mas o risco continua o mesmo: sem tratar a distinção,
+    // Visão Geral acenderia junto, e o menu deixaria de dizer onde a pessoa está.
+    renderMenu('/v2/financial/extrato');
     expect(ativos().filter((r) => r?.includes('Extrato'))).toHaveLength(1);
     expect(ativos().some((r) => r === 'Visão Geral')).toBe(false);
   });

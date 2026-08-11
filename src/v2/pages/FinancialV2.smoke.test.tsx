@@ -65,26 +65,35 @@ function renderFinanceiro() {
 }
 
 describe('FinancialV2 — paridade e navegação', () => {
-  it('tem as abas que só existiam na v1', async () => {
-    // Sem estas três, migrar o menu para a v2 tiraria do usuário o que ele acabou de ganhar.
+  it('mantém as abas que são recorte do mesmo material', async () => {
+    // Regras e Contas bancárias continuam aqui: são configuração do financeiro, não
+    // destino próprio. Sem elas, migrar o menu tiraria do usuário o que ele ganhou na v1.
     renderFinanceiro();
-    // "Caixa de entrada" virou "Extrato": a fila É o extrato, e manter os dois nomes era
-    // manter dois destinos para o mesmo material.
-    expect(await screen.findByRole('tab', { name: /^Extrato$/i })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /^Regras$/i })).toBeInTheDocument();
+    expect(await screen.findByRole('tab', { name: /^Regras$/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /Contas bancárias/i })).toBeInTheDocument();
   });
 
-  it('Extrato vem ANTES de Conciliação — a ordem é o fluxo do trabalho', async () => {
-    // Triar o que o banco trouxe vem primeiro; conferir o que já foi lançado vem depois.
-    // Invertido, a tela sugere que se concilia antes de registrar — que é exatamente a
-    // confusão que esta reorganização desfez.
+  it('[F2-UI] Extrato e Conciliação NÃO são mais abas — viraram rota', async () => {
+    // Manter a aba além da rota daria dois caminhos para o mesmo destino, que é a confusão
+    // que o gestor pediu para desfazer ("não sei se clico na lateral ou em cima"). Quem
+    // reintroduzir a aba aqui quebra este teste — e é isso que se quer.
+    renderFinanceiro();
+    await screen.findAllByRole('tab');
+    expect(screen.queryByRole('tab', { name: /^Extrato$/i })).toBeNull();
+    expect(screen.queryByRole('tab', { name: /Concilia|Reconcil/i })).toBeNull();
+    expect(screen.queryByRole('tab', { name: /^Cartões$/i })).toBeNull();
+    expect(screen.queryByRole('tab', { name: /Fora da fila/i })).toBeNull();
+    expect(screen.queryByRole('tab', { name: /^Fechamento$/i })).toBeNull();
+  });
+
+  it('[F2-UI] a ordem do fluxo agora vive no menu lateral, não nas abas', async () => {
+    // Triar o extrato vem antes de conferir o que foi lançado. Essa ordem passou a ser
+    // responsabilidade do menu (Extrato acima de Conciliação, em AppLayout), porque as duas
+    // deixaram de ser abas. Aqui só se garante que nenhuma das duas voltou para cá.
     renderFinanceiro();
     const abas = (await screen.findAllByRole('tab')).map((a) => a.textContent ?? '');
-    const iExtrato = abas.findIndex((r) => /^Extrato$/i.test(r.trim()));
-    const iConcil = abas.findIndex((r) => /Concilia|Reconcil/i.test(r));
-    expect(iExtrato).toBeGreaterThanOrEqual(0);
-    expect(iConcil).toBeGreaterThan(iExtrato);
+    expect(abas.some((r) => /^Extrato$/i.test(r.trim()))).toBe(false);
+    expect(abas.some((r) => /Concilia|Reconcil/i.test(r))).toBe(false);
   });
 
   it('nenhuma aba abre em branco', async () => {
@@ -107,19 +116,17 @@ describe('FinancialV2 — paridade e navegação', () => {
     const user = userEvent.setup();
     renderFinanceiro();
 
-    await user.click(await screen.findByRole('tab', { name: /Conciliação|Reconciliation/i }));
-    // A regressão original: uma aba disparava navigate() e trocava a tela inteira.
+    // A regressão original: uma aba disparava navigate() e trocava a tela inteira. Como
+    // Extrato e Conciliação saíram, a verificação passa a usar uma aba que ficou.
+    await user.click(await screen.findByRole('tab', { name: /^Regras$/i }));
     expect(navigateMock).not.toHaveBeenCalled();
   });
 
-  it('cada aba nova alcança o próprio painel', async () => {
+  it('cada aba alcança o próprio painel', async () => {
     const user = userEvent.setup();
     renderFinanceiro();
 
-    await user.click(await screen.findByRole('tab', { name: /^Extrato$/i }));
-    expect(await screen.findByText('painel extrato')).toBeInTheDocument();
-
-    await user.click(screen.getByRole('tab', { name: /^Regras$/i }));
+    await user.click(await screen.findByRole('tab', { name: /^Regras$/i }));
     expect(await screen.findByText('painel regras')).toBeInTheDocument();
 
     await user.click(screen.getByRole('tab', { name: /Contas bancárias/i }));

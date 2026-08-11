@@ -235,8 +235,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
         // "Extrato", igual à aba. Renomear a aba e esquecer o menu deixou os dois nomes
         // convivendo para o MESMO destino — que é a confusão que a reorganização veio
         // desfazer, agora causada por mim.
-        { label: 'Extrato', icon: Sparkles, path: '/v2/financial?tab=inbox', roles: ['admin', 'financial'] },
-        { label: 'Conciliação', icon: ArrowLeftRight, path: '/v2/financial?tab=reconciliation', roles: ['admin', 'financial'] },
+        { label: 'Extrato', icon: Sparkles, path: '/v2/financial/extrato', roles: ['admin', 'financial'] },
+        { label: 'Conciliação', icon: ArrowLeftRight, path: '/v2/financial/conciliacao', roles: ['admin', 'financial'] },
         // Tela inteira, não aba: tem filtros, régua de cobrança e recibo próprios.
         { label: 'Contas a Receber', icon: TrendingUp, path: '/v2/receivables', roles: ['admin', 'financial'] },
         { label: 'Contas a Pagar', icon: TrendingDown, path: '/v2/financial?tab=payables', roles: ['admin', 'financial'] },
@@ -364,7 +364,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
     // que faz a pessoa entrar. Recolhido, vira um ponto (não cabe número).
     const pendentes = item.path === '/agenda'
       ? sugestoesPendentes
-      : item.path === '/v2/financial?tab=inbox' ? propostasPendentes : 0;
+      : item.path === '/v2/financial/extrato' ? propostasPendentes : 0;
     const ativo = isActive(item.path);
     return (
       <Link

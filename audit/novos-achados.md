@@ -183,3 +183,19 @@ Não foram corrigidos.
   propósito contra clipping lateral, então exigem teste nos dois eixos.
 - **Bônus latente:** o loop do plugin (`html2pdf.js:369`) usa `getBoundingClientRect()` enquanto insere
   espaçadores no mesmo loop, invalidando as coordenadas dos elementos seguintes.
+
+## NOVO-015 — A aba "Sugeridas" da Conciliação não tem motor por trás
+
+- **Origem:** [F2-UI], implementação da `/v2/financial/conciliacao`, 11/08/2026.
+- **Situação:** o desenho previa quatro abas (Sugeridas · Casadas · Sem par · Fechamento).
+  Entreguei três. O que existe hoje é ordenação de candidatos por proximidade de valor
+  (`distancia()` em `ConciliacaoPanel.tsx`), dentro do fluxo de "sem par" — que é outra coisa:
+  ajuda a escolher depois que a pessoa já abriu o lançamento, não propõe casamento nenhum.
+- **Por que não implementei:** "sugestão" exige definir tolerância de valor, janela de data,
+  o que fazer com múltiplos candidatos e se o casamento sugerido vira estado gravado. São
+  decisões sobre conciliação de dinheiro, e um palpite errado casa recebível com o depósito
+  do cliente errado.
+- **Por que não deixei a aba vazia:** abriria sem nada para sempre, e ninguém saberia se é
+  falta de dado ou falta de recurso. Há teste travando a ausência dela.
+- **Para decidir:** existe plano em `plans/` sobre conciliação inteligente com motor em
+  camadas. Se for por ali, a aba entra como superfície desse motor.

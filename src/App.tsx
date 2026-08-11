@@ -51,6 +51,8 @@ const OrdersListV2 = lazy(() => import("./v2/pages/OrdersListV2"));
 const DashboardV2 = lazy(() => import("./v2/pages/DashboardV2"));
 const ReceivablesV2 = lazy(() => import("./v2/pages/ReceivablesV2"));
 const FinancialV2 = lazy(() => import("./v2/pages/FinancialV2"));
+const ExtratoV2 = lazy(() => import("./v2/pages/ExtratoV2"));
+const ConciliacaoV2 = lazy(() => import("./v2/pages/ConciliacaoV2"));
 const CollectionsV2 = lazy(() => import("./v2/pages/CollectionsV2"));
 const CommissionsV2 = lazy(() => import("./v2/pages/CommissionsV2"));
 const PayeesPage = lazy(() => import("./pages/PayeesPage"));
@@ -124,6 +126,29 @@ function FinanceiroLegadoOuV2() {
 }
 
 /**
+ * [F2-UI] As abas que viraram ROTA, e para onde cada `?tab=` antigo aponta agora.
+ *
+ * Extrato e Conciliação deixaram de ser abas da tela financeira. Sem este mapa, todo link
+ * salvo, favorito e atalho de menu que alguém guardou nos últimos meses abriria a tela
+ * financeira na aba "Visão Geral" — sem erro, sem aviso, só no lugar errado. É o tipo de
+ * quebra que ninguém reporta como bug: a pessoa só acha que o sistema mudou de lugar de novo.
+ */
+const TABS_QUE_VIRARAM_ROTA: Record<string, string> = {
+  inbox: '/v2/financial/extrato',
+  cartoes: '/v2/financial/extrato?aba=cartao',
+  ignoradas: '/v2/financial/extrato?aba=fora',
+  reconciliation: '/v2/financial/conciliacao',
+  fechamento: '/v2/financial/conciliacao?aba=fechamento',
+};
+
+function FinanceiroV2ComRedirect() {
+  const [params] = useSearchParams();
+  const destino = TABS_QUE_VIRARAM_ROTA[params.get('tab') ?? ''];
+  if (destino) return <Navigate to={destino} replace />;
+  return <FinancialV2 />;
+}
+
+/**
  * Redesign em todo o ERP (30/07/2026): generalização do padrão acima para
  * TODAS as telas com gêmea v2. Redireciona preservando :params e query string;
  * `?legacy=1` ainda abre a tela antiga — saída de emergência enquanto a
@@ -176,7 +201,9 @@ const App = () => (
                         <Route path="/v2/quotes" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><OrdersListV2 mode="quotes" /></ProtectedRoute>} />
                         <Route path="/v2/dashboard" element={<ProtectedRoute roles={['admin','financial','technician','seller']}><DashboardV2 /></ProtectedRoute>} />
                         <Route path="/v2/receivables" element={<ProtectedRoute roles={['admin','financial']}><ReceivablesV2 /></ProtectedRoute>} />
-                        <Route path="/v2/financial" element={<ProtectedRoute roles={['admin','financial']}><FinancialV2 /></ProtectedRoute>} />
+                        <Route path="/v2/financial" element={<ProtectedRoute roles={['admin','financial']}><FinanceiroV2ComRedirect /></ProtectedRoute>} />
+                        <Route path="/v2/financial/extrato" element={<ProtectedRoute roles={['admin','financial']}><ExtratoV2 /></ProtectedRoute>} />
+                        <Route path="/v2/financial/conciliacao" element={<ProtectedRoute roles={['admin','financial']}><ConciliacaoV2 /></ProtectedRoute>} />
                         <Route path="/v2/collections" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><CollectionsV2 /></ProtectedRoute>} />
                         <Route path="/v2/commissions" element={<ProtectedRoute roles={['admin','financial']}><CommissionsV2 /></ProtectedRoute>} />
                         {/* Dado sensível (CPF, conta, Pix): mesma restrição do financeiro. */}

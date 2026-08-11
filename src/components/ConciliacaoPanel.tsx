@@ -45,9 +45,26 @@ function diasDeDistancia(due: string | null, extrato: string): number {
   return Math.round(ms / 86_400_000);
 }
 
-export function ConciliacaoPanel() {
+export interface ConciliacaoPanelProps {
+  /**
+   * Aba controlada de fora. Quando a tela dona guarda o estado na URL (é o caso de
+   * `/v2/financial/conciliacao`), o painel deixa de ter opinião própria e obedece — sem isso,
+   * recarregar a página com `?aba=casadas` voltaria para "Sem par" e o link compartilhado
+   * apontaria para o lugar errado.
+   *
+   * Omitido, o painel volta a gerenciar a aba sozinho (é como a tela legada o usa).
+   */
+  aba?: Aba;
+  onAbaChange?: (aba: Aba) => void;
+  /** Esconde a barra de abas quando quem desenha as abas é a tela de fora. */
+  ocultarAbas?: boolean;
+}
+
+export function ConciliacaoPanel({ aba: abaControlada, onAbaChange, ocultarAbas }: ConciliacaoPanelProps = {}) {
   const { formatCurrency, formatDate } = useI18n();
-  const [aba, setAba] = useState<Aba>('sem_extrato');
+  const [abaInterna, setAbaInterna] = useState<Aba>('sem_extrato');
+  const aba = abaControlada ?? abaInterna;
+  const setAba = (v: Aba) => { setAbaInterna(v); onAbaChange?.(v); };
   const [ladoFiltro, setLadoFiltro] = useState<LadoDoLancamento | 'todos'>('todos');
   const [busca, setBusca] = useState('');
   const [abertoId, setAbertoId] = useState<string | null>(null);
@@ -114,21 +131,23 @@ export function ConciliacaoPanel() {
       )}
 
       <div className="flex flex-wrap items-center gap-2">
-        <div className="flex rounded-lg border p-0.5">
-          {([
-            { k: 'sem_extrato' as Aba, r: 'Sem par no extrato', n: semExtrato.data?.length },
-            { k: 'conciliados' as Aba, r: 'Conciliados', n: conciliados.data?.length },
-          ]).map(t => (
-            <button
-              key={t.k}
-              onClick={() => { setAba(t.k); setAbertoId(null); }}
-              className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
-                aba === t.k ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
-            >
-              {t.r}{t.n != null && ` (${t.n})`}
-            </button>
-          ))}
-        </div>
+        {!ocultarAbas && (
+          <div className="flex rounded-lg border p-0.5">
+            {([
+              { k: 'sem_extrato' as Aba, r: 'Sem par no extrato', n: semExtrato.data?.length },
+              { k: 'conciliados' as Aba, r: 'Conciliados', n: conciliados.data?.length },
+            ]).map(t => (
+              <button
+                key={t.k}
+                onClick={() => { setAba(t.k); setAbertoId(null); }}
+                className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                  aba === t.k ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
+              >
+                {t.r}{t.n != null && ` (${t.n})`}
+              </button>
+            ))}
+          </div>
+        )}
 
         <div className="flex rounded-lg border p-0.5">
           {([
