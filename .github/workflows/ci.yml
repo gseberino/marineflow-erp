@@ -7,6 +7,10 @@ name: CI
 # tela (MF-AUD-042 e MF-AUD-045), e a suíte de 875 testes só rodava se alguém lembrasse.
 #
 # Este workflow NÃO precisa de segredo nenhum — é a diferença que o mantém vivo.
+#
+# Aqui mora SÓ o que bloqueia. O lint, que reporta dívida antiga sem impedir merge, foi para
+# `lint.yml`: assim a run "CI" verde significa exatamente "os gates bloqueantes passaram", sem
+# um job vermelho ao lado para o leitor ter que aprender a ignorar.
 
 on:
   push:
@@ -55,21 +59,3 @@ jobs:
 
       - name: Build
         run: npm run build
-
-  lint:
-    name: Lint (reporta, não bloqueia)
-    runs-on: ubuntu-latest
-    # Herdado: 2.455 erros de lint no baseline de 10/08/2026, nenhum deles introduzido
-    # por esta frente. Bloquear aqui seria travar todo o trabalho por uma dívida antiga;
-    # ignorar seria fingir que não existe. Então roda, aparece, e não impede o merge.
-    # Zerar o lint é tarefa própria do Bloco 4 — provavelmente `--fix` por etapas.
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
-      - name: ESLint
-        run: npm run lint

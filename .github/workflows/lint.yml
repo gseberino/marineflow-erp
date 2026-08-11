@@ -1,0 +1,43 @@
+name: Lint
+
+# Por que este arquivo existe (separado do CI):
+# o lint roda como observação, não como portão. Enquanto ele morava dentro de `ci.yml`, mesmo
+# com `continue-on-error`, a run principal do CI carregava um job em vermelho ao lado dos gates
+# que passaram — e quem olha a lista de execuções não distingue "o build quebrou" de "a dívida
+# de lint de sempre". Separando, a run "CI" responde uma pergunta só ("o que bloqueia está
+# verde?") e esta responde outra ("quanto ainda falta zerar?").
+#
+# Herdado: 2.455 erros de lint no baseline de 10/08/2026, nenhum deles introduzido pelas frentes
+# em curso. Bloquear aqui travaria todo o trabalho por uma dívida antiga; ignorar seria fingir
+# que não existe. Então roda, aparece, e não impede o merge. Zerar o lint é tarefa própria do
+# Bloco 4 — provavelmente `--fix` por etapas.
+#
+# Como o CI, não depende de segredo nenhum.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: ESLint (reporta, não bloqueia)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: ESLint
+        run: npm run lint
