@@ -48,7 +48,10 @@ create table if not exists public.service_fiscal_verbs (
   default_service_code      text,
   default_cnae              text,
   default_iss_rate          numeric,
-  default_iss_withheld      boolean,
+  -- NOT NULL com default: o verbo é o PISO da herança e precisa sempre responder algo.
+  -- Um verbo com retenção nula faria o COALESCE cair no `false` final sem ninguém ter
+  -- decidido — que é exatamente o buraco que o NOVO-014 fechou do lado do serviço.
+  default_iss_withheld      boolean not null default false,
   notes                     text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -114,6 +117,28 @@ create trigger set_updated_at_service_fiscal_verbs
 alter table public.services
   add column if not exists fiscal_verb text;
 
+-- NOVO-014, respondido pelo gestor em 11/08/2026: nenhum `false` atual foi decisao de
+-- retencao — o cadastro fiscal nunca foi preenchido, e o `false` veio do DEFAULT da coluna
+-- criada em 20260810120000. Enquanto a coluna for `not null`, todo servico ja tem valor e o
+-- COALESCE nunca alcanca o verbo: a heranca existiria no codigo e nao valeria nada.
+--
+-- Duas mudancas, nesta ordem: solta o NOT NULL e SO ENTAO apaga os `false` de default. O
+-- update precisa vir depois, senao o NOT NULL o rejeita.
+alter table public.services alter column iss_withheld drop not null;
+alter table public.services alter column iss_withheld drop default;
+
+-- `false` -> NULL, que passa a significar "nao decidido, herda do verbo". Seguro porque
+-- nenhum desses `false` foi escolha de ninguem: em 11/08/2026 os 243 servicos ativos tinham
+-- ZERO cadastro fiscal (national_tax_code, cnae e iss_rate todos nulos). Se algum dia
+-- alguem tiver marcado retencao de proposito, este UPDATE apagaria a decisao — por isso ele
+-- so toca linhas que continuam sem QUALQUER campo fiscal preenchido.
+update public.services
+set iss_withheld = null
+where iss_withheld = false
+  and national_tax_code is null
+  and cnae is null
+  and iss_rate is null;
+
 alter table public.services drop constraint if exists services_fiscal_verb_fk;
 alter table public.services
   add constraint services_fiscal_verb_fk
@@ -154,11 +179,12 @@ update public.services s
 -- backfill para desfazer. Resolvido aqui, corrigir UMA linha de default corrige o catalogo
 -- inteiro. E a mesma razao pela qual o produto resolve default_ncm em vez de copia-lo.
 --
--- ATENCAO — `iss_withheld` NAO herda, e isso e proposital. A coluna em `services` e
--- `not null default false`, entao um COALESCE nunca chegaria ao verbo: toda linha ja tem
--- `false` gravado. Distinguir "explicitamente sem retencao" de "nunca preenchido" exigiria
--- decidir o que significam os `false` que ja existem — decisao de retencao tributaria, nao
--- de schema. Fica como esta (valor do servico manda) ate a contabilidade responder.
+-- `iss_withheld` herda como os outros, com um TERCEIRO nivel (NOVO-014, respondido em
+-- 11/08/2026): COALESCE(servico, verbo, false). O `false` final existe porque a coluna
+-- devolvida e `boolean` e retencao precisa de resposta — mas ele so e alcancado quando nem
+-- o servico nem o verbo disseram nada, e o verbo e `not null`, entao na pratica so ocorre
+-- em servico sem verbo fiscal. Retencao errada muda QUEM recolhe o imposto; por isso o
+-- caminho e explicito e nao um default escondido no schema.
 create or replace function public.resolve_service_fiscal(p_service_id uuid)
 returns table (
   national_tax_code text,
@@ -178,7 +204,7 @@ as $fn$
     coalesce(s.service_code,      f.default_service_code),
     coalesce(s.cnae,              f.default_cnae),
     coalesce(s.iss_rate,          f.default_iss_rate),
-    s.iss_withheld,
+    coalesce(s.iss_withheld,      f.default_iss_withheld, false),
     case
       when s.national_tax_code is not null            then 'proprio'
       when f.default_national_tax_code is not null    then 'verbo'
@@ -208,7 +234,7 @@ select
   coalesce(s.service_code,      f.default_service_code)      as service_code_efetivo,
   coalesce(s.cnae,              f.default_cnae)              as cnae_efetivo,
   coalesce(s.iss_rate,          f.default_iss_rate)          as iss_rate_efetivo,
-  s.iss_withheld                                             as iss_withheld_efetivo,
+  coalesce(s.iss_withheld, f.default_iss_withheld, false)    as iss_withheld_efetivo,
   case
     when s.national_tax_code is not null         then 'proprio'
     when f.default_national_tax_code is not null then 'verbo'

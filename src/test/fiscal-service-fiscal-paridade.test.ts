@@ -30,6 +30,11 @@ const MIGRATION = join(
   "20260811003000_nfse_verbos_fiscais_com_heranca.sql",
 );
 
+/** A migration inteira — para as regras que vivem fora do corpo do resolvedor. */
+function migrationDaHeranca(): string {
+  return readFileSync(MIGRATION, "utf8");
+}
+
 function corpoDoResolvedor(): string {
   const sql = readFileSync(MIGRATION, "utf8");
   const inicio = sql.indexOf("create or replace function public.resolve_service_fiscal");
@@ -65,19 +70,54 @@ describe("paridade SQL × TypeScript — ordem de precedência", () => {
     }
   });
 
-  it("iss_withheld continua FORA da herança, nos dois lados", () => {
+  it("iss_withheld herda com TRÊS níveis: serviço → verbo → false (NOVO-014)", () => {
+    // O gestor respondeu o NOVO-014 em 11/08/2026: nenhum `false` existente foi decisão de
+    // retenção — vieram todos do DEFAULT da coluna, e o cadastro fiscal nunca foi preenchido.
+    // A coluna virou nullable e NULL passou a significar "não decidido, herda do verbo".
     const corpo = corpoDoResolvedor();
 
-    // No SQL: aparece sozinho, nunca dentro de um coalesce.
-    expect(corpo).toMatch(/^\s*s\.iss_withheld,\s*$/m);
-    expect(corpo).not.toMatch(/coalesce\([^)]*iss_withheld/i);
+    // No SQL: dentro de um coalesce de TRÊS argumentos, com `false` fechando.
+    expect(corpo).toMatch(/coalesce\(\s*s\.iss_withheld,\s*f\.default_iss_withheld,\s*false\s*\)/);
 
-    // No TypeScript: o default do verbo é ignorado, mesmo quando preenchido.
-    const resolvido = resolveServiceFiscal(
-      { iss_withheld: false },
-      { default_iss_withheld: true },
-    );
-    expect(resolvido.issWithheld).toBe(false);
+    // Serviço decidiu: manda, mesmo contrariando o verbo.
+    expect(resolveServiceFiscal({ iss_withheld: false }, { default_iss_withheld: true }).issWithheld)
+      .toBe(false);
+    expect(resolveServiceFiscal({ iss_withheld: true }, { default_iss_withheld: false }).issWithheld)
+      .toBe(true);
+
+    // Serviço não decidiu (NULL): herda o verbo. É este caso que o `=== true` de antes
+    // achatava em `false`, matando a herança em silêncio.
+    expect(resolveServiceFiscal({ iss_withheld: null }, { default_iss_withheld: true }).issWithheld)
+      .toBe(true);
+
+    // Ninguém decidiu: `false`, porque retenção precisa de resposta booleana.
+    expect(resolveServiceFiscal({ iss_withheld: null }, null).issWithheld).toBe(false);
+  });
+
+  it("o verbo é o piso da herança de retenção — NOT NULL no banco", () => {
+    // Se `default_iss_withheld` pudesse ser nulo, o COALESCE cairia no `false` final sem
+    // ninguém ter decidido — o mesmo buraco que o NOVO-014 fechou do lado do serviço.
+    const sql = migrationDaHeranca();
+    expect(sql).toMatch(/default_iss_withheld\s+boolean\s+not null\s+default false/i);
+  });
+
+  it("a migration solta o NOT NULL de services.iss_withheld ANTES de apagar os false", () => {
+    // Ordem importa: o UPDATE para NULL é rejeitado enquanto a coluna for NOT NULL.
+    const sql = migrationDaHeranca();
+    const posDrop = sql.search(/alter column iss_withheld drop not null/i);
+    const posUpdate = sql.search(/set iss_withheld = null/i);
+    expect(posDrop).toBeGreaterThan(-1);
+    expect(posUpdate).toBeGreaterThan(posDrop);
+  });
+
+  it("o UPDATE só apaga false de serviço SEM nenhum campo fiscal preenchido", () => {
+    // A salvaguarda: se alguém já tiver marcado retenção de propósito num serviço com
+    // cadastro fiscal, este UPDATE não pode apagar essa decisão.
+    const sql = migrationDaHeranca();
+    const bloco = sql.slice(sql.search(/set iss_withheld = null/i), sql.search(/set iss_withheld = null/i) + 400);
+    expect(bloco).toMatch(/national_tax_code is null/i);
+    expect(bloco).toMatch(/cnae is null/i);
+    expect(bloco).toMatch(/iss_rate is null/i);
   });
 
   it("o rótulo de procedência olha o código NACIONAL — igual ao CASE do SQL", () => {

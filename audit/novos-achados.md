@@ -222,6 +222,16 @@ Não foram corrigidos.
 - **O que fiz:** deixei `iss_withheld` FORA da herança — vale o valor do serviço, exatamente
   como hoje. Os outros quatro campos herdam normalmente. Está documentado na migration, no
   espelho TS e coberto por teste de paridade nos dois lados.
-- **Para decidir:** se `iss_withheld` deve herdar do verbo, a coluna precisa virar nullable
-  **e** alguém precisa dizer o que fazer com os `false` atuais (mantê-los como decisão
-  explícita, ou zerá-los para `null` e deixar o verbo mandar).
+- **RESPONDIDO pelo gestor em 11/08/2026 — RESOLVIDO.** Nenhum `false` atual foi decisão: o
+  cadastro fiscal nunca foi preenchido (em 10/08 os 243 serviços ativos tinham
+  `national_tax_code`, `cnae` e `iss_rate` todos nulos), e o `false` veio do DEFAULT da coluna.
+  Aplicado na mesma migration, que ainda não tinha ido para produção:
+  - `services.iss_withheld` virou **nullable**, sem default;
+  - os `false` existentes viraram **NULL** — mas só nas linhas que continuam sem nenhum campo
+    fiscal preenchido, para o caso de alguém já ter marcado retenção de propósito;
+  - a resolução passou a ser **`COALESCE(serviço, verbo, false)`**, nos dois lados;
+  - `service_fiscal_verbs.default_iss_withheld` virou **`not null default false`**: o verbo é o
+    piso da herança e precisa sempre responder algo, senão o `false` final seria alcançado sem
+    ninguém ter decidido — o mesmo buraco, um nível acima.
+  - Quatro testes de paridade travam o comportamento, inclusive a **ordem** das instruções na
+    migration (soltar o NOT NULL antes do UPDATE) e a salvaguarda do UPDATE.

@@ -80,10 +80,14 @@ export function resolveServiceFiscal(
     serviceCode: coalesce(s.service_code, f.default_service_code),
     cnae: coalesce(s.cnae, f.default_cnae),
     issRate: coalesce(s.iss_rate, f.default_iss_rate),
-    // Não herda — ver a nota na migration. A coluna em `services` é `not null default false`,
-    // então não há como distinguir "sem retenção" de "não preenchido" sem uma decisão de
-    // retenção tributária que ninguém tomou ainda.
-    issWithheld: s.iss_withheld === true,
+    // Herda com TRÊS níveis (NOVO-014): serviço → verbo → false. O `false` final existe
+    // porque retenção precisa de resposta booleana, mas só é alcançado quando nem o serviço
+    // nem o verbo disseram nada — e o verbo é `not null` no banco, então na prática isso só
+    // ocorre em serviço sem verbo fiscal.
+    //
+    // `=== true` NÃO serve aqui: ele achata `null` em `false` e mataria a herança
+    // silenciosamente, que era exatamente o defeito que o NOVO-014 apontou.
+    issWithheld: coalesce(s.iss_withheld, f.default_iss_withheld) ?? false,
     codeSource,
   };
 }
