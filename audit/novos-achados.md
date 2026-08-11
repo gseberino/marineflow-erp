@@ -264,3 +264,33 @@ Não foram corrigidos.
   (`(100 - margem - imposto - comissão) / 100`), que erra menos por construção.
 - **Cobertura:** `src/lib/price-calculator.test.ts` tem o caso marcado com `it.fails` e o comportamento atual
   documentado. Quando a correção entrar, o `it.fails` passa a acusar e obriga a virar `it()`.
+
+---
+
+## [NOVO-010] Deslocamento: 4 técnicos custam menos que 3, e a tarifa por km exibida na OS não é a usada no cálculo
+
+- **Encontrado em:** 11/08/2026, escrevendo a cobertura de teste de `displacement.ts`
+- **Categoria:** A — **Severidade sugerida:** P2 · **Status:** registrado, **não corrigido** (regra 3)
+- **Arquivo:linha:** `src/lib/displacement.ts:59` e `:79-93`; `src/components/ServiceOrderForm.tsx:344,634,695`
+
+**(a) A tarifa por hora despenca fora da faixa 1–3.** A tabela é `{1: 90, 2: 170, 3: 250}` e a busca é
+`rates.hourly[technician_count] || rates.hourly[1]`. Com **4 técnicos**, a hora cai para **R$ 90** — menos do
+que com 1... e menos da metade do que com 3. Com `0` ou negativo, idem. O número de técnicos é campo livre no
+formulário da OS, então basta digitar 4. O `||` também engole um eventual `0` legítimo na tabela.
+**Sugestão:** usar a maior faixa disponível quando o número passar do teto (`hourly[min(n, 3)]`), ou uma
+tarifa por técnico adicional — é decisão comercial, não técnica.
+
+**(b) `calculateDisplacement` ignora as tarifas da empresa.** Ela chama `calculateTravelCost` **sem passar
+`rates`**, então usa `DEFAULT_TRAVEL_RATES` — mesmo quando `app_settings` tem valores diferentes. E devolve
+`cost_per_km: 1.10` **fixo em código**, que o formulário grava na OS (`ServiceOrderForm.tsx:695`). Hoje o
+padrão e a configuração coincidem em 1,10, então ninguém percebe; **no dia em que o dono mudar
+`travel_km_rate` na tela de configurações, o botão de calcular deslocamento continuará cobrando 1,10.** O
+mesmo formulário já monta `travelRatesFromSettings(appSettings)` para o cálculo manual (`:128-130`) — é passar
+o mesmo objeto adiante.
+
+**(c) Duas chaves para a mesma ideia, com valores diferentes, em produção.** `app_settings` tem
+`travel_km_rate = 1.10` **e** `travel_cost_per_km = 3.50`. O código só lê a primeira; a segunda não é lida por
+ninguém (`grep` em `src/` e `supabase/functions/`) — mas existe também uma **coluna** `travel_cost_per_km` em
+`service_orders`, cujo default no formulário é **3,5** (`:344,634`). Ou seja, o campo "custo por km" gravado na
+OS pode dizer 3,50 enquanto o total foi calculado a 1,10. **Sugestão:** decidir qual é a chave verdadeira,
+apagar a outra e fazer o formulário gravar a mesma tarifa que usou na conta.

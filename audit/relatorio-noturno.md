@@ -267,3 +267,28 @@ guard, ou calcular o divisor em pontos percentuais inteiros) e está descrita no
 O caso está no teste com `it.fails` — quando a correção entrar, ele passa a acusar e obriga a virar `it()`.
 
 **Gates:** typecheck 0 · vitest **980** (eram 963; +17) · deno 267 · build OK.
+
+### 5.2 `displacement.ts` — concluído, **e achou outro**
+
+**Commit:** `test(deslocamento): cobre displacement e registra NOVO-010`
+
+Deslocamento é dinheiro em toda OS de campo, e a conta multiplica três partes (km, hora de equipe,
+multiplicador de urgência/fim de semana). Erro aqui não aparece como erro — aparece como OS que fechou por
+menos do que custou. 14 casos cobrindo as três partes, os multiplicadores, o fallback de configuração
+inválida (um `travel_km_rate` vazio faria toda viagem sair de graça se o código aceitasse) e arredondamento.
+
+**`NOVO-010`, registrado e não corrigido — três coisas, a primeira é a que dói:**
+
+1. **Com 4 técnicos, a hora cai para R$ 90.** A tabela vai até 3 (`{1: 90, 2: 170, 3: 250}`) e a busca é
+   `hourly[n] || hourly[1]`. Quatro técnicos custam **menos que um** — e o número de técnicos é campo livre
+   na tela. Com 0 ou negativo, idem. Corrigir é escolher a regra comercial (usar a maior faixa? tarifa por
+   técnico adicional?), por isso não decidi.
+2. **`calculateDisplacement` ignora as tarifas configuradas** — chama o cálculo sem passar `rates`, então usa
+   os padrões de fábrica, e devolve `cost_per_km: 1.10` fixo em código. Hoje padrão e configuração coincidem
+   em 1,10 e ninguém percebe; **no dia em que você mudar a tarifa por km na tela de configurações, o botão de
+   calcular deslocamento continuará cobrando 1,10.**
+3. **Duas chaves para a mesma ideia em produção:** `travel_km_rate = 1,10` (a que o código lê) e
+   `travel_cost_per_km = 3,50` (que ninguém lê) — e a coluna `travel_cost_per_km` da OS tem default 3,5 no
+   formulário. O campo "custo por km" gravado na OS pode dizer 3,50 enquanto o total foi calculado a 1,10.
+
+**Gates:** typecheck 0 · vitest **994** (eram 980; +14) · deno 267 · build OK.
