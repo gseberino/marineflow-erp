@@ -24,6 +24,42 @@ aqui e pular, nunca decidir.
 
 ---
 
+## Leia isto primeiro (revisão matinal em 8 minutos)
+
+**Nada foi para produção.** Sem `push`, sem migration aplicada, sem deploy de Edge Function. Tudo vive em
+`session/noturno`, no worktree `marineflow-erp--noturno`. As únicas conversas com o banco foram dois `SELECT`
+(chaves `pdf_options_%` e as colunas de `service_orders`), nenhuma escrita.
+
+**Gates no HEAD:** typecheck **0** · vitest **1.094** (eram 904 no começo da noite: **+190**) · deno **267** ·
+build **OK**.
+
+**Quatro defeitos reais foram encontrados** — todos registrados em `audit/novos-achados.md` e **nenhum
+corrigido**, conforme a regra 3. Em ordem de gravidade:
+
+| ID | O quê | Onde dói |
+|---|---|---|
+| **NOVO-011** | Importação de CSV: **`1.234,56` entra como `1,23`**; e `Telefone` vazio **apaga o celular** | Carga em lote de catálogo/cadastro — erro em centenas de linhas de uma vez, já gravadas |
+| **NOVO-009** | Preço de venda vira **3,6 × 10¹⁸** quando margem+imposto+comissão dão exatamente 100% | O número entra no campo de preço do produto enquanto o aviso "impossível" está na tela |
+| **NOVO-010** | Deslocamento: **4 técnicos custam menos que 1**; e o botão de calcular ignora a tarifa configurada | Toda OS de campo |
+| **NOVO-008** | A view do técnico fecha os valores da OS, mas os **itens** (peça/serviço) continuam com preço no mesmo embed | "O técnico não vê valores" vale do total para cima |
+
+**Duas decisões esperam por você** (não decidi nenhuma):
+1. **T3.2** — o diálogo de PDF perdeu também o cache local (`localStorage`), não só a escrita em
+   `app_settings`. Foi a leitura literal de "aplica só na geração corrente"; a decisão #4 falava em "override
+   local por usuário". Repor são três linhas — veja a seção 1.
+2. **NOVO-006a** — `invoicing_status` e `payment_status` **ficaram** na view do técnico. Não são valores, e a
+   tela usa o primeiro para bloquear edição de OS faturada. Se sua leitura da decisão #3 for mais estrita, é
+   apagar duas linhas.
+
+**A única coisa pronta para aplicar:** a migration `20260811002500_view_os_sem_valores_para_tecnico.sql`. A
+ordem de operações está na seção 4 e importa (**regenerar os tipos** antes de virar a chave no frontend).
+
+**Achado que não reproduziu:** MF-AUD-030 (paridade de i18n) já estava resolvido. Os dicionários estão em
+812 × 812 chaves — se você usava o "782 × 781" do relatório de auditoria para dimensionar a frente de i18n, a
+base de cálculo mudou.
+
+---
+
 ## 0 — Lint fora do CI (concluída)
 
 **Commit:** `ci: separa o lint do CI em workflow proprio (MF-AUD-043)`
