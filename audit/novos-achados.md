@@ -186,3 +186,24 @@ Não foram corrigidos.
 - **Sugestão:** levantar com a contabilidade o código nacional + CNAE + alíquota dos
   serviços mais faturados e o percentual da faixa do Simples, antes de qualquer teste de
   emissão. Não é trabalho de código.
+
+## NOVO-012 — "MÃO DE OBRA" de R$ 12.000 classificada como `logistica`
+
+- **Origem:** [F-NFSE-02], levantamento de 10/08/2026.
+- **Situação:** o serviço "MÃO DE OBRA" (R$ 12.000, terceira maior linha de faturamento de serviço nos
+  últimos 12 meses) está com `service_verb = 'logistica'` e `service_system = 'nenhum'`.
+- **Por que importa:** o backfill fiscal proposto usa `service_verb` como chave. Se a classificação
+  estiver errada, o código de tributação sai errado junto — e são R$ 12 mil declarados à prefeitura
+  como outra atividade. Ninguém confere código de tributação depois da nota autorizada.
+- **Sugestão:** conferir a classificação deste serviço (e a `classification_confidence` do catálogo)
+  ANTES de aplicar qualquer backfill por verbo. Não corrigi: classificação é decisão de quem conhece
+  o serviço prestado.
+
+## NOVO-013 — 34 linhas de serviço em OS sem `service_id`
+
+- **Origem:** [F-NFSE-02], últimos 12 meses.
+- **Situação:** de 122 linhas de serviço em OS, 34 são digitadas à mão e não apontam para o catálogo.
+- **Por que importa:** nenhum backfill de cadastro fiscal as alcança. Na emissão de NFS-e elas vão
+  exigir preenchimento manual de código/CNAE/ISS toda vez, ou impedir a emissão.
+- **Sugestão:** avaliar se viram serviço de catálogo ou se a tela de emissão precisa de um caminho
+  para serviço avulso com código informado na hora.
