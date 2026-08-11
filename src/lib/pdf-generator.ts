@@ -343,8 +343,18 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
   // saiu partido ao meio. Medindo cada bloco antes e marcando onde a página
   // deve virar, o corte deixa de cair no acaso.
   //
-  // `.html2pdf__page-break` é a marca que o html2pdf reconhece no modo
-  // `legacy`, que já estava ligado.
+  // NOVO-007 — nós mesmos inserimos o ESPAÇO da quebra, aqui, antes de medir.
+  //
+  // Antes, quem inseria era o html2pdf no modo `legacy`: ele varre o DOM e põe uma div
+  // de padding antes de cada `.html2pdf__page-break`. Só que isso roda em
+  // `toContainer()` — DEPOIS de `container.scrollHeight` já ter sido medido e congelado
+  // em `html2canvas.height`. O documento crescia, a captura não, e o fim ficava fora da
+  // imagem: PDF truncado, sem condições de pagamento nem termos. E não era só o botão
+  // Baixar — este mesmo pipeline gera o anexo do WhatsApp e o download do portal público,
+  // então o CLIENTE vinha recebendo documento cortado, em silêncio.
+  //
+  // Com o espaço inserido aqui, a altura medida logo abaixo já inclui tudo, e o `legacy`
+  // sai do `pagebreak.mode` — ninguém mais mexe no DOM depois da medição.
   const alvoDaPaginacao = container.querySelector('.container') ?? container;
   const filhos = Array.from(alvoDaPaginacao.children).filter(
     (el) => el instanceof HTMLElement && el.tagName !== 'STYLE',
@@ -358,12 +368,22 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
       indivisivel: el.classList.contains('card') || !!el.querySelector('table'),
     }));
 
-    const { planPageBreaks } = await import('./pdf-pagination');
-    // Inserir de trás para frente preserva os índices dos anteriores.
-    for (const i of planPageBreaks(blocos).reverse()) {
-      const marca = document.createElement('div');
-      marca.className = 'html2pdf__page-break';
-      filhos[i].parentNode?.insertBefore(marca, filhos[i]);
+    const { planPageBreaks, alturaDoEspacador } = await import('./pdf-pagination');
+
+    // Em ordem CRESCENTE, medindo um por vez: cada espaçador desloca os blocos
+    // seguintes, então o topo do próximo só é confiável depois que o anterior entrou.
+    // (Ler todas as posições de uma vez e inserir depois é exatamente o defeito do
+    // `legacy`, que invalida as próprias coordenadas enquanto insere.)
+    const topoDoContainer = alvoDaPaginacao.getBoundingClientRect().top;
+    for (const i of planPageBreaks(blocos)) {
+      const topoDoBloco = filhos[i].getBoundingClientRect().top - topoDoContainer;
+      const altura = alturaDoEspacador(topoDoBloco);
+      if (altura <= 0) continue;
+      const espacador = document.createElement('div');
+      espacador.className = 'mf-page-spacer';
+      espacador.setAttribute('aria-hidden', 'true');
+      espacador.style.cssText = `display:block;height:${altura}px;`;
+      filhos[i].parentNode?.insertBefore(espacador, filhos[i]);
     }
   }
 
@@ -424,12 +444,19 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
           y: 0,
         },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-        // `avoid-all` saiu: ele tenta adivinhar sozinho onde não partir, e é
-        // justamente essa adivinhação que cortava o card de pagamento ao meio.
-        // Agora as quebras são calculadas acima, com as alturas medidas, e
-        // entram como marcas explícitas — que é o que `legacy` lê. `css`
-        // continua para honrar o page-break-* declarado na folha.
-        pagebreak: { mode: ['css', 'legacy'] },
+        // `avoid-all` saiu antes: ele adivinhava onde não partir, e era a adivinhação
+        // que cortava o card de pagamento ao meio.
+        //
+        // Agora `legacy` sai também (NOVO-007). Ele era quem inseria o padding das
+        // quebras — mas em `toContainer()`, DEPOIS de `captureHeight` estar congelado
+        // em `html2canvas.height`. O documento crescia sem a captura acompanhar e o fim
+        // do PDF era cortado. O espaço das quebras agora entra lá em cima, antes da
+        // medição, então não há mais nada para o `legacy` fazer aqui — e deixá-lo ligado
+        // faria ele inserir padding DE NOVO, em cima do nosso.
+        //
+        // `css` continua: honra o `page-break-*` declarado na folha de estilo, que não
+        // muta o DOM.
+        pagebreak: { mode: ['css'] },
       })
       .outputPdf('blob');
 
