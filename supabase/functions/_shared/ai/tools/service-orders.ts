@@ -1,5 +1,6 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
 import { dayOverloadNotice } from "./agenda.ts";
+import { recalcularOSComCascata } from "../../receivables/cascata.ts";
 
 /**
  * Recalcula os totais da OS após inserir/alterar item — best-effort, não deve derrubar a
@@ -14,9 +15,19 @@ import { dayOverloadNotice } from "./agenda.ts";
 async function recalcSoTotals(sb: any, soId: string | undefined | null): Promise<void> {
   if (!soId) return;
   try {
-    await sb.rpc("recalc_so_totals", { so_id: soId });
-  } catch {
-    // Não crítico — recalcular totais é best-effort.
+    // [MF-AUD-009] Passou a propagar para os recebíveis. Antes chamava só a RPC, que atualiza
+    // `service_orders` e para por aí: o agente mudava o valor da OS e o título a receber
+    // ficava com o valor antigo, sem erro nenhum.
+    const r = await recalcularOSComCascata(sb, soId);
+    if (r.bloqueado) {
+      // Aqui NÃO é best-effort. Este é o caso caro: reduzir a OS abaixo do que o cliente já
+      // pagou. A tela bloqueia de propósito, e o agente precisa bloquear igual — senão a
+      // mesma operação é recusada para uma pessoa e aceita para a IA.
+      throw new Error(r.motivo ?? "Alteração bloqueada: total abaixo do já pago.");
+    }
+  } catch (e) {
+    // Recalcular total continua best-effort; o piso do já pago, não.
+    if (e instanceof Error && /abaixo do (valor já pago|já pago)/i.test(e.message)) throw e;
   }
 }
 

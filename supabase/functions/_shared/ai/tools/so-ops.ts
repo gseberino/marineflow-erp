@@ -1,4 +1,5 @@
 import { NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
+import { recalcularOSComCascata } from "../../receivables/cascata.ts";
 
 /**
  * Paridade entre a TELA de edição da OS e o assistente.
@@ -298,7 +299,7 @@ export const soOpsTools: ToolDef[] = [
       if (error) throw error;
       // O total da OS conta hora cobrável — remover sem recalcular deixaria o valor
       // do serviço maior do que o trabalho registrado.
-      await sb.rpc("recalc_so_totals", { so_id: (entrada as any).service_order_id });
+      await recalcularOSComCascata(sb, (entrada as any).service_order_id);
       return { ok: true, minutos_removidos: (entrada as any).duration_minutes };
     },
   },
@@ -531,7 +532,7 @@ export const soOpsTools: ToolDef[] = [
         );
       }
 
-      await sb.rpc("recalc_so_totals", { so_id: novoId });
+      await recalcularOSComCascata(sb, novoId);
 
       return {
         ok: true,
