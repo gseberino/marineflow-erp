@@ -16,7 +16,7 @@ aqui e pular, nunca decidir.
 | # | Tarefa | Situação |
 |---|---|---|
 | 0 | Mover o lint do `ci.yml` para workflow próprio | ✅ concluída |
-| 1 | T3.2 — preferências de PDF (decisão #4) | ⏳ pendente |
+| 1 | T3.2 — preferências de PDF (decisão #4) | ✅ concluída |
 | 2 | NOVO-006b — PDF de execução sem bloco financeiro | ⏳ pendente |
 | 3 | T3.8 — paridade i18n pt-BR × en (MF-AUD-030) | ⏳ pendente |
 | 4 | NOVO-006a — view de `service_orders` sem valores | ⏳ pendente |
@@ -45,3 +45,57 @@ Depois do push, conferir em Actions que passaram a existir **duas** runs por pus
 fica verde. Se a organização tiver required checks configurados apontando para o job `lint` dentro do
 workflow CI, esse nome de check mudou e precisa ser reapontado — não encontrei configuração dessas no
 repositório, mas ela vive no GitHub, não em arquivo.
+
+---
+
+## 1 — T3.2 · Preferências de PDF (MF-AUD-014, decisão #4) — concluída
+
+**Commit:** `fix(pdf): MF-AUD-014 padrao da empresa em Settings; o dialogo nao persiste mais`
+
+**A decisão que autorizou:** o Gustavo respondeu a #4 assim, textualmente: *"padrão da empresa em Settings;
+PDFOptionsDialog para de persistir em app_settings e aplica só na geração corrente"*.
+
+**Como ficou:**
+- `Configurações › Documentos` ganhou a seção **Padrão dos PDFs** (`PdfDefaultsSection`): escolhe o documento
+  (orçamento, OS, fatura) e marca o que sai por padrão. É a única tela que grava `pdf_options_<tipo>`. A rota
+  `/settings` já é `roles={['admin']}`, então herda o guarda.
+- `PDFOptionsDialog` não grava mais nada — nem em `app_settings`, nem no `localStorage`. Ele lê o padrão da
+  empresa como estado inicial e o que for mexido vale só para o documento que está saindo.
+- `resolvePdfOptions` passou a aceitar só chaves conhecidas e só valores booleanos: chave gravada com sujeira
+  (string, número, array, opção que não existe mais) cai no padrão de fábrica em vez de virar um `PDFOptions`
+  meio inválido. `validity`/`dueDate` são explicitamente ignorados — descrevem um documento, não um padrão.
+- Novo `src/lib/pdf-options-catalog.ts`: quais toggles existem, em que documento aparecem e como se chamam.
+  Existe porque a mesma lista agora é desenhada em dois lugares, e duas cópias divergiriam na primeira opção
+  nova — com sintoma silencioso (um toggle que o dono não consegue configurar, ou configura e ninguém aplica).
+
+**Interpretação que eu fiz — vale conferir:** *"aplica só na geração corrente"* me levou a remover **também** o
+cache em `localStorage` (`pdf.prefs.<tipo>`), não só a escrita em `app_settings`. Mantê-lo faria o diálogo
+lembrar da última escolha, que é o oposto de "só na geração corrente". Mas a decisão #4, como estava escrita no
+sumário, dizia *"padrão da empresa (admin) + override local por usuário"* — se a intenção era manter o override
+local, é reverter uma função de três linhas. **Não decidi por você: implementei o texto da ordem de hoje, que é
+mais recente e mais específico, e estou declarando a diferença.**
+
+**Achado que fica aberto (não corrigi, é migration):** a política de `app_settings` continua
+`FOR ALL TO authenticated USING (true)` — item 4 do MF-AUD-014. A tela nova é admin-only pela rota, mas o banco
+não impede um técnico de gravar a chave direto pela API. Fechar isso é DDL em produção, proibido esta noite.
+
+**Verificação em produção (só leitura, nenhuma escrita):** consultei `app_settings` filtrando apenas
+`key like 'pdf_options_%'` — as duas chaves existentes (`quote` e `service_order`) estão com **`showTerms:
+true`**. Isso **descarta em definitivo** a hipótese #2 do briefing ("os termos não renderizam") como sendo
+efeito do MF-AUD-014: o padrão gravado sempre mandou imprimir os termos. A causa fica sendo a do `NOVO-007`
+(PDF truncado — os termos são o penúltimo bloco do documento e caíam fora da imagem capturada), corrigida no
+commit imediatamente anterior a esta noite. As duas investigações convergem.
+
+**Gates:** typecheck 0 · vitest **926** (eram 904; +22 novos) · deno 267 · build OK.
+
+**Para a revisão matinal:**
+1. Abrir `Configurações › Documentos`, conferir que a seção aparece com os valores atuais e que salvar funciona
+   (é escrita em `app_settings` — não fiz, produção não foi tocada).
+2. Gerar um PDF pelo diálogo desmarcando algo e conferir, na tela de padrão, que **nada mudou lá**.
+3. Decidir sobre o `localStorage` (parágrafo "Interpretação" acima).
+4. `showProductImages` aparece sempre na tela de padrão e só aparece no diálogo quando o documento tem peça com
+   foto — foi decisão minha de desenho, está comentada no catálogo.
+
+**Provei que o teste pega a regressão:** reintroduzi a persistência (localStorage + upsert) no diálogo e rodei —
+2 dos 5 casos de `PDFOptionsDialog.no-persist.test.tsx` falharam, exatamente os dois que cobrem escrita. Depois
+revertido; o arquivo no commit é o correto.

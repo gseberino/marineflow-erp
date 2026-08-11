@@ -38,10 +38,21 @@ export const DEFAULT_PDF_OPTIONS: PDFOptions = {
 };
 
 /**
- * Resolve as opções de PDF a usar para um tipo de documento: preferência salva em
- * app_settings (chave pdf_options_<tipo>, gravada pelo PDFOptionsDialog) sobre o padrão de
- * fábrica. Usado tanto pelo diálogo de Baixar/Imprimir quanto pelo envio direto via
- * WhatsApp, para que as duas trilhas de geração de PDF respeitem a mesma preferência.
+ * Resolve o PADRÃO DA EMPRESA para um tipo de documento: o que estiver gravado em
+ * app_settings (chave `pdf_options_<tipo>`) sobre o padrão de fábrica.
+ *
+ * Quem grava essa chave é a tela de Configurações › Documentos, e só ela (MF-AUD-014). Até
+ * 10/08/2026 quem gravava era o diálogo de Baixar/Imprimir, a cada clique: desmarcar "incluir
+ * termos" uma única vez desligava os termos da empresa inteira, para todos os documentos
+ * futuros daquele tipo — inclusive os enviados por WhatsApp, que leem daqui.
+ *
+ * Usado pelo diálogo (como estado inicial dos checkboxes) e pelo envio direto por WhatsApp
+ * (que não tem diálogo e portanto usa o padrão puro).
+ *
+ * Só chaves conhecidas e só valores booleanos entram. Um `pdf_options_quote` com sujeira —
+ * um número, uma string, uma chave que não existe mais — cai no padrão de fábrica em vez de
+ * contaminar `PDFOptions` com campos que o gerador não entende. `validity` e `dueDate` são
+ * deliberadamente ignorados: descrevem um documento, nunca um padrão.
  */
 export function resolvePdfOptions(
   appSettings: Record<string, string> | undefined,
@@ -49,11 +60,22 @@ export function resolvePdfOptions(
 ): PDFOptions {
   const raw = appSettings?.[`pdf_options_${documentType}`];
   if (!raw) return { ...DEFAULT_PDF_OPTIONS };
+  let parsed: unknown;
   try {
-    return { ...DEFAULT_PDF_OPTIONS, ...JSON.parse(raw) };
+    parsed = JSON.parse(raw);
   } catch {
     return { ...DEFAULT_PDF_OPTIONS };
   }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { ...DEFAULT_PDF_OPTIONS };
+  }
+  const saved = parsed as Record<string, unknown>;
+  const resolved: PDFOptions = { ...DEFAULT_PDF_OPTIONS };
+  for (const key of Object.keys(DEFAULT_PDF_OPTIONS) as Array<keyof PDFOptions>) {
+    const value = saved[key];
+    if (typeof value === 'boolean') (resolved as Record<string, unknown>)[key] = value;
+  }
+  return resolved;
 }
 
 export type PDFData = {

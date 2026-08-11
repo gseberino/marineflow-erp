@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useI18n } from '@/i18n';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -8,7 +8,8 @@ import { Input } from '@/components/ui/input';
 import { AlertTriangle, Download, Printer, Loader2 } from 'lucide-react';
 import type { PDFOptions, PDFDocumentType } from '@/lib/pdf-generator';
 import { DEFAULT_PDF_OPTIONS, resolvePdfOptions } from '@/lib/pdf-generator';
-import { useAppSetting, useAppSettings, useUpdateAppSetting } from '@/hooks/use-app-settings';
+import { pdfOptionItems } from '@/lib/pdf-options-catalog';
+import { useAppSetting, useAppSettings } from '@/hooks/use-app-settings';
 
 export type ValidityConfig = {
   mode: 'days' | 'date';
@@ -27,30 +28,24 @@ interface Props {
   initialValidityDays?: number;
 }
 
-const PREFS_KEY = (docType: PDFDocumentType) => `pdf.prefs.${docType}`;
-const BACKEND_KEY = (docType: PDFDocumentType) => `pdf_options_${docType}`;
-
-function loadLocalPrefs(docType: PDFDocumentType): Partial<PDFOptions> {
-  try {
-    const raw = localStorage.getItem(PREFS_KEY(docType));
-    return raw ? JSON.parse(raw) : {};
-  } catch { return {}; }
-}
-
-function saveLocalPrefs(docType: PDFDocumentType, opts: PDFOptions) {
-  try { localStorage.setItem(PREFS_KEY(docType), JSON.stringify(opts)); } catch {}
-}
-
 export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate, hasProductImages, initialValidityDays }: Props) {
   const { t } = useI18n();
-  // Preferências ficam no backend (app_settings, uma chave por tipo de documento) para
-  // valerem em qualquer navegador/dispositivo — o localStorage é só um cache instantâneo
-  // pra não esperar a rede antes de abrir o diálogo.
+  // Este diálogo NÃO guarda preferência (MF-AUD-014). Ele parte do padrão da empresa —
+  // configurado em Configurações › Documentos, chave app_settings.pdf_options_<tipo> — e o
+  // que for mexido aqui vale só para o documento que está saindo agora.
+  //
+  // Antes, cada clique em Baixar/Imprimir gravava os checkboxes em app_settings, que é
+  // configuração GLOBAL da empresa: qualquer usuário que desmarcasse "termos e condições"
+  // uma vez desligava os termos de todos os documentos futuros daquele tipo, inclusive os
+  // enviados por WhatsApp — sem pedir nada e sem avisar ninguém.
   const { data: appSettings } = useAppSettings();
-  const updateSetting = useUpdateAppSetting();
   const defaultQuoteValidityDays = Number(useAppSetting('quote_validity_days', '15')) || 15;
 
   const [options, setOptions] = useState<PDFOptions>({ ...DEFAULT_PDF_OPTIONS });
+  // Enquanto ninguém mexeu nos checkboxes, o padrão da empresa que chegar depois (a query de
+  // app_settings pode resolver com o diálogo já aberto) ainda é aplicado. Depois do primeiro
+  // clique, não — seria trocar a escolha do usuário debaixo dele.
+  const optionsTouched = useRef(false);
   const [downloading, setDownloading] = useState(false);
   const [validityMode, setValidityMode] = useState<'days' | 'date'>('days');
   const [validityDays, setValidityDays] = useState(initialValidityDays ?? defaultQuoteValidityDays);
@@ -63,12 +58,8 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
 
   useEffect(() => {
     if (open) {
-      // Preferência salva: backend (fonte da verdade) > cache local > padrão de fábrica.
-      const hasBackendValue = !!appSettings?.[BACKEND_KEY(documentType)];
-      const saved = hasBackendValue
-        ? resolvePdfOptions(appSettings, documentType)
-        : { ...DEFAULT_PDF_OPTIONS, ...loadLocalPrefs(documentType) };
-      setOptions(saved);
+      optionsTouched.current = false;
+      setOptions(resolvePdfOptions(appSettings, documentType));
       setDownloading(false);
       setValidityMode('days');
       setValidityDays(initialValidityDays ?? defaultQuoteValidityDays);
@@ -80,6 +71,14 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, documentType]);
 
+  // O padrão da empresa que chega tarde (query ainda em voo quando o diálogo abriu) precisa
+  // alcançar os checkboxes; sem isto, quem abrisse o diálogo antes da rede responder geraria
+  // o documento com o padrão de fábrica em vez do configurado.
+  useEffect(() => {
+    if (!open || optionsTouched.current || !appSettings) return;
+    setOptions(resolvePdfOptions(appSettings, documentType));
+  }, [open, appSettings, documentType]);
+
   const titleMap: Record<PDFDocumentType, string> = {
     quote: `${t.pdf.generate} — ${t.pdf.quote}`,
     service_order: `${t.pdf.generate} — ${t.pdf.serviceOrder}`,
@@ -87,50 +86,18 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
     receipt: `${t.pdf.generate} — Recibo`,
   };
 
-  // Different checkbox set per document type
-  const checkboxItems: Array<{ key: keyof PDFOptions; label: string }> = (() => {
-    if (documentType === 'invoice') {
-      const items: Array<{ key: keyof PDFOptions; label: string }> = [
-        { key: 'showServicePrices', label: t.pdf.showServicePrices },
-        { key: 'showTravelCost', label: t.pdf.showTravelCost },
-        { key: 'showDiscount', label: t.pdf.showDiscount },
-        { key: 'showTax', label: t.pdf.showTax },
-        { key: 'showCardFee', label: 'Mostrar taxa de cartão' },
-        { key: 'showBankDetails', label: 'Mostrar dados bancários' },
-        { key: 'showPaymentInstructions', label: 'Mostrar instruções de pagamento' },
-        { key: 'showTerms', label: t.pdf.showTerms },
-      ];
-      if (hasProductImages) items.push({ key: 'showProductImages', label: 'Incluir fotos dos produtos' });
-      return items;
-    }
-    if (documentType === 'receipt') {
-      // Receipt has no toggleable line-item options; render no checkboxes.
-      return [];
-    }
-    const items: Array<{ key: keyof PDFOptions; label: string }> = [
-      { key: 'showServicePrices', label: t.pdf.showServicePrices },
-      { key: 'showPartsPrices', label: t.pdf.showPartsPrices },
-      { key: 'showTravelCost', label: t.pdf.showTravelCost },
-      { key: 'showDiscount', label: t.pdf.showDiscount },
-      { key: 'showTax', label: t.pdf.showTax },
-      { key: 'showCardFee', label: 'Mostrar taxa de cartão' },
-      { key: 'showCommission', label: t.pdf.showCommission },
-      { key: 'showTerms', label: t.pdf.showTerms },
-      { key: 'showSignature', label: t.pdf.showSignature },
-    ];
-    if (hasProductImages) items.push({ key: 'showProductImages', label: 'Incluir fotos dos produtos' });
-    return items;
-  })();
+  // Quais toggles existem por tipo de documento vem do catálogo compartilhado com a tela de
+  // padrão da empresa (recibo não tem nenhum). Duas listas separadas divergiriam na primeira
+  // opção nova.
+  const checkboxItems = pdfOptionItems(documentType, t.pdf as unknown as Record<string, string>, { hasProductImages });
 
   const triggerAction = async (action: PDFAction) => {
     const validity = documentType === 'quote'
       ? { mode: validityMode, days: validityDays, date: validityDate }
       : undefined;
     const due = documentType === 'invoice' ? dueDate : undefined;
-    // Persist options for next time — cache local instantâneo + backend (vale em qualquer
-    // dispositivo). O backend é fire-and-forget: não atrasa a geração do PDF.
-    saveLocalPrefs(documentType, options);
-    updateSetting.mutate({ key: BACKEND_KEY(documentType), value: JSON.stringify(options) });
+    // Nada é gravado aqui, de propósito: o que foi marcado vale para este documento e acaba
+    // quando o diálogo fecha. Mudar o padrão é em Configurações › Documentos (MF-AUD-014).
     if (action === 'download') {
       setDownloading(true);
       try {
@@ -153,15 +120,19 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
 
         {checkboxItems.length > 0 && (
           <div className="space-y-3 py-2">
-            <p className="text-sm font-medium text-muted-foreground">{t.pdf.itemsToShow}</p>
+            <div className="space-y-0.5">
+              <p className="text-sm font-medium text-muted-foreground">{t.pdf.itemsToShow}</p>
+              <p className="text-xs text-muted-foreground">{t.pdf.optionsScopeHint}</p>
+            </div>
             {checkboxItems.map(({ key, label }) => (
               <div key={key} className="flex items-center gap-2">
                 <Checkbox
                   id={key}
                   checked={!!options[key]}
-                  onCheckedChange={(checked) =>
-                    setOptions(p => ({ ...p, [key]: !!checked }))
-                  }
+                  onCheckedChange={(checked) => {
+                    optionsTouched.current = true;
+                    setOptions(p => ({ ...p, [key]: !!checked }));
+                  }}
                 />
                 <Label htmlFor={key} className="cursor-pointer text-sm">
                   {label}

@@ -866,6 +866,7 @@ export const en = {
     generateOS: 'Generate SO',
     pdfOptions: 'Choose what to include in the document',
     itemsToShow: 'Items to display',
+    optionsScopeHint: 'Applies to this document only. The company default is set in Settings › Documents.',
     showServicePrices: 'Service unit prices',
     showPartsPrices: 'Parts unit prices',
     showTravelCost: 'Travel cost',

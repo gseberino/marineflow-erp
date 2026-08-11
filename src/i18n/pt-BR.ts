@@ -845,6 +845,7 @@ export const ptBR: TranslationKeys = {
     generateOS: 'Gerar OS',
     pdfOptions: 'Escolha o que incluir no documento',
     itemsToShow: 'Itens a exibir',
+    optionsScopeHint: 'Vale só para este documento. O padrão da empresa fica em Configurações › Documentos.',
     showServicePrices: 'Preço unitário dos serviços',
     showPartsPrices: 'Preço unitário das peças',
     showTravelCost: 'Custo de deslocamento',
