@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useI18n } from '@/i18n';
 import { useServices } from '@/hooks/use-services';
+import { useServicesFiscalEfetivo, type ServiceFiscalEfetivo } from '@/hooks/use-service-fiscal';
 import { PageHeader } from '@/components/PageHeader';
 import { ServiceFormDialog } from '@/components/ServiceFormDialog';
 import { ImportWizard } from '@/components/ImportWizard';
@@ -10,15 +11,52 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatusBadge } from '@/components/StatusBadge';
-import { Plus, Search, Wrench, Pencil, Upload, Download, Table2, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Plus, Search, Wrench, Pencil, Upload, Download, Table2, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, FileWarning } from 'lucide-react';
 
 type SortDir = 'asc' | 'desc';
 const PAGE_SIZE = 20;
 
+/**
+ * Código de tributação EFETIVO e de onde ele veio.
+ *
+ * Mostrar a procedência não é detalhe: um código herdado do verbo vale para todos os serviços
+ * daquela atividade, então corrigi-lo em Settings conserta o catálogo inteiro — enquanto um
+ * código próprio só se corrige serviço a serviço. Quem vê "herdado" sabe onde ir.
+ */
+function CodigoFiscal({ f }: { f?: ServiceFiscalEfetivo }) {
+  // A view ainda não chegou: não afirmar nada é melhor que afirmar "sem código".
+  if (!f) return <span className="text-muted-foreground">—</span>;
+
+  if (f.sem_codigo_fiscal) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-amber-600 dark:text-amber-500">
+        <FileWarning className="h-3.5 w-3.5 shrink-0" />
+        <span className="text-xs">sem código</span>
+      </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="font-mono text-xs">{f.national_tax_code_efetivo}</span>
+      {f.code_source === 'verbo' && (
+        <span
+          className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+          title={`Herdado do verbo fiscal "${f.fiscal_verb}". Alterar em Configurações → Fiscal vale para todos os serviços dessa atividade.`}
+        >
+          verbo
+        </span>
+      )}
+    </span>
+  );
+}
+
 export default function ServiceList() {
   const { t, formatCurrency } = useI18n();
   const { data: services, isLoading, error } = useServices();
+  const { data: fiscal } = useServicesFiscalEfetivo();
   const [search, setSearch] = useState('');
+  const [soSemCodigo, setSoSemCodigo] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editData, setEditData] = useState<any>(null);
   const [importOpen, setImportOpen] = useState(false);
@@ -45,10 +83,26 @@ export default function ServiceList() {
     return sortDir === 'asc' ? <ArrowUp className="h-3 w-3 ml-1 shrink-0" /> : <ArrowDown className="h-3 w-3 ml-1 shrink-0" />;
   }
 
+  // Índice do fiscal EFETIVO por serviço. Quem resolve a herança é o banco; aqui só se casa
+  // pelo id. Enquanto a view não carrega, o mapa fica vazio e a tela se comporta como antes.
+  const fiscalPorId = useMemo(() => {
+    const m = new Map<string, ServiceFiscalEfetivo>();
+    for (const f of fiscal ?? []) m.set(f.id, f);
+    return m;
+  }, [fiscal]);
+
+  // Contador do topo: serviços ATIVOS sem código efetivo. Inativo fora da conta de propósito
+  // — serviço desativado não emite nota, e contá-lo deixaria um alarme que nunca zera.
+  const pendentes = useMemo(
+    () => (fiscal ?? []).filter((f) => f.active && f.sem_codigo_fiscal).length,
+    [fiscal],
+  );
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     const list = (services ?? []).filter((s) =>
-      s.name.toLowerCase().includes(q) || (s.category || '').toLowerCase().includes(q)
+      (s.name.toLowerCase().includes(q) || (s.category || '').toLowerCase().includes(q))
+      && (!soSemCodigo || fiscalPorId.get(s.id)?.sem_codigo_fiscal === true)
     );
     return [...list].sort((a, b) => {
       let av: any = (a as any)[sortKey] ?? '';
@@ -59,7 +113,7 @@ export default function ServiceList() {
       if (av > bv) return sortDir === 'asc' ? 1 : -1;
       return 0;
     });
-  }, [services, search, sortKey, sortDir]);
+  }, [services, search, sortKey, sortDir, soSemCodigo, fiscalPorId]);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -84,10 +138,25 @@ export default function ServiceList() {
         </div>
       </PageHeader>
 
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input placeholder={t.services.searchPlaceholder} value={search}
-          onChange={(e) => { setSearch(e.target.value); setPage(1); }} className="pl-9" />
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative max-w-sm flex-1 min-w-[220px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input placeholder={t.services.searchPlaceholder} value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(1); }} className="pl-9" />
+        </div>
+
+        {/* Só aparece quando há pendência: filtro que mostra "0 serviços" vira ruído fixo. */}
+        {pendentes > 0 && (
+          <Button
+            variant={soSemCodigo ? 'default' : 'outline'}
+            size="sm"
+            className="gap-1.5"
+            onClick={() => { setSoSemCodigo((v) => !v); setPage(1); }}
+          >
+            <FileWarning className="h-3.5 w-3.5" />
+            {pendentes} sem código fiscal
+          </Button>
+        )}
       </div>
 
       {error ? (
@@ -132,6 +201,9 @@ export default function ServiceList() {
                       {t.services.defaultPrice}<SortIcon col="default_price" />
                     </button>
                   </th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground whitespace-nowrap">
+                    Código fiscal
+                  </th>
                   <th className="px-4 py-3 text-center font-medium text-muted-foreground">
                     <button onClick={() => handleSort('active')} className="flex items-center justify-center w-full hover:text-foreground transition-colors">
                       {t.common.status}<SortIcon col="active" />
@@ -147,6 +219,7 @@ export default function ServiceList() {
                     <td className="px-4 py-3 text-muted-foreground">{s.category || '—'}</td>
                     <td className="px-4 py-3">{billingUnitLabel[s.billing_unit] || s.billing_unit}</td>
                     <td className="px-4 py-3 text-right">{formatCurrency(s.default_price || 0)}</td>
+                    <td className="px-4 py-3 whitespace-nowrap"><CodigoFiscal f={fiscalPorId.get(s.id)} /></td>
                     <td className="px-4 py-3 text-center">
                       <StatusBadge className={s.active ? 'bg-success/15 text-success' : 'bg-muted text-muted-foreground'}>
                         {s.active ? t.common.active : t.common.inactive}

@@ -207,3 +207,21 @@ Não foram corrigidos.
   exigir preenchimento manual de código/CNAE/ISS toda vez, ou impedir a emissão.
 - **Sugestão:** avaliar se viram serviço de catálogo ou se a tela de emissão precisa de um caminho
   para serviço avulso com código informado na hora.
+
+## NOVO-014 — `services.iss_withheld` não consegue herdar do verbo
+
+- **Origem:** [F-NFSE-03], implementação do resolvedor fiscal, 11/08/2026.
+- **Situação:** a coluna é `boolean not null default false`. Como toda linha já tem `false`
+  gravado, um `coalesce(s.iss_withheld, f.default_iss_withheld)` nunca alcançaria o verbo — a
+  herança existiria no código e não valeria nada.
+- **Por que importa:** retenção de ISS na fonte muda quem recolhe o imposto. Herdar errado
+  declara retenção que não houve (ou omite a que houve), e é o tomador que responde.
+- **O que travou a decisão:** distinguir "explicitamente sem retenção" de "nunca preenchido"
+  exige dizer o que significam os `false` que já existem no catálogo. Isso é decisão de
+  retenção tributária, não de schema.
+- **O que fiz:** deixei `iss_withheld` FORA da herança — vale o valor do serviço, exatamente
+  como hoje. Os outros quatro campos herdam normalmente. Está documentado na migration, no
+  espelho TS e coberto por teste de paridade nos dois lados.
+- **Para decidir:** se `iss_withheld` deve herdar do verbo, a coluna precisa virar nullable
+  **e** alguém precisa dizer o que fazer com os `false` atuais (mantê-los como decisão
+  explícita, ou zerá-los para `null` e deixar o verbo mandar).

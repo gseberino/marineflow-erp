@@ -6,6 +6,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { createFiscalProvider, readFiscalEnvironment } from "../_shared/fiscal/factory.ts";
 import { applyStatusUpdate } from "../_shared/fiscal/apply-status.ts";
 import { resolveIbgeCityCode } from "../_shared/fiscal/ibge.ts";
+import { resolveServiceFiscal, semCodigoFiscal } from "../_shared/fiscal/service-fiscal.ts";
 import { logEdgeError } from "../_shared/log-error.ts";
 import {
   buildNfeDraftPayload,
@@ -754,9 +755,16 @@ async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
   if (!cli) return { ok: false, error: "Cliente da OS não encontrado.", status: 404 };
 
   // Linhas de serviço COM o cadastro fiscal junto — é dele que saem código, CNAE e alíquota.
+  // O verbo fiscal vem embutido porque o cadastro do serviço pode estar vazio e ainda assim
+  // haver código: quem responde é o EFETIVO (próprio → verbo), não a coluna do serviço.
   const { data: linhas } = await admin
     .from("service_order_services")
-    .select("name_snapshot, description_snapshot, quantity, unit_price_snapshot, line_total, services(national_tax_code, service_code, cnae, iss_rate, iss_withheld)")
+    .select(
+      "name_snapshot, description_snapshot, quantity, unit_price_snapshot, line_total, "
+      + "services(national_tax_code, service_code, cnae, iss_rate, iss_withheld, fiscal_verb, "
+      + "service_fiscal_verbs(default_national_tax_code, default_service_code, default_cnae, "
+      + "default_iss_rate, default_iss_withheld))",
+    )
     .eq("service_order_id", soId);
 
   const lista = ((linhas as any[]) || []).filter((l) => Number(l.line_total) > 0);
@@ -769,8 +777,18 @@ async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
     };
   }
 
+  // Resolve o fiscal EFETIVO de cada linha antes de qualquer decisão. Sem isto, um serviço que
+  // herda o código do verbo seria acusado de "sem cadastro fiscal" e a emissão pararia — a
+  // herança existiria no banco e não valeria nada na hora que importa.
+  const resolvidas = lista.map((l) => ({
+    linha: l,
+    fiscal: resolveServiceFiscal(l.services ?? null, l.services?.service_fiscal_verbs ?? null),
+  }));
+
   // Sem cadastro fiscal não há nota. Dizer QUAIS faltam evita a caça ao serviço errado.
-  const semCadastro = lista.filter((l) => !l.services?.national_tax_code);
+  const semCadastro = resolvidas
+    .filter((r) => semCodigoFiscal(r.fiscal))
+    .map((r) => r.linha);
   if (semCadastro.length > 0) {
     return {
       ok: false,
@@ -778,12 +796,13 @@ async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
       error: "Serviço sem cadastro fiscal: "
         + semCadastro.map((l) => `"${l.name_snapshot}"`).join(", ")
         + ". Preencha o código de tributação nacional (6 dígitos), o CNAE e a alíquota de ISS "
-        + "no cadastro do serviço antes de emitir.",
+        + "no cadastro do serviço — ou no verbo fiscal dele, em Configurações → Fiscal → "
+        + "Verbos, que vale para todos os serviços daquela atividade — antes de emitir.",
       details: { servicos_sem_cadastro: semCadastro.map((l) => l.name_snapshot) },
     };
   }
 
-  const codigos = [...new Set(lista.map((l) => String(l.services.national_tax_code)))];
+  const codigos = [...new Set(resolvidas.map((r) => String(r.fiscal.nationalTaxCode)))];
   if (codigos.length > 1) {
     return {
       ok: false,
@@ -796,7 +815,7 @@ async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
     };
   }
 
-  const fiscal = lista[0].services;
+  const fiscal = resolvidas[0].fiscal;
   const total = lista.reduce((a, l) => a + (Number(l.line_total) || 0), 0);
 
   // Descrição: uma linha por serviço, com quantidade quando maior que 1. A prefeitura e o
@@ -820,11 +839,11 @@ async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
       origin_id: so.id,
       service: {
         description: descricao,
-        national_tax_code: fiscal.national_tax_code,
-        service_code: fiscal.service_code ?? null,
+        national_tax_code: fiscal.nationalTaxCode,
+        service_code: fiscal.serviceCode ?? null,
         cnae: fiscal.cnae ?? null,
-        iss_rate: fiscal.iss_rate ?? null,
-        iss_withheld: fiscal.iss_withheld === true,
+        iss_rate: fiscal.issRate ?? null,
+        iss_withheld: fiscal.issWithheld,
       },
       taker: {
         name: cli.name,
@@ -847,9 +866,13 @@ async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
       cliente: cli.name,
       servicos_na_nota: lista.length,
       total_servicos: r2(total),
-      codigo_de_tributacao: fiscal.national_tax_code,
+      codigo_de_tributacao: fiscal.nationalTaxCode,
       cnae: fiscal.cnae,
-      iss_rate: fiscal.iss_rate,
+      iss_rate: fiscal.issRate,
+      // De onde saiu o código: cadastro do serviço ou herdado do verbo. Quem confere a nota
+      // antes de emitir precisa saber se está olhando um cadastro específico ou o padrão da
+      // atividade — são responsabilidades diferentes se o código estiver errado.
+      origem_do_codigo: fiscal.codeSource,
       // Simétrico ao aviso da NF-e: quem emite precisa saber o que NÃO entrou.
       aviso_nfe: "As peças da OS não entram na NFS-e — elas são NF-e, documento de produto.",
     },
