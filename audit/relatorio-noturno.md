@@ -461,3 +461,47 @@ coluna, lista vazia gerando só cabeçalho.
    ao abrir a planilha. O conteúdo vem do usuário e o arquivo sai da empresa.
 
 **Gates:** typecheck 0 · vitest **1.125** (eram 1.111; +14) · deno 267 · build OK.
+
+---
+
+## Onde a fila parou (para retomar)
+
+A fila 5 é infinita por natureza. O critério que usei: lógica que decide dinheiro ou integridade de dado, sem
+nenhum teste, testável sem banco — e **nada de CashForecastPanel/financeiro**, que roda em outra sessão.
+
+**Feito nesta noite (8 módulos):** `price-calculator`, `displacement`, `document-hash`, `nfe-xml-parser`,
+`import-detector`, `masks`, `quick-task-parser`, `export-utils`.
+
+**Aviso para quem retomar a varredura:** procurar por `src/lib/<nome>.test.ts` **não** é suficiente — vários
+módulos são cobertos por testes que vivem em `src/test/`. A varredura correta é procurar quem *importa* o
+módulo em qualquer arquivo `*.test.*`. Com esse critério, o que ainda está descoberto em `src/lib` é:
+
+| Módulo | Linhas | Observação |
+|---|---|---|
+| `cascade-updates.ts` | 409 | **O de maior risco que sobrou** — estorno, reabertura e cascata de recebíveis. Precisa de mock do Supabase, e encosta no território da outra sessão: confirmar antes |
+| `generate-collections.ts` | 191 | cobranças — mesmo cuidado |
+| `completion-receivables.ts` | 98 | recebíveis na conclusão — mesmo cuidado |
+| `collection-message.ts` | 86 | montagem da mensagem de cobrança |
+| `ai-whatsapp.ts` | 53 | |
+| `invoke-error.ts` | 26 | |
+| `pdf-print.ts` | 23 | |
+| `expense-categories.ts` / `export.ts` / `constants.ts` / `query-client.ts` / `utils.ts` | ≤63 | pouco risco, sobretudo dados e configuração |
+
+Depois de `src/lib`, os próximos alvos naturais são os hooks com cálculo (`src/hooks`) e as Edge Functions
+que ainda não têm `_test.ts` em `supabase/functions`.
+
+---
+
+## Fecho
+
+**14 commits** em `session/noturno`, todos com os quatro gates verdes antes de entrar. **Nada foi para
+produção:** sem `push`, sem migration aplicada, sem deploy. As duas únicas idas ao banco foram `SELECT` de
+leitura, escopadas, e estão descritas nas seções 1 e 4.
+
+O que precisa de você, em uma linha cada:
+1. **NOVO-011** — conferir o catálogo importado (preços abaixo de R$ 10, clientes sem celular). É o mais caro.
+2. **NOVO-009 / NOVO-010 / NOVO-012 / NOVO-013** — correções pequenas, mas duas delas (`hourly[4]` e o
+   arredondamento do preço) são **decisão comercial**, não técnica.
+3. **Migration da view** — aplicar, regenerar tipos, virar a chave, validar com JWT de técnico (seção 4).
+4. **Duas decisões declaradas** — `localStorage` do diálogo de PDF (seção 1) e `invoicing_status`/
+   `payment_status` na view (seção 4).
