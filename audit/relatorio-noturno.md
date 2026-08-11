@@ -315,3 +315,26 @@ fica incompleta exatamente no caso em que ela é necessária. Hoje os 14 campos 
 "internal_notes é vigiado pelo trigger mas não entra no hash". Migration restaurada em seguida.
 
 **Gates:** typecheck 0 · vitest **1.024** (eram 994; +30) · deno 267 · build OK.
+
+### 5.4 `nfe-xml-parser.ts` — concluído
+
+**Commit:** `test(fiscal): cobre o parser de XML de NF-e (venda e devolucao)`
+
+244 linhas sem teste que alimentam duas telas onde errar custa: duplicar uma nota de venda e montar a
+**devolução ao fornecedor** — que precisa espelhar exatamente o que o fornecedor destacou, item a item, senão
+o crédito dele não fecha. O parse é por expressão regular, não por parser de XML, o que torna dois erros
+fáceis e invisíveis; os dois ganharam caso próprio:
+
+1. **`vBC` existe no ICMS e no IPI.** Ler do `<det>` inteiro pega o primeiro (o do ICMS) e a base do IPI sai
+   errada na devolução. O XML de teste usa 750 no ICMS e 800 no IPI de propósito — se alguém tirar o recorte
+   por grupo, o caso acusa.
+2. **A data de emissão não pode virar `Date`.** `dhEmi` de 11/09 às 23:30 com fuso −03:00 é 12/09 em UTC:
+   converter devolveria o **dia seguinte** na nota de devolução. O parser corta os 10 primeiros caracteres, e
+   agora existe um teste para que ninguém "melhore" isso.
+
+Outros 20 casos: recusa de arquivo que não é NF-e, chave de acesso pelo `Id` e pelo `<chNFe>` do protocolo,
+emitente ≠ destinatário (a devolução inverte os dois), entidades HTML decodificadas, CPF quando é pessoa
+física, ICMS do Simples (`CSOSN`) lido igual, e imposto ausente vindo como `undefined` em vez de `0` — zero é
+uma afirmação ("o fornecedor destacou zero"), `undefined` é silêncio, e a devolução precisa da diferença.
+
+**Gates:** typecheck 0 · vitest **1.046** (eram 1.024; +22) · deno 267 · build OK.
