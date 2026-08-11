@@ -79,6 +79,8 @@ describe('FiscalEmission — smoke de render', () => {
     // findBy* espera as queries de montagem (environment/diagnostics) resolverem
     // dentro de act — assim o smoke cobre TAMBÉM o re-render com os dados já carregados,
     // que é onde um deref de null costuma estourar.
-    expect(await screen.findByText('Emissão Fiscal (NF-e)')).toBeTruthy();
+    // O título deixou de ser "(NF-e)" quando a NFS-e entrou: a página cobre os dois
+    // documentos, e prometer só um esconderia metade do que ela faz.
+    expect(await screen.findByText('Emissão Fiscal')).toBeTruthy();
   });
 });

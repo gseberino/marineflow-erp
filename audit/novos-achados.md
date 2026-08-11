@@ -159,3 +159,30 @@ Não foram corrigidos.
   Gustavo precisa saber disso para decidir se quer a tarefa da view.
 - **Evidência:** `src/hooks/use-service-orders.ts:15-33` (selects com `*`); comportamento documentado do
   PostgREST/Postgres para grants de coluna.
+
+---
+
+## NOVO-010 — Tool `emitir_nfse_da_os` do agente ainda não existe
+
+- **Origem:** [F-NFSE-01] sub-tarefa 5, declarada FORA DE ESCOPO na própria tarefa.
+- **Situação:** a NFS-e já pode ser emitida a partir de uma OS pela edge function
+  (`document_type: "nfse"` + `service_order_id`), mas o agente de IA não tem tool para isso.
+  Hoje ele sabe emitir NF-e (`emitir_nfe_da_os`) e, quando a OS tem mão de obra, avisa que
+  "a NFS-e ainda não está disponível" — frase que passa a ser falsa.
+- **Por que importa:** o aviso desatualizado é pior que a ausência da tool; ele afirma ao
+  dono que uma capacidade não existe quando ela existe.
+- **Sugestão:** tool espelhando `emitir_nfe_da_os`, com o mesmo gate de risco (sim + PIN),
+  e atualizar a frase do resumo da NF-e.
+
+## NOVO-011 — Serviços sem cadastro fiscal (243 de 243)
+
+- **Origem:** [F-NFSE-01], medido em 10/08/2026.
+- **Situação:** os 243 serviços ativos têm `national_tax_code`, `cnae` e `iss_rate` NULOS, e
+  `company_fiscal_settings.nfse_total_tax_rate_sn` está vazio. A infraestrutura de emissão
+  está pronta e não há um único serviço emitível.
+- **Por que importa:** o prazo da NFS-e é 01/09/2026, e nenhum desses valores pode ser
+  inferido por software — código de tributação errado declara à prefeitura um serviço que
+  não foi prestado, e o percentual do Simples só a contabilidade sabe.
+- **Sugestão:** levantar com a contabilidade o código nacional + CNAE + alíquota dos
+  serviços mais faturados e o percentual da faixa do Simples, antes de qualquer teste de
+  emissão. Não é trabalho de código.
