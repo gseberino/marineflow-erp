@@ -11,7 +11,8 @@ Produza um retrato honesto do estado desta frente. **A única escrita permitida 
 arquivo de código, nenhuma migration, nenhum deploy, nenhum push. Se durante o levantamento você encontrar um
 defeito, ele vira linha no relatório, não commit.
 
-Salve em `audit/status-<frente>-<AAAAMMDD>.md` e siga este template. Cada seção é obrigatória; seção sem
+Salve em `audit/status-<frente>-<AAAA-MM-DD>.md` — mesmo formato de data dos `status-fase2-*.md` já
+existentes — e siga este template. Cada seção é obrigatória; seção sem
 conteúdo escreve "nada" em vez de sumir.
 
 ## 1. Resumo
@@ -42,7 +43,8 @@ relatório diz qual e por quê — não se conserta durante um checkpoint.
 
 ## 6. Banco e deploys
 
-Migrations aplicadas × arquivos em disco (leitura pura: `list_migrations` contra `supabase/migrations/`).
+Migrations aplicadas × arquivos em disco (leitura pura: `npx supabase migration list` contra
+`supabase/migrations/`).
 Divergência é a primeira coisa da seção. Deploys de Edge Function e do frontend: o que está no ar e de qual
 commit.
 
