@@ -118,7 +118,11 @@ describe('calculateSalePrice — imposto e comissão saem de dentro do preço', 
 
   it('tudo sai arredondado em centavos — nada de 166.66666666666669 no orçamento', () => {
     const bd = calculateSalePrice({ cost_price: 100, profit_margin: 30, tax_rate: 6, commission_rate: 4 });
-    for (const [campo, valor] of Object.entries(bd)) {
+    // Percorre só os campos NUMÉRICOS: `error` e `warning` (NOVO-009) são texto ou null, e a
+    // intenção deste teste sempre foi dinheiro sem dízima — não o formato de uma mensagem.
+    const numericos = Object.entries(bd).filter(([, v]) => typeof v === 'number');
+    expect(numericos.length, 'o breakdown deveria ter campos numéricos').toBeGreaterThan(0);
+    for (const [campo, valor] of numericos) {
       expect(Number.isFinite(valor as number), campo).toBe(true);
       expect(String(valor).split('.')[1]?.length ?? 0, `${campo} com mais de 2 casas`).toBeLessThanOrEqual(2);
     }
@@ -175,5 +179,67 @@ describe('ida e volta — o que a tela faz no modo "preço direto"', () => {
       const margemDeVolta = calculateMarginFromPrice(c.cost, ida.sale_price, c.imposto, c.comissao);
       expect(Math.abs(margemDeVolta - c.margem), `caso ${JSON.stringify(c)}`).toBeLessThanOrEqual(0.01);
     }
+  });
+});
+
+// [NOVO-009] A borda dos 100%.
+//
+// Margem, imposto e comissão saem da RECEITA. Somados a 100% não sobra nada para pagar o
+// custo; acima disso a conta vira negativa. O código devolvia `sale_price: 0` calado — e zero
+// é um preço que PARECE válido: entra no campo, salva no produto e sai numa proposta.
+describe('[NOVO-009] margem + imposto + comissão na borda de 100%', () => {
+  const base = { cost_price: 100, tax_rate: 0, commission_rate: 0 };
+
+  it('99% ainda calcula, mas AVISA que o preço ficou 100× o custo', () => {
+    const r = calculateSalePrice({ ...base, profit_margin: 99 });
+    expect(r.error).toBeNull();
+    expect(r.sale_price).toBe(10000);
+    expect(r.warning).toMatch(/100× o custo/);
+    expect(r.warning).toMatch(/confira se era isso/);
+  });
+
+  it('100% devolve ERRO e preço zero — não é preço alto, é impossível', () => {
+    const r = calculateSalePrice({ ...base, profit_margin: 100 });
+    expect(r.sale_price).toBe(0);
+    expect(r.error).toMatch(/somam 100%/);
+    expect(r.error).toMatch(/ABAIXO de 100%/);
+    expect(r.warning).toBeNull();
+  });
+
+  it('101% também é erro, e a mensagem diz a soma real', () => {
+    const r = calculateSalePrice({ ...base, profit_margin: 101 });
+    expect(r.sale_price).toBe(0);
+    expect(r.error).toMatch(/somam 101%/);
+  });
+
+  it('a soma dos TRÊS é que importa, não cada um isolado', () => {
+    // 40 + 30 + 30 = 100: nenhum é absurdo sozinho, e é assim que se cai nisso sem perceber.
+    const r = calculateSalePrice({ cost_price: 100, profit_margin: 40, tax_rate: 30, commission_rate: 30 });
+    expect(r.error).toMatch(/somam 100%/);
+    expect(r.error).toMatch(/40%/);
+    expect(r.error).toMatch(/30%/);
+  });
+
+  it('logo abaixo do corte de aviso não avisa — para o alerta não virar ruído', () => {
+    // 95% → 20× o custo, exatamente no corte (e é o caso que expõe o ponto flutuante: a
+    // divisão crua dá 19.999999999999982, então o multiplicador é arredondado antes de
+    // comparar). 94% → 16,67×, abaixo do corte.
+    expect(calculateSalePrice({ ...base, profit_margin: 95 }).warning).not.toBeNull();
+    expect(calculateSalePrice({ ...base, profit_margin: 94 }).warning).toBeNull();
+  });
+
+  it('caso normal segue sem erro e sem aviso', () => {
+    const r = calculateSalePrice({ cost_price: 100, profit_margin: 30, tax_rate: 6, commission_rate: 4 });
+    expect(r.error).toBeNull();
+    expect(r.warning).toBeNull();
+    expect(r.sale_price).toBe(166.67);
+  });
+
+  it('entrada inválida devolve motivo, não NaN', () => {
+    expect(calculateSalePrice({ ...base, profit_margin: NaN }).error).toMatch(/números/);
+    expect(calculateSalePrice({ ...base, profit_margin: -10 }).error).toMatch(/negativos/);
+    expect(calculateSalePrice({ ...base, cost_price: -1, profit_margin: 30 }).error).toMatch(/custo não pode/);
+    // O que importa: nunca sai NaN no campo de preço.
+    expect(calculateSalePrice({ ...base, profit_margin: NaN }).sale_price).toBe(0);
   });
 });
