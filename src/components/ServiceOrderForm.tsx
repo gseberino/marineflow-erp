@@ -2389,8 +2389,13 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               toast.success('PDF baixado com sucesso');
               setPdfDialogType(null);
             } catch (e: any) {
+              // A causa importa: "documento longo demais" e "imagem bloqueada"
+              // pedem ações diferentes, e "Erro ao gerar o PDF" não distingue.
               console.error('PDF download failed:', e);
-              toast.error('Erro ao gerar o PDF para download');
+              toast.error(
+                `Erro ao gerar o PDF: ${e?.message || 'causa desconhecida'}`,
+                { duration: 10000 },
+              );
             }
           } else {
             printPDF(payload, opts);

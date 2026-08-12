@@ -1,4 +1,5 @@
 import { scopeCss } from './css-scope';
+import { valueVisibility } from './pdf-visibility';
 
 export type PDFDocumentType = 'quote' | 'service_order' | 'invoice' | 'receipt';
 
@@ -369,58 +370,58 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
     try { await (document as any).fonts.ready; } catch { /* ignore */ }
   }
 
-  // Paginação decidida AQUI, com as alturas já calculadas pelo navegador.
-  //
-  // O html2pdf fatia a imagem capturada em folhas A4, e imagem não respeita
-  // `page-break-inside` — foi assim que o bloco "Informações para Pagamento"
-  // saiu partido ao meio. Medindo cada bloco antes e marcando onde a página
-  // deve virar, o corte deixa de cair no acaso.
-  //
-  // NOVO-007 — nós mesmos inserimos o ESPAÇO da quebra, aqui, antes de medir.
-  //
-  // Antes, quem inseria era o html2pdf no modo `legacy`: ele varre o DOM e põe uma div
-  // de padding antes de cada `.html2pdf__page-break`. Só que isso roda em
-  // `toContainer()` — DEPOIS de `container.scrollHeight` já ter sido medido e congelado
-  // em `html2canvas.height`. O documento crescia, a captura não, e o fim ficava fora da
-  // imagem: PDF truncado, sem condições de pagamento nem termos. E não era só o botão
-  // Baixar — este mesmo pipeline gera o anexo do WhatsApp e o download do portal público,
-  // então o CLIENTE vinha recebendo documento cortado, em silêncio.
-  //
-  // Com o espaço inserido aqui, a altura medida logo abaixo já inclui tudo, e o `legacy`
-  // sai do `pagebreak.mode` — ninguém mais mexe no DOM depois da medição.
-  const alvoDaPaginacao = container.querySelector('.container') ?? container;
-  const filhos = Array.from(alvoDaPaginacao.children).filter(
-    (el) => el instanceof HTMLElement && el.tagName !== 'STYLE',
-  ) as HTMLElement[];
-
-  if (filhos.length > 1) {
-    const blocos = filhos.map((el) => ({
-      altura: el.getBoundingClientRect().height,
-      // Card e tabela são os que não podem partir; o CSS já declara o mesmo,
-      // e aqui a intenção vira medida.
-      indivisivel: el.classList.contains('card') || !!el.querySelector('table'),
-    }));
-
-    const { planPageBreaks, alturaDoEspacador } = await import('./pdf-pagination');
-
-    // Em ordem CRESCENTE, medindo um por vez: cada espaçador desloca os blocos
-    // seguintes, então o topo do próximo só é confiável depois que o anterior entrou.
-    // (Ler todas as posições de uma vez e inserir depois é exatamente o defeito do
-    // `legacy`, que invalida as próprias coordenadas enquanto insere.)
-    const topoDoContainer = alvoDaPaginacao.getBoundingClientRect().top;
-    for (const i of planPageBreaks(blocos)) {
-      const topoDoBloco = filhos[i].getBoundingClientRect().top - topoDoContainer;
-      const altura = alturaDoEspacador(topoDoBloco);
-      if (altura <= 0) continue;
-      const espacador = document.createElement('div');
-      espacador.className = 'mf-page-spacer';
-      espacador.setAttribute('aria-hidden', 'true');
-      espacador.style.cssText = `display:block;height:${altura}px;`;
-      filhos[i].parentNode?.insertBefore(espacador, filhos[i]);
-    }
-  }
-
   try {
+    // Paginação decidida AQUI, com as alturas já calculadas pelo navegador.
+    //
+    // O html2pdf fatia a imagem capturada em folhas A4, e imagem não respeita
+    // `page-break-inside` — foi assim que o bloco "Informações para Pagamento"
+    // saiu partido ao meio. Medindo cada bloco antes e marcando onde a página
+    // deve virar, o corte deixa de cair no acaso.
+    //
+    // NOVO-007 — nós mesmos inserimos o ESPAÇO da quebra, aqui, antes de medir.
+    //
+    // Antes, quem inseria era o html2pdf no modo `legacy`: ele varre o DOM e põe uma div
+    // de padding antes de cada `.html2pdf__page-break`. Só que isso roda em
+    // `toContainer()` — DEPOIS de `container.scrollHeight` já ter sido medido e congelado
+    // em `html2canvas.height`. O documento crescia, a captura não, e o fim ficava fora da
+    // imagem: PDF truncado, sem condições de pagamento nem termos. E não era só o botão
+    // Baixar — este mesmo pipeline gera o anexo do WhatsApp e o download do portal público,
+    // então o CLIENTE vinha recebendo documento cortado, em silêncio.
+    //
+    // Com o espaço inserido aqui, a altura medida logo abaixo já inclui tudo, e o `legacy`
+    // sai do `pagebreak.mode` — ninguém mais mexe no DOM depois da medição.
+    const alvoDaPaginacao = container.querySelector('.container') ?? container;
+    const filhos = Array.from(alvoDaPaginacao.children).filter(
+      (el) => el instanceof HTMLElement && el.tagName !== 'STYLE',
+    ) as HTMLElement[];
+
+    if (filhos.length > 1) {
+      const blocos = filhos.map((el) => ({
+        altura: el.getBoundingClientRect().height,
+        // Card e tabela são os que não podem partir; o CSS já declara o mesmo,
+        // e aqui a intenção vira medida.
+        indivisivel: el.classList.contains('card') || !!el.querySelector('table'),
+      }));
+
+      const { planPageBreaks, alturaDoEspacador } = await import('./pdf-pagination');
+
+      // Em ordem CRESCENTE, medindo um por vez: cada espaçador desloca os blocos
+      // seguintes, então o topo do próximo só é confiável depois que o anterior entrou.
+      // (Ler todas as posições de uma vez e inserir depois é exatamente o defeito do
+      // `legacy`, que invalida as próprias coordenadas enquanto insere.)
+      const topoDoContainer = alvoDaPaginacao.getBoundingClientRect().top;
+      for (const i of planPageBreaks(blocos)) {
+        const topoDoBloco = filhos[i].getBoundingClientRect().top - topoDoContainer;
+        const altura = alturaDoEspacador(topoDoBloco);
+        if (altura <= 0) continue;
+        const espacador = document.createElement('div');
+        espacador.className = 'mf-page-spacer';
+        espacador.setAttribute('aria-hidden', 'true');
+        espacador.style.cssText = `display:block;height:${altura}px;`;
+        filhos[i].parentNode?.insertBefore(espacador, filhos[i]);
+      }
+    }
+
     // Import dinâmico para não pesar o bundle inicial. Falha de rede/timing
     // ("Failed to fetch dynamically imported module") costuma ser passageira —
     // uma nova tentativa silenciosa evita expor o erro ao usuário sem necessidade.
@@ -1070,13 +1071,19 @@ function buildOrderHTML(data: PDFData, options: PDFOptions): string {
     return 'Válido por 15 dias.';
   };
 
+  // O que aparece de valor. Desmarcar uma seção no diálogo esconde o preço
+  // dela INTEIRO — unitário e total —, e sem preço em nenhuma seção o resumo
+  // financeiro some junto. Antes a opção tirava só a coluna "Unitário", e o
+  // documento saía com os totais mesmo com tudo desmarcado.
+  const vis = valueVisibility(options);
+
   const serviceRows = data.services.map(s => `
     <tr>
       <td style="font-weight:600;">${esc(s.name)}${s.description ? `<div style="font-weight:400;color:var(--pdf-text-muted);font-size:9px;margin-top:2px;">${esc(s.description)}</div>` : ''}</td>
       <td style="text-align:center;">${s.quantity} ${esc(billingUnitLabel[s.billing_unit] || s.billing_unit)}</td>
       ${semValores ? '' : `
-      ${options.showServicePrices ? `<td style="text-align:right;">${fmtCurrency(s.unit_price)}</td>` : ''}
-      <td style="text-align:right;font-weight:600;">${fmtCurrency(s.line_total)}</td>`}
+      ${vis.servicoUnitario ? `<td style="text-align:right;">${fmtCurrency(s.unit_price)}</td>` : ''}
+      ${vis.servicoTotal ? `<td style="text-align:right;font-weight:600;">${fmtCurrency(s.line_total)}</td>` : ''}`}
     </tr>
   `).join('');
 
@@ -1098,8 +1105,8 @@ function buildOrderHTML(data: PDFData, options: PDFOptions): string {
       <td>${itemCell}</td>
       <td style="text-align:center;">${p.quantity}</td>
       ${semValores ? '' : `
-      ${options.showPartsPrices ? `<td style="text-align:right;">${fmtCurrency(p.unit_price)}</td>` : ''}
-      <td style="text-align:right;font-weight:600;">${fmtCurrency(p.line_total)}</td>`}
+      ${vis.pecaUnitario ? `<td style="text-align:right;">${fmtCurrency(p.unit_price)}</td>` : ''}
+      ${vis.pecaTotal ? `<td style="text-align:right;font-weight:600;">${fmtCurrency(p.line_total)}</td>` : ''}`}
     </tr>
   `;}).join('');
 
@@ -1222,8 +1229,8 @@ ${data.services.length > 0 ? `
       <th style="width:${semValores ? '80' : '55'}%;">Descrição Técnica</th>
       <th style="width:${semValores ? '20' : '15'}%;text-align:center;">Qtd/Unid</th>
       ${semValores ? '' : `
-      ${options.showServicePrices ? '<th style="width:15%;text-align:right;">Unitário</th>' : ''}
-      <th style="width:15%;text-align:right;">Subtotal</th>`}
+      ${vis.servicoUnitario ? '<th style="width:15%;text-align:right;">Unitário</th>' : ''}
+      ${vis.servicoTotal ? '<th style="width:15%;text-align:right;">Subtotal</th>' : ''}`}
     </tr>
   </thead>
   <tbody>${serviceRows}</tbody>
@@ -1238,8 +1245,8 @@ ${data.parts.length > 0 ? `
       <th style="width:${semValores ? '80' : '55'}%;">Item / Especificação</th>
       <th style="width:${semValores ? '20' : '15'}%;text-align:center;">Qtd</th>
       ${semValores ? '' : `
-      ${options.showPartsPrices ? '<th style="width:15%;text-align:right;">Unitário</th>' : ''}
-      <th style="width:15%;text-align:right;">Subtotal</th>`}
+      ${vis.pecaUnitario ? '<th style="width:15%;text-align:right;">Unitário</th>' : ''}
+      ${vis.pecaTotal ? '<th style="width:15%;text-align:right;">Subtotal</th>' : ''}`}
     </tr>
   </thead>
   <tbody>${partsRows}</tbody>
@@ -1254,6 +1261,7 @@ ${!isQuote && data.serviceOrder.technical_notes ? `
 ` : ''}
 
 ${semValores ? '' : `
+${vis.resumoFinanceiro ? `
 <div style="display:flex;justify-content:flex-end;">
   <div style="width:300px;">
     <table class="summary-table">
@@ -1267,7 +1275,7 @@ ${semValores ? '' : `
     </table>
     ${isQuote ? `<div style="text-align:right;font-size:10px;font-weight:700;color:var(--pdf-secondary);margin-top:-10px;padding-right:12px;">${getValidityText()}</div>` : ''}
   </div>
-</div>
+</div>` : ''}
 
 ${buildPaymentSection(data.serviceOrder)}
 ${buildPaymentHistorySection(data.serviceOrder)}
