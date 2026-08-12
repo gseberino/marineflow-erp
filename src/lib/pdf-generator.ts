@@ -1,5 +1,6 @@
 import { scopeCss } from './css-scope';
 import { planPageBreaks } from './pdf-pagination';
+import { valueVisibility } from './pdf-visibility';
 
 export type PDFDocumentType = 'quote' | 'service_order' | 'invoice' | 'receipt';
 
@@ -1002,12 +1003,18 @@ function buildOrderHTML(data: PDFData, options: PDFOptions): string {
     return 'Válido por 15 dias.';
   };
 
+  // O que aparece de valor. Desmarcar uma seção no diálogo esconde o preço
+  // dela INTEIRO — unitário e total —, e sem preço em nenhuma seção o resumo
+  // financeiro some junto. Antes a opção tirava só a coluna "Unitário", e o
+  // documento saía com os totais mesmo com tudo desmarcado.
+  const vis = valueVisibility(options);
+
   const serviceRows = data.services.map(s => `
     <tr>
       <td style="font-weight:600;">${esc(s.name)}${s.description ? `<div style="font-weight:400;color:var(--pdf-text-muted);font-size:9px;margin-top:2px;">${esc(s.description)}</div>` : ''}</td>
       <td style="text-align:center;">${s.quantity} ${esc(billingUnitLabel[s.billing_unit] || s.billing_unit)}</td>
-      ${options.showServicePrices ? `<td style="text-align:right;">${fmtCurrency(s.unit_price)}</td>` : ''}
-      <td style="text-align:right;font-weight:600;">${fmtCurrency(s.line_total)}</td>
+      ${vis.servicoUnitario ? `<td style="text-align:right;">${fmtCurrency(s.unit_price)}</td>` : ''}
+      ${vis.servicoTotal ? `<td style="text-align:right;font-weight:600;">${fmtCurrency(s.line_total)}</td>` : ''}
     </tr>
   `).join('');
 
@@ -1028,8 +1035,8 @@ function buildOrderHTML(data: PDFData, options: PDFOptions): string {
     <tr>
       <td>${itemCell}</td>
       <td style="text-align:center;">${p.quantity}</td>
-      ${options.showPartsPrices ? `<td style="text-align:right;">${fmtCurrency(p.unit_price)}</td>` : ''}
-      <td style="text-align:right;font-weight:600;">${fmtCurrency(p.line_total)}</td>
+      ${vis.pecaUnitario ? `<td style="text-align:right;">${fmtCurrency(p.unit_price)}</td>` : ''}
+      ${vis.pecaTotal ? `<td style="text-align:right;font-weight:600;">${fmtCurrency(p.line_total)}</td>` : ''}
     </tr>
   `;}).join('');
 
@@ -1145,8 +1152,8 @@ ${data.services.length > 0 ? `
     <tr>
       <th style="width:55%;">Descrição Técnica</th>
       <th style="width:15%;text-align:center;">Qtd/Unid</th>
-      ${options.showServicePrices ? '<th style="width:15%;text-align:right;">Unitário</th>' : ''}
-      <th style="width:15%;text-align:right;">Subtotal</th>
+      ${vis.servicoUnitario ? '<th style="width:15%;text-align:right;">Unitário</th>' : ''}
+      ${vis.servicoTotal ? '<th style="width:15%;text-align:right;">Subtotal</th>' : ''}
     </tr>
   </thead>
   <tbody>${serviceRows}</tbody>
@@ -1160,8 +1167,8 @@ ${data.parts.length > 0 ? `
     <tr>
       <th style="width:55%;">Item / Especificação</th>
       <th style="width:15%;text-align:center;">Qtd</th>
-      ${options.showPartsPrices ? '<th style="width:15%;text-align:right;">Unitário</th>' : ''}
-      <th style="width:15%;text-align:right;">Subtotal</th>
+      ${vis.pecaUnitario ? '<th style="width:15%;text-align:right;">Unitário</th>' : ''}
+      ${vis.pecaTotal ? '<th style="width:15%;text-align:right;">Subtotal</th>' : ''}
     </tr>
   </thead>
   <tbody>${partsRows}</tbody>
@@ -1175,6 +1182,7 @@ ${!isQuote && data.serviceOrder.technical_notes ? `
 </div>
 ` : ''}
 
+${vis.resumoFinanceiro ? `
 <div style="display:flex;justify-content:flex-end;">
   <div style="width:300px;">
     <table class="summary-table">
@@ -1188,7 +1196,7 @@ ${!isQuote && data.serviceOrder.technical_notes ? `
     </table>
     ${isQuote ? `<div style="text-align:right;font-size:10px;font-weight:700;color:var(--pdf-secondary);margin-top:-10px;padding-right:12px;">${getValidityText()}</div>` : ''}
   </div>
-</div>
+</div>` : ''}
 
 ${buildPaymentSection(data.serviceOrder)}
 ${buildPaymentHistorySection(data.serviceOrder)}
