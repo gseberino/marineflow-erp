@@ -24,10 +24,37 @@ Superfície: 243 arquivos em `supabase/migrations/`, `src/integrations/supabase/
 
 ## 21.1 Achados
 
-### [MF-AUD-058] 35 migrations aplicadas em produção sem arquivo versionado — inclusive uma correção de segurança
+### [MF-AUD-058] 154 migrations aplicadas em produção sem arquivo versionado — inclusive uma correção de segurança
 - **Módulo:** Banco / governança
-- **Arquivo:linha:** `supabase_migrations.schema_migrations` (278 linhas) × `ls supabase/migrations/*.sql` (243)
+- **Arquivo:linha:** `supabase_migrations.schema_migrations` × `ls supabase/migrations/*.sql`
 - **Categoria:** J — **Severidade:** P1
+
+> ## ⚠️ NÚMERO CORRIGIDO EM 12/08/2026 — era 35, é **154**
+>
+> A medição original (08/08) comparou apenas as **contagens** (278 × 243) e concluiu 35. Ao
+> tentar `supabase db push --dry-run` em 12/08, o CLI listou **nome por nome** as versões
+> remotas sem arquivo local, e o número real apareceu:
+>
+> | | |
+> |---|---:|
+> | Versões registradas no banco | **297** |
+> | Arquivos em disco | 252 |
+> | **Registradas SEM arquivo local** | **159** (154 anteriores ao trabalho recente) |
+> | **Arquivos SEM versão registrada** | **114** |
+>
+> Duas coisas que a medição por contagem não podia mostrar:
+>
+> 1. **A deriva corre nos DOIS sentidos.** Além das 159 sem arquivo, há **114 arquivos cuja
+>    versão nunca foi registrada** — consequência de `db query -f`, que aplica o SQL e não
+>    escreve em `schema_migrations`. A diferença 278−243 nunca foi "35 órfãs": era o saldo
+>    líquido de dois desvios muito maiores que se cancelavam parcialmente.
+> 2. **`db push` está inutilizável**, e não por causa do trabalho recente: aborta com
+>    `LegacyDbPushMissingLocalError` antes de aplicar qualquer coisa, por causa das 154
+>    antigas (abril→agosto). Virou a **regra 1 do CLAUDE.md**.
+>
+> A explicação (a) abaixo — "trabalho em worktree que chega no merge" — continua verdadeira
+> para as dez de 08/08, mas explica **dez de 154**. O grosso é histórico e não tem worktree
+> esperando por ele.
 - **Descrição:** A diferença tem **duas naturezas distintas**, e é importante não confundi-las:
 
   **(a) Trabalho em andamento em worktrees — legítimo, temporário.** Dez das migrations aplicadas hoje

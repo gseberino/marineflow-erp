@@ -5,12 +5,40 @@ Este repositório é editado por **várias sessões de IA ao mesmo tempo** (work
 de minuto em minuto na `main`). As regras abaixo não são preferência de estilo: cada uma nasceu de um
 incidente já ocorrido aqui. Valem independentemente da tarefa em curso.
 
-1. **Nenhuma migration é aplicada em produção sem o arquivo correspondente commitado ANTES em
-   `supabase/migrations/`. Sem exceção — inclusive correção de dados.**
-   Motivo: em 09/08/2026 a migration `20260809140033_corrige_categorias_que_o_mcc_desmente` foi aplicada
-   em produção e não existia em disco (NOVO-003); só foi recuperada porque o Postgres guardava o SQL. Antes
-   dela, outras 35 já haviam entrado assim (MF-AUD-058), incluindo **uma correção de segurança de RLS que
-   existe apenas no banco** (MF-AUD-021) — o repositório, hoje, não reconstrói a produção.
+1. **`supabase db push` NÃO É UTILIZÁVEL neste projeto. Migration se aplica por
+   `supabase db query --linked -f <arquivo>` — e a versão se registra à mão, no mesmo ato.**
+
+   Medido em 12/08/2026, e é maior do que se supunha: **297 versões registradas no banco ×
+   252 arquivos em disco**, com a deriva correndo nos **dois sentidos**:
+
+   - **159 versões registradas sem arquivo local** (154 delas anteriores a qualquer trabalho
+     recente, cobrindo abril→agosto). É o que faz o `db push` abortar com
+     `LegacyDbPushMissingLocalError` antes de aplicar seja o que for.
+   - **114 arquivos em disco cuja versão nunca foi registrada** — consequência direta de
+     `db query -f`, que **executa o SQL mas não escreve em `schema_migrations`**.
+
+   **Na prática, aplicar uma migration são dois passos:**
+
+   ```bash
+   npx supabase db query --linked -f supabase/migrations/<arquivo>.sql
+   npx supabase db query --linked -e "insert into supabase_migrations.schema_migrations \
+     (version, name) values ('<AAAAMMDDHHMMSS>', '<nome_sem_a_data>') on conflict (version) do nothing;"
+   ```
+
+   Pular o segundo passo faz o arquivo virar o 115º sem registro. **`migration repair
+   --status reverted`, que o CLI sugere, NÃO se usa aqui**: marcaria como revertidas 154
+   migrations que de fato rodaram em produção — escrever no histórico que algo não aconteceu,
+   quando aconteceu.
+
+   **Continua valendo, e por cima disto:** nenhuma migration é aplicada sem o arquivo
+   commitado ANTES em `supabase/migrations/`. Sem exceção — inclusive correção de dados.
+   Motivo original: em 09/08/2026 a `20260809140033_corrige_categorias_que_o_mcc_desmente` foi
+   aplicada e não existia em disco (NOVO-003); só foi recuperada porque o Postgres guardava o
+   SQL. Entre as 159 há **uma correção de segurança de RLS que existe apenas no banco**
+   (MF-AUD-021) — o repositório, hoje, não reconstrói a produção.
+
+   A reconstrução do histórico via `db pull` está agendada como tarefa própria **para depois
+   de 01/09** (ver MF-AUD-058). Não é caminho crítico, e não se faz às pressas.
 
 2. **Commit que atende achado da auditoria referencia o ID na mensagem** (`MF-AUD-0XX`).
    Motivo: é o que permite dizer, meses depois, o que foi feito e o que continua aberto sem reler 27 commits.

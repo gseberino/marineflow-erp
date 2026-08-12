@@ -588,3 +588,24 @@ cada uma vira tarefa própria, por ordem do dono.
   desde `e0a7c85`, e há teste travando.
 - **4º técnico = R$ 330** por extrapolação linear do passo configurado. Já é o comportamento
   desde `070d988`, com teste. Tabela explícita (`travel_hourly_4..6`) só se doer na prática.
+
+---
+
+## [TAREFA AGENDADA] Reconstrução do histórico de migrations via `db pull` — DEPOIS de 01/09
+
+- **Origem:** decisão do dono em 12/08/2026, ao escolher o caminho A para a migration da NFS-e.
+- **Por que existe:** `supabase db push` está inutilizável neste projeto (ver MF-AUD-058
+  corrigido e a regra 1 do CLAUDE.md). Hoje se contorna aplicando por
+  `db query --linked -f` + registro manual da versão. Contorno funciona, mas **o repositório
+  não reconstrói a produção** — e entre as 159 versões sem arquivo há uma correção de
+  segurança de RLS que existe **apenas no banco** (MF-AUD-021).
+- **Escopo:** `supabase db pull` para gerar os arquivos faltantes, conferência do que ele
+  produz contra o schema real, e decisão sobre as 114 versões não registradas.
+- **NÃO É CAMINHO CRÍTICO, e a ordem importa:** a NFS-e tem prazo regulatório de 01/09 e
+  depende de contabilidade e prefeitura, que são latência de terceiros. A limpeza do
+  histórico não tem prazo externo e não pode roubar a janela da NFS-e.
+- **Exige janela própria e revisão:** mexe em 159 registros de produção, várias horas, e uma
+  hipótese errada aqui é pior que a deriva atual — que ao menos é conhecida e documentada.
+- **O que NÃO fazer:** `supabase migration repair --status reverted`, que o próprio CLI
+  sugere. Marcaria como revertidas 154 migrations que de fato rodaram — escrever no histórico
+  que algo não aconteceu, quando aconteceu.
