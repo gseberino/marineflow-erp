@@ -13,6 +13,7 @@ import { MapPin, DollarSign, Users, Globe, Banknote, CreditCard, FileText, Tag, 
 import { LogoCropDialog } from '@/components/LogoCropDialog';
 import { AppUserEditDialog } from '@/components/AppUserEditDialog';
 import { MasterDataPanel } from '@/components/MasterDataManagement';
+import { VerbosFiscaisGrid } from '@/components/fiscal/VerbosFiscaisGrid';
 import { useAuth } from '@/hooks/use-auth';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useCardFees, useUpdateCardFee } from '@/hooks/use-card-fees';
@@ -287,6 +288,10 @@ export default function SettingsPage() {
 
         <TabsContent value="categories" className="mt-4 space-y-4">
           <ProductCategoriesTab />
+          {/* Simétrico ao fiscal das categorias de produto: lá o NCM é por categoria, aqui o
+              código de tributação é por verbo. Mesma ideia de herança, chave diferente porque
+              a LC 116 organiza serviço por atividade, não por sistema. */}
+          <VerbosFiscaisGrid />
         </TabsContent>
 
         <TabsContent value="system" className="mt-4 space-y-4">

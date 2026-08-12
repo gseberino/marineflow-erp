@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { PageHeader } from '@/components/PageHeader';
+// [F-NFSE-01] NFS-e vive em componente próprio: este arquivo tem 3.505 linhas e já está
+// registrado como MF-AUD-069 (decompor). Montar aqui é o menor diff possível.
+import { NfseSection } from '@/components/fiscal/NfseSection';
 import { AddressFields } from '@/components/AddressFields';
 import { ClientFormDialog } from '@/components/ClientFormDialog';
 import { EntityCombobox, type EntityOption } from '@/components/EntityCombobox';
@@ -1936,8 +1939,8 @@ export default function FiscalEmission() {
   return (
     <div className="space-y-6 animate-fade-in">
       <PageHeader
-        title="Emissão Fiscal (NF-e)"
-        description="Emita notas fiscais eletrônicas de produto via Contora e acompanhe o status de autorização."
+        title="Emissão Fiscal"
+        description="NF-e para produto e NFS-e para serviço, via Contora, com acompanhamento de autorização."
       >
         <Button variant="outline" onClick={openSettings}>
           <Settings2 className="h-4 w-4 mr-2" />
@@ -1969,6 +1972,11 @@ export default function FiscalEmission() {
           </span>
         </div>
       )}
+
+      {/* ── [F-NFSE-01] NFS-e — documento de SERVIÇO ──
+          Seção própria, logo abaixo do cabeçalho: quem abre esta tela para faturar mão de
+          obra não precisa rolar por toda a NF-e para descobrir que o documento é outro. */}
+      {company && <NfseSection serviceOrderId={null} />}
 
       {/* ── Painel de Saúde Fiscal ── */}
       {company && (

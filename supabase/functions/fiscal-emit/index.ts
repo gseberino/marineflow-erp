@@ -6,6 +6,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { createFiscalProvider, readFiscalEnvironment } from "../_shared/fiscal/factory.ts";
 import { applyStatusUpdate } from "../_shared/fiscal/apply-status.ts";
 import { resolveIbgeCityCode } from "../_shared/fiscal/ibge.ts";
+import { resolveServiceFiscal, semCodigoFiscal } from "../_shared/fiscal/service-fiscal.ts";
 import { logEdgeError } from "../_shared/log-error.ts";
 import {
   buildNfeDraftPayload,
@@ -20,10 +21,21 @@ import {
   type GlobalFiscalDefaults,
   type ProductFiscalInput,
 } from "../_shared/fiscal/product-fiscal.ts";
+// [F-NFSE-01] Builder da NFS-e — separado do da NF-e de propósito: os contratos não têm
+// campo em comum, e misturá-los faria uma mudança de layout de produto mexer em serviço.
+import {
+  buildNfseDraftPayload,
+  validateNfseDraftInput,
+  type BuildNfsePayloadInput,
+  type NfseStandard,
+} from "../_shared/fiscal/nfse-payload-builder.ts";
 
 // SEFAZ exige justificativa com pelo menos 15 caracteres tanto no cancelamento
 // quanto na Carta de Correção Eletrônica.
 const MIN_JUSTIFICATION_LENGTH = 15;
+// [F-NFSE-01] Teto da justificativa de cancelamento — a doc da NFS-e define a faixa 15–255.
+// A NF-e também tem limite (255), então a constante vale para as duas famílias.
+const MAX_JUSTIFICATION_LENGTH = 255;
 const ACTIVE_STATUSES = ["draft", "queued", "processing", "authorized"];
 
 const corsHeaders = {
@@ -231,6 +243,19 @@ Deno.serve(async (req) => {
     // Ponte OS → payload: quando vem service_order_id e não vieram itens, montamos o
     // destinatário e os itens a partir da Ordem de Serviço (peças). Assim o agente não
     // precisa saber nada de fiscal — ele só diz "de qual OS".
+    // [F-NFSE-01] Mesma ideia, outro documento: para NFS-e a ponte parte dos SERVIÇOS da OS,
+    // não das peças. É a outra metade da separação que o seam `servicos_para_nfse` já
+    // anunciava — peça vai na NF-e, mão de obra vai aqui.
+    if (body.document_type === "nfse" && body.service_order_id && !body.service) {
+      const ponte = await buildNfseBodyFromServiceOrder(admin, body);
+      if (!ponte.ok) return jr({ error: ponte.error, details: ponte.details }, ponte.status);
+      Object.assign(body, ponte.body);
+      if (body.action === "prepare") {
+        return jr({ ok: true, data: { resumo: ponte.resumo, payload_pronto: true } });
+      }
+      body.__resumo_os = ponte.resumo;
+    }
+
     if (body.service_order_id && !Array.isArray(body.items)) {
       const ponte = await buildBodyFromServiceOrder(admin, body);
       if (!ponte.ok) return jr({ error: ponte.error }, ponte.status);
@@ -251,10 +276,16 @@ Deno.serve(async (req) => {
     if (body.action === "cancel") return await handleCancel(admin, body);
     if (body.action === "correction") return await handleCorrection(admin, body);
     if (body.action === "diagnostics") return await handleDiagnostics();
+    // [F-NFSE-01] Pré-voo: nada de emitir NFS-e antes do verde.
+    if (body.action === "nfse_health") return await handleNfseHealth(admin);
     if (body.action === "enable_homolog") return await handleEnableHomolog();
     if (body.action === "artifact") return await handleArtifact(admin, body);
     if (body.action === "preview") return await handlePreview(admin, body);
     if (body.action === "homolog") return await handleHomolog(admin, body);
+    // [F-NFSE-01] Serviço é NFS-e e produto é NF-e: fluxos separados porque a NFS-e não tem
+    // etapa de build e usa outra numeração. O default continua NF-e — nenhum chamador
+    // existente muda de comportamento.
+    if (body.document_type === "nfse") return await handleCreateNfse(admin, body);
     return await handleCreate(admin, body);
   } catch (err) {
     console.error("[fiscal-emit] erro:", err);
@@ -680,6 +711,422 @@ async function handleHomolog(admin: any, body: any): Promise<Response> {
 }
 
 // deno-lint-ignore no-explicit-any
+/**
+ * [F-NFSE-01] Ponte Ordem de Serviço → corpo da NFS-e.
+ *
+ * A outra metade da separação que o seam `servicos_para_nfse` já anunciava: peça vai na
+ * NF-e, mão de obra vem para cá. Monta o tomador a partir do cliente e o serviço a partir
+ * das linhas de SERVIÇO da OS (`service_order_services`), nunca das peças.
+ *
+ * A CONSOLIDAÇÃO, E POR QUE ELA PODE SE RECUSAR A ACONTECER
+ * O contrato da NFS-e tem UM objeto `service`, não uma lista. Uma OS com cinco linhas de
+ * mão de obra vira UMA nota, com a descrição juntando as linhas e o valor somado. Isso é
+ * fiel enquanto todas as linhas forem do mesmo código de tributação.
+ *
+ * Quando os códigos divergem, esta função PARA e explica. Escolher um dos códigos seria
+ * declarar à prefeitura um serviço que não foi o prestado, e o erro sobreviveria à nota:
+ * ninguém confere código de tributação depois de autorizado. Uma nota por código é a saída,
+ * e quem decide isso é a pessoa, não o sistema.
+ */
+// deno-lint-ignore no-explicit-any
+async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
+  | { ok: true; body: Record<string, unknown>; resumo: Record<string, unknown> }
+  | { ok: false; error: string; status: number; details?: unknown }
+> {
+  const soId = String(body.service_order_id);
+  const { data: so } = await admin
+    .from("service_orders")
+    .select("id, service_order_number, status, client_id")
+    .eq("id", soId)
+    .maybeSingle();
+  if (!so) return { ok: false, error: "Ordem de serviço não encontrada.", status: 404 };
+  if (so.status === "cancelled") {
+    return { ok: false, error: "OS cancelada não pode gerar nota.", status: 422 };
+  }
+  if (!so.client_id) {
+    return { ok: false, error: "Essa OS não tem cliente vinculado — sem tomador não há NFS-e.", status: 422 };
+  }
+
+  const { data: cli } = await admin
+    .from("clients")
+    .select("name, cpf_cnpj, email, address_line_1, address_number, address_complement, neighborhood, city, state, postal_code")
+    .eq("id", so.client_id)
+    .maybeSingle();
+  if (!cli) return { ok: false, error: "Cliente da OS não encontrado.", status: 404 };
+
+  // Linhas de serviço COM o cadastro fiscal junto — é dele que saem código, CNAE e alíquota.
+  // O verbo fiscal vem embutido porque o cadastro do serviço pode estar vazio e ainda assim
+  // haver código: quem responde é o EFETIVO (próprio → verbo), não a coluna do serviço.
+  const { data: linhas } = await admin
+    .from("service_order_services")
+    .select(
+      "name_snapshot, description_snapshot, quantity, unit_price_snapshot, line_total, "
+      + "services(national_tax_code, service_code, cnae, iss_rate, iss_withheld, fiscal_verb, "
+      + "service_fiscal_verbs(default_national_tax_code, default_service_code, default_cnae, "
+      + "default_iss_rate, default_iss_withheld))",
+    )
+    .eq("service_order_id", soId);
+
+  const lista = ((linhas as any[]) || []).filter((l) => Number(l.line_total) > 0);
+  if (lista.length === 0) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Essa OS não tem linhas de serviço com valor — a NFS-e é documento de serviço. "
+        + "Se o que há são peças, o documento é a NF-e.",
+    };
+  }
+
+  // Resolve o fiscal EFETIVO de cada linha antes de qualquer decisão. Sem isto, um serviço que
+  // herda o código do verbo seria acusado de "sem cadastro fiscal" e a emissão pararia — a
+  // herança existiria no banco e não valeria nada na hora que importa.
+  const resolvidas = lista.map((l) => ({
+    linha: l,
+    fiscal: resolveServiceFiscal(l.services ?? null, l.services?.service_fiscal_verbs ?? null),
+  }));
+
+  // Sem cadastro fiscal não há nota. Dizer QUAIS faltam evita a caça ao serviço errado.
+  const semCadastro = resolvidas
+    .filter((r) => semCodigoFiscal(r.fiscal))
+    .map((r) => r.linha);
+  if (semCadastro.length > 0) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Serviço sem cadastro fiscal: "
+        + semCadastro.map((l) => `"${l.name_snapshot}"`).join(", ")
+        + ". Preencha o código de tributação nacional (6 dígitos), o CNAE e a alíquota de ISS "
+        + "no cadastro do serviço — ou no verbo fiscal dele, em Configurações → Fiscal → "
+        + "Verbos, que vale para todos os serviços daquela atividade — antes de emitir.",
+      details: { servicos_sem_cadastro: semCadastro.map((l) => l.name_snapshot) },
+    };
+  }
+
+  const codigos = [...new Set(resolvidas.map((r) => String(r.fiscal.nationalTaxCode)))];
+  if (codigos.length > 1) {
+    return {
+      ok: false,
+      status: 422,
+      error: `Esta OS tem serviços de códigos de tributação diferentes (${codigos.join(", ")}). `
+        + "A NFS-e declara UM código por nota, então não dá para juntar tudo numa só — "
+        + "escolher um deles declararia à prefeitura um serviço que não foi o prestado. "
+        + "Emita uma nota por código, selecionando os serviços de cada uma.",
+      details: { codigos_encontrados: codigos },
+    };
+  }
+
+  const fiscal = resolvidas[0].fiscal;
+  const total = lista.reduce((a, l) => a + (Number(l.line_total) || 0), 0);
+
+  // Descrição: uma linha por serviço, com quantidade quando maior que 1. A prefeitura e o
+  // cliente leem isto — "Serviços diversos" não serve a nenhum dos dois.
+  const descricao = lista
+    .map((l) => {
+      const q = Number(l.quantity) || 1;
+      const nome = l.name_snapshot || l.description_snapshot || "Serviço";
+      return q > 1 ? `${nome} (${q}x)` : nome;
+    })
+    .join("; ")
+    .slice(0, 500);
+
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+
+  return {
+    ok: true,
+    body: {
+      client_id: so.client_id,
+      origin_type: "service_order",
+      origin_id: so.id,
+      service: {
+        description: descricao,
+        national_tax_code: fiscal.nationalTaxCode,
+        service_code: fiscal.serviceCode ?? null,
+        cnae: fiscal.cnae ?? null,
+        iss_rate: fiscal.issRate ?? null,
+        iss_withheld: fiscal.issWithheld,
+      },
+      taker: {
+        name: cli.name,
+        document: cli.cpf_cnpj,
+        email: cli.email,
+        address: {
+          street: cli.address_line_1,
+          number: cli.address_number,
+          complement: cli.address_complement,
+          district: cli.neighborhood,
+          city_name: cli.city,
+          state_code: cli.state,
+          postal_code: cli.postal_code,
+        },
+      },
+      amounts: { service_amount: r2(total) },
+    },
+    resumo: {
+      os: so.service_order_number,
+      cliente: cli.name,
+      servicos_na_nota: lista.length,
+      total_servicos: r2(total),
+      codigo_de_tributacao: fiscal.nationalTaxCode,
+      cnae: fiscal.cnae,
+      iss_rate: fiscal.issRate,
+      // De onde saiu o código: cadastro do serviço ou herdado do verbo. Quem confere a nota
+      // antes de emitir precisa saber se está olhando um cadastro específico ou o padrão da
+      // atividade — são responsabilidades diferentes se o código estiver errado.
+      origem_do_codigo: fiscal.codeSource,
+      // Simétrico ao aviso da NF-e: quem emite precisa saber o que NÃO entrou.
+      aviso_nfe: "As peças da OS não entram na NFS-e — elas são NF-e, documento de produto.",
+    },
+  };
+}
+
+/**
+ * [F-NFSE-01] Monta e valida o payload da NFS-e a partir do cadastro + do corpo da chamada.
+ *
+ * O cadastro da empresa é a FONTE dos campos fiscais que valem para toda nota (padrão,
+ * percentual do Simples, situação, inscrição municipal); o corpo traz o que muda por nota
+ * (serviço, tomador, valores). Quando o corpo informa um campo que também existe no
+ * cadastro, o corpo vence — é o caso do serviço com alíquota própria.
+ */
+// deno-lint-ignore no-explicit-any
+async function prepareNfsePayload(admin: any, body: any): Promise<
+  | { ok: true; payload: Record<string, unknown>; company: any; series: number }
+  | { ok: false; error: string; status: number; details?: unknown }
+> {
+  const { data: company } = await admin
+    .from("company_fiscal_settings")
+    .select("*")
+    .maybeSingle();
+  if (!company) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Cadastro fiscal da empresa não encontrado. Preencha em Configurações → Fiscal "
+        + "antes de emitir.",
+    };
+  }
+
+  const s = body.service ?? {};
+  const t = body.taker ?? {};
+  const amt = body.amounts ?? {};
+
+  // Código IBGE do tomador: resolvido a partir de UF + cidade, como na NF-e. Sem ele a
+  // prefeitura não sabe de onde é o tomador, e o campo não existe no formulário de endereço.
+  let cityCode = t.address?.city_code ?? null;
+  if (!cityCode && t.address?.state_code && t.address?.city_name) {
+    cityCode = await resolveIbgeCityCode(t.address.state_code, t.address.city_name);
+  }
+
+  const input: BuildNfsePayloadInput = {
+    standard: (company.nfse_standard ?? "nacional") as NfseStandard,
+    taxRegime: company.tax_regime ?? null,
+    simplesNacionalOption: company.nfse_simples_nacional_option ?? null,
+    municipalRegistration: company.municipal_registration ?? null,
+    municipalRegistrationInCnc: company.nfse_municipal_registration_in_cnc !== false,
+    service: {
+      description: s.description ?? null,
+      nationalTaxCode: s.national_tax_code ?? null,
+      serviceCode: s.service_code ?? null,
+      municipalTaxCode: s.municipal_tax_code ?? null,
+      nbsCode: s.nbs_code ?? null,
+      itemListCode: s.item_list_code ?? null,
+      cnae: s.cnae ?? null,
+      issRate: s.iss_rate ?? null,
+      issWithheld: s.iss_withheld === true,
+      // Percentual do Simples: o do serviço vence, mas o do cadastro é o padrão — é lá que
+      // a contabilidade preenche uma vez e vale para todas as notas (E0712).
+      totalTaxRateSn: s.total_tax_rate_sn ?? company.nfse_total_tax_rate_sn ?? null,
+    },
+    taker: {
+      name: t.name ?? null,
+      document: t.document ?? null,
+      email: t.email ?? null,
+      address: {
+        street: t.address?.street ?? null,
+        number: t.address?.number ?? null,
+        complement: t.address?.complement ?? null,
+        district: t.address?.district ?? null,
+        cityCode,
+        cityName: t.address?.city_name ?? null,
+        stateCode: t.address?.state_code ?? null,
+        postalCode: t.address?.postal_code ?? null,
+      },
+    },
+    amounts: {
+      serviceAmount: amt.service_amount ?? null,
+      netAmount: amt.net_amount ?? null,
+      deductions: amt.deductions ?? null,
+      pisAmount: amt.pis_amount ?? null,
+      cofinsAmount: amt.cofins_amount ?? null,
+      inssAmount: amt.inss_amount ?? null,
+      irAmount: amt.ir_amount ?? null,
+      csllAmount: amt.csll_amount ?? null,
+    },
+  };
+
+  // AVISO não bloqueia. O E0120 é o único que não dá para decidir daqui — só o CNC (ou a
+  // própria rejeição) confirma —, e barrá-lo impediria de emitir em município que ESTÁ no
+  // CNC, que é o caso comum. Ele volta no `avisos` para a tela mostrar.
+  const todos = validateNfseDraftInput(input);
+  const avisos = todos.filter((e) => e.startsWith("AVISO:"));
+  const erros = todos.filter((e) => !e.startsWith("AVISO:"));
+  if (erros.length > 0) {
+    return {
+      ok: false,
+      status: 422,
+      error: erros.join(" "),
+      details: { erros, avisos },
+    };
+  }
+
+  return {
+    ok: true,
+    company,
+    series: Number(company.nfse_default_series ?? 1) || 1,
+    payload: buildNfseDraftPayload(input),
+  };
+}
+
+/**
+ * [F-NFSE-01] Emissão de NFS-e — fluxo próprio, sem tocar no da NF-e.
+ *
+ * Três diferenças que impedem reaproveitar o handleCreate:
+ *   1. NFS-e NÃO TEM BUILD. O dispatch é o gatilho da emissão.
+ *   2. A numeração é outra série (nfse_default_series), independente da NF-e.
+ *   3. Depois de um dispatch que não conclui, é preciso REFRESH antes de qualquer novo
+ *      envio — a Contora reconcilia a DPS pelo RPS, e reenviar sem isso emite a mesma
+ *      nota duas vezes.
+ */
+// deno-lint-ignore no-explicit-any
+async function handleCreateNfse(admin: any, body: any): Promise<Response> {
+  const documentType = "nfse";
+  const environment = readFiscalEnvironment();
+  const originType: string = body.origin_type ?? "manual";
+  const originId: string | null = body.origin_id ?? null;
+  const clientIdempotencyKey: string | null = body.idempotency_key || null;
+
+  if (originId || clientIdempotencyKey) {
+    const { data: existing, error: existingErr } = await findActiveDocument(
+      admin, documentType, originType, originId, clientIdempotencyKey,
+    );
+    if (existingErr) {
+      return jr({ error: "Falha ao checar duplicidade: " + existingErr.message }, 500);
+    }
+    // Documento vivo para a mesma origem: em vez de emitir outro, SINCRONIZA. É a regra da
+    // Contora aplicada ao nosso lado — quem chega aqui de novo normalmente é um retry, e
+    // um retry não pode virar uma segunda nota.
+    if (existing) {
+      if (existing.provider_document_id) {
+        const provider = createFiscalProvider();
+        await provider.refresh(documentType, existing.provider_document_id);
+        const st = await provider.getStatus(documentType, existing.provider_document_id);
+        if (st.ok) await applyStatusUpdate(admin, provider, existing, st.data);
+      }
+      return jr({ ok: true, data: existing, reused: true });
+    }
+  }
+
+  const prep = await prepareNfsePayload(admin, body);
+  if (!prep.ok) return jr({ error: prep.error, details: prep.details }, prep.status);
+
+  const series = prep.series;
+  const { data: number, error: seqErr } = await admin.rpc("next_fiscal_number", {
+    p_document_type: documentType,
+    p_series: series,
+    p_environment: environment,
+  });
+  if (seqErr) {
+    return jr({ error: "Falha ao reservar numeração: " + seqErr.message }, 500);
+  }
+
+  const idempotencyKey = clientIdempotencyKey || crypto.randomUUID();
+  const { data: draftRow, error: insErr } = await admin
+    .from("issued_fiscal_documents")
+    .insert({
+      document_type: documentType,
+      origin_type: originType,
+      origin_id: originId,
+      client_id: body.client_id ?? null,
+      provider: "contora",
+      environment,
+      series,
+      number,
+      status: "draft",
+      idempotency_key: idempotencyKey,
+      request_payload: prep.payload,
+    })
+    .select()
+    .single();
+
+  if (insErr) {
+    if (String(insErr.code) === "23505") {
+      const { data: existing } = await findActiveDocument(
+        admin, documentType, originType, originId, idempotencyKey,
+      );
+      if (existing) return jr({ ok: true, data: existing, reused: true });
+    }
+    return jr({ error: "Falha ao registrar documento: " + insErr.message }, 500);
+  }
+
+  const provider = createFiscalProvider();
+  const created = await provider.createDraft({
+    documentType,
+    environment,
+    series,
+    number,
+    payload: prep.payload,
+    // Chave ESTÁVEL derivada do nosso id: um retry de rede reaproveita o rascunho na
+    // Contora em vez de criar um segundo e queimar numeração.
+    idempotencyKey: `draft-nfse-${draftRow.id}`,
+  });
+
+  if (!created.ok) {
+    await markFailed(admin, draftRow.id, didaticize(created.error), created.errorType, created.details);
+    return jr({ error: didaticize(created.error), details: created.details }, 422);
+  }
+  if (!created.data.providerDocumentId) {
+    const msg = "Resposta inesperada do provedor: documento criado sem identificador.";
+    await markFailed(admin, draftRow.id, msg);
+    return jr({ error: msg }, 502);
+  }
+
+  await admin.from("issued_fiscal_documents").update({
+    provider_document_id: created.data.providerDocumentId,
+    status: created.data.status,
+    updated_at: new Date().toISOString(),
+  }).eq("id", draftRow.id);
+
+  // SEM BUILD. Na NFS-e o dispatch é o gatilho da emissão — chamar build aqui devolveria
+  // 404, e a nota ficaria presa em draft sem motivo aparente.
+  const dispatched = await provider.dispatch(documentType, created.data.providerDocumentId);
+
+  if (!dispatched.ok) {
+    // Falha TÉCNICA não é rejeição fiscal. Antes de deixar o documento como falho, sincroniza
+    // com o autorizador: o dispatch pode ter chegado e só a resposta ter se perdido, e nesse
+    // caso a nota existe — marcar falha aqui levaria alguém a emitir a segunda.
+    await provider.refresh(documentType, created.data.providerDocumentId);
+    const st = await provider.getStatus(documentType, created.data.providerDocumentId);
+    if (st.ok && (st.data.status === "authorized" || st.data.status === "processing" || st.data.status === "queued")) {
+      await applyStatusUpdate(admin, provider, draftRow, st.data);
+      return jr({
+        ok: true,
+        data: { id: draftRow.id, status: st.data.status, environment },
+        aviso: "O envio deu erro de comunicação, mas a nota FOI recebida pelo provedor — "
+          + "situação sincronizada. Não emita de novo.",
+      });
+    }
+    await markFailed(admin, draftRow.id, didaticize(dispatched.error), dispatched.errorType, dispatched.details);
+    return jr({ error: didaticize(dispatched.error), details: dispatched.details }, 422);
+  }
+
+  await admin.from("issued_fiscal_documents").update({
+    status: "queued",
+    updated_at: new Date().toISOString(),
+  }).eq("id", draftRow.id);
+
+  return jr({ ok: true, data: { id: draftRow.id, status: "queued", environment } });
+}
+
+// deno-lint-ignore no-explicit-any
 async function handleCreate(admin: any, body: any): Promise<Response> {
   const documentType = "nfe"; // piloto: só NF-e por ora (NFS-e fica para a Fase 3)
   const environment = readFiscalEnvironment();
@@ -894,6 +1341,95 @@ async function handleArtifact(admin: any, body: any): Promise<Response> {
   });
 }
 
+/**
+ * [F-NFSE-01] Pré-voo da NFS-e — GET /companies/{id}/nfse/health.
+ *
+ * NADA DE EMITIR ANTES DO VERDE. A NFS-e tem dois caminhos e quem decide não é o regime da
+ * empresa, é o MUNICÍPIO: onde ele aderiu ao Sistema Nacional vale o padrão nacional; onde
+ * mantém layout próprio, vale o provedor municipal. Descobrir isso por tentativa e erro
+ * custa numeração fiscal a cada tentativa — e em Itajaí/SC ninguém aqui sabe de antemão
+ * qual dos dois está ativo.
+ *
+ * Read-only: não grava, não emite, não gasta cota.
+ *
+ * Devolve também o que o CADASTRO daqui tem, ao lado do que a Contora diz. Quando o
+ * `nfse_standard` gravado divergir do caminho ativo, a tela mostra os dois e a pessoa
+ * decide — em vez de o sistema "corrigir" sozinho um campo que é decisão fiscal.
+ */
+// deno-lint-ignore no-explicit-any
+async function handleNfseHealth(admin: any): Promise<Response> {
+  const provider = createFiscalProvider();
+
+  const companies = await provider.listCompanies();
+  if (!companies.ok) {
+    return jr({ error: `Não deu para listar as empresas na Contora: ${companies.error}` }, 502);
+  }
+  const empresa = companies.data[0];
+  if (!empresa?.id) {
+    return jr({
+      error: "Nenhuma empresa emissora cadastrada na Contora. O cadastro é feito no console "
+        + "da Contora, não neste app — sem ele não há certificado nem município para emitir.",
+    }, 422);
+  }
+
+  const health = await provider.nfseHealth(empresa.id);
+
+  const { data: settings } = await admin
+    .from("company_fiscal_settings")
+    .select("nfse_standard, nfse_total_tax_rate_sn, nfse_simples_nacional_option, nfse_municipal_registration_in_cnc, nfse_default_series, tax_regime, municipal_registration, ibge_city_code, city_name")
+    .maybeSingle();
+
+  // Pendências que ESTE app consegue detectar sozinho, sem depender do contrato da Contora.
+  // Cada uma corresponde a uma rejeição conhecida — melhor barrar aqui do que descobrir na
+  // prefeitura minutos depois.
+  const pendenciasLocais: string[] = [];
+  const regime = String(settings?.tax_regime ?? "");
+  if (regime === "simples" && settings?.nfse_total_tax_rate_sn == null) {
+    pendenciasLocais.push(
+      "Falta o percentual total de tributos do Simples (nfse_total_tax_rate_sn). O padrão "
+      + "nacional recusa o indicador de tributos para ME/EPP e exige esse percentual — é a "
+      + "rejeição E0712. Não é a alíquota de ISS: é a carga da faixa do Simples na "
+      + "competência, que só a contabilidade sabe.",
+    );
+  }
+  if (settings?.municipal_registration && settings?.nfse_municipal_registration_in_cnc !== false) {
+    pendenciasLocais.push(
+      "A inscrição municipal será enviada. Se o município não tiver dados no CNC NFS-e, o "
+      + "envio volta com E0120 — nesse caso desmarque 'inscrição municipal registrada no CNC'.",
+    );
+  }
+
+  return jr({
+    ok: true,
+    data: {
+      empresa: { id: empresa.id, legal_name: empresa.legalName, document: empresa.document },
+      // `pronto` exige o verde da Contora E nenhuma pendência nossa. Silêncio não é
+      // autorização: se a Contora não afirmar que está pronta, não está.
+      pronto: (health.ok ? health.data.ready : false) && pendenciasLocais.length === 0,
+      contora: health.ok
+        ? {
+          ready: health.data.ready,
+          standard: health.data.standard,
+          city_code: health.data.cityCode,
+          city_name: health.data.cityName,
+          certificate_ok: health.data.certificateOk,
+          certificate_valid_until: health.data.certificateValidUntil,
+          pending: health.data.pending,
+          raw: health.data.raw,
+        }
+        : { erro: health.error, retryable: health.retryable },
+      cadastro: settings ?? null,
+      pendencias_locais: pendenciasLocais,
+      // Divergência é para a PESSOA resolver: qual padrão vale é decisão fiscal, e o
+      // sistema alinhar sozinho esconderia justamente o que precisa ser conferido.
+      divergencia_de_padrao: health.ok && health.data.standard && settings?.nfse_standard
+          && health.data.standard !== settings.nfse_standard
+        ? `A Contora diz que o caminho ativo é "${health.data.standard}", mas o cadastro daqui está como "${settings.nfse_standard}".`
+        : null,
+    },
+  });
+}
+
 // Diagnóstico read-only da conta na Contora: token válido? empresa cadastrada
 // com city_code/certificado? SEFAZ online? Não grava nada, não gasta cota.
 // Serve para o usuário entender por que a emissão falha (ex.: "empresa sem
@@ -1012,6 +1548,15 @@ async function handleCancel(admin: any, body: any): Promise<Response> {
   if (reason.trim().length < MIN_JUSTIFICATION_LENGTH) {
     return jr({ error: `O motivo do cancelamento precisa ter pelo menos ${MIN_JUSTIFICATION_LENGTH} caracteres.` }, 422);
   }
+  // [F-NFSE-01] A NFS-e tem TETO, não só piso: a justificativa vai de 15 a 255 caracteres.
+  // Sem este corte, um motivo longo só seria recusado pelo provedor — depois de a pessoa
+  // ter escrito o texto inteiro e apertado o botão.
+  if (reason.trim().length > MAX_JUSTIFICATION_LENGTH) {
+    return jr({
+      error: `O motivo do cancelamento pode ter no máximo ${MAX_JUSTIFICATION_LENGTH} `
+        + `caracteres (o seu tem ${reason.trim().length}).`,
+    }, 422);
+  }
 
   const { data: doc, error: docErr } = await admin
     .from("issued_fiscal_documents")
@@ -1029,7 +1574,26 @@ async function handleCancel(admin: any, body: any): Promise<Response> {
 
   const provider = createFiscalProvider();
   const result = await provider.cancel(doc.document_type, doc.provider_document_id, reason.trim());
-  if (!result.ok) return jr({ error: result.error, details: result.details }, 422);
+  if (!result.ok) {
+    // [F-NFSE-01] Nem todo município cancela por webservice. Onde não oferece, o pedido volta
+    // como FISCAL-NFSE-CANCEL-UNSUPPORTED — que é REJEIÇÃO DE NEGÓCIO, não falha técnica:
+    // repetir não adianta, e tratar como erro faria a tela oferecer "tentar de novo" para
+    // sempre. A nota continua autorizada; o cancelamento é feito no portal da prefeitura com
+    // o certificado da empresa, e depois `refresh` sincroniza.
+    const bruto = `${result.errorType ?? ""} ${result.error ?? ""} ${JSON.stringify(result.details ?? "")}`;
+    if (bruto.includes("FISCAL-NFSE-CANCEL-UNSUPPORTED")) {
+      return jr({
+        ok: false,
+        cancel_unsupported: true,
+        error: "A prefeitura deste município não oferece cancelamento de NFS-e por sistema. "
+          + "A nota continua AUTORIZADA. O cancelamento precisa ser feito no portal da "
+          + "prefeitura, com o certificado digital da empresa — depois disso, use "
+          + "\"Atualizar status\" aqui para sincronizar. Repetir este botão não vai adiantar.",
+        details: result.details,
+      }, 422);
+    }
+    return jr({ error: result.error, details: result.details }, 422);
+  }
 
   // Cancelamento também é assíncrono, mas homologa em segundos. Marca
   // 'processing' e faz um curto polling para refletir "cancelada" na hora — o

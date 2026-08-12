@@ -41,7 +41,17 @@ export function createFiscalProvider(): FiscalProvider {
       throw new Error("ContoraProvider: CONTORA_API_TOKEN é obrigatório.");
     }
 
-    return new ContoraProvider({ baseUrl, token, webhookSecret, environment });
+    // CNPJ da empresa emissora → X-Company-Document nas rotas globais. Opcional: com um
+    // CNPJ só o token já resolve. Vem de secret, nunca de código (regra 6 do CLAUDE.md).
+    const companyDocument = Deno.env.get("CONTORA_COMPANY_DOCUMENT") ?? "";
+
+    return new ContoraProvider({
+      baseUrl,
+      token,
+      webhookSecret,
+      environment,
+      companyDocument,
+    });
   }
 
   throw new Error(`FISCAL_PROVIDER desconhecido: ${providerType}`);

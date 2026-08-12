@@ -42,6 +42,14 @@ export interface CreateDraftInput {
   // Provider document body. For NF-e this is the SEFAZ layout (or a template.apply
   // result); for NFS-e it is { service, taker, amounts, ... }.
   payload: Record<string, unknown>;
+  /**
+   * Chave de idempotência do POST.
+   *
+   * Deve ser ESTÁVEL para o mesmo documento — normalmente o id interno em
+   * issued_fiscal_documents. É o que faz um retry após timeout de rede reaproveitar o
+   * rascunho em vez de criar um segundo, consumindo numeração fiscal que não volta.
+   */
+  idempotencyKey?: string;
 }
 
 export interface DraftCreated {
@@ -96,6 +104,28 @@ export interface CompanyInfo {
   raw: unknown;
 }
 
+/**
+ * Prontidão da empresa para emitir NFS-e — GET /companies/{id}/nfse/health.
+ *
+ * A NFS-e tem DOIS caminhos e quem decide não é o regime da empresa, é o MUNICÍPIO: onde
+ * ele aderiu ao Sistema Nacional vale o padrão nacional; onde mantém layout próprio, vale o
+ * provedor municipal. Sem consultar isto, a primeira emissão vira tentativa e erro — e cada
+ * tentativa consome numeração.
+ */
+export interface NfseHealthInfo {
+  /** Verde: dá para emitir. Falso quando falta certificado, cadastro ou o município. */
+  ready: boolean;
+  /** "nacional" | "municipal" — qual caminho está ativo para esta empresa. */
+  standard?: string | null;
+  cityCode?: string | null;
+  cityName?: string | null;
+  certificateOk?: boolean;
+  certificateValidUntil?: string | null;
+  /** O que ainda falta, em texto legível, para a tela mostrar sem interpretar. */
+  pending: string[];
+  raw: unknown;
+}
+
 export interface SefazStatusInfo {
   ok: boolean; // a consulta respondeu (tooling da SEFAZ acessível p/ a empresa)
   certificateLoaded?: boolean;
@@ -115,6 +145,24 @@ export interface FiscalProvider {
 
   // Status da SEFAZ / prontidão da empresa (Contora: GET /sefaz/status).
   sefazStatus(): Promise<FiscalResult<SefazStatusInfo>>;
+
+  // Pré-voo da NFS-e (Contora: GET /companies/{id}/nfse/health). Diz qual caminho está
+  // ativo para a empresa e o que falta antes da PRIMEIRA emissão.
+  nfseHealth(companyId: string): Promise<FiscalResult<NfseHealthInfo>>;
+
+  /**
+   * Sincroniza a situação fiscal do documento com o autorizador.
+   *
+   * Existe por causa de uma regra explícita da Contora: depois de `dispatch`, se houver
+   * timeout ou resultado técnico desconhecido, use `refresh` ANTES de tentar nova emissão —
+   * a plataforma reconcilia a DPS pelo RPS e evita duplicidade. Reenviar sem isso é como se
+   * emite a mesma nota duas vezes.
+   */
+  refresh(
+    documentType: DocumentType,
+    providerDocumentId: string,
+    companyId?: string,
+  ): Promise<FiscalResult<unknown>>;
 
   createDraft(input: CreateDraftInput): Promise<FiscalResult<DraftCreated>>;
 

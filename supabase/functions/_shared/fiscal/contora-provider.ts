@@ -15,6 +15,7 @@ import type {
   FiscalResult,
   FiscalStatus,
   FiscalWebhookEvent,
+  NfseHealthInfo,
   SefazStatusInfo,
 } from "./types.ts";
 
@@ -23,6 +24,9 @@ export interface ContoraConfig {
   token: string; // Bearer API token (per environment)
   webhookSecret: string; // HMAC secret configured on the webhook endpoint
   environment: FiscalEnvironment;
+  // CNPJ sem máscara. Vira X-Company-Document nas rotas globais — a Contora exige quando o
+  // token administra mais de uma empresa. Opcional: com um CNPJ só, o token já resolve.
+  companyDocument?: string;
   // Note: this provider always uses Contora's "flat/global" routes (/nfe/drafts,
   // not /companies/{id}/nfe/drafts) — recommended by Contora's own docs and
   // sufficient for a single-CNPJ account. No company id is needed on requests.
@@ -143,6 +147,11 @@ export class ContoraProvider implements FiscalProvider {
       "Accept": "application/json",
       "Authorization": `Bearer ${config.token}`,
     };
+    // Nas rotas globais a Contora exige X-Company-Document quando o token administra mais
+    // de uma empresa. Com um CNPJ só ele é inofensivo; com dois, sem ele a nota sai pela
+    // empresa errada — e nota emitida no CNPJ errado não se corrige, se cancela.
+    const doc = (config.companyDocument ?? "").replace(/\D/g, "");
+    if (doc) this.headers["X-Company-Document"] = doc;
   }
 
   // Core request against the { ok, data } / { ok:false, message, error } envelope.
@@ -150,11 +159,18 @@ export class ContoraProvider implements FiscalProvider {
     method: string,
     path: string,
     body?: unknown,
+    opts?: { idempotencyKey?: string },
   ): Promise<FiscalResult<T>> {
     try {
+      // Idempotency-Key em todo POST, como a doc pede. Sem ela, um timeout de rede seguido
+      // de retry emite a MESMA nota duas vezes — e a segunda consome numeração fiscal que
+      // não volta.
+      const headers = opts?.idempotencyKey
+        ? { ...this.headers, "Idempotency-Key": opts.idempotencyKey }
+        : this.headers;
       const res = await fetch(`${this.baseUrl}${path}`, {
         method,
-        headers: this.headers,
+        headers,
         body: body === undefined ? undefined : JSON.stringify(body),
       });
       const env = (await res.json().catch(() => ({}))) as Envelope;
@@ -262,6 +278,73 @@ export class ContoraProvider implements FiscalProvider {
     };
   }
 
+  /**
+   * Pré-voo da NFS-e: GET /companies/{id}/nfse/health.
+   *
+   * A resposta da Contora não tem contrato fixo publicado campo a campo, então lemos os
+   * nomes prováveis e, o mais importante, PRESERVAMOS o `raw`. A tela mostra o que
+   * entendemos e, quando não entendemos, mostra o bruto — melhor do que afirmar "tudo
+   * certo" a partir de um campo que talvez nem exista.
+   */
+  async nfseHealth(companyId: string): Promise<FiscalResult<NfseHealthInfo>> {
+    const r = await this.request<Record<string, unknown>>(
+      "GET",
+      `/companies/${companyId}/nfse/health`,
+    );
+    if (!r.ok) return r as FiscalResult<NfseHealthInfo>;
+    const d = r.data ?? {};
+    const cert = (d["certificate"] ?? {}) as Record<string, unknown>;
+
+    // Lista do que falta: aceita tanto array de strings quanto array de objetos {message}.
+    const brutoPendencias = (d["pending"] ?? d["pendencies"] ?? d["missing"] ?? []) as unknown;
+    const pending = Array.isArray(brutoPendencias)
+      ? brutoPendencias.map((p) =>
+        typeof p === "string"
+          ? p
+          : String((p as Record<string, unknown>)?.["message"] ?? JSON.stringify(p))
+      )
+      : [];
+
+    // "Pronto" só quando a Contora afirma. Ausência de campo NÃO vira verde: silêncio não
+    // é autorização, e emitir sem estar pronto queima numeração.
+    const ready = d["ready"] === true || d["status"] === "ready" || d["healthy"] === true;
+
+    return {
+      ok: true,
+      data: {
+        ready,
+        standard: (d["standard"] ?? d["nfse_standard"] ?? null) as string | null,
+        cityCode: (d["city_code"] ?? null) as string | null,
+        cityName: (d["city_name"] ?? null) as string | null,
+        certificateOk: cert["valid"] === true || d["certificate_loaded"] === true,
+        certificateValidUntil: (cert["valid_until"] ?? cert["expires_at"] ?? null) as
+          | string
+          | null,
+        pending,
+        raw: d,
+      },
+    };
+  }
+
+  /**
+   * POST /nfse/drafts/{id}/refresh — sincroniza a situação fiscal com o autorizador.
+   *
+   * Usado depois de um dispatch com timeout ou resultado técnico desconhecido, ANTES de
+   * qualquer nova emissão: a Contora reconcilia a DPS pelo RPS e é isso que impede a mesma
+   * nota de sair duas vezes.
+   */
+  refresh(
+    documentType: DocumentType,
+    id: string,
+    companyId?: string,
+  ): Promise<FiscalResult<unknown>> {
+    const fam = family(documentType);
+    const base = companyId ? `/companies/${companyId}/${fam}` : `/${fam}`;
+    return this.request("POST", `${base}/drafts/${id}/refresh`, undefined, {
+      idempotencyKey: `refresh-${documentType}-${id}`,
+    });
+  }
+
   async createDraft(
     input: CreateDraftInput,
   ): Promise<FiscalResult<DraftCreated>> {
@@ -289,6 +372,7 @@ export class ContoraProvider implements FiscalProvider {
       "POST",
       `${base}/drafts`,
       body,
+      { idempotencyKey: input.idempotencyKey },
     );
     // Cast explícito (em vez de deixar o narrowing estrutural resolver): TS
     // não estreita bem uniões discriminadas genéricas quando o tipo de retorno
@@ -335,7 +419,11 @@ export class ContoraProvider implements FiscalProvider {
     const base = companyId ? `/companies/${companyId}/${fam}` : `/${fam}`;
     // NF-e expects { action: "authorize" }; NFS-e dispatch is the emission trigger.
     const body = fam === "nfe" ? { action } : {};
-    return this.request("POST", `${base}/drafts/${id}/dispatch`, body);
+    // Chave derivada do documento e da ação: um retry de dispatch não pode virar uma
+    // segunda emissão da mesma nota.
+    return this.request("POST", `${base}/drafts/${id}/dispatch`, body, {
+      idempotencyKey: `dispatch-${documentType}-${id}-${action}`,
+    });
   }
 
   async getStatus(
@@ -457,6 +545,9 @@ export class ContoraProvider implements FiscalProvider {
       "POST",
       `/${family(documentType)}/drafts/${id}/cancel`,
       { reason },
+      // Sem chave, um retry de cancelamento após timeout viraria um segundo pedido de
+      // cancelamento do mesmo documento.
+      { idempotencyKey: `cancel-${documentType}-${id}` },
     );
   }
 

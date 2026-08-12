@@ -468,3 +468,76 @@ alterado — o teste continua lendo o arquivo antigo, extrai os mesmos 14 campos
 verde. O cenário que o teste diz impedir passa direto.
 **Correção sugerida:** varrer todas as migrations e usar a definição **mais recente** de
 `detect_so_change_after_signature`, como já faz o teste de status da OS com o `CHECK`.
+## NOVO-010 — Tool `emitir_nfse_da_os` do agente ainda não existe
+
+- **Origem:** [F-NFSE-01] sub-tarefa 5, declarada FORA DE ESCOPO na própria tarefa.
+- **Situação:** a NFS-e já pode ser emitida a partir de uma OS pela edge function
+  (`document_type: "nfse"` + `service_order_id`), mas o agente de IA não tem tool para isso.
+  Hoje ele sabe emitir NF-e (`emitir_nfe_da_os`) e, quando a OS tem mão de obra, avisa que
+  "a NFS-e ainda não está disponível" — frase que passa a ser falsa.
+- **Por que importa:** o aviso desatualizado é pior que a ausência da tool; ele afirma ao
+  dono que uma capacidade não existe quando ela existe.
+- **Sugestão:** tool espelhando `emitir_nfe_da_os`, com o mesmo gate de risco (sim + PIN),
+  e atualizar a frase do resumo da NF-e.
+
+## NOVO-011 — Serviços sem cadastro fiscal (243 de 243)
+
+- **Origem:** [F-NFSE-01], medido em 10/08/2026.
+- **Situação:** os 243 serviços ativos têm `national_tax_code`, `cnae` e `iss_rate` NULOS, e
+  `company_fiscal_settings.nfse_total_tax_rate_sn` está vazio. A infraestrutura de emissão
+  está pronta e não há um único serviço emitível.
+- **Por que importa:** o prazo da NFS-e é 01/09/2026, e nenhum desses valores pode ser
+  inferido por software — código de tributação errado declara à prefeitura um serviço que
+  não foi prestado, e o percentual do Simples só a contabilidade sabe.
+- **Sugestão:** levantar com a contabilidade o código nacional + CNAE + alíquota dos
+  serviços mais faturados e o percentual da faixa do Simples, antes de qualquer teste de
+  emissão. Não é trabalho de código.
+
+## NOVO-012 — "MÃO DE OBRA" de R$ 12.000 classificada como `logistica`
+
+- **Origem:** [F-NFSE-02], levantamento de 10/08/2026.
+- **Situação:** o serviço "MÃO DE OBRA" (R$ 12.000, terceira maior linha de faturamento de serviço nos
+  últimos 12 meses) está com `service_verb = 'logistica'` e `service_system = 'nenhum'`.
+- **Por que importa:** o backfill fiscal proposto usa `service_verb` como chave. Se a classificação
+  estiver errada, o código de tributação sai errado junto — e são R$ 12 mil declarados à prefeitura
+  como outra atividade. Ninguém confere código de tributação depois da nota autorizada.
+- **Sugestão:** conferir a classificação deste serviço (e a `classification_confidence` do catálogo)
+  ANTES de aplicar qualquer backfill por verbo. Não corrigi: classificação é decisão de quem conhece
+  o serviço prestado.
+
+## NOVO-013 — 34 linhas de serviço em OS sem `service_id`
+
+- **Origem:** [F-NFSE-02], últimos 12 meses.
+- **Situação:** de 122 linhas de serviço em OS, 34 são digitadas à mão e não apontam para o catálogo.
+- **Por que importa:** nenhum backfill de cadastro fiscal as alcança. Na emissão de NFS-e elas vão
+  exigir preenchimento manual de código/CNAE/ISS toda vez, ou impedir a emissão.
+- **Sugestão:** avaliar se viram serviço de catálogo ou se a tela de emissão precisa de um caminho
+  para serviço avulso com código informado na hora.
+
+## NOVO-014 — `services.iss_withheld` não consegue herdar do verbo
+
+- **Origem:** [F-NFSE-03], implementação do resolvedor fiscal, 11/08/2026.
+- **Situação:** a coluna é `boolean not null default false`. Como toda linha já tem `false`
+  gravado, um `coalesce(s.iss_withheld, f.default_iss_withheld)` nunca alcançaria o verbo — a
+  herança existiria no código e não valeria nada.
+- **Por que importa:** retenção de ISS na fonte muda quem recolhe o imposto. Herdar errado
+  declara retenção que não houve (ou omite a que houve), e é o tomador que responde.
+- **O que travou a decisão:** distinguir "explicitamente sem retenção" de "nunca preenchido"
+  exige dizer o que significam os `false` que já existem no catálogo. Isso é decisão de
+  retenção tributária, não de schema.
+- **O que fiz:** deixei `iss_withheld` FORA da herança — vale o valor do serviço, exatamente
+  como hoje. Os outros quatro campos herdam normalmente. Está documentado na migration, no
+  espelho TS e coberto por teste de paridade nos dois lados.
+- **RESPONDIDO pelo gestor em 11/08/2026 — RESOLVIDO.** Nenhum `false` atual foi decisão: o
+  cadastro fiscal nunca foi preenchido (em 10/08 os 243 serviços ativos tinham
+  `national_tax_code`, `cnae` e `iss_rate` todos nulos), e o `false` veio do DEFAULT da coluna.
+  Aplicado na mesma migration, que ainda não tinha ido para produção:
+  - `services.iss_withheld` virou **nullable**, sem default;
+  - os `false` existentes viraram **NULL** — mas só nas linhas que continuam sem nenhum campo
+    fiscal preenchido, para o caso de alguém já ter marcado retenção de propósito;
+  - a resolução passou a ser **`COALESCE(serviço, verbo, false)`**, nos dois lados;
+  - `service_fiscal_verbs.default_iss_withheld` virou **`not null default false`**: o verbo é o
+    piso da herança e precisa sempre responder algo, senão o `false` final seria alcançado sem
+    ninguém ter decidido — o mesmo buraco, um nível acima.
+  - Quatro testes de paridade travam o comportamento, inclusive a **ordem** das instruções na
+    migration (soltar o NOT NULL antes do UPDATE) e a salvaguarda do UPDATE.
