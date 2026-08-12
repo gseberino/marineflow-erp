@@ -158,6 +158,65 @@ export function detectFormat(parsed: ParsedFile): DetectionResult {
   };
 }
 
+/**
+ * Número vindo de planilha, em pt-BR ou en-US. [NOVO-017a]
+ *
+ * O que havia antes era `parseFloat(str.replace(',', '.'))`, e ele tem dois furos que se
+ * somam: `replace` sem flag global troca só a PRIMEIRA vírgula, e o ponto de milhar fica.
+ * "1.234,56" virava "1.234.56", que o `parseFloat` lê até o segundo ponto e devolve 1.234.
+ * Um produto de R$ 1.234,56 entrava no catálogo por R$ 1,23 — sem erro, no meio de centenas
+ * de linhas certas.
+ *
+ * COMO O SEPARADOR DECIMAL É DECIDIDO, em ordem:
+ *
+ *  1. Se há vírgula E ponto, o ÚLTIMO a aparecer é o decimal e o outro é milhar. Vale para
+ *     os dois formatos: "1.234,56" (pt-BR) e "1,234.56" (en-US).
+ *  2. Se há só um tipo de separador e ele aparece MAIS DE UMA VEZ, é milhar: "1.234.567".
+ *  3. Se aparece uma vez só:
+ *     · vírgula  → decimal. "1234,56" = 1234,56. É o padrão pt-BR e este é um ERP brasileiro.
+ *     · ponto seguido de EXATAMENTE 3 dígitos → milhar. "1.500" = 1500 unidades.
+ *     · ponto em qualquer outro caso → decimal. "89.9" = 89,9.
+ *
+ * A regra 3 com ponto e 3 dígitos é a única genuinamente ambígua: "1.234" pode ser mil
+ * duzentos e trinta e quatro (pt-BR) ou um inteiro com três decimais (en-US). Escolhi
+ * pt-BR porque é o formato que o Excel local gera e porque preço com três casas decimais é
+ * raro em catálogo. Está registrado no livro do turno para o dono revisar.
+ *
+ * Devolve `null` quando não há dígito nenhum — quem chama decide o que fazer com isso.
+ */
+export function parseNumeroBR(bruto: string): number | null {
+  // Fora símbolo de moeda, espaço comum e espaço não-quebrável (o Excel exporta o segundo).
+  const limpo = String(bruto).replace(/[R$\s ]/gi, '');
+  if (!/\d/.test(limpo)) return null;
+
+  const negativo = /^-/.test(limpo) || /^\(.*\)$/.test(limpo); // (1.234,56) = negativo contábil
+  const corpo = limpo.replace(/[()-]/g, '');
+
+  const ultimaVirgula = corpo.lastIndexOf(',');
+  const ultimoPonto = corpo.lastIndexOf('.');
+
+  let decimal: string | null = null;
+  if (ultimaVirgula >= 0 && ultimoPonto >= 0) {
+    decimal = ultimaVirgula > ultimoPonto ? ',' : '.';
+  } else if (ultimaVirgula >= 0) {
+    decimal = (corpo.match(/,/g) ?? []).length > 1 ? null : ',';
+  } else if (ultimoPonto >= 0) {
+    const casas = corpo.length - ultimoPonto - 1;
+    const varios = (corpo.match(/\./g) ?? []).length > 1;
+    decimal = varios || casas === 3 ? null : '.';
+  }
+
+  // `decimal === null` = todos os separadores são de milhar.
+  const semMilhar = decimal === null
+    ? corpo.replace(/[.,]/g, '')
+    : corpo.split(decimal).map((p, i, a) =>
+        i === a.length - 1 ? p : p.replace(/[.,]/g, '')).join('.');
+
+  const num = Number(semMilhar);
+  if (!Number.isFinite(num)) return null;
+  return negativo ? -num : num;
+}
+
 export function transformValue(value: any, targetField: string): any {
   if (value === undefined || value === null || value === '') return null;
   const str = String(value).trim();
@@ -168,13 +227,15 @@ export function transformValue(value: any, targetField: string): any {
   }
 
   if (['sale_price', 'cost_price', 'default_price'].includes(targetField)) {
-    const num = parseFloat(str.replace(',', '.'));
-    return isNaN(num) ? 0 : num;
+    const num = parseNumeroBR(str);
+    return num === null ? 0 : num;
   }
 
   if (['stock_quantity', 'minimum_stock'].includes(targetField)) {
-    const num = parseInt(str.replace(',', '.'), 10);
-    return isNaN(num) ? 0 : num;
+    const num = parseNumeroBR(str);
+    // Trunca em vez de arredondar: estoque de "1.500,80" é 1.500 unidades, não 1.501 —
+    // arredondar para cima inventaria uma unidade que não existe na prateleira.
+    return num === null ? 0 : Math.trunc(num);
   }
 
   if (targetField === '_type') {
@@ -195,7 +256,20 @@ export function applyMapping(
     const mapped: Record<string, any> = {};
     for (const [sourceCol, targetField] of Object.entries(mapping)) {
       if (!targetField) continue;
-      mapped[targetField] = transformValue(row[sourceCol], targetField);
+      const valor = transformValue(row[sourceCol], targetField);
+
+      // [NOVO-017b] Coluna VAZIA não apaga o que outra coluna já preencheu.
+      //
+      // Mais de uma coluna de origem pode apontar para o mesmo campo — no mapeamento de
+      // clientes, 'Celular' E 'Telefone' vão os dois para `phone`. A atribuição era
+      // incondicional e o laço percorre o mapeamento em ordem, então um 'Telefone' em branco
+      // sobrescrevia com null o celular já lido. Perdia-se justamente o número que serve para
+      // WhatsApp, em silêncio, em toda linha da planilha que só preenchia 'Celular'.
+      //
+      // Preencher continua podendo CORRIGIR: valor não-nulo sobrescreve valor não-nulo, e a
+      // última coluna preenchida vence. O que não pode é o vazio ganhar do preenchido.
+      if (valor === null && mapped[targetField] != null) continue;
+      mapped[targetField] = valor;
     }
     return mapped;
   });

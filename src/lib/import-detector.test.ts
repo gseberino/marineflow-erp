@@ -145,14 +145,58 @@ describe('transformValue — converter texto de planilha em dado', () => {
     expect(transformValue('  Cabo 6mm  ', 'name')).toBe('Cabo 6mm');
   });
 
-  // ⚠️ NOVO-017(a) — DEFEITO CONHECIDO, registrado e não corrigido aqui.
-  // `parseFloat(str.replace(',', '.'))` troca só a PRIMEIRA vírgula e não remove o ponto de
-  // milhar: "1.234,56" vira "1.234.56", que o parseFloat lê como 1.234. Um produto de
-  // R$ 1.234,56 entra no catálogo por R$ 1,23 — e o mesmo vale para estoque ("1.500" vira 1).
-  it('[NOVO-017] preço com separador de milhar é destruído: 1.234,56 vira 1.23', () => {
-    expect(transformValue('1.234,56', 'sale_price')).toBe(1.234);
-    expect(transformValue('12.500,00', 'cost_price')).toBe(12.5);
-    expect(transformValue('1.500', 'stock_quantity')).toBe(1);
+  // [NOVO-017a] CORRIGIDO. `parseFloat(str.replace(',', '.'))` trocava só a PRIMEIRA vírgula e
+  // deixava o ponto de milhar: "1.234,56" virava "1.234.56" e o parseFloat parava em 1.234.
+  it('[NOVO-017] preço pt-BR com milhar entra inteiro', () => {
+    expect(transformValue('1.234,56', 'sale_price')).toBe(1234.56);
+    expect(transformValue('12.500,00', 'cost_price')).toBe(12500);
+    expect(transformValue('1.234.567,89', 'sale_price')).toBe(1234567.89);
+  });
+
+  it('[NOVO-017] preço en-US também entra inteiro', () => {
+    // O arquivo pode vir de um ERP configurado em inglês. O último separador manda.
+    expect(transformValue('1,234.56', 'sale_price')).toBe(1234.56);
+    expect(transformValue('12,500.00', 'cost_price')).toBe(12500);
+  });
+
+  it('[NOVO-017] formas simples continuam valendo', () => {
+    expect(transformValue('89,90', 'sale_price')).toBe(89.9);
+    expect(transformValue('89.90', 'sale_price')).toBe(89.9);
+    expect(transformValue('1234', 'sale_price')).toBe(1234);
+    expect(transformValue('0', 'sale_price')).toBe(0);
+  });
+
+  it('[NOVO-017] símbolo de moeda e espaço do Excel não atrapalham', () => {
+    expect(transformValue('R$ 1.234,56', 'sale_price')).toBe(1234.56);
+    // Espaço não-quebrável (U+00A0) — o que o Excel de fato exporta.
+    expect(transformValue('R$ 1.234,56', 'sale_price')).toBe(1234.56);
+  });
+
+  it('[NOVO-017] negativo, inclusive o contábil entre parênteses', () => {
+    expect(transformValue('-1.234,56', 'cost_price')).toBe(-1234.56);
+    expect(transformValue('(1.234,56)', 'cost_price')).toBe(-1234.56);
+  });
+
+  it('[NOVO-017] "1.500" é mil e quinhentos, não um e meio', () => {
+    // O caso genuinamente ambíguo: ponto seguido de EXATAMENTE 3 dígitos. Resolvido como
+    // milhar porque este é um ERP brasileiro e preço com 3 casas decimais é raro em catálogo.
+    // Registrado no livro do turno para o dono revisar.
+    expect(transformValue('1.500', 'stock_quantity')).toBe(1500);
+    expect(transformValue('1.500', 'sale_price')).toBe(1500);
+    // Duas casas depois do ponto continua sendo decimal.
+    expect(transformValue('1.50', 'sale_price')).toBe(1.5);
+  });
+
+  it('[NOVO-017] estoque trunca em vez de arredondar', () => {
+    // "1.500,80" são 1.500 unidades na prateleira; arredondar inventaria uma.
+    expect(transformValue('1.500,80', 'stock_quantity')).toBe(1500);
+    expect(transformValue('3,9', 'minimum_stock')).toBe(3);
+  });
+
+  it('[NOVO-017] texto sem dígito nenhum continua caindo em 0', () => {
+    // Comportamento PRESERVADO de propósito: mudar para null/erro é decisão de produto,
+    // registrada no livro do turno. O que se corrigiu foi a leitura errada, não este contrato.
+    expect(transformValue('sob consulta', 'sale_price')).toBe(0);
   });
 });
 
@@ -176,16 +220,41 @@ describe('applyMapping — do arquivo para os campos do sistema', () => {
       .toEqual([{ name: '1', sku: null }]);
   });
 
-  // ⚠️ NOVO-017(b) — DEFEITO CONHECIDO, registrado e não corrigido aqui.
-  // O mapeamento de clientes manda 'Celular' E 'Telefone' para o MESMO campo `phone`. Como o
-  // laço percorre o mapeamento em ordem e sobrescreve, um 'Telefone' vazio apaga o celular
-  // que já tinha sido lido — e celular é justamente o número que serve para WhatsApp.
-  it('[NOVO-017] duas colunas para o mesmo campo: a última apaga a primeira, mesmo vazia', () => {
+  // [NOVO-017b] CORRIGIDO. O mapeamento de clientes manda 'Celular' E 'Telefone' para o mesmo
+  // campo `phone`; a atribuição era incondicional e o vazio ganhava do preenchido.
+  it('[NOVO-017] coluna vazia NÃO apaga o que outra já preencheu', () => {
     const resultado = applyMapping(
       [{ Celular: '(47) 99999-0000', Telefone: '' }],
       { Celular: 'phone', Telefone: 'phone' },
       'clients',
     );
-    expect(resultado[0].phone).toBeNull(); // comportamento de HOJE: o celular se perdeu
+    expect(resultado[0].phone).toBe('(47) 99999-0000');
+  });
+
+  it('[NOVO-017] vale nos dois sentidos — a ordem das colunas não decide quem sobrevive', () => {
+    // A planilha pode trazer 'Telefone' antes de 'Celular'. Se a regra dependesse da ordem,
+    // metade dos arquivos continuaria perdendo o número.
+    const resultado = applyMapping(
+      [{ Telefone: '', Celular: '(47) 99999-0000' }],
+      { Telefone: 'phone', Celular: 'phone' },
+      'clients',
+    );
+    expect(resultado[0].phone).toBe('(47) 99999-0000');
+  });
+
+  it('[NOVO-017] preenchido AINDA sobrescreve preenchido — corrigir continua possível', () => {
+    // A correção não pode virar "o primeiro valor tranca o campo": quando as duas colunas têm
+    // número, a última continua vencendo, que era o comportamento pretendido.
+    const resultado = applyMapping(
+      [{ Celular: '(47) 90000-0000', Telefone: '(47) 3348-0000' }],
+      { Celular: 'phone', Telefone: 'phone' },
+      'clients',
+    );
+    expect(resultado[0].phone).toBe('(47) 3348-0000');
+  });
+
+  it('[NOVO-017] campo que só tem coluna vazia continua null', () => {
+    const resultado = applyMapping([{ Celular: '' }], { Celular: 'phone' }, 'clients');
+    expect(resultado[0].phone).toBeNull();
   });
 });
