@@ -7,7 +7,30 @@
 
 ## Resumo executivo
 
-*(consolidado no encerramento do turno — ver o fim do arquivo)*
+1. **Três correções prontas, três commits, quatro gates verdes em cada uma.** Nada saiu do
+   branch: nenhum push, nenhuma migration aplicada, nenhum deploy. Produção intocada.
+2. **Revise nesta ordem:** `e0a7c85` (CSV/dinheiro) → `070d988` (deslocamento) → `d16da5b`
+   (preço). É a ordem do risco: o primeiro corrompia catálogo inteiro; o último tem a menor
+   superfície.
+3. **`e0a7c85` — o importador destruía preço.** `"1.234,56"` entrava como **1.234**, e um
+   `Telefone` vazio apagava o celular já lido. Os dois reproduziam por leitura antes de mexer.
+4. **`070d988` — quatro técnicos custavam como um** (R$ 90/h em vez de crescer), e o botão de
+   calcular ignorava a tarifa de Settings, gravando R$ 1,10/km fixo na OS.
+5. **`d16da5b` — preço 100% virava zero calado**; 99% virava 100× o custo sem aviso. Zero é o
+   pior dos dois: parece válido e sai numa proposta.
+6. **Cinco tarefas da fila não foram tocadas** (NOVO-022, 019, 018, 023, 021). Fim de tanque,
+   não bloqueio — nenhuma foi começada, então nada ficou pela metade.
+7. **Quatro decisões esperam você**, todas sobre dinheiro ou comportamento: a leitura de
+   `"1.500"`, o que fazer com célula não numérica, quanto custa o 4º técnico e o corte de 20×
+   no aviso de preço. Detalhadas no fim.
+8. **Dois achados novos registrados e não corrigidos:** NOVO-import-01 (texto vira preço 0) e
+   NOVO-import-02 (o wizard deixa duas colunas disputarem um campo, sem avisar).
+9. **Três coisas que eu NÃO verifiquei** e a revisão deve: importar um CSV de teste, apertar o
+   botão de deslocamento numa OS, e ver o aviso vermelho de preço na tela. Todas as correções
+   são de função pura com teste; nenhuma foi vista rodando, porque subir o app seria escrita
+   em produção.
+10. **Um teste pré-existente foi alterado** (`price-calculator`), e isso merece olhar: escopei
+    o laço aos campos numéricos. Explico o porquê e por que não é afrouxamento na §3.
 
 ---
 
@@ -17,12 +40,19 @@
 |---|---|---|
 | NOVO-017 — importador CSV | ✅ corrigido + auditoria | `e0a7c85` |
 | NOVO-016 — deslocamento | ✅ corrigido | `070d988` |
-| NOVO-009 — preço 100% | ✅ corrigido | `a definir` |
-| NOVO-022 — toggles | ⏳ | |
-| NOVO-019 — export CSV | ⏳ | |
-| NOVO-018 — captura rápida | ⏳ | |
-| NOVO-023 — guarda do hash | ⏳ | |
-| NOVO-021 — Salvar em voo | ⏳ | |
+| NOVO-009 — preço 100% | ✅ corrigido | `d16da5b` |
+| NOVO-022 — toggles | ⛔ não iniciada — fim de contexto | |
+| NOVO-019 — export CSV | ⛔ não iniciada | |
+| NOVO-018 — captura rápida | ⛔ não iniciada | |
+| NOVO-023 — guarda do hash | ⛔ não iniciada | |
+| NOVO-021 — Salvar em voo | ⛔ não iniciada | |
+
+**Partes 2 e 3 do briefing não começaram** — a Parte 1 não esgotou.
+
+**Para o próximo turno:** a fila retoma em **NOVO-022**, sem nenhum trabalho pendente para
+recuperar. Todas as cinco continuam intactas, e o padrão que funcionou nas três primeiras foi:
+reproduzir por leitura → inverter os testes de caracterização → corrigir → quatro gates →
+livro. Vale repetir.
 
 ---
 
@@ -214,3 +244,33 @@ chegando a 100 sem nenhum ser absurdo sozinho, o corte do aviso, e entrada invá
    para números que a pessoa digitou iguais. O multiplicador é arredondado **antes** de
    comparar. Foi o teste que pegou isso, não eu.
 4. **Não verifiquei na tela.** A ligação `bd.error` → aviso vermelho foi lida, não vista.
+
+---
+
+## Decisões que esperam o dono — consolidado
+
+| # | Decisão | Onde | Recomendação |
+|---|---|---|---|
+| 1 | `"1.500"` no CSV é mil e quinhentos ou 1,5? | §1 | Milhar (é o que o Excel pt-BR gera) |
+| 2 | Célula não numérica em campo de preço | NOVO-import-01 | Importar `null` e listar na conferência — nunca 0 calado |
+| 3 | Quanto custa o 4º técnico | §2 | Extrapolar o passo da própria tabela (hoje: R$ 330) |
+| 4 | Corte de 20× para o aviso de preço | §3 | Manter como aviso, nunca bloqueio |
+| 5 | Corrigir os dados já importados | §1 | Só com o CSV original; o critério fraco pega produto barato legítimo |
+
+---
+
+## Verificação final do turno
+
+Rodado no último commit (`d16da5b`), tudo verde:
+
+```
+tsc -b --force   0 erros
+vitest run       1152 passed
+deno test -A     267 passed | 0 failed
+npm run build    OK
+```
+
+**Regras do turno cumpridas:** nenhum push · nenhuma migration aplicada · nenhum deploy ·
+nenhum arquivo de território congelado tocado (fiscal, F2-UI, cascata de recebíveis,
+CashForecast) · `audit/novos-achados.md` não editado — os achados desta noite vivem só aqui,
+e a consolidação é do turno diurno.
