@@ -15,8 +15,8 @@
 
 | Tarefa | Situação | Commit |
 |---|---|---|
-| NOVO-017 — importador CSV | ✅ corrigido + auditoria | `a definir` |
-| NOVO-016 — deslocamento | ⏳ | |
+| NOVO-017 — importador CSV | ✅ corrigido + auditoria | `e0a7c85` |
+| NOVO-016 — deslocamento | ✅ corrigido | `a definir` |
 | NOVO-009 — preço 100% | ⏳ | |
 | NOVO-022 — toggles | ⏳ | |
 | NOVO-019 — export CSV | ⏳ | |
@@ -124,3 +124,51 @@ têm e-mail preenchido são os suspeitos do defeito (b), e o script os lista.
 3. **Correção dos dados já gravados** — o script lista suspeitos; corrigir é decisão sua, e nos
    casos sem rastro **exige o CSV original**. Não recomendo correção em lote pelo critério
    fraco: produto barato de verdade cai nele.
+
+---
+
+## 2. NOVO-016 — deslocamento: 4 técnicos custavam como 1, e a tarifa configurada era ignorada
+
+**Reprodução confirmada** por leitura antes de mexer, nos dois casos.
+
+### (a) A hora despencava acima de 3 técnicos
+
+`displacement.ts:59` fazia `rates.hourly[technician_count] || rates.hourly[1]`. A tabela tem
+três faixas (1, 2, 3); com 4 a busca dá `undefined` e caía na tarifa de **um** técnico —
+quatro pessoas na estrada custando R$ 90/h em vez de crescer. E o número de técnicos é campo
+livre na tela, então ninguém precisa de má-fé para cair nisso.
+
+**Como ficou:** `hourlyRateFor()` extrapola pelo **passo que a própria configuração descreve**.
+Com 90/170/250 o passo é 80, e o 4º técnico entra por 330. Se a empresa dobrar as faixas, o
+passo dobra junto. Contagem zero ou negativa vira 1 — alguém sempre vai.
+
+### (b) O botão de calcular ignorava Settings
+
+`calculateDisplacement` consultava `app_settings` **só para lat/lng** e chamava o cálculo
+**sem o segundo argumento**, ou seja, com `DEFAULT_TRAVEL_RATES`. Quem tivesse ajustado o km
+para R$ 1,80 continuava orçando a R$ 1,10. Pior: o `return` trazia `cost_per_km: 1.10`
+literal, e a tela grava esse número em `travel_cost_per_km` na OS — o orçamento guardava para
+sempre uma tarifa que a empresa talvez nunca tenha usado.
+
+**Como ficou:** a consulta passou a trazer as seis chaves de tarifa, o cálculo recebe
+`travelRatesFromSettings(...)` e o `cost_per_km` devolvido é o configurado.
+
+**Testes:** 19 no arquivo (eram 12). Cobrem 1, 3 e 4 técnicos como pedido, mais monotonicidade
+de 1 a 6, o passo vindo de configuração dobrada, borda de zero/negativo/fracionário, e dois
+casos novos com `app_settings` mockado provando que a tarifa configurada chega ao resultado —
+inclusive uma asserção negativa que falha se alguém reintroduzir o 1.10.
+
+### ⚠️ Autoavaliação — o que uma revisão adversarial pegaria
+
+1. **A extrapolação é uma regra de PREÇO que eu escolhi.** Derivei do passo dos números
+   configurados em vez de inventar um valor, mas "o 4º técnico custa R$ 330" é dinheiro, e o
+   dono pode querer outra coisa (teto, tabela explícita até 6, ou recusar acima de 3). **É a
+   decisão nº 4 abaixo.** O que não podia ficar é o comportamento anterior, que cobrava menos
+   por mais gente.
+2. **Não verifiquei na tela.** `runDisplacement` em `ServiceOrderForm.tsx:689` grava três
+   campos com o resultado; li o código e o contrato de retorno não mudou (mesmas três chaves),
+   mas não subi o app — seria escrita em produção. **A revisão matinal deve apertar o botão
+   "calcular deslocamento" numa OS de teste** e conferir que o km bate com Settings.
+3. **Faixa 2 permanece sem uso se alguém configurar buraco na tabela** (ex.: só 1 e 3). O
+   código trata (usa a próxima faixa acima), mas isso não estava especificado e é
+   comportamento que inventei para não quebrar. Coberto por teste.
