@@ -541,3 +541,50 @@ verde. O cenário que o teste diz impedir passa direto.
     ninguém ter decidido — o mesmo buraco, um nível acima.
   - Quatro testes de paridade travam o comportamento, inclusive a **ordem** das instruções na
     migration (soltar o NOT NULL antes do UPDATE) e a salvaguarda do UPDATE.
+
+---
+
+## [NOVO-025] Colisão de ID: o turno noturno usou NOVO-016 para o deslocamento
+
+- **Encontrado em:** 12/08/2026, integrando `session/noturno-20260811`.
+- **Situação:** o turno de 11→12/08 usou **NOVO-016** para o defeito do deslocamento, porque
+  era o ID vigente na ordem de serviço que recebeu. Enquanto ele trabalhava, a `main` foi
+  renumerada: hoje **NOVO-016 é o teste intermitente do F2-UI** e o deslocamento é
+  **NOVO-024**. O commit `070d988` e o livro `audit/relatorio-noturno-20260811.md` ficaram
+  com a referência antiga, e ambos já estão na main.
+- **Por que importa:** é exatamente o que a regra 2 do CLAUDE.md existe para evitar — daqui
+  a meses, procurar "o que foi feito no NOVO-016" devolve duas coisas diferentes.
+- **NÃO corrigido de propósito:** reescrever mensagem de commit já publicado exige
+  `--force`, que é proibido aqui; e editar o livro do turno apagaria o registro de como as
+  coisas de fato aconteceram. **A correção certa é esta anotação**, que liga os dois IDs.
+- **Equivalência para quem for procurar:** `NOVO-016` no branch `session/noturno-20260811` e
+  no commit `070d988` **=** `NOVO-024` na main.
+
+---
+
+# Tarefas abertas pelas decisões do dono (12/08/2026)
+
+As quatro decisões do livro noturno foram respondidas. **Nenhuma foi implementada hoje** —
+cada uma vira tarefa própria, por ordem do dono.
+
+## [TAREFA] NOVO-import-01 — célula não numérica NUNCA vira preço 0
+- **Decisão:** importar como `null` e emitir **relatório de conferência com o número da
+  linha**; a importação segue nas linhas válidas.
+- **Por que:** `0` é um preço que parece válido — entra no campo, salva no produto e sai numa
+  proposta. Hoje `"sob consulta"` vira `0` calado (`import-detector.ts`, `transformValue`).
+- **Escopo estimado:** ~meio dia. Mexe em `transformValue` (retornar `null`), no contrato de
+  `applyMapping` e no passo de conferência do `ImportWizard`, que já existe.
+- **Cuidado:** o campo é `not null` no banco? Conferir antes — pode exigir decisão adicional
+  sobre gravar `null` ou segurar a linha.
+
+## [TAREFA] Extrair `MULTIPLICADOR_SUSPEITO` com comentário
+- **Decisão:** manter **20×**, como **aviso e nunca bloqueio**.
+- **Situação:** já está extraído como constante exportada em `price-calculator.ts`, com o
+  comentário explicando o porquê. **Esta tarefa está cumprida pelo commit `d16da5b`** — fica
+  registrada só para fechar o ciclo da decisão.
+
+## Decisões que confirmaram o comportamento atual (nada a fazer)
+- **`"1.500"` = mil e quinhentos.** Formato brasileiro, caso comum. Já é o comportamento
+  desde `e0a7c85`, e há teste travando.
+- **4º técnico = R$ 330** por extrapolação linear do passo configurado. Já é o comportamento
+  desde `070d988`, com teste. Tabela explícita (`travel_hourly_4..6`) só se doer na prática.
