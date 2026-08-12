@@ -1,4 +1,5 @@
 import { scopeCss } from './css-scope';
+import { planPageBreaks } from './pdf-pagination';
 
 export type PDFDocumentType = 'quote' | 'service_order' | 'invoice' | 'receipt';
 
@@ -336,38 +337,36 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
     try { await (document as any).fonts.ready; } catch { /* ignore */ }
   }
 
-  // Paginação decidida AQUI, com as alturas já calculadas pelo navegador.
-  //
-  // O html2pdf fatia a imagem capturada em folhas A4, e imagem não respeita
-  // `page-break-inside` — foi assim que o bloco "Informações para Pagamento"
-  // saiu partido ao meio. Medindo cada bloco antes e marcando onde a página
-  // deve virar, o corte deixa de cair no acaso.
-  //
-  // `.html2pdf__page-break` é a marca que o html2pdf reconhece no modo
-  // `legacy`, que já estava ligado.
-  const alvoDaPaginacao = container.querySelector('.container') ?? container;
-  const filhos = Array.from(alvoDaPaginacao.children).filter(
-    (el) => el instanceof HTMLElement && el.tagName !== 'STYLE',
-  ) as HTMLElement[];
-
-  if (filhos.length > 1) {
-    const blocos = filhos.map((el) => ({
-      altura: el.getBoundingClientRect().height,
-      // Card e tabela são os que não podem partir; o CSS já declara o mesmo,
-      // e aqui a intenção vira medida.
-      indivisivel: el.classList.contains('card') || !!el.querySelector('table'),
-    }));
-
-    const { planPageBreaks } = await import('./pdf-pagination');
-    // Inserir de trás para frente preserva os índices dos anteriores.
-    for (const i of planPageBreaks(blocos).reverse()) {
-      const marca = document.createElement('div');
-      marca.className = 'html2pdf__page-break';
-      filhos[i].parentNode?.insertBefore(marca, filhos[i]);
-    }
-  }
-
   try {
+    // Paginação decidida AQUI, com as alturas já calculadas pelo navegador.
+    //
+    // O html2pdf fatia a imagem capturada em folhas A4, e imagem não respeita
+    // `page-break-inside` — foi assim que o bloco "Informações para Pagamento"
+    // saiu partido ao meio. Medindo cada bloco antes e marcando onde a página
+    // deve virar, o corte deixa de cair no acaso.
+    //
+    // `.html2pdf__page-break` é a marca que o html2pdf reconhece no modo
+    // `legacy`, que já estava ligado.
+    const alvoDaPaginacao = container.querySelector('.container') ?? container;
+    const filhos = Array.from(alvoDaPaginacao.children).filter(
+      (el) => el instanceof HTMLElement && el.tagName !== 'STYLE',
+    ) as HTMLElement[];
+  
+    if (filhos.length > 1) {
+      const blocos = filhos.map((el) => ({
+        altura: el.getBoundingClientRect().height,
+        // Card e tabela são os que não podem partir; o CSS já declara o mesmo,
+        // e aqui a intenção vira medida.
+        indivisivel: el.classList.contains('card') || !!el.querySelector('table'),
+      }));
+  
+        // Inserir de trás para frente preserva os índices dos anteriores.
+      for (const i of planPageBreaks(blocos).reverse()) {
+        const marca = document.createElement('div');
+        marca.className = 'html2pdf__page-break';
+        filhos[i].parentNode?.insertBefore(marca, filhos[i]);
+      }
+    }
     // Import dinâmico para não pesar o bundle inicial. Falha de rede/timing
     // ("Failed to fetch dynamically imported module") costuma ser passageira —
     // uma nova tentativa silenciosa evita expor o erro ao usuário sem necessidade.
