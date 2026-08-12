@@ -89,12 +89,27 @@ O que aquela frente deixou no ar é o `feat/f2-ui-financeiro` (acima), que é de
 
 ---
 
-## Ordem de integração sugerida
+## Ordem de integração
 
-1. **`docs/turno-noite-20260810`** — merge limpo, custo zero.
+> **🔴 PRIORIDADE: `feat/nfse-nacional` é a próxima integração.** Decisão do Gustavo em 12/08/2026.
+>
+> Dois motivos, e os dois têm prazo:
+> 1. **O banco está à frente da `main`** — a migration `nfse_cadastro_fiscal_de_servicos` já vive em produção
+>    e o código que a usa não. **Drift assim é tolerável por dias, não por semanas:** quanto mais tempo
+>    passa, mais gente escreve código contra um schema que o repositório não descreve, e mais caro fica
+>    descobrir qual dos dois está certo.
+> 2. **Deadline regulatório em 01/09/2026** para a NFS-e. A frente inteira depende dos códigos de serviço da
+>    contabilidade (dez linhas de verbo, hoje vazias de propósito) — e essa dependência é externa, então o
+>    tempo dela não é nosso. Integrar cedo separa o que trava por nossa causa do que trava por causa deles.
+>
+> A integração dela exige: resolver o conflito em `audit/novos-achados.md` (manter os dois blocos), conferir
+> a tela de Settings depois do auto-merge (as duas frentes acrescentaram seções ali) e decidir sobre a
+> segunda migration, `20260811003000_nfse_verbos_fiscais_com_heranca`, que **não** foi aplicada.
+
+Ordem sugerida para as demais, depois da NF-e:
+
+1. **`docs/turno-noite-20260810`** — merge limpo, custo zero. Pode ir junto ou antes, não atrapalha ninguém.
 2. **`feat/f2-ui-financeiro`** — um conflito só, em `.md`, e a frente está verde.
-3. **`feat/nfse-nacional`** — por último: é a maior, tem conflito em dois arquivos e **precisa da conversa
-   sobre o banco estar à frente do código**.
 
 ---
 

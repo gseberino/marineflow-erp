@@ -15,8 +15,8 @@ incidente já ocorrido aqui. Valem independentemente da tarefa em curso.
 2. **Commit que atende achado da auditoria referencia o ID na mensagem** (`MF-AUD-0XX`).
    Motivo: é o que permite dizer, meses depois, o que foi feito e o que continua aberto sem reler 27 commits.
 
-3. **Problema encontrado fora do escopo da tarefa atual: registrar em `audit/novos-achados.md` com ID
-   `NOVO-XXX` e NÃO corrigir.**
+3. **Problema encontrado fora do escopo da tarefa atual: registrar em `audit/novos-achados.md` com ID no
+   formato da regra 8 e NÃO corrigir.**
    Motivo: corrigir de passagem mistura diffs, quebra a rastreabilidade e transforma uma tarefa pequena em
    sessão longa. Registrar custa um minuto e não perde o achado.
 
@@ -45,6 +45,13 @@ incidente já ocorrido aqui. Valem independentemente da tarefa em curso.
    cast, o `tsc` teria apontado os campos ausentes na primeira compilação.
    **Na prática:** fonte nova (view, RPC, endpoint) entra com o tipo real dela. Se o formulário não compila,
    é porque a escrita ainda depende de campo que a leitura não traz — e isso é o defeito, não o obstáculo.
+
+8. **Achado novo usa ID com slug da frente: `NOVO-<slug>-NN`.**
+   Motivo: em 11/08/2026 quatro IDs tinham dois significados cada, porque três sessões numeravam em sequência
+   global ao mesmo tempo — e a colisão só apareceu na integração. O slug elimina a corrida: cada frente
+   numera no próprio espaço.
+   **Vale para achados novos.** Os `NOVO-001` a `NOVO-024` já registrados ficam como estão: renumerar
+   quebraria as referências nas mensagens de commit, que são imutáveis.
 
 > Antes de editar: se houver (ou puder haver) outra sessão ativa, isole-se em um worktree próprio —
 > `bash .claude/skills/multi-session-guard/guard.sh worktree <nome>`. Nunca `git add -A`.
