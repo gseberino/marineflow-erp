@@ -16,8 +16,8 @@
 | Tarefa | Situação | Commit |
 |---|---|---|
 | NOVO-017 — importador CSV | ✅ corrigido + auditoria | `e0a7c85` |
-| NOVO-016 — deslocamento | ✅ corrigido | `a definir` |
-| NOVO-009 — preço 100% | ⏳ | |
+| NOVO-016 — deslocamento | ✅ corrigido | `070d988` |
+| NOVO-009 — preço 100% | ✅ corrigido | `a definir` |
 | NOVO-022 — toggles | ⏳ | |
 | NOVO-019 — export CSV | ⏳ | |
 | NOVO-018 — captura rápida | ⏳ | |
@@ -172,3 +172,45 @@ inclusive uma asserção negativa que falha se alguém reintroduzir o 1.10.
 3. **Faixa 2 permanece sem uso se alguém configurar buraco na tabela** (ex.: só 1 e 3). O
    código trata (usa a próxima faixa acima), mas isso não estava especificado e é
    comportamento que inventei para não quebrar. Coberto por teste.
+
+---
+
+## 3. NOVO-009 — preço na borda dos 100%
+
+**Reprodução confirmada.** Margem, imposto e comissão saem da **receita**, então a fórmula é
+`custo / (1 - m - i - c)`. Dois comportamentos ruins conviviam:
+
+- **≥ 100%:** o divisor zera ou fica negativo. A lib já protegia, mas devolvia
+  `sale_price: 0` **em silêncio** — e zero é um preço que *parece* válido: entra no campo,
+  salva no produto e sai numa proposta ao cliente.
+- **99%:** divisor 0,01 → o preço vira **100× o custo**. Um item de R$ 100 sai por R$ 10.000,
+  sem uma linha de aviso. A conta está certa; quem digitou 99 quase sempre queria 9.
+
+### O que fiz
+
+`PriceBreakdown` ganhou dois campos **opcionais e aditivos** — `error` e `warning` —, então os
+três consumidores atuais continuam compilando sem alteração. `error` traz os números reais
+("margem 40% + imposto 30% + comissão 30% somam 100%") e o que fazer; `warning` cobre o caso
+válido-mas-suspeito acima de **20× o custo**. Entrada inválida (NaN, negativo) devolve motivo
+em vez de `NaN` no campo.
+
+Na tela, `impossiblePrice` deixou de recalcular `>= 100` por conta própria e passou a ler
+`bd.error`. Eram **duas fontes para a mesma verdade**, e a tela poderia discordar da lib
+depois de qualquer ajuste na fórmula.
+
+**Testes:** 24 no arquivo (eram 16). Bordas de 99/100/101% como pedido, a soma dos três
+chegando a 100 sem nenhum ser absurdo sozinho, o corte do aviso, e entrada inválida.
+
+### ⚠️ Autoavaliação
+
+1. **Corrigi um teste que já existia**, e isso merece olhar na revisão. "tudo sai arredondado
+   em centavos" percorria `Object.entries(bd)` e quebrou ao encontrar os campos de texto.
+   Escopei para os campos **numéricos** — a intenção declarada dele sempre foi dinheiro sem
+   dízima, não formato de mensagem. **Não é afrouxamento**: acrescentei `expect(length > 0)`
+   para o laço não passar vazio se alguém remover os números.
+2. **O corte de 20× é meu, e é arbitrário.** Margem alta legítima existe (peça rara, serviço
+   especializado). Por isso **avisa e não bloqueia** — mas o número é decisão do dono.
+3. **Ponto flutuante mordeu:** 1/(1−0,95) dá 19.999999999999982, e o corte decidia diferente
+   para números que a pessoa digitou iguais. O multiplicador é arredondado **antes** de
+   comparar. Foi o teste que pegou isso, não eu.
+4. **Não verifiquei na tela.** A ligação `bd.error` → aviso vermelho foi lida, não vista.

@@ -60,7 +60,10 @@ export function PriceCalculator({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [breakdown.sale_price, mode]);
 
-  const impossiblePrice = (profitMargin + taxRate + effectiveCommission) >= 100;
+  // [NOVO-009] Vem do cálculo, não de uma segunda cópia da regra aqui. Antes esta linha
+  // repetia `>= 100` por conta própria: duas fontes para a mesma verdade, e a tela poderia
+  // discordar da lib depois de qualquer ajuste na fórmula.
+  const impossiblePrice = bd.error !== null;
 
   return (
     <div className="space-y-4">
@@ -172,9 +175,18 @@ export function PriceCalculator({
       </div>
 
       {/* Warnings */}
+      {/* A mensagem do cálculo diz QUAIS números somam quanto e o que reduzir; a string de
+          i18n é genérica e fica só como reserva se algum dia o erro vier sem texto. */}
       {impossiblePrice && (
         <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-          ⚠️ {p.impossiblePrice || 'Soma ≥ 100% — preço impossível'}
+          ⚠️ {bd.error || p.impossiblePrice || 'Soma ≥ 100% — preço impossível'}
+        </div>
+      )}
+      {/* [NOVO-009] Preço matematicamente válido mas muito acima do custo — 99% no lugar de
+          9% é o engano de digitação que produz isso. Avisa, não bloqueia. */}
+      {!impossiblePrice && bd.warning && (
+        <div className="rounded-lg border border-amber-300/30 bg-amber-50 p-3 text-sm text-amber-700">
+          ⚠️ {bd.warning}
         </div>
       )}
       {!impossiblePrice && profitMargin > 0 && profitMargin < 10 && mode === 'calculate' && (
