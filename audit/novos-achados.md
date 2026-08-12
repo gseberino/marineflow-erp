@@ -267,7 +267,7 @@ Não foram corrigidos.
 
 ---
 
-## [NOVO-016] Deslocamento: 4 técnicos custam o mesmo que 1, e a tarifa por km exibida na OS não é a usada no cálculo
+## [NOVO-024] Deslocamento: 4 técnicos custam o mesmo que 1, e a tarifa por km exibida na OS não é a usada no cálculo
 
 - **Encontrado em:** 11/08/2026, escrevendo a cobertura de teste de `displacement.ts`
 - **Categoria:** A — **Severidade sugerida:** P2 · **Status:** registrado, **não corrigido** (regra 3)

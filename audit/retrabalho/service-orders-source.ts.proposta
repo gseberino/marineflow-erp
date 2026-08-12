@@ -1,0 +1,94 @@
+/**
+ * De onde cada cargo LÊ a ordem de serviço (NOVO-006a).
+ *
+ * O técnico lê de uma view sem nenhuma coluna de valor; todos os outros cargos leem da
+ * tabela. A escrita continua sempre na tabela — a view é só de leitura, e quem pode alterar
+ * o quê é assunto da RLS, não daqui.
+ *
+ * Isto NÃO é controle de acesso: é o frontend pedindo a fonte certa. Quem impede de verdade
+ * é a migration `20260811002500_view_os_sem_valores_para_tecnico.sql` junto com a RLS. Um
+ * técnico que chamasse a REST na mão continuaria lendo `service_orders` enquanto a política
+ * daquela tabela permitir — fechar isso é o passo seguinte, e está declarado no relatório.
+ */
+
+export const OS_TABELA = 'service_orders' as const;
+export const OS_VIEW_TECNICO = 'service_orders_tecnico' as const;
+
+export type FonteDaOS = typeof OS_TABELA | typeof OS_VIEW_TECNICO;
+
+/**
+ * Colunas que a view NÃO pode ter — a mesma lista que a migration deixou de fora.
+ *
+ * Existe em código para o teste conseguir cobrar a migration: se alguém acrescentar uma
+ * coluna de valor à view, o teste falha antes de o banco receber. Critério: valor monetário,
+ * percentual de precificação/comissão, forma/condição de pagamento e `share_token` — que
+ * abre o link público onde os valores aparecem.
+ */
+export const COLUNAS_DE_VALOR_DA_OS = [
+  'hourly_rate',
+  'labor_cost_total',
+  'travel_cost_per_km',
+  'travel_cost_total',
+  'parts_cost_total',
+  'subcontract_cost_total',
+  'operational_cost_total',
+  'discount_amount',
+  'discount_services_pct',
+  'discount_parts_pct',
+  'tax_amount',
+  'grand_total',
+  'original_quote_amount',
+  'contingency_pct',
+  'commission_rate',
+  'commission_amount',
+  'commissioned_person',
+  'commissioned_user_id',
+  'card_fee_amount',
+  'card_fee_passthrough_enabled',
+  'card_installments',
+  'ferry_cost',
+  'financial_notes',
+  'payment_conditions',
+  'payment_condition_preset_id',
+  'payment_method',
+  'payment_method_preferred',
+  'custom_payment_installments',
+  'share_token',
+] as const;
+
+/** Cargos, como gravados em `app_users.role`. */
+export type CargoDoUsuario = 'admin' | 'technician' | 'financial' | 'seller' | 'external_seller' | 'other';
+
+/**
+ * A view já existe no banco?
+ *
+ * `false` até alguém aplicar a migration em produção. Enquanto for `false`, TODO cargo lê da
+ * tabela — inclusive o técnico, exatamente como antes desta mudança.
+ *
+ * Esta chave existe porque as duas metades não sobem juntas: o arquivo da migration é
+ * commitado antes de ser aplicado (regra 1 do CLAUDE.md) e o frontend é publicado a cada push
+ * na main pela integração do Vercel. Sem a chave, a janela entre publicar e aplicar deixaria
+ * o técnico consultando uma view inexistente — a tela dele responderia erro, que é justamente
+ * a tela do trabalho dele.
+ *
+ * PARA LIGAR, nesta ordem: (1) aplicar a migration; (2) regenerar
+ * `src/integrations/supabase/types.ts`, senão `.from()` não conhece a view; (3) virar esta
+ * chave para `true`; (4) conferir com JWT de técnico que a lista e o detalhe da OS abrem, que
+ * os embeds de cliente/embarcação/marina vêm preenchidos e que nenhum valor aparece na tela.
+ */
+export const VIEW_TECNICO_DISPONIVEL = false;
+
+/**
+ * Fonte de LEITURA da OS para um cargo.
+ *
+ * Cargo desconhecido ou ausente cai na tabela, e é deliberado: a view é uma restrição para
+ * um cargo específico, não um modo seguro genérico. Devolver a view para quem não se sabe
+ * quem é esconderia dados de um financeiro cujo perfil ainda não carregou, e o sintoma
+ * (campos sumindo da tela sem explicação) seria pior de diagnosticar do que o problema.
+ */
+export function fonteDeLeituraDaOS(
+  cargo: string | null | undefined,
+  viewDisponivel: boolean = VIEW_TECNICO_DISPONIVEL,
+): FonteDaOS {
+  return viewDisponivel && cargo === 'technician' ? OS_VIEW_TECNICO : OS_TABELA;
+}

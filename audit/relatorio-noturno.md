@@ -19,8 +19,8 @@ aqui e pular, nunca decidir.
 | 1 | T3.2 — preferências de PDF (decisão #4) | ✅ concluída |
 | 2 | NOVO-006b — PDF de execução sem bloco financeiro | ✅ concluída |
 | 3 | T3.8 — paridade i18n pt-BR × en (MF-AUD-030) | ✅ concluída (achado não reproduziu) |
-| 4 | NOVO-006a — view de `service_orders` sem valores | ✅ migration escrita (NÃO aplicada) |
-| 5 | Fila infinita — cobertura de teste em módulos categoria I | 🔄 em curso (1 módulo por commit) |
+| 4 | NOVO-006a — view de `service_orders` sem valores | ❌ REJEITADA na integração — material em `audit/retrabalho/` |
+| 5 | Fila infinita — cobertura de teste em módulos categoria I | ✅ 8 módulos, 1 por commit |
 
 ---
 
@@ -40,21 +40,18 @@ corrigido**, conforme a regra 3. Em ordem de gravidade:
 |---|---|---|
 | **NOVO-017** | Importação de CSV: **`1.234,56` entra como `1,23`**; e `Telefone` vazio **apaga o celular** | Carga em lote de catálogo/cadastro — erro em centenas de linhas de uma vez, já gravadas |
 | **NOVO-009** | Preço de venda vira **3,6 × 10¹⁸** quando margem+imposto+comissão dão exatamente 100% | O número entra no campo de preço do produto enquanto o aviso "impossível" está na tela |
-| **NOVO-016** | Deslocamento: **4 técnicos custam o mesmo que 1** (e 36% do que custam 3); e o botão de calcular ignora a tarifa configurada | Toda OS de campo |
+| **NOVO-024** | Deslocamento: **4 técnicos custam o mesmo que 1** (e 36% do que custam 3); e o botão de calcular ignora a tarifa configurada | Toda OS de campo |
 | **NOVO-008** | A view do técnico fecha os valores da OS, mas os **itens** (peça/serviço) continuam com preço no mesmo embed | "O técnico não vê valores" vale do total para cima |
 | **NOVO-019** | Export de CSV: coluna "Marina" repete o nome do barco; aspas mal escapadas; **injeção de fórmula** | Arquivo que sai da empresa — contador, cliente, outro sistema |
 | **NOVO-018** | Captura rápida da Agenda: **"comprar 3 cabos"** vira tarefa das 03:00 sem o "3"; `30/02` vira 02/03/2027 | Toda tarefa criada pela captura rápida com número no texto |
 
-**Duas decisões esperam por você** (não decidi nenhuma):
-1. **T3.2** — o diálogo de PDF perdeu também o cache local (`localStorage`), não só a escrita em
-   `app_settings`. Foi a leitura literal de "aplica só na geração corrente"; a decisão #4 falava em "override
-   local por usuário". Repor são três linhas — veja a seção 1.
-2. **NOVO-006a** — `invoicing_status` e `payment_status` **ficaram** na view do técnico. Não são valores, e a
-   tela usa o primeiro para bloquear edição de OS faturada. Se sua leitura da decisão #3 for mais estrita, é
-   apagar duas linhas.
+**As duas decisões que estavam pendentes foram respondidas em 11/08** e estão registradas na seção
+"Decisões do dono", no fim deste arquivo: **(a)** o diálogo de PDF fica **sem** `localStorage` — leitura
+literal aprovada; **(b)** quando a view do técnico voltar, sai também `invoicing_status` e `payment_status`.
 
-**A única coisa pronta para aplicar:** a migration `20260811002500_view_os_sem_valores_para_tecnico.sql`. A
-ordem de operações está na seção 4 e importa (**regenerar os tipos** antes de virar a chave no frontend).
+**Nenhuma migration foi aplicada, e não há nenhuma pendente:** a única que existia era a da view, e aquela
+tarefa foi **rejeitada** na integração da manhã. O material está preservado em `audit/retrabalho/`, com a
+spec do que a próxima tentativa precisa entregar.
 
 **Achado que não reproduziu:** MF-AUD-030 (paridade de i18n) já estava resolvido. Os dicionários estão em
 812 × 812 chaves — se você usava o "782 × 781" do relatório de auditoria para dimensionar a frente de i18n, a
@@ -217,17 +214,26 @@ frente de i18n, o número certo hoje é 812 chaves em cada idioma. Nada a corrig
 
 ---
 
-## 4 — NOVO-006a · View da OS sem colunas de valor — migration ESCRITA, **não aplicada**
+## 4 — NOVO-006a · View da OS sem colunas de valor — ❌ **REJEITADA na integração de 11/08**
 
-**Commit:** `feat(rls): NOVO-006a view da OS sem valores para o tecnico (migration NAO aplicada)`
+> **Esta tarefa NÃO entrou na `main`.** O commit foi removido do branch por rebase antes do merge, a pedido do
+> Gustavo, depois que a revisão pré-merge encontrou dois bloqueios: o detalhe da OS falharia inteiro para o
+> técnico (embed `payment_condition_presets` sobre uma view sem a coluna de FK → PGRST200) e **cada Salvar do
+> técnico apagaria doze campos financeiros da OS**. Detalhe em `audit/novos-achados.md` → **NOVO-020**.
+>
+> **O material está preservado em `audit/retrabalho/`** — o SQL da view (que a revisão aprovou tecnicamente),
+> o roteador por cargo, e a **spec do retrabalho** em `README-view-tecnico.md`. Nada foi aplicado no banco;
+> a migration nunca existiu em produção.
+>
+> **Quando a view voltar, sai também `invoicing_status` e `payment_status`** — decisão (b) do Gustavo, 11/08,
+> mais estrita que a minha proposta original.
+>
+> O texto abaixo é o registro do que foi feito na noite, **mantido como estava** para que a spec do retrabalho
+> tenha contexto. Os "5 passos de ativação" descritos adiante **estão incompletos** — não cobrem nenhum dos
+> dois bloqueios. Não siga aquela lista.
 
-> **⚠️ CORRIGIDO EM 11/08 APÓS REVISÃO — NÃO ATIVAR.** A migration pode ser aplicada (a view fica inerte,
-> ninguém a consulta), mas **virar a chave `VIEW_TECNICO_DISPONIVEL` quebra a tela do técnico e apaga campos
-> financeiros da OS a cada Salvar**. Dois bloqueios encontrados na revisão pré-merge, registrados como
-> `NOVO-020`. Os 5 passos de ativação que escrevi abaixo **não cobrem nenhum dos dois** — leia o achado antes
-> de seguir aquela lista. O banco não foi tocado; nenhuma escrita, nenhum deploy.
-
-**Arquivo:** `supabase/migrations/20260811002500_view_os_sem_valores_para_tecnico.sql`
+**Arquivo (removido do branch, preservado em `audit/retrabalho/`):**
+`view-os-sem-valores-para-tecnico.sql.proposta`
 
 **O que ela faz:** cria `public.service_orders_tecnico` — a OS **sem nenhuma coluna de valor** —, com
 `security_invoker = on` (a RLS da tabela base continua valendo; a view restringe **coluna**, nunca **linha**),
@@ -311,14 +317,14 @@ O caso está no teste com `it.fails` — quando a correção entrar, ele passa a
 
 ### 5.2 `displacement.ts` — concluído, **e achou outro**
 
-**Commit:** `test(deslocamento): cobre displacement e registra NOVO-016`
+**Commit:** `test(deslocamento): cobre displacement e registra NOVO-024`
 
 Deslocamento é dinheiro em toda OS de campo, e a conta multiplica três partes (km, hora de equipe,
 multiplicador de urgência/fim de semana). Erro aqui não aparece como erro — aparece como OS que fechou por
 menos do que custou. 14 casos cobrindo as três partes, os multiplicadores, o fallback de configuração
 inválida (um `travel_km_rate` vazio faria toda viagem sair de graça se o código aceitasse) e arredondamento.
 
-**`NOVO-016`, registrado e não corrigido — três coisas, a primeira é a que dói:**
+**`NOVO-024`, registrado e não corrigido — três coisas, a primeira é a que dói:**
 
 1. **Com 4 técnicos, a hora cai para R$ 90** — o mesmo que com 1 técnico, e 36% do que custam 3. A tabela vai até 3 (`{1: 90, 2: 170, 3: 250}`) e a busca é
    `hourly[n] || hourly[1]`. Quatro técnicos custam **o mesmo que um** — e o número de técnicos é campo livre
@@ -503,8 +509,46 @@ leitura, escopadas, e estão descritas nas seções 1 e 4.
 
 O que precisa de você, em uma linha cada:
 1. **NOVO-017** — conferir o catálogo importado (preços abaixo de R$ 10, clientes sem celular). É o mais caro.
-2. **NOVO-009 / NOVO-016 / NOVO-018 / NOVO-019** — correções pequenas, mas duas delas (`hourly[4]` e o
+2. **NOVO-009 / NOVO-024 / NOVO-018 / NOVO-019** — correções pequenas, mas duas delas (`hourly[4]` e o
    arredondamento do preço) são **decisão comercial**, não técnica.
 3. **Migration da view** — aplicar, regenerar tipos, virar a chave, validar com JWT de técnico (seção 4).
 4. **Duas decisões declaradas** — `localStorage` do diálogo de PDF (seção 1) e `invoicing_status`/
    `payment_status` na view (seção 4).
+
+---
+
+## Decisões do dono registradas na integração de 11/08/2026
+
+Ficam aqui porque a regra 4 do `CLAUDE.md` exige resposta **registrada em arquivo** — e porque as duas
+mudaram o que ficou no código.
+
+### (a) Diálogo de PDF sem `localStorage` — leitura literal APROVADA
+
+Eu havia removido, além da escrita em `app_settings`, o cache local `pdf.prefs.<tipo>`, por leitura literal de
+"aplica só na geração corrente" — e declarei a diferença em relação ao texto da decisão #4, que falava em
+"override local por usuário".
+
+**Resposta do Gustavo:** *"PDFOptionsDialog sem localStorage — leitura literal aprovada; só reabre com fricção
+real de uso."*
+
+Ou seja: fica como está. O diálogo parte sempre do padrão da empresa e esquece o que foi marcado ao fechar.
+**O que reabriria o assunto:** alguém que gere muitos documentos seguidos com a mesma exceção e reclame de
+remarcar toda vez. Fricção relatada, não fricção suposta.
+
+### (b) A view do técnico, quando voltar, não terá `invoicing_status` nem `payment_status`
+
+Eu havia mantido os dois, argumentando que não são valores e que a tela usa `invoicing_status` para bloquear
+edição de OS faturada.
+
+**Resposta do Gustavo:** saem também. Quem precisar bloquear edição terá que obter esse sinal por outro
+caminho — uma coluna derivada booleana, sem revelar situação financeira. Está na spec em
+`audit/retrabalho/README-view-tecnico.md`.
+
+### (c) Regra nova no `CLAUDE.md`
+
+O episódio da view virou **regra 7** das invariantes: trocar a fonte de dados de um formulário exige que o
+tipo **falhe** até leitura e escrita estarem completas; `as typeof` para compilar é proibido nesse contexto.
+
+**Nota de execução:** o pedido dizia "junto da regra 8". A lista tem **6** regras hoje — conferi na `main` e
+nos cinco branches remotos não integrados, todos com 6. A nova entrou como **7**. Se você tinha em mente uma
+regra 7/8 que ainda não está no repositório, me diga e eu renumero.

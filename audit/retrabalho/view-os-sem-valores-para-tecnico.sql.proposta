@@ -1,0 +1,124 @@
+-- NOVO-006a — a metade DO BANCO da decisão #3: o técnico deixa de ler os valores da OS.
+--
+-- POR QUE UMA VIEW, E NÃO UM REVOKE DE COLUNA: a avaliação está em audit/novos-achados.md
+-- (NOVO-006). Resumo: `REVOKE SELECT (coluna)` no Postgres não omite a coluna — recusa a
+-- consulta inteira com 42501 —, e o frontend pede `select=*` em toda parte. O técnico
+-- deixaria de abrir a própria tela de trabalho. A view resolve pelo outro lado: ela
+-- simplesmente não tem as colunas.
+--
+-- AS COLUNAS SÃO LISTADAS UMA A UMA, DE PROPÓSITO. `SELECT *` faria toda coluna de valor
+-- criada no futuro entrar aqui sozinha, e ninguém perceberia. O preço dessa escolha é o
+-- oposto: coluna operacional nova também não aparece até alguém acrescentar. É a falha para
+-- o lado seguro — funcionalidade que falta se vê na hora, valor que vaza não.
+--
+-- CRITÉRIO DO QUE FICOU DE FORA: valor monetário, percentual de precificação/comissão e
+-- forma/condição de pagamento. `share_token` também saiu, e este merece explicação: ele abre
+-- o link público do documento, que mostra os valores — mantê-lo seria fechar a porta e
+-- deixar a chave na fechadura.
+--
+-- FRONTEIRA QUE FICA PARA O DONO REVER: `invoicing_status` e `payment_status` FICARAM. Não
+-- são valores, e a tela de OS os usa para bloquear edição de OS faturada — sem eles o
+-- técnico editaria o que não deve. Dizem "foi faturada" e "está paga", não quanto.
+--
+-- O QUE ESTA MIGRATION NÃO RESOLVE: os itens da OS. `service_order_parts` e
+-- `service_order_services` têm `unit_price`/`total_price` e são lidos por embed na mesma
+-- consulta — o técnico continua vendo preço de peça e de serviço por ali. Registrado como
+-- NOVO-008; fechar isso pede views irmãs e é tarefa própria.
+
+CREATE OR REPLACE VIEW public.service_orders_tecnico
+WITH (security_invoker = on) AS
+SELECT
+  id,
+  service_order_number,
+  client_id,
+  vessel_id,
+  marina_id,
+  requested_by_name,
+  requested_by_contact_id,
+  scheduled_start_at,
+  scheduled_end_at,
+  check_in_at,
+  check_out_at,
+  status,
+  quote_status,
+  invoicing_status,
+  payment_status,
+  priority,
+  service_type,
+  problem_description,
+  initial_findings,
+  diagnosis,
+  solution_applied,
+  technician_notes,
+  internal_notes,
+  extra_notes,
+  customer_visible_report,
+  estimated_hours,
+  labor_hours_total,
+  travel_distance_km,
+  technician_count_for_travel,
+  travel_hours,
+  travel_type,
+  is_travel_billable,
+  currency,
+  client_signature_url,
+  signed_at,
+  signed_by_name,
+  signed_document_hash,
+  requires_resignature,
+  resignature_requested_at,
+  photos,
+  survey_id,
+  estimate_confidence,
+  customer_po_number,
+  customer_buyer_name,
+  quote_validity_days,
+  quote_validity_date,
+  converted_to_os_at,
+  cancelled_at,
+  cancellation_reason,
+  reopened_at,
+  reopen_reason,
+  reminder_sent_at,
+  created_by,
+  created_at,
+  updated_at
+FROM public.service_orders;
+
+COMMENT ON VIEW public.service_orders_tecnico IS
+  'OS sem nenhuma coluna de valor, para o cargo técnico (NOVO-006a, decisão #3 do dono). '
+  'security_invoker=on: a RLS de service_orders continua valendo — esta view restringe COLUNA, nunca LINHA. '
+  'Colunas listadas uma a uma de propósito: coluna de valor nova não entra sozinha.';
+
+-- security_invoker=on é o que impede a view de virar um buraco na RLS: sem ele a view roda
+-- com os direitos de quem a criou (postgres) e devolveria linhas que a política da tabela
+-- base negaria ao usuário. Já aconteceu neste repositório com outra view.
+
+-- Toda view nasce com SELECT para PUBLIC pelo default de privilégios do schema public.
+-- Fechar aqui, na MESMA migration, senão a view fica legível por anônimo até alguém notar.
+REVOKE ALL ON public.service_orders_tecnico FROM PUBLIC;
+REVOKE ALL ON public.service_orders_tecnico FROM anon;
+GRANT SELECT ON public.service_orders_tecnico TO authenticated;
+GRANT SELECT ON public.service_orders_tecnico TO service_role;
+
+-- ── Verificação depois de aplicar (não é parte da migration) ────────────────────
+--
+-- 1. Nenhuma coluna de valor sobreviveu:
+--      SELECT column_name FROM information_schema.columns
+--       WHERE table_schema='public' AND table_name='service_orders_tecnico'
+--         AND column_name ~ 'cost|total|amount|price|fee|rate|discount|commission|payment_method|payment_conditions|share_token';
+--      -- esperado: 0 linhas
+--
+-- 2. Anônimo não lê:
+--      SELECT has_table_privilege('anon', 'public.service_orders_tecnico', 'SELECT');
+--      -- esperado: false
+--
+-- 3. security_invoker ligado:
+--      SELECT reloptions FROM pg_class WHERE relname='service_orders_tecnico';
+--      -- esperado: {security_invoker=on}
+--
+-- 4. O PostgREST enxerga os relacionamentos (clients/vessels/marinas) a partir da view —
+--    ele os infere das colunas de FK, que estão todas aqui. É o ÚNICO ponto que só o
+--    ambiente real responde; se falhar, o embed volta vazio e a tela do técnico perde o
+--    nome do cliente. Testar com o JWT de um técnico:
+--      GET /rest/v1/service_orders_tecnico?select=*,clients(name),vessels(name),marinas(name)&limit=1

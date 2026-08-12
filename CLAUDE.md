@@ -34,6 +34,18 @@ incidente já ocorrido aqui. Valem independentemente da tarefa em curso.
    (MF-AUD-053/054). Um valor vazado em log de função anula a proteção inteira. Para conferir se dois
    segredos coincidem, compare **hashes**, nunca os valores.
 
+7. **Trocar a fonte de dados de um formulário exige que o tipo FALHE até leitura e escrita estarem
+   completas. Cast para compilar (`as typeof`, `as any`, `as unknown as`) é proibido nesse contexto.**
+   Motivo: em 11/08/2026 uma view sem as colunas de valor (`service_orders_tecnico`) foi ligada aos hooks de
+   leitura com `.from(fonte as typeof OS_TABELA)` — o cast existia só para o código compilar antes de a view
+   existir no schema gerado. Ele escondeu do compilador duas coisas que a revisão pré-merge encontrou por
+   leitura (NOVO-020): um embed impossível, que faria o PostgREST responder 400 e derrubar a tela do técnico
+   em 100% das OSs; e, pior, que `ServiceOrderForm` semeia com `d.<campo> || 0` e salva o formulário
+   **inteiro** — de modo que cada Salvar do técnico gravaria zero em doze campos financeiros da OS. Sem o
+   cast, o `tsc` teria apontado os campos ausentes na primeira compilação.
+   **Na prática:** fonte nova (view, RPC, endpoint) entra com o tipo real dela. Se o formulário não compila,
+   é porque a escrita ainda depende de campo que a leitura não traz — e isso é o defeito, não o obstáculo.
+
 > Antes de editar: se houver (ou puder haver) outra sessão ativa, isole-se em um worktree próprio —
 > `bash .claude/skills/multi-session-guard/guard.sh worktree <nome>`. Nunca `git add -A`.
 
