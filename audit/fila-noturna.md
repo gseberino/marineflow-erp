@@ -11,6 +11,29 @@ Cada item vira **um commit**, com testes cobrindo o caso e as bordas, e os quatr
 
 ---
 
+> ## ⚠️ Itens 1, 2 e 3 JÁ TÊM CORREÇÃO PRONTA, aguardando integração
+>
+> O turno de 11-12/08 rodou em `session/noturno-20260811` (pushado, **fora da `main`**) e entregou os três
+> primeiros da fila, um commit cada, com os quatro gates verdes:
+>
+> | Item | Commit | O quê |
+> |---|---|---|
+> | 1 · NOVO-017 | `e0a7c85` | CSV deixa de corromper dinheiro e de apagar o celular |
+> | 2 · NOVO-024 | `070d988` | deslocamento cobra por 4 técnicos e respeita a tarifa configurada |
+> | 3 · NOVO-009 | `d16da5b` | borda dos 100% deixa de virar zero calado ou preço absurdo |
+>
+> **O próximo turno noturno começa no item 4 (NOVO-022).** Refazer 1-3 é trabalho jogado fora — e pior,
+> gera dois diffs concorrentes para o mesmo defeito.
+>
+> Duas observações para quem for integrar aquele branch:
+> - ele usa **`NOVO-016`** para o deslocamento (o ID anterior à renumeração de 11/08). Na `main`, `NOVO-016`
+>   é o **teste intermitente do F2-UI**, de outra sessão, e o deslocamento é **`NOVO-024`**. Conferir no merge;
+> - o livro do turno (`aec8b45`) declara que **nenhuma das três correções foi vista rodando na tela** — são
+>   funções puras com teste, mas a revisão deve importar um CSV, apertar o botão de deslocamento e ver o
+>   aviso de preço.
+
+---
+
 ## Em aberto, nesta ordem
 
 ### 1. NOVO-017 — o importador de CSV corrompe dinheiro
