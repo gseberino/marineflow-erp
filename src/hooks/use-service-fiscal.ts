@@ -8,22 +8,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
-/**
- * Acesso destipado — e o ponto ÚNICO do app em que isso é assumido.
- *
- * `src/integrations/supabase/types.ts` é gerado a partir do banco, e a migration
- * `20260811003000_nfse_verbos_fiscais_com_heranca` ainda NÃO foi aplicada (é decisão do
- * gestor, com os códigos que a contabilidade devolver). Até lá o cliente tipado não conhece
- * `service_fiscal_verbs` nem `v_services_fiscal_efetivo`.
- *
- * A alternativa seria editar o arquivo gerado à mão, o que a próxima regeneração desfaria em
- * silêncio. Aqui o buraco fica confinado a uma linha, com as interfaces abaixo declarando o
- * formato esperado para todo o resto do app.
- *
- * ⚠ APÓS APLICAR A MIGRATION: regenerar os tipos e trocar `db` por `supabase` — o typecheck
- * volta a cobrir estas queries de verdade.
- */
-const db = supabase as any;
+// Migration `20260811003000_nfse_verbos_fiscais_com_heranca` APLICADA em 13/08/2026 e tipos
+// regenerados na mesma sessão — o acesso destipado (`supabase as any`) que vivia aqui foi
+// removido, como o próprio aviso original pedia. O typecheck volta a cobrir estas queries.
+const db = supabase;
 
 /** De onde veio o código de tributação que sairia na nota. */
 export type FiscalCodeSource = 'proprio' | 'verbo' | 'nenhum';

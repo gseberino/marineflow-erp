@@ -193,15 +193,13 @@ function selectablePaymentMethod(...candidates: unknown[]): string {
 }
 
 // ── Hooks locais ───────────────────────────────────────────────────────────
-// company_fiscal_settings e issued_fiscal_documents são tabelas novas (ver
-// migração 20260714120000_fiscal_emit_foundation.sql) ainda não presentes no
-// types.ts gerado — mesmo padrão de cast já usado em ImportFiscalXML.tsx para
-// a RPC confirm_nfe_import. Regenerar os tipos do Supabase remove a necessidade.
+// types.ts regenerado em 13/08/2026 já conhece company_fiscal_settings (incl. nfse_*) e
+// issued_fiscal_documents — os casts `(supabase.from as any)` que viviam aqui foram removidos.
 function useCompanyFiscalSettings() {
   return useQuery({
     queryKey: ['company_fiscal_settings'],
     queryFn: async () => {
-      const { data, error } = await (supabase.from as any)('company_fiscal_settings')
+      const { data, error } = await supabase.from('company_fiscal_settings')
         .select('*')
         .limit(1)
         .maybeSingle();
@@ -216,7 +214,7 @@ function useIssuedFiscalDocuments() {
   return useQuery({
     queryKey: ['issued_fiscal_documents'],
     queryFn: async () => {
-      const { data, error } = await (supabase.from as any)('issued_fiscal_documents')
+      const { data, error } = await supabase.from('issued_fiscal_documents')
         .select('*')
         .order('created_at', { ascending: false })
         .limit(100);
@@ -574,8 +572,8 @@ export default function FiscalEmission() {
     try {
       const payload = { ...settingsForm, updated_at: new Date().toISOString() };
       const { error } = company
-        ? await (supabase.from as any)('company_fiscal_settings').update(payload).eq('id', company.id)
-        : await (supabase.from as any)('company_fiscal_settings').insert(payload);
+        ? await supabase.from('company_fiscal_settings').update(payload).eq('id', company.id)
+        : await supabase.from('company_fiscal_settings').insert(payload);
       // Corrida rara: duas pessoas configurando ao mesmo tempo na primeira vez
       // — a constraint de linha única (singleton_guard) rejeita o segundo
       // insert com 23505. Trata como "alguém já salvou primeiro": recarrega e
@@ -847,7 +845,7 @@ export default function FiscalEmission() {
     setShowClientForm(false);
     qc.invalidateQueries({ queryKey: ['clients'] });
     setClientId(savedClientId);
-    const { data } = await (supabase.from as any)('clients').select('*').eq('id', savedClientId).maybeSingle();
+    const { data } = await supabase.from('clients').select('*').eq('id', savedClientId).maybeSingle();
     if (data) populateFromClient(data);
   };
 
@@ -1525,7 +1523,7 @@ export default function FiscalEmission() {
       toast.success(`NF-e enviada para processamento (ambiente: ${env}). Acompanhe o status abaixo.`);
       // Ao faturar um orçamento/OS, marca a OS como faturada.
       if (emitOrigin.type === 'service_order' && emitOrigin.id) {
-        await (supabase.from as any)('service_orders')
+        await supabase.from('service_orders')
           .update({ invoicing_status: 'invoiced', updated_at: new Date().toISOString() })
           .eq('id', emitOrigin.id);
         qc.invalidateQueries({ queryKey: ['service-orders'] });
@@ -1684,7 +1682,7 @@ export default function FiscalEmission() {
         // Arquiva sob demanda (idempotente): reconcile reconsulta a nota
         // autorizada sem PDF e baixa o DANFE para o Storage.
         await supabase.functions.invoke('fiscal-reconcile', { body: { document_id: doc.id } });
-        const { data: fresh } = await (supabase.from as any)('issued_fiscal_documents')
+        const { data: fresh } = await supabase.from('issued_fiscal_documents')
           .select('pdf_storage_path')
           .eq('id', doc.id)
           .maybeSingle();
@@ -1861,7 +1859,7 @@ export default function FiscalEmission() {
       // cancelada no livro; senão o número parece uma inutilização/lacuna).
       const fromInstant = new Date(`${exportFrom}T00:00:00`).toISOString();
       const toInstant = new Date(`${exportTo}T23:59:59.999`).toISOString();
-      const { data: docs, error } = await (supabase.from as any)('issued_fiscal_documents')
+      const { data: docs, error } = await supabase.from('issued_fiscal_documents')
         .select('id, series, number, access_key, status, authorized_at, environment, request_payload')
         .in('status', ['authorized', 'cancelled'])
         .gte('authorized_at', fromInstant)
@@ -1883,8 +1881,13 @@ export default function FiscalEmission() {
       for (let i = 0; i < docs.length; i++) {
         const d = docs[i];
         toast.loading(`Baixando XML ${i + 1}/${docs.length}…`, { id: tId });
-        const rec = d.request_payload?.recipient || {};
-        const total = Number(d.request_payload?.payments?.[0]?.amount ?? 0);
+        // request_payload é jsonb (tipo Json) — narrowing local para os campos que o CSV usa.
+        const payload = (d.request_payload ?? {}) as {
+          recipient?: { name?: string; document?: string };
+          payments?: Array<{ amount?: number }>;
+        };
+        const rec = payload.recipient || {};
+        const total = Number(payload.payments?.[0]?.amount ?? 0);
         const dateStr = d.authorized_at ? new Date(d.authorized_at).toLocaleDateString('pt-BR') : '';
         rows.push([
           d.series, d.number, d.access_key || '', dateStr,
