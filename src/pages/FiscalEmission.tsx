@@ -348,6 +348,14 @@ export default function FiscalEmission() {
     // outro sistema usam uma série nova para começar a numeração limpa (evita
     // Rejeição 539 "número já utilizado"). Homologação fica sempre na série 2.
     nfe_series_producao: 1,
+    // ── NFS-e (padrão nacional) ──
+    ibge_city_code: '',
+    nfse_standard: 'nacional',
+    // pTotTribSN: carga TOTAL da faixa do Simples (não é alíquota de ISS) — sem ele a NFS-e
+    // do optante é rejeitada com E0712. String no form; vira número/null no save.
+    nfse_total_tax_rate_sn: '' as string | number,
+    nfse_municipal_registration_in_cnc: true,
+    nfse_default_series: 1,
   });
   const [nextNumberInput, setNextNumberInput] = useState('');
 
@@ -535,6 +543,11 @@ export default function FiscalEmission() {
         city_name: company.city_name || '',
         postal_code: company.postal_code || '',
         nfe_series_producao: company.nfe_series_producao ?? 1,
+        ibge_city_code: company.ibge_city_code || '',
+        nfse_standard: company.nfse_standard || 'nacional',
+        nfse_total_tax_rate_sn: company.nfse_total_tax_rate_sn ?? '',
+        nfse_municipal_registration_in_cnc: company.nfse_municipal_registration_in_cnc !== false,
+        nfse_default_series: company.nfse_default_series ?? 1,
       });
     }
     setShowSettings(true);
@@ -570,7 +583,17 @@ export default function FiscalEmission() {
     }
     setSavingSettings(true);
     try {
-      const payload = { ...settingsForm, updated_at: new Date().toISOString() };
+      const payload = {
+        ...settingsForm,
+        // Campos NFS-e: '' no form vira null no banco (colunas numéricas/nullable).
+        ibge_city_code: String(settingsForm.ibge_city_code).trim() || null,
+        nfse_total_tax_rate_sn:
+          settingsForm.nfse_total_tax_rate_sn === '' || settingsForm.nfse_total_tax_rate_sn == null
+            ? null
+            : Number(settingsForm.nfse_total_tax_rate_sn),
+        nfse_default_series: Number(settingsForm.nfse_default_series) || 1,
+        updated_at: new Date().toISOString(),
+      };
       const { error } = company
         ? await supabase.from('company_fiscal_settings').update(payload).eq('id', company.id)
         : await supabase.from('company_fiscal_settings').insert(payload);
@@ -2355,6 +2378,66 @@ export default function FiscalEmission() {
                 emitiu em produção) para começar a numeração limpa — assim evita a Rejeição 539 ("número já utilizado").
                 O "próximo número" só é necessário para <strong>continuar</strong> uma série existente a partir de um número
                 específico (confirme o último número com a contadora). Homologação usa sempre a série 2. Salve a série no botão abaixo.
+              </p>
+            </div>
+
+            {/* ── NFS-e (padrão nacional) ── */}
+            <div className="rounded-lg border p-3 space-y-2.5">
+              <p className="text-sm font-semibold">NFS-e — Nota Fiscal de Serviço</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">Padrão de emissão</Label>
+                  <Select
+                    value={settingsForm.nfse_standard}
+                    onValueChange={(v) => setSettingsForm((p) => ({ ...p, nfse_standard: v }))}
+                  >
+                    <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="nacional">Nacional (Itajaí usa este)</SelectItem>
+                      <SelectItem value="municipal">Municipal (layout próprio)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs">Série da NFS-e</Label>
+                  <Input
+                    type="number" min={1} className="h-8 text-xs"
+                    value={settingsForm.nfse_default_series}
+                    onChange={(e) => setSettingsForm((p) => ({ ...p, nfse_default_series: Math.max(1, parseInt(e.target.value, 10) || 1) }))}
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">% total do Simples (pTotTribSN)</Label>
+                  <Input
+                    type="number" min={0} max={100} step="0.01" className="h-8 text-xs"
+                    placeholder="ex.: 6,00"
+                    value={settingsForm.nfse_total_tax_rate_sn}
+                    onChange={(e) => setSettingsForm((p) => ({ ...p, nfse_total_tax_rate_sn: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Código IBGE do município</Label>
+                  <Input
+                    className="h-8 text-xs" placeholder="Itajaí = 4208203"
+                    value={settingsForm.ibge_city_code}
+                    onChange={(e) => setSettingsForm((p) => ({ ...p, ibge_city_code: e.target.value.replace(/\D/g, '').slice(0, 7) }))}
+                  />
+                </div>
+              </div>
+              <label className="flex items-center gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={settingsForm.nfse_municipal_registration_in_cnc}
+                  onChange={(e) => setSettingsForm((p) => ({ ...p, nfse_municipal_registration_in_cnc: e.target.checked }))}
+                />
+                Inscrição municipal registrada no CNC NFS-e (desmarque se a emissão voltar com E0120)
+              </label>
+              <p className="text-[11px] text-muted-foreground">
+                ⚠ O <strong>pTotTribSN não é a alíquota de ISS</strong>: é a carga total de tributos da faixa do Simples
+                na competência — sem ele a NFS-e do optante é rejeitada (E0712). O valor de 6,00% gravado em 13/08/2026
+                é <strong>provisório (1ª faixa do Anexo III), a validar com a contadora</strong> antes de emitir em produção.
+                Os códigos de tributação dos serviços são preenchidos pela contabilidade em Configurações → Fiscal → Verbos
+                (ou no cadastro de cada serviço).
               </p>
             </div>
 

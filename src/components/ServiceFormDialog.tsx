@@ -15,6 +15,7 @@ import {
   systemChoiceToDb, systemDbToChoice,
 } from '@/hooks/use-service-systems';
 import { VERBOS, VERB_LABEL } from '@/hooks/use-service-classification';
+import { useServiceFiscalVerbs } from '@/hooks/use-service-fiscal';
 
 interface Props {
   open: boolean;
@@ -28,6 +29,7 @@ export function ServiceFormDialog({ open, onOpenChange, editData, onCreated }: P
   const create = useCreateService();
   const update = useUpdateService();
   const { data: sistemas = [] } = useServiceSystems();
+  const { data: verbosFiscais = [] } = useServiceFiscalVerbs();
 
   // `category` (texto livre) foi aposentado em 02/08: estava vazio em 257 dos
   // 262 serviços e concorria com service_system, que é o que de fato classifica
@@ -42,6 +44,14 @@ export function ServiceFormDialog({ open, onOpenChange, editData, onCreated }: P
     currency: 'BRL',
     active: true,
     default_warranty_days: 0,
+    // Cadastro fiscal PRÓPRIO (override). Vazio = herda do verbo fiscal — é o caminho
+    // normal: a contabilidade preenche as 10 linhas de verbo e o catálogo inteiro resolve.
+    fiscal_verb: '',
+    national_tax_code: '',
+    service_code: '',
+    cnae: '',
+    iss_rate: '' as string | number,
+    iss_withheld: 'herda' as 'herda' | 'sim' | 'nao',
   };
   const [form, setForm] = useState(VAZIO);
 
@@ -57,6 +67,12 @@ export function ServiceFormDialog({ open, onOpenChange, editData, onCreated }: P
         currency: editData.currency || 'BRL',
         active: editData.active ?? true,
         default_warranty_days: editData.default_warranty_days ?? 0,
+        fiscal_verb: editData.fiscal_verb || '',
+        national_tax_code: editData.national_tax_code || '',
+        service_code: editData.service_code || '',
+        cnae: editData.cnae || '',
+        iss_rate: editData.iss_rate ?? '',
+        iss_withheld: editData.iss_withheld === true ? 'sim' : editData.iss_withheld === false ? 'nao' : 'herda',
       });
     } else {
       setForm(VAZIO);
@@ -68,16 +84,36 @@ export function ServiceFormDialog({ open, onOpenChange, editData, onCreated }: P
 
   const handleSave = async () => {
     if (!form.name.trim()) return;
+    // CHECKs do banco viram mensagem ANTES do submit — o formato de rejeição da prefeitura
+    // chegaria minutos depois e longe da causa.
+    const ntc = String(form.national_tax_code).replace(/\D/g, '');
+    if (form.national_tax_code && ntc.length !== 6) {
+      toast.error('Código de tributação nacional precisa ter exatamente 6 dígitos (ex.: 140101).');
+      return;
+    }
+    const cnaeDigits = String(form.cnae).replace(/\D/g, '');
+    if (form.cnae && cnaeDigits.length !== 7) {
+      toast.error('CNAE precisa ter exatamente 7 dígitos, sem pontos nem barra.');
+      return;
+    }
     try {
       // A coluna é `name`. O código antigo mandava `service_name`, que não
       // existe no schema — salvar por este diálogo falhava em silêncio para
       // quem não olhava o toast de erro.
       // Vazio vira null de propósito: '' violaria a FK de service_systems, e
       // sistema nulo tem significado ("depende da OS").
+      // Fiscal: vazio = null = herda do verbo fiscal; iss_withheld null = "não decidido"
+      // (a herança do NOVO-014 depende disso — false explícito NÃO herda).
       const payload = {
         ...form,
         service_system: form.service_system || null,
         service_verb: form.service_verb || null,
+        fiscal_verb: form.fiscal_verb || null,
+        national_tax_code: ntc || null,
+        service_code: String(form.service_code).trim() || null,
+        cnae: cnaeDigits || null,
+        iss_rate: form.iss_rate === '' || form.iss_rate == null ? null : Number(form.iss_rate),
+        iss_withheld: form.iss_withheld === 'herda' ? null : form.iss_withheld === 'sim',
       };
       if (editData?.id) {
         await update.mutateAsync({ id: editData.id, ...payload });
@@ -197,6 +233,95 @@ export function ServiceFormDialog({ open, onOpenChange, editData, onCreated }: P
             <div className="flex-1">
               <Label className="text-xs">Garantia Padrão (dias)</Label>
               <Input type="number" min="0" value={(form as any).default_warranty_days ?? 0} onChange={(e) => set('default_warranty_days', Number(e.target.value))} />
+            </div>
+          </div>
+
+          {/* ── Fiscal (NFS-e) ─────────────────────────────────────────────────
+              O caminho normal é HERDAR do verbo fiscal (a contabilidade preenche 10 linhas
+              em Configurações → Fiscal e o catálogo inteiro resolve). Os campos daqui são o
+              OVERRIDE para o serviço que foge da regra da atividade. */}
+          <div className="rounded-md border p-3 space-y-3">
+            <div>
+              <p className="text-sm font-semibold">Fiscal (NFS-e)</p>
+              <p className="text-xs text-muted-foreground">
+                Deixe em branco para herdar do verbo fiscal — preencher aqui é a exceção.
+              </p>
+            </div>
+            <div>
+              <Label>Verbo fiscal (herança)</Label>
+              <Select value={form.fiscal_verb || 'nenhum'} onValueChange={(v) => set('fiscal_verb', v === 'nenhum' ? '' : v)}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="nenhum">Sem herança (só o cadastro próprio vale)</SelectItem>
+                  {verbosFiscais.map((v) => (
+                    <SelectItem key={v.verb_slug} value={v.verb_slug}>
+                      {v.name}{v.default_national_tax_code ? ` · ${v.default_national_tax_code}` : ' · sem código ainda'}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {form.fiscal_verb && !form.national_tax_code && (() => {
+                const verbo = verbosFiscais.find((v) => v.verb_slug === form.fiscal_verb);
+                return (
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    {verbo?.default_national_tax_code
+                      ? `Este serviço herda o código ${verbo.default_national_tax_code} do verbo "${verbo.name}".`
+                      : 'O verbo escolhido ainda não tem código — a contabilidade preenche em Configurações → Fiscal → Verbos.'}
+                  </p>
+                );
+              })()}
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <Label>Código de tributação nacional</Label>
+                <Input
+                  value={form.national_tax_code}
+                  onChange={(e) => set('national_tax_code', e.target.value)}
+                  placeholder="6 dígitos, ex.: 140101"
+                  className="mt-1"
+                  inputMode="numeric"
+                />
+              </div>
+              <div>
+                <Label>CNAE</Label>
+                <Input
+                  value={form.cnae}
+                  onChange={(e) => set('cnae', e.target.value)}
+                  placeholder="7 dígitos"
+                  className="mt-1"
+                  inputMode="numeric"
+                />
+              </div>
+              <div>
+                <Label>Código municipal do serviço</Label>
+                <Input
+                  value={form.service_code}
+                  onChange={(e) => set('service_code', e.target.value)}
+                  placeholder="Opcional (ex.: 14.01)"
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label>Alíquota de ISS (%)</Label>
+                <Input
+                  type="number" min="0" max="100" step="0.01"
+                  value={form.iss_rate}
+                  onChange={(e) => set('iss_rate', e.target.value)}
+                  placeholder="Ex.: 3"
+                  className="mt-1"
+                />
+              </div>
+            </div>
+            <div>
+              <Label>Retenção de ISS pelo tomador</Label>
+              <Select value={form.iss_withheld} onValueChange={(v) => set('iss_withheld', v)}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="herda">Herdar do verbo fiscal (padrão)</SelectItem>
+                  <SelectItem value="nao">Sem retenção (decisão deste serviço)</SelectItem>
+                  <SelectItem value="sim">Retido pelo tomador</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-2">
