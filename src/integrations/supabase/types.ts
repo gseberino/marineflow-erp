@@ -1,4 +1,4 @@
-﻿export type Json =
+export type Json =
   | string
   | number
   | boolean
@@ -1034,6 +1034,13 @@ export type Database = {
             referencedRelation: "services"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "ai_operator_draft_items_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "v_services_fiscal_efetivo"
+            referencedColumns: ["id"]
+          },
         ]
       }
       ai_operator_drafts: {
@@ -1324,11 +1331,15 @@ export type Database = {
       ai_operator_messages: {
         Row: {
           attachments: Json | null
+          cache_creation_tokens: number | null
           cache_read_tokens: number | null
           content: string | null
           created_at: string
+          custo_reconciliado_em: string | null
           id: string
           model: string | null
+          openrouter_generation_id: string | null
+          reconcile_tentativas: number
           role: string
           session_id: string
           source: string | null
@@ -1338,14 +1349,20 @@ export type Database = {
           tool_call_id: string | null
           tool_calls: Json | null
           tool_name: string | null
+          usd_cache_discount: number | null
+          usd_real: number | null
         }
         Insert: {
           attachments?: Json | null
+          cache_creation_tokens?: number | null
           cache_read_tokens?: number | null
           content?: string | null
           created_at?: string
+          custo_reconciliado_em?: string | null
           id?: string
           model?: string | null
+          openrouter_generation_id?: string | null
+          reconcile_tentativas?: number
           role: string
           session_id: string
           source?: string | null
@@ -1355,14 +1372,20 @@ export type Database = {
           tool_call_id?: string | null
           tool_calls?: Json | null
           tool_name?: string | null
+          usd_cache_discount?: number | null
+          usd_real?: number | null
         }
         Update: {
           attachments?: Json | null
+          cache_creation_tokens?: number | null
           cache_read_tokens?: number | null
           content?: string | null
           created_at?: string
+          custo_reconciliado_em?: string | null
           id?: string
           model?: string | null
+          openrouter_generation_id?: string | null
+          reconcile_tentativas?: number
           role?: string
           session_id?: string
           source?: string | null
@@ -1372,6 +1395,8 @@ export type Database = {
           tool_call_id?: string | null
           tool_calls?: Json | null
           tool_name?: string | null
+          usd_cache_discount?: number | null
+          usd_real?: number | null
         }
         Relationships: [
           {
@@ -1642,6 +1667,13 @@ export type Database = {
             columns: ["service_id"]
             isOneToOne: false
             referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_suggestion_reviews_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "v_services_fiscal_efetivo"
             referencedColumns: ["id"]
           },
         ]
@@ -2903,6 +2935,11 @@ export type Database = {
           legal_name: string | null
           municipal_registration: string | null
           nfe_series_producao: number
+          nfse_default_series: number
+          nfse_municipal_registration_in_cnc: boolean
+          nfse_simples_nacional_option: number | null
+          nfse_standard: string
+          nfse_total_tax_rate_sn: number | null
           number: string | null
           postal_code: string | null
           provider: string
@@ -2928,6 +2965,11 @@ export type Database = {
           legal_name?: string | null
           municipal_registration?: string | null
           nfe_series_producao?: number
+          nfse_default_series?: number
+          nfse_municipal_registration_in_cnc?: boolean
+          nfse_simples_nacional_option?: number | null
+          nfse_standard?: string
+          nfse_total_tax_rate_sn?: number | null
           number?: string | null
           postal_code?: string | null
           provider?: string
@@ -2953,6 +2995,11 @@ export type Database = {
           legal_name?: string | null
           municipal_registration?: string | null
           nfe_series_producao?: number
+          nfse_default_series?: number
+          nfse_municipal_registration_in_cnc?: boolean
+          nfse_simples_nacional_option?: number | null
+          nfse_standard?: string
+          nfse_total_tax_rate_sn?: number | null
           number?: string | null
           postal_code?: string | null
           provider?: string
@@ -3710,6 +3757,27 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "finance_review_queue_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "bank_transactions_situacao"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_review_queue_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "extrato_a_tratar"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_review_queue_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "faturas_do_cartao"
+            referencedColumns: ["pagamento_id"]
+          },
+          {
             foreignKeyName: "finance_review_queue_created_payable_id_fkey"
             columns: ["created_payable_id"]
             isOneToOne: false
@@ -3729,6 +3797,27 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "bank_transactions"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_review_queue_related_transaction_id_fkey"
+            columns: ["related_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "bank_transactions_situacao"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_review_queue_related_transaction_id_fkey"
+            columns: ["related_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "extrato_a_tratar"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_review_queue_related_transaction_id_fkey"
+            columns: ["related_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "faturas_do_cartao"
+            referencedColumns: ["pagamento_id"]
           },
           {
             foreignKeyName: "finance_review_queue_suggested_client_id_fkey"
@@ -4757,6 +4846,27 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "bank_transactions"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payables_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "bank_transactions_situacao"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payables_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "extrato_a_tratar"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payables_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "faturas_do_cartao"
+            referencedColumns: ["pagamento_id"]
           },
           {
             foreignKeyName: "payables_cost_center_id_fkey"
@@ -6193,6 +6303,27 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "receivables_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "bank_transactions_situacao"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "receivables_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "extrato_a_tratar"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "receivables_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "faturas_do_cartao"
+            referencedColumns: ["pagamento_id"]
+          },
+          {
             foreignKeyName: "receivables_client_id_fkey"
             columns: ["client_id"]
             isOneToOne: false
@@ -6307,6 +6438,27 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "bank_transactions"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reconciliation_log_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "bank_transactions_situacao"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reconciliation_log_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "extrato_a_tratar"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reconciliation_log_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "faturas_do_cartao"
+            referencedColumns: ["pagamento_id"]
           },
           {
             foreignKeyName: "reconciliation_log_finance_rule_id_fkey"
@@ -6564,6 +6716,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "service_cases_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "v_services_fiscal_efetivo"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "service_cases_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
@@ -6597,6 +6756,57 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "vessels"
             referencedColumns: ["id"]
+          },
+        ]
+      }
+      service_fiscal_verbs: {
+        Row: {
+          created_at: string
+          default_cnae: string | null
+          default_iss_rate: number | null
+          default_iss_withheld: boolean
+          default_national_tax_code: string | null
+          default_service_code: string | null
+          notes: string | null
+          updated_at: string
+          verb_slug: string
+        }
+        Insert: {
+          created_at?: string
+          default_cnae?: string | null
+          default_iss_rate?: number | null
+          default_iss_withheld?: boolean
+          default_national_tax_code?: string | null
+          default_service_code?: string | null
+          notes?: string | null
+          updated_at?: string
+          verb_slug: string
+        }
+        Update: {
+          created_at?: string
+          default_cnae?: string | null
+          default_iss_rate?: number | null
+          default_iss_withheld?: boolean
+          default_national_tax_code?: string | null
+          default_service_code?: string | null
+          notes?: string | null
+          updated_at?: string
+          verb_slug?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_fiscal_verbs_verb_slug_fkey"
+            columns: ["verb_slug"]
+            isOneToOne: true
+            referencedRelation: "service_verbs"
+            referencedColumns: ["slug"]
+          },
+          {
+            foreignKeyName: "service_fiscal_verbs_verb_slug_fkey"
+            columns: ["verb_slug"]
+            isOneToOne: true
+            referencedRelation: "v_service_verbs_status"
+            referencedColumns: ["slug"]
           },
         ]
       }
@@ -7033,6 +7243,13 @@ export type Database = {
             columns: ["service_id"]
             isOneToOne: false
             referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_services_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "v_services_fiscal_efetivo"
             referencedColumns: ["id"]
           },
           {
@@ -7932,6 +8149,13 @@ export type Database = {
             referencedRelation: "services"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "service_step_templates_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "v_services_fiscal_efetivo"
+            referencedColumns: ["id"]
+          },
         ]
       }
       service_survey_answers: {
@@ -8081,6 +8305,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "service_survey_templates_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "v_services_fiscal_efetivo"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "survey_tpl_system_fk"
             columns: ["applies_to_system"]
             isOneToOne: false
@@ -8216,6 +8447,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "service_surveys_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "v_services_fiscal_efetivo"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "service_surveys_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
@@ -8323,16 +8561,22 @@ export type Database = {
           classification_confidence: number | null
           classified_at: string | null
           classified_by: string | null
+          cnae: string | null
           created_at: string | null
           currency: string | null
           default_price: number | null
           default_warranty_days: number | null
           description: string | null
           field_factor: number
+          fiscal_verb: string | null
           id: string
+          iss_rate: number | null
+          iss_withheld: boolean | null
           material_kit_product_id: string | null
           name: string
+          national_tax_code: string | null
           requires_survey: boolean
+          service_code: string | null
           service_system: string | null
           service_verb: string | null
           standard_minutes: number | null
@@ -8348,16 +8592,22 @@ export type Database = {
           classification_confidence?: number | null
           classified_at?: string | null
           classified_by?: string | null
+          cnae?: string | null
           created_at?: string | null
           currency?: string | null
           default_price?: number | null
           default_warranty_days?: number | null
           description?: string | null
           field_factor?: number
+          fiscal_verb?: string | null
           id?: string
+          iss_rate?: number | null
+          iss_withheld?: boolean | null
           material_kit_product_id?: string | null
           name: string
+          national_tax_code?: string | null
           requires_survey?: boolean
+          service_code?: string | null
           service_system?: string | null
           service_verb?: string | null
           standard_minutes?: number | null
@@ -8373,16 +8623,22 @@ export type Database = {
           classification_confidence?: number | null
           classified_at?: string | null
           classified_by?: string | null
+          cnae?: string | null
           created_at?: string | null
           currency?: string | null
           default_price?: number | null
           default_warranty_days?: number | null
           description?: string | null
           field_factor?: number
+          fiscal_verb?: string | null
           id?: string
+          iss_rate?: number | null
+          iss_withheld?: boolean | null
           material_kit_product_id?: string | null
           name?: string
+          national_tax_code?: string | null
           requires_survey?: boolean
+          service_code?: string | null
           service_system?: string | null
           service_verb?: string | null
           standard_minutes?: number | null
@@ -8392,6 +8648,13 @@ export type Database = {
           updated_at?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "services_fiscal_verb_fk"
+            columns: ["fiscal_verb"]
+            isOneToOne: false
+            referencedRelation: "service_fiscal_verbs"
+            referencedColumns: ["verb_slug"]
+          },
           {
             foreignKeyName: "services_material_kit_product_id_fkey"
             columns: ["material_kit_product_id"]
@@ -9579,6 +9842,208 @@ export type Database = {
       }
     }
     Views: {
+      bank_transactions_situacao: {
+        Row: {
+          amount: number | null
+          authentication_code: string | null
+          balance_after: number | null
+          bank_connection_id: string | null
+          bank_ref_id: string | null
+          bill_id: string | null
+          card_last_digits: string | null
+          counterparty_account: string | null
+          counterparty_bank: string | null
+          counterparty_branch: string | null
+          counterparty_document: string | null
+          counterparty_name: string | null
+          created_at: string | null
+          description: string | null
+          dismissed_at: string | null
+          dismissed_by: string | null
+          dismissed_kind: string | null
+          dismissed_reason: string | null
+          e_cartao: boolean | null
+          id: string | null
+          import_batch_id: string | null
+          installment_label: string | null
+          merchant_category: string | null
+          merchant_document: string | null
+          merchant_name: string | null
+          payee_mcc: string | null
+          payment_method: string | null
+          payment_reason: string | null
+          pix_end_to_end_id: string | null
+          provider: string | null
+          provider_account_id: string | null
+          provider_category: string | null
+          receiver_reference_id: string | null
+          reconciled: boolean | null
+          reconciled_payment_id: string | null
+          reconciled_service_order_id: string | null
+          situacao: string | null
+          source_type: string | null
+          transaction_date: string | null
+          transaction_type: string | null
+          tx_status: string | null
+        }
+        Insert: {
+          amount?: number | null
+          authentication_code?: string | null
+          balance_after?: number | null
+          bank_connection_id?: string | null
+          bank_ref_id?: string | null
+          bill_id?: string | null
+          card_last_digits?: string | null
+          counterparty_account?: string | null
+          counterparty_bank?: string | null
+          counterparty_branch?: string | null
+          counterparty_document?: string | null
+          counterparty_name?: string | null
+          created_at?: string | null
+          description?: string | null
+          dismissed_at?: string | null
+          dismissed_by?: string | null
+          dismissed_kind?: string | null
+          dismissed_reason?: string | null
+          e_cartao?: never
+          id?: string | null
+          import_batch_id?: string | null
+          installment_label?: string | null
+          merchant_category?: string | null
+          merchant_document?: string | null
+          merchant_name?: string | null
+          payee_mcc?: string | null
+          payment_method?: string | null
+          payment_reason?: string | null
+          pix_end_to_end_id?: string | null
+          provider?: string | null
+          provider_account_id?: string | null
+          provider_category?: string | null
+          receiver_reference_id?: string | null
+          reconciled?: boolean | null
+          reconciled_payment_id?: string | null
+          reconciled_service_order_id?: string | null
+          situacao?: never
+          source_type?: string | null
+          transaction_date?: string | null
+          transaction_type?: string | null
+          tx_status?: string | null
+        }
+        Update: {
+          amount?: number | null
+          authentication_code?: string | null
+          balance_after?: number | null
+          bank_connection_id?: string | null
+          bank_ref_id?: string | null
+          bill_id?: string | null
+          card_last_digits?: string | null
+          counterparty_account?: string | null
+          counterparty_bank?: string | null
+          counterparty_branch?: string | null
+          counterparty_document?: string | null
+          counterparty_name?: string | null
+          created_at?: string | null
+          description?: string | null
+          dismissed_at?: string | null
+          dismissed_by?: string | null
+          dismissed_kind?: string | null
+          dismissed_reason?: string | null
+          e_cartao?: never
+          id?: string | null
+          import_batch_id?: string | null
+          installment_label?: string | null
+          merchant_category?: string | null
+          merchant_document?: string | null
+          merchant_name?: string | null
+          payee_mcc?: string | null
+          payment_method?: string | null
+          payment_reason?: string | null
+          pix_end_to_end_id?: string | null
+          provider?: string | null
+          provider_account_id?: string | null
+          provider_category?: string | null
+          receiver_reference_id?: string | null
+          reconciled?: boolean | null
+          reconciled_payment_id?: string | null
+          reconciled_service_order_id?: string | null
+          situacao?: never
+          source_type?: string | null
+          transaction_date?: string | null
+          transaction_type?: string | null
+          tx_status?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bank_transactions_bank_connection_id_fkey"
+            columns: ["bank_connection_id"]
+            isOneToOne: false
+            referencedRelation: "bank_connections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bank_transactions_dismissed_by_fkey"
+            columns: ["dismissed_by"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bank_transactions_reconciled_payment_id_fkey"
+            columns: ["reconciled_payment_id"]
+            isOneToOne: false
+            referencedRelation: "payments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bank_transactions_reconciled_service_order_id_fkey"
+            columns: ["reconciled_service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bank_transactions_reconciled_service_order_id_fkey"
+            columns: ["reconciled_service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bank_transactions_reconciled_service_order_id_fkey"
+            columns: ["reconciled_service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_margin"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bank_transactions_reconciled_service_order_id_fkey"
+            columns: ["reconciled_service_order_id"]
+            isOneToOne: false
+            referencedRelation: "vw_os_profitability"
+            referencedColumns: ["os_id"]
+          },
+        ]
+      }
+      conciliacao_lancamentos: {
+        Row: {
+          amount: number | null
+          bank_transaction_id: string | null
+          categoria: string | null
+          contraparte: string | null
+          description: string | null
+          diferenca: number | null
+          due_date: string | null
+          extrato_data: string | null
+          extrato_descricao: string | null
+          extrato_valor: number | null
+          id: string | null
+          issue_date: string | null
+          lado: string | null
+          situacao: string | null
+          status: string | null
+        }
+        Relationships: []
+      }
       erp_open_loop_facts: {
         Row: {
           detail: string | null
@@ -9592,6 +10057,92 @@ export type Database = {
           ref_table: string | null
           service_order_id: string | null
           title: string | null
+        }
+        Relationships: []
+      }
+      extrato_a_tratar: {
+        Row: {
+          amount: number | null
+          balance_after: number | null
+          bank_ref_id: string | null
+          bill_id: string | null
+          card_last_digits: string | null
+          counterparty_bank: string | null
+          counterparty_document: string | null
+          counterparty_name: string | null
+          description: string | null
+          e_cartao: boolean | null
+          id: string | null
+          installment_label: string | null
+          merchant_category: string | null
+          merchant_document: string | null
+          merchant_name: string | null
+          payee_mcc: string | null
+          payment_method: string | null
+          payment_reason: string | null
+          proposta_categoria: string | null
+          proposta_cliente_id: string | null
+          proposta_confianca: number | null
+          proposta_descricao: string | null
+          proposta_dre_group: string | null
+          proposta_favorecido_id: string | null
+          proposta_fornecedor_id: string | null
+          proposta_id: string | null
+          proposta_motivo: string | null
+          proposta_regra_id: string | null
+          proposta_titulo: string | null
+          provider_category: string | null
+          situacao: string | null
+          source_type: string | null
+          transaction_date: string | null
+          transaction_type: string | null
+          tx_status: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_review_queue_applied_rule_id_fkey"
+            columns: ["proposta_regra_id"]
+            isOneToOne: false
+            referencedRelation: "finance_rules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_review_queue_suggested_client_id_fkey"
+            columns: ["proposta_cliente_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_review_queue_suggested_payee_id_fkey"
+            columns: ["proposta_favorecido_id"]
+            isOneToOne: false
+            referencedRelation: "payees"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_review_queue_suggested_supplier_id_fkey"
+            columns: ["proposta_fornecedor_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      faturas_do_cartao: {
+        Row: {
+          bill_id: string | null
+          cartoes: string | null
+          compras: number | null
+          compras_parceladas: number | null
+          pagamento_data: string | null
+          pagamento_descricao: string | null
+          pagamento_id: string | null
+          pagamento_valor: number | null
+          primeira_compra: string | null
+          provider_account_id: string | null
+          total: number | null
+          ultima_compra: string | null
         }
         Relationships: []
       }
@@ -9631,6 +10182,28 @@ export type Database = {
           phone_normalized: string | null
           ultima_frase: string | null
           ultima_mensagem: string | null
+        }
+        Relationships: []
+      }
+      v_ai_custo_diario: {
+        Row: {
+          canal: string | null
+          chamadas: number | null
+          chamadas_reconciliadas: number | null
+          chamadas_sem_cache: number | null
+          dia: string | null
+          modelo: string | null
+          pct_com_cache: number | null
+          pct_reconciliado: number | null
+          tokens_entrada: number | null
+          tokens_gravados_no_cache: number | null
+          tokens_lidos_do_cache: number | null
+          tokens_preco_cheio: number | null
+          tokens_saida: number | null
+          usd_estimado: number | null
+          usd_por_chamada: number | null
+          usd_real_parcial: number | null
+          usd_total: number | null
         }
         Relationships: []
       }
@@ -9816,6 +10389,45 @@ export type Database = {
           sort?: number | null
         }
         Relationships: []
+      }
+      v_services_fiscal_efetivo: {
+        Row: {
+          active: boolean | null
+          cnae_efetivo: string | null
+          code_source: string | null
+          fiscal_verb: string | null
+          id: string | null
+          iss_rate_efetivo: number | null
+          iss_withheld_efetivo: boolean | null
+          name: string | null
+          national_tax_code_efetivo: string | null
+          sem_codigo_fiscal: boolean | null
+          service_code_efetivo: string | null
+          service_verb: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "services_fiscal_verb_fk"
+            columns: ["fiscal_verb"]
+            isOneToOne: false
+            referencedRelation: "service_fiscal_verbs"
+            referencedColumns: ["verb_slug"]
+          },
+          {
+            foreignKeyName: "services_verb_fk"
+            columns: ["service_verb"]
+            isOneToOne: false
+            referencedRelation: "service_verbs"
+            referencedColumns: ["slug"]
+          },
+          {
+            foreignKeyName: "services_verb_fk"
+            columns: ["service_verb"]
+            isOneToOne: false
+            referencedRelation: "v_service_verbs_status"
+            referencedColumns: ["slug"]
+          },
+        ]
       }
       vw_os_profitability: {
         Row: {
@@ -10070,6 +10682,7 @@ export type Database = {
       is_admin: { Args: { _user_id: string }; Returns: boolean }
       is_admin_or_financial: { Args: { _user_id: string }; Returns: boolean }
       is_external_seller: { Args: { _user_id: string }; Returns: boolean }
+      is_technician: { Args: { _user_id: string }; Returns: boolean }
       lines_missing_system: {
         Args: { p_service_order_id: string }
         Returns: {
@@ -10243,6 +10856,17 @@ export type Database = {
           price: number
           ref_date: string
           source: string
+        }[]
+      }
+      resolve_service_fiscal: {
+        Args: { p_service_id: string }
+        Returns: {
+          cnae: string
+          code_source: string
+          iss_rate: number
+          iss_withheld: boolean
+          national_tax_code: string
+          service_code: string
         }[]
       }
       revert_nfe_import: { Args: { p_note_id: string }; Returns: Json }
