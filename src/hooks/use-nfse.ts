@@ -74,9 +74,10 @@ async function chamar<T>(body: Record<string, unknown>): Promise<T> {
   return data as T;
 }
 
-export function useNfseHealth() {
+export function useNfseHealth(enabled = true) {
   return useQuery({
     queryKey: ['nfse-health'],
+    enabled,
     queryFn: async (): Promise<NfseHealth> => {
       const r = await chamar<{ data: NfseHealth }>({ action: 'nfse_health' });
       return r.data;

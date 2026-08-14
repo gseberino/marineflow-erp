@@ -60,7 +60,7 @@ import { PDFOptionsDialog } from '@/components/PDFOptionsDialog';
 import { RegisterDepositDialog } from '@/components/RegisterDepositDialog';
 import { CompletionSendDialog } from '@/components/CompletionSendDialog';
 import { FaturarOsDialog } from '@/components/fiscal/FaturarOsDialog';
-import { useAuth } from '@/hooks/use-auth';
+import { useOptionalAuth } from '@/hooks/use-auth';
 import { StockAlertDialog } from '@/components/StockAlertDialog';
 import { ReceivePODialog } from '@/components/ReceivePODialog';
 import { calculateDisplacement, calculateTravelCost, travelRatesFromSettings } from '@/lib/displacement';
@@ -398,7 +398,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   }>({ open: false, balance: 0, dueDate: null, clientName: null, clientPhone: null });
   // Assistente "Faturar OS" (NFS-e + NF-e): abre ao concluir, ANTES do aviso de saldo —
   // documento fiscal primeiro, cobrança depois. Só admin (a emissão é admin-only).
-  const { user: authUser } = useAuth();
+  const authUser = useOptionalAuth()?.user ?? null;
   const [faturarOsOpen, setFaturarOsOpen] = useState(false);
   const [completionPendente, setCompletionPendente] = useState<typeof completionSend | null>(null);
   const { data: vesselContacts } = useVesselContacts(form.vessel_id || undefined);

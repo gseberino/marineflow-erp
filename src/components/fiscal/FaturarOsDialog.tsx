@@ -50,7 +50,9 @@ export function FaturarOsDialog({ open, onOpenChange, serviceOrderId, orderNumbe
   const navigate = useNavigate();
   const qc = useQueryClient();
   const preflight = useBillingPreflight(serviceOrderId, open);
-  const health = useNfseHealth();
+  // Só consulta a Contora com o diálogo aberto — este componente fica montado (fechado)
+  // nas listas, e cada health é um round-trip real ao provedor.
+  const health = useNfseHealth(open);
   const emitirNfse = useEmitirNfse();
   const emitirNfe = useEmitirNfeDaOs();
 

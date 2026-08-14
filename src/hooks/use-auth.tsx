@@ -38,6 +38,18 @@ export function useAuth() {
   return ctx;
 }
 
+/**
+ * Variante que NÃO lança fora do AuthProvider — devolve null.
+ *
+ * Para componentes reusáveis que só usam o papel como REFINAMENTO opcional (ex.: o gancho
+ * "Faturar OS" do StatusQuickChange, que abre só para admin). Nos testes de página, que
+ * renderizam sem AuthProvider, o componente degrada para "sem papel" em vez de derrubar a
+ * árvore inteira. Quem PRECISA do usuário continua usando useAuth, que falha alto.
+ */
+export function useOptionalAuth(): AuthContextType | null {
+  return useContext(AuthContext);
+}
+
 function buildMinimalUser(authUser: { id: string; email?: string }): AuthUser {
   return {
     id: authUser.id,

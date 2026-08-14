@@ -12,7 +12,7 @@ import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import { CompletionSendDialog } from '@/components/CompletionSendDialog';
 import { FaturarOsDialog } from '@/components/fiscal/FaturarOsDialog';
-import { useAuth } from '@/hooks/use-auth';
+import { useOptionalAuth } from '@/hooks/use-auth';
 import type { ServiceOrderStatus } from '@/types/domain';
 
 interface Props {
@@ -27,7 +27,7 @@ export function StatusQuickChange({ orderId, currentStatus }: Props) {
   const cancelOrder = useCancelServiceOrder();
   const reopenOrder = useReopenServiceOrder();
 
-  const { user } = useAuth();
+  const user = useOptionalAuth()?.user ?? null;
   const [cancelOpen, setCancelOpen] = useState(false);
   const [reopenOpen, setReopenOpen] = useState(false);
   const [reason, setReason] = useState('');
