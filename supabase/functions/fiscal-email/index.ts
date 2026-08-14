@@ -125,8 +125,11 @@ Deno.serve(async (req) => {
     const provider = createFiscalProvider();
     const arts = await provider.listArtifacts(doc.document_type, doc.provider_document_id);
     if (!arts.ok) return jr({ error: "Falha ao listar artefatos na Contora: " + arts.error }, 502);
-    const pdfArt = arts.data.find((a) => a.type === "pdf_danfe" && a.available && a.downloadUrl);
-    const xmlArt = arts.data.find((a) => a.type === "xml_authorized" && a.available && a.downloadUrl);
+    // Tipos por família: NF-e = pdf_danfe/xml_authorized; NFS-e = pdf_nfse/xml_nfse.
+    const pdfTipos = ehNfse ? ["pdf_nfse", "pdf_danfe"] : ["pdf_danfe"];
+    const xmlTipos = ehNfse ? ["xml_nfse", "xml_authorized"] : ["xml_authorized"];
+    const pdfArt = arts.data.find((a) => pdfTipos.includes(a.type) && a.available && a.downloadUrl);
+    const xmlArt = arts.data.find((a) => xmlTipos.includes(a.type) && a.available && a.downloadUrl);
     if (!pdfArt?.downloadUrl) {
       return jr({ error: `O ${nomePdf} (PDF) ainda não está disponível para esta nota. Tente 'Atualizar status' e reenvie.` }, 502);
     }

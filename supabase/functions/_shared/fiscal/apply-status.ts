@@ -93,11 +93,18 @@ async function archiveArtifacts(
       return result;
     }
 
+    // Os TIPOS de artefato mudam por família (confirmado ao vivo em 13/08/2026 contra a
+    // API): NF-e/NFC-e usam xml_authorized/pdf_danfe; a NFS-e usa xml_nfse/pdf_nfse
+    // (+ xml_rps). Procurar só pelos nomes da NF-e faria o arquivamento legal da NFS-e
+    // falhar em silêncio para sempre.
+    const ehNfse = doc.document_type === "nfse";
+    const xmlTypes = ehNfse ? ["xml_nfse", "xml_authorized"] : ["xml_authorized"];
+    const pdfTypes = ehNfse ? ["pdf_nfse", "pdf_danfe"] : ["pdf_danfe"];
     const xmlArtifact = artifacts.data.find(
-      (a) => a.type === "xml_authorized" && a.available && a.downloadUrl,
+      (a) => xmlTypes.includes(a.type) && a.available && a.downloadUrl,
     );
     const pdfArtifact = artifacts.data.find(
-      (a) => a.type === "pdf_danfe" && a.available && a.downloadUrl,
+      (a) => pdfTypes.includes(a.type) && a.available && a.downloadUrl,
     );
 
     // As download_url da Contora exigem o Bearer token — usar fetchArtifact do
