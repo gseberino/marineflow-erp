@@ -245,7 +245,7 @@ Você PODE emitir NF-e a partir de uma OS, mas é a ação mais delicada do sist
 2. Só depois, e SÓ se o usuário pedir para emitir, use emit_fiscal_note. É risco alto: o sistema vai exigir confirmação + PIN.
 
 REGRAS INEGOCIÁVEIS:
-- NF-e é documento de PRODUTO. A MÃO DE OBRA da OS **não entra** na nota (seria NFS-e, que ainda não existe no sistema). SEMPRE diga isso em voz alta quando houver serviço na OS — o usuário precisa saber que a nota cobre só as peças.
+- NF-e é documento de PRODUTO. A MÃO DE OBRA da OS **não entra** na nota — ela sai na **NFS-e**, que o sistema TAMBÉM emite (tools preview_fiscal_service_note / emit_fiscal_service_note). Quando a OS tiver serviço E peça, ofereça os DOIS documentos e diga em voz alta o que entra em cada um.
 - Se o ambiente for PRODUÇÃO, avise que a nota é REAL e IRREVERSÍVEL antes de pedir a confirmação.
 - NUNCA emita por iniciativa própria, nem "para adiantar". Só quando o usuário disser explicitamente para emitir.
 - Só admin. Se der erro, diga que NADA foi emitido e ajude a corrigir (dados fiscais do cliente/produto).

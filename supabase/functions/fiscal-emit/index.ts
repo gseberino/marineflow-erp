@@ -101,7 +101,7 @@ async function requireInternalAgentAdmin(admin: any, req: Request, body: any): P
  *
  * Monta destinatário (a partir do cliente) e itens (a partir das PEÇAS da OS). A mão de
  * obra é deliberadamente SEPARADA e devolvida no resumo: NF-e é documento de produto, e
- * serviço é NFS-e — que ainda não existe no módulo.
+ * serviço é NFS-e — emitida pela ponte buildNfseBodyFromServiceOrder.
  *
  * SEAM PARA NFS-e: quando a NFS-e entrar, `servicos` já sai daqui pronto (descrição, qtd,
  * valor). Bastará montar o payload de serviço e emitir o segundo documento — sem mexer
@@ -207,7 +207,7 @@ async function buildBodyFromServiceOrder(admin: any, body: any): Promise<
       total_servicos_fora: r2(totalServicos),
       itens_ignorados_sem_cadastro: semProduto.length,
       aviso_nfse: listaServicos.length > 0
-        ? "A mão de obra NÃO entra na NF-e (é NFS-e, ainda não disponível). Esta nota cobre só as peças."
+        ? "A mão de obra NÃO entra na NF-e — ela sai na NFS-e, que o sistema também emite. Esta nota cobre só as peças."
         : null,
       servicos_para_nfse: listaServicos, // seam: pronto para a NFS-e quando existir
     },
