@@ -233,14 +233,14 @@ function LinhaDaNota({ doc, onCancelar, formatCurrency, formatDate }: {
           <>
             <Button
               size="sm" variant="outline" className="shrink-0"
-              onClick={() => artefato.mutate({ documentId: doc.id, tipo: 'xml' })}
+              onClick={() => artefato.mutate({ documentId: doc.id, tipo: 'xml', numero: doc.number, serie: doc.series })}
               disabled={artefato.isPending}
             >
               <Download className="mr-1.5 h-4 w-4" />XML
             </Button>
             <Button
               size="sm" variant="outline" className="shrink-0"
-              onClick={() => artefato.mutate({ documentId: doc.id, tipo: 'pdf' })}
+              onClick={() => artefato.mutate({ documentId: doc.id, tipo: 'pdf', numero: doc.number, serie: doc.series })}
               disabled={artefato.isPending}
             >
               <Download className="mr-1.5 h-4 w-4" />DANFSe

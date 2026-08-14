@@ -99,9 +99,20 @@ Deno.serve(async (req) => {
     }
     if (!doc.provider_document_id) return jr({ error: "Documento ainda não foi enviado ao provedor" }, 422);
 
+    // NFS-e e NF-e compartilham este envio; o que muda é o vocabulário (documento, PDF) e o
+    // lugar do e-mail no payload (NF-e tem `recipient`, NFS-e tem `taker`).
+    const ehNfse = doc.document_type === "nfse";
+    const nomeDoc = ehNfse ? "NFS-e" : "NF-e";
+    const nomePdf = ehNfse ? "DANFSe" : "DANFE";
+    const prefixoArquivo = ehNfse ? "NFSe" : "NFe";
+
     // Destinatário: e-mail explícito no corpo → e-mail do payload → e-mail do cliente.
     let to = String(body.to ?? "").trim();
-    if (!to) to = String(doc.request_payload?.recipient?.email ?? "").trim();
+    if (!to) {
+      to = String(
+        doc.request_payload?.recipient?.email ?? doc.request_payload?.taker?.email ?? "",
+      ).trim();
+    }
     if (!to && doc.client_id) {
       const { data: cli } = await admin.from("clients").select("email").eq("id", doc.client_id).maybeSingle();
       to = String(cli?.email ?? "").trim();
@@ -117,15 +128,15 @@ Deno.serve(async (req) => {
     const pdfArt = arts.data.find((a) => a.type === "pdf_danfe" && a.available && a.downloadUrl);
     const xmlArt = arts.data.find((a) => a.type === "xml_authorized" && a.available && a.downloadUrl);
     if (!pdfArt?.downloadUrl) {
-      return jr({ error: "A DANFE (PDF) ainda não está disponível para esta nota. Tente 'Atualizar status' e reenvie." }, 502);
+      return jr({ error: `O ${nomePdf} (PDF) ainda não está disponível para esta nota. Tente 'Atualizar status' e reenvie.` }, 502);
     }
 
     // deno-lint-ignore no-explicit-any
     const attachments: any[] = [];
     const pdfFetched = await provider.fetchArtifact(pdfArt.downloadUrl);
-    if (!pdfFetched.ok) return jr({ error: "Falha ao baixar a DANFE: " + pdfFetched.error }, 502);
+    if (!pdfFetched.ok) return jr({ error: `Falha ao baixar o ${nomePdf}: ` + pdfFetched.error }, 502);
     attachments.push({
-      filename: `NFe-${doc.number}.pdf`,
+      filename: `${prefixoArquivo}-${doc.number}.pdf`,
       content: toBase64(pdfFetched.data.bytes),
       encoding: "base64",
       contentType: "application/pdf",
@@ -136,7 +147,7 @@ Deno.serve(async (req) => {
       const xmlFetched = await provider.fetchArtifact(xmlArt.downloadUrl);
       if (xmlFetched.ok) {
         attachments.push({
-          filename: `NFe-${doc.number}.xml`,
+          filename: `${prefixoArquivo}-${doc.number}.xml`,
           content: toBase64(xmlFetched.data.bytes),
           encoding: "base64",
           contentType: "application/xml",
@@ -172,10 +183,10 @@ Deno.serve(async (req) => {
       await transporter.sendMail({
         from: `${fromName} <${fromEmail}>`,
         to,
-        subject: `NF-e nº ${numero} — ${fromName}`,
+        subject: `${nomeDoc} nº ${numero} — ${fromName}`,
         // \n aqui é seguro: o Nodemailer normaliza para \r\n (CRLF) no MIME.
         text:
-          `Olá,\n\nSegue em anexo a Nota Fiscal Eletrônica nº ${numero} (DANFE em PDF${temXml ? " e o arquivo XML" : ""}).` +
+          `Olá,\n\nSegue em anexo a ${ehNfse ? "Nota Fiscal de Serviço Eletrônica" : "Nota Fiscal Eletrônica"} nº ${numero} (${nomePdf} em PDF${temXml ? " e o arquivo XML" : ""}).` +
           (extra ? `\n\n${extra}` : "") +
           `\n\nAtenciosamente,\n${fromName}`,
         attachments,

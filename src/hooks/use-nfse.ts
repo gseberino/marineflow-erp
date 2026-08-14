@@ -145,10 +145,35 @@ export function useCancelarNfse() {
 export function useAtualizarStatusNfse() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async () => await chamar({ action: 'reconcile' }),
-    onSuccess: () => {
+    mutationFn: async () => {
+      // A sincronização mora na function `fiscal-reconcile` (a mesma que o cron usa), com
+      // `document_id` por nota. O `fiscal-emit` NÃO tem action "reconcile" — a versão
+      // anterior deste hook chamava uma action inexistente, caía no default (emitir NF-e)
+      // e devolvia um erro de validação sem relação com o botão.
+      const { data: pendentes, error } = await supabase
+        .from('issued_fiscal_documents')
+        .select('id')
+        .eq('document_type', 'nfse')
+        .not('provider_document_id', 'is', null)
+        .in('status', ['draft', 'queued', 'processing'])
+        .order('created_at', { ascending: false })
+        .limit(20);
+      if (error) throw error;
+      for (const d of pendentes ?? []) {
+        const { error: err } = await supabase.functions.invoke('fiscal-reconcile', {
+          body: { document_id: d.id },
+        });
+        if (err) throw new Error(`Falha ao sincronizar uma das notas: ${err.message}`);
+      }
+      return { sincronizados: pendentes?.length ?? 0 };
+    },
+    onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['nfse-documentos'] });
-      toast.success('Status sincronizado.');
+      toast.success(
+        r.sincronizados > 0
+          ? `Status sincronizado (${r.sincronizados} nota${r.sincronizados > 1 ? 's' : ''}).`
+          : 'Nenhuma nota pendente de sincronização.',
+      );
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -156,21 +181,49 @@ export function useAtualizarStatusNfse() {
 
 export function useArtefatoNfse() {
   return useMutation({
-    mutationFn: async (v: { documentId: string; tipo: 'xml' | 'pdf' }) => {
+    mutationFn: async (v: {
+      documentId: string;
+      tipo: 'xml' | 'pdf';
+      numero?: number | null;
+      serie?: number | null;
+    }) => {
       // O download passa pelo servidor porque as URLs da Contora são autenticadas (Bearer):
       // abrir no navegador devolve "token ausente".
-      const r = await chamar<{ data: { filename: string; content_base64: string; content_type: string } }>({
-        action: 'artifact',
-        document_id: v.documentId,
-        artifact_type: v.tipo === 'xml' ? 'xml_authorized' : 'pdf_danfse',
+      //
+      // Contrato REAL do handleArtifact (fiscal-emit): campo `artifact` com
+      // 'xml_authorized' | 'pdf_danfe' (o DANFSe da Contora sai no MESMO slot pdf_danfe da
+      // DANFE) e resposta em Blob cru com Content-Disposition — não JSON/base64. A versão
+      // anterior mandava `artifact_type: 'pdf_danfse'` e esperava JSON: quebrado nos dois
+      // eixos.
+      const { data, error } = await supabase.functions.invoke('fiscal-emit', {
+        body: {
+          action: 'artifact',
+          document_id: v.documentId,
+          artifact: v.tipo === 'xml' ? 'xml_authorized' : 'pdf_danfe',
+        },
       });
-      return r.data;
+      if (error) {
+        const resposta = (error as { context?: Response }).context;
+        if (resposta && typeof resposta.json === 'function') {
+          try {
+            const corpo = await resposta.json();
+            if (corpo?.error) throw new Error(String(corpo.error));
+          } catch (e) {
+            if (e instanceof Error && !e.message.includes('non-2xx')) throw e;
+          }
+        }
+        throw error;
+      }
+      const ehXml = v.tipo === 'xml';
+      const tipoConteudo = ehXml ? 'application/xml' : 'application/pdf';
+      const blob = data instanceof Blob
+        ? data
+        : new Blob([typeof data === 'string' ? data : JSON.stringify(data)], { type: tipoConteudo });
+      const sufixo = v.numero != null ? `${v.serie ?? 1}-${v.numero}` : v.documentId.slice(0, 8);
+      return { blob, filename: `NFSe-${sufixo}.${ehXml ? 'xml' : 'pdf'}` };
     },
     onSuccess: (d) => {
-      const bin = atob(d.content_base64);
-      const bytes = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      const url = URL.createObjectURL(new Blob([bytes], { type: d.content_type }));
+      const url = URL.createObjectURL(d.blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = d.filename;

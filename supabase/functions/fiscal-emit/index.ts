@@ -240,6 +240,11 @@ Deno.serve(async (req) => {
   if (!caller) return jr({ error: "unauthorized" }, 401);
 
   try {
+    // [FATURAR-OS] Pré-voo CONJUNTO da OS (NFS-e + NF-e), sem emitir nada. Precisa vir ANTES
+    // das pontes abaixo: elas mutam o body e retornam erro no primeiro documento com
+    // problema, enquanto o pré-voo quer o retrato dos DOIS lados de uma vez.
+    if (body.action === "billing_preflight") return await handleBillingPreflight(admin, body);
+
     // Ponte OS → payload: quando vem service_order_id e não vieram itens, montamos o
     // destinatário e os itens a partir da Ordem de Serviço (peças). Assim o agente não
     // precisa saber nada de fiscal — ele só diz "de qual OS".
@@ -757,7 +762,7 @@ async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
   // Linhas de serviço COM o cadastro fiscal junto — é dele que saem código, CNAE e alíquota.
   // O verbo fiscal vem embutido porque o cadastro do serviço pode estar vazio e ainda assim
   // haver código: quem responde é o EFETIVO (próprio → verbo), não a coluna do serviço.
-  const { data: linhas } = await admin
+  const { data: linhas, error: linhasErr } = await admin
     .from("service_order_services")
     .select(
       "name_snapshot, description_snapshot, quantity, unit_price_snapshot, line_total, "
@@ -766,6 +771,16 @@ async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
       + "default_iss_rate, default_iss_withheld))",
     )
     .eq("service_order_id", soId);
+  // Sem esta checagem, um 400 do PostgREST (ex.: embed em tabela que não existe no schema
+  // cache) viraria `linhas = null` → "OS sem linhas de serviço", um diagnóstico FALSO que já
+  // aconteceu quando a migration dos verbos fiscais ainda não tinha sido aplicada.
+  if (linhasErr) {
+    return {
+      ok: false,
+      status: 500,
+      error: "Falha ao consultar as linhas de serviço da OS: " + linhasErr.message,
+    };
+  }
 
   const lista = ((linhas as any[]) || []).filter((l) => Number(l.line_total) > 0);
   if (lista.length === 0) {
@@ -877,6 +892,99 @@ async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
       aviso_nfe: "As peças da OS não entram na NFS-e — elas são NF-e, documento de produto.",
     },
   };
+}
+
+/**
+ * [FATURAR-OS] Pré-voo conjunto da OS: o retrato dos DOIS documentos (NFS-e dos serviços,
+ * NF-e das peças) de uma só vez, SEM emitir, SEM reservar numeração, SEM gastar cota.
+ *
+ * É o que alimenta o checklist do assistente "Faturar OS": para cada documento diz se ele se
+ * aplica (há linhas daquele tipo com valor?), se está pronto (payload montaria e validaria?)
+ * e, quando não está, QUAL é a pendência — com os mesmos textos didáticos das pontes.
+ * Também devolve os documentos fiscais já emitidos desta OS, para o assistente mostrar o que
+ * existe em vez de oferecer uma segunda emissão às cegas.
+ *
+ * Local e barato de propósito: não consulta a Contora (o verde da conta/certificado é o
+ * `nfse_health`, que a tela chama separado e cacheia).
+ */
+// deno-lint-ignore no-explicit-any
+async function handleBillingPreflight(admin: any, body: any): Promise<Response> {
+  const soId = body.service_order_id ? String(body.service_order_id) : null;
+  if (!soId) return jr({ error: "service_order_id é obrigatório" }, 422);
+
+  const { data: so, error: soErr } = await admin
+    .from("service_orders")
+    .select("id, service_order_number, status, client_id, invoicing_status, grand_total")
+    .eq("id", soId)
+    .maybeSingle();
+  if (soErr) return jr({ error: "Falha ao consultar a OS: " + soErr.message }, 500);
+  if (!so) return jr({ error: "Ordem de serviço não encontrada." }, 404);
+
+  const { data: docs } = await admin
+    .from("issued_fiscal_documents")
+    .select("id, document_type, status, number, series, environment, status_message, created_at")
+    .eq("origin_type", "service_order")
+    .eq("origin_id", soId)
+    .order("created_at", { ascending: false });
+
+  // ── NFS-e (serviços) ──
+  const nfse: Record<string, unknown> = { aplicavel: true, pronto: false };
+  const ponteNfse = await buildNfseBodyFromServiceOrder(admin, { service_order_id: soId });
+  if (!ponteNfse.ok) {
+    if (ponteNfse.status === 422 && ponteNfse.error.includes("não tem linhas de serviço")) {
+      nfse.aplicavel = false;
+      nfse.motivo = "A OS não tem linhas de serviço com valor.";
+    } else {
+      nfse.erro = ponteNfse.error;
+      nfse.details = ponteNfse.details ?? null;
+    }
+  } else {
+    nfse.resumo = ponteNfse.resumo;
+    const prep = await prepareNfsePayload(admin, ponteNfse.body);
+    if (!prep.ok) {
+      nfse.erro = prep.error;
+      nfse.details = prep.details ?? null;
+    } else {
+      nfse.pronto = true;
+    }
+  }
+
+  // ── NF-e (peças) ──
+  const nfe: Record<string, unknown> = { aplicavel: true, pronto: false };
+  const ponteNfe = await buildBodyFromServiceOrder(admin, { service_order_id: soId });
+  if (!ponteNfe.ok) {
+    if (ponteNfe.status === 422 && ponteNfe.error.includes("não tem peças")) {
+      nfe.aplicavel = false;
+      nfe.motivo = "A OS não tem peças de catálogo.";
+    } else {
+      nfe.erro = ponteNfe.error;
+    }
+  } else {
+    nfe.resumo = ponteNfe.resumo;
+    const prep = await prepareNfePayload(admin, ponteNfe.body);
+    if (!prep.ok) {
+      nfe.erro = prep.error;
+    } else {
+      nfe.pronto = true;
+    }
+  }
+
+  return jr({
+    ok: true,
+    data: {
+      os: {
+        id: so.id,
+        numero: so.service_order_number,
+        status: so.status,
+        invoicing_status: so.invoicing_status,
+        grand_total: so.grand_total,
+      },
+      ambiente: readFiscalEnvironment(),
+      nfse,
+      nfe,
+      documentos: docs ?? [],
+    },
+  });
 }
 
 /**
