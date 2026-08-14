@@ -17,6 +17,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { PDFOptionsDialog } from '@/components/PDFOptionsDialog';
 import { WhatsAppSendHistoryDialog } from '@/components/WhatsAppSendHistoryDialog';
 import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/SendViaWhatsAppDialog';
+import { FaturarOsDialog } from '@/components/fiscal/FaturarOsDialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useWhatsAppSendStatusMap } from '@/hooks/use-whatsapp-send-log';
 import { usePDFData, fetchPDFData } from '@/hooks/use-pdf';
@@ -83,33 +84,12 @@ export default function ServiceOrderList() {
     }
   };
 
-  // Faturar: leva os PRODUTOS da OS para a emissão de NF-e pré-preenchida
-  // (serviços/mão de obra ficam de fora — NF-e é de produto).
-  const handleInvoice = async (so: any) => {
-    try {
-      const { data: parts, error } = await supabase
-        .from('service_order_parts')
-        .select('product_id, quantity, unit_sale_snapshot')
-        .eq('service_order_id', so.id);
-      if (error) throw error;
-      const items = (parts || [])
-        .filter((p: any) => p.product_id)
-        .map((p: any) => ({ productId: p.product_id, quantity: Number(p.quantity) || 0, unitPrice: Number(p.unit_sale_snapshot) || 0 }));
-      if (!items.length) { toast.error('Esta OS não tem produtos para faturar (só serviços/mão de obra).'); return; }
-      navigate('/fiscal/emissao', {
-        state: { invoiceFrom: {
-          serviceOrderId: so.id,
-          clientId: so.client_id || so.clients?.id || null,
-          items,
-          // Pedido do cliente informado na OS/orcamento segue ate a NF-e.
-          purchaseOrder: so.customer_po_number || '',
-          buyerName: so.customer_buyer_name || so.requested_by_name || '',
-          orderNumber: so.service_order_number || null,
-        } },
-      });
-    } catch (e: any) {
-      toast.error(e?.message || 'Erro ao preparar o faturamento');
-    }
+  // Faturar: abre o assistente "Faturar OS" — NFS-e (serviços) + NF-e (peças), com
+  // checklist do que falta. O caminho antigo (só NF-e pré-preenchida na página fiscal)
+  // continua acessível DENTRO do assistente ("conferir campo a campo").
+  const [faturarTarget, setFaturarTarget] = useState<{ id: string; numero: string | null } | null>(null);
+  const handleInvoice = (so: any) => {
+    setFaturarTarget({ id: so.id, numero: so.service_order_number || null });
   };
 
   const [pdfTarget, setPdfTarget] = useState<{ id: string; type: 'quote' | 'service_order' } | null>(null);
@@ -640,7 +620,7 @@ export default function ServiceOrderList() {
                               className="gap-2 text-emerald-700 font-medium focus:text-emerald-700 focus:bg-emerald-50"
                             >
                               <Receipt className="h-4 w-4" />
-                              Emitir NF-e / Faturar
+                              Faturar (NFS-e + NF-e)
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => handleDuplicate(so.id)} className="gap-2">
                               <Copy className="h-4 w-4" />
@@ -758,6 +738,14 @@ export default function ServiceOrderList() {
         open={!!whatsAppTarget}
         onOpenChange={v => { if (!v) setWhatsAppTarget(null); }}
         target={whatsAppTarget}
+      />
+
+      {/* Faturar OS — NFS-e (serviços) + NF-e (peças) com checklist */}
+      <FaturarOsDialog
+        open={!!faturarTarget}
+        onOpenChange={v => { if (!v) setFaturarTarget(null); }}
+        serviceOrderId={faturarTarget?.id ?? null}
+        orderNumber={faturarTarget?.numero ?? null}
       />
 
       {/* Duplicate mode dialog — shown only when duplicating from the OS tab */}

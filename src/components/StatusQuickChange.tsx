@@ -11,6 +11,8 @@ import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import { CompletionSendDialog } from '@/components/CompletionSendDialog';
+import { FaturarOsDialog } from '@/components/fiscal/FaturarOsDialog';
+import { useAuth } from '@/hooks/use-auth';
 import type { ServiceOrderStatus } from '@/types/domain';
 
 interface Props {
@@ -25,12 +27,19 @@ export function StatusQuickChange({ orderId, currentStatus }: Props) {
   const cancelOrder = useCancelServiceOrder();
   const reopenOrder = useReopenServiceOrder();
 
+  const { user } = useAuth();
   const [cancelOpen, setCancelOpen] = useState(false);
   const [reopenOpen, setReopenOpen] = useState(false);
   const [reason, setReason] = useState('');
   const [completionSend, setCompletionSend] = useState<{
     open: boolean; osNumber: string; balance: number; dueDate: string | null; clientName: string | null; clientPhone: string | null;
   }>({ open: false, osNumber: '', balance: 0, dueDate: null, clientName: null, clientPhone: null });
+  // Assistente "Faturar OS" (NFS-e + NF-e). Abre ao concluir, ANTES do aviso de WhatsApp —
+  // primeiro o documento fiscal, depois a cobrança. Só para admin: a página fiscal e a
+  // emissão são admin-only, oferecer a outro papel seria porta para um 401.
+  const [faturar, setFaturar] = useState<{ open: boolean; osNumber: string | null }>({ open: false, osNumber: null });
+  // O prompt de WhatsApp fica ARMADO aqui enquanto o assistente está aberto.
+  const [completionPendente, setCompletionPendente] = useState<typeof completionSend | null>(null);
 
   const cfg = statusConfig[currentStatus];
   const validTransitions = STATUS_TRANSITIONS[currentStatus] ?? [];
@@ -119,17 +128,26 @@ export function StatusQuickChange({ orderId, currentStatus }: Props) {
         ]);
         const pend = (recRows || []).filter((r: any) => !r.is_deposit && r.status !== 'paid');
         const outstanding = pend.reduce((s: number, r: any) => s + Number(r.balance_amount || 0), 0);
+        const osNumber = (so as any)?.service_order_number || '';
+        let promptSaldo: typeof completionSend | null = null;
         if (outstanding > 0.009) {
           const dueRow = pend.slice().sort((a: any, b: any) => String(a.due_date).localeCompare(String(b.due_date)))[0];
           const cli = (so as any)?.clients;
-          setCompletionSend({
+          promptSaldo = {
             open: true,
-            osNumber: (so as any)?.service_order_number || '',
+            osNumber,
             balance: Math.round(outstanding * 100) / 100,
             dueDate: dueRow?.due_date ?? null,
             clientName: cli?.name ?? null,
             clientPhone: cli?.whatsapp || cli?.phone || null,
-          });
+          };
+        }
+        if (user?.role === 'admin') {
+          // Fiscal primeiro; o aviso de saldo (se houver) fica armado para depois.
+          setCompletionPendente(promptSaldo);
+          setFaturar({ open: true, osNumber });
+        } else if (promptSaldo) {
+          setCompletionSend(promptSaldo);
         }
       }
     } catch (err: any) {
@@ -262,6 +280,21 @@ export function StatusQuickChange({ orderId, currentStatus }: Props) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Faturar OS (NFS-e + NF-e) — ao concluir pela lista, admin. Ao fechar, dispara o
+          prompt de saldo que ficou armado. */}
+      <FaturarOsDialog
+        open={faturar.open}
+        onOpenChange={(v) => {
+          setFaturar(prev => ({ ...prev, open: v }));
+          if (!v && completionPendente) {
+            setCompletionSend(completionPendente);
+            setCompletionPendente(null);
+          }
+        }}
+        serviceOrderId={orderId}
+        orderNumber={faturar.osNumber}
+      />
 
       {/* Prompt opt-in de conclusão (avisar cliente + saldo) — ao concluir pela lista */}
       <CompletionSendDialog

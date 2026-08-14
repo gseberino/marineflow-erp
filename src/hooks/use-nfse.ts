@@ -46,6 +46,10 @@ export interface NfseHealth {
  * motivo real aqui é justamente o que ensina a corrigir ("falta o percentual do Simples",
  * "códigos de tributação diferentes"). Sem isto, toda rejeição vira a mesma frase inútil.
  */
+export async function chamarFiscalEmit<T>(body: Record<string, unknown>): Promise<T> {
+  return await chamar<T>(body);
+}
+
 async function chamar<T>(body: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabase.functions.invoke('fiscal-emit', { body });
   if (error) {

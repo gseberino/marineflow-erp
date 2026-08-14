@@ -59,6 +59,8 @@ import type { PDFOptions } from '@/lib/pdf-generator';
 import { PDFOptionsDialog } from '@/components/PDFOptionsDialog';
 import { RegisterDepositDialog } from '@/components/RegisterDepositDialog';
 import { CompletionSendDialog } from '@/components/CompletionSendDialog';
+import { FaturarOsDialog } from '@/components/fiscal/FaturarOsDialog';
+import { useAuth } from '@/hooks/use-auth';
 import { StockAlertDialog } from '@/components/StockAlertDialog';
 import { ReceivePODialog } from '@/components/ReceivePODialog';
 import { calculateDisplacement, calculateTravelCost, travelRatesFromSettings } from '@/lib/displacement';
@@ -394,6 +396,11 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [completionSend, setCompletionSend] = useState<{
     open: boolean; balance: number; dueDate: string | null; clientName: string | null; clientPhone: string | null;
   }>({ open: false, balance: 0, dueDate: null, clientName: null, clientPhone: null });
+  // Assistente "Faturar OS" (NFS-e + NF-e): abre ao concluir, ANTES do aviso de saldo —
+  // documento fiscal primeiro, cobrança depois. Só admin (a emissão é admin-only).
+  const { user: authUser } = useAuth();
+  const [faturarOsOpen, setFaturarOsOpen] = useState(false);
+  const [completionPendente, setCompletionPendente] = useState<typeof completionSend | null>(null);
   const { data: vesselContacts } = useVesselContacts(form.vessel_id || undefined);
 
   // Part inline-card state (matches the services pattern)
@@ -1089,17 +1096,26 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           ]);
           const pend = (recRows || []).filter((r: any) => !r.is_deposit && r.status !== 'paid');
           const outstanding = pend.reduce((s: number, r: any) => s + Number(r.balance_amount || 0), 0);
+          let promptSaldo: typeof completionSend | null = null;
           if (outstanding > 0.009) {
             const dueRow = pend.slice().sort((a: any, b: any) =>
               String(a.due_date).localeCompare(String(b.due_date)))[0];
             const cli = (cliRes as any).data;
-            setCompletionSend({
+            promptSaldo = {
               open: true,
               balance: Math.round(outstanding * 100) / 100,
               dueDate: dueRow?.due_date ?? null,
               clientName: cli?.name ?? null,
               clientPhone: cli?.whatsapp || cli?.phone || null,
-            });
+            };
+          }
+          if (authUser?.role === 'admin') {
+            // Fiscal primeiro; o aviso de saldo (se houver) fica armado para quando o
+            // assistente fechar.
+            setCompletionPendente(promptSaldo);
+            setFaturarOsOpen(true);
+          } else if (promptSaldo) {
+            setCompletionSend(promptSaldo);
           }
         } catch (err) {
           console.error('completion prompt prep failed', err);
@@ -1801,6 +1817,23 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           appliedConditionLabel={form.payment_conditions || ''}
           installments={installmentSource ?? undefined}
           scheduledEndAt={form.scheduled_end_at || null}
+        />
+      )}
+
+      {/* Faturar OS (NFS-e + NF-e) — ao concluir, admin. Fechou → dispara o aviso de saldo
+          que ficou armado. */}
+      {!isNew && orderId && (
+        <FaturarOsDialog
+          open={faturarOsOpen}
+          onOpenChange={(v) => {
+            setFaturarOsOpen(v);
+            if (!v && completionPendente) {
+              setCompletionSend(completionPendente);
+              setCompletionPendente(null);
+            }
+          }}
+          serviceOrderId={orderId}
+          orderNumber={orderData?.service_order_number || null}
         />
       )}
 

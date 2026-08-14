@@ -34,6 +34,7 @@ import { PurchaseNeedsDialog } from '@/components/purchasing/PurchaseNeedsDialog
 import { PDFOptionsDialog, type PDFAction } from '@/components/PDFOptionsDialog';
 import { WhatsAppSendHistoryDialog } from '@/components/WhatsAppSendHistoryDialog';
 import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/SendViaWhatsAppDialog';
+import { FaturarOsDialog } from '@/components/fiscal/FaturarOsDialog';
 import { exportToCSV } from '@/lib/export';
 import { PageShell } from '@/v2/components/PageShell';
 import { StatusChip } from '@/v2/components/StatusChip';
@@ -121,6 +122,7 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
   const [historyTarget, setHistoryTarget] = useState<{ id: string; number: string } | null>(null);
   const [whatsAppTarget, setWhatsAppTarget] = useState<SendViaWhatsAppTarget | null>(null);
   const [duplicateDialogId, setDuplicateDialogId] = useState<string | null>(null);
+  const [faturarTarget, setFaturarTarget] = useState<{ id: string; numero: string | null } | null>(null);
   const [stockConfirm, setStockConfirm] = useState<{ id: string; number: string } | null>(null);
   const [bulkDownloading, setBulkDownloading] = useState(false);
   const pdfGenCountRef = useRef(0);
@@ -237,35 +239,10 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
   };
 
   // ── Ações (paridade v1, mesmos handlers) ─────────────────────────────────
-  const handleInvoice = async (so: SORow) => {
-    try {
-      const { data: parts, error: err } = await supabase
-        .from('service_order_parts')
-        .select('product_id, quantity, unit_sale_snapshot')
-        .eq('service_order_id', so.id);
-      if (err) throw err;
-      const items = (parts ?? [])
-        .filter((p) => p.product_id)
-        .map((p) => ({ productId: p.product_id, quantity: Number(p.quantity) || 0, unitPrice: Number(p.unit_sale_snapshot) || 0 }));
-      if (!items.length) {
-        toast.error(isOrders
-          ? 'Esta OS não tem produtos para faturar (só serviços/mão de obra).'
-          : 'Este orçamento não tem produtos para faturar (só serviços/mão de obra).');
-        return;
-      }
-      navigate('/fiscal/emissao', {
-        state: { invoiceFrom: {
-          serviceOrderId: so.id,
-          clientId: so.client_id || so.clients?.id || null,
-          items,
-          purchaseOrder: so.customer_po_number || '',
-          buyerName: so.customer_buyer_name || so.requested_by_name || '',
-          orderNumber: so.service_order_number || null,
-        } },
-      });
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Erro ao preparar o faturamento');
-    }
+  // Faturar: abre o assistente "Faturar OS" — NFS-e (serviços) + NF-e (peças), com
+  // checklist do que falta. A NF-e campo a campo continua acessível dentro do assistente.
+  const handleInvoice = (so: SORow) => {
+    setFaturarTarget({ id: so.id, numero: so.service_order_number || null });
   };
 
   const executeDuplicate = async (soId: string, dupMode: 'quote' | 'order') => {
@@ -502,7 +479,7 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
           </DropdownMenuItem>
         )}
         <DropdownMenuItem onClick={() => handleInvoice(so)} className="gap-2 font-medium text-success focus:text-success">
-          <Receipt className="h-4 w-4" /> Emitir NF-e / Faturar
+          <Receipt className="h-4 w-4" /> Faturar (NFS-e + NF-e)
         </DropdownMenuItem>
         <DropdownMenuItem
           onClick={() => (isOrders ? setDuplicateDialogId(so.id) : executeDuplicate(so.id, 'quote'))}
@@ -850,6 +827,14 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Faturar OS — NFS-e (serviços) + NF-e (peças) com checklist */}
+      <FaturarOsDialog
+        open={!!faturarTarget}
+        onOpenChange={(v) => { if (!v) setFaturarTarget(null); }}
+        serviceOrderId={faturarTarget?.id ?? null}
+        orderNumber={faturarTarget?.numero ?? null}
+      />
     </V2Shell>
   );
 }

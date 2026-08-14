@@ -60,7 +60,7 @@ export function NfseSection({ serviceOrderId }: { serviceOrderId?: string | null
               <p className="text-sm text-muted-foreground">
                 {serviceOrderId
                   ? 'A partir dos serviços desta OS. As peças não entram.'
-                  : 'Abra uma Ordem de Serviço para emitir a partir dela.'}
+                  : 'Use "Faturar (NFS-e + NF-e)" na lista de OS/Orçamentos — ou conclua a OS, que o assistente abre sozinho.'}
               </p>
             </div>
             <Button
