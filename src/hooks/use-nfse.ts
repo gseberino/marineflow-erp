@@ -19,6 +19,18 @@ export interface DocumentoNfse {
   status_message: string | null;
   created_at: string | null;
   origin_id: string | null;
+  /**
+   * `number` é o RPS (numeração NOSSA, reservada antes do envio). O número da NFS-e em si
+   * é NACIONAL, gerado pela Sefin na autorização — chega via status/reconcile e fica em
+   * provider_status (nfse_number/display_number). Confundir os dois é erro clássico.
+   */
+  provider_status?: { nfse_number?: string | null; display_number?: string | null } | null;
+}
+
+/** Número nacional da NFS-e (pós-autorização), quando já sincronizado. */
+export function numeroNacionalNfse(doc: DocumentoNfse): string | null {
+  const n = doc.provider_status?.nfse_number ?? doc.provider_status?.display_number ?? null;
+  return n != null && String(n).trim() !== '' ? String(n) : null;
 }
 
 export interface NfseHealth {
@@ -95,7 +107,7 @@ export function useNfseDocumentos() {
     queryFn: async (): Promise<DocumentoNfse[]> => {
       const { data, error } = await supabase
         .from('issued_fiscal_documents')
-        .select('id, number, series, status, environment, status_message, created_at, origin_id')
+        .select('id, number, series, status, environment, status_message, created_at, origin_id, provider_status')
         .eq('document_type', 'nfse')
         .order('created_at', { ascending: false })
         .order('id', { ascending: true })

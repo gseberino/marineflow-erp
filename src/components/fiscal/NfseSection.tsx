@@ -21,7 +21,7 @@ import {
 import { useI18n } from '@/i18n';
 import {
   useNfseHealth, useNfseDocumentos, useEmitirNfse, useCancelarNfse,
-  useArtefatoNfse, useAtualizarStatusNfse,
+  useArtefatoNfse, useAtualizarStatusNfse, numeroNacionalNfse,
   MIN_JUSTIFICATIVA, MAX_JUSTIFICATIVA,
   type DocumentoNfse,
 } from '@/hooks/use-nfse';
@@ -217,8 +217,12 @@ function LinhaDaNota({ doc, onCancelar, formatCurrency, formatDate }: {
     <Card className="p-3">
       <div className="flex flex-wrap items-center gap-3">
         <div className="min-w-0 flex-1">
+          {/* O número que vale é o NACIONAL (gerado pela Sefin na autorização); o RPS é a
+              nossa numeração interna de envio. Antes de autorizar só existe o RPS. */}
           <p className="truncate font-medium">
-            nº {doc.number ?? '—'} · série {doc.series ?? '—'}
+            {numeroNacionalNfse(doc)
+              ? <>NFS-e nº {numeroNacionalNfse(doc)} <span className="font-normal text-muted-foreground">· RPS {doc.number ?? '—'}/{doc.series ?? '—'}</span></>
+              : <>RPS {doc.number ?? '—'} · série {doc.series ?? '—'}</>}
           </p>
           <p className="truncate text-xs text-muted-foreground">
             {doc.created_at ? formatDate(doc.created_at) : ''}

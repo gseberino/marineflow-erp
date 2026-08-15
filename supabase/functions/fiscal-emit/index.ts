@@ -1509,11 +1509,43 @@ async function handleNfseHealth(admin: any): Promise<Response> {
       + "competência, que só a contabilidade sabe.",
     );
   }
-  if (settings?.municipal_registration && settings?.nfse_municipal_registration_in_cnc !== false) {
-    pendenciasLocais.push(
-      "A inscrição municipal será enviada. Se o município não tiver dados no CNC NFS-e, o "
-      + "envio volta com E0120 — nesse caso desmarque 'inscrição municipal registrada no CNC'.",
-    );
+  // LIÇÕES do incidente E0116/E0121 (13-14/08/2026, chamado Contora):
+  // - A IM do prestador vem do CADASTRO da empresa na Contora, nunca do payload.
+  // - O matcher do CNC é LITERAL (município+CNPJ+IM): a IM tem que estar na grafia exata
+  //   do CNC — 15 posições com zeros à esquerda. "352217" ≠ "000000000352217" e a Sefin
+  //   devolve E0116 dizendo que a IM "não foi informada", mesmo com a tag presente.
+  const imLocal = String(settings?.municipal_registration ?? "").trim();
+  if (imLocal && settings?.nfse_municipal_registration_in_cnc !== false) {
+    if (imLocal !== imLocal.padStart(15, "0")) {
+      pendenciasLocais.push(
+        "A inscrição municipal está gravada como \"" + imLocal + "\" — o CNC NFS-e guarda o "
+        + "identificador em 15 posições com zeros à esquerda (\"" + imLocal.padStart(15, "0")
+        + "\") e o Ambiente Nacional compara LITERALMENTE. Grafia diferente volta como E0116 "
+        + "('IM deve ser informada'), mesmo com a IM presente na DPS. Alinhe aqui e no "
+        + "cadastro da empresa na Contora.",
+      );
+    }
+    if (String(readFiscalEnvironment()) === "producao") {
+      // Só até a primeira NFS-e real autorizada — depois disso o CNC de produção está
+      // comprovadamente ok e o aviso viraria ruído permanente.
+      const { data: jaAutorizada } = await admin
+        .from("issued_fiscal_documents")
+        .select("id")
+        .eq("document_type", "nfse")
+        .eq("environment", "producao")
+        .eq("status", "authorized")
+        .limit(1)
+        .maybeSingle();
+      if (!jaAutorizada) {
+        pendenciasLocais.push(
+          "AVISO: antes da PRIMEIRA NFS-e em produção, confirme com a Contora que o CNC de "
+          + "produção já tem o registro complementar da HBR (em 14/08/2026 ele existia só em "
+          + "homologação — a sincronização municipal entre ambientes pode atrasar). Não "
+          + "desligue a flag do CNC nem mude a IM por conta própria para contornar: isso só "
+          + "alterna entre E0116 e E0120.",
+        );
+      }
+    }
   }
 
   return jr({
@@ -1522,7 +1554,10 @@ async function handleNfseHealth(admin: any): Promise<Response> {
       empresa: { id: empresa.id, legal_name: empresa.legalName, document: empresa.document },
       // `pronto` exige o verde da Contora E nenhuma pendência nossa. Silêncio não é
       // autorização: se a Contora não afirmar que está pronta, não está.
-      pronto: (health.ok ? health.data.ready : false) && pendenciasLocais.length === 0,
+      // "AVISO:" informa sem travar (mesma convenção do prepareNfsePayload) — só pendência
+      // real bloqueia o pronto.
+      pronto: (health.ok ? health.data.ready : false)
+        && pendenciasLocais.filter((p) => !p.startsWith("AVISO:")).length === 0,
       contora: health.ok
         ? {
           ready: health.data.ready,

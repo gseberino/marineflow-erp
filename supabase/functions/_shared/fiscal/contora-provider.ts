@@ -466,7 +466,9 @@ export class ContoraProvider implements FiscalProvider {
         statusMessage: isCancelled
           ? ((cancellation["status_message"] as string) ?? "Cancelamento homologado pela SEFAZ.")
           : ((sefaz["status_message"] ?? d["last_error_message"] ?? null) as string | null),
-        accessKey: (sefaz["access_key"] as string) ?? null,
+        // NFS-e não tem grupo `sefaz` — a chave nacional (50 dígitos) vem no nível do
+        // documento (access_key). O fallback cobre as duas famílias.
+        accessKey: ((sefaz["access_key"] ?? d["access_key"]) as string) ?? null,
         protocol: isCancelled
           ? ((cancellation["protocol"] as string) ?? (sefaz["protocol"] as string) ?? null)
           : ((sefaz["protocol"] ?? provider["protocol"] ?? null) as string | null),
