@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/select';
 import {
   AlertTriangle, Camera, Check, ClipboardCheck, ClipboardList, Gauge, HelpCircle,
-  History, Loader2, Play, RotateCcw,
+  History, Loader2, Play, Printer, RotateCcw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -49,6 +49,34 @@ export function SurveyPanel({
   const answer = useAnswerSurvey();
   const close = useCloseSurvey();
   const reabrir = useReopenSurvey();
+
+  /* A folha de campo. Busca as perguntas, o histórico do serviço e a memória
+     deste ativo numa chamada só — o botão não pode depender de a tela ter
+     carregado três hooks antes, porque quem clica está de saída. */
+  const [imprimindoFolha, setImprimindoFolha] = useState(false);
+  async function imprimirFolha() {
+    if (!serviceId) return;
+    setImprimindoFolha(true);
+    try {
+      const { fetchSurveySheetData, printSurveySheet } = await import('@/lib/survey-sheet');
+      const { header, questions: perguntas, history } =
+        await fetchSurveySheetData(serviceId, vesselId, serviceOrderId);
+      if (!perguntas.length) {
+        toast.warning('Este serviço ainda não tem perguntas de levantamento aprovadas.');
+        return;
+      }
+      printSurveySheet(
+        { ...header, orderNumber: header.orderNumber || 'Levantamento' },
+        perguntas,
+        history,
+      );
+    } catch (e: any) {
+      console.error('[folha de levantamento] falhou:', e);
+      toast.error(e?.message || 'Não deu para gerar a folha.');
+    } finally {
+      setImprimindoFolha(false);
+    }
+  }
 
   const [surveyId, setSurveyId] = useState<string | null>(null);
   const [idx, setIdx] = useState(0);
@@ -170,6 +198,20 @@ export function SurveyPanel({
             </Button>
             <Button size="sm" variant="outline" onClick={() => handleStart('remoto')} disabled={start.isPending}>
               <Camera className="h-4 w-4 mr-1.5" /> Pedir foto ao cliente
+            </Button>
+            {/* Nem todo levantamento acontece com o celular na mão: dentro de
+                paiol, embaixo de motorhome, com luva, o papel ganha. A folha
+                leva as perguntas, o histórico do serviço e o que este ativo já
+                respondeu antes — e volta para ser lançada aqui. */}
+            <Button
+              size="sm" variant="outline"
+              onClick={imprimirFolha}
+              disabled={imprimindoFolha}
+            >
+              {imprimindoFolha
+                ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                : <Printer className="mr-1.5 h-4 w-4" />}
+              Imprimir folha
             </Button>
           </div>
         </div>
