@@ -5,6 +5,14 @@
 -- a unidade continuaria só na cabeça de quem cadastrou, e o aviso de "confira
 -- a vírgula" não teria contra o que comparar.
 -- ═══════════════════════════════════════════════════════════════════════════
+-- Trocar o tipo de retorno exige derrubar antes: o Postgres recusa
+-- `create or replace` quando as colunas de saída mudam. Tudo numa transação
+-- só — se algo falhar no meio, nenhuma das duas fica ausente.
+begin;
+
+drop function if exists public.compose_survey_for_service(uuid, text);
+drop function if exists public.compose_survey_for_axes(text, text, text);
+
 create or replace function public.compose_survey_for_service(
   p_service_id uuid,
   p_mode text default 'local')
@@ -185,3 +193,5 @@ $fn$;
 
 revoke all on function public.survey_cable_sizing(uuid) from public, anon;
 grant execute on function public.survey_cable_sizing(uuid) to authenticated;
+
+commit;
