@@ -19,6 +19,7 @@ import {
   type SurveyQuestion,
 } from '@/hooks/use-service-survey';
 import { SuggestedMaterialsPanel } from './SuggestedMaterialsPanel';
+import { SurveySheetEntryDialog } from './SurveySheetEntryDialog';
 
 /**
  * Levantamento antes de orçar, na tela.
@@ -54,6 +55,7 @@ export function SurveyPanel({
      deste ativo numa chamada só — o botão não pode depender de a tela ter
      carregado três hooks antes, porque quem clica está de saída. */
   const [imprimindoFolha, setImprimindoFolha] = useState(false);
+  const [lancarFolha, setLancarFolha] = useState(false);
   async function imprimirFolha() {
     if (!serviceId) return;
     setImprimindoFolha(true);
@@ -212,6 +214,12 @@ export function SurveyPanel({
                 ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
                 : <Printer className="mr-1.5 h-4 w-4" />}
               Imprimir folha
+            </Button>
+            {/* O par da folha: ela sai preenchida à mão e volta por aqui, tudo
+                de uma vez. Sem isto o papel fica na gaveta — ninguém digita
+                nove respostas numa fila de nove telas. */}
+            <Button size="sm" variant="ghost" onClick={() => setLancarFolha(true)}>
+              <ClipboardList className="mr-1.5 h-4 w-4" /> Lançar folha preenchida
             </Button>
           </div>
         </div>
@@ -515,6 +523,14 @@ export function SurveyPanel({
           <RotateCcw className="mr-1.5 h-4 w-4" /> Reabrir para completar
         </Button>
       )}
+      <SurveySheetEntryDialog
+        open={lancarFolha}
+        onOpenChange={setLancarFolha}
+        serviceOrderId={serviceOrderId}
+        serviceId={serviceId}
+        clientId={clientId}
+        vesselId={vesselId}
+      />
     </Card>
   );
 }
