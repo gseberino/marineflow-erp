@@ -92,9 +92,10 @@ describe('as perguntas na folha', () => {
   });
 
   // "14" anotado sem unidade volta e ninguém sabe se é metro ou centímetro —
-  // e quem mediu já foi embora.
-  it('imprime a unidade ao lado do campo de medida', () => {
-    expect(html).toMatch(/m &nbsp;·&nbsp; cm/);
+  // e quem mediu já foi embora. Quando a pergunta não declara a unidade, a
+  // folha deixa o espaço para quem mede escrever qual usou.
+  it('campo de medida sempre tem onde declarar a unidade', () => {
+    expect(html).toContain('unidade: ______');
   });
 
   it('dá caixas de marcar para pergunta de foto, com saída para quando não deu', () => {
@@ -174,5 +175,46 @@ describe('segurança do conteúdo', () => {
   it('não carrega preço nenhum', () => {
     const html = buildSurveySheetHtml(header, perguntas, { cases: 0 });
     expect(html).not.toMatch(/R\$/);
+  });
+});
+
+describe('grandeza na folha impressa', () => {
+  const comUnidade: SurveySheetQuestion[] = [{
+    id: 'm1', question: 'Qual a distância do banco até o inversor?',
+    answer_type: 'medida', options: null, price_impact: 'alto',
+    expectedUnit: 'm', minExpected: 0.5, maxExpected: 60,
+  }];
+
+  // "14" anotado ao lado de "m" é 14 metros. Sem a unidade impressa, volta e
+  // ninguém sabe — e quem mediu já foi embora.
+  it('imprime a unidade que a pergunta espera', () => {
+    const html = buildSurveySheetHtml(header, comUnidade, { cases: 0 });
+    expect(html).toContain('<b>m</b>');
+  });
+
+  // A faixa é o que denuncia a vírgula trocada: 2,5 vira 25 e o cabo custa
+  // quatro vezes mais.
+  it('imprime a faixa do que é plausível', () => {
+    const html = buildSurveySheetHtml(header, comUnidade, { cases: 0 });
+    expect(html).toContain('costuma ficar entre 0.5 e 60');
+  });
+
+  it('sem unidade cadastrada, deixa espaço para escrevê-la', () => {
+    const semUnidade: SurveySheetQuestion[] = [{
+      id: 'm2', question: 'Quantas horas de uso?',
+      answer_type: 'numero', options: null, price_impact: 'medio',
+    }];
+    const html = buildSurveySheetHtml(header, semUnidade, { cases: 0 });
+    expect(html).toContain('unidade: ______');
+  });
+
+  // Horímetro não tem faixa: 3.000 km e 300.000 são os dois verdade.
+  it('sem faixa cadastrada, não inventa uma', () => {
+    const semFaixa: SurveySheetQuestion[] = [{
+      id: 'm3', question: 'Horímetro', answer_type: 'numero',
+      options: null, price_impact: 'baixo', expectedUnit: 'h',
+    }];
+    const html = buildSurveySheetHtml(header, semFaixa, { cases: 0 });
+    expect(html).not.toContain('costuma ficar entre');
   });
 });

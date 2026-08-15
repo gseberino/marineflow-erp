@@ -32,6 +32,13 @@ export interface SurveyQuestion {
   options: string[] | null;
   price_impact: 'alto' | 'medio' | 'baixo';
   ask_remotely: boolean;
+  /* Grandeza: a unidade que a resposta deve ter e a faixa do que é plausível.
+     Nulos quando a pergunta não é de medida — ou quando não há base para dizer
+     o que é plausível, caso do horímetro (3.000 km e 300.000 são os dois
+     verdade num motorhome). */
+  expected_unit?: string | null;
+  min_expected?: number | null;
+  max_expected?: number | null;
 }
 
 const IMPACT_ORDER: Record<string, number> = { alto: 0, medio: 1, baixo: 2 };
@@ -247,6 +254,11 @@ export function useAnswerSurvey() {
     mutationFn: async (input: {
       surveyId: string; serviceOrderId?: string; seq: number; question: string;
       templateId?: string; answer?: string; skippedReason?: string; photoPath?: string;
+      /* O número, quando a pergunta é de grandeza. O texto CONTINUA sendo
+         gravado: é ele que carrega o contexto ("2,5 medido por cima do
+         forro"). O número é o que o cálculo lê, em vez de garimpar dígito no
+         meio da frase. */
+      numericValue?: number | null; answerUnit?: string | null;
     }) => {
       const { error } = await supabase.from('service_survey_answers').upsert(
         {
@@ -257,6 +269,9 @@ export function useAnswerSurvey() {
           answer_value: input.answer ?? null,
           skipped_reason: input.skippedReason ?? null,
           ...(input.photoPath ? { photo_path: input.photoPath } : {}),
+          ...(input.numericValue !== undefined && input.numericValue !== null
+            ? { numeric_value: input.numericValue } : {}),
+          ...(input.answerUnit ? { answer_unit: input.answerUnit } : {}),
         },
         { onConflict: 'survey_id,seq' },
       );

@@ -8161,9 +8161,11 @@ export type Database = {
       service_survey_answers: {
         Row: {
           answer_json: Json | null
+          answer_unit: string | null
           answer_value: string | null
           answered_at: string
           id: string
+          numeric_value: number | null
           photo_path: string | null
           question_snapshot: string
           seq: number
@@ -8173,9 +8175,11 @@ export type Database = {
         }
         Insert: {
           answer_json?: Json | null
+          answer_unit?: string | null
           answer_value?: string | null
           answered_at?: string
           id?: string
+          numeric_value?: number | null
           photo_path?: string | null
           question_snapshot: string
           seq: number
@@ -8185,9 +8189,11 @@ export type Database = {
         }
         Update: {
           answer_json?: Json | null
+          answer_unit?: string | null
           answer_value?: string | null
           answered_at?: string
           id?: string
+          numeric_value?: number | null
           photo_path?: string | null
           question_snapshot?: string
           seq?: number
@@ -8225,8 +8231,11 @@ export type Database = {
           branch_on: Json | null
           created_at: string
           created_by: string | null
+          expected_unit: string | null
           help_text: string | null
           id: string
+          max_expected: number | null
+          min_expected: number | null
           options: Json | null
           origin: string
           price_impact: string
@@ -8248,8 +8257,11 @@ export type Database = {
           branch_on?: Json | null
           created_at?: string
           created_by?: string | null
+          expected_unit?: string | null
           help_text?: string | null
           id?: string
+          max_expected?: number | null
+          min_expected?: number | null
           options?: Json | null
           origin?: string
           price_impact?: string
@@ -8271,8 +8283,11 @@ export type Database = {
           branch_on?: Json | null
           created_at?: string
           created_by?: string | null
+          expected_unit?: string | null
           help_text?: string | null
           id?: string
+          max_expected?: number | null
+          min_expected?: number | null
           options?: Json | null
           origin?: string
           price_impact?: string
@@ -10533,8 +10548,11 @@ export type Database = {
         Returns: {
           answer_type: string
           ask_remotely: boolean
+          expected_unit: string
           help_text: string
           id: string
+          max_expected: number
+          min_expected: number
           options: Json
           origem: string
           price_impact: string
@@ -10547,8 +10565,11 @@ export type Database = {
         Returns: {
           answer_type: string
           ask_remotely: boolean
+          expected_unit: string
           help_text: string
           id: string
+          max_expected: number
+          min_expected: number
           options: Json
           origem: string
           price_impact: string
