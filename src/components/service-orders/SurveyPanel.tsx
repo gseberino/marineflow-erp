@@ -18,6 +18,7 @@ import {
   uploadSurveyPhoto, surveyPhotoUrl, usePreviousAnswers, howLongAgo, canReuseAnswer,
   type SurveyQuestion,
 } from '@/hooks/use-service-survey';
+import { checkMeasure } from '@/lib/survey-measure';
 import { SuggestedMaterialsPanel } from './SuggestedMaterialsPanel';
 import { SurveySheetEntryDialog } from './SurveySheetEntryDialog';
 
@@ -105,6 +106,15 @@ export function SurveyPanel({
   const atual: SurveyQuestion | undefined = questions[idx];
   const anterior = atual ? anteriores[atual.id] : undefined;
   const reaproveitavel = canReuseAnswer(atual, anterior);
+  const eGrandeza = atual?.answer_type === 'medida' || atual?.answer_type === 'numero';
+  const medida = useMemo(
+    () => (eGrandeza
+      ? checkMeasure(resposta, {
+          unit: atual?.expected_unit, min: atual?.min_expected, max: atual?.max_expected,
+        })
+      : { value: null, numberCount: 0, warning: null }),
+    [eGrandeza, resposta, atual],
+  );
 
   const contingencia = useMemo(
     () => (confidence ? finalContingency(estimate, confidence) : estimate?.contingencia_pct ?? null),
@@ -148,6 +158,11 @@ export function SurveyPanel({
         surveyId: ativo, serviceOrderId, seq: idx + 1,
         question: atual.question, templateId: atual.id,
         answer: skip ? undefined : resposta, skippedReason: skip,
+        // O número vai gravado à parte quando a pergunta é de grandeza: é ele
+        // que o dimensionamento lê, em vez de garimpar dígito na frase.
+        ...(!skip && eGrandeza && medida.value !== null
+          ? { numericValue: medida.value, answerUnit: atual?.expected_unit ?? null }
+          : {}),
         // A foto vale mesmo quando a resposta escrita ficou em branco: às vezes
         // a imagem é a resposta.
         ...(foto ? { photoPath: foto } : {}),
@@ -249,12 +264,33 @@ export function SurveyPanel({
               </SelectContent>
             </Select>
           ) : (
-            <Input
-              value={resposta}
-              onChange={(e) => setResposta(e.target.value)}
-              placeholder={atual.answer_type === 'numero' || atual.answer_type === 'medida' ? 'valor' : 'resposta'}
-              className="h-10"
-            />
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Input
+                  value={resposta}
+                  onChange={(e) => setResposta(e.target.value)}
+                  placeholder={eGrandeza ? 'só o número' : 'resposta'}
+                  className="h-10"
+                  inputMode={eGrandeza ? 'decimal' : undefined}
+                />
+                {/* A unidade fica colada ao campo, não no texto da pergunta:
+                    é aí que se olha na hora de digitar. */}
+                {atual.expected_unit && (
+                  <span className="shrink-0 rounded-md border bg-muted px-2.5 py-2 text-sm font-medium">
+                    {atual.expected_unit}
+                  </span>
+                )}
+              </div>
+              {/* Avisa, nunca barra. Faixa que impede leitura correta é pior
+                  que faixa nenhuma — quem está no local vê o que o cadastro
+                  não previu, e alerta que atrapalha vira alerta ignorado. */}
+              {medida.warning && (
+                <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-500">
+                  <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                  {medida.warning}
+                </p>
+              )}
+            </div>
           )}
 
           {/* O que este ativo respondeu da última vez.

@@ -70,6 +70,10 @@ export interface SurveySheetQuestion {
   answer_type: string;
   options?: string[] | null;
   price_impact: string;
+  /** Unidade que a resposta deve ter, impressa ao lado do campo. */
+  expectedUnit?: string | null;
+  minExpected?: number | null;
+  maxExpected?: number | null;
   /** Resposta que este mesmo ativo deu antes — para conferir em vez de perguntar. */
   previousAnswer?: string | null;
   previousWhen?: string | null;
@@ -112,9 +116,20 @@ function formatMin(min: number | null | undefined): string {
 function fieldFor(q: SurveySheetQuestion): string {
   switch (q.answer_type) {
     case 'medida':
-      return `<div class="field"><span class="line"></span><span class="unit">m &nbsp;·&nbsp; cm &nbsp;·&nbsp; mm</span></div>`;
-    case 'numero':
-      return `<div class="field"><span class="line short"></span><span class="unit">unid. / A / Ah / W</span></div>`;
+    case 'numero': {
+      // A unidade impressa é a QUE A PERGUNTA ESPERA, não uma lista de
+      // possibilidades: quem escreve "14" ao lado de "m" escreveu metros.
+      // A faixa vem junto porque é ela que denuncia a vírgula trocada — o erro
+      // que transforma 2,5 m em 25 m e o cabo em quatro vezes o preço.
+      const un = q.expectedUnit ? esc(q.expectedUnit) : 'unidade: ______';
+      const faixa =
+        q.minExpected !== null && q.minExpected !== undefined &&
+        q.maxExpected !== null && q.maxExpected !== undefined
+          ? ` &nbsp;<span class="faixa">costuma ficar entre ${q.minExpected} e ${q.maxExpected}</span>`
+          : '';
+      return `<div class="field"><span class="line ${q.answer_type === 'numero' ? 'short' : ''}"></span>` +
+             `<span class="unit"><b>${un}</b>${faixa}</span></div>`;
+    }
     case 'sim_nao':
       return `<div class="field opts"><span class="box"></span> Sim &nbsp;&nbsp; <span class="box"></span> Não &nbsp;&nbsp; <span class="box"></span> Não deu para ver</div>`;
     case 'escolha':
@@ -238,6 +253,8 @@ export function buildSurveySheetHtml(
   .field .line { display: inline-block; border-bottom: .6pt solid #333; width: 78%; height: 4.5mm; }
   .field .line.short { width: 28%; }
   .field .unit { font-size: 7.5pt; color: #666; margin-left: 2mm; }
+  .field .unit b { font-size: 9pt; color: #000; }
+  .faixa { color: #888; font-style: italic; }
   .field.opts { font-size: 9pt; }
 
   .rule { border-bottom: .5pt solid #bbb; height: 5.2mm; }
@@ -468,6 +485,9 @@ export async function fetchSurveySheetData(
       answer_type: q.answer_type,
       options: q.options,
       price_impact: q.price_impact,
+      expectedUnit: q.expected_unit ?? null,
+      minExpected: q.min_expected ?? null,
+      maxExpected: q.max_expected ?? null,
       previousAnswer: anteriores.get(q.id)?.answer ?? null,
       previousWhen: anteriores.get(q.id)?.when ?? null,
     })),
