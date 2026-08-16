@@ -1130,3 +1130,100 @@ apareceria em uso.
   na nova tentativa, ou mover os três passos para uma RPC única (o insert, o
   fechamento e a criação numa transação só).
 - **Não corrigido:** regra 3.
+
+### [NOVO-lev-24] Corrigir a medida não corrige o número que o cálculo lê
+
+- **Onde:** `src/components/service-orders/SurveyPanel.tsx:483-490` (o botão
+  "corrigir") e `src/hooks/use-service-survey.ts:263-277` (`useAnswerSurvey`).
+- **O quê:** a correção manda só `answer: correcao.trim()`. Não manda
+  `numericValue` nem `answerUnit`. E o upsert monta o payload com spread
+  condicional — `...(input.numericValue !== undefined && !== null ? { numeric_value } : {})` —,
+  de modo que a coluna **não entra no `ON CONFLICT DO UPDATE`** e o valor antigo
+  permanece.
+- **O que acontece:** a resposta era `25` (vírgula errada, deveria ser `2,5`).
+  Gravada pela tela viva, ficou `answer_value = '25'` e `numeric_value = 25`.
+  Alguém percebe e corrige para `2,5`. Agora `answer_value = '2,5'` e
+  **`numeric_value` continua 25**. O `survey_cable_sizing` lê
+  `coalesce(numeric_value, parse_answer_number(answer_value))` — pega o 25. A
+  tela mostra a resposta certa e o dimensionamento usa a errada.
+- **Por que dói exatamente aqui:** o comentário que justifica esta UI
+  (`SurveyPanel.tsx:464-468`) diz que ela existe para não *"deixar o número
+  errado sustentando o preço"*. É a única função do botão, e é a única coisa que
+  ele não faz.
+- **E a correção também não passa por `checkMeasure`:** o aviso de "confira a
+  vírgula", que aparece na resposta original, não aparece na correção.
+- **Consertar seria:** na correção, rodar `checkMeasure` e mandar
+  `numericValue`/`answerUnit` junto — e, no hook, escrever `numeric_value: null`
+  explicitamente quando não houver número, em vez de omitir a chave. A omissão é
+  a mesma raiz do `NOVO-lev-04`.
+- **Não corrigido:** regra 3. **Aparentado ao `NOVO-lev-04` e ao `NOVO-lev-20`:
+  os três terminam em bitola calculada sobre número que ninguém confirmou.**
+
+### [NOVO-lev-25] Reabrir (ou só recarregar a página) volta para a pergunta 1 e sobrescreve o que já foi respondido
+
+- **Onde:** `src/components/service-orders/SurveyPanel.tsx:85` (`useState(0)` para
+  `idx`), `:104` (`ativo`) e `:158` (`seq: idx + 1`).
+- **O quê:** `idx` é estado local que nasce em 0 e **nunca é sincronizado com as
+  respostas que já existem**. Não há `useEffect` que o posicione em
+  `respostas.length`.
+- **Dois caminhos, o mesmo estrago:**
+  1. **Reabrir.** `useReopenSurvey` põe `status: 'draft'`, e `ativo` volta a
+     apontar para o levantamento. A tela reabre **na pergunta 1**, com o campo
+     vazio. Responder grava `seq: 1`, que pelo `onConflict: 'survey_id,seq'`
+     **sobrescreve a resposta 1 que estava lá**. Para chegar na pergunta que
+     faltava, é preciso passar por todas — apagando cada uma no caminho.
+  2. **Recarregar a página no meio.** O default de `status` em `service_surveys`
+     é `'draft'` (conferido no banco), então após um F5 `ativo` continua
+     apontando para o levantamento em curso e `idx` volta a 0. Mesma
+     sobrescrita, sem ninguém ter pedido para reabrir nada.
+- **A tela promete o contrário, com todas as letras:** o comentário em `:543-545`
+  diz *"reabrir devolve a fila de perguntas **de onde parou**, sem apagar nada do
+  que já foi respondido"*, e o toast de sucesso diz *"Levantamento reaberto — as
+  respostas foram mantidas."* Elas foram mantidas até a próxima resposta.
+- **A lista "O que foi levantado" continua mostrando tudo**, então a perda não é
+  visível como perda: a linha simplesmente muda de valor.
+- **Consertar seria:** posicionar `idx` na primeira pergunta ainda sem resposta
+  (a partir de `respostas`), e marcar as já respondidas na fila. A correção
+  completa depende do `NOVO-lev-05` — enquanto a identidade for `seq` e não
+  `template_id`, "primeira sem resposta" também é uma conta sobre posição.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-26] Reabrir não limpa a estimativa, ao contrário do que o código afirma
+
+- **Onde:** `src/hooks/use-service-survey.ts:334-347`.
+- **O quê:** o comentário diz *"A confiança e a estimativa são limpas de
+  propósito — foram um julgamento sobre um conjunto de respostas que agora vai
+  mudar"*. O `update` limpa `confidence`, `confidence_rationale` e `answered_at`.
+  **Não limpa `estimated_minutes_p50`, `estimated_minutes_p80`,
+  `contingency_pct` nem `cases_used`** — exatamente os quatro campos que formam a
+  estimativa.
+- **Por que importa:** entre reabrir e fechar de novo, o levantamento carrega uma
+  contingência carimbada por um julgamento que foi explicitamente retirado.
+  `useCloseSurvey` reescreve os quatro ao fechar, então a janela é limitada — mas
+  é justamente a janela em que alguém volta ao local e olha o orçamento.
+- **Consertar seria:** ou limpar os quatro, ou corrigir o comentário. O perigo do
+  jeito atual é que a próxima pessoa vai confiar no comentário.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-27] As fotos do levantamento vão para um bucket público
+
+- **Onde:** `src/hooks/use-service-survey.ts:234-249` (`uploadSurveyPhoto` /
+  `surveyPhotoUrl`).
+- **O quê:** o upload vai para o bucket `service-order-photos` e a URL é obtida
+  por `getPublicUrl`. **Conferido no banco: `storage.buckets.public = true`** para
+  esse bucket. Quem tiver a URL vê a imagem sem autenticação nenhuma.
+- **O que são essas fotos:** quadro elétrico, banco de baterias, interior de
+  lancha e de motorhome de cliente — tiradas dentro da propriedade dele. O
+  caminho (`surveys/<uuid>/<seq>-<timestamp>.jpg`) não é adivinhável, mas a
+  proteção é só a obscuridade do UUID: a URL vaza em qualquer link colado,
+  histórico de navegador ou print de tela.
+- **Estado:** a decisão de bucket público é anterior a esta frente (já valia para
+  as fotos de OS). O que muda é o volume e a natureza — o levantamento é o que
+  passa a produzir foto de dentro da casa/embarcação do cliente de forma
+  sistemática, e o comentário do próprio código diz que "é a foto que sustenta o
+  preço".
+- **Consertar seria:** bucket privado com URL assinada de validade curta
+  (`createSignedUrl`), como já se faz nos anexos fiscais. Muda o `surveyPhotoUrl`
+  e os dois pontos que o consomem.
+- **Não corrigido:** regra 3, e a troca de bucket precisa de decisão sobre as
+  fotos já existentes.
