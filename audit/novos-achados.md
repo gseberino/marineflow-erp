@@ -1349,3 +1349,182 @@ apareceria em uso.
   ou `pg_input_is_valid(value,'numeric')` (PG16+), e — se o limiar é para ser
   configurável — criar a linha e o campo na tela de configurações.
 - **Não corrigido:** regra 3.
+
+### [NOVO-lev-33] O registro do ativo entra no documento sem escapar
+
+- **Onde:** `src/lib/pdf-generator.ts:1178` —
+  `${data.vessel?.registration ? `Registro: ${data.vessel.registration}<br/>` : ''}`.
+- **O quê:** é a **única interpolação de texto vindo do cadastro que não passa
+  por `esc()`** em todo o arquivo. Varri as 1.570 linhas: todas as outras — nome
+  do cliente, do ativo, do fabricante, descrição, notas técnicas, URL de foto,
+  SKU — usam `esc()`. Esta ficou de fora, cercada de vizinhas escapadas
+  (`esc(data.vessel.name)` na linha 1175, `esc(data.vessel.manufacturer)` na
+  1177).
+- **De onde vem o valor:** `vessels.hull_id_or_registration`, texto livre digitado
+  na tela de ativos por qualquer usuário interno.
+- **Por que não é só cosmético:** `generatePDFBlob` faz `container.innerHTML =
+  html` e anexa o resultado ao `document.body` do ERP; `printPDF` escreve o mesmo
+  HTML numa janela nova. Marcação injetada no campo executa nos dois caminhos, no
+  contexto da aplicação. Um `<` sozinho já quebra o bloco do ativo.
+- **Secundário, no mesmo arquivo:** `pageWrapper(`${docTypeLabel} ${docNumber}`)`
+  (linha 1343) põe o número no `<title>` sem escapar — no corpo ele é escapado
+  (`esc(docNumber)`, linha 1348). O número da ordem é gerado pelo sistema
+  (`ORÇ-00074`), então o risco é nulo; anotado para o conserto sair completo.
+- **Consertar seria:** `esc(data.vessel.registration)`, e um teste que varra o
+  arquivo procurando interpolação de campo de cadastro sem `esc` — a mesma
+  ideia das varreduras de `.select()` e de hooks.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-34] Todo documento diz "Página 01 / 01"
+
+- **Onde:** `src/lib/pdf-generator.ts:694` (cabeçalho) e `:1338` (rodapé). Nos
+  dois, a string é literal.
+- **O quê:** o documento afirma ter uma página só, sempre — inclusive nos que
+  têm cinco. O módulo inteiro de paginação (`pdf-pagination.ts`, os espaçadores,
+  o `NOVO-lev-10` e o `NOVO-lev-11`) existe justamente porque estes documentos
+  passam de uma folha.
+- **Por que importa neste sistema em particular:** o documento é assinado pelo
+  cliente no portal e circula por WhatsApp e e-mail. Numeração de página é o que
+  permite dizer que a proposta está inteira — sem ela, ninguém percebe uma folha
+  faltando, nem na conferência interna nem do lado do cliente.
+- **Consertar seria:** no caminho de imprimir, dá para fazer com CSS
+  (`@page { @bottom-right { content: counter(page) " / " counter(pages) } }`,
+  suporte irregular) ou com contadores em elementos de rodapé repetidos. No
+  caminho de baixar, quem sabe o número de folhas é o html2pdf **depois** de
+  fatiar — o jeito honesto é escrever a numeração pelo `jsPDF` sobre o PDF
+  pronto, que a API `.toPdf().get('pdf')` já permite. Enquanto isso não existir,
+  **tirar a frase é melhor que mantê-la**: informação errada é pior que
+  informação ausente.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-35] `itemColumnCount` nunca foi ligado, e as colunas somam 85%
+
+- **Onde:** `src/lib/pdf-visibility.ts:54` (a função) contra
+  `src/lib/pdf-generator.ts` (que não a importa).
+- **O quê, em duas partes:**
+  1. `itemColumnCount` existe, tem quatro asserções em
+     `pdf-visibility.test.ts:64-67`, e o comentário dela diz que serve para o
+     `colspan` do rodapé não desalinhar a tabela — *"o tipo de defeito que só
+     aparece no papel"*. **`pdf-generator.ts` não tem nenhum `colspan`** e nunca
+     importa a função. É helper morto, com teste dando cobertura a nada — o mesmo
+     padrão do `indivisivel` (`NOVO-lev-12`).
+  2. As larguras das colunas são literais (`:1229-1233` e `:1245-1249`):
+     55% + 15% para descrição e quantidade, mais 15% por coluna de preço. Com as
+     duas colunas de preço dá 100%; **com só uma marcada no diálogo, dá 85%** —
+     a tabela sai estreita ou o navegador redistribui a sobra a seu critério, e o
+     resultado difere entre imprimir (layout do navegador) e baixar (rasterizado).
+- **Por que registrar junto:** é a mesma peça de contabilidade da tabela. Quem
+  for ligar a função vai querer que a largura saia dela também.
+- **Consertar seria:** derivar largura e `colspan` de `itemColumnCount`, ou
+  remover a função e o teste.
+- **Não corrigido:** regra 3.
+
+---
+
+## Fechamento da varredura noturna — 15/08 23:33 a 16/08 07:00
+
+Nove rodadas, uma área por rodada, lendo o código e — quando a resposta estava no
+banco e não no arquivo — **rodando a função contra produção**. Trinta e cinco
+achados (`NOVO-lev-01` a `NOVO-lev-35`). **Nada foi corrigido** (regra 3):
+nenhum dos achados quebra produção neste momento, e vários exigem decisão de
+desenho ou de negócio. Ao fim de cada rodada, `tsc -b` em zero e a suíte
+completa passando — 102 arquivos, 1.280 testes, em todas as nove.
+
+### O que foi coberto
+
+`survey-sheet.ts` · `survey-measure.ts` · `SurveyPanel.tsx` ·
+`SurveySheetEntryDialog.tsx` · `pdf-generator.ts` · `pdf-pagination.ts` ·
+`css-scope.ts` · `use-pdf.ts` · `use-service-survey.ts` ·
+`use-survey-material-rules.ts` · `RelatedMaterialsPanel.tsx` ·
+`PublicServiceOrderView.tsx` · as funções SQL do levantamento
+(`compose_survey_for_*`, `should_survey_service`, `estimate_from_cases`,
+`previous_survey_answers`, `related_materials`, `survey_suggested_materials`,
+`apply_survey_materials`, `survey_cable_sizing`, `dc_cable_sizing`,
+`parse_answer_number`) · a RLS de `service_surveys`, `service_survey_answers`,
+`survey_material_rules` e `dc_ampacity_ratings` · e a consistência entre a folha
+impressa e a tela de lançamento.
+
+### O que ficou de fora
+
+Não foram lidos: `buildInvoiceHTML` e o PDF de recibo (`v2/lib/receipt.ts`),
+`pdf-print.ts`, `download.ts`, `autosave-guard.ts`, `document-type.ts`, o
+download em lote e o anexo de WhatsApp, a tela de aprovação de perguntas e de
+regras de material, e `survey_question_catalog`.
+
+### Os achados por gravidade
+
+**1. Erram um número que decide material — inclusive bitola de cabo, que é risco
+físico.**
+`NOVO-lev-20` (a frase pronta afirma 5,96 mm² para 200 A com `pronto: false`) ·
+`NOVO-lev-21` (quatro das seis perguntas do dimensionamento inativas; os padrões
+saem sob a chave `lido_do_levantamento`, e os dois que erram para menos são
+justamente casa de máquinas e feixe) · `NOVO-lev-24` (corrigir a medida não
+corrige o `numeric_value`, que é o que o cálculo lê) · `NOVO-lev-04` (resposta
+marcada como "não consegui ver" continua alimentando o cálculo) ·
+`NOVO-lev-06` (material lançado pelo levantamento não mexe no total da ordem).
+
+**2. Saem da empresa errados.**
+`NOVO-lev-14` (31 orçamentos com link público baixados como "Ordem de Serviço" e
+sem validade; o portal tem uma terceira montagem do PDF) · `NOVO-lev-16` (três
+consultas sem checar erro: documento com o nome "MarineFlow", sem CNPJ, sem
+banco, sem termos, e sem o sinal já pago) · `NOVO-lev-34` ("Página 01 / 01" em
+documento de várias folhas) · `NOVO-lev-15` ("Baixar PDF" do portal abre a
+janela de impressão) · `NOVO-lev-10` e `NOVO-lev-11` (a paginação ainda deixa
+bloco ser cortado, e cria página quase em branco depois de tabela longa).
+
+**3. Perdem o que foi levantado.**
+`NOVO-lev-19` (a folha imprime até 14 perguntas da ordem e a tela lança 9 de um
+serviço — o que não casa se perde, e o que sobra é gravado como "não verificado"
+sem ter sido perguntado) · `NOVO-lev-25` (reabrir, ou só recarregar a página,
+volta para a pergunta 1 e sobrescreve as respostas) · `NOVO-lev-05` (o upsert
+casa por posição, não por pergunta) · `NOVO-lev-23` (falha no lançamento deixa
+levantamento órfão e o botão cria outro).
+
+**4. Sugerem mal.**
+`NOVO-lev-28` (73% da evidência de "costuma entrar junto" vem de orçamento
+rascunho ou cancelado, e a tela chama isso de "vezes que você usou") ·
+`NOVO-lev-30` (o `limit 5` do histórico não limita — a folha impressa recebe
+todas as execuções numa linha) · `NOVO-lev-29` (lista em ordem de uuid) ·
+`NOVO-lev-08` e `NOVO-lev-09` (mensagem falsa e trava de duplicata furada no
+lançamento de material) · `NOVO-lev-18` (com dois levantamentos fechados, o PDF
+pega um qualquer).
+
+**5. Erro engolido que vira mensagem errada.**
+`NOVO-lev-02` (folha vazia diz que faltam perguntas aprovadas, seja qual for a
+causa) · `NOVO-lev-07` (invalidação com chaves de cache inexistentes: o clique
+parece não ter feito nada) · `NOVO-lev-17` (a galeria de fotos lê uma coluna que
+nada escreve).
+
+**6. Higiene de segurança.**
+`NOVO-lev-27` (fotos do levantamento em bucket público) · `NOVO-lev-33` (registro
+do ativo sem `esc()`) · `NOVO-lev-32` (`value::numeric` sem validação derruba o
+painel inteiro) · `NOVO-lev-31` (`parse_answer_number` aberta para `anon`) ·
+`NOVO-lev-13` (`scopeCss` divide seletor por vírgula sem contar parênteses —
+latente).
+
+**7. Código que promete e não entrega.**
+`NOVO-lev-12` (`indivisivel`) · `NOVO-lev-35` (`itemColumnCount`) ·
+`NOVO-lev-26` (reabrir não limpa a estimativa, ao contrário do comentário) ·
+`NOVO-lev-01` (a folha diz que agrupa por sistema e não agrupa) ·
+`NOVO-lev-03` (consulta fora do `Promise.all`).
+
+### Três coisas que a varredura verificou e NÃO são defeito
+
+Anotadas para não voltarem à fila: o `@import` do Google Fonts atravessa o
+`scopeCss` intacto apesar dos `;` na URL; comentário com chave fora da posição 0
+embaralha o texto mas o navegador reinterpreta certo; e as 6 linhas de
+`service_cases` estarem todas inutilizáveis é o gatilho **funcionando** e
+dizendo a verdade ("Concluída sem hora apontada") — não há defeito ali, mas
+significa que a estimativa por analogia nunca teve dado.
+
+### O padrão que se repetiu
+
+Sete dos trinta e cinco achados são **teste ou comentário que dá confiança
+falsa**: o teste da paginação põe o bloco alto em primeiro lugar, justamente
+onde a fórmula errada acerta (`NOVO-lev-11`); o teste de unificação do PDF
+nomeia o portal público e só faz grep em `use-pdf.ts` (`NOVO-lev-14`); o
+comentário do reabrir diz que limpa a estimativa e não limpa (`NOVO-lev-26`); o
+toast diz que as respostas foram mantidas um instante antes de sobrescrevê-las
+(`NOVO-lev-25`). Vale mais como método do que como lista: **onde havia um
+comentário afirmando o comportamento, valeu a pena conferir se o código o
+cumpria** — foi o que rendeu os achados mais graves da noite.
