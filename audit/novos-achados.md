@@ -887,3 +887,120 @@ apareceria em uso.
   do `/*` ou dentro do comentário. Os dois foram testados.
 - **Consertar seria:** dividir contando profundidade de parênteses e colchetes.
 - **Não corrigido:** regra 3.
+
+### [NOVO-lev-14] O portal público monta o PDF por conta própria — e é o documento que o CLIENTE baixa
+
+- **Onde:** `src/pages/PublicServiceOrderView.tsx:211` (`buildPdfData`), contra
+  `src/hooks/use-pdf.ts:58` (`carregarPDFData`).
+- **O quê:** a unificação de 05/08 juntou `usePDFData` e `fetchPDFData` numa
+  montagem só. Ficou de fora uma **terceira cópia**, escrita à mão, no portal
+  público — que não chama nenhuma das duas e busca tudo de novo com o cliente do
+  token (`sb`, `:89-118`).
+- **O teste que deveria pegar isso nomeia justamente o portal:**
+  `use-pdf-unico.test.ts:8` diz *"usePDFData (tela) e fetchPDFData (lote, anexo de
+  WhatsApp, **portal público**)"* — e o teste só faz grep dentro de `use-pdf.ts`.
+  Mesmo padrão de confiança falsa do `NOVO-lev-11`.
+- **O que diverge, conferido campo a campo:**
+  - `documentType` é **`'service_order'` fixo** (`:214`). **Hoje há 31 orçamentos
+    em `draft` com link público** — conferido no banco. Todos os 31 são baixados
+    pelo cliente com o cabeçalho **"Ordem de Serviço"** em vez de "Orçamento"
+    (`pdf-generator.ts:1052`), com a seção chamada "Relato do Problema" em vez de
+    "Objetivo do Projeto / Diagnóstico" (`:1185`) e o bloco de assinatura dizendo
+    "Aceite do Serviço Realizado" em vez de "Aprovação do Orçamento" (`:1322`).
+  - **A validade some.** `getValidityText()` só sai quando `isQuote`
+    (`pdf-generator.ts:1276`), e `buildPdfData` nem passa `quote_validity_days`.
+    Os **31 de 31** têm validade preenchida no banco. O cliente recebe um
+    orçamento sem prazo de validade.
+  - `logo_url` não é passado: o PDF do cliente sai **sem a logo**, o do ERP com.
+  - Não passa `marina`, `expenses`, `survey`, `deposit_paid`, `receivables`,
+    `payments`, `travel_hours`, `ferry_cost`, `travel_type`, `commission_*`,
+    `financial_notes`, `payment_method_preferred`, `discount_services_pct`,
+    `discount_parts_pct`. O levantamento e o sinal já pago **nunca chegam** ao
+    documento que o cliente baixa.
+  - Na direção contrária, passa `card_fee_amount` e `card_installments`, que
+    `carregarPDFData` **não** monta. A taxa de cartão aparece no PDF do portal e
+    não aparece no do ERP — o mesmo documento, dois valores.
+  - `technical_notes` é passado e só é suprimido quando `isQuote`
+    (`pdf-generator.ts:1256`). Com `isQuote` sempre falso, **nota técnica interna
+    entra no orçamento do cliente**. Hoje nenhum dos 31 tem o campo preenchido —
+    latente, mas o caminho está aberto.
+- **Consertar seria:** o portal chamar `carregarPDFData` (o cliente do token serve
+  para as mesmas tabelas) e derivar `documentType` de `documentTypeFor(status)`,
+  que já existe em `src/lib/document-type.ts` e é exatamente para isto. E o teste
+  de unificação passar a olhar `PublicServiceOrderView.tsx`.
+- **Não corrigido:** regra 3. **É o achado de maior alcance desta varredura** —
+  atinge o documento que sai da empresa.
+
+### [NOVO-lev-15] O botão "Baixar PDF" do portal abre a janela de impressão
+
+- **Onde:** `src/pages/PublicServiceOrderView.tsx:286` e `:425-426`.
+- **O quê:** o botão tem ícone de download e o rótulo **"Baixar PDF"**, e chama
+  `printPDF(...)` — que abre a janela de impressão do navegador. Nenhum arquivo é
+  baixado.
+- **Por que importa:** este link chega ao cliente por WhatsApp, e ele o abre no
+  celular. Pedir "baixar" e receber a caixa de impressão do iOS é onde a pessoa
+  desiste — ou imprime em papel um documento que queria guardar. Todos os outros
+  botões de baixar do sistema usam `downloadPDF`.
+- **Consertar seria:** trocar por `downloadPDF`, ou renomear o botão para
+  "Imprimir" e acrescentar um de baixar de verdade.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-16] Três consultas do PDF não checam erro, e cada fallback mente diferente
+
+- **Onde:** `src/hooks/use-pdf.ts` — `settingsRes` (`:76`), `receivablesRes`
+  (`:81`) e a de `payments` (`:96`). Só `soRes.error` é verificado (`:88`).
+- **O quê:** cada uma tem um `|| []` ou `|| ''` que transforma falha em ausência.
+- **O que sai do outro lado, por consulta:**
+  - `app_settings` falha → `get()` devolve vazio em tudo. O documento sai com o
+    nome **"MarineFlow"** (`:113`, o fallback literal), sem CNPJ, sem endereço,
+    sem telefone, sem dados bancários e **sem termos** — e vai assim para o
+    cliente, sem nenhum aviso na tela.
+  - `receivables` falha → `depositPaid = 0`, `receivables: []`. O cliente que já
+    pagou o sinal recebe um documento **sem registro nenhum do que pagou**.
+  - `payments` falha → o histórico de pagamentos some, e a seção que existe para
+    "mostrar o real" mostra vazio.
+- **Por que não é teórico:** é a mesma classe que derrubou o PDF inteiro em 05/08
+  e o `NOVO-lev-02` da folha de levantamento. Aqui o erro nem chega a derrubar:
+  produz um documento plausível e errado, que é pior.
+- **Consertar seria:** checar `.error` nas três e falhar com a causa, do mesmo
+  jeito que `soRes` já faz.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-17] A galeria de fotos do PDF lê uma coluna que nada escreve
+
+- **Onde:** `src/hooks/use-pdf.ts:230` contra
+  `src/components/ServiceOrderPhotos.tsx:75`.
+- **O quê:** o PDF monta a "Galeria Técnica / Evidências do Serviço"
+  (`pdf-generator.ts:1113`) a partir de `service_orders.photos` — uma coluna
+  `jsonb`. **Nada no repositório escreve nessa coluna**: procurei em `src/`, nas
+  edge functions e nas migrations. Quem sobe foto pela tela grava na **tabela**
+  `service_order_photos`, que o PDF nunca lê.
+- **Conferido no banco:** as 79 ordens têm `photos = []`, e
+  `service_order_photos` tem 0 linhas. Ninguém subiu foto ainda — então isto não
+  está errado hoje; está errado **a partir da primeira foto**, e do jeito mais
+  difícil de perceber: a opção existe, a seção existe, e a galeria sai vazia.
+- **E os dois leitores da coluna discordam da forma:** `use-pdf.ts:230` faz
+  `photos.map(p => p.url)` (objetos), enquanto `PublicServiceOrderView.tsx:604`
+  faz `photos.map((url: string) => …)` (strings) e o próprio
+  `pdf-generator.ts:1117` espera string. Se a coluna algum dia for preenchida com
+  strings, o PDF renderiza `<img src="undefined">`.
+- **Consertar seria:** o PDF ler `service_order_photos` (a fonte real), e decidir
+  o destino da coluna `photos` — usar ou remover, não as duas coisas pela metade.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-18] Com mais de um levantamento fechado, o PDF escolhe um qualquer
+
+- **Onde:** `src/hooks/use-pdf.ts:25` — `lista.find((s) => s?.status === 'closed')`.
+- **O quê:** pega o **primeiro** fechado na ordem em que o PostgREST devolveu o
+  embed, e o embed não pede ordenação nenhuma. Sem `order by`, a ordem não é
+  garantida entre execuções.
+- **Por que passou a ser plausível:** até 15/08 o levantamento era de um serviço;
+  desde `compose_survey_for_order` ele é **da ordem**, e uma visita de avaliação
+  que gera um segundo levantamento na mesma ordem é o fluxo desenhado. Dois
+  fechados na mesma ordem deixa de ser exceção.
+- **Estado hoje:** latente — há uma única ordem com levantamento no banco, e ele
+  não está fechado.
+- **Consertar seria:** ordenar por `answered_at desc` no embed e pegar o mais
+  recente, ou respeitar `service_orders.survey_id`, que existe justamente para
+  apontar o levantamento principal.
+- **Não corrigido:** regra 3.
