@@ -797,3 +797,93 @@ apareceria em uso.
   Decidir se a unidade de duplicata é a ordem ou a linha de serviço é escolha de
   negócio.
 - **Não corrigido:** regra 3.
+
+### [NOVO-lev-10] O planejador de quebra ignora as margens — e o card ainda parte ao meio
+
+- **Onde:** `src/lib/pdf-generator.ts:399-404` (a medição) e `src/lib/pdf-pagination.ts`
+  (`planPageBreaks`).
+- **O quê:** cada bloco é medido por `el.getBoundingClientRect().height`, que
+  **não inclui margens**. O CSS do documento dá margem a quase todo bloco de topo:
+  `.card { margin-bottom: 20px }` (`pdf-generator.ts:750`), `table { margin-bottom:
+  16px }` (:766) e `.grid { margin-bottom: 20px }` (:792). A conta de "quanto já
+  usei desta folha" fica menor que a realidade, e cresce a cada bloco.
+- **Provado com os números reais do arquivo:** cinco cards de 200 px com os 20 px
+  de margem do CSS. O planejador soma 1000 px, vê que cabe em 1032 e **não planeja
+  quebra nenhuma**. As posições reais são `[0,200] [220,420] [440,640] [660,860]
+  [880,1080]` — o quinto card termina em **1080**, 48 px além da folha, e o
+  html2pdf o corta. É exatamente o defeito que este módulo existe para impedir
+  (o card "Informações para Pagamento" partido ao meio), ainda alcançável.
+- **Por que não aparece sempre:** o erro só morde quando a soma sem margens fica
+  logo abaixo do limite e a soma com margens passa. Quanto mais blocos na folha,
+  maior a chance — documento longo é justamente o que tem muitos.
+- **Consertar seria:** medir a ocupação real. O jeito robusto não é somar
+  `height + marginTop + marginBottom` (que erra no colapso de margens), e sim
+  derivar a altura de cada bloco da diferença entre os topos dos irmãos
+  consecutivos — que já inclui a margem efetiva —, usando o fim do container para
+  o último.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-11] Bloco mais alto que a folha zera a conta pelo lugar errado
+
+- **Onde:** `src/lib/pdf-pagination.ts:101-104`.
+- **O quê:** `if (altura > alturaUtil) { usado = altura % alturaUtil; continue; }`.
+  A sobra é calculada como se o bloco alto começasse no topo de uma folha. Ele
+  quase nunca começa: vem depois do cabeçalho, dos dados do cliente, do resumo.
+  O certo é `(usado + altura) % alturaUtil`.
+- **Provado:** blocos de 200, 3000, 250 e 300 px, folha de 1032. Sobra real depois
+  do bloco de 3000 px = `(200+3000) % 1032` = **104 px**; o planejador calcula
+  `3000 % 1032` = **936 px**. Com 936 "usados", o bloco de 250 px não caberia e o
+  planejador **manda quebrar a página** — quando na realidade sobravam 928 px
+  livres. Resultado: uma folha quase inteira em branco no meio do documento.
+- **A direção contrária também existe:** com outros números o planejador acha que
+  cabe quando não cabe, e aí o bloco é fatiado — o mesmo estrago do `NOVO-lev-10`.
+- **O bloco alto é o caso comum, não o excepcional:** a tabela de itens de uma OS
+  com muitas linhas passa de 1032 px sozinha, e nunca é o primeiro filho.
+- **O teste existente passa porque evita o caso quebrado:**
+  `pdf-pagination.test.ts:41` põe o bloco alto **como primeiro bloco** — onde
+  `usado` é 0 e as duas fórmulas coincidem. Dá confiança falsa.
+- **Consertar seria:** uma linha (`usado = (usado + altura) % alturaUtil`) mais um
+  caso de teste com o bloco alto em segundo lugar.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-12] `indivisivel` é medido, documentado — e nunca usado
+
+- **Onde:** `src/lib/pdf-pagination.ts:72-80` (o tipo) e `:96` (o destructuring);
+  `src/lib/pdf-generator.ts:403` (quem calcula).
+- **O quê:** o chamador varre cada bloco com `el.classList.contains('card') ||
+  !!el.querySelector('table')` para marcar o que não pode partir, e
+  `planPageBreaks` desestrutura `indivisivel` e **não o lê em lugar nenhum**.
+  Bloco indivisível e bloco comum seguem exatamente o mesmo caminho.
+- **Por que importa:** não produz saída errada hoje — o comentário do código
+  (`:111-113`) já explica que os dois descem inteiros de propósito. O problema é o
+  contrário: o campo promete um comportamento no tipo e nos testes
+  (`pdf-pagination.test.ts:28` passa `indivisivel: true` como se importasse), e
+  quem for mexer vai supor que a distinção existe. Também custa um
+  `querySelector('table')` por bloco em toda geração.
+- **Consertar seria:** ou remover o campo, ou usá-lo — por exemplo, permitindo que
+  um bloco DIVISÍVEL longo (texto corrido de termos) parta em vez de descer
+  inteiro e deixar meia folha vazia.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-13] `scopeCss` divide seletores por vírgula sem olhar parênteses
+
+- **Onde:** `src/lib/css-scope.ts:34` (`seletores.split(',')`).
+- **O quê:** a vírgula é tratada sempre como separador de seletores. Dentro de
+  `:is()`, `:not()`, `:where()` ou de um `[attr="a,b"]` ela não é.
+  `:is(h1, h2) { … }` sai como **`.pdf :is(h1, .pdf h2)`** — verificado rodando a
+  função. O escopo entra dentro dos argumentos e o seletor passa a significar
+  outra coisa.
+- **Estado hoje:** **latente.** O CSS de `pageWrapper` não usa nenhum desses —
+  conferi os 29 blocos de regra. Nada quebrado em produção agora.
+- **Por que registrar mesmo assim:** este CSS é editado à mão sempre que o
+  documento muda, e `:not()` é a primeira coisa que alguém escreve ao ajustar
+  espaçamento de tabela ("todas as linhas menos a última"). O erro é silencioso:
+  não lança, não avisa, só deixa de aplicar.
+- **Conferido e SEM defeito, para não voltar a investigar:** o `@import` do Google
+  Fonts, que tem `;` dentro da URL (`wght@400;500;600…`), atravessa a função
+  intacto — o laço fatia em pedaços contíguos e reconcatena sem perda. E
+  comentário com chave fora da posição 0 produz texto embaralhado que o
+  navegador reinterpreta corretamente, porque o `.pdf` inserido cai sempre antes
+  do `/*` ou dentro do comentário. Os dois foram testados.
+- **Consertar seria:** dividir contando profundidade de parênteses e colchetes.
+- **Não corrigido:** regra 3.
