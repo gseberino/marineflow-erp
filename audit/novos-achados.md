@@ -1004,3 +1004,129 @@ apareceria em uso.
   recente, ou respeitar `service_orders.survey_id`, que existe justamente para
   apontar o levantamento principal.
 - **Não corrigido:** regra 3.
+
+### [NOVO-lev-19] A folha impressa e a tela de lançamento montam perguntas diferentes
+
+- **Onde:** `src/lib/survey-sheet.ts:436-440` contra
+  `src/hooks/use-service-survey.ts:97` (`useSurveyQuestions`), usada por
+  `SurveySheetEntryDialog.tsx:39`.
+- **O quê:** são **duas composições distintas** para o mesmo levantamento.
+  - A folha, quando há ordem, chama `compose_survey_for_order` com
+    **`p_limit: 14`** — rodízio entre TODOS os sistemas e verbos das linhas da
+    ordem (elétrico, gás, refrigeração).
+  - A tela que lança a folha de volta chama `compose_survey_for_service`, que
+    tem **`limit 9` fixo no SQL** e só olha UM serviço.
+- **O que acontece com o papel preenchido:** o técnico volta com até 14 respostas
+  e encontra na tela uma lista mais curta e **de outro conjunto**. As perguntas
+  que ele respondeu no papel e não estão na tela **não têm onde ser lançadas** —
+  a medida foi tomada e se perde. E as que estão na tela e não estavam no papel
+  ficam em branco, e o código as grava com
+  `skipped_reason: 'em branco na folha de campo'`
+  (`SurveySheetEntryDialog.tsx:85`) — ou seja, registra como "não deu para
+  verificar" uma pergunta que **nunca foi feita ao técnico**.
+- **Por que isso é o pior tipo de erro aqui:** o levantamento inteiro existe para
+  que o orçamento não seja chutado. Uma resposta perdida vira preço faltando; uma
+  "não verificada" falsa vira contingência cobrada por algo que estava resolvido.
+  Os dois estragos são silenciosos.
+- **O `SurveySheetEntryDialog` já recebe `serviceOrderId`** (`:29`) e o usa para
+  criar o levantamento — só não o usa para montar as perguntas.
+- **Consertar seria:** a tela de lançamento usar a mesma composição da folha,
+  com o mesmo limite. Melhor ainda: a folha gravar quais `template_id` imprimiu,
+  e a tela lançar exatamente aqueles — o papel e a tela deixam de poder divergir.
+- **Não corrigido:** regra 3, e a escolha entre "mesma RPC" e "folha carimba o
+  conjunto" é decisão de desenho.
+
+### [NOVO-lev-20] A frase pronta afirma a bitola mesmo quando o cálculo não fechou
+
+- **Onde:** `supabase/functions/_shared/ai/tools/survey-ops.ts:400-402`
+  (`como_dizer`) e `dc_cable_sizing` (migration `20260808100000`), no
+  `mm2_minimo`.
+- **O quê:** `mm2_minimo` é `greatest(coalesce(v_drop,0), coalesce(v_amp,0))`. Com
+  a ampacidade indisponível, `v_amp` é nulo, o `coalesce` o transforma em **0**, e
+  o máximo passa a ser só a queda de tensão — **a metade que sobrou vira o
+  resultado**. Em seguida, `como_dizer` é montado com `r?.mm2_minimo ? …`, **sem
+  olhar `pronto`**, e entrega ao modelo uma frase fechada.
+- **Provado rodando a função em produção** (200 A, 1 m de trecho, 12 V, 10% de
+  queda, isolação 105 °C, em casa de máquinas, feixe de 4 condutores):
+  - `pronto: false`, `mm2_por_ampacidade: null` — nenhuma bitola cadastrada
+    atende com o derating.
+  - `mm2_minimo: **5.96**`.
+  - `como_dizer` sai como: *"Para 200 A neste trecho, mantendo 10% de queda, o
+    cabo precisa de no mínimo 5.96 mm²."*
+- **Por que importa:** é ~6 mm² para 200 A. A `instrucao` logo abaixo manda
+  "NUNCA apresente a bitola como fechada se 'pronto' for false" — mas a frase
+  pronta já foi entregue, e frase pronta ganha de instrução. O módulo inteiro foi
+  escrito com o princípio "meia conta nunca é apresentada como inteira"
+  (comentário da própria migration), e este é o ponto em que ele é violado.
+- **Consertar seria:** `mm2_minimo` só existir quando os dois critérios existirem
+  (ou vir acompanhado de `mm2_minimo_parcial`, com outro nome), e `como_dizer`
+  ser gerado apenas com `pronto === true` — nos outros casos, dizer o que falta.
+- **Não corrigido:** regra 3. **É o achado mais grave da noite: erra para menos
+  em dimensionamento de cabo, que é risco físico.**
+
+### [NOVO-lev-21] Quatro das seis perguntas do dimensionamento estão inativas — e os padrões saem como se tivessem sido lidos
+
+- **Onde:** `survey_cable_sizing` (migration `20260815110000`), no
+  `jsonb_build_object('lido_do_levantamento', …)`.
+- **Conferido no banco, hoje:** dos seis papéis que a função lê, só dois têm
+  pergunta ativa —
+  `corrente` ("Qual a corrente máxima do circuito, em ampères?") e
+  `comprimento` ("Qual a distância do banco de baterias até o inversor?").
+  **`tensao`, `criticidade`, `casa_maquinas` e `feixe` têm zero perguntas ativas**
+  (uma cadastrada cada, todas aguardando aprovação).
+- **O quê:** sem resposta, a função usa os padrões — 12 V, 3% de queda, fora de
+  casa de máquinas, 1 condutor no feixe — e os devolve **dentro de uma chave
+  chamada `lido_do_levantamento`**. Nada disso foi lido de levantamento nenhum.
+- **A direção do erro não é a mesma nos quatro:**
+  - `tensao = 12` e `queda = 3%` erram para MAIS (cabo mais grosso que o
+    necessário num sistema de 24/48 V). Custa dinheiro, não segurança.
+  - **`casa_maquinas = false` e `feixe = 1` erram para MENOS**: o derating de 0,7
+    da casa de máquinas e o de feixe simplesmente não são aplicados, porque a
+    pergunta que os acionaria não existe para ser respondida.
+- **O tamanho do erro, medido:** 200 A, 1 m, 12 V, 10%. Como o sistema responde
+  hoje: `mm2_por_ampacidade = 35`, `pronto = true`. Com casa de máquinas e feixe
+  de 4: `mm2_por_ampacidade = null` — **nenhuma das cinco bitolas cadastradas
+  atende**. O sistema devolve 35 mm² com `pronto: true` para um circuito cuja
+  resposta honesta é "não sei".
+- **Consertar seria:** aprovar as quatro perguntas (elas já existem, estão entre
+  as 18 pendentes) e, enquanto não houver resposta, a função declarar o padrão
+  como PADRÃO — chave `presumido`, não `lido_do_levantamento` — e derrubar
+  `pronto` quando o que falta é derating.
+- **Não corrigido:** regra 3. Ligado ao `NOVO-lev-20`: um produz o número errado,
+  o outro o apresenta como certo.
+
+### [NOVO-lev-22] A transcrição do papel não passa pela conferência de grandeza
+
+- **Onde:** `src/components/service-orders/SurveySheetEntryDialog.tsx` — não
+  importa `checkMeasure`; `SurveyPanel.tsx:112` importa e usa.
+- **O quê:** a tela viva confere cada resposta de grandeza contra a unidade e a
+  faixa esperadas e avisa "confira a vírgula e a unidade". A tela que transcreve
+  a folha **não faz nenhuma conferência** — é um `<Input>` de texto puro.
+- **Por que é justamente ali que faz falta:** na tela viva quem digita é quem
+  acabou de medir e sabe o valor. Na transcrição, quem digita está **lendo a
+  letra de outra pessoa** dias depois, e é aí que 2,5 vira 25 sem ninguém notar.
+  A rede existe, está testada com 14 casos, e não cobre o caminho de maior risco.
+- **Também não grava `numeric_value` nem `answer_unit`** — o número volta a ser
+  garimpado do texto. Isso está previsto no comentário da migration
+  `20260815110000` e é aceitável; o que não é aceitável é a ausência do aviso.
+- **Consertar seria:** chamar `checkMeasure` por campo com `expectedUnit`/
+  `minExpected`/`maxExpected` da pergunta, mostrar o aviso abaixo do campo (sem
+  bloquear) e gravar `numeric_value` quando houver um número só.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-23] Falha ao gravar as respostas deixa um levantamento órfão, e o botão cria outro
+
+- **Onde:** `src/components/service-orders/SurveySheetEntryDialog.tsx:64-90`.
+- **O quê:** `start.mutateAsync` cria o levantamento **antes** do insert das
+  respostas. Se o insert falhar (rede, RLS, um `template_id` que saiu do ar entre
+  abrir e lançar), o `catch` mostra o erro e **o levantamento fica no banco,
+  aberto e vazio**. O diálogo continua aberto com tudo preenchido, e clicar
+  "Lançar folha" de novo cria **mais um**.
+- **Por que importa:** o levantamento vazio aparece na aba como se alguém tivesse
+  começado um; e o `NOVO-lev-18` mostra que a escolha de qual levantamento vai
+  para o PDF é por ordem não determinada — quanto mais registros soltos na mesma
+  ordem, mais fácil o documento pegar o errado.
+- **Consertar seria:** guardar o `surveyId` já criado num `ref` e reaproveitá-lo
+  na nova tentativa, ou mover os três passos para uma RPC única (o insert, o
+  fechamento e a criação numa transação só).
+- **Não corrigido:** regra 3.
