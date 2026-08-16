@@ -10560,6 +10560,24 @@ export type Database = {
           seq: number
         }[]
       }
+      compose_survey_for_order: {
+        Args: { p_limit?: number; p_mode?: string; p_service_order_id: string }
+        Returns: {
+          answer_type: string
+          ask_remotely: boolean
+          eixo: string
+          expected_unit: string
+          help_text: string
+          id: string
+          max_expected: number
+          min_expected: number
+          options: Json
+          origem: string
+          price_impact: string
+          question: string
+          seq: number
+        }[]
+      }
       compose_survey_for_service: {
         Args: { p_mode?: string; p_service_id: string }
         Returns: {
