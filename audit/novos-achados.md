@@ -609,3 +609,54 @@ cada uma vira tarefa própria, por ordem do dono.
 - **O que NÃO fazer:** `supabase migration repair --status reverted`, que o próprio CLI
   sugere. Marcaria como revertidas 154 migrations que de fato rodaram — escrever no histórico
   que algo não aconteceu, quando aconteceu.
+
+---
+
+## Varredura noturna da frente Levantamento — 15/08 → 16/08
+
+Registrados conforme a regra 3 (não corrigidos) e numerados conforme a regra 8
+(`NOVO-lev-NN`). O código desta frente é recente e pouco exercitado em campo;
+esta varredura lê o que foi escrito nos últimos dias procurando o que só
+apareceria em uso.
+
+### [NOVO-lev-01] A folha imprime as perguntas embaralhadas entre sistemas
+
+- **Onde:** `src/lib/survey-sheet.ts`, `buildSurveySheetHtml`.
+- **O quê:** `compose_survey_for_order` passou a devolver o campo `eixo` — de qual
+  sistema ou verbo cada pergunta veio — e o comentário da função SQL diz, com todas
+  as letras, que "a folha agrupa por isto". **A folha não agrupa.** Ela separa apenas
+  por `price_impact` (o que muda o preço × o resto), então numa visita de avaliação
+  com seis sistemas as perguntas saem intercaladas: elétrico, gás, instalação,
+  logística, elétrico de novo.
+- **Por que importa:** em campo se avalia um sistema de cada vez. Quem está no paiol
+  olhando o banco de baterias não quer, entre duas perguntas de elétrico, uma sobre o
+  cilindro de gás que está do outro lado do veículo. O documentado e o construído
+  divergem, e quem confiar no comentário do SQL vai supor um agrupamento que não existe.
+- **Consertar seria:** agrupar por `eixo` dentro de cada faixa de impacto, com
+  subtítulo por sistema. O dado já chega na folha; falta só usá-lo.
+- **Não corrigido:** fora do escopo da tarefa em que foi encontrado.
+
+### [NOVO-lev-02] A folha em branco mente sobre o motivo
+
+- **Onde:** `src/lib/survey-sheet.ts` (`fetchSurveySheetData`) e
+  `src/components/service-orders/SurveyPanel.tsx` (`imprimirFolha`).
+- **O quê:** nenhuma das cinco chamadas de `fetchSurveySheetData` verifica `.error`.
+  Quando uma RPC falha, o Supabase devolve `data: null`, que vira `[]`, e a tela
+  responde: *"Este serviço ainda não tem perguntas de levantamento aprovadas."*
+- **Por que importa:** a mensagem é FALSA em todos os casos de erro — permissão
+  negada, rede caída, função derrubada por uma migration. Manda quem está de saída
+  para a tela de aprovação de perguntas, onde não há nada errado, enquanto o defeito
+  real fica invisível. É a mesma classe que derrubou o PDF do sistema inteiro em
+  05/08 e custou dois dias: erro engolido que vira mensagem errada.
+- **Consertar seria:** propagar o erro de cada RPC e distinguir na tela "não há
+  perguntas" de "não deu para buscar as perguntas: <causa>".
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-03] Uma consulta ficou fora do `Promise.all`
+
+- **Onde:** `src/lib/survey-sheet.ts`, `fetchSurveySheetData`.
+- **O quê:** a busca do nome do serviço (`service_order_services`) roda depois do
+  `Promise.all`, serializada, quando poderia ir junto das outras cinco.
+- **Por que importa:** pouco — é uma viagem a mais numa ação que já leva algumas
+  centenas de milissegundos. Registrado por completude, não por urgência.
+- **Não corrigido:** regra 3, e não vale a mexida sozinho.
