@@ -660,3 +660,47 @@ apareceria em uso.
 - **Por que importa:** pouco — é uma viagem a mais numa ação que já leva algumas
   centenas de milissegundos. Registrado por completude, não por urgência.
 - **Não corrigido:** regra 3, e não vale a mexida sozinho.
+
+### [NOVO-lev-04] Resposta pulada continua alimentando o dimensionamento
+
+- **Onde:** `survey_cable_sizing` (migration `20260815110000`), nas seis leituras
+  por papel (`corrente`, `comprimento`, `tensao`, `criticidade`, `casa_maquinas`,
+  `feixe`).
+- **O quê:** o filtro é `(a.numeric_value is not null or a.answer_value is not null)`.
+  **Não há `and a.skipped_reason is null`.** Uma resposta marcada como "não consegui
+  verificar" entra no cálculo se tiver qualquer valor gravado.
+- **Como acontece na prática:** o técnico responde a corrente ("250"), depois volta
+  e marca "não consegui ver" — porque descobriu que leu o valor errado. O upsert
+  grava `skipped_reason`, mas **não apaga `numeric_value`**, porque o campo não vai
+  no payload e o `ON CONFLICT DO UPDATE` só toca no que foi enviado. O 250 fica lá,
+  e o dimensionamento continua calculando com um número que quem mediu retirou.
+- **Por que importa:** este é o cálculo que decide bitola de cabo. Uma leitura
+  retirada de propósito voltando pela porta dos fundos é pior que leitura nenhuma —
+  a função inclusive responde `pronto: true`, dizendo que sabe o que não sabe.
+- **A assimetria denuncia:** `survey_suggested_materials` FILTRA `skipped_reason is
+  null` (linha 38 da migration `20260808120000`). As duas funções leem a mesma
+  tabela com regras diferentes; a do material está certa.
+- **Consertar seria:** somar `and a.skipped_reason is null` às seis leituras, e
+  limpar `numeric_value`/`answer_unit` quando a resposta vira pulada.
+- **Não corrigido:** regra 3. **É o mais grave desta varredura.**
+
+### [NOVO-lev-05] Corrigir uma resposta pode sobrescrever OUTRA pergunta
+
+- **Onde:** `src/components/service-orders/SurveyPanel.tsx` (`gravar`), com
+  `onConflict: 'survey_id,seq'` em `use-service-survey.ts:276`.
+- **O quê:** a resposta é gravada com `seq: idx + 1` — a POSIÇÃO na lista — e o
+  upsert casa por `(survey_id, seq)`. A posição não é identidade: ela depende de
+  quais perguntas estavam ativas no momento em que a lista foi montada.
+- **Como acontece na prática:** um levantamento é aberto e respondido até a 9ª
+  pergunta. Uma pergunta nova de impacto ALTO é aprovada — e ela entra em terceiro
+  lugar, porque a ordem é por impacto no preço. O levantamento é reaberto para
+  completar; agora a 3ª posição é outra pergunta, e responder ali **sobrescreve a
+  resposta que estava no seq 3**. A original some sem aviso.
+- **Por que isso é plausível aqui, e não teórico:** há 18 perguntas aguardando
+  aprovação neste momento, e várias são de impacto alto — exatamente as que entram
+  no começo da lista. Aprovar perguntas enquanto há levantamento aberto é o curso
+  normal desta frente.
+- **Consertar seria:** casar por `(survey_id, template_id)` — que é a identidade
+  real — mantendo `seq` apenas como ordem de exibição. Exige índice único novo e
+  cuidado com as respostas de `template_id` nulo (as lançadas pela folha antiga).
+- **Não corrigido:** regra 3, e a correção mexe em chave de tabela com dados.
