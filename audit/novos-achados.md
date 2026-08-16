@@ -1227,3 +1227,125 @@ apareceria em uso.
   e os dois pontos que o consomem.
 - **Não corrigido:** regra 3, e a troca de bucket precisa de decisão sobre as
   fotos já existentes.
+
+### [NOVO-lev-28] "Costuma entrar junto" aprende com orçamento que nunca virou serviço
+
+- **Onde:** `related_materials` (migration `20260807100000`), na CTE `ordens_com` —
+  o único filtro é `sop.service_order_id <> p_service_order_id`. **Não há filtro
+  de status.**
+- **O quê:** a estatística conta qualquer ordem que tenha a peça, inclusive
+  rascunho e cancelada.
+- **Medido no banco, hoje:**
+
+  | situação | ordens | linhas de peça |
+  |---|---:|---:|
+  | rascunho (`draft`) | 31 | 118 |
+  | cancelada | 24 | 41 |
+  | executada (`completed` + `invoiced`) | 13 | 40 |
+  | em andamento (demais) | 8 | 18 |
+
+  **159 das ~217 linhas — 73% — vêm de ordens que nunca foram executadas**, e as
+  canceladas entram com o mesmo peso das concluídas.
+- **E a tela afirma o contrário:** `RelatedMaterialsPanel.tsx:95` escreve
+  *"**{juntos} de {de_total}** vez(es) que você **usou** {produto}"*. Um rascunho
+  não é um uso; uma cancelada é o oposto de um uso. O comentário da própria
+  função diz "nas outras vezes que você usou isto".
+- **Por que importa:** um orçamento que o cliente recusou por causa de um item
+  caro passa a recomendar esse item nos próximos. A sugestão fica mais forte
+  justamente quando a proposta foi rejeitada muitas vezes.
+- **Consertar seria:** restringir a `status in ('completed','invoiced')` — o
+  mesmo recorte que `create_service_cases_on_complete` usa para dizer o que
+  virou caso. Com 13 ordens executadas o `p_min_juntos = 3` fica apertado, então
+  vale rever o piso junto.
+- **Não corrigido:** regra 3, e o recorte é decisão de negócio (contar `open` ou
+  não, por exemplo).
+
+### [NOVO-lev-29] A lista de material relacionado sai em ordem de UUID
+
+- **Onde:** `related_materials`, a cláusula final
+  `order by c.sugerido, pct desc, c.juntos desc`.
+- **O quê:** `distinct on (c.sugerido)` obriga o `order by` a **começar** pela
+  chave do distinct. Dentro de cada produto a ordenação por `pct desc` funciona e
+  guarda o vínculo mais forte — que é o que o comentário promete. Mas o conjunto
+  final sai ordenado por `c.sugerido`, que é um **uuid**: a ordem de exibição é
+  aleatória.
+- **Por que importa:** a tela mostra a lista inteira sem recorte
+  (`RelatedMaterialsPanel.tsx:90`), então a sugestão de 90% de recorrência pode
+  aparecer depois da de 30%. Numa lista curta ninguém nota; é quando ela cresce
+  que a ordenação passa a ser a única coisa que a torna útil. **Também não há
+  `limit`** — tudo o que passar do piso entra na tela.
+- **Consertar seria:** embrulhar o `distinct on` numa subconsulta e ordenar por
+  fora (`select * from (…) t order by pct desc, juntos desc limit 8`).
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-30] O `limit 5` do histórico não limita nada
+
+- **Onde:** `estimate_from_cases` (migration `20260730020000`), no `select` que
+  monta `baseado_em`.
+- **O quê:** `jsonb_agg` é agregado sem `group by` — a consulta devolve **uma
+  linha só**, e o `limit 5` é aplicado depois da agregação, sobre essa linha
+  única. Ele nunca corta nada.
+- **Provado rodando em produção:**
+  `select jsonb_array_length((select coalesce(jsonb_agg(g order by g desc),'[]') from generate_series(1,40) g limit 5))`
+  devolve **40**.
+- **O que sai do outro lado:** `baseado_em` traz **todas** as execuções do
+  serviço. Os dois consumidores juntam tudo numa linha:
+  - `SurveyPanel.tsx:439` — `.join(' · ')` no rodapé da estimativa;
+  - `survey-sheet.ts:194` — a mesma junção dentro do bloco de histórico da
+    **folha impressa**, que tem altura fixa.
+  Com 40 execuções, a folha do técnico ganha um parágrafo de 40 pares
+  "OS-xxxxx 3h20" onde cabiam cinco.
+  E `useCloseSurvey` grava esse mesmo array em `service_surveys.cases_used`,
+  então a lista inteira fica guardada em cada levantamento.
+- **Estado hoje:** latente, e vale registrar por quê — **`service_cases` tem 6
+  linhas e nenhuma utilizável**: todas com `actual_minutes` nulo e
+  `unusable_reason` = "Concluída sem hora apontada". Não é defeito, é o gatilho
+  funcionando e dizendo a verdade; mas significa que a estimativa por analogia
+  nunca teve dado, e que este `limit` nunca foi exercitado.
+- **Consertar seria:** mover o corte para dentro (`from (select … order by
+  created_at desc limit 5) c`).
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-31] `parse_answer_number` continua aberta para `anon`
+
+- **Onde:** migration `20260806100000`, seção 2 — a função é criada e recebe
+  `comment on`, mas **não recebe `revoke`/`grant`**, ao contrário das outras
+  quatro funções do mesmo arquivo.
+- **Conferido no banco:** `has_function_privilege('anon', …, 'EXECUTE')` = **true**.
+  É a única função desta frente nessa situação; as outras treze estão fechadas.
+- **Exposição real: nenhuma.** É um parser de texto para número, `immutable`, sem
+  acesso a tabela — quem a chamasse como anônimo só conseguiria converter o
+  próprio texto.
+- **Por que registrar mesmo assim:** a regra está escrita na migration vizinha,
+  duas semanas depois, sobre uma função igualmente inofensiva —
+  *"aritmética pura, não expõe dado nenhum — mas função nova nasce com EXECUTE
+  para public, e deixar uma aberta ensina a deixar a próxima"*
+  (`20260808100000`, linhas 65-67). Esta é a que ficou.
+- **Consertar seria:** duas linhas de `revoke`/`grant`, no padrão das demais.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-32] O limiar de valor do levantamento é "configurável" sem ter como ser configurado — e o cast pode derrubar a função
+
+- **Onde:** `should_survey_service` (migration `20260730020000`, linha 194):
+  `coalesce((select value::numeric from public.app_settings where key = 'survey_valor_limiar'), 3000)`.
+- **Duas coisas, uma leitura:**
+  1. **A chave não existe e nada a escreve.** Conferido: `app_settings` não tem a
+     linha, e `survey_valor_limiar` aparece **uma única vez em todo o
+     repositório** — nesta migration. Não há tela, seed ou rotina que a crie. O
+     limiar é, na prática, o literal 3000; o `coalesce` é o único caminho que
+     roda.
+  2. **O cast não é protegido.** `coalesce` só cobre a ausência de linha. Se a
+     chave passar a existir com um texto que não seja numérico puro — `"3.000"`,
+     `"R$ 3000"`, ou vazio —, `value::numeric` **lança** `invalid input syntax`,
+     e como `should_survey_service` é a primeira coisa que o `SurveyPanel`
+     chama, o bloco do gatilho some para **todos os serviços**, não só para um.
+     E `app_settings` aceita insert de qualquer chave por qualquer autenticado
+     (política `app_settings_auth_insert`, sem restrição).
+- **Por que importa:** é um botão que não existe protegendo um cast que não
+  perdoa. Quem for ligar a configuração — o caminho natural é inserir a chave
+  pela tela genérica de settings — tem boa chance de digitar no formato de moeda
+  brasileiro e derrubar o painel inteiro.
+- **Consertar seria:** validar com `nullif(regexp_replace(value,'[^0-9.]','','g'),'')::numeric`
+  ou `pg_input_is_valid(value,'numeric')` (PG16+), e — se o limiar é para ser
+  configurável — criar a linha e o campo na tela de configurações.
+- **Não corrigido:** regra 3.
