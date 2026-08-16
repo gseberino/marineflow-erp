@@ -70,6 +70,8 @@ export interface SurveySheetQuestion {
   answer_type: string;
   options?: string[] | null;
   price_impact: string;
+  /** De qual sistema ou verbo a pergunta veio — a folha agrupa por isto. */
+  eixo?: string | null;
   /** Unidade que a resposta deve ter, impressa ao lado do campo. */
   expectedUnit?: string | null;
   minExpected?: number | null;
@@ -426,7 +428,16 @@ export async function fetchSurveySheetData(
   serviceOrderId?: string | null,
 ): Promise<{ header: Partial<SurveySheetHeader>; questions: SurveySheetQuestion[]; history: SurveySheetHistory }> {
   const [qRes, histRes, prevRes, osRes, cfgRes] = await Promise.all([
-    supabase.rpc('compose_survey_for_service', { p_service_id: serviceId, p_mode: 'local' }),
+    // O levantamento é da ORDEM, não de um serviço: um orçamento com três
+    // serviços precisa levantar o dos três, e uma visita de avaliação precisa
+    // levantar os sistemas que o técnico marcou nas linhas — o "diagnóstico no
+    // local" é genérico e sozinho só traria as perguntas do verbo.
+    // Sem ordem (folha avulsa), cai na composição por serviço.
+    serviceOrderId
+      ? supabase.rpc('compose_survey_for_order', {
+          p_service_order_id: serviceOrderId, p_mode: 'local', p_limit: 14,
+        })
+      : supabase.rpc('compose_survey_for_service', { p_service_id: serviceId, p_mode: 'local' }),
     supabase.rpc('estimate_from_cases', { p_service_id: serviceId }),
     vesselId
       ? supabase.rpc('previous_survey_answers', { p_vessel_id: vesselId })
@@ -485,6 +496,7 @@ export async function fetchSurveySheetData(
       answer_type: q.answer_type,
       options: q.options,
       price_impact: q.price_impact,
+      eixo: q.eixo ?? null,
       expectedUnit: q.expected_unit ?? null,
       minExpected: q.min_expected ?? null,
       maxExpected: q.max_expected ?? null,
