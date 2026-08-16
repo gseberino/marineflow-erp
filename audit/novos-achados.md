@@ -704,3 +704,96 @@ apareceria em uso.
   real — mantendo `seq` apenas como ordem de exibição. Exige índice único novo e
   cuidado com as respostas de `template_id` nulo (as lançadas pela folha antiga).
 - **Não corrigido:** regra 3, e a correção mexe em chave de tabela com dados.
+
+### [NOVO-lev-06] Material lançado pelo levantamento não mexe no total da OS
+
+- **Onde:** `apply_survey_materials` (migration `20260806100000`), chamada por
+  `src/hooks/use-survey-material-rules.ts` (`useApplySurveyMaterials`) e
+  `src/components/service-orders/SuggestedMaterialsPanel.tsx`. Mesmo defeito em
+  `src/components/service-orders/RelatedMaterialsPanel.tsx` (`useAddRelated`).
+- **O quê:** as duas rotas inserem em `service_order_parts` e **ninguém recalcula
+  o total da ordem**. Conferido no banco: os únicos gatilhos da tabela são
+  `parts_reservation` (reserva de estoque), `trg_warranty_parts` (validade de
+  garantia) e `update_service_order_parts_updated_at`. Nenhum chama
+  `recalc_so_totals`. E nenhuma das duas rotas chama `recalcTotals` do frontend.
+- **Qual é o caminho certo, para comparar:** `use-service-order-parts.ts:93` —
+  toda edição de peça chama `recalcTotals(service_order_id)` logo depois de
+  gravar, dentro de um `try/catch` que **desfaz a alteração** se o recálculo
+  falhar. `ServiceOrderForm` faz o mesmo. Quem entrou por este caminho novo
+  não herdou nada disso.
+- **Por que importa:** a peça aparece na lista e o orçamento continua com o valor
+  de antes. Não há erro, não há aviso. O número volta ao lugar sozinho na próxima
+  vez que alguém editar qualquer linha ou salvar o formulário — de modo que o
+  total "muda sozinho" depois, sem ninguém ter mexido em preço. É a mesma classe
+  de defeito de `MF-AUD-009` (o agente alterava a OS por uma rota sem cascata) e
+  reaparece aqui por uma rota nova.
+- **Consertar seria:** chamar `recalcTotals` no `mutationFn` das duas rotas, com o
+  mesmo padrão de reversão do `use-service-order-parts`. Ou — melhor, porque fecha
+  a classe inteira — um gatilho `after insert or update or delete` em
+  `service_order_parts` chamando `recalc_so_totals`; mas isso é decisão de
+  arquitetura, porque a aritmética de hoje vive no frontend
+  (`receivable-redistribution.ts`) e é ela que checa o piso do que o cliente já
+  pagou.
+- **Não corrigido:** regra 3, e a correção certa é a decisão acima.
+
+### [NOVO-lev-07] A tela não atualiza porque a invalidação usa chaves que não existem
+
+- **Onde:** `src/hooks/use-survey-material-rules.ts:85-87` e
+  `src/components/service-orders/RelatedMaterialsPanel.tsx:68-70`.
+- **O quê:** as duas invalidam `['service-order-parts', id]` e `['service-order', id]`.
+  As chaves reais do repositório são **`['so-parts', id]`** (`use-service-orders.ts:307`)
+  e **`['service-orders', id]`** (`use-service-orders.ts:52`) — plural em uma,
+  nome diferente na outra. `invalidateQueries` com chave inexistente não é erro:
+  não casa com nada e devolve sucesso.
+- **Por que importa:** somado ao `NOVO-lev-06`, o clique em "Lançar" produz um
+  toast de sucesso e **nada visível muda** — nem a lista de peças, nem o total.
+  Quem confere lê aquilo como "não funcionou" e clica de novo; aí a trava de
+  duplicata responde *"Nada novo a lançar — esses materiais já estavam no
+  orçamento"*, que contradiz a tela que ele está vendo. Os itens só aparecem
+  depois de recarregar a página.
+- **Consertar seria:** trocar pelas duas chaves reais. É uma linha em cada arquivo.
+- **Não corrigido:** regra 3 — mas é o achado de menor custo de correção desta
+  varredura, e o de sintoma mais visível.
+
+### [NOVO-lev-08] "Já estavam no orçamento" também é dito quando nada foi lançado por falta de número
+
+- **Onde:** `apply_survey_materials` (migration `20260806100000`), o `case` da
+  mensagem de retorno.
+- **O quê:** o `insert ... select` descarta a linha por três motivos diferentes —
+  `quantity is null`, `quantity <= 0` e produto já lançado neste orçamento — e
+  todos caem no mesmo `v_criadas = 0`, que responde *"Nada novo a lançar — esses
+  materiais já estavam no orçamento."*
+- **Como acontece na prática:** a sugestão vem marcada com o alerta *"a resposta
+  não tem número — confira a quantidade"* (a própria função já avisa disso), quem
+  confere marca a linha assim mesmo e manda lançar. A quantidade é nula, a linha é
+  descartada, e a resposta afirma que o material já estava lá — quando não está e
+  não vai estar.
+- **Por que importa:** a mensagem manda parar de procurar. Quem a lê não volta
+  para corrigir a resposta do levantamento, que é exatamente o que precisaria
+  fazer. O `SuggestedMaterialsPanel` já desmarca sozinho a linha com alerta, o que
+  reduz a frequência — não elimina, porque marcar de volta é um clique.
+- **Consertar seria:** contar os descartados por motivo (`count(*) filter (where
+  m.quantity is null)`, etc.) e dizer qual foi. A função já tem a lista em mãos.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-09] A trava de duplicata não enxerga o que a própria instrução está inserindo
+
+- **Onde:** `apply_survey_materials`, o `not exists (...) x.source = 'survey'`.
+- **O quê:** a subconsulta anti-duplicata lê `service_order_parts` no instantâneo
+  do início da instrução. Duas regras selecionadas na mesma chamada apontando para
+  o **mesmo produto** passam as duas, porque nenhuma vê a linha que a outra está
+  criando. Aplicadas em dois cliques, a segunda é barrada.
+- **Por que é plausível aqui:** o cabo é o caso central desta frente, e o desenho
+  natural é uma regra por trecho (banco→inversor, inversor→quadro), ambas
+  apontando para o mesmo produto de cabo. Nesse desenho, o resultado depende de o
+  usuário ter marcado as duas juntas ou uma de cada vez.
+- **Efeito colateral do mesmo `not exists`, na direção oposta:** ele olha a ordem
+  INTEIRA, sem considerar `service_order_service_id`. Dois serviços na mesma ordem
+  que precisem do mesmo produto — dois bancos de bateria, dois inversores — só
+  recebem material no primeiro, e o segundo fica silenciosamente sem.
+- **Consertar seria:** trocar por `on conflict` sobre um índice único real, ou
+  agregar por produto antes de inserir (`sum(quantity) group by product_id`), o
+  que também resolveria o caso dos dois trechos de cabo virando uma linha só.
+  Decidir se a unidade de duplicata é a ordem ou a linha de serviço é escolha de
+  negócio.
+- **Não corrigido:** regra 3.
