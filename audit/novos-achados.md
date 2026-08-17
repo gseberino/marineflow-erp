@@ -1528,3 +1528,29 @@ toast diz que as respostas foram mantidas um instante antes de sobrescrevê-las
 (`NOVO-lev-25`). Vale mais como método do que como lista: **onde havia um
 comentário afirmando o comportamento, valeu a pena conferir se o código o
 cumpria** — foi o que rendeu os achados mais graves da noite.
+
+### [NOVO-lev-36] Aprovar a segunda pergunta de comprimento faz o cálculo escolher UM trecho
+
+- **Onde:** `survey_cable_sizing` (migration `20260815110000`), a leitura de
+  `comprimento`: `order by a.answered_at desc nulls last limit 1`.
+- **O quê:** hoje existe **uma** pergunta ativa com papel `comprimento` ("Qual a
+  distância do banco de baterias até o inversor?", seq 4) e **uma inativa** ("Qual
+  a distância do inversor (ou banco) até o quadro de distribuição?", seq 17,
+  também `{comprimento}`). Aprovar a segunda — que é o conserto do desdobramento
+  do ORÇ-00074, onde a pergunta pedia dois trechos e tinha um campo só — passa a
+  haver **duas respostas para o mesmo papel**, e a função pega **uma só**: a
+  respondida mais tarde.
+- **Por que isso é armadilha e não melhoria:** os dois trechos são circuitos
+  diferentes e cada um pede o seu cabo. Com `limit 1`, o dimensionamento pode sair
+  calculado sobre o trecho CURTO — o oposto do que o desdobramento pretendia
+  corrigir. E não há aviso: a função responde `pronto: true` e informa o
+  comprimento escolhido em `lido_do_levantamento.trecho_m` como se fosse o único.
+- **Consertar seria** (antes de aprovar a pergunta): dimensionar **por trecho** em
+  vez de por levantamento — a função devolver uma entrada por resposta de
+  `comprimento`, cada uma com a sua bitola. Alternativa mínima e honesta: usar
+  `max(comprimento)` e dizer explicitamente que dimensionou pelo trecho mais
+  longo.
+- **Aparentado a:** `NOVO-lev-20` e `NOVO-lev-21` — os três terminam em bitola
+  apresentada como fechada sobre premissa que ninguém confirmou.
+- **Não corrigido:** regra 3. **Descoberto ao levantar a lista de aprovações
+  pendentes para o dono — é pré-requisito da aprovação, não consequência dela.**
