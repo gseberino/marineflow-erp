@@ -1554,3 +1554,53 @@ cumpria** — foi o que rendeu os achados mais graves da noite.
   apresentada como fechada sobre premissa que ninguém confirmou.
 - **Não corrigido:** regra 3. **Descoberto ao levantar a lista de aprovações
   pendentes para o dono — é pré-requisito da aprovação, não consequência dela.**
+
+### [NOVO-lev-37] A isolação do cabo é fixa em 105 °C — a hipótese mais generosa que existe
+
+- **Onde:** `survey_cable_sizing` (migration `20260815110000`) chama
+  `public.dc_cable_sizing(v_amps, v_len, v_volts, v_drop, **105**, …)`, e a tool
+  do agente (`supabase/functions/_shared/ai/tools/survey-ops.ts:388`) passa
+  `p_insulation_c: 105` — **literal nos dois casos**. O `input_schema` da tool
+  nem expõe o parâmetro, então não há como informar outro valor. E não existe
+  pergunta de levantamento com papel de isolação.
+- **Por que 105 °C é a hipótese perigosa:** quanto maior a temperatura da
+  isolação, maior a ampacidade admitida para a MESMA bitola. 105 °C é o topo da
+  escala da ABYC E-11 (60 / 75 / 90 / 105) — é cabo marítimo premium. Cabo de PVC
+  comum de embarcação costuma ser 75 ou 90 °C. Assumir 105 quando o cabo é 90
+  faz a tabela liberar uma bitola que o cabo real não suporta: **erra para
+  menos**, na mesma direção do `NOVO-lev-21`.
+- **E hoje isso é o único caminho possível:** `dc_ampacity_ratings` tem **5
+  linhas, todas a 105 °C** (16, 25, 35, 50 e 70 mm²). Nenhuma linha de 60, 75 ou
+  90 °C. Ou seja, mesmo que alguém passasse outra temperatura, a consulta não
+  acharia nada e devolveria `mm2_por_ampacidade: null`.
+- **Consertar seria:** cadastrar as quatro temperaturas na tabela, acrescentar a
+  isolação como pergunta de levantamento (ou como atributo do produto de cabo, que
+  é onde a informação realmente vive), e — enquanto isso não existir — assumir o
+  valor CONSERVADOR (75 °C), não o generoso, e dizer qual assumiu.
+- **Não corrigido:** regra 3. **Terceiro achado da mesma família:** `NOVO-lev-20`
+  (afirma bitola com o cálculo incompleto), `NOVO-lev-21` (derating nunca
+  aplicado) e este — os três empurram a bitola para baixo e nenhum avisa.
+
+### Lacunas de DADO desta frente (não são defeito de código)
+
+Registradas aqui porque bloqueiam a frente do mesmo jeito que um defeito, e
+porque só o dono pode preenchê-las.
+
+1. **`dc_ampacity_ratings` tem 5 de ~36 linhas.** Faltam as bitolas abaixo de
+   16 mm² (1,5 / 2,5 / 4 / 6 / 10 — iluminação, bombas, sensores), acima de
+   70 mm² (95 / 120 — banco grande, inversor de 3 kVA+) e as três outras
+   temperaturas de isolação. Fora da faixa 16–70 mm² a 105 °C, `dc_cable_sizing`
+   responde `pronto: false` e o dimensionamento não fecha. **E não há tela para
+   preencher a tabela** — só por SQL.
+2. **A única regra de material ATIVA aponta um cabo fixo.** É
+   `sempre → Cabo flexível 35 mm² - ligação da fonte 120A`, `proporcional`,
+   fator 2, folga 15%, arredondando para cima. O cálculo do COMPRIMENTO está
+   certo (ida e volta + sobra); o **produto** é o mesmo para qualquer corrente e
+   qualquer distância. **Não existe nenhuma ligação entre `dc_cable_sizing` e a
+   escolha do produto**: a função calcula a bitola, a regra escolhe o cabo, e as
+   duas nunca se falam. É o defeito original do ORÇ-00074, ainda de pé — e a
+   regra está ATIVA, ou seja, em uso.
+3. **A estimativa por analogia nunca teve dado.** 6 casos registrados, 0
+   utilizáveis: todos com `actual_minutes` nulo e `unusable_reason` = "Concluída
+   sem hora apontada". O gatilho funciona; o que falta é alguém apontar hora
+   (timer da OS ou passos do roteiro) antes de concluir.
