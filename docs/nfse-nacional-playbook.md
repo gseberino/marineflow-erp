@@ -56,6 +56,19 @@ Contora enviava `xNome` junto — corrigido do lado deles.
    homologação. **Antes da 1ª NFS-e de produção, pedir à Contora que reconsulte o CNC de
    produção** (o `nfse_health` avisa até a 1ª autorizada real). Nunca desligar a flag do
    CNC nem mudar a IM para "contornar" — isso só alterna entre E0116 e E0120.
+   **Atualização 16/08 (Contora):** quem alimenta o CNC é o MUNICÍPIO (não há
+   autoatendimento do contribuinte) — o pedido cabível é à Secretaria da Fazenda de
+   Itajaí. Enquanto produção não tem o registro, a Contora criou
+   `settings.nfse_municipal_registration_in_cnc_producao = false` (produção omite a IM;
+   homologação segue enviando) — DPS comparada linha a linha nos dois ambientes, idêntica
+   fora do indicador de ambiente e da IM. Quando Itajaí publicar o registro, a flag volta
+   a `true` (a Contora reconsulta antes). Endpoint de conferência (mTLS com o A1):
+   `GET https://adn.nfse.gov.br/cnc/consulta/cad?codMunicipio=4208203&inscricaoFederal=50057049000159`.
+4. **Chaves de API por ambiente:** a chave de produção ("HBR Marineflow ERP") atende os
+   DOIS ambientes (a empresa tem homologação permitida); a chave "HBR Marineflow
+   Homologacao" responde `environment_mismatch` nesta empresa e pode ser descartada.
+   RPS é independente por ambiente/série — produção série 1 começa do 1; sem `number`,
+   a Contora aloca o próximo livre no despacho.
 
 ---
 
@@ -99,9 +112,18 @@ Contora enviava `xNome` junto — corrigido do lado deles.
   (Configurações → Fiscal → Verbos) com override por serviço.
 - **Tomador ≠ prestador** (E0202): o app deve bloquear antes do envio — NF-e de homologação
   aceita destinatário = emitente, NFS-e NÃO.
-- **Chave de acesso (50 dígitos):** não vem no `access_key` do status da Contora para NFS-e
-  (confirmado 15/08 — veio null com nota autorizada); ela está dentro do `xml_nfse`
-  arquivado e na consulta pública. Se precisar dela estruturada, extrair do XML.
+- **Chave de acesso (50 dígitos):** desde 16/08/2026 a Contora devolve `access_key` no
+  `GET .../status` e no GET do rascunho (correção feita após nosso apontamento — antes só
+  vinha dentro do `xml_nfse`). Provedor municipal sem chave nacional devolve `null` e se
+  identifica por `provider.verification_code`. Nosso `getStatus` já mapeia o fallback no
+  nível do documento.
+- **Histórico da HBR (nota manual nº 11, 17/12/2025):** cTribNac 140101 com ISS 3%
+  (Itajaí), sem retenção (tpRetISSQN=1), e a contabilidade classificou INSTALAÇÃO como
+  14.01 — inclusive faturando o equipamento dentro da NFS-e (prática antiga; o correto,
+  e o que o nosso sistema faz, é peça na NF-e). ⚠ A nota saiu como **opSimpNac=1 (NÃO
+  optante do Simples)** — a opção pelo Simples deve ter ocorrido em jan/2026 (as NF-e de
+  2026 autorizaram com CSOSN), mas a data exata é pergunta obrigatória à contadora antes
+  da 1ª NFS-e real: ela define opSimpNac/pTotTribSN.
 - **Cota:** homologação tem franquia separada (100/mês) da produção (500/mês). OS mista =
   2 eventos (NFS-e + NF-e).
 - **IBS/CBS:** para optante do Simples, obrigatório só a partir de **01/01/2027**; sem
