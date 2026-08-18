@@ -609,3 +609,43 @@ cada uma vira tarefa própria, por ordem do dono.
 - **O que NÃO fazer:** `supabase migration repair --status reverted`, que o próprio CLI
   sugere. Marcaria como revertidas 154 migrations que de fato rodaram — escrever no histórico
   que algo não aconteceu, quando aconteceu.
+
+---
+
+## NOVO-020 — O sistema de aprendizado do agente nunca funcionou uma única vez
+
+- **Achado em:** 18/08/2026, ao medir o que o agente aprendeu desde as otimizações de 09/08.
+- **Evidência (produção):** as 14 ferramentas de aprendizado — `remember_note`, `record_routine`,
+  `list_memory_notes`, `forget_note`, `propose_automation`, `confirm_automation`,
+  `get_autonomy_report`, `get_autonomy_settings`, `set_tool_autonomy`, `remember_about_entity`,
+  `list_entity_notes`, `review_entity_note`, `learn_product_alias`, `list_routines` — têm
+  **zero chamadas em toda a história de `ai_operator_audit`**. Não é baixa adesão: é nenhuma.
+  As tabelas confirmam: `ai_operator_memory_notes` 0 linhas, `ai_learned_routines` 0 linhas,
+  `ai_agent_memory` 1 linha de 09/06.
+- **Custo:** ~3.554 tokens das definições dessas ferramentas + ~1.390 tokens das seções
+  "APRENDIZADO — CONSTITUIÇÃO VIVA" (913) e "AUTONOMIA" (477) do system prompt. **~5.000 tokens
+  em toda chamada — 7% do prefixo — para habilitar um comportamento que nunca ocorre.**
+- **Causa provável (não confirmada):** aprender compete com a tarefa em curso e sempre perde. O
+  prompt manda "OFEREÇA guardar" e "nunca guarde sem o sim", o que põe duas barreiras (o agente
+  lembrar de oferecer + o dono confirmar) num ponto do prompt distante de onde a ação acontece.
+  É a mesma classe de falha da regra do item físico, que só passou a valer quando saiu do prompt
+  e virou verificação no código (ver commit da Fase 1, 08/08).
+- **NÃO corrigir de passagem.** Há três saídas possíveis e a escolha é do dono: (a) remover o
+  subsistema e recuperar os ~5.000 tokens; (b) capturar aprendizado por código, sem depender do
+  modelo lembrar — ex.: `edit_service_order_item` logo após `create_quote_from_items` no mesmo
+  turno É uma correção do dono, e dá para registrar sozinho; (c) manter e aceitar o custo.
+
+## NOVO-021 — Itens "Valor provisório" são criados em lote e removidos em lote
+
+- **Achado em:** 18/08/2026, investigando por que `remove_service_order_item` continua alto
+  (44 usos em 60 dias antes; 11 em 9 dias depois — o ritmo diário subiu de 0,73 para 1,22).
+- **Evidência:** em 11/08 15:47:25-26, seis itens removidos em dois segundos, todos rotulados
+  "— Valor provisório (aguardando cotação)": cabos 50/95 mm², terminais TF-50-L, TF-95, TPP-6-12,
+  TCM. Padrão repetido em 13/08 (acumulador 20L provisório) e 17/08.
+- **Leitura:** ao contrário do retrabalho que a Fase 1 eliminou (item físico entrando como texto
+  livre), este não é erro de caminho — é o orçamento sendo refeito. Sugere que a macro
+  `create_quote_from_items` gera mais itens provisórios do que o dono aceita, e a limpeza vem
+  depois. Cada remoção é uma chamada de LLM a ~US$ 0,03.
+- **A investigar antes de mexer:** quantos itens a macro marca como provisórios por orçamento, e
+  se o dono os remove por serem errados (casamento ruim no catálogo) ou por não querer cotar
+  aquilo agora. As duas causas pedem correções opostas.
