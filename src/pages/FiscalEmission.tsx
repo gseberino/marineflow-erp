@@ -2433,11 +2433,11 @@ export default function FiscalEmission() {
                 Inscrição municipal registrada no CNC NFS-e (desmarque se a emissão voltar com E0120)
               </label>
               <p className="text-[11px] text-muted-foreground">
-                ⚠ O <strong>pTotTribSN não é a alíquota de ISS</strong>: é a carga total de tributos da faixa do Simples
-                na competência — sem ele a NFS-e do optante é rejeitada (E0712). O valor de 6,00% gravado em 13/08/2026
-                é <strong>provisório (1ª faixa do Anexo III), a validar com a contadora</strong> antes de emitir em produção.
-                Os códigos de tributação dos serviços são preenchidos pela contabilidade em Configurações → Fiscal → Verbos
-                (ou no cadastro de cada serviço).
+                O <strong>pTotTribSN não é a alíquota de ISS</strong>: é a carga total aproximada de tributos da faixa do
+                Simples — sem ele a NFS-e do optante é rejeitada (E0712). O valor de <strong>6,00% foi confirmado pela
+                contadora em 18/08/2026</strong> (HBR optante do Simples desde jan/2026). Ele muda com a faixa de
+                faturamento — reconfirmar com a contabilidade quando a faixa mudar. Os códigos de tributação dos serviços
+                vivem em Configurações → Fiscal → Verbos (confirmados: tudo 14.01, ISS 3%, sem retenção).
               </p>
             </div>
 

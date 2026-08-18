@@ -120,10 +120,20 @@ Contora enviava `xNome` junto — corrigido do lado deles.
 - **Histórico da HBR (nota manual nº 11, 17/12/2025):** cTribNac 140101 com ISS 3%
   (Itajaí), sem retenção (tpRetISSQN=1), e a contabilidade classificou INSTALAÇÃO como
   14.01 — inclusive faturando o equipamento dentro da NFS-e (prática antiga; o correto,
-  e o que o nosso sistema faz, é peça na NF-e). ⚠ A nota saiu como **opSimpNac=1 (NÃO
-  optante do Simples)** — a opção pelo Simples deve ter ocorrido em jan/2026 (as NF-e de
-  2026 autorizaram com CSOSN), mas a data exata é pergunta obrigatória à contadora antes
-  da 1ª NFS-e real: ela define opSimpNac/pTotTribSN.
+  e o que o nosso sistema faz, é peça na NF-e). A nota saiu como opSimpNac=1 porque a
+  HBR ainda NÃO era optante.
+- **CONFIRMAÇÕES FINAIS da contabilidade (18/08/2026)** — fecham todas as dúvidas:
+  1. HBR **optante do Simples desde JANEIRO/2026** (por isso a nota de dez/2025 saiu
+     não-optante; hoje opSimpNac=3 é o correto).
+  2. **pTotTribSN = 6% CONFIRMADO** (reconfirmar apenas quando a faixa de faturamento
+     mudar).
+  3. Enquadramento: **"manter tudo no 14.01"** — inclusive laudos/projetos (nada de
+     310102 por ora) e mão de obra. Os 10 verbos fiscais estão com 140101/3317102/3%.
+  4. **Sem retenção de ISS** por tomador — a HBR recolhe.
+  5. **Itajaí NÃO alimenta o CNC de produção** (usa o cartão CNPJ da RFB) → a flag
+     `nfse_municipal_registration_in_cnc_producao=false` da Contora é o estado
+     PERMANENTE: produção emite SEM IM; homologação (que tem registro no CNC de lá)
+     emite COM IM. Não mexer.
 - **Cota:** homologação tem franquia separada (100/mês) da produção (500/mês). OS mista =
   2 eventos (NFS-e + NF-e).
 - **IBS/CBS:** para optante do Simples, obrigatório só a partir de **01/01/2027**; sem

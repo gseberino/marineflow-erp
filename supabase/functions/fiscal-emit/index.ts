@@ -1538,11 +1538,13 @@ async function handleNfseHealth(admin: any): Promise<Response> {
         .maybeSingle();
       if (!jaAutorizada) {
         pendenciasLocais.push(
-          "AVISO: antes da PRIMEIRA NFS-e em produção, confirme com a Contora que o CNC de "
-          + "produção já tem o registro complementar da HBR (em 14/08/2026 ele existia só em "
-          + "homologação — a sincronização municipal entre ambientes pode atrasar). Não "
-          + "desligue a flag do CNC nem mude a IM por conta própria para contornar: isso só "
-          + "alterna entre E0116 e E0120.",
+          "AVISO: a PRIMEIRA NFS-e em produção deve ser avisada no chamado da Contora antes "
+          + "do envio (combinado com o suporte — eles acompanham a transmissão). A "
+          + "configuração de produção já está correta e é PERMANENTE: Itajaí não alimenta o "
+          + "CNC de produção (confirmado pela contabilidade em 18/08/2026 — o município usa "
+          + "o cartão CNPJ da RFB), então a Contora omite a IM em produção "
+          + "(nfse_municipal_registration_in_cnc_producao=false) e envia em homologação. "
+          + "Não mexer nessas flags.",
         );
       }
     }
