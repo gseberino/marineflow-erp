@@ -1657,3 +1657,30 @@ porque só o dono pode preenchê-las.
   erro, que é o que ela é.
 - **Não corrigido:** alterar o `CLAUDE.md` do repositório é decisão que vale para
   todas as sessões e não cabe de passagem.
+
+### [NOVO-lev-39] A fila noturna mente sobre o estado dos próprios itens
+
+- **Onde:** `audit/fila-noturna.md`, o aviso em destaque no topo.
+- **O quê:** o arquivo abre com um bloco dizendo que os itens 1, 2 e 3
+  (`NOVO-017`, `NOVO-024`, `NOVO-009`) **“JÁ TÊM CORREÇÃO PRONTA, aguardando
+  integração”**, em `session/noturno-20260811`, fora da `main`, e instruindo o
+  próximo turno a começar pelo item 4.
+- **A verdade, conferida hoje:** os três commits (`e0a7c85`, `070d988`,
+  `d16da5b`) **são ancestrais de `origin/main`** —
+  `git merge-base --is-ancestor origin/session/noturno-20260811 origin/main`
+  responde verdadeiro. Está tudo integrado há dias. O aviso é de 12/08 e nunca
+  foi movido.
+- **Por que importa mais do que parece:** o próprio arquivo declara a regra —
+  *“Editar este arquivo é como a fila evolui. Item concluído: mover para
+  Concluídos com o commit.”* Quem integrou não voltou. E o aviso não é passivo:
+  ele **manda** o próximo turno pular os três, e alerta contra “dois diffs
+  concorrentes para o mesmo defeito”. Uma sessão que confiasse nele gastaria o
+  turno num inventário errado, ou repetiria trabalho para conferir.
+- **Aconteceu comigo, nesta sessão:** reportei ao dono que havia “três correções
+  prontas paradas há oito dias”, com essa ênfase, porque li o aviso e o repassei.
+  Só descobri o contrário ao ir integrar.
+- **Consertar seria:** mover os três para “Concluídos” com o commit de merge, e
+  apagar o bloco de aviso. Um minuto de edição.
+- **Não corrigido:** a fila é o instrumento de outra frente (o `/modo-noturno`), e
+  mexer no estado dela por fora, no meio do trabalho de outra sessão, é como o
+  aviso ficou errado em primeiro lugar.
