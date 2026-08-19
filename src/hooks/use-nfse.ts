@@ -140,6 +140,86 @@ export function useEmitirNfse() {
   });
 }
 
+/** Ambiente REAL de emissão (secret do servidor) — alimenta o banner de produção. */
+export function useAmbienteFiscal() {
+  return useQuery({
+    queryKey: ['fiscal-environment'],
+    queryFn: async (): Promise<'homologacao' | 'producao'> => {
+      const r = await chamar<{ data: { environment: string } }>({ action: 'environment' });
+      return r.data.environment === 'producao' ? 'producao' : 'homologacao';
+    },
+    staleTime: 10 * 60_000,
+    retry: false,
+  });
+}
+
+export interface NfseAvulsaInput {
+  clientId: string;
+  descricao: string;
+  valor: number;
+  nationalTaxCode: string;
+  cnae: string | null;
+  issRate: number | null;
+  issWithheld: boolean;
+}
+
+/**
+ * NFS-e AVULSA — serviço que não virou OS (cobrança pontual). O servidor já aceitava
+ * `service`/`taker`/`amounts` explícitos (caminho manual do handleCreateNfse); este hook
+ * monta o tomador a partir do cadastro do cliente com o MESMO mapeamento da ponte de OS.
+ */
+export function useEmitirNfseAvulsa() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (v: NfseAvulsaInput) => {
+      const { data: cli, error } = await supabase
+        .from('clients')
+        .select('name, cpf_cnpj, email, address_line_1, address_number, address_complement, neighborhood, city, state, postal_code')
+        .eq('id', v.clientId)
+        .maybeSingle();
+      if (error) throw error;
+      if (!cli) throw new Error('Cliente não encontrado.');
+      return await chamar<{ data: { id: string; status: string; environment?: string }; aviso?: string }>({
+        document_type: 'nfse',
+        origin_type: 'manual',
+        client_id: v.clientId,
+        // Avulsa não tem origem estável — a idempotência fica por chamada (o servidor
+        // ainda dedupe retries de rede pela chave).
+        idempotency_key: crypto.randomUUID(),
+        service: {
+          description: v.descricao,
+          national_tax_code: v.nationalTaxCode,
+          cnae: v.cnae,
+          iss_rate: v.issRate,
+          iss_withheld: v.issWithheld,
+        },
+        taker: {
+          name: cli.name,
+          document: cli.cpf_cnpj,
+          email: cli.email,
+          address: {
+            street: cli.address_line_1,
+            number: cli.address_number,
+            complement: cli.address_complement,
+            district: cli.neighborhood,
+            city_name: cli.city,
+            state_code: cli.state,
+            postal_code: cli.postal_code,
+          },
+        },
+        amounts: { service_amount: v.valor },
+      });
+    },
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['nfse-documentos'] });
+      qc.invalidateQueries({ queryKey: ['issued_fiscal_documents'] });
+      if (r.aviso) toast.warning(r.aviso, { duration: 12_000 });
+      else toast.success('NFS-e avulsa enviada. Acompanhe o status na lista.');
+    },
+    onError: (e: Error) => toast.error(e.message, { duration: 12_000 }),
+  });
+}
+
 export function useCancelarNfse() {
   const qc = useQueryClient();
   return useMutation({
