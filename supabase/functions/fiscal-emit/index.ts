@@ -1556,13 +1556,27 @@ async function handleNfseHealth(admin: any): Promise<Response> {
       empresa: { id: empresa.id, legal_name: empresa.legalName, document: empresa.document },
       // `pronto` exige o verde da Contora E nenhuma pendência nossa. Silêncio não é
       // autorização: se a Contora não afirmar que está pronta, não está.
-      // "AVISO:" informa sem travar (mesma convenção do prepareNfsePayload) — só pendência
-      // real bloqueia o pronto.
-      pronto: (health.ok ? health.data.ready : false)
+      // PRONTIDÃO (corrigida em 18/08/2026 após teste ao vivo): o `ready` cru da Contora
+      // fica FALSE por orientação de payload nos blocks (ex.: "informe national_tax_code"
+      // — coisa que nosso payload SEMPRE envia, resolvida por nota no billing_preflight),
+      // o que trancaria a emissão para sempre. O gate real da empresa é
+      // public_emission_enabled + todos os checks de cadastro ok. Fallback para o ready
+      // cru quando a resposta não traz esses campos (contrato antigo/outro provedor).
+      // "AVISO:" informa sem travar — só pendência local real bloqueia.
+      pronto: (health.ok
+        ? (health.data.publicEmissionEnabled != null || health.data.checksOk != null
+          ? health.data.publicEmissionEnabled === true && health.data.checksOk !== false
+          : health.data.ready)
+        : false)
         && pendenciasLocais.filter((p) => !p.startsWith("AVISO:")).length === 0,
       contora: health.ok
         ? {
           ready: health.data.ready,
+          public_emission_enabled: health.data.publicEmissionEnabled ?? null,
+          checks_ok: health.data.checksOk ?? null,
+          // Orientações/bloqueios crus da Contora — exibir como informação; o `pronto`
+          // acima já decidiu o que de fato trava.
+          blocks: health.data.blocks ?? [],
           standard: health.data.standard,
           city_code: health.data.cityCode,
           city_name: health.data.cityName,
