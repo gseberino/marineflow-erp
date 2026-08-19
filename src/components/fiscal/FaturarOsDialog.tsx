@@ -267,7 +267,12 @@ export function FaturarOsDialog({ open, onOpenChange, serviceOrderId, orderNumbe
             <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
               <Button
                 variant="outline" size="sm"
-                onClick={() => preflight.refetch()}
+                onClick={() => {
+                  // Reverifica TAMBÉM a saúde da conta (o gate da NFS-e) — só refazer o
+                  // preflight deixava uma pendência de conta resolvida presa no cache.
+                  qc.invalidateQueries({ queryKey: ['nfse-health'] });
+                  preflight.refetch();
+                }}
                 disabled={preflight.isFetching || emitindo}
               >
                 <RefreshCw className={`mr-1.5 h-4 w-4 ${preflight.isFetching ? 'animate-spin' : ''}`} />
@@ -327,7 +332,9 @@ function CartaoDocumento({ icone, titulo, doc, docExistente, resultado, linhaRes
   }
 
   const emitida = !!docExistente || resultado.fase === 'ok';
-  const comErro = !!doc.erro || resultado.fase === 'erro' || pendenciasExtra.length > 0;
+  // AVISO informa sem pintar o cartão de pendência — mesma convenção do servidor.
+  const pendenciasBloqueantes = pendenciasExtra.filter((p) => !p.startsWith('AVISO:'));
+  const comErro = !!doc.erro || resultado.fase === 'erro' || pendenciasBloqueantes.length > 0;
 
   return (
     <Card className={`p-3 ${emitida ? 'border-success/40' : comErro ? 'border-amber-500/40' : ''}`}>
@@ -338,7 +345,7 @@ function CartaoDocumento({ icone, titulo, doc, docExistente, resultado, linhaRes
           {emitida ? (
             <Badge className="bg-success/15 text-success">
               {docExistente
-                ? `emitida — nº ${docExistente.number ?? '…'} · ${docExistente.status}${docExistente.environment === 'homologacao' ? ' · homolog.' : ''}`
+                ? `emitida — nº ${docExistente.provider_status?.nfse_number ?? docExistente.provider_status?.display_number ?? docExistente.number ?? '…'} · ${docExistente.status}${docExistente.environment === 'homologacao' ? ' · homolog.' : ''}`
                 : 'enviada para emissão'}
             </Badge>
           ) : resultado.fase === 'emitindo' ? (
@@ -383,7 +390,7 @@ function CartaoDocumento({ icone, titulo, doc, docExistente, resultado, linhaRes
         <ul className="mt-2 space-y-1">
           {pendenciasExtra.map((p, i) => (
             <li key={i} className="flex gap-2 text-xs text-muted-foreground">
-              <span className="text-amber-600">•</span>
+              <span className={p.startsWith('AVISO:') ? 'text-muted-foreground' : 'text-amber-600'}>•</span>
               <span className="min-w-0">{p}</span>
             </li>
           ))}

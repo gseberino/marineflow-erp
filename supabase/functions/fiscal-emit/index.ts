@@ -240,6 +240,20 @@ Deno.serve(async (req) => {
   if (!caller) return jr({ error: "unauthorized" }, 401);
 
   try {
+    // [VERIFICAÇÃO 18/08] Lista FECHADA de ações. Antes, qualquer action desconhecida
+    // (typo, chamador desatualizado) caía no default — que é EMISSÃO REAL em produção.
+    // O caminho mais perigoso não pode ser o fallback de um erro de digitação.
+    const ACOES_CONHECIDAS = new Set([
+      "create", "prepare", "environment", "cancel", "correction", "diagnostics",
+      "nfse_health", "enable_homolog", "artifact", "preview", "homolog", "billing_preflight",
+    ]);
+    if (body.action != null && !ACOES_CONHECIDAS.has(String(body.action))) {
+      return jr({
+        error: `Ação desconhecida: "${body.action}". Nada foi emitido.`,
+        acoes_validas: [...ACOES_CONHECIDAS],
+      }, 422);
+    }
+
     // [FATURAR-OS] Pré-voo CONJUNTO da OS (NFS-e + NF-e), sem emitir nada. Precisa vir ANTES
     // das pontes abaixo: elas mutam o body e retornam erro no primeiro documento com
     // problema, enquanto o pré-voo quer o retrato dos DOIS lados de uma vez.
@@ -261,7 +275,10 @@ Deno.serve(async (req) => {
       body.__resumo_os = ponte.resumo;
     }
 
-    if (body.service_order_id && !Array.isArray(body.items)) {
+    // [VERIFICAÇÃO 18/08] Guarda de tipo: sem ela, a emissão de NFS-e por OS (que chega
+    // com service_order_id e sem items) caía TAMBÉM nesta ponte de NF-e — OS só de mão de
+    // obra recebia 422 "não tem peças" e a NFS-e abortava com o erro do documento errado.
+    if (body.document_type !== "nfse" && body.service_order_id && !Array.isArray(body.items)) {
       const ponte = await buildBodyFromServiceOrder(admin, body);
       if (!ponte.ok) return jr({ error: ponte.error }, ponte.status);
       Object.assign(body, ponte.body);
@@ -270,6 +287,20 @@ Deno.serve(async (req) => {
       }
       // O resumo viaja para o preview responder "o que entrou e o que ficou de fora".
       body.__resumo_os = ponte.resumo;
+    }
+
+    // [VERIFICAÇÃO 18/08] `prepare` AVULSO (sem service_order_id — as pontes acima não
+    // interceptaram): valida e devolve o payload SEM emitir. Antes, um prepare avulso
+    // caía no default e EMITIA de verdade — pré-visualização virando nota real.
+    if (body.action === "prepare") {
+      if (body.document_type === "nfse") {
+        const prep = await prepareNfsePayload(admin, body);
+        if (!prep.ok) return jr({ error: prep.error, details: prep.details }, prep.status);
+        return jr({ ok: true, data: { payload: prep.payload, payload_pronto: true } });
+      }
+      const prep = await prepareNfePayload(admin, body);
+      if (!prep.ok) return jr({ error: prep.error }, prep.status);
+      return jr({ ok: true, data: { payload: prep.payload, payload_pronto: true } });
     }
 
     // Ambiente REAL de emissão (lê o secret FISCAL_ENVIRONMENT do servidor, sem
@@ -739,11 +770,12 @@ async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
   | { ok: false; error: string; status: number; details?: unknown }
 > {
   const soId = String(body.service_order_id);
-  const { data: so } = await admin
+  const { data: so, error: soErr } = await admin
     .from("service_orders")
     .select("id, service_order_number, status, client_id")
     .eq("id", soId)
     .maybeSingle();
+  if (soErr) return { ok: false, error: "Falha ao consultar a OS: " + soErr.message, status: 500 };
   if (!so) return { ok: false, error: "Ordem de serviço não encontrada.", status: 404 };
   if (so.status === "cancelled") {
     return { ok: false, error: "OS cancelada não pode gerar nota.", status: 422 };
@@ -752,11 +784,12 @@ async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
     return { ok: false, error: "Essa OS não tem cliente vinculado — sem tomador não há NFS-e.", status: 422 };
   }
 
-  const { data: cli } = await admin
+  const { data: cli, error: cliErr } = await admin
     .from("clients")
     .select("name, cpf_cnpj, email, address_line_1, address_number, address_complement, neighborhood, city, state, postal_code")
     .eq("id", so.client_id)
     .maybeSingle();
+  if (cliErr) return { ok: false, error: "Falha ao consultar o cliente: " + cliErr.message, status: 500 };
   if (!cli) return { ok: false, error: "Cliente da OS não encontrado.", status: 404 };
 
   // Linhas de serviço COM o cadastro fiscal junto — é dele que saem código, CNAE e alíquota.
@@ -825,7 +858,8 @@ async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
       error: `Esta OS tem serviços de códigos de tributação diferentes (${codigos.join(", ")}). `
         + "A NFS-e declara UM código por nota, então não dá para juntar tudo numa só — "
         + "escolher um deles declararia à prefeitura um serviço que não foi o prestado. "
-        + "Emita uma nota por código, selecionando os serviços de cada uma.",
+        + "Caminhos: alinhe o código dos serviços no cadastro (Configurações → Fiscal), ou "
+        + "emita uma NFS-e AVULSA por grupo de código (página Notas de Serviço).",
       details: { codigos_encontrados: codigos },
     };
   }
@@ -922,7 +956,7 @@ async function handleBillingPreflight(admin: any, body: any): Promise<Response> 
 
   const { data: docs } = await admin
     .from("issued_fiscal_documents")
-    .select("id, document_type, status, number, series, environment, status_message, created_at")
+    .select("id, document_type, status, number, series, environment, status_message, created_at, provider_status")
     .eq("origin_type", "service_order")
     .eq("origin_id", soId)
     .order("created_at", { ascending: false });
@@ -1000,10 +1034,14 @@ async function prepareNfsePayload(admin: any, body: any): Promise<
   | { ok: true; payload: Record<string, unknown>; company: any; series: number }
   | { ok: false; error: string; status: number; details?: unknown }
 > {
-  const { data: company } = await admin
+  const { data: company, error: companyErr } = await admin
     .from("company_fiscal_settings")
     .select("*")
+    .limit(1)
     .maybeSingle();
+  if (companyErr) {
+    return { ok: false, status: 500, error: "Falha ao consultar o cadastro fiscal da empresa: " + companyErr.message };
+  }
   if (!company) {
     return {
       ok: false,
@@ -1128,8 +1166,18 @@ async function handleCreateNfse(admin: any, body: any): Promise<Response> {
         await provider.refresh(documentType, existing.provider_document_id);
         const st = await provider.getStatus(documentType, existing.provider_document_id);
         if (st.ok) await applyStatusUpdate(admin, provider, existing, st.data);
+        // Reler DEPOIS do applyStatusUpdate — devolver a linha velha faria o chamador
+        // afirmar um status que acabou de mudar.
+        const { data: fresh } = await admin
+          .from("issued_fiscal_documents").select("*").eq("id", existing.id).maybeSingle();
+        return jr({ ok: true, data: fresh ?? existing, reused: true });
       }
-      return jr({ ok: true, data: existing, reused: true });
+      // [VERIFICAÇÃO 18/08] Rascunho ÓRFÃO (linha inserida, mas o createDraft na Contora
+      // nunca aconteceu — crash entre os dois). Devolver reused aqui deixava a nota presa
+      // em 'draft' para sempre e o chamador achando que ela existia. Marca como falho e
+      // SEGUE para uma emissão nova.
+      await markFailed(admin, existing.id,
+        "Rascunho órfão (emissão interrompida antes do envio ao provedor) — substituído por nova emissão.");
     }
   }
 
@@ -1253,7 +1301,17 @@ async function handleCreate(admin: any, body: any): Promise<Response> {
     if (existingErr) {
       return jr({ error: "Falha ao checar duplicidade: " + existingErr.message }, 500);
     }
-    if (existing) return jr({ ok: true, data: existing, reused: true });
+    if (existing) {
+      // [VERIFICAÇÃO 18/08] Rascunho órfão (sem provider_document_id): a emissão parou
+      // entre o INSERT e o createDraft. Devolver reused deixaria a venda presa para
+      // sempre — marca como falho e segue para emissão nova. Com provider_document_id,
+      // reusa normalmente (retry não pode virar segunda nota).
+      if (existing.provider_document_id) {
+        return jr({ ok: true, data: existing, reused: true });
+      }
+      await markFailed(admin, existing.id,
+        "Rascunho órfão (emissão interrompida antes do envio ao provedor) — substituído por nova emissão.");
+    }
   }
 
   // Monta o payload (empresa + impostos por item + validação) — mesma função
@@ -1491,10 +1549,14 @@ async function handleNfseHealth(admin: any): Promise<Response> {
 
   const health = await provider.nfseHealth(empresa.id);
 
-  const { data: settings } = await admin
+  const { data: settings, error: settingsErr } = await admin
     .from("company_fiscal_settings")
     .select("nfse_standard, nfse_total_tax_rate_sn, nfse_simples_nacional_option, nfse_municipal_registration_in_cnc, nfse_default_series, tax_regime, municipal_registration, ibge_city_code, city_name")
+    .limit(1)
     .maybeSingle();
+  if (settingsErr) {
+    return jr({ error: "Falha ao consultar o cadastro fiscal local: " + settingsErr.message }, 500);
+  }
 
   // Pendências que ESTE app consegue detectar sozinho, sem depender do contrato da Contora.
   // Cada uma corresponde a uma rejeição conhecida — melhor barrar aqui do que descobrir na
@@ -1803,6 +1865,14 @@ async function handleCorrection(admin: any, body: any): Promise<Response> {
     .maybeSingle();
   if (docErr) return jr({ error: "Falha ao consultar documento: " + docErr.message }, 500);
   if (!doc) return jr({ error: "Documento não encontrado" }, 404);
+  // Carta de Correção é instituto da NF-e/CT-e — NÃO existe para NFS-e. O caminho da
+  // NFS-e errada é cancelar (no prazo municipal) e emitir outra (substituição).
+  if (doc.document_type === "nfse") {
+    return jr({
+      error: "NFS-e não tem Carta de Correção. Para corrigir, cancele a nota (dentro do "
+        + "prazo do município) e emita outra no lugar.",
+    }, 422);
+  }
   if (!doc.provider_document_id) {
     return jr({ error: "Documento ainda não foi enviado ao provedor" }, 422);
   }

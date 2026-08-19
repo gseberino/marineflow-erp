@@ -478,6 +478,15 @@ export class ContoraProvider implements FiscalProvider {
     const cancelCode = cancellation["status_code"] != null ? String(cancellation["status_code"]) : "";
     const cancelledAt = (cancellation["cancelled_at"] as string) ?? null;
     const isCancelled = !!cancelledAt || cancelCode === "135" || cancelCode === "155";
+    // [VERIFICAÇÃO 18/08] Os códigos 135/155 são vocabulário de NF-e; o cancelamento de
+    // NFS-e nacional pode chegar com outro formato que ainda não vimos ao vivo. Se o
+    // grupo cancellation vier POPULADO sem casar com o que reconhecemos, deixa rastro —
+    // o primeiro cancelamento real de NFS-e mostra o formato e a gente amplia.
+    if (!isCancelled && (cancellation["status"] != null || cancelCode)) {
+      console.warn(
+        `[fiscal] cancellation não reconhecido em ${id}: status=${cancellation["status"]} code=${cancelCode} — verifique o formato (NFS-e?)`,
+      );
+    }
 
     return {
       ok: true,

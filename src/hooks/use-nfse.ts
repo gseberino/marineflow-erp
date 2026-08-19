@@ -133,6 +133,9 @@ export function useEmitirNfse() {
     },
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['nfse-documentos'] });
+      qc.invalidateQueries({ queryKey: ['issued_fiscal_documents'] });
+      // A OS de origem pode ter mudado de invoicing_status — a lista precisa recarregar.
+      qc.invalidateQueries({ queryKey: ['service-orders'] });
       if (r.aviso) toast.warning(r.aviso, { duration: 12_000 });
       else toast.success('NFS-e enviada. Acompanhe o status abaixo.');
     },
@@ -161,6 +164,12 @@ export interface NfseAvulsaInput {
   cnae: string | null;
   issRate: number | null;
   issWithheld: boolean;
+  /**
+   * Gerada UMA vez ao entrar na conferência e reutilizada em todos os retries — um uuid
+   * novo por clique deixaria um retry pós-timeout emitir a MESMA nota real duas vezes
+   * (a avulsa não tem origem estável; a chave é a única dedupe).
+   */
+  idempotencyKey: string;
 }
 
 /**
@@ -183,9 +192,7 @@ export function useEmitirNfseAvulsa() {
         document_type: 'nfse',
         origin_type: 'manual',
         client_id: v.clientId,
-        // Avulsa não tem origem estável — a idempotência fica por chamada (o servidor
-        // ainda dedupe retries de rede pela chave).
-        idempotency_key: crypto.randomUUID(),
+        idempotency_key: v.idempotencyKey,
         service: {
           description: v.descricao,
           national_tax_code: v.nationalTaxCode,

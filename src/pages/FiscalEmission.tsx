@@ -1650,7 +1650,7 @@ export default function FiscalEmission() {
     const tipo = t === 'nfse' ? 'NFS-e' : t === 'nfce' ? 'NFC-e' : 'NF-e';
     const cliente = String(doc.request_payload?.recipient?.name || '')
       // eslint-disable-next-line no-control-regex
-      .replace(/[<>:"/\\|?* -]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+      .replace(/[<>:"/\\|?*\x00-\x1f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
     const base = `${tipo} ${doc.number ?? ''}-${doc.series ?? ''}${cliente ? ' ' + cliente : ''}`.trim();
     return `${base}.${kind === 'pdf_danfe' ? 'pdf' : 'xml'}`;
   };

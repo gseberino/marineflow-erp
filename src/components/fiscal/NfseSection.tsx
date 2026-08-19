@@ -37,6 +37,9 @@ export function NfseSection({ serviceOrderId }: { serviceOrderId?: string | null
   const emitir = useEmitirNfse();
   const atualizar = useAtualizarStatusNfse();
   const [cancelando, setCancelando] = useState<DocumentoNfse | null>(null);
+  // Emissão por OS exige CONFIRMAÇÃO — era o último caminho que emitia nota (real, em
+  // produção) num clique só, sem conferência.
+  const [confirmandoEmissao, setConfirmandoEmissao] = useState(false);
 
   const pronto = health.data?.pronto === true;
 
@@ -65,7 +68,7 @@ export function NfseSection({ serviceOrderId }: { serviceOrderId?: string | null
             </div>
             <Button
               disabled={!serviceOrderId || emitir.isPending}
-              onClick={() => serviceOrderId && emitir.mutate({ serviceOrderId })}
+              onClick={() => serviceOrderId && setConfirmandoEmissao(true)}
             >
               {emitir.isPending
                 ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -75,6 +78,32 @@ export function NfseSection({ serviceOrderId }: { serviceOrderId?: string | null
           </div>
         </Card>
       )}
+
+      {/* Confirmação da emissão por OS — em produção é nota real e o cancelamento tem
+          prazo municipal; um clique só não basta. */}
+      <AlertDialog open={confirmandoEmissao} onOpenChange={setConfirmandoEmissao}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Emitir a NFS-e desta OS?</AlertDialogTitle>
+            <AlertDialogDescription>
+              A nota sai com TODOS os serviços da OS consolidados (as peças ficam de fora —
+              elas são NF-e). No ambiente de produção a nota é real e o cancelamento tem
+              prazo curto definido pelo município.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Voltar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setConfirmandoEmissao(false);
+                if (serviceOrderId) emitir.mutate({ serviceOrderId });
+              }}
+            >
+              Emitir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <div>
         <div className="mb-2 flex items-center justify-between">
@@ -272,7 +301,9 @@ function DialogoDeCancelamento({ doc, onFechar }: {
     <AlertDialog open={!!doc} onOpenChange={(o) => { if (!o) { setMotivo(''); onFechar(); } }}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Cancelar NFS-e nº {doc?.number}</AlertDialogTitle>
+          <AlertDialogTitle>
+            Cancelar NFS-e {doc && numeroNacionalNfse(doc) ? `nº ${numeroNacionalNfse(doc)}` : `(RPS ${doc?.number})`}
+          </AlertDialogTitle>
           <AlertDialogDescription asChild>
             <div className="space-y-2">
               <p>

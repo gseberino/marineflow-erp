@@ -13,7 +13,7 @@
 // autenticação do caminho manual é feita aqui dentro.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { createFiscalProvider } from "../_shared/fiscal/factory.ts";
-import { applyStatusUpdate } from "../_shared/fiscal/apply-status.ts";
+import { applyStatusUpdate, recomputeInvoicingStatus } from "../_shared/fiscal/apply-status.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -29,7 +29,7 @@ function jr(body: unknown, status = 200) {
 }
 
 const NON_TERMINAL = ["draft", "queued", "processing"];
-const SELECT_COLS = "id, document_type, provider_document_id, environment, status, xml_storage_path, pdf_storage_path, provider_status";
+const SELECT_COLS = "id, document_type, provider_document_id, environment, status, xml_storage_path, pdf_storage_path, provider_status, origin_type, origin_id";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -96,6 +96,11 @@ Deno.serve(async (req) => {
     if (statusInfo.ok) {
       await applyStatusUpdate(admin, provider, doc, statusInfo.data);
       updated++;
+      // OS de origem: uma nota que virou rejected/failed/cancelled aqui precisa refletir
+      // no marcador da OS — senão "invoiced" sobrevive a uma rejeição para sempre.
+      if (doc.origin_type === "service_order" && doc.origin_id && statusInfo.data.status !== doc.status) {
+        await recomputeInvoicingStatus(admin, String(doc.origin_id));
+      }
     } else {
       console.error(`[fiscal-reconcile] falha ao consultar ${doc.id}:`, statusInfo.error);
     }

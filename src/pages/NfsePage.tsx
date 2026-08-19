@@ -57,7 +57,9 @@ export default function NfsePage() {
         </Button>
       </div>
 
-      {ambiente.data === 'producao' && (
+      {/* FAIL-SAFE: só esconde o banner quando o servidor DISSE homologação — ambiente
+          desconhecido é tratado como produção. */}
+      {!ambiente.isLoading && ambiente.data !== 'homologacao' && (
         <div className="rounded-md border border-destructive/50 bg-destructive/5 p-2.5 text-sm font-medium text-destructive">
           ⚠ Ambiente de PRODUÇÃO — as emissões desta página são notas reais.
         </div>

@@ -36,6 +36,9 @@ export function NfseAvulsaDialog({ open, onOpenChange }: {
   const emitir = useEmitirNfseAvulsa();
 
   const [etapa, setEtapa] = useState<'form' | 'conferencia'>('form');
+  // Chave de idempotência da TENTATIVA: nasce ao entrar na conferência e sobrevive aos
+  // retries — retry pós-timeout com a mesma chave não vira segunda nota real.
+  const [chaveEmissao, setChaveEmissao] = useState<string | null>(null);
   const [clientId, setClientId] = useState('');
   const [descricao, setDescricao] = useState('');
   const [valor, setValor] = useState(0);
@@ -48,6 +51,7 @@ export function NfseAvulsaDialog({ open, onOpenChange }: {
   useEffect(() => {
     if (open) {
       setEtapa('form');
+      setChaveEmissao(null);
       setClientId('');
       setDescricao('');
       setValor(0);
@@ -92,14 +96,26 @@ export function NfseAvulsaDialog({ open, onOpenChange }: {
       toast.error('O cliente precisa de CPF/CNPJ no cadastro — sem tomador identificado não há NFS-e.');
       return;
     }
-    if (!cliente.city || !cliente.state || !cliente.postal_code) {
-      toast.error('O cliente precisa de endereço completo (cidade, UF e CEP) no cadastro.');
+    // Espelha o validador do SERVIDOR (nfse-payload-builder): logradouro e bairro também
+    // são obrigatórios — barrar aqui evita o 422 minutos depois, longe da causa.
+    const faltas = [
+      !cliente.address_line_1 && 'logradouro',
+      !cliente.neighborhood && 'bairro',
+      !cliente.city && 'cidade',
+      !cliente.state && 'UF',
+      !cliente.postal_code && 'CEP',
+    ].filter(Boolean);
+    if (faltas.length) {
+      toast.error(`O cadastro do cliente está sem: ${faltas.join(', ')}. Complete antes de emitir.`);
       return;
     }
+    // Chave por tentativa: só (re)gera ao ENTRAR na conferência.
+    setChaveEmissao((k) => k ?? crypto.randomUUID());
     setEtapa('conferencia');
   };
 
   const handleEmitir = async () => {
+    if (!chaveEmissao) return;
     try {
       await emitir.mutateAsync({
         clientId,
@@ -109,14 +125,18 @@ export function NfseAvulsaDialog({ open, onOpenChange }: {
         cnae: cnaeDigits || null,
         issRate: issRate === '' ? null : Number(issRate),
         issWithheld: issRetido,
+        idempotencyKey: chaveEmissao,
       });
       onOpenChange(false);
     } catch {
-      // toast do hook; o diálogo fica aberto para corrigir
+      // toast do hook; o diálogo fica aberto para corrigir — a MESMA chave vale no retry
     }
   };
 
-  const producao = ambiente.data === 'producao';
+  // FAIL-SAFE: ambiente desconhecido (carregando/erro) é tratado como PRODUÇÃO — o
+  // servidor está em produção e a UI afirmar "homologação" sem certeza já quase custou
+  // uma nota real "de teste". Só relaxa quando o servidor DISSE homologação.
+  const producao = ambiente.data !== 'homologacao';
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!emitir.isPending) onOpenChange(v); }}>
@@ -220,9 +240,9 @@ export function NfseAvulsaDialog({ open, onOpenChange }: {
               <Button variant="outline" onClick={() => setEtapa('form')} disabled={emitir.isPending}>
                 <ArrowLeft className="mr-1.5 h-4 w-4" />Voltar e corrigir
               </Button>
-              <Button onClick={handleEmitir} disabled={emitir.isPending}>
-                {emitir.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
-                {producao ? 'Emitir NFS-e REAL' : 'Emitir em homologação'}
+              <Button onClick={handleEmitir} disabled={emitir.isPending || ambiente.isLoading}>
+                {(emitir.isPending || ambiente.isLoading) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
+                {ambiente.isLoading ? 'Verificando ambiente…' : producao ? 'Emitir NFS-e REAL' : 'Emitir em homologação'}
               </Button>
             </div>
           </div>
