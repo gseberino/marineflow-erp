@@ -3053,36 +3053,51 @@ export type Database = {
       }
       dc_ampacity_ratings: {
         Row: {
-          amps_outside_engine_space: number
+          amps_bundled: number
+          amps_bundled_engine: number
+          amps_free_air: number
+          amps_free_air_engine: number
           awg: string | null
           created_at: string
           created_by: string | null
+          diameter_mm: number | null
           id: string
           insulation_c: number
           mm2: number
           notes: string | null
+          ohm_per_km: number | null
           source: string
         }
         Insert: {
-          amps_outside_engine_space: number
+          amps_bundled: number
+          amps_bundled_engine: number
+          amps_free_air: number
+          amps_free_air_engine: number
           awg?: string | null
           created_at?: string
           created_by?: string | null
+          diameter_mm?: number | null
           id?: string
           insulation_c: number
           mm2: number
           notes?: string | null
+          ohm_per_km?: number | null
           source: string
         }
         Update: {
-          amps_outside_engine_space?: number
+          amps_bundled?: number
+          amps_bundled_engine?: number
+          amps_free_air?: number
+          amps_free_air_engine?: number
           awg?: string | null
           created_at?: string
           created_by?: string | null
+          diameter_mm?: number | null
           id?: string
           insulation_c?: number
           mm2?: number
           notes?: string | null
+          ohm_per_km?: number | null
           source?: string
         }
         Relationships: []
@@ -5585,6 +5600,8 @@ export type Database = {
           cfop: string | null
           cofins_rate: number | null
           commission_rate: number | null
+          conductor_insulation_c: number | null
+          conductor_mm2: number | null
           cost_currency: string | null
           cost_price: number | null
           created_at: string
@@ -5627,6 +5644,8 @@ export type Database = {
           cfop?: string | null
           cofins_rate?: number | null
           commission_rate?: number | null
+          conductor_insulation_c?: number | null
+          conductor_mm2?: number | null
           cost_currency?: string | null
           cost_price?: number | null
           created_at?: string
@@ -5669,6 +5688,8 @@ export type Database = {
           cfop?: string | null
           cofins_rate?: number | null
           commission_rate?: number | null
+          conductor_insulation_c?: number | null
+          conductor_mm2?: number | null
           cost_currency?: string | null
           cost_price?: number | null
           created_at?: string
@@ -8889,6 +8910,7 @@ export type Database = {
           min_value: number | null
           origin: string
           product_id: string
+          product_pick: string
           qty_factor: number
           qty_fixed: number
           qty_mode: string
@@ -8911,6 +8933,7 @@ export type Database = {
           min_value?: number | null
           origin?: string
           product_id: string
+          product_pick?: string
           qty_factor?: number
           qty_fixed?: number
           qty_mode?: string
@@ -8933,6 +8956,7 @@ export type Database = {
           min_value?: number | null
           origin?: string
           product_id?: string
+          product_pick?: string
           qty_factor?: number
           qty_fixed?: number
           qty_mode?: string
@@ -10636,6 +10660,17 @@ export type Database = {
           p_volts?: number
         }
         Returns: number
+      }
+      dc_cable_product_for: {
+        Args: {
+          p_amps: number
+          p_bundle_size?: number
+          p_engine_space?: boolean
+          p_max_drop_pct?: number
+          p_one_way_meters: number
+          p_volts?: number
+        }
+        Returns: Json
       }
       dc_cable_sizing: {
         Args: {
