@@ -44,11 +44,16 @@ export async function applyStatusUpdate(
     status: statusInfo.status,
     status_code: statusInfo.statusCode ?? null,
     status_message: statusInfo.statusMessage ?? null,
-    access_key: statusInfo.accessKey ?? null,
-    protocol: statusInfo.protocol ?? null,
     provider_status: mergedProviderStatus,
     updated_at: new Date().toISOString(),
   };
+  // [VERIFICAÇÃO 18/08] access_key/protocol só entram quando o snapshot os TROUXE.
+  // Gravar `?? null` incondicional apagava a chave nacional de uma nota autorizada
+  // sempre que uma resposta de status viesse sem o campo — e o contrato da Contora
+  // para esses campos comprovadamente evolui (access_key da NFS-e só existe desde
+  // 16/08). Dado de retenção legal não se sobrescreve com ausência.
+  if (statusInfo.accessKey) update.access_key = statusInfo.accessKey;
+  if (statusInfo.protocol) update.protocol = statusInfo.protocol;
 
   if (statusInfo.status === "authorized" && statusInfo.authorizedAt) {
     update.authorized_at = statusInfo.authorizedAt;
@@ -72,6 +77,54 @@ export async function applyStatusUpdate(
   const { error } = await admin.from("issued_fiscal_documents").update(update).eq("id", doc.id);
   if (error) {
     console.error(`[fiscal] falha ao gravar status do documento ${doc.id}:`, error);
+  }
+}
+
+/**
+ * [VERIFICAÇÃO 18/08] Recomputa o invoicing_status da OS a partir dos documentos que
+ * EXISTEM. Chamado por webhook/reconcile quando um documento de origem service_order muda
+ * de status — sem isto, uma NFS-e rejeitada DEPOIS da emissão deixava a OS como
+ * "invoiced" para sempre, com zero notas válidas.
+ *
+ * Semântica (a mesma do frontend em use-faturar-os.ts): documento "vivo" =
+ * draft/queued/processing/authorized; "aplicável" aproximado pelos TIPOS já tentados
+ * nesta OS (quem nunca tentou NF-e não é rebaixado por não tê-la).
+ */
+export async function recomputeInvoicingStatus(
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  originId: string,
+): Promise<void> {
+  try {
+    const { data: docs, error } = await admin
+      .from("issued_fiscal_documents")
+      .select("document_type, status")
+      .eq("origin_type", "service_order")
+      .eq("origin_id", originId);
+    if (error || !docs) {
+      if (error) console.error(`[fiscal] recompute invoicing: falha ao consultar docs de ${originId}:`, error);
+      return;
+    }
+    const VIVO = ["draft", "queued", "processing", "authorized"];
+    const tipos = [...new Set((docs as { document_type: string; status: string }[]).map((d) => d.document_type))];
+    const vivos = new Set(
+      (docs as { document_type: string; status: string }[])
+        .filter((d) => VIVO.includes(d.status))
+        .map((d) => d.document_type),
+    );
+    const comVida = tipos.filter((t) => vivos.has(t)).length;
+    const status = tipos.length === 0 || comVida === 0
+      ? "not_invoiced"
+      : comVida === tipos.length
+        ? "invoiced"
+        : "partially_invoiced";
+    const { error: upErr } = await admin
+      .from("service_orders")
+      .update({ invoicing_status: status, updated_at: new Date().toISOString() })
+      .eq("id", originId);
+    if (upErr) console.error(`[fiscal] recompute invoicing: falha ao gravar em ${originId}:`, upErr);
+  } catch (e) {
+    console.error("[fiscal] recompute invoicing: erro inesperado:", e);
   }
 }
 

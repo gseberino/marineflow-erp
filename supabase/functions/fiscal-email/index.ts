@@ -105,6 +105,13 @@ Deno.serve(async (req) => {
     const nomeDoc = ehNfse ? "NFS-e" : "NF-e";
     const nomePdf = ehNfse ? "DANFSe" : "DANFE";
     const prefixoArquivo = ehNfse ? "NFSe" : "NFe";
+    // NFS-e: o número que o cliente conhece é o NACIONAL (gerado pela Sefin), não o RPS
+    // que reservamos. Ele chega via status/webhook e fica no provider_status.
+    const ps = (doc.provider_status ?? {}) as Record<string, unknown>;
+    const numeroNacional = ehNfse
+      ? (String(ps["nfse_number"] ?? ps["display_number"] ?? "").trim() || null)
+      : null;
+    const numeroArquivo = numeroNacional ?? String(doc.number);
 
     // Destinatário: e-mail explícito no corpo → e-mail do payload → e-mail do cliente.
     let to = String(body.to ?? "").trim();
@@ -139,7 +146,7 @@ Deno.serve(async (req) => {
     const pdfFetched = await provider.fetchArtifact(pdfArt.downloadUrl);
     if (!pdfFetched.ok) return jr({ error: `Falha ao baixar o ${nomePdf}: ` + pdfFetched.error }, 502);
     attachments.push({
-      filename: `${prefixoArquivo}-${doc.number}.pdf`,
+      filename: `${prefixoArquivo}-${numeroArquivo}.pdf`,
       content: toBase64(pdfFetched.data.bytes),
       encoding: "base64",
       contentType: "application/pdf",
@@ -150,7 +157,7 @@ Deno.serve(async (req) => {
       const xmlFetched = await provider.fetchArtifact(xmlArt.downloadUrl);
       if (xmlFetched.ok) {
         attachments.push({
-          filename: `${prefixoArquivo}-${doc.number}.xml`,
+          filename: `${prefixoArquivo}-${numeroArquivo}.xml`,
           content: toBase64(xmlFetched.data.bytes),
           encoding: "base64",
           contentType: "application/xml",
@@ -169,7 +176,7 @@ Deno.serve(async (req) => {
     const fromEmail = Deno.env.get("SMTP_FROM") || user;
     const fromName = Deno.env.get("SMTP_FROM_NAME") || "HBR Marine";
 
-    const numero = `${doc.number}${doc.series ? `/${doc.series}` : ""}`;
+    const numero = numeroNacional ?? `${doc.number}${doc.series ? `/${doc.series}` : ""}`;
     const extra = String(body.message ?? "").trim();
     const temXml = attachments.some((a) => a.filename.endsWith(".xml"));
 

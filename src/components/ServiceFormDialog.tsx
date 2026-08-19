@@ -22,9 +22,11 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   editData?: any;
   onCreated?: (service: any) => void;
+  /** Chamado após QUALQUER salvar com sucesso (criar ou editar) — p/ quem abriu o popup revalidar (ex.: pré-voo fiscal). */
+  onSaved?: (id: string) => void;
 }
 
-export function ServiceFormDialog({ open, onOpenChange, editData, onCreated }: Props) {
+export function ServiceFormDialog({ open, onOpenChange, editData, onCreated, onSaved }: Props) {
   const { t } = useI18n();
   const create = useCreateService();
   const update = useUpdateService();
@@ -118,10 +120,12 @@ export function ServiceFormDialog({ open, onOpenChange, editData, onCreated }: P
       if (editData?.id) {
         await update.mutateAsync({ id: editData.id, ...payload });
         toast.success(t.services.updateSuccess);
+        onSaved?.(editData.id);
       } else {
         const result = await create.mutateAsync(payload);
         toast.success(t.services.createSuccess);
         onCreated?.(result);
+        if ((result as any)?.id) onSaved?.((result as any).id);
       }
       onOpenChange(false);
     } catch (e: any) {
@@ -241,11 +245,39 @@ export function ServiceFormDialog({ open, onOpenChange, editData, onCreated }: P
               em Configurações → Fiscal e o catálogo inteiro resolve). Os campos daqui são o
               OVERRIDE para o serviço que foge da regra da atividade. */}
           <div className="rounded-md border p-3 space-y-3">
-            <div>
-              <p className="text-sm font-semibold">Fiscal (NFS-e)</p>
-              <p className="text-xs text-muted-foreground">
-                Deixe em branco para herdar do verbo fiscal — preencher aqui é a exceção.
-              </p>
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold">Fiscal (NFS-e)</p>
+                <p className="text-xs text-muted-foreground">
+                  Deixe em branco para herdar do verbo fiscal — preencher aqui é a exceção.
+                </p>
+              </div>
+              {/* Preenche pela regra CONFIRMADA pela contadora (18/08/2026): tudo 14.01,
+                  ISS 3% Itajaí, CNAE 3317102. Preferência: ligar a HERANÇA pelo verbo
+                  (corrigir o verbo corrige o catálogo); sem verbo, valores próprios. */}
+              <Button
+                type="button" variant="outline" size="sm"
+                onClick={() => {
+                  const verboOperacional = form.service_verb || '';
+                  if (verboOperacional) {
+                    set('fiscal_verb', verboOperacional);
+                    set('national_tax_code', '');
+                    set('cnae', '');
+                    set('iss_rate', '');
+                    set('service_code', '');
+                    toast.info(`Herança ligada pelo verbo "${verboOperacional}" (regra da contadora: 14.01, ISS 3%). Confira e salve.`);
+                  } else {
+                    set('national_tax_code', '140101');
+                    set('cnae', '3317102');
+                    set('iss_rate', '3');
+                    set('service_code', '14.01');
+                    toast.info('Valores da regra da contadora aplicados (14.01, ISS 3%, CNAE 3317102). Confira e salve.');
+                  }
+                  set('iss_withheld', 'nao');
+                }}
+              >
+                Aplicar regra da contadora
+              </Button>
             </div>
             <div>
               <Label>Verbo fiscal (herança)</Label>

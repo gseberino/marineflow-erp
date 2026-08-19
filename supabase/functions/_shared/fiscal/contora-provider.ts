@@ -293,33 +293,55 @@ export class ContoraProvider implements FiscalProvider {
     );
     if (!r.ok) return r as FiscalResult<NfseHealthInfo>;
     const d = r.data ?? {};
-    const cert = (d["certificate"] ?? {}) as Record<string, unknown>;
+    // FORMATO REAL confirmado ao vivo (13-18/08/2026): o corpo vem ANINHADO —
+    // { company_id, health: { ready, public_emission_enabled, checks[], blocks[],
+    //   warnings[], provider{...} } }. O mapeamento antigo lia d["ready"]/d["city_code"]
+    // no nível de cima e devolvia tudo nulo/falso — o painel mostrava a empresa "vazia"
+    // mesmo com o cadastro 100% ok.
+    const h = ((d["health"] ?? d) as Record<string, unknown>) ?? {};
+    const cert = (h["certificate"] ?? d["certificate"] ?? {}) as Record<string, unknown>;
 
-    // Lista do que falta: aceita tanto array de strings quanto array de objetos {message}.
-    const brutoPendencias = (d["pending"] ?? d["pendencies"] ?? d["missing"] ?? []) as unknown;
+    // checks[]: o retrato POR ITEM do cadastro da empresa (CNPJ, city_code, IM, CNAE,
+    // certificado…). É a fonte da verdade do que É da empresa.
+    const checks = Array.isArray(h["checks"]) ? (h["checks"] as Record<string, unknown>[]) : [];
+    const checkPor = (key: string) => checks.find((c) => c?.["key"] === key);
+    const checksOk = checks.length > 0 ? checks.every((c) => c?.["ok"] === true) : null;
+    const certCheck = checkPor("certificate");
+    const cityCheck = checkPor("city_code");
+
+    // blocks[]: mistura pendência de empresa com ORIENTAÇÃO DE PAYLOAD (ex.: "informe
+    // service.national_tax_code…"). A guidance derruba o ready da Contora mesmo com a
+    // empresa perfeita — quem decide o que bloqueia é o handleNfseHealth, com contexto.
+    const blocks = Array.isArray(h["blocks"])
+      ? (h["blocks"] as unknown[]).map((b) =>
+        typeof b === "string" ? b : String((b as Record<string, unknown>)?.["message"] ?? JSON.stringify(b)))
+      : [];
+    const brutoPendencias = (h["pending"] ?? d["pending"] ?? d["pendencies"] ?? d["missing"] ?? []) as unknown;
     const pending = Array.isArray(brutoPendencias)
       ? brutoPendencias.map((p) =>
         typeof p === "string"
           ? p
-          : String((p as Record<string, unknown>)?.["message"] ?? JSON.stringify(p))
-      )
+          : String((p as Record<string, unknown>)?.["message"] ?? JSON.stringify(p)))
       : [];
 
-    // "Pronto" só quando a Contora afirma. Ausência de campo NÃO vira verde: silêncio não
-    // é autorização, e emitir sem estar pronto queima numeração.
-    const ready = d["ready"] === true || d["status"] === "ready" || d["healthy"] === true;
+    const ready = h["ready"] === true || d["ready"] === true || d["status"] === "ready";
+    // Certificado válido até: o check traz "… ate 12/05/2027" no detail.
+    const certDetail = String(certCheck?.["detail"] ?? "");
+    const certValidUntil = (cert["valid_until"] ?? cert["expires_at"]
+      ?? (certDetail.match(/ate\s+(\d{2}\/\d{2}\/\d{4})/)?.[1] ?? null)) as string | null;
 
     return {
       ok: true,
       data: {
         ready,
-        standard: (d["standard"] ?? d["nfse_standard"] ?? null) as string | null,
-        cityCode: (d["city_code"] ?? null) as string | null,
+        publicEmissionEnabled: h["public_emission_enabled"] === true,
+        checksOk,
+        blocks,
+        standard: (h["standard"] ?? d["standard"] ?? d["nfse_standard"] ?? null) as string | null,
+        cityCode: ((cityCheck?.["detail"] ?? d["city_code"]) ?? null) as string | null,
         cityName: (d["city_name"] ?? null) as string | null,
-        certificateOk: cert["valid"] === true || d["certificate_loaded"] === true,
-        certificateValidUntil: (cert["valid_until"] ?? cert["expires_at"] ?? null) as
-          | string
-          | null,
+        certificateOk: certCheck ? certCheck["ok"] === true : (cert["valid"] === true || d["certificate_loaded"] === true),
+        certificateValidUntil: certValidUntil,
         pending,
         raw: d,
       },
@@ -456,6 +478,15 @@ export class ContoraProvider implements FiscalProvider {
     const cancelCode = cancellation["status_code"] != null ? String(cancellation["status_code"]) : "";
     const cancelledAt = (cancellation["cancelled_at"] as string) ?? null;
     const isCancelled = !!cancelledAt || cancelCode === "135" || cancelCode === "155";
+    // [VERIFICAÇÃO 18/08] Os códigos 135/155 são vocabulário de NF-e; o cancelamento de
+    // NFS-e nacional pode chegar com outro formato que ainda não vimos ao vivo. Se o
+    // grupo cancellation vier POPULADO sem casar com o que reconhecemos, deixa rastro —
+    // o primeiro cancelamento real de NFS-e mostra o formato e a gente amplia.
+    if (!isCancelled && (cancellation["status"] != null || cancelCode)) {
+      console.warn(
+        `[fiscal] cancellation não reconhecido em ${id}: status=${cancellation["status"]} code=${cancelCode} — verifique o formato (NFS-e?)`,
+      );
+    }
 
     return {
       ok: true,
@@ -466,7 +497,9 @@ export class ContoraProvider implements FiscalProvider {
         statusMessage: isCancelled
           ? ((cancellation["status_message"] as string) ?? "Cancelamento homologado pela SEFAZ.")
           : ((sefaz["status_message"] ?? d["last_error_message"] ?? null) as string | null),
-        accessKey: (sefaz["access_key"] as string) ?? null,
+        // NFS-e não tem grupo `sefaz` — a chave nacional (50 dígitos) vem no nível do
+        // documento (access_key). O fallback cobre as duas famílias.
+        accessKey: ((sefaz["access_key"] ?? d["access_key"]) as string) ?? null,
         protocol: isCancelled
           ? ((cancellation["protocol"] as string) ?? (sefaz["protocol"] as string) ?? null)
           : ((sefaz["protocol"] ?? provider["protocol"] ?? null) as string | null),

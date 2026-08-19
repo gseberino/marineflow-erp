@@ -249,6 +249,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
         // Sócios, diaristas, prestadores e comissionados — com CPF, Pix e conta.
         { label: 'Favorecidos', icon: Wallet, path: '/v2/payees', roles: ['admin', 'financial'] },
         { label: 'Emissão Fiscal (NF-e)', icon: FileText, path: '/v2/fiscal/emissao', roles: ['admin'] },
+        { label: 'Notas de Serviço (NFS-e)', icon: FileText, path: '/fiscal/nfse', roles: ['admin'] },
         { label: 'Relatórios', icon: BarChart3, path: '/v2/reports', roles: ['admin', 'financial'] },
       ],
     },

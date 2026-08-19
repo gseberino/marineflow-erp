@@ -113,8 +113,19 @@ export interface CompanyInfo {
  * tentativa consome numeração.
  */
 export interface NfseHealthInfo {
-  /** Verde: dá para emitir. Falso quando falta certificado, cadastro ou o município. */
+  /**
+   * O "ready" CRU da Contora. Atenção (aprendido ao vivo em 18/08/2026): ele fica false
+   * também por ORIENTAÇÃO DE PAYLOAD nos blocks (ex.: "informe national_tax_code"),
+   * mesmo com a empresa 100% ok — quem decide prontidão de emissão é o handleNfseHealth,
+   * combinando publicEmissionEnabled + checksOk + pendências locais.
+   */
   ready: boolean;
+  /** Emissão pública liberada para a empresa/ambiente (o gate REAL da Contora). */
+  publicEmissionEnabled?: boolean;
+  /** true = todos os checks de EMPRESA ok; null = a Contora não devolveu checks. */
+  checksOk?: boolean | null;
+  /** blocks[] crus da Contora (empresa E payload misturados) — exibir, não decidir. */
+  blocks?: string[];
   /** "nacional" | "municipal" — qual caminho está ativo para esta empresa. */
   standard?: string | null;
   cityCode?: string | null;

@@ -14,7 +14,14 @@ export interface PreflightDocumento {
   pronto: boolean;
   motivo?: string;
   erro?: string;
-  details?: { servicos_sem_cadastro?: string[]; codigos_encontrados?: string[] } | null;
+  details?: {
+    servicos_sem_cadastro?: string[];
+    codigos_encontrados?: string[];
+    /** Acionável: abre o cadastro do serviço no popup. service_id null = linha avulsa. */
+    servicos_pendentes?: Array<{ service_id: string | null; name: string }>;
+    /** Acionável: abre o cadastro do produto no popup (falta NCM etc.). */
+    produtos_pendentes?: Array<{ product_id: string; name: string; faltas: string[] }>;
+  } | null;
   resumo?: Record<string, unknown> | null;
 }
 
@@ -22,11 +29,13 @@ export interface DocumentoDaOs {
   id: string;
   document_type: string;
   status: string;
+  /** RPS/número interno reservado por nós — o número NACIONAL da NFS-e fica no provider_status. */
   number: number | null;
   series: number | null;
   environment: string;
   status_message: string | null;
   created_at: string | null;
+  provider_status?: { nfse_number?: string | null; display_number?: string | null } | null;
 }
 
 export interface BillingPreflight {
@@ -98,11 +107,17 @@ export async function atualizarInvoicingStatus(
   serviceOrderId: string,
   aplicaveis: { nfse: boolean; nfe: boolean },
 ): Promise<void> {
-  const { data: docs } = await supabase
+  const { data: docs, error } = await supabase
     .from('issued_fiscal_documents')
     .select('document_type, status')
     .eq('origin_type', 'service_order')
     .eq('origin_id', serviceOrderId);
+  // Consulta falhou ≠ "não há notas": escrever not_invoiced em cima de uma OS faturada
+  // por causa de um erro de rede seria mentir no marcador. Aborta sem escrever.
+  if (error) {
+    console.error('[faturar-os] invoicing_status não recalculado (select falhou):', error);
+    return;
+  }
 
   const vivos = new Set(
     (docs ?? [])
@@ -120,8 +135,9 @@ export async function atualizarInvoicingStatus(
       ? 'invoiced'
       : 'partially_invoiced';
 
-  await supabase
+  const { error: upErr } = await supabase
     .from('service_orders')
     .update({ invoicing_status: status, updated_at: new Date().toISOString() })
     .eq('id', serviceOrderId);
+  if (upErr) console.error('[faturar-os] falha ao gravar invoicing_status:', upErr);
 }

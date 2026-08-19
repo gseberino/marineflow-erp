@@ -147,7 +147,7 @@ export const registryCrudTools: ToolDef[] = [
   {
     name: "update_service",
     description:
-      "Atualiza um serviço de mão de obra do catálogo: nome, descrição, preço padrão, unidade de cobrança (hora/visita/dia) e garantia. Use para 'reajusta o valor desse serviço'.",
+      "Atualiza um serviço de mão de obra do catálogo: nome, descrição, preço padrão, unidade de cobrança (hora/visita/dia), garantia e os campos FISCAIS da NFS-e (código de tributação nacional, CNAE, ISS, verbo fiscal). Use para 'reajusta o valor desse serviço' e para completar cadastro fiscal pendente. Regra da contadora (18/08/2026): a HBR usa 14.01 para tudo → código 140101, CNAE 3317102, ISS 3% — na dúvida, sugira herdar pelo fiscal_verb (que já carrega esses valores) e CONFIRME com o usuário antes de gravar.",
     input_schema: {
       type: "object",
       properties: {
@@ -159,6 +159,15 @@ export const registryCrudTools: ToolDef[] = [
         billing_unit: { type: "string", enum: ["hour", "visit", "day", "unit"] },
         default_warranty_days: { type: "number" },
         active: { type: "boolean" },
+        fiscal_verb: {
+          type: "string",
+          description: "Verbo fiscal de HERANÇA (instalacao, reparo, manutencao...) — o serviço herda código/CNAE/ISS dele. Caminho preferido: preencher isto em vez de copiar os valores.",
+        },
+        national_tax_code: { type: "string", description: "Código de tributação nacional PRÓPRIO (override), 6 dígitos sem pontos (ex.: 140101)." },
+        service_code: { type: "string", description: "Código municipal informativo (ex.: 14.01)." },
+        cnae: { type: "string", description: "CNAE próprio (override), 7 dígitos sem pontuação." },
+        iss_rate: { type: "number", description: "Alíquota de ISS própria (override), em % (3 = 3%)." },
+        iss_withheld: { type: "boolean", description: "ISS retido pelo tomador. Regra atual da HBR: false (nós recolhemos)." },
       },
       required: ["service_id"],
     },

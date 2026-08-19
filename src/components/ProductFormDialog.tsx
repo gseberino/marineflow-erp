@@ -23,11 +23,15 @@ import { PriceCalculator } from '@/components/PriceCalculator';
 import { PriceCalculatorDialog } from '@/components/PriceCalculatorDialog';
 import { CSOSN_OPTIONS, FISCAL_ORIGIN_OPTIONS } from '@/lib/price-calculator';
 import { MoneyInput } from '@/components/MoneyInput';
+import { useFiscalSuggest } from '@/hooks/use-nfse';
+import { Sparkles, Loader2 } from 'lucide-react';
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   product?: Product | null;
+  /** Chamado após salvar com sucesso — p/ quem abriu o popup revalidar (ex.: pré-voo fiscal). */
+  onSaved?: (id: string) => void;
 }
 
 const empty: TablesInsert<'products'> = {
@@ -71,7 +75,8 @@ const emptySupplierForm = {
   notes: '',
 };
 
-export function ProductFormDialog({ open, onOpenChange, product }: Props) {
+export function ProductFormDialog({ open, onOpenChange, product, onSaved }: Props) {
+  const sugerir = useFiscalSuggest();
   const { t, formatCurrency } = useI18n();
   const create = useCreateProduct();
   const update = useUpdateProduct();
@@ -265,9 +270,11 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
         const { stock_quantity, ...rest } = form;
         await update.mutateAsync({ id: product.id, ...rest });
         toast.success(t.products.updateSuccess);
+        onSaved?.(product.id);
       } else {
-        await create.mutateAsync({ ...form, stock_quantity: 0 });
+        const created: any = await create.mutateAsync({ ...form, stock_quantity: 0 });
         toast.success(t.products.createSuccess);
+        if (created?.id) onSaved?.(created.id);
       }
       onOpenChange(false);
     } catch (err: any) {
@@ -628,6 +635,39 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
                   </p>
                 </div>
               </label>
+
+              {/* Sugerir NCM com IA: pré-preenche o campo — a gravação continua sendo o
+                  Salvar humano. Só para produto existente (a IA lê o cadastro no servidor). */}
+              {isEdit && product?.id && (
+                <Button
+                  type="button" variant="outline" size="sm"
+                  disabled={sugerir.isPending}
+                  onClick={() => sugerir.mutate(
+                    { kind: 'produto', id: product.id },
+                    {
+                      onSuccess: (r) => {
+                        const ncm = String(r.sugestao?.ncm ?? '').replace(/\D/g, '');
+                        if (ncm.length !== 8) return;
+                        setUseGlobal(false);
+                        set('use_global_fiscal', false);
+                        set('ncm', ncm);
+                        const conf = r.confianca != null ? ` (confiança ${Math.round(Number(r.confianca) * 100)}%)` : '';
+                        toast.info(
+                          `NCM sugerido: ${ncm}${conf}. ${r.justificativa ?? ''} Confira antes de salvar.`,
+                          { duration: 12_000 },
+                        );
+                        const alt = (r.alternativas ?? []).filter((a) => a?.ncm);
+                        if (alt.length) {
+                          toast.message(`Alternativas: ${alt.map((a) => `${a.ncm} (${a.quando ?? ''})`).join(' · ')}`, { duration: 12_000 });
+                        }
+                      },
+                    },
+                  )}
+                >
+                  {sugerir.isPending ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Sparkles className="mr-1.5 h-4 w-4" />}
+                  Sugerir NCM com IA
+                </Button>
+              )}
 
               {/* Custom fiscal fields */}
               {!useGlobal && (

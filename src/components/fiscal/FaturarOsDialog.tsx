@@ -27,10 +27,12 @@ import {
   type PreflightDocumento, type DocumentoDaOs,
 } from '@/hooks/use-faturar-os';
 import {
-  AlertTriangle, CheckCircle2, FileText, Loader2, Package, Wrench, ExternalLink, RefreshCw,
+  AlertTriangle, CheckCircle2, FileText, Loader2, Package, Wrench, ExternalLink, RefreshCw, Pencil,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
+import { ServiceFormDialog } from '@/components/ServiceFormDialog';
+import { ProductFormDialog } from '@/components/ProductFormDialog';
 
 type ResultadoEmissao =
   | { fase: 'idle' }
@@ -58,6 +60,27 @@ export function FaturarOsDialog({ open, onOpenChange, serviceOrderId, orderNumbe
 
   const [resNfse, setResNfse] = useState<ResultadoEmissao>({ fase: 'idle' });
   const [resNfe, setResNfe] = useState<ResultadoEmissao>({ fase: 'idle' });
+  // Correção de cadastro SEM sair do assistente: a pendência abre o popup do cadastro
+  // já carregado; salvar revalida o pré-voo. (A sugestão de IA vive DENTRO dos popups.)
+  const [servicoEmEdicao, setServicoEmEdicao] = useState<Record<string, unknown> | null>(null);
+  const [produtoEmEdicao, setProdutoEmEdicao] = useState<Record<string, unknown> | null>(null);
+
+  const abrirCorrecaoServico = async (serviceId: string) => {
+    const { data, error } = await supabase.from('services').select('*').eq('id', serviceId).maybeSingle();
+    if (error || !data) { toast.error('Não deu para carregar o serviço.'); return; }
+    setServicoEmEdicao(data);
+  };
+  const abrirCorrecaoProduto = async (productId: string) => {
+    const { data, error } = await supabase.from('products').select('*').eq('id', productId).maybeSingle();
+    if (error || !data) { toast.error('Não deu para carregar o produto.'); return; }
+    setProdutoEmEdicao(data);
+  };
+  const aposCorrigirCadastro = () => {
+    qc.invalidateQueries({ queryKey: ['billing-preflight'] });
+    qc.invalidateQueries({ queryKey: ['services'] });
+    qc.invalidateQueries({ queryKey: ['products'] });
+    preflight.refetch();
+  };
 
   // Reabrir o assistente para OUTRA OS (ou de novo para a mesma) zera o placar.
   useEffect(() => {
@@ -234,6 +257,7 @@ export function FaturarOsDialog({ open, onOpenChange, serviceOrderId, orderNumbe
               doc={d.nfse}
               docExistente={docVivo('nfse')}
               resultado={resNfse}
+              onCorrigirServico={abrirCorrecaoServico}
               linhaResumo={resumoNfse
                 ? `${resumoNfse.servicos_na_nota} serviço(s) · ${formatCurrency(Number(resumoNfse.total_servicos ?? 0))} · código ${resumoNfse.codigo_de_tributacao}${resumoNfse.origem_do_codigo === 'verbo' ? ' (herdado do verbo)' : ''}`
                 : null}
@@ -248,6 +272,7 @@ export function FaturarOsDialog({ open, onOpenChange, serviceOrderId, orderNumbe
               doc={d.nfe}
               docExistente={docVivo('nfe')}
               resultado={resNfe}
+              onCorrigirProduto={abrirCorrecaoProduto}
               linhaResumo={resumoNfe
                 ? `${resumoNfe.pecas_na_nota} peça(s) · ${formatCurrency(Number(resumoNfe.total_pecas ?? 0))}${Number(resumoNfe.itens_ignorados_sem_cadastro ?? 0) > 0 ? ` · ${resumoNfe.itens_ignorados_sem_cadastro} item(ns) fora por falta de cadastro` : ''}`
                 : null}
@@ -267,7 +292,12 @@ export function FaturarOsDialog({ open, onOpenChange, serviceOrderId, orderNumbe
             <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
               <Button
                 variant="outline" size="sm"
-                onClick={() => preflight.refetch()}
+                onClick={() => {
+                  // Reverifica TAMBÉM a saúde da conta (o gate da NFS-e) — só refazer o
+                  // preflight deixava uma pendência de conta resolvida presa no cache.
+                  qc.invalidateQueries({ queryKey: ['nfse-health'] });
+                  preflight.refetch();
+                }}
                 disabled={preflight.isFetching || emitindo}
               >
                 <RefreshCw className={`mr-1.5 h-4 w-4 ${preflight.isFetching ? 'animate-spin' : ''}`} />
@@ -297,11 +327,32 @@ export function FaturarOsDialog({ open, onOpenChange, serviceOrderId, orderNumbe
           </div>
         ) : null}
       </DialogContent>
+
+      {/* Popups de correção de cadastro — salvar revalida o pré-voo na hora. Os botões de
+          sugestão (IA p/ NCM; regra da contadora p/ serviço) vivem DENTRO deles.
+          Montagem CONDICIONAL de propósito: são árvores pesadas com hooks próprios, e
+          montá-las fechadas rodaria essas queries em toda abertura do assistente. */}
+      {servicoEmEdicao && (
+        <ServiceFormDialog
+          open
+          onOpenChange={(v) => { if (!v) setServicoEmEdicao(null); }}
+          editData={servicoEmEdicao}
+          onSaved={() => { setServicoEmEdicao(null); aposCorrigirCadastro(); }}
+        />
+      )}
+      {produtoEmEdicao && (
+        <ProductFormDialog
+          open
+          onOpenChange={(v) => { if (!v) setProdutoEmEdicao(null); }}
+          product={produtoEmEdicao as Parameters<typeof ProductFormDialog>[0]['product']}
+          onSaved={() => { setProdutoEmEdicao(null); aposCorrigirCadastro(); }}
+        />
+      )}
     </Dialog>
   );
 }
 
-function CartaoDocumento({ icone, titulo, doc, docExistente, resultado, linhaResumo, pendenciasExtra = [], aguardandoConta = false, onEmitir, rodape }: {
+function CartaoDocumento({ icone, titulo, doc, docExistente, resultado, linhaResumo, pendenciasExtra = [], aguardandoConta = false, onEmitir, rodape, onCorrigirServico, onCorrigirProduto }: {
   icone: React.ReactNode;
   titulo: string;
   doc: PreflightDocumento;
@@ -312,6 +363,8 @@ function CartaoDocumento({ icone, titulo, doc, docExistente, resultado, linhaRes
   aguardandoConta?: boolean;
   onEmitir?: () => void | Promise<void>;
   rodape?: React.ReactNode;
+  onCorrigirServico?: (serviceId: string) => void;
+  onCorrigirProduto?: (productId: string) => void;
 }) {
   if (!doc.aplicavel) {
     return (
@@ -327,7 +380,9 @@ function CartaoDocumento({ icone, titulo, doc, docExistente, resultado, linhaRes
   }
 
   const emitida = !!docExistente || resultado.fase === 'ok';
-  const comErro = !!doc.erro || resultado.fase === 'erro' || pendenciasExtra.length > 0;
+  // AVISO informa sem pintar o cartão de pendência — mesma convenção do servidor.
+  const pendenciasBloqueantes = pendenciasExtra.filter((p) => !p.startsWith('AVISO:'));
+  const comErro = !!doc.erro || resultado.fase === 'erro' || pendenciasBloqueantes.length > 0;
 
   return (
     <Card className={`p-3 ${emitida ? 'border-success/40' : comErro ? 'border-amber-500/40' : ''}`}>
@@ -338,7 +393,7 @@ function CartaoDocumento({ icone, titulo, doc, docExistente, resultado, linhaRes
           {emitida ? (
             <Badge className="bg-success/15 text-success">
               {docExistente
-                ? `emitida — nº ${docExistente.number ?? '…'} · ${docExistente.status}${docExistente.environment === 'homologacao' ? ' · homolog.' : ''}`
+                ? `emitida — nº ${docExistente.provider_status?.nfse_number ?? docExistente.provider_status?.display_number ?? docExistente.number ?? '…'} · ${docExistente.status}${docExistente.environment === 'homologacao' ? ' · homolog.' : ''}`
                 : 'enviada para emissão'}
             </Badge>
           ) : resultado.fase === 'emitindo' ? (
@@ -371,7 +426,27 @@ function CartaoDocumento({ icone, titulo, doc, docExistente, resultado, linhaRes
       {resultado.fase !== 'erro' && doc.erro && !emitida && (
         <div className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-2">
           <p className="text-sm break-words">{doc.erro}</p>
-          {doc.details?.servicos_sem_cadastro?.length ? (
+          {/* Pendências ACIONÁVEIS: corrige o cadastro no popup, sem sair do assistente.
+              Dentro do popup há a sugestão (IA p/ NCM; regra da contadora p/ serviço). */}
+          {doc.details?.servicos_pendentes?.length ? (
+            <ul className="mt-1.5 space-y-1">
+              {doc.details.servicos_pendentes.map((s, i) => (
+                <li key={`${s.service_id ?? 'avulso'}-${i}`} className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="min-w-0 flex-1 text-muted-foreground">• {s.name}</span>
+                  {s.service_id && onCorrigirServico ? (
+                    <Button size="sm" variant="outline" className="h-6 px-2 text-xs shrink-0"
+                      onClick={() => onCorrigirServico(s.service_id!)}>
+                      <Pencil className="mr-1 h-3 w-3" />Corrigir cadastro
+                    </Button>
+                  ) : (
+                    <span className="shrink-0 text-[10px] text-muted-foreground">
+                      linha avulsa — vincule ao catálogo na OS
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : doc.details?.servicos_sem_cadastro?.length ? (
             <ul className="mt-1 list-inside list-disc text-xs text-muted-foreground">
               {doc.details.servicos_sem_cadastro.map((s) => <li key={s}>{s}</li>)}
             </ul>
@@ -379,11 +454,32 @@ function CartaoDocumento({ icone, titulo, doc, docExistente, resultado, linhaRes
         </div>
       )}
 
+      {doc.details?.produtos_pendentes?.length && !emitida ? (
+        <div className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-2">
+          <p className="text-xs font-medium">Produtos com cadastro fiscal incompleto:</p>
+          <ul className="mt-1.5 space-y-1">
+            {doc.details.produtos_pendentes.map((pItem) => (
+              <li key={pItem.product_id} className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="min-w-0 flex-1 text-muted-foreground">
+                  • {pItem.name} <span className="text-amber-700">(falta {pItem.faltas.join(', ')})</span>
+                </span>
+                {onCorrigirProduto && (
+                  <Button size="sm" variant="outline" className="h-6 px-2 text-xs shrink-0"
+                    onClick={() => onCorrigirProduto(pItem.product_id)}>
+                    <Pencil className="mr-1 h-3 w-3" />Corrigir cadastro
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
       {pendenciasExtra.length > 0 && !emitida && (
         <ul className="mt-2 space-y-1">
           {pendenciasExtra.map((p, i) => (
             <li key={i} className="flex gap-2 text-xs text-muted-foreground">
-              <span className="text-amber-600">•</span>
+              <span className={p.startsWith('AVISO:') ? 'text-muted-foreground' : 'text-amber-600'}>•</span>
               <span className="min-w-0">{p}</span>
             </li>
           ))}

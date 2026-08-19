@@ -345,15 +345,15 @@ export function buildNfseDraftPayload(
     payload.simples_nacional_option = input.simplesNacionalOption;
   }
 
-  // E0120: para o MEI a inscrição nunca é enviada — o cadastro nacional responde pelos
-  // dados do prestador.
-  if (
-    input.municipalRegistration?.trim() &&
-    input.municipalRegistrationInCnc !== false &&
-    input.simplesNacionalOption !== 2
-  ) {
-    payload.municipal_registration = onlyDigits(input.municipalRegistration);
-  }
+  // A IM do prestador NÃO vai no payload — confirmado pelo suporte da Contora em
+  // 14/08/2026, após o incidente E0116/E0121: "CNPJ, IM e regime do prestador vêm da
+  // empresa vinculada à emissão; esse campo no payload não é necessário e não corrige a
+  // DPS". O valor que vale é settings.municipal_registration NO CADASTRO da Contora, no
+  // formato EXATO do CNC (15 posições com zeros à esquerda — o matcher do Ambiente
+  // Nacional compara município+CNPJ+IM literalmente; "352217" ≠ "000000000352217" e a
+  // divergência volta como E0116 dizendo que a IM "não foi informada").
+  // Os campos municipalRegistration/municipalRegistrationInCnc continuam no input só
+  // para o VALIDADOR avisar (E0120) — nada deles é enviado.
 
   return payload;
 }

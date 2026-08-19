@@ -19,6 +19,18 @@ export interface DocumentoNfse {
   status_message: string | null;
   created_at: string | null;
   origin_id: string | null;
+  /**
+   * `number` é o RPS (numeração NOSSA, reservada antes do envio). O número da NFS-e em si
+   * é NACIONAL, gerado pela Sefin na autorização — chega via status/reconcile e fica em
+   * provider_status (nfse_number/display_number). Confundir os dois é erro clássico.
+   */
+  provider_status?: { nfse_number?: string | null; display_number?: string | null } | null;
+}
+
+/** Número nacional da NFS-e (pós-autorização), quando já sincronizado. */
+export function numeroNacionalNfse(doc: DocumentoNfse): string | null {
+  const n = doc.provider_status?.nfse_number ?? doc.provider_status?.display_number ?? null;
+  return n != null && String(n).trim() !== '' ? String(n) : null;
 }
 
 export interface NfseHealth {
@@ -95,7 +107,7 @@ export function useNfseDocumentos() {
     queryFn: async (): Promise<DocumentoNfse[]> => {
       const { data, error } = await supabase
         .from('issued_fiscal_documents')
-        .select('id, number, series, status, environment, status_message, created_at, origin_id')
+        .select('id, number, series, status, environment, status_message, created_at, origin_id, provider_status')
         .eq('document_type', 'nfse')
         .order('created_at', { ascending: false })
         .order('id', { ascending: true })
@@ -121,8 +133,125 @@ export function useEmitirNfse() {
     },
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['nfse-documentos'] });
+      qc.invalidateQueries({ queryKey: ['issued_fiscal_documents'] });
+      // A OS de origem pode ter mudado de invoicing_status — a lista precisa recarregar.
+      qc.invalidateQueries({ queryKey: ['service-orders'] });
       if (r.aviso) toast.warning(r.aviso, { duration: 12_000 });
       else toast.success('NFS-e enviada. Acompanhe o status abaixo.');
+    },
+    onError: (e: Error) => toast.error(e.message, { duration: 12_000 }),
+  });
+}
+
+export interface FiscalSuggestResult {
+  kind: 'produto' | 'servico';
+  id: string;
+  sugestao: Record<string, unknown> & { ncm?: string; national_tax_code?: string; fiscal_verb?: string | null };
+  confianca?: number | null;
+  justificativa?: string;
+  alternativas?: Array<{ ncm?: string; quando?: string }>;
+  fonte: string;
+  aviso?: string;
+}
+
+/**
+ * Sugestão de cadastro fiscal — NUNCA grava: pré-preenche o formulário e quem salva é o
+ * humano (princípio Sugerir≫Criar). Produto = NCM via modelo leve; serviço = regra da
+ * contadora (determinística).
+ */
+export function useFiscalSuggest() {
+  return useMutation({
+    mutationFn: async (v: { kind: 'produto' | 'servico'; id: string }) => {
+      const r = await chamar<{ data: FiscalSuggestResult }>({
+        action: 'fiscal_suggest',
+        kind: v.kind,
+        id: v.id,
+      });
+      return r.data;
+    },
+    onError: (e: Error) => toast.error(`Sugestão indisponível: ${e.message}`),
+  });
+}
+
+/** Ambiente REAL de emissão (secret do servidor) — alimenta o banner de produção. */
+export function useAmbienteFiscal() {
+  return useQuery({
+    queryKey: ['fiscal-environment'],
+    queryFn: async (): Promise<'homologacao' | 'producao'> => {
+      const r = await chamar<{ data: { environment: string } }>({ action: 'environment' });
+      return r.data.environment === 'producao' ? 'producao' : 'homologacao';
+    },
+    staleTime: 10 * 60_000,
+    retry: false,
+  });
+}
+
+export interface NfseAvulsaInput {
+  clientId: string;
+  descricao: string;
+  valor: number;
+  nationalTaxCode: string;
+  cnae: string | null;
+  issRate: number | null;
+  issWithheld: boolean;
+  /**
+   * Gerada UMA vez ao entrar na conferência e reutilizada em todos os retries — um uuid
+   * novo por clique deixaria um retry pós-timeout emitir a MESMA nota real duas vezes
+   * (a avulsa não tem origem estável; a chave é a única dedupe).
+   */
+  idempotencyKey: string;
+}
+
+/**
+ * NFS-e AVULSA — serviço que não virou OS (cobrança pontual). O servidor já aceitava
+ * `service`/`taker`/`amounts` explícitos (caminho manual do handleCreateNfse); este hook
+ * monta o tomador a partir do cadastro do cliente com o MESMO mapeamento da ponte de OS.
+ */
+export function useEmitirNfseAvulsa() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (v: NfseAvulsaInput) => {
+      const { data: cli, error } = await supabase
+        .from('clients')
+        .select('name, cpf_cnpj, email, address_line_1, address_number, address_complement, neighborhood, city, state, postal_code')
+        .eq('id', v.clientId)
+        .maybeSingle();
+      if (error) throw error;
+      if (!cli) throw new Error('Cliente não encontrado.');
+      return await chamar<{ data: { id: string; status: string; environment?: string }; aviso?: string }>({
+        document_type: 'nfse',
+        origin_type: 'manual',
+        client_id: v.clientId,
+        idempotency_key: v.idempotencyKey,
+        service: {
+          description: v.descricao,
+          national_tax_code: v.nationalTaxCode,
+          cnae: v.cnae,
+          iss_rate: v.issRate,
+          iss_withheld: v.issWithheld,
+        },
+        taker: {
+          name: cli.name,
+          document: cli.cpf_cnpj,
+          email: cli.email,
+          address: {
+            street: cli.address_line_1,
+            number: cli.address_number,
+            complement: cli.address_complement,
+            district: cli.neighborhood,
+            city_name: cli.city,
+            state_code: cli.state,
+            postal_code: cli.postal_code,
+          },
+        },
+        amounts: { service_amount: v.valor },
+      });
+    },
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['nfse-documentos'] });
+      qc.invalidateQueries({ queryKey: ['issued_fiscal_documents'] });
+      if (r.aviso) toast.warning(r.aviso, { duration: 12_000 });
+      else toast.success('NFS-e avulsa enviada. Acompanhe o status na lista.');
     },
     onError: (e: Error) => toast.error(e.message, { duration: 12_000 }),
   });

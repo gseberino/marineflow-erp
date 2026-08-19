@@ -143,29 +143,41 @@ describe("E0160 — situação no Simples Nacional", () => {
   });
 });
 
-describe("E0120 — inscrição municipal e o CNC", () => {
-  it("avisa quando a inscrição vai ser enviada", () => {
-    const erros = validateNfseDraftInput(base({
-      municipalRegistration: "123456",
+describe("E0116/E0120 — inscrição municipal e o CNC", () => {
+  // LIÇÃO do incidente de 13-14/08/2026 (chamado à Contora): a IM do prestador vem do
+  // CADASTRO da empresa no provedor — no formato EXATO do CNC, 15 posições com zeros à
+  // esquerda ("352217" ≠ "000000000352217" para o matcher município+CNPJ+IM do Ambiente
+  // Nacional; a divergência volta como E0116 dizendo que a IM "não foi informada").
+  // O campo municipal_registration no payload é ignorado pelo provedor e NUNCA é enviado.
+  it("a IM NUNCA vai no payload, nem com registro no CNC", () => {
+    const payload = buildNfseDraftPayload(base({
+      municipalRegistration: "000000000352217",
       municipalRegistrationInCnc: true,
     }));
-    expect(erros.join(" ")).toContain("E0120");
+    expect(payload.municipal_registration).toBeUndefined();
   });
 
-  it("cala quando o município não tem dados no CNC — e aí a IM não é enviada", () => {
+  it("nem quando o município não tem dados no CNC", () => {
     const input = base({ municipalRegistration: "123456", municipalRegistrationInCnc: false });
     expect(validateNfseDraftInput(input).join(" ")).not.toContain("E0120");
     expect(buildNfseDraftPayload(input).municipal_registration).toBeUndefined();
   });
 
-  it("para o MEI a inscrição NUNCA é enviada", () => {
-    // O cadastro nacional responde pelos dados do prestador.
+  it("nem para o MEI", () => {
     const payload = buildNfseDraftPayload(base({
       simplesNacionalOption: 2,
       municipalRegistration: "123456",
       municipalRegistrationInCnc: true,
     }));
     expect(payload.municipal_registration).toBeUndefined();
+  });
+
+  it("o validador segue avisando sobre o E0120 quando há IM com CNC ligado", () => {
+    const erros = validateNfseDraftInput(base({
+      municipalRegistration: "123456",
+      municipalRegistrationInCnc: true,
+    }));
+    expect(erros.join(" ")).toContain("E0120");
   });
 });
 

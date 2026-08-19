@@ -1684,3 +1684,88 @@ porque só o dono pode preenchê-las.
 - **Não corrigido:** a fila é o instrumento de outra frente (o `/modo-noturno`), e
   mexer no estado dela por fora, no meio do trabalho de outra sessão, é como o
   aviso ficou errado em primeiro lugar.
+## NOVO-020 — O sistema de aprendizado do agente nunca funcionou uma única vez
+
+- **Achado em:** 18/08/2026, ao medir o que o agente aprendeu desde as otimizações de 09/08.
+- **Evidência (produção):** as 14 ferramentas de aprendizado — `remember_note`, `record_routine`,
+  `list_memory_notes`, `forget_note`, `propose_automation`, `confirm_automation`,
+  `get_autonomy_report`, `get_autonomy_settings`, `set_tool_autonomy`, `remember_about_entity`,
+  `list_entity_notes`, `review_entity_note`, `learn_product_alias`, `list_routines` — têm
+  **zero chamadas em toda a história de `ai_operator_audit`**. Não é baixa adesão: é nenhuma.
+  As tabelas confirmam: `ai_operator_memory_notes` 0 linhas, `ai_learned_routines` 0 linhas,
+  `ai_agent_memory` 1 linha de 09/06.
+- **Custo:** ~3.554 tokens das definições dessas ferramentas + ~1.390 tokens das seções
+  "APRENDIZADO — CONSTITUIÇÃO VIVA" (913) e "AUTONOMIA" (477) do system prompt. **~5.000 tokens
+  em toda chamada — 7% do prefixo — para habilitar um comportamento que nunca ocorre.**
+- **Causa provável (não confirmada):** aprender compete com a tarefa em curso e sempre perde. O
+  prompt manda "OFEREÇA guardar" e "nunca guarde sem o sim", o que põe duas barreiras (o agente
+  lembrar de oferecer + o dono confirmar) num ponto do prompt distante de onde a ação acontece.
+  É a mesma classe de falha da regra do item físico, que só passou a valer quando saiu do prompt
+  e virou verificação no código (ver commit da Fase 1, 08/08).
+- **NÃO corrigir de passagem.** Há três saídas possíveis e a escolha é do dono: (a) remover o
+  subsistema e recuperar os ~5.000 tokens; (b) capturar aprendizado por código, sem depender do
+  modelo lembrar — ex.: `edit_service_order_item` logo após `create_quote_from_items` no mesmo
+  turno É uma correção do dono, e dá para registrar sozinho; (c) manter e aceitar o custo.
+
+## NOVO-021 — Itens "Valor provisório" são criados em lote e removidos em lote
+
+- **Achado em:** 18/08/2026, investigando por que `remove_service_order_item` continua alto
+  (44 usos em 60 dias antes; 11 em 9 dias depois — o ritmo diário subiu de 0,73 para 1,22).
+- **Evidência:** em 11/08 15:47:25-26, seis itens removidos em dois segundos, todos rotulados
+  "— Valor provisório (aguardando cotação)": cabos 50/95 mm², terminais TF-50-L, TF-95, TPP-6-12,
+  TCM. Padrão repetido em 13/08 (acumulador 20L provisório) e 17/08.
+- **Leitura:** ao contrário do retrabalho que a Fase 1 eliminou (item físico entrando como texto
+  livre), este não é erro de caminho — é o orçamento sendo refeito. Sugere que a macro
+  `create_quote_from_items` gera mais itens provisórios do que o dono aceita, e a limpeza vem
+  depois. Cada remoção é uma chamada de LLM a ~US$ 0,03.
+- **A investigar antes de mexer:** quantos itens a macro marca como provisórios por orçamento, e
+  se o dono os remove por serem errados (casamento ruim no catálogo) ou por não querer cotar
+  aquilo agora. As duas causas pedem correções opostas.
+
+---
+
+# Frente NFS-e — anotações e achados (18/08/2026, sessão nfse-um-clique)
+
+## Anotações de governança
+
+- **NOVO-010 RESOLVIDO** pelo commit `c87bd4e` (13/08/2026): tools
+  `preview_fiscal_service_note`/`emit_fiscal_service_note` criadas e a frase "NFS-e ainda
+  não disponível" corrigida no prompt e nos avisos do servidor.
+- **Colisão de IDs NOVO-020/NOVO-021**: os IDs aparecem DUAS vezes cada em este arquivo
+  (blocos de frentes diferentes, integrados por append). Como as mensagens de commit são
+  imutáveis, ninguém renumera — esta anotação é o desambiguador: ao citar um deles,
+  cite também a frente/linha. Achados novos usam o formato com slug (regra 8).
+
+## Achados registrados (não corrigidos nesta sessão — regra 3)
+
+### NOVO-nfse-01 — Versão de migration DUPLICADA: 20260815100000 em dois arquivos
+- `supabase/migrations/20260815100000_grandeza_estruturada.sql` (outra frente) e
+  `20260815100000_nfse_im_formato_exato_cnc.sql` (frente NFS-e) compartilham a MESMA
+  versão; `schema_migrations` registra a versão apontando para `nfse_im_formato_exato_cnc`.
+  Se `grandeza_estruturada` foi aplicada, está sem registro próprio; se não foi, o
+  histórico sugere que sim. **Correção sugerida**: a frente dona renomeia o arquivo para
+  versão livre e registra no mesmo ato. Não mexi por ser arquivo de outra sessão.
+
+### NOVO-nfse-02 — xml_rps (a via assinada da DPS) não é arquivado nem baixável
+- `archiveArtifacts` guarda `xml_nfse`+`pdf_nfse`; o `xml_rps` — a via que NÓS assinamos e
+  transmitimos — não é retido nem exposto no `handleArtifact`. O documento legal é o
+  `xml_nfse`, mas a via transmitida tem valor probatório. **Sugestão**: incluir
+  `xml_rps` no arquivamento (`<env>/nfse/<id>-rps.xml`) e aceitar `artifact:'xml_rps'`.
+
+### NOVO-nfse-03 — "Conferir campo a campo" descarta o aviso de saldo armado
+- No fluxo concluir→FaturarOsDialog→"conferir campo a campo", a navegação para
+  /fiscal/emissao desmonta a página e o CompletionSendDialog (aviso de saldo por
+  WhatsApp) que estava armado nunca abre. **Sugestão**: exibir o aviso antes de navegar,
+  ou levá-lo no state da navegação.
+
+### NOVO-nfse-04 — Emissão pela NfseSection não ATUALIZA invoicing_status na hora
+- `useEmitirNfse` invalida as queries mas não recalcula o marcador da OS (o assistente
+  recalcula; o reconcile/webhook agora corrigem rejeições depois). Efeito: emitir só a
+  NFS-e pela seção deixa a OS como not_invoiced até o próximo recálculo por outro
+  caminho. **Sugestão**: chamar atualizarInvoicingStatus no onSuccess quando houver
+  serviceOrderId (exige saber os tipos aplicáveis — hoje só o preflight sabe).
+
+### NOVO-nfse-05 — OS com códigos de tributação MISTOS não tem emissão por grupo
+- A ponte consolida a OS numa nota só e recusa códigos divergentes (correto), mas não há
+  seleção de linhas por código; o caminho hoje é a NFS-e avulsa por grupo. **Sugestão**:
+  aceitar `service_line_ids` na ponte e diferenciar a dedup por código.

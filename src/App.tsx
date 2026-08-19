@@ -44,6 +44,7 @@ const ActiveProspectingPage = lazy(() => import("./pages/ActiveProspectingPage")
 const ProspectingPage = lazy(() => import("./pages/ProspectingPage"));
 const ImportFiscalXML = lazy(() => import("./pages/ImportFiscalXML"));
 const FiscalEmission = lazy(() => import("./pages/FiscalEmission"));
+const NfsePage = lazy(() => import("./pages/NfsePage"));
 const CommissionsPage = lazy(() => import("./pages/CommissionsPage"));
 const SmartPurchasePage = lazy(() => import("./pages/SmartPurchasePage"));
 const DesignPreviewV2 = lazy(() => import("./pages/DesignPreviewV2"));
@@ -229,6 +230,8 @@ const App = () => (
                         <Route path="/inventory/smart-purchase" element={<ProtectedRoute roles={['admin','financial']}><LegadoOuV2 to="/v2/inventory/smart-purchase" legacy={<SmartPurchasePage />} /></ProtectedRoute>} />
                         <Route path="/inventory/import-xml" element={<ProtectedRoute roles={['admin']}><LegadoOuV2 to="/v2/inventory/import-xml" legacy={<ImportFiscalXML />} /></ProtectedRoute>} />
                         <Route path="/fiscal/emissao" element={<ProtectedRoute roles={['admin']}><LegadoOuV2 to="/v2/fiscal/emissao" legacy={<FiscalEmission />} /></ProtectedRoute>} />
+                        {/* NFS-e: página NOVA (sem versão legada) — a casa da nota de serviço. */}
+                        <Route path="/fiscal/nfse" element={<ProtectedRoute roles={['admin']}><NfsePage /></ProtectedRoute>} />
                         {/* Compras: telas NOVAS, então não existe versão antiga delas. As
                             rotas sem prefixo ficam como atalho e caem na v2 preservando :id
                             e query, pelo mesmo LegadoOuV2 do resto do ERP. */}

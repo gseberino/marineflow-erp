@@ -1,0 +1,17 @@
+1	#	REGRAS DE NEGÓCIO			EFEITO	CÓD. ERRO	MSG. ERRO	NOTAS EXPLICATIVAS
+2		Validação do Certificado de Transmissão			-	-	-	-
+3		Certificado de Transmissor Inválido: \n - Certificado de Transmissor inexistente na mensagem \n - Versão difere "3" \n - Se informado o Basic Constraint deve ser true (não pode ser Certificado de AC) \n - KeyUsage não define "Autenticação Cliente"			Rej.	E1200	Certificado de Transmissão Inválido	-
+4		Validade do Certificado (data início e data fim)			Rej.	E1203	Certificado de Transmissão expirado	-
+5		Verifica a Cadeia de Certificação: \n - Certificado da AC emissora não cadastrado na RFB \n - Certificado de AC revogado \n - Certificado não assinado pela AC emissora do Certificado			Rej.	E1205	Certificado de Transmissão - Erro Cadeira de Certificação	-
+6		LCR do Certificado de Transmissor \n - Falta o endereço da LCR (CRL DistributionPoint) \n - LCR indisponível \n - LCR inválida			Rej.	E1206	Certificado de Transmissão - Erro de acesso a LCR	-
+7		Certificado do Transmissor revogado			Rej.	E1207	Certificado de Transmissão revogado	-
+8		Certificado Raiz difere da "ICP-Brasil"			Rej.	E1208	Certificado de Transmissão difere da ICP - Brasil	-
+9		Falta a extensão de CNPJ ou CPF no Certificado (OtherName - OID=2.16.76.1.3.3)			Rej.	E1209	Certificado de Transmissão sem CNPJ ou CPF.	-
+10		Validação da Área de Dados			-	-	-	-
+11		Falha na descompactado da base 64.			Rej.	E1225	Falha na decodificação da base 64 da área de dados	-
+12		Estrutura descompactada mal formada.			Rej.	E1226	Estrutura descompactada mal formada.	-
+13		Validação dos Tipos de Documentos			-	-	-	-
+14		Validar os tipos de DF-e tratados pelo Sistema Nacional NFS-e.			Rej.	E1242	Tipo DF-e não tratado pelo Sistema Nacional NFS-e.	-
+15		Uso de prefixo de namespace não permitido na área de dados descompactada.			Rej.	E1228	Uso de prefixo de namespace não permitido na área de dados descompactada.	-
+16		XML não está utilizando codificação UTF8.			Rej.	E1229	XML não está utilizando codificação UTF8.	-
+17		Falha no esquema XML do DF-e.			Rej.	E1235	Falha no esquema XML do DF-e.	-

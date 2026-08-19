@@ -45,6 +45,7 @@ const NAV: { group: string; items: { label: string; to: string; icon: typeof Sea
       { label: 'Recebíveis', to: '/v2/receivables', icon: DollarSign },
       { label: 'Comissões', to: '/v2/commissions', icon: Users },
       { label: 'Emissão Fiscal (NF-e)', to: '/v2/fiscal/emissao', icon: Receipt },
+      { label: 'Notas de Serviço (NFS-e)', to: '/fiscal/nfse', icon: Receipt },
       { label: 'Relatórios', to: '/v2/reports', icon: BarChart3 },
     ],
   },
