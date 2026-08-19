@@ -1604,3 +1604,30 @@ porque só o dono pode preenchê-las.
    utilizáveis: todos com `actual_minutes` nulo e `unusable_reason` = "Concluída
    sem hora apontada". O gatilho funciona; o que falta é alguém apontar hora
    (timer da OS ou passos do roteiro) antes de concluir.
+
+### [NOVO-fiscal-01] Um teste do espelho da NF-e fica vermelho no dia 19/08/2026 — e só nele
+
+- **Onde:** `src/test/danfe-espelho.test.ts:91-96`, contra
+  `src/lib/danfe-espelho.ts:153-154`.
+- **O quê:** o teste "formata o vencimento sem deslocar o dia (bug clássico de
+  fuso)" faz três asserções sobre o HTML: contém `20/08/2026`, contém
+  `20/09/2026`, e **não** contém `19/08/2026` — esta última sendo a guarda
+  contra a data escorregar um dia para trás por fuso horário.
+- **Por que quebrou hoje:** o espelho imprime a data de EMISSÃO com
+  `(opts.generatedAt ?? new Date()).toLocaleDateString('pt-BR')`. O teste não
+  passa `generatedAt`, então sai a data de hoje. Hoje é **19/08/2026** — o mesmo
+  literal da guarda. A asserção dispara sobre a data de emissão, não sobre o
+  vencimento.
+- **O código está certo.** O vencimento continua saindo `20/08/2026` e
+  `20/09/2026`, como as duas primeiras asserções confirmam — elas passam. É o
+  teste que colide consigo mesmo, e só neste dia: amanhã ele volta ao verde
+  sozinho, sem ninguém mexer em nada.
+- **Por que importa mesmo assim:** um teste que fica vermelho por causa do
+  calendário ensina a ignorar teste vermelho. E ele já tem a saída pronta —
+  `buildEspelhoHtml` aceita `opts.generatedAt` justamente para ser determinístico.
+- **Consertar seria:** passar `generatedAt: new Date('2026-01-15T12:00:00')` (ou
+  qualquer data fixa longe das do vencimento) no `makePayload` deste teste.
+- **Não corrigido:** regra 3 (é da frente fiscal, fora do escopo desta tarefa) e
+  regra 5 (alterar teste exige tarefa dedicada). Encontrado ao rodar a suíte
+  depois das migrations do dimensionamento de cabo — as migrations não tocam em
+  `src/`, e as outras 1.279 asserções passaram.
