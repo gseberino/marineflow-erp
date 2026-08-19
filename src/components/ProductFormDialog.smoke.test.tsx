@@ -48,6 +48,11 @@ vi.mock('@/hooks/use-app-settings', () => {
   const r = { data: {} };
   return { useAppSettings: () => r };
 });
+// Sugestão fiscal por IA, do trabalho da frente fiscal que entrou neste diálogo.
+vi.mock('@/hooks/use-nfse', () => {
+  const m = { mutate: () => {}, mutateAsync: async () => ({}), isPending: false };
+  return { useFiscalSuggest: () => m };
+});
 
 const abrir = () =>
   render(
