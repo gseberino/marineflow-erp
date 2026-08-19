@@ -1654,12 +1654,15 @@ async function handleArtifact(admin: any, body: any): Promise<Response> {
   if (!artifacts.ok) return jr({ error: "Falha ao listar artefatos: " + artifacts.error }, 502);
 
   // Tipos por família (confirmado ao vivo 13/08/2026): NF-e/NFC-e = xml_authorized/
-  // pdf_danfe; NFS-e = xml_nfse/pdf_nfse. Procurar só o nome da NF-e deixaria o download
-  // da NFS-e sempre em 404.
+  // pdf_danfe; NFS-e = xml_nfse/pdf_nfse (+ xml_rps, a via da DPS que nós assinamos).
+  // Procurar só o nome da NF-e deixaria o download da NFS-e sempre em 404.
   const ehNfse = doc.document_type === "nfse";
-  const tiposAceitos = pediuXml
-    ? (ehNfse ? ["xml_nfse", "xml_authorized"] : ["xml_authorized"])
-    : (ehNfse ? ["pdf_nfse", "pdf_danfe"] : ["pdf_danfe"]);
+  const pediuRps = ehNfse && body.artifact === "xml_rps";
+  const tiposAceitos = pediuRps
+    ? ["xml_rps"]
+    : pediuXml
+      ? (ehNfse ? ["xml_nfse", "xml_authorized"] : ["xml_authorized"])
+      : (ehNfse ? ["pdf_nfse", "pdf_danfe"] : ["pdf_danfe"]);
   const kind = tiposAceitos[0];
 
   const art = artifacts.data.find((a) => tiposAceitos.includes(a.type) && a.available && a.downloadUrl);
@@ -1670,7 +1673,7 @@ async function handleArtifact(admin: any, body: any): Promise<Response> {
   const fetched = await provider.fetchArtifact(art.downloadUrl);
   if (!fetched.ok) return jr({ error: "Falha ao baixar o artefato: " + fetched.error }, 502);
 
-  const isPdf = !pediuXml;
+  const isPdf = !pediuXml && !pediuRps;
   const contentType = isPdf ? "application/pdf" : "application/xml";
   const filename = art.filename || `${kind}-${doc.series}-${doc.number}.${isPdf ? "pdf" : "xml"}`;
   const blob = new Blob([fetched.data.bytes], { type: contentType });

@@ -222,6 +222,31 @@ async function archiveArtifacts(
         console.error(`[fiscal] download do DANFE falhou para ${doc.id}: ${pdfRes.error}`);
       }
     }
+
+    // [NOVO-nfse-02] NFS-e: arquiva TAMBÉM o xml_rps — a via da DPS que NÓS assinamos e
+    // transmitimos (valor probatório; o documento legal continua sendo o xml_nfse).
+    // Best-effort na primeira passada de arquivamento (upsert torna reexecução inócua).
+    if (ehNfse && !doc.xml_storage_path) {
+      const rpsArtifact = artifacts.data.find(
+        (a) => a.type === "xml_rps" && a.available && a.downloadUrl,
+      );
+      if (rpsArtifact?.downloadUrl) {
+        const rpsRes = await provider.fetchArtifact(rpsArtifact.downloadUrl);
+        if (rpsRes.ok) {
+          const rpsText = new TextDecoder().decode(rpsRes.data.bytes);
+          if (rpsText.trim().startsWith("<")) {
+            const path = `${doc.environment}/${doc.document_type}/${doc.id}-rps.xml`;
+            const { error } = await admin.storage
+              .from("fiscal-xml")
+              .upload(path, new Blob([rpsText], { type: "application/xml" }), {
+                contentType: "application/xml",
+                upsert: true,
+              });
+            if (error) console.error("[fiscal] falha ao arquivar xml_rps:", error);
+          }
+        }
+      }
+    }
   } catch (err) {
     console.error("[fiscal] falha ao processar artefatos:", err);
   }

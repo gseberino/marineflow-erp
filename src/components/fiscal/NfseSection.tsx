@@ -25,6 +25,7 @@ import {
   MIN_JUSTIFICATIVA, MAX_JUSTIFICATIVA,
   type DocumentoNfse,
 } from '@/hooks/use-nfse';
+import { atualizarInvoicingStatus } from '@/hooks/use-faturar-os';
 import {
   Stethoscope, AlertTriangle, CheckCircle2, FileText, Download, Ban,
   RefreshCw, Loader2,
@@ -96,7 +97,13 @@ export function NfseSection({ serviceOrderId }: { serviceOrderId?: string | null
             <AlertDialogAction
               onClick={() => {
                 setConfirmandoEmissao(false);
-                if (serviceOrderId) emitir.mutate({ serviceOrderId });
+                if (serviceOrderId) {
+                  emitir.mutate({ serviceOrderId }, {
+                    // [NOVO-nfse-04] Emitir por aqui também atualiza o marcador da OS —
+                    // sem aplicáveis explícitos, o cálculo usa os tipos já tentados.
+                    onSuccess: () => { void atualizarInvoicingStatus(serviceOrderId); },
+                  });
+                }
               }}
             >
               Emitir
@@ -277,6 +284,14 @@ function LinhaDaNota({ doc, onCancelar, formatCurrency, formatDate }: {
               disabled={artefato.isPending}
             >
               <Download className="mr-1.5 h-4 w-4" />DANFSe
+            </Button>
+            <Button
+              size="sm" variant="ghost" className="shrink-0"
+              title="XML do RPS — a via da DPS assinada/transmitida por nós (probatório)"
+              onClick={() => artefato.mutate({ documentId: doc.id, tipo: 'rps', numero: doc.number, serie: doc.series })}
+              disabled={artefato.isPending}
+            >
+              <Download className="mr-1.5 h-4 w-4" />RPS
             </Button>
             <Button size="sm" variant="outline" className="shrink-0" onClick={onCancelar}>
               <Ban className="mr-1.5 h-4 w-4" />Cancelar

@@ -697,3 +697,17 @@ cada uma vira tarefa própria, por ordem do dono.
 - A ponte consolida a OS numa nota só e recusa códigos divergentes (correto), mas não há
   seleção de linhas por código; o caminho hoje é a NFS-e avulsa por grupo. **Sugestão**:
   aceitar `service_line_ids` na ponte e diferenciar a dedup por código.
+
+## Resoluções da frente NFS-e (19/08/2026)
+
+- **NOVO-nfse-01 RESOLVIDO**: `20260815100000_grandeza_estruturada.sql` renomeada para
+  `20260815095900` e versão registrada (as colunas JÁ estavam aplicadas em produção —
+  comprovado por information_schema). Mapa versão↔arquivo voltou a ser 1:1 no intervalo.
+- **NOVO-nfse-02 RESOLVIDO**: `xml_rps` agora é arquivado junto do primeiro arquivamento
+  (`<env>/nfse/<id>-rps.xml`) e baixável (handleArtifact `artifact:'xml_rps'` + botão RPS
+  na seção de NFS-e).
+- **NOVO-nfse-04 RESOLVIDO**: emitir pela NfseSection também recalcula o
+  `invoicing_status` (atualizarInvoicingStatus com aplicáveis derivados dos tipos já
+  tentados — mesma aproximação do recompute do servidor).
+- NOVO-nfse-03 (prompt de saldo perdido ao navegar) e NOVO-nfse-05 (emissão por grupo de
+  código) permanecem abertos, por decisão de escopo.
