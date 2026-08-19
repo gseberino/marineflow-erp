@@ -1631,3 +1631,29 @@ porque só o dono pode preenchê-las.
   regra 5 (alterar teste exige tarefa dedicada). Encontrado ao rodar a suíte
   depois das migrations do dimensionamento de cabo — as migrations não tocam em
   `src/`, e as outras 1.279 asserções passaram.
+
+### [NOVO-lev-38] O registro manual de migration engole colisão de versão em silêncio
+
+- **Onde:** a receita da **regra 1** do `CLAUDE.md` deste repositório:
+  `insert into supabase_migrations.schema_migrations (version, name)
+   values ('<data>', '<nome>') on conflict (version) do nothing;`
+- **O quê:** o `on conflict (version) do nothing` existe para tornar o comando
+  repetível. Só que ele **também** silencia o caso em que a versão já pertence a
+  OUTRA migration: o insert não grava nada, não devolve erro, e quem rodou
+  entende que registrou.
+- **Aconteceu nesta sessão, em produção.** Escolhi `20260818100000` para a
+  migration de ampacidade e apliquei o SQL. A versão já era de
+  `nfse_confirmacao_contadora`, de outra sessão que trabalhou na frente fiscal no
+  mesmo dia — e que registrou três versões seguidas (10h, 11h e 12h). O SQL rodou,
+  o registro não, e o arquivo teria virado o **115º sem versão registrada** —
+  exatamente a deriva que a regra 1 existe para conter. Só apareceu porque fui
+  conferir o registro depois; a receita não pede essa conferência.
+- **Por que é fácil repetir:** o repositório é editado por várias sessões ao
+  mesmo tempo, e todas carimbam a data de hoje com hora redonda. Colidir em
+  `AAAAMMDD100000` é o caso comum, não o raro.
+- **Consertar seria:** trocar a receita da regra 1 por duas etapas — conferir se a
+  versão está livre ANTES (`select ... where version = '<data>'`), e conferir o
+  registro DEPOIS. Ou remover o `on conflict`, deixando a colisão estourar como
+  erro, que é o que ela é.
+- **Não corrigido:** alterar o `CLAUDE.md` do repositório é decisão que vale para
+  todas as sessões e não cabe de passagem.
