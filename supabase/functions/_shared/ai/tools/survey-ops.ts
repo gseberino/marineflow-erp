@@ -380,28 +380,42 @@ export const surveyOpsTools: ToolDef[] = [
     async execute(args, { sb }) {
       const { data, error } = args.survey_id
         ? await sb.rpc("survey_cable_sizing", { p_survey_id: args.survey_id })
+        // `p_insulation_c` NÃO é passado de propósito: o padrão da função é
+        // 90 °C, o conservador. Passar 105 aqui — como estava — assumia cabo
+        // marítimo premium e liberava bitola que o cabo real pode não suportar
+        // (NOVO-lev-37). Quando a isolação é conhecida, ela vem do produto no
+        // catálogo, não de um literal nesta chamada.
         : await sb.rpc("dc_cable_sizing", {
             p_amps: args.amps ?? null,
             p_one_way_meters: args.one_way_meters ?? null,
             p_volts: args.volts ?? 12,
             p_max_drop_pct: args.max_drop_pct ?? 3,
-            p_insulation_c: 105,
             p_engine_space: args.engine_space ?? false,
             p_bundle_size: args.bundle_size ?? 1,
           });
       if (error) throw error;
       const r = data as any;
 
+      // NOVO-lev-20: `como_dizer` era montado sempre que houvesse `mm2_minimo`,
+      // SEM olhar `pronto`. A instrução logo abaixo mandava não afirmar bitola
+      // com o cálculo aberto — mas a frase pronta já tinha sido entregue, e
+      // frase pronta ganha de instrução. Chegou a produzir "no mínimo 5,96 mm²"
+      // para um circuito de 200 A.
+      //
+      // Agora a frase afirmativa só existe com os dois critérios fechados.
+      // Nos outros casos ela diz o que falta — e o `aviso` do banco, que já
+      // carrega o motivo (trecho ambíguo, feixe acima de três, bitola ausente),
+      // vai junto.
+      const corrente = r?.lido_do_levantamento?.corrente_a ?? args.amps;
+      const queda = r?.premissas?.queda_max_pct ?? args.max_drop_pct ?? 3;
+
       return {
         ...r,
-        // O modelo tende a arredondar para um número redondo e apresentá-lo
-        // como veredito. Estas instruções existem para impedir isso: o que
-        // sai daqui é meia conta enquanto a ampacidade não estiver cadastrada.
-        como_dizer: r?.mm2_minimo
-          ? `Para ${r?.lido_do_levantamento?.corrente_a ?? args.amps} A neste trecho, mantendo ${r?.premissas?.queda_max_pct ?? args.max_drop_pct ?? 3}% de queda, o cabo precisa de no mínimo ${r.mm2_minimo} mm².`
-          : "Não deu para dimensionar: faltam dados.",
+        como_dizer: r?.pronto === true
+          ? `Para ${corrente} A neste trecho, mantendo ${queda}% de queda, o cabo precisa de no mínimo ${r.mm2_minimo} mm² (mandou a ${r.criterio_que_manda}, isolação ${r?.premissas?.isolacao_c} °C).`
+          : `NÃO HÁ BITOLA FECHADA para este circuito. ${r?.aviso ?? "Faltam dados para dimensionar."} Diga isso à pessoa e peça o que falta — não ofereça um número.`,
         instrucao:
-          "NUNCA apresente a bitola como fechada se 'pronto' for false. Diga sempre qual critério mandou. Se 'ampacidade_cadastrada' for false, repita que só a queda de tensão entrou na conta e que falta conferir a ampacidade na ABYC E-11 ou no Circuit Wizard da Blue Sea. Não reproduza tabela de ampacidade de memória em hipótese alguma.",
+          "Se 'pronto' for false, NÃO diga bitola nenhuma: repita o texto de 'como_dizer' e o 'aviso', e peça o dado que falta. Com 'pronto' true, diga o número e qual critério mandou. Nunca reproduza tabela de ampacidade de memória, e nunca arredonde a bitola para um valor 'redondo' — a próxima seção comercial acima é a resposta, não um número parecido.",
       };
     },
   },
