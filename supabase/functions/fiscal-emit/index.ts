@@ -8,6 +8,10 @@ import { applyStatusUpdate } from "../_shared/fiscal/apply-status.ts";
 import { resolveIbgeCityCode } from "../_shared/fiscal/ibge.ts";
 import { resolveServiceFiscal, semCodigoFiscal } from "../_shared/fiscal/service-fiscal.ts";
 import { logEdgeError } from "../_shared/log-error.ts";
+// [SUGESTAO-FISCAL] Modelo leve para sugerir NCM de produto direto da tela de emissão.
+// A sugestão NUNCA grava nada — ela pré-preenche o formulário e quem salva é o humano.
+import { callClaude } from "../_shared/ai/anthropic.ts";
+import { MODEL_LITE } from "../_shared/ai/models.ts";
 import {
   buildNfeDraftPayload,
   computeCfop,
@@ -246,6 +250,7 @@ Deno.serve(async (req) => {
     const ACOES_CONHECIDAS = new Set([
       "create", "prepare", "environment", "cancel", "correction", "diagnostics",
       "nfse_health", "enable_homolog", "artifact", "preview", "homolog", "billing_preflight",
+      "fiscal_suggest",
     ]);
     if (body.action != null && !ACOES_CONHECIDAS.has(String(body.action))) {
       return jr({
@@ -312,6 +317,7 @@ Deno.serve(async (req) => {
     if (body.action === "cancel") return await handleCancel(admin, body);
     if (body.action === "correction") return await handleCorrection(admin, body);
     if (body.action === "diagnostics") return await handleDiagnostics();
+    if (body.action === "fiscal_suggest") return await handleFiscalSuggest(admin, body);
     // [F-NFSE-01] Pré-voo: nada de emitir NFS-e antes do verde.
     if (body.action === "nfse_health") return await handleNfseHealth(admin);
     if (body.action === "enable_homolog") return await handleEnableHomolog();
@@ -798,7 +804,7 @@ async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
   const { data: linhas, error: linhasErr } = await admin
     .from("service_order_services")
     .select(
-      "name_snapshot, description_snapshot, quantity, unit_price_snapshot, line_total, "
+      "service_id, name_snapshot, description_snapshot, quantity, unit_price_snapshot, line_total, "
       + "services(national_tax_code, service_code, cnae, iss_rate, iss_withheld, fiscal_verb, "
       + "service_fiscal_verbs(default_national_tax_code, default_service_code, default_cnae, "
       + "default_iss_rate, default_iss_withheld))",
@@ -846,7 +852,15 @@ async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
         + ". Preencha o código de tributação nacional (6 dígitos), o CNAE e a alíquota de ISS "
         + "no cadastro do serviço — ou no verbo fiscal dele, em Configurações → Fiscal → "
         + "Verbos, que vale para todos os serviços daquela atividade — antes de emitir.",
-      details: { servicos_sem_cadastro: semCadastro.map((l) => l.name_snapshot) },
+      details: {
+        servicos_sem_cadastro: semCadastro.map((l) => l.name_snapshot),
+        // Acionável pela UI: service_id abre o cadastro no popup. Linha avulsa (sem
+        // service_id) não tem cadastro para abrir — a UI explica o caminho (vincular).
+        servicos_pendentes: semCadastro.map((l) => ({
+          service_id: l.service_id ?? null,
+          name: l.name_snapshot ?? l.description_snapshot ?? "Serviço",
+        })),
+      },
     };
   }
 
@@ -929,6 +943,133 @@ async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
 }
 
 /**
+ * [SUGESTAO-FISCAL] Sugere o cadastro fiscal de um item pendente — SEM gravar nada.
+ *
+ * - kind="servico": DETERMINÍSTICO (sem IA). A contadora fixou a regra em 18/08/2026
+ *   ("manter tudo no 14.01, ISS 3% Itajaí, CNAE 3317102") — a sugestão é herdar pelo
+ *   verbo fiscal (que já carrega esses valores) ou os próprios valores da regra.
+ *   Gastar LLM para redescobrir uma decisão já tomada seria ruído com risco.
+ * - kind="produto": NCM é classificação de mercadoria — usa o modelo LEVE com contexto
+ *   do catálogo (nome/marca/categoria) e devolve NCM + justificativa + alternativas.
+ *
+ * A gravação é SEMPRE humana (o formulário abre pré-preenchido e a pessoa salva) ou do
+ * agente com confirmação — princípio Sugerir≫Criar do projeto.
+ */
+// deno-lint-ignore no-explicit-any
+async function handleFiscalSuggest(admin: any, body: any): Promise<Response> {
+  const kind = String(body.kind ?? "");
+  const id = body.id ? String(body.id) : null;
+  if (!id || (kind !== "produto" && kind !== "servico")) {
+    return jr({ error: "Informe kind ('produto' | 'servico') e id." }, 422);
+  }
+
+  if (kind === "servico") {
+    const { data: svc, error } = await admin
+      .from("services")
+      .select("id, name, service_verb, fiscal_verb, national_tax_code")
+      .eq("id", id)
+      .maybeSingle();
+    if (error) return jr({ error: "Falha ao consultar o serviço: " + error.message }, 500);
+    if (!svc) return jr({ error: "Serviço não encontrado." }, 404);
+
+    const verbo: string | null = svc.fiscal_verb ?? svc.service_verb ?? null;
+    let herdado: Record<string, unknown> | null = null;
+    if (verbo) {
+      const { data: v } = await admin
+        .from("service_fiscal_verbs")
+        .select("verb_slug, default_national_tax_code, default_cnae, default_iss_rate, default_service_code")
+        .eq("verb_slug", verbo)
+        .maybeSingle();
+      herdado = v ?? null;
+    }
+    return jr({
+      ok: true,
+      data: {
+        kind,
+        id,
+        sugestao: {
+          fiscal_verb: verbo,
+          national_tax_code: (herdado?.["default_national_tax_code"] as string) ?? "140101",
+          cnae: (herdado?.["default_cnae"] as string) ?? "3317102",
+          iss_rate: herdado?.["default_iss_rate"] != null ? Number(herdado["default_iss_rate"]) : 3,
+          service_code: (herdado?.["default_service_code"] as string) ?? "14.01",
+        },
+        justificativa: verbo
+          ? `Herança do verbo fiscal "${verbo}" — regra confirmada pela contadora em 18/08/2026 (tudo 14.01, ISS 3% Itajaí).`
+          : "Serviço sem verbo classificado: valores da regra geral da contadora (tudo 14.01, ISS 3% Itajaí). Confira se a atividade é mesmo manutenção/instalação.",
+        fonte: "regra-da-contadora",
+      },
+    });
+  }
+
+  // ── produto → NCM via modelo leve ──
+  const { data: prod, error: prodErr } = await admin
+    .from("products")
+    .select("id, name, sku, brand, category, unit, ncm")
+    .eq("id", id)
+    .maybeSingle();
+  if (prodErr) return jr({ error: "Falha ao consultar o produto: " + prodErr.message }, 500);
+  if (!prod) return jr({ error: "Produto não encontrado." }, 404);
+
+  const r = await callClaude({
+    model: MODEL_LITE,
+    maxTokens: 600,
+    system: [{
+      type: "text",
+      text: "Você é um classificador fiscal brasileiro especializado em NCM (Nomenclatura Comum do "
+        + "Mercosul, 8 dígitos). O contexto é uma empresa de eletroeletrônica/energia embarcada "
+        + "(embarcações e motorhomes): baterias LiFePO4, inversores, carregadores, cabos, "
+        + "disjuntores, painéis solares, eletrônica de navegação, bombas, refrigeração 12V. "
+        + "Responda APENAS um JSON válido, sem markdown, no formato: "
+        + '{"ncm":"8 dígitos","confianca":0.0,"justificativa":"1-2 frases","alternativas":[{"ncm":"8 dígitos","quando":"frase"}]} '
+        + "Regras: NCM sempre com exatamente 8 dígitos, sem pontos. Se o nome for ambíguo, "
+        + "escolha o mais provável para ESTE segmento e liste alternativas. confianca entre 0 e 1.",
+    }],
+    messages: [{
+      role: "user",
+      content: [{
+        type: "text",
+        text: `Classifique o NCM deste produto do catálogo:\n`
+          + `Nome: ${prod.name}\n`
+          + (prod.brand ? `Marca: ${prod.brand}\n` : "")
+          + (prod.category ? `Categoria: ${prod.category}\n` : "")
+          + (prod.sku ? `SKU: ${prod.sku}\n` : "")
+          + (prod.unit ? `Unidade: ${prod.unit}\n` : ""),
+      }],
+    }],
+  });
+
+  const texto = r.content
+    .map((b) => (b as { type?: string; text?: string }).type === "text" ? String((b as { text?: string }).text ?? "") : "")
+    .join("");
+  const m = texto.match(/\{[\s\S]*\}/);
+  if (!m) return jr({ error: "A IA não devolveu uma sugestão utilizável. Tente de novo." }, 502);
+  let sugestao: Record<string, unknown>;
+  try {
+    sugestao = JSON.parse(m[0]);
+  } catch {
+    return jr({ error: "A IA devolveu um formato inválido. Tente de novo." }, 502);
+  }
+  const ncm = String(sugestao["ncm"] ?? "").replace(/\D/g, "");
+  if (ncm.length !== 8) {
+    return jr({ error: "A sugestão da IA não tem um NCM de 8 dígitos. Tente de novo ou preencha manualmente." }, 502);
+  }
+  return jr({
+    ok: true,
+    data: {
+      kind,
+      id,
+      sugestao: { ncm },
+      confianca: typeof sugestao["confianca"] === "number" ? sugestao["confianca"] : null,
+      justificativa: String(sugestao["justificativa"] ?? ""),
+      alternativas: Array.isArray(sugestao["alternativas"]) ? sugestao["alternativas"] : [],
+      fonte: "ia-modelo-leve",
+      aviso: "Sugestão de IA — confira antes de salvar. NCM errado é rejeição na SEFAZ e problema com a contadora.",
+    },
+  });
+}
+
+/**
  * [FATURAR-OS] Pré-voo conjunto da OS: o retrato dos DOIS documentos (NFS-e dos serviços,
  * NF-e das peças) de uma só vez, SEM emitir, SEM reservar numeração, SEM gastar cota.
  *
@@ -995,6 +1136,33 @@ async function handleBillingPreflight(admin: any, body: any): Promise<Response> 
     }
   } else {
     nfe.resumo = ponteNfe.resumo;
+    // Pendências ACIONÁVEIS de cadastro de produto (NCM resolvido pela hierarquia
+    // produto→categoria→global — a mesma da emissão). Best-effort: enriquecimento não
+    // pode derrubar o pré-voo.
+    try {
+      const itens = (ponteNfe.body.items as Array<Record<string, unknown>>) ?? [];
+      const globalDefaults = await loadGlobalFiscalDefaults(admin);
+      const { productsById, categoriesById } = await loadItemFiscalSources(admin, itens);
+      const pendentes: Array<{ product_id: string; name: string; faltas: string[] }> = [];
+      for (const it of itens) {
+        const pid = it.product_id ? String(it.product_id) : null;
+        if (!pid) continue;
+        const product = productsById[pid] ?? null;
+        const category = product?.product_category_id
+          ? categoriesById[String(product.product_category_id)] ?? null
+          : null;
+        const rf = resolveProductFiscal(product, category, globalDefaults);
+        const ncm = String(it.ncm ?? rf.ncm ?? "").replace(/\D/g, "");
+        const faltas: string[] = [];
+        if (ncm.length !== 8) faltas.push("NCM (8 dígitos)");
+        if (faltas.length) pendentes.push({ product_id: pid, name: String(it.name ?? "Produto"), faltas });
+      }
+      if (pendentes.length) {
+        nfe.details = { ...(nfe.details as Record<string, unknown> ?? {}), produtos_pendentes: pendentes };
+      }
+    } catch (e) {
+      console.error("[billing_preflight] enriquecimento de produtos pendentes falhou:", e);
+    }
     const prep = await prepareNfePayload(admin, ponteNfe.body);
     if (!prep.ok) {
       nfe.erro = prep.error;

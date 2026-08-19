@@ -143,6 +143,36 @@ export function useEmitirNfse() {
   });
 }
 
+export interface FiscalSuggestResult {
+  kind: 'produto' | 'servico';
+  id: string;
+  sugestao: Record<string, unknown> & { ncm?: string; national_tax_code?: string; fiscal_verb?: string | null };
+  confianca?: number | null;
+  justificativa?: string;
+  alternativas?: Array<{ ncm?: string; quando?: string }>;
+  fonte: string;
+  aviso?: string;
+}
+
+/**
+ * Sugestão de cadastro fiscal — NUNCA grava: pré-preenche o formulário e quem salva é o
+ * humano (princípio Sugerir≫Criar). Produto = NCM via modelo leve; serviço = regra da
+ * contadora (determinística).
+ */
+export function useFiscalSuggest() {
+  return useMutation({
+    mutationFn: async (v: { kind: 'produto' | 'servico'; id: string }) => {
+      const r = await chamar<{ data: FiscalSuggestResult }>({
+        action: 'fiscal_suggest',
+        kind: v.kind,
+        id: v.id,
+      });
+      return r.data;
+    },
+    onError: (e: Error) => toast.error(`Sugestão indisponível: ${e.message}`),
+  });
+}
+
 /** Ambiente REAL de emissão (secret do servidor) — alimenta o banner de produção. */
 export function useAmbienteFiscal() {
   return useQuery({

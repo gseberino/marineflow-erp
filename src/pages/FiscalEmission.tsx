@@ -6,6 +6,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { NfseSection } from '@/components/fiscal/NfseSection';
 import { AddressFields } from '@/components/AddressFields';
 import { ClientFormDialog } from '@/components/ClientFormDialog';
+import { ProductFormDialog } from '@/components/ProductFormDialog';
 import { EntityCombobox, type EntityOption } from '@/components/EntityCombobox';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -376,6 +377,9 @@ export default function FiscalEmission() {
   // Índice do item cujos detalhes fiscais estão abertos no diálogo secundário
   // (mantém a linha do item compacta, sem estourar a largura do popup).
   const [detailIndex, setDetailIndex] = useState<number | null>(null);
+  // Corrigir o CADASTRO do produto sem sair da emissão (a edição do item acima muda só a
+  // nota; esta muda a fonte — e o botão de sugerir NCM com IA vive dentro do popup).
+  const [produtoEmCorrecao, setProdutoEmCorrecao] = useState<{ row: Record<string, unknown>; index: number } | null>(null);
   // Espelho de conferência exibido antes de transmitir (fluxo Emitir → conferir → confirmar).
   const [confirmEspelho, setConfirmEspelho] = useState<
     { html: string; number?: number; series?: number } | null
@@ -3225,6 +3229,18 @@ export default function FiscalEmission() {
                   <Label className="text-[10px] text-muted-foreground">Descrição na nota (xProd)</Label>
                   <Input className="h-8 text-xs" maxLength={120} value={it.name} onChange={(e) => updateItem(index, { name: e.target.value })} />
                 </div>
+                {it.productId && (
+                  <Button
+                    type="button" variant="outline" size="sm" className="h-7 text-xs"
+                    onClick={async () => {
+                      const { data } = await supabase.from('products').select('*').eq('id', it.productId!).maybeSingle();
+                      if (!data) { toast.error('Não deu para carregar o produto.'); return; }
+                      setProdutoEmCorrecao({ row: data, index });
+                    }}
+                  >
+                    Corrigir cadastro do produto (NCM etc.) — vale para as próximas notas
+                  </Button>
+                )}
                 <div className="grid grid-cols-3 gap-2">
                   <div>
                     <Label className="text-[10px] text-muted-foreground">NCM</Label>
@@ -3594,6 +3610,29 @@ export default function FiscalEmission() {
         client={(clients || []).find((c) => c.id === clientId) || null}
         onSaved={handleClientSaved}
       />
+
+      {/* Cadastro do PRODUTO (popup) — corrige a fonte (NCM etc.) sem sair da emissão;
+          ao salvar, o item da nota herda o NCM novo na hora. Sugestão de IA dentro do popup.
+          Montagem condicional: a árvore do popup tem hooks próprios que não devem rodar
+          com ele fechado. */}
+      {produtoEmCorrecao && (
+      <ProductFormDialog
+        open
+        onOpenChange={(v) => { if (!v) setProdutoEmCorrecao(null); }}
+        product={produtoEmCorrecao.row as Parameters<typeof ProductFormDialog>[0]['product']}
+        onSaved={async (savedId) => {
+          const alvo = produtoEmCorrecao;
+          setProdutoEmCorrecao(null);
+          qc.invalidateQueries({ queryKey: ['products'] });
+          if (!alvo) return;
+          const { data: fresh } = await supabase.from('products').select('ncm, sku, name').eq('id', savedId).maybeSingle();
+          if (fresh?.ncm) {
+            updateItem(alvo.index, { ncm: String(fresh.ncm).replace(/\D/g, '').slice(0, 8) });
+            toast.success('Cadastro do produto atualizado — NCM aplicado ao item da nota.');
+          }
+        }}
+      />
+      )}
     </div>
   );
 }

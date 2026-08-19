@@ -90,9 +90,13 @@ describe("buildEspelhoHtml", () => {
 
   it("formata o vencimento sem deslocar o dia (bug clássico de fuso)", () => {
     const html = buildEspelhoHtml(makePayload(parcelado), emitter);
-    expect(html).toContain("20/08/2026");
-    expect(html).toContain("20/09/2026");
-    expect(html).not.toContain("19/08/2026");
+    // A checagem do deslocamento mira o QUADRO DA FATURA, não o HTML inteiro: o espelho
+    // imprime a data de EMISSÃO (hoje) em outro canto, e proibir "19/08/2026" no documento
+    // todo fazia o teste explodir exatamente em 19/08/2026 (bomba-relógio — explodiu).
+    const fatura = html.slice(html.indexOf("Fatura / Duplicata"));
+    expect(fatura).toContain("20/08/2026");
+    expect(fatura).toContain("20/09/2026");
+    expect(fatura.slice(0, fatura.indexOf("20/09/2026"))).not.toContain("19/08/2026");
   });
 
   it("à vista (sem billing): mostra a forma de pagamento mas nenhuma duplicata", () => {

@@ -14,7 +14,14 @@ export interface PreflightDocumento {
   pronto: boolean;
   motivo?: string;
   erro?: string;
-  details?: { servicos_sem_cadastro?: string[]; codigos_encontrados?: string[] } | null;
+  details?: {
+    servicos_sem_cadastro?: string[];
+    codigos_encontrados?: string[];
+    /** Acionável: abre o cadastro do serviço no popup. service_id null = linha avulsa. */
+    servicos_pendentes?: Array<{ service_id: string | null; name: string }>;
+    /** Acionável: abre o cadastro do produto no popup (falta NCM etc.). */
+    produtos_pendentes?: Array<{ product_id: string; name: string; faltas: string[] }>;
+  } | null;
   resumo?: Record<string, unknown> | null;
 }
 

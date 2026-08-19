@@ -55,6 +55,15 @@ vi.mock('@/hooks/use-faturar-os', async (importOriginal) => {
   };
 });
 
+// Os popups de cadastro são árvores pesadas (hooks próprios de produtos/serviços) — aqui
+// interessa só SE o assistente os abre; stubs mantêm o smoke rápido e isolado.
+vi.mock('@/components/ServiceFormDialog', () => ({
+  ServiceFormDialog: ({ open }: { open: boolean }) => (open ? <div data-testid="popup-servico" /> : null),
+}));
+vi.mock('@/components/ProductFormDialog', () => ({
+  ProductFormDialog: ({ open }: { open: boolean }) => (open ? <div data-testid="popup-produto" /> : null),
+}));
+
 vi.mock('@/hooks/use-nfse', async (importOriginal) => {
   const real = await importOriginal<typeof import('@/hooks/use-nfse')>();
   return {
@@ -128,6 +137,40 @@ describe('assistente Faturar OS', () => {
     renderDialog();
     expect(await screen.findByText(/Serviço sem cadastro fiscal/)).toBeInTheDocument();
     expect(screen.getByText('Instalação LiFePO4')).toBeInTheDocument();
+  });
+
+  it('pendência ACIONÁVEL: serviço com id ganha "Corrigir cadastro"; linha avulsa ganha a explicação', async () => {
+    const p = preflightBase();
+    p.nfse = {
+      aplicavel: true,
+      pronto: false,
+      erro: 'Serviço sem cadastro fiscal.',
+      details: {
+        servicos_pendentes: [
+          { service_id: 'svc-1', name: 'Instalação LiFePO4' },
+          { service_id: null, name: 'Linha digitada à mão' },
+        ],
+      },
+    };
+    estado.preflight = p;
+    renderDialog();
+    expect(await screen.findByRole('button', { name: /Corrigir cadastro/ })).toBeInTheDocument();
+    expect(screen.getByText(/linha avulsa — vincule ao catálogo/)).toBeInTheDocument();
+  });
+
+  it('produto com NCM pendente ganha "Corrigir cadastro" no cartão da NF-e', async () => {
+    const p = preflightBase();
+    p.nfe = {
+      aplicavel: true,
+      pronto: false,
+      erro: 'NCM obrigatório.',
+      details: { produtos_pendentes: [{ product_id: 'prod-1', name: 'Bateria LiFePO4 100Ah', faltas: ['NCM (8 dígitos)'] }] },
+    };
+    estado.preflight = p;
+    renderDialog();
+    expect(await screen.findByText(/Produtos com cadastro fiscal incompleto/)).toBeInTheDocument();
+    expect(screen.getByText(/Bateria LiFePO4 100Ah/)).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /Corrigir cadastro/ }).length).toBeGreaterThan(0);
   });
 
   it('NFS-e não emite com a conta da Contora sem verde, mesmo com payload pronto', async () => {
