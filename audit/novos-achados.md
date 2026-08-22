@@ -1769,3 +1769,39 @@ porque só o dono pode preenchê-las.
 - A ponte consolida a OS numa nota só e recusa códigos divergentes (correto), mas não há
   seleção de linhas por código; o caminho hoje é a NFS-e avulsa por grupo. **Sugestão**:
   aceitar `service_line_ids` na ponte e diferenciar a dedup por código.
+
+### [NOVO-lev-40] Os termos nunca chegam ao cliente — nem na tela do portal, nem no PDF, nem no hash da assinatura
+
+- **Onde:** a política `anon_public_settings_whitelist` em `app_settings`, contra
+  `src/pages/PublicServiceOrderView.tsx` (`termsText`, `:156`) e
+  `src/hooks/use-pdf.ts` (o campo `terms`).
+- **O quê:** o portal monta os termos a partir de cinco chaves —
+  `terms_general`, `terms_warranty`, `terms_cancellation`, `terms_delivery`,
+  `terms_responsibilities`. A whitelist do `anon` em `app_settings` libera
+  `public_view_%` e uma lista nominal de 25 chaves de empresa e banco.
+  **Nenhuma das cinco está nela.**
+- **Provado com `set role anon`:** as cinco chaves existem no banco; o `anon`
+  enxerga **zero**. Não é erro, é a política funcionando — só que ninguém notou
+  que os termos ficaram do lado de fora.
+- **O que isso produz, em três lugares:**
+  1. **A tela do portal** renderiza os termos sob `show.terms && termsText`.
+     `public_view_show_terms` está **`true`** no banco — o dono ligou —, e a
+     seção nunca aparece, porque o texto vem vazio.
+  2. **O PDF que o cliente baixa** sai sem termos, pela mesma razão.
+  3. **O hash do documento assinado.** `computeDocumentHash(order, services,
+     termsText)` recebe o texto VAZIO no portal. Se o hash existe para provar o
+     que foi assinado, ele está provando um documento sem os termos que a empresa
+     acha que estão valendo.
+- **Por que importa mais que os outros:** os demais achados desta frente erram
+  número ou aparência. Este é contratual — garantia, cancelamento, prazo de
+  entrega e responsabilidades são exatamente o que se discute quando algo dá
+  errado, e o cliente assinou sem nunca tê-los visto.
+- **Não é regressão da unificação do PDF:** o portal já se comportava assim antes,
+  e a montagem única preserva o comportamento. Apareceu porque, ao ligar
+  `showTerms` ao toggle do dono, fui conferir se havia texto para mostrar.
+- **Consertar seria:** acrescentar as cinco chaves à whitelist do `anon` — são
+  texto que a empresa já publica junto da proposta, não há segredo nelas. Mexer
+  em política de `anon` é decisão de segurança, então fica registrado e não
+  aplicado. Depois disso vale conferir se o hash de assinaturas já colhidas
+  precisa ser recalculado ou anotado.
+- **Não corrigido:** regra 3, e a alteração é numa política de RLS de `anon`.
