@@ -711,3 +711,9 @@ cada uma vira tarefa própria, por ordem do dono.
   tentados — mesma aproximação do recompute do servidor).
 - NOVO-nfse-03 (prompt de saldo perdido ao navegar) e NOVO-nfse-05 (emissão por grupo de
   código) permanecem abertos, por decisão de escopo.
+- **NOVO-nfse-03 RESOLVIDO (19/08)**: o assistente passou a PEDIR para navegar
+  (`onAntesDeNavegar(continuar)`); quem o monta na conclusão da OS fecha o diálogo, mostra
+  o aviso de saldo armado e só depois executa a navegação para a emissão detalhada. Nas
+  listas e na página NFS-e (sem aviso armado) o comportamento é o mesmo de antes.
+- Aberto por escopo: só **NOVO-nfse-05** (emissão por grupo de código) — sem demanda
+  enquanto a regra da contadora for "tudo 14.01" (todos os verbos resolvem o mesmo código).

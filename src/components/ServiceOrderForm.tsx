@@ -401,6 +401,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const authUser = useOptionalAuth()?.user ?? null;
   const [faturarOsOpen, setFaturarOsOpen] = useState(false);
   const [completionPendente, setCompletionPendente] = useState<typeof completionSend | null>(null);
+  // [NOVO-nfse-03] Navegação pedida pelo assistente, adiada até o aviso de saldo fechar.
+  const [navegarDepois, setNavegarDepois] = useState<(() => void) | null>(null);
   const { data: vesselContacts } = useVesselContacts(form.vessel_id || undefined);
 
   // Part inline-card state (matches the services pattern)
@@ -1834,6 +1836,16 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           }}
           serviceOrderId={orderId}
           orderNumber={orderData?.service_order_number || null}
+          onAntesDeNavegar={(continuar) => {
+            setFaturarOsOpen(false);
+            if (completionPendente) {
+              setCompletionSend(completionPendente);
+              setCompletionPendente(null);
+              setNavegarDepois(() => continuar);
+            } else {
+              continuar();
+            }
+          }}
         />
       )}
 
@@ -1841,7 +1853,10 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       {!isNew && orderId && (
         <CompletionSendDialog
           open={completionSend.open}
-          onOpenChange={v => setCompletionSend(prev => ({ ...prev, open: v }))}
+          onOpenChange={v => {
+            setCompletionSend(prev => ({ ...prev, open: v }));
+            if (!v && navegarDepois) { const ir = navegarDepois; setNavegarDepois(null); ir(); }
+          }}
           serviceOrderId={orderId}
           osNumber={orderData?.service_order_number || ''}
           clientName={completionSend.clientName}

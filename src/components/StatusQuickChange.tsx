@@ -40,6 +40,8 @@ export function StatusQuickChange({ orderId, currentStatus }: Props) {
   const [faturar, setFaturar] = useState<{ open: boolean; osNumber: string | null }>({ open: false, osNumber: null });
   // O prompt de WhatsApp fica ARMADO aqui enquanto o assistente está aberto.
   const [completionPendente, setCompletionPendente] = useState<typeof completionSend | null>(null);
+  // [NOVO-nfse-03] Navegação pedida pelo assistente, adiada até o aviso de saldo fechar.
+  const [navegarDepois, setNavegarDepois] = useState<(() => void) | null>(null);
 
   const cfg = statusConfig[currentStatus];
   const validTransitions = STATUS_TRANSITIONS[currentStatus] ?? [];
@@ -294,12 +296,25 @@ export function StatusQuickChange({ orderId, currentStatus }: Props) {
         }}
         serviceOrderId={orderId}
         orderNumber={faturar.osNumber}
+        onAntesDeNavegar={(continuar) => {
+          setFaturar(prev => ({ ...prev, open: false }));
+          if (completionPendente) {
+            setCompletionSend(completionPendente);
+            setCompletionPendente(null);
+            setNavegarDepois(() => continuar);
+          } else {
+            continuar();
+          }
+        }}
       />
 
       {/* Prompt opt-in de conclusão (avisar cliente + saldo) — ao concluir pela lista */}
       <CompletionSendDialog
         open={completionSend.open}
-        onOpenChange={v => setCompletionSend(prev => ({ ...prev, open: v }))}
+        onOpenChange={v => {
+          setCompletionSend(prev => ({ ...prev, open: v }));
+          if (!v && navegarDepois) { const ir = navegarDepois; setNavegarDepois(null); ir(); }
+        }}
         serviceOrderId={orderId}
         osNumber={completionSend.osNumber}
         clientName={completionSend.clientName}
