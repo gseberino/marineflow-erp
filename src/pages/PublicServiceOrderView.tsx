@@ -10,8 +10,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { generatePDFBlob, DEFAULT_PDF_OPTIONS, type PDFData } from '@/lib/pdf-generator';
-import { printPDF } from '@/lib/pdf-print';
+import { generatePDFBlob, downloadPDF, DEFAULT_PDF_OPTIONS, type PDFData, type PDFOptions } from '@/lib/pdf-generator';
+import { carregarPDFData } from '@/hooks/use-pdf';
+import { documentTypeFor } from '@/lib/document-type';
 import { SignaturePad } from '@/components/SignaturePad';
 import { computeDocumentHash } from '@/lib/document-hash';
 import { toast } from 'sonner';
@@ -60,6 +61,7 @@ export default function PublicServiceOrderView() {
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [signaturePng, setSignaturePng] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [baixandoPdf, setBaixandoPdf] = useState(false);
 
   // Cliente que leva o token do link no cabeçalho, para a RLS poder compará-lo.
   const sb = useMemo(() => (token ? createShareClient(token) : supabase), [token]);
@@ -208,83 +210,65 @@ export default function PublicServiceOrderView() {
   const isSigned = !!order.signed_at && !order.requires_resignature;
   const needsResignature = !!order.requires_resignature;
 
-  const buildPdfData = (): PDFData => {
-    const get = (k: string) => company[k] || '';
-    return {
-      documentType: 'service_order',
-      company: {
-        name: get('company_name') || 'MarineFlow',
-        address: [get('address_line_1'), get('address_number')].filter(Boolean).join(', '),
-        city: get('city'),
-        state: get('state'),
-        postal_code: get('postal_code'),
-        phone: get('phone'),
-        email: get('email'),
-        cnpj: get('cnpj'),
-      },
-      bank: {
-        bank_name: get('bank_name') || undefined,
-        bank_agency: get('bank_agency') || undefined,
-        bank_account: get('bank_account') || undefined,
-        pix_key: get('pix_key') || undefined,
-      },
-      serviceOrder: {
-        service_order_number: order.service_order_number,
-        status: order.status,
-        created_at: order.created_at,
-        scheduled_start_at: order.scheduled_start_at ?? undefined,
-        problem_description: order.problem_description ?? undefined,
-        technical_notes: order.technician_notes ?? undefined,
-        grand_total: order.grand_total || 0,
-        labor_cost_total: order.labor_cost_total || 0,
-        parts_cost_total: order.parts_cost_total || 0,
-        travel_cost_total: (order as any).is_travel_billable !== false ? (order.travel_cost_total || 0) : 0,
-        discount_amount: order.discount_amount || 0,
-        tax_amount: order.tax_amount || 0,
-        operational_cost_total: order.operational_cost_total || 0,
-        card_fee_amount: (order as any).card_fee_passthrough_enabled ? ((order as any).card_fee_amount || 0) : 0,
-        card_installments: (order as any).card_fee_passthrough_enabled ? ((order as any).card_installments || 0) : 0,
-        extra_notes: order.extra_notes ?? undefined,
-        payment_conditions: order.payment_conditions ?? undefined,
-        payment_condition_label: data?.presetData?.label ?? null,
-        payment_condition_installments: data?.presetData?.installments ?? null,
-        subcontract_cost_total: (order as any).subcontract_cost_total || 0,
-      },
-      client: {
-        name: client?.name || '—',
-        cpf_cnpj: client?.cpf_cnpj ?? undefined,
-        phone: client?.phone ?? undefined,
-        email: client?.email ?? undefined,
-        address: [client?.address_line_1, client?.city, client?.state].filter(Boolean).join(', ') || undefined,
-      },
-      vessel: vessel ? {
-        name: vessel.name,
-        manufacturer: vessel.manufacturer ?? undefined,
-        model: vessel.model ?? undefined,
-        year: vessel.year ?? undefined,
-        registration: vessel.hull_id_or_registration ?? undefined,
-      } : undefined,
-      services: services.map((s: any) => ({
-        name: s.name_snapshot || '—',
-        description: s.description_snapshot ?? undefined,
-        billing_unit: s.billing_unit_snapshot || 'unit',
-        quantity: s.quantity || 1,
-        unit_price: s.unit_price_snapshot || 0,
-        line_total: s.line_total || 0,
-      })),
-      parts: parts.map((p: any) => ({
-        name: p.products?.name || '—',
-        sku: p.products?.sku ?? undefined,
-        quantity: p.quantity || 1,
-        unit_price: p.unit_sale_snapshot || 0,
-        line_total: p.line_total_sale || 0,
-      })),
-      terms: termsText || undefined,
-    };
+  /**
+   * O documento que o cliente baixa sai da MESMA montagem do ERP.
+   *
+   * Antes esta função montava o PDFData à mão — a terceira cópia, depois de
+   * `usePDFData` e `fetchPDFData` já terem sido unificadas. Divergia em doze
+   * campos, e o pior deles era `documentType` fixo em 'service_order': 31
+   * orçamentos com link público eram baixados pelo cliente intitulados "Ordem
+   * de Serviço", sem a validade, e com a nota técnica interna liberada para
+   * sair (NOVO-lev-14).
+   *
+   * `carregarPDFData` recebe o cliente do token: a RLS compara o `x-share-token`
+   * e devolve só esta ordem. O que o token não alcança — levantamento,
+   * recebíveis, pagamentos, despesas — volta vazio, como já vinha.
+   */
+  const montarPdf = async (): Promise<PDFData> => {
+    const d = await carregarPDFData(order.id, sb);
+    // Rascunho é ORÇAMENTO. É esta linha que devolve o cabeçalho certo, a
+    // validade, e que suprime a nota técnica interna no documento do cliente.
+    return { ...d, documentType: documentTypeFor(order.status) };
   };
 
-  const handleDownloadPDF = () => {
-    printPDF(buildPdfData(), DEFAULT_PDF_OPTIONS);
+  /**
+   * O PDF obedece o que o dono configurou para a via pública.
+   *
+   * Antes ia sempre com `DEFAULT_PDF_OPTIONS` — tudo ligado. Desligar "mostrar
+   * dados bancários" no portal escondia da TELA, e o cliente baixava o PDF com
+   * eles assim mesmo.
+   */
+  const opcoesDoPdf = (): PDFOptions => ({
+    ...DEFAULT_PDF_OPTIONS,
+    showServicePrices: show.servicePrices,
+    showPartsPrices: show.partsPrices,
+    showTravelCost: show.travelCost,
+    showDiscount: show.discount,
+    showTax: show.tax,
+    showCardFee: show.cardFee,
+    showTerms: show.terms,
+    showBankDetails: show.bankDetails,
+    showPaymentInstructions: show.paymentInstructions,
+    showSignature: show.allowSignature,
+  });
+
+  /**
+   * O botão diz "Baixar PDF" e agora BAIXA (NOVO-lev-15).
+   *
+   * Chamava `printPDF`, que abre a janela de impressão do navegador. Este link
+   * chega ao cliente por WhatsApp e é aberto no celular: pedir "baixar" e
+   * receber a caixa de impressão do iOS é onde a pessoa desiste.
+   */
+  const handleDownloadPDF = async () => {
+    setBaixandoPdf(true);
+    try {
+      await downloadPDF(await montarPdf(), opcoesDoPdf());
+    } catch (e: any) {
+      console.error('[portal] falha ao baixar o PDF:', e);
+      toast.error(e?.message || 'Não deu para gerar o PDF. Tente de novo.');
+    } finally {
+      setBaixandoPdf(false);
+    }
   };
 
   const handleSubmitSignature = async () => {
@@ -323,7 +307,7 @@ export default function PublicServiceOrderView() {
       // Gera o PDF imutável da OS no exato estado em que está sendo assinado
       let signedPdfBase64: string | undefined;
       try {
-        const pdfBlob = await generatePDFBlob(buildPdfData(), DEFAULT_PDF_OPTIONS);
+        const pdfBlob = await generatePDFBlob(await montarPdf(), opcoesDoPdf());
         signedPdfBase64 = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
           reader.onloadend = () => resolve(String(reader.result || ''));
@@ -422,8 +406,8 @@ export default function PublicServiceOrderView() {
                     Validade: {fmtDate(order.quote_validity_date)}
                   </p>
                 )}
-                <Button onClick={handleDownloadPDF} size="sm" className="gap-2">
-                  <Download className="h-4 w-4" /> Baixar PDF
+                <Button onClick={handleDownloadPDF} size="sm" className="gap-2" disabled={baixandoPdf}>
+                  {baixandoPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Baixar PDF
                 </Button>
               </div>
             </div>

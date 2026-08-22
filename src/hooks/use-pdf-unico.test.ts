@@ -13,13 +13,51 @@ import { join } from 'node:path';
  * Já aconteceu aqui: a seção de levantamento entrou só no hook.
  */
 const src = readFileSync(join(process.cwd(), 'src', 'hooks', 'use-pdf.ts'), 'utf8');
+const portal = readFileSync(
+  join(process.cwd(), 'src', 'pages', 'PublicServiceOrderView.tsx'), 'utf8',
+);
 
 describe('uma montagem só para o PDF', () => {
   it('existe uma função única e as duas pontas a chamam', () => {
     expect(src).toContain('export async function carregarPDFData');
     // Cada uma chama, e nenhuma monta por conta própria.
-    expect(src).toMatch(/usePDFData[\s\S]*?carregarPDFData\(serviceOrderId\)/);
-    expect(src).toMatch(/fetchPDFData[\s\S]*?carregarPDFData\(serviceOrderId\)/);
+    // Sem fixar a assinatura: o que importa é chamar a função única com a ordem.
+    // `carregarPDFData` passou a aceitar um cliente (o do token, para o portal).
+    expect(src).toMatch(/usePDFData[\s\S]*?carregarPDFData\(serviceOrderId/);
+    expect(src).toMatch(/fetchPDFData[\s\S]*?carregarPDFData\(serviceOrderId/);
+  });
+
+  /**
+   * O PORTAL PÚBLICO é a terceira ponta — e a que mais importa, porque é o
+   * documento que sai da empresa.
+   *
+   * Este teste nomeava o portal no comentário e só lia `use-pdf.ts`. Enquanto
+   * isso o portal tinha uma montagem à mão que divergia em doze campos e mandava
+   * 31 orçamentos ao cliente intitulados "Ordem de Serviço" (NOVO-lev-14). Um
+   * teste que cita o que não verifica dá confiança falsa — agora ele lê o arquivo.
+   */
+  it('o portal público usa a montagem única, não uma cópia', () => {
+    expect(portal).toContain('carregarPDFData');
+    // Nenhum PDFData montado à mão lá dentro.
+    expect(portal).not.toMatch(/const buildPdfData/);
+    expect(portal).not.toMatch(/documentType:\s*'service_order'/);
+  });
+
+  /**
+   * Rascunho é orçamento. Fixar o tipo faz o cliente baixar um "Ordem de
+   * Serviço" sem validade, com a nota técnica interna liberada para sair.
+   */
+  it('o portal deriva o tipo do documento do status', () => {
+    expect(portal).toContain('documentTypeFor(order.status)');
+  });
+
+  /**
+   * O PDF do portal ia sempre com DEFAULT_PDF_OPTIONS — tudo ligado. Desligar
+   * "mostrar dados bancários" escondia da tela e o cliente baixava com eles.
+   */
+  it('o PDF do portal obedece os toggles da via pública', () => {
+    expect(portal).toMatch(/showBankDetails:\s*show\.bankDetails/);
+    expect(portal).toMatch(/showTerms:\s*show\.terms/);
   });
 
   it('o PDFData é montado UMA vez no arquivo', () => {
