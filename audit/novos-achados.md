@@ -1783,6 +1783,21 @@ porque só o dono pode preenchê-las.
 - **Provado com `set role anon`:** as cinco chaves existem no banco; o `anon`
   enxerga **zero**. Não é erro, é a política funcionando — só que ninguém notou
   que os termos ficaram do lado de fora.
+- **É REGRESSÃO, e dá para datar.** A whitelist nasceu em
+  `20260723080000_app_settings_anon_whitelist_rls.sql` (S1/A1+A2 do plano de
+  otimização, 22–23/07/2026), trocando "o `anon` lê a tabela inteira" por uma
+  lista nominal de 25 chaves. O endurecimento estava certo; as cinco de termos
+  simplesmente não entraram na lista. As assinaturas provam a data:
+
+  | assinatura | quando | termos guardados |
+  |---|---|---|
+  | validação técnica de staging | 22/05/2026 | **843 caracteres** |
+  | Rodrigo — cliente real | 29/07/2026 | **nenhum** |
+
+  Antes da whitelist os termos chegavam. Seis dias depois dela, o único cliente
+  real que assinou pelo portal aceitou um documento sem eles — e o
+  `accepted_terms_snapshot` da assinatura dele está vazio, então não há registro
+  do que ele aceitou.
 - **O que isso produz, em três lugares:**
   1. **A tela do portal** renderiza os termos sob `show.terms && termsText`.
      `public_view_show_terms` está **`true`** no banco — o dono ligou —, e a
