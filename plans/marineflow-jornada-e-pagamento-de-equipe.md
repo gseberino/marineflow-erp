@@ -3,6 +3,14 @@
 **Data:** 18/08/2026 · **Status:** plano, nada implementado
 **Pedido:** controlar diária e horário de funcionários e freelancers, chegar ao valor a pagar, e permitir o registro pelo agente IA e pelo WhatsApp.
 
+> **STATUS EM 18/08/2026 — Fases 1 a 3 NO AR.** Tabelas `work_profiles`, `work_shifts`, `payroll_periods` e `payroll_lines` criadas com RLS (migration `20260818120000`); motor de apuração em `_shared/payroll/calculo.ts` com 17 testes; 4 ferramentas do agente em `_shared/ai/tools/jornada.ts` (`registrar_jornada`, `fechar_jornada`, `minhas_horas`, `apurar_pagamento`) com 5 testes. Custo medido: 1.321 tokens; prefixo em 70.087 (painel) e 65.256 (WhatsApp).
+>
+> **O que falta, e por quê:**
+> - **Fase 0** — bloqueada por dado: Felipe (o único técnico) **não tem telefone cadastrado**, e sem `phone_normalized` o canal do WhatsApp não identifica ninguém. Habilitar `ai_whatsapp_enabled` sozinho não resolveria.
+> - **Nenhum perfil de pagamento existe ainda** — o sistema está pronto e vazio. Sem `work_profiles`, as ferramentas recusam e explicam. É o primeiro passo de uso real.
+> - **Fase 4** (fechar período → `payable`, anexo da NFS-e) e **Fase 5** (custo real por OS) seguem abertas. A tela de Folha não foi construída.
+> - As 6 decisões da seção 7 continuam sem resposta e definem quanto do motor será exercitado.
+
 ---
 
 ## 1. O que JÁ existe (e por que quase nada disso funciona hoje)
