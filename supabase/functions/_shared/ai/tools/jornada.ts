@@ -13,16 +13,27 @@
 import type { ToolDef } from "./registry.ts";
 import { apurar, diasDoPeriodo, type Turno, type WorkProfile } from "../../payroll/calculo.ts";
 
-/** Acha o perfil de pagamento vigente. Sem perfil, não há como calcular nada — e o erro precisa
- *  dizer o que fazer, não só que faltou. */
+/** Acha o perfil de pagamento vigente de quem está logado. Sem perfil, não há como calcular nada —
+ *  e o erro precisa dizer o que fazer, não só que faltou.
+ *
+ *  Procura por DOIS caminhos porque quem trabalha nem sempre tem login: o perfil pode estar no
+ *  favorecido (`payees`, a identidade de PAGAMENTO) e a conta ser criada depois. Quando isso
+ *  acontece, `payees.app_user_id` liga os dois e o perfil continua sendo do favorecido — o
+ *  histórico não muda de dono só porque a pessoa ganhou acesso ao sistema. */
 async function perfilVigente(sb: any, appUserId: string) {
-  const { data } = await sb
-    .from("work_profiles")
-    .select("*")
-    .eq("app_user_id", appUserId)
-    .is("vigencia_fim", null)
-    .maybeSingle();
-  return data ?? null;
+  const { data: direto } = await sb
+    .from("work_profiles").select("*")
+    .eq("app_user_id", appUserId).is("vigencia_fim", null).maybeSingle();
+  if (direto) return direto;
+
+  const { data: payee } = await sb
+    .from("payees").select("id").eq("app_user_id", appUserId).maybeSingle();
+  if (!payee) return null;
+
+  const { data: viaPayee } = await sb
+    .from("work_profiles").select("*")
+    .eq("payee_id", payee.id).is("vigencia_fim", null).maybeSingle();
+  return viaPayee ?? null;
 }
 
 /** Resolve por nome quando o dono registra pela equipe ("o Felipe fez diária hoje").
