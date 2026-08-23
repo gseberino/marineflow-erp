@@ -1843,3 +1843,44 @@ porque só o dono pode preenchê-las.
   decisão de data de corte das 19 telas antigas (`MF-AUD-037`), que está aberta:
   se o corte estiver próximo, o certo é apagar a tela, não emendá-la.
 - **Não corrigido:** regra 3, e a correção depende da decisão do corte.
+
+### [NOVO-lev-42] O domínio que o cliente recebe serve um build morto — TODO link público está quebrado
+
+- **Onde:** o domínio `hbrmarine.online`, que é o valor de
+  `app_settings.app_public_url` e portanto o endereço de todo link de orçamento
+  que o sistema manda ao cliente.
+- **O sintoma:** abrir qualquer `/view/<token>` mostra **"Documento indisponível
+  — TypeError: Failed to fetch"**. Não é RLS, não é token: é erro de REDE, antes
+  de qualquer regra ser avaliada.
+- **A causa, medida:**
+
+  | o quê | aponta para | estado |
+  |---|---|---|
+  | `hbrmarine.online` (bundle `index-Bhp72O6g.js`) | `zssewfqhmrlagqbfqsmb.supabase.co` | **não resolve** (curl exit 6) |
+  | deploy Vercel mais recente (`index-DOUZwxrm.js`) | `okurngvcodmljjicopdp.supabase.co` | vivo |
+
+  São **builds diferentes**. O domínio serve um build antigo, de antes da troca
+  de projeto Supabase, e o projeto daquele build **não existe mais** — o
+  navegador nem chega a fazer a requisição.
+
+- **E não é a Vercel que serve o domínio.** `curl -I hbrmarine.online` responde
+  `Server: cloudflare`; o deploy da Vercel responde `Server: Vercel` com
+  `X-Vercel-Id`. A conta da Vercel tem **um único projeto**, e os deploys de
+  produção estão saindo normalmente (o último é de hoje, da `main`). Ou seja: o
+  `.online` está sendo servido por outro caminho — Cloudflare Pages ou túnel —
+  preso a um build velho.
+- **O alcance:** os 31 orçamentos com link público, mais todos os já enviados por
+  WhatsApp desde a troca de projeto. Nenhum cliente conseguiu abrir nenhum. O
+  ERP não sofre porque quem trabalha nele entra por outro endereço.
+- **Por que ninguém viu:** o link sai do sistema e a falha acontece do lado do
+  cliente. Quem não abre um orçamento pelo link — e ninguém de dentro abre —
+  nunca encontra o erro. É o mesmo cego dos termos (`NOVO-lev-40`): defeito que
+  só existe fora da empresa.
+- **Existe caminho vivo hoje:** `https://marineflow-erp.vercel.app` responde 200
+  e o bundle dele aponta para o projeto certo. Serve de endereço provisório.
+- **Consertar seria:** apontar o `.online` para o deploy atual da Vercel (domínio
+  na Vercel, ou o Cloudflare como proxy do deploy certo em vez de servir build
+  próprio). Enquanto isso não acontece, trocar `app_public_url` faz os links
+  NOVOS já saírem funcionando — os já enviados continuam mortos.
+- **Não corrigido:** é infraestrutura (DNS/hospedagem), fora do alcance desta
+  sessão, e trocar `app_public_url` muda o endereço da marca — decisão do dono.
