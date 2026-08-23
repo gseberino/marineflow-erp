@@ -136,6 +136,16 @@ Contora enviava `xNome` junto — corrigido do lado deles.
      emite COM IM. Não mexer.
 - **Cota:** homologação tem franquia separada (100/mês) da produção (500/mês). OS mista =
   2 eventos (NFS-e + NF-e).
+- **iss_rate ≠ pTotTribSN — NUNCA confundir (quase virou nota real errada, 23/08/2026):** o
+  console da Contora tinha 6% nos DOIS campos (`nfse_iss_rate_default` e o % do Simples). O
+  6% é a carga TOTAL aproximada do Simples (pTotTribSN, Lei 12.741 — informativo); a
+  alíquota de ISS do 14.01 em Itajaí é **3%** (LC 29/2003; NFS-e real nº 11 de 17/12/2025:
+  pAliqAplic 3,00, vISSQN 608,28 sobre 20.275,92). Emitir com 6 no iss_rate = ISS dobrado
+  na DPS, e correção só por cancelamento/substituição. Nosso fluxo real manda iss_rate 3
+  (verbos fiscais) e total_tax_rate_sn 6 (empresa) — mas o provedor deve ter os defaults
+  certos também, para o dia em que o payload omitir. Lembrete de regra nacional: optante
+  do Simples SEM retenção não informa pAliq (E0625) — confirmar com o provedor o que ele
+  faz com iss_rate nesse cenário.
 - **IBS/CBS:** para optante do Simples, obrigatório só a partir de **01/01/2027**; sem
   rejeição por ausência até lá. Obrigatoriedade do padrão nacional p/ ME-EPP: 01/11/2026.
 
