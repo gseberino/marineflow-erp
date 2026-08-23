@@ -1820,3 +1820,26 @@ porque só o dono pode preenchê-las.
   aplicado. Depois disso vale conferir se o hash de assinaturas já colhidas
   precisa ser recalculado ou anotado.
 - **Não corrigido:** regra 3, e a alteração é numa política de RLS de `anon`.
+
+### [NOVO-lev-41] A lista de orçamentos LEGADA ainda manda um link morto por WhatsApp
+
+- **Onde:** `src/pages/QuoteList.tsx:172`, dentro de `handleSendWhatsApp`.
+- **O quê:** o link é montado como
+  `${origin}/public/service-order/${share_token}`. **Essa rota não existe.**
+  A única rota pública registrada é `/view/:token` (`src/App.tsx:157`), e há um
+  curinga `path="*"` que leva ao `NotFound` — então o cliente que clica recebe a
+  página de "não encontrado".
+- **E não é um botão de copiar:** é o disparo de WhatsApp. A mensagem sai pronta
+  ("segue o link do seu Orçamento ORÇ-000XX: …") e o link vai quebrado junto.
+- **Alguém já sabia, e corrigiu só um lado.** `src/v2/pages/OrdersListV2.tsx:53`
+  e `:327` documentam a correção: *"o link wa.me de orçamentos usava
+  /public/service-order/ … quebrado que a QuoteList v1 enviava ao cliente"*. A
+  V2 foi corrigida; a V1 ficou como estava.
+- **Alcance real, medido:** o menu lateral aponta para `/v2/quotes`, e a rota
+  `/quotes` passa por `LegadoOuV2` — a tela V1 só aparece para quem optou pelo
+  legado ou digitou o caminho. **Não é o caminho do dia a dia**, e por isso o
+  defeito sobreviveu tanto tempo.
+- **Consertar seria:** uma linha (`/view/`). Mas mexer em tela legada esbarra na
+  decisão de data de corte das 19 telas antigas (`MF-AUD-037`), que está aberta:
+  se o corte estiver próximo, o certo é apagar a tela, não emendá-la.
+- **Não corrigido:** regra 3, e a correção depende da decisão do corte.
