@@ -612,7 +612,12 @@ cada uma vira tarefa própria, por ordem do dono.
 
 ---
 
-## NOVO-020 — O sistema de aprendizado do agente nunca funcionou uma única vez
+## NOVO-agente-01 — O sistema de aprendizado do agente nunca funcionou uma única vez
+
+> **Renumerado em 18/08/2026.** Nasceu como `NOVO-020` (commit `f351b36`), mas esse ID já
+> significava outra coisa — o cast de tipo do `ServiceOrderForm`, citado na regra 7 do CLAUDE.md.
+> É exatamente a colisão que a regra 8 passou a evitar. O ID antigo fica registrado aqui porque a
+> mensagem de commit é imutável.
 
 - **Achado em:** 18/08/2026, ao medir o que o agente aprendeu desde as otimizações de 09/08.
 - **Evidência (produção):** as 14 ferramentas de aprendizado — `remember_note`, `record_routine`,
@@ -635,7 +640,9 @@ cada uma vira tarefa própria, por ordem do dono.
   modelo lembrar — ex.: `edit_service_order_item` logo após `create_quote_from_items` no mesmo
   turno É uma correção do dono, e dá para registrar sozinho; (c) manter e aceitar o custo.
 
-## NOVO-021 — Itens "Valor provisório" são criados em lote e removidos em lote
+## NOVO-agente-02 — Itens "Valor provisório" são criados em lote e removidos em lote
+
+> **Renumerado em 18/08/2026**, mesmo motivo do NOVO-agente-01 (nasceu como `NOVO-021` no commit `f351b36`).
 
 - **Achado em:** 18/08/2026, investigando por que `remove_service_order_item` continua alto
   (44 usos em 60 dias antes; 11 em 9 dias depois — o ritmo diário subiu de 0,73 para 1,22).
