@@ -94,6 +94,7 @@ export const jornadaTools: ToolDef[] = [
         fim: { type: "string", description: "Fim em ISO." },
         intervalo_minutos: { type: "number", description: "Almoço/pausa em minutos, descontado da duração." },
         tipo: { type: "string", enum: ["normal", "diaria", "folga", "falta", "atestado", "feriado"], description: "Padrão: normal. Use 'diaria' quando o combinado for por dia, não por hora." },
+        ordem_servico: { type: "string", description: "OS em que o dia foi trabalhado, se foi só uma ('diária no barco do Rodrigo'). UUID ou número (OS-00042). Omita para dia de oficina, deslocamento ou administrativo." },
         observacao: { type: "string" },
       },
       required: [],
@@ -145,6 +146,21 @@ export const jornadaTools: ToolDef[] = [
         }
       }
 
+      // A OS do dia é o que liga o custo de folha ao serviço (view v_custo_real_mao_de_obra_por_os).
+      // Entra AQUI, na mesma frase em que a pessoa registra o dia, e não numa segunda ferramenta:
+      // `log_service_order_hours` existe há meses, é ensinada no prompt e nunca foi chamada — pedir
+      // uma segunda iniciativa é o que faz o dado nunca existir.
+      let ordemServicoId: string | null = null;
+      if (args.ordem_servico) {
+        const termo = String(args.ordem_servico).trim();
+        const ehUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(termo);
+        const { data: os } = await (ehUUID
+          ? sb.from("service_orders").select("id, service_order_number").eq("id", termo).maybeSingle()
+          : sb.from("service_orders").select("id, service_order_number").eq("service_order_number", termo).maybeSingle());
+        if (!os) return { error: `Não achei a OS "${termo}". Confira o número — o dia não foi registrado.` };
+        ordemServicoId = os.id;
+      }
+
       const linha: Record<string, unknown> = {
         work_profile_id: perfil.id,
         data,
@@ -155,6 +171,7 @@ export const jornadaTools: ToolDef[] = [
         status: "rascunho",
         observacao: args.observacao || null,
         registrado_por: userId,
+        service_order_id: ordemServicoId,
       };
       if (duracaoMin !== null && !fim) {
         // Duração declarada sem relógio: grava a duração direto. É o caso mais comum no WhatsApp.
@@ -173,6 +190,7 @@ export const jornadaTools: ToolDef[] = [
         tipo,
         em_aberto: emAberto,
         horas: turno.duracao_minutos ? Math.round((turno.duracao_minutos / 60) * 100) / 100 : null,
+        ordem_servico_id: ordemServicoId,
         status: "rascunho",
         nota: emAberto
           ? "Expediente aberto. Diga 'terminei' quando sair."
