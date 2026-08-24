@@ -1,15 +1,22 @@
 # MarineFlow — Controle de Jornada e Pagamento de Equipe e Freelancers
 
-**Data:** 18/08/2026 · **Status:** plano, nada implementado
+**Data:** 18/08/2026 · **Status:** Fases 1 a 5 no ar em 24/08/2026
 **Pedido:** controlar diária e horário de funcionários e freelancers, chegar ao valor a pagar, e permitir o registro pelo agente IA e pelo WhatsApp.
 
-> **STATUS EM 18/08/2026 — Fases 1 a 3 NO AR.** Tabelas `work_profiles`, `work_shifts`, `payroll_periods` e `payroll_lines` criadas com RLS (migration `20260818120000`); motor de apuração em `_shared/payroll/calculo.ts` com 17 testes; 4 ferramentas do agente em `_shared/ai/tools/jornada.ts` (`registrar_jornada`, `fechar_jornada`, `minhas_horas`, `apurar_pagamento`) com 5 testes. Custo medido: 1.321 tokens; prefixo em 70.087 (painel) e 65.256 (WhatsApp).
+> **STATUS EM 24/08/2026 — o ciclo fecha inteiro: dia trabalhado → valor apurado → conta a pagar → custo do serviço.**
 >
-> **O que falta, e por quê:**
-> - **Fase 0** — bloqueada por dado: Felipe (o único técnico) **não tem telefone cadastrado**, e sem `phone_normalized` o canal do WhatsApp não identifica ninguém. Habilitar `ai_whatsapp_enabled` sozinho não resolveria.
-> - **Nenhum perfil de pagamento existe ainda** — o sistema está pronto e vazio. Sem `work_profiles`, as ferramentas recusam e explicam. É o primeiro passo de uso real.
-> - **Fase 4** (fechar período → `payable`, anexo da NFS-e) e **Fase 5** (custo real por OS) seguem abertas. A tela de Folha não foi construída.
-> - As 6 decisões da seção 7 continuam sem resposta e definem quanto do motor será exercitado.
+> - **Fases 1-3** (18/08): `work_profiles`, `work_shifts`, `payroll_periods`, `payroll_lines` com RLS; motor puro em `_shared/payroll/calculo.ts`; ferramentas do agente em `_shared/ai/tools/jornada.ts`.
+> - **Fase 4** (24/08, migration `20260824120000`): **`fechar_folha`** apura todo mundo com perfil vigente e **gera uma conta a pagar por pessoa**, via a RPC `gravar_fechamento_de_folha` — atômica, só de gestor, e com índice único em `(de, ate)` porque fechar o mesmo período duas vezes pagaria a equipe em dobro. `origin='folha'` precisou entrar no `chk_payables_origin`, que é lista fechada. Categoria da despesa vem do `tipo_vinculo`, não de texto livre.
+> - **Fase 5** (24/08, migration `20260824130000`): **`v_custo_real_mao_de_obra_por_os`** — o que a mão de obra de cada OS custou de fato, lido do detalhamento das linhas já fechadas. `work_shifts.service_order_id` e o `turno_id` no detalhamento são o rastro; `registrar_jornada` aceita a OS **na mesma frase** ("diária no barco do Rodrigo").
+> - **Equipe cadastrada** (23/08): Roberto (diária R$ 160) e Mickael (R$ 130), meia diária até 4h, como `payees` — não como `app_users`, porque não vão usar o sistema ainda e conta ociosa é dívida de segurança, não cadastro.
+> - **Custo no agente:** 5 ferramentas, 1.155 tokens.
+>
+> **O que continua aberto:**
+> - **Tela de Folha** não existe. Hoje o fechamento se faz pelo agente. Foi opção: a tela serve para conferir muitas linhas, e são duas pessoas.
+> - **Retenção de ISS fica em zero** até a contadora confirmar o que Itajaí exige do prestador. Chutar retenção erra o valor pago a alguém, e o erro só aparece no recibo da pessoa.
+> - **Fase 0 (WhatsApp para a equipe)** segue bloqueada por dado — ninguém da equipe tem `phone_normalized`. E Felipe foi desligado em 23/08.
+> - **`time_entries` continua com 0 linhas.** A Fase 5 foi construída sobre o turno justamente por isso (ver §5 abaixo). O rateio de um dia entre duas OS espera esse dado.
+> - Decisões 4, 5 e 6 da seção 7 seguem sem resposta. Não travam nada hoje: **no regime de diária, hora extra e DSR não se aplicam** — o dia é valor fechado.
 
 ---
 
