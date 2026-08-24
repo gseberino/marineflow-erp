@@ -61,6 +61,9 @@ export interface Apuracao {
   valor_comissoes: number;
   descontos: number;
   valor_bruto: number;
+  /** Uma entrada por turno, com `turno_id` e o valor daquele dia. O `turno_id` é o que liga o
+   *  custo de folha de volta ao turno — e, por ele, à OS em que o dia foi trabalhado. Sem isso a
+   *  folha fecha certo mas o custo de mão de obra por serviço continua sendo estimativa. */
   detalhamento: Array<Record<string, unknown>>;
   avisos: string[];
 }
@@ -139,7 +142,7 @@ export function apurar(
 
   for (const t of turnos) {
     if (NAO_TRABALHADO.includes(t.tipo)) {
-      r.detalhamento.push({ data: t.data, tipo: t.tipo, valor: 0 });
+      r.detalhamento.push({ turno_id: t.id ?? null, data: t.data, tipo: t.tipo, valor: 0 });
       continue;
     }
 
@@ -153,7 +156,7 @@ export function apurar(
       const meia = limiteMeia !== null && horas > 0 && horas <= limiteMeia;
       if (meia) { r.diarias_meias += 1; r.valor_diarias += vd * 0.5; }
       else { r.diarias_inteiras += 1; r.valor_diarias += vd; }
-      r.detalhamento.push({ data: t.data, tipo: "diaria", horas: arred(horas), meia, valor: arred(meia ? vd * 0.5 : vd) });
+      r.detalhamento.push({ turno_id: t.id ?? null, data: t.data, tipo: "diaria", horas: arred(horas), meia, valor: arred(meia ? vd * 0.5 : vd) });
       continue;
     }
 
@@ -174,7 +177,7 @@ export function apurar(
       // Domingo/feriado paga em dobro sobre a hora normal; não se soma extra por cima.
       r.horas_domingo += horas;
       r.valor_domingo += horas * valorHora * (1 + perfil.pct_domingo / 100);
-      r.detalhamento.push({ data: t.data, tipo: "domingo_feriado", horas: arred(horas), valor: arred(horas * valorHora * (1 + perfil.pct_domingo / 100)) });
+      r.detalhamento.push({ turno_id: t.id ?? null, data: t.data, tipo: "domingo_feriado", horas: arred(horas), valor: arred(horas * valorHora * (1 + perfil.pct_domingo / 100)) });
       continue;
     }
 
@@ -205,7 +208,7 @@ export function apurar(
     r.valor_extras += vExtrasDiurnas;
 
     r.detalhamento.push({
-      data: t.data, tipo: "normal",
+      turno_id: t.id ?? null, data: t.data, tipo: "normal",
       horas: arred(horas), horas_extras: arred(hExtras), horas_noturnas: arred(hNot),
       valor: arred(vNormaisDiurnas + vNormaisNoturnas + vExtrasDiurnas + vExtrasNoturnas),
     });

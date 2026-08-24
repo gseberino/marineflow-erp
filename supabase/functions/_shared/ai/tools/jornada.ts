@@ -94,6 +94,7 @@ export const jornadaTools: ToolDef[] = [
         fim: { type: "string", description: "Fim em ISO." },
         intervalo_minutos: { type: "number", description: "Almoço/pausa em minutos, descontado da duração." },
         tipo: { type: "string", enum: ["normal", "diaria", "folga", "falta", "atestado", "feriado"], description: "Padrão: normal. Use 'diaria' quando o combinado for por dia, não por hora." },
+        ordem_servico: { type: "string", description: "OS em que o dia foi trabalhado, se foi só uma ('diária no barco do Rodrigo'). UUID ou número (OS-00042). Omita para dia de oficina, deslocamento ou administrativo." },
         observacao: { type: "string" },
       },
       required: [],
@@ -145,6 +146,21 @@ export const jornadaTools: ToolDef[] = [
         }
       }
 
+      // A OS do dia é o que liga o custo de folha ao serviço (view v_custo_real_mao_de_obra_por_os).
+      // Entra AQUI, na mesma frase em que a pessoa registra o dia, e não numa segunda ferramenta:
+      // `log_service_order_hours` existe há meses, é ensinada no prompt e nunca foi chamada — pedir
+      // uma segunda iniciativa é o que faz o dado nunca existir.
+      let ordemServicoId: string | null = null;
+      if (args.ordem_servico) {
+        const termo = String(args.ordem_servico).trim();
+        const ehUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(termo);
+        const { data: os } = await (ehUUID
+          ? sb.from("service_orders").select("id, service_order_number").eq("id", termo).maybeSingle()
+          : sb.from("service_orders").select("id, service_order_number").eq("service_order_number", termo).maybeSingle());
+        if (!os) return { error: `Não achei a OS "${termo}". Confira o número — o dia não foi registrado.` };
+        ordemServicoId = os.id;
+      }
+
       const linha: Record<string, unknown> = {
         work_profile_id: perfil.id,
         data,
@@ -155,6 +171,7 @@ export const jornadaTools: ToolDef[] = [
         status: "rascunho",
         observacao: args.observacao || null,
         registrado_por: userId,
+        service_order_id: ordemServicoId,
       };
       if (duracaoMin !== null && !fim) {
         // Duração declarada sem relógio: grava a duração direto. É o caso mais comum no WhatsApp.
@@ -173,6 +190,7 @@ export const jornadaTools: ToolDef[] = [
         tipo,
         em_aberto: emAberto,
         horas: turno.duracao_minutos ? Math.round((turno.duracao_minutos / 60) * 100) / 100 : null,
+        ordem_servico_id: ordemServicoId,
         status: "rascunho",
         nota: emAberto
           ? "Expediente aberto. Diga 'terminei' quando sair."
@@ -354,7 +372,127 @@ export const jornadaTools: ToolDef[] = [
         },
         total_bruto: r.valor_bruto,
         avisos: r.avisos,
-        nota: "Prévia — não gera conta a pagar. Para fechar o período e gerar o pagamento, use a tela de Folha.",
+        nota: "Prévia — não gera conta a pagar. Para fechar de fato e gerar o pagamento, use fechar_folha.",
+      };
+    },
+  },
+  {
+    name: "fechar_folha",
+    description:
+      "Fecha o período de pagamento da equipe: apura todo mundo que tem perfil, GERA UMA CONTA A PAGAR por pessoa e marca os dias como pagos. Ação de dinheiro — pede confirmação. Use para 'fecha a folha do mês', 'pode pagar a equipe', 'fecha o pagamento da quinzena'. Só considera jornada APROVADA. Um período só pode ser fechado uma vez.",
+    input_schema: {
+      type: "object",
+      properties: {
+        de: { type: "string", description: "Data inicial YYYY-MM-DD. Padrão: primeiro dia do mês corrente." },
+        ate: { type: "string", description: "Data final YYYY-MM-DD. Padrão: hoje." },
+        vencimento: { type: "string", description: "Vencimento das contas geradas YYYY-MM-DD. Padrão: 5 dias após o fim do período." },
+        descricao: { type: "string", description: "Rótulo do período, ex.: 'Folha agosto/2026'." },
+      },
+      required: [],
+    },
+    risk: "high",
+    roles: ["admin", "financial"],
+    async execute(args, { sb, userId, userRole }) {
+      // Defesa em profundidade: o filtro de `roles` já tira esta ferramenta da lista do técnico,
+      // mas o canal WhatsApp roda com service-role e sem RLS de usuário — a checagem tem que
+      // existir aqui também. A RPC repete a validação pela terceira vez, no banco.
+      if (!["admin", "financial"].includes(String(userRole))) {
+        return { error: "Só gestor pode fechar folha." };
+      }
+
+      const hoje = hojeLocal();
+      const de = String(args.de || `${hoje.slice(0, 7)}-01`);
+      const ate = String(args.ate || hoje);
+      if (ate < de) return { error: `Período inválido: ${ate} é anterior a ${de}.` };
+
+      const { data: perfis } = await sb
+        .from("work_profiles")
+        .select("*, payees(name), app_users(full_name)")
+        .is("vigencia_fim", null);
+      if (!perfis?.length) {
+        return { error: "Ninguém tem perfil de pagamento cadastrado — não há o que fechar. Cadastre em Equipe → Perfil de pagamento." };
+      }
+
+      const { diasUteis, domingosEFeriados } = diasDoPeriodo(de, ate);
+      const linhas: Array<Record<string, unknown>> = [];
+      const semTurno: string[] = [];
+      const avisos: string[] = [];
+
+      for (const perfil of perfis) {
+        const nome = perfil.payees?.name || perfil.app_users?.full_name || "equipe";
+
+        // Só jornada APROVADA entra na folha. Rascunho é o que a pessoa apontou e ninguém conferiu:
+        // pagar por ele transformaria o apontamento em autorização de pagamento.
+        const { data: turnos } = await sb.from("work_shifts")
+          .select("id, data, inicio, fim, intervalo_minutos, duracao_minutos, tipo, status")
+          .eq("work_profile_id", perfil.id)
+          .gte("data", de).lte("data", ate)
+          .eq("status", "aprovado")
+          .order("data", { ascending: true });
+
+        let comissoes = 0;
+        if (perfil.app_user_id) {
+          const { data: com } = await sb.from("commissions")
+            .select("amount").eq("user_id", perfil.app_user_id)
+            .gte("created_at", `${de}T00:00:00-03:00`).lte("created_at", `${ate}T23:59:59-03:00`);
+          comissoes = (com ?? []).reduce((a: number, c: any) => a + Number(c.amount || 0), 0);
+        }
+
+        if (!turnos?.length && comissoes === 0) { semTurno.push(nome); continue; }
+
+        const r = apurar(perfil as WorkProfile, (turnos ?? []) as Turno[], { comissoes, diasUteis, domingosEFeriados });
+        if (r.avisos.length) avisos.push(`${nome}: ${r.avisos.join("; ")}`);
+        if (r.valor_bruto <= 0) { semTurno.push(nome); continue; }
+
+        linhas.push({
+          work_profile_id: perfil.id, nome,
+          horas_normais: r.horas_normais, horas_extras: r.horas_extras,
+          horas_noturnas: r.horas_noturnas, horas_domingo: r.horas_domingo,
+          diarias_inteiras: r.diarias_inteiras, diarias_meias: r.diarias_meias,
+          valor_normais: r.valor_normais, valor_extras: r.valor_extras,
+          valor_noturnas: r.valor_noturnas, valor_domingo: r.valor_domingo,
+          valor_diarias: r.valor_diarias, valor_mensal: r.valor_mensal,
+          valor_comissoes: r.valor_comissoes, valor_dsr: r.valor_dsr,
+          descontos: r.descontos, valor_bruto: r.valor_bruto,
+          // Retenção de ISS/INSS fica em ZERO até a contadora confirmar o que Itajaí exige do
+          // prestador. Chutar retenção é errar o valor pago a alguém — e o erro só aparece no
+          // recibo da pessoa. Quando confirmar, entra aqui e o líquido muda sozinho.
+          retencoes: 0,
+          detalhamento: r.detalhamento,
+          turno_ids: (turnos ?? []).map((t: any) => t.id),
+        });
+      }
+
+      if (!linhas.length) {
+        return {
+          error: `Nenhuma jornada aprovada entre ${de} e ${ate} — nada a pagar.`,
+          dica: semTurno.length ? `Sem jornada aprovada no período: ${semTurno.join(", ")}. Se alguém apontou e falta aprovar, aprove antes de fechar.` : undefined,
+        };
+      }
+
+      const { data: fechamento, error } = await sb.rpc("gravar_fechamento_de_folha", {
+        p_de: de, p_ate: ate,
+        p_descricao: args.descricao || `Folha ${de} a ${ate}`,
+        p_linhas: linhas,
+        p_ator: userId,
+        p_vencimento: args.vencimento || null,
+      });
+
+      if (error) {
+        // 23505 = o índice único de (de, ate). É o caso de repetir o comando, e a mensagem tem que
+        // dizer isso, não vazar o nome do índice.
+        if (String(error.code) === "23505") {
+          return { error: `O período de ${de} a ${ate} já foi fechado. Consulte a folha desse período em vez de fechar de novo.` };
+        }
+        return { error: `Não consegui fechar a folha: ${error.message}` };
+      }
+
+      return {
+        ok: true,
+        ...fechamento,
+        sem_jornada_no_periodo: semTurno.length ? semTurno : undefined,
+        avisos: avisos.length ? avisos : undefined,
+        nota: "As contas a pagar foram criadas como PENDENTES — o pagamento em si continua sendo registrado no financeiro. Freelancer: anexe a NFS-e dele na conta antes de pagar.",
       };
     },
   },

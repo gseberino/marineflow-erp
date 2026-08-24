@@ -627,16 +627,25 @@ cada uma vira tarefa própria, por ordem do dono.
   **zero chamadas em toda a história de `ai_operator_audit`**. Não é baixa adesão: é nenhuma.
   As tabelas confirmam: `ai_operator_memory_notes` 0 linhas, `ai_learned_routines` 0 linhas,
   `ai_agent_memory` 1 linha de 09/06.
-- **Custo:** ~3.554 tokens das definições dessas ferramentas + ~1.390 tokens das seções
-  "APRENDIZADO — CONSTITUIÇÃO VIVA" (913) e "AUTONOMIA" (477) do system prompt. **~5.000 tokens
-  em toda chamada — 7% do prefixo — para habilitar um comportamento que nunca ocorre.**
+- **Custo — número corrigido em 24/08/2026.** A estimativa original dizia ~5.000 tokens; medindo o
+  payload real que vai para a API (`name` + `description` + `input_schema` serializados, não o
+  tamanho do arquivo), o total é **~3.400**: `learning.ts` 1.249 + `autonomy.ts` 272 +
+  `memory.ts` 565 + `entity-memory.ts` 644, mais as seções "APRENDIZADO — CONSTITUIÇÃO VIVA"
+  (913) e "AUTONOMIA" (477) do system prompt — dessas duas, ~690 tokens saem se as ferramentas
+  saírem. **~3.400 tokens em toda chamada, 4,9% do prefixo, para um comportamento que nunca
+  ocorre.** Continua sendo o maior bloco morto identificado, mas é 1,5× menos do que se supunha,
+  e isso muda o quanto vale gastar com ele.
+- **Duas das 14 não pertencem a este achado:** `list_unidentified_contacts` e
+  `link_contact_identity` (327 tokens) são do Contexto Vivo — identidade de contato, não
+  aprendizado. Elas resolvem um problema que existe (1,1% → 72,6% de contatos identificados) e
+  não devem sair junto.
 - **Causa provável (não confirmada):** aprender compete com a tarefa em curso e sempre perde. O
   prompt manda "OFEREÇA guardar" e "nunca guarde sem o sim", o que põe duas barreiras (o agente
   lembrar de oferecer + o dono confirmar) num ponto do prompt distante de onde a ação acontece.
   É a mesma classe de falha da regra do item físico, que só passou a valer quando saiu do prompt
   e virou verificação no código (ver commit da Fase 1, 08/08).
 - **NÃO corrigir de passagem.** Há três saídas possíveis e a escolha é do dono: (a) remover o
-  subsistema e recuperar os ~5.000 tokens; (b) capturar aprendizado por código, sem depender do
+  subsistema e recuperar os ~3.400 tokens; (b) capturar aprendizado por código, sem depender do
   modelo lembrar — ex.: `edit_service_order_item` logo após `create_quote_from_items` no mesmo
   turno É uma correção do dono, e dá para registrar sozinho; (c) manter e aceitar o custo.
 
@@ -656,6 +665,40 @@ cada uma vira tarefa própria, por ordem do dono.
 - **A investigar antes de mexer:** quantos itens a macro marca como provisórios por orçamento, e
   se o dono os remove por serem errados (casamento ruim no catálogo) ou por não querer cotar
   aquilo agora. As duas causas pedem correções opostas.
+
+## NOVO-agente-03 — Quem mais usa o agente é o único que paga o prefixo inteiro
+
+- **Achado em:** 24/08/2026, ao medir o efeito dos filtros que já existem, para saber se ainda
+  valia a pena continuar raspando texto do system prompt (não valia — ver abaixo).
+- **Como medir (reprodutível):** serializar `{name, description, input_schema}` de cada tool —
+  é isso que vai no corpo da requisição. Medir o arquivo `.ts` dá número errado: comentário e
+  `execute()` não são enviados. Foi assim que a estimativa do NOVO-agente-01 saiu 1,5× alta.
+- **Evidência:** o bloco de ferramentas custa **34.858 tokens por chamada** (194 tools). Os
+  filtros existentes cortam muito para uns e quase nada para quem importa:
+
+  | canal    | cargo      | tools | tokens | corte |
+  |----------|------------|-------|--------|-------|
+  | painel   | admin      | 194   | 34.858 | —     |
+  | painel   | technician | 91    | 16.651 | −52%  |
+  | whatsapp | admin      | 172   | 31.539 | −9,5% |
+  | whatsapp | technician | 84    | 15.463 | −56%  |
+
+  O técnico, que quase não usa o agente, recebe metade do bloco. O **admin — que gera quase todas
+  as chamadas — recebe tudo**, e o filtro de canal alivia 9,5% dele. O custo real do agente é,
+  em larga medida, o custo desta linha.
+- **E 68% desse bloco nunca foi chamado:** 138 das 194 tools têm zero execuções em toda a
+  história de `ai_operator_audit` (23.536 dos 34.858 tokens). Isso **não** quer dizer que sejam
+  descartáveis — a maioria é capacidade real cuja ocasião ainda não chegou (`registrar_jornada`
+  nasceu esta semana; as fiscais esperam a primeira NFS-e). O que o número diz é onde está o
+  dinheiro, não o que apagar.
+- **Por que isso encerra a linha de "reescrever o prompt":** a Fase 5 rendeu 370 tokens; a Fase 2,
+  425. O system prompt inteiro é ~15.000 tokens contra ~34.858 de ferramentas. Continuar cortando
+  texto é trabalhar na metade menor do problema, com risco de tirar instrução que funciona.
+- **A decisão é do dono, e a restrição é o cache:** qualquer conjunto que varie POR MENSAGEM dá
+  cache miss em 100% das chamadas e sai mais caro (é por isso que `ai_intent_router` continua
+  desligado). O que preserva o cache é um conjunto **fixo por combinação estável** — como o
+  filtro de canal já faz. Um "perfil de admin no WhatsApp" enxuto, decidido uma vez e congelado,
+  é o caminho que resta; escolher o que entra nele é decisão de negócio, não técnica.
 
 ---
 
