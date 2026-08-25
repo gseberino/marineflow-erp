@@ -1685,6 +1685,12 @@ porque só o dono pode preenchê-las.
   mexer no estado dela por fora, no meio do trabalho de outra sessão, é como o
   aviso ficou errado em primeiro lugar.
 ## NOVO-020 — O sistema de aprendizado do agente nunca funcionou uma única vez
+## NOVO-agente-01 — O sistema de aprendizado do agente nunca funcionou uma única vez
+
+> **Renumerado em 18/08/2026.** Nasceu como `NOVO-020` (commit `f351b36`), mas esse ID já
+> significava outra coisa — o cast de tipo do `ServiceOrderForm`, citado na regra 7 do CLAUDE.md.
+> É exatamente a colisão que a regra 8 passou a evitar. O ID antigo fica registrado aqui porque a
+> mensagem de commit é imutável.
 
 - **Achado em:** 18/08/2026, ao medir o que o agente aprendeu desde as otimizações de 09/08.
 - **Evidência (produção):** as 14 ferramentas de aprendizado — `remember_note`, `record_routine`,
@@ -1707,7 +1713,9 @@ porque só o dono pode preenchê-las.
   modelo lembrar — ex.: `edit_service_order_item` logo após `create_quote_from_items` no mesmo
   turno É uma correção do dono, e dá para registrar sozinho; (c) manter e aceitar o custo.
 
-## NOVO-021 — Itens "Valor provisório" são criados em lote e removidos em lote
+## NOVO-agente-02 — Itens "Valor provisório" são criados em lote e removidos em lote
+
+> **Renumerado em 18/08/2026**, mesmo motivo do NOVO-agente-01 (nasceu como `NOVO-021` no commit `f351b36`).
 
 - **Achado em:** 18/08/2026, investigando por que `remove_service_order_item` continua alto
   (44 usos em 60 dias antes; 11 em 9 dias depois — o ritmo diário subiu de 0,73 para 1,22).
@@ -1884,3 +1892,22 @@ porque só o dono pode preenchê-las.
   NOVOS já saírem funcionando — os já enviados continuam mortos.
 - **Não corrigido:** é infraestrutura (DNS/hospedagem), fora do alcance desta
   sessão, e trocar `app_public_url` muda o endereço da marca — decisão do dono.
+## Resoluções da frente NFS-e (19/08/2026)
+
+- **NOVO-nfse-01 RESOLVIDO**: `20260815100000_grandeza_estruturada.sql` renomeada para
+  `20260815095900` e versão registrada (as colunas JÁ estavam aplicadas em produção —
+  comprovado por information_schema). Mapa versão↔arquivo voltou a ser 1:1 no intervalo.
+- **NOVO-nfse-02 RESOLVIDO**: `xml_rps` agora é arquivado junto do primeiro arquivamento
+  (`<env>/nfse/<id>-rps.xml`) e baixável (handleArtifact `artifact:'xml_rps'` + botão RPS
+  na seção de NFS-e).
+- **NOVO-nfse-04 RESOLVIDO**: emitir pela NfseSection também recalcula o
+  `invoicing_status` (atualizarInvoicingStatus com aplicáveis derivados dos tipos já
+  tentados — mesma aproximação do recompute do servidor).
+- NOVO-nfse-03 (prompt de saldo perdido ao navegar) e NOVO-nfse-05 (emissão por grupo de
+  código) permanecem abertos, por decisão de escopo.
+- **NOVO-nfse-03 RESOLVIDO (19/08)**: o assistente passou a PEDIR para navegar
+  (`onAntesDeNavegar(continuar)`); quem o monta na conclusão da OS fecha o diálogo, mostra
+  o aviso de saldo armado e só depois executa a navegação para a emissão detalhada. Nas
+  listas e na página NFS-e (sem aviso armado) o comportamento é o mesmo de antes.
+- Aberto por escopo: só **NOVO-nfse-05** (emissão por grupo de código) — sem demanda
+  enquanto a regra da contadora for "tudo 14.01" (todos os verbos resolvem o mesmo código).

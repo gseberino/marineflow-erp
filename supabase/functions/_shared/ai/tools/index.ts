@@ -36,6 +36,7 @@ import { bomTools } from "./bom.ts";
 import { statusTools } from "./status-tools.ts";
 import { bankingTools } from "./banking.ts";
 import { financeRulesTools } from "./finance-rules.ts";
+import { jornadaTools } from "./jornada.ts";
 
 export type { ToolDef, ToolCtx, RiskLevel, Role } from "./registry.ts";
 
@@ -79,6 +80,7 @@ export const allTools: ToolDef[] = [
   ...statusTools,
   ...bankingTools,
   ...financeRulesTools,
+  ...jornadaTools,
 ].sort((a, b) => a.name.localeCompare(b.name));
 
 export const toolsByName: Record<string, ToolDef> = Object.fromEntries(allTools.map((t) => [t.name, t]));

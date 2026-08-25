@@ -142,10 +142,14 @@ export function useEmitirNfeDaOs() {
  * Recalcula o `invoicing_status` da OS a partir dos documentos que EXISTEM — não do que
  * acabou de ser clicado. invoiced = todo documento aplicável tem nota viva (não
  * cancelada/rejeitada/falha); partially_invoiced = só parte; not_invoiced = nenhuma.
+ *
+ * `aplicaveis` é opcional: sem ele, os tipos "aplicáveis" são os já TENTADOS nesta OS —
+ * a mesma aproximação do recompute do servidor (webhook/reconcile). É o caminho de quem
+ * emite fora do assistente (ex.: NfseSection), que não tem o preflight em mãos.
  */
 export async function atualizarInvoicingStatus(
   serviceOrderId: string,
-  aplicaveis: { nfse: boolean; nfe: boolean },
+  aplicaveis?: { nfse: boolean; nfe: boolean },
 ): Promise<void> {
   const { data: docs, error } = await supabase
     .from('issued_fiscal_documents')
@@ -164,12 +168,14 @@ export async function atualizarInvoicingStatus(
       .filter((d) => ['draft', 'queued', 'processing', 'authorized'].includes(d.status))
       .map((d) => d.document_type),
   );
-  const esperados = [
-    ...(aplicaveis.nfse ? ['nfse'] : []),
-    ...(aplicaveis.nfe ? ['nfe'] : []),
-  ];
+  const esperados = aplicaveis
+    ? [
+      ...(aplicaveis.nfse ? ['nfse'] : []),
+      ...(aplicaveis.nfe ? ['nfe'] : []),
+    ]
+    : [...new Set((docs ?? []).map((d) => d.document_type))];
   const emitidos = esperados.filter((t) => vivos.has(t)).length;
-  const status = emitidos === 0
+  const status = esperados.length === 0 || emitidos === 0
     ? 'not_invoiced'
     : emitidos === esperados.length
       ? 'invoiced'

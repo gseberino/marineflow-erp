@@ -46,11 +46,19 @@ type ResultadoEmissao =
 
 const STATUS_VIVO = ['draft', 'queued', 'processing', 'authorized'];
 
-export function FaturarOsDialog({ open, onOpenChange, serviceOrderId, orderNumber }: {
+export function FaturarOsDialog({ open, onOpenChange, serviceOrderId, orderNumber, onAntesDeNavegar }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   serviceOrderId: string | null;
   orderNumber?: string | null;
+  /**
+   * [NOVO-nfse-03] Quem monta o assistente na CONCLUSÃO da OS tem um aviso de saldo
+   * (WhatsApp) armado para depois que ele fechar. Navegar para a emissão detalhada
+   * desmontava a página e o aviso morria. Com este callback, o assistente PEDE para
+   * navegar: o pai fecha o diálogo, mostra o aviso e só então chama `continuar`.
+   * Sem o callback (listas/página NFS-e), navega direto.
+   */
+  onAntesDeNavegar?: (continuar: () => void) => void;
 }) {
   const { formatCurrency } = useI18n();
   const navigate = useNavigate();
@@ -192,8 +200,7 @@ export function FaturarOsDialog({ open, onOpenChange, serviceOrderId, orderNumbe
         toast.error('Esta OS não tem produtos para a NF-e.');
         return;
       }
-      onOpenChange(false);
-      navigate('/fiscal/emissao', {
+      const ir = () => navigate('/fiscal/emissao', {
         state: {
           invoiceFrom: {
             serviceOrderId,
@@ -205,6 +212,13 @@ export function FaturarOsDialog({ open, onOpenChange, serviceOrderId, orderNumbe
           },
         },
       });
+      if (onAntesDeNavegar) {
+        // O pai decide a ordem (fechar → aviso armado → navegar).
+        onAntesDeNavegar(ir);
+        return;
+      }
+      onOpenChange(false);
+      ir();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Erro ao preparar a emissão detalhada');
     }

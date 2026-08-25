@@ -317,7 +317,7 @@ export function useArtefatoNfse() {
   return useMutation({
     mutationFn: async (v: {
       documentId: string;
-      tipo: 'xml' | 'pdf';
+      tipo: 'xml' | 'pdf' | 'rps';
       numero?: number | null;
       serie?: number | null;
     }) => {
@@ -333,7 +333,7 @@ export function useArtefatoNfse() {
         body: {
           action: 'artifact',
           document_id: v.documentId,
-          artifact: v.tipo === 'xml' ? 'xml_authorized' : 'pdf_danfe',
+          artifact: v.tipo === 'xml' ? 'xml_authorized' : v.tipo === 'rps' ? 'xml_rps' : 'pdf_danfe',
         },
       });
       if (error) {
@@ -348,13 +348,14 @@ export function useArtefatoNfse() {
         }
         throw error;
       }
-      const ehXml = v.tipo === 'xml';
+      const ehXml = v.tipo !== 'pdf';
       const tipoConteudo = ehXml ? 'application/xml' : 'application/pdf';
       const blob = data instanceof Blob
         ? data
         : new Blob([typeof data === 'string' ? data : JSON.stringify(data)], { type: tipoConteudo });
       const sufixo = v.numero != null ? `${v.serie ?? 1}-${v.numero}` : v.documentId.slice(0, 8);
-      return { blob, filename: `NFSe-${sufixo}.${ehXml ? 'xml' : 'pdf'}` };
+      const prefixo = v.tipo === 'rps' ? 'NFSe-RPS' : 'NFSe';
+      return { blob, filename: `${prefixo}-${sufixo}.${ehXml ? 'xml' : 'pdf'}` };
     },
     onSuccess: (d) => {
       const url = URL.createObjectURL(d.blob);
