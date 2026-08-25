@@ -44,17 +44,22 @@ export function LineSystemPicker({ linha }: { linha: LineMissingSystem }) {
 
   const precisaVerbo = !linha.service_verb;
 
-  // A escolha vive aqui até o Confirmar. Começa no palpite, quando há um.
-  const [sistema, setSistema] = useState<string | undefined>(linha.sistema_sugerido ?? undefined);
+  // O que está GRAVADO manda; o palpite só preenche o que está vazio. Inverter
+  // isto é o que faria o Confirmar sobrescrever uma classificação correta com
+  // um palpite — a linha entra nesta lista por FALTAR um eixo, não os dois.
+  const sistemaInicial = linha.sistema_atual ?? linha.sistema_sugerido ?? undefined;
+
+  // A escolha vive aqui até o Confirmar.
+  const [sistema, setSistema] = useState<string | undefined>(sistemaInicial);
   const [verbo, setVerbo] = useState<string | undefined>(linha.verbo_sugerido ?? undefined);
 
   // A lista de pendências é refeita depois de cada gravação. Se esta linha
-  // continuar nela (porque só um eixo entrou), o palpite pode ter mudado — o
-  // estado local acompanha em vez de congelar no primeiro render.
+  // continuar nela (porque só um eixo entrou), o que veio do banco pode ter
+  // mudado — o estado local acompanha em vez de congelar no primeiro render.
   useEffect(() => {
-    setSistema(linha.sistema_sugerido ?? undefined);
+    setSistema(linha.sistema_atual ?? linha.sistema_sugerido ?? undefined);
     setVerbo(linha.verbo_sugerido ?? undefined);
-  }, [linha.line_id, linha.sistema_sugerido, linha.verbo_sugerido]);
+  }, [linha.line_id, linha.sistema_atual, linha.sistema_sugerido, linha.verbo_sugerido]);
 
   const faltaEscolher = !sistema || (precisaVerbo && !verbo);
 
@@ -129,14 +134,22 @@ export function LineSystemPicker({ linha }: { linha: LineMissingSystem }) {
         </p>
       )}
 
-      {!faltaEscolher && linha.sistema_sugerido && (
+      {/* A legenda só pode falar de PALPITE quando o campo veio de palpite.
+          Dizer "sugerido pelo texto desta linha" sobre um valor que já está no
+          banco convida a trocar o que estava certo. */}
+      {!faltaEscolher && linha.sistema_atual && (
+        <p className="text-[10px] text-muted-foreground">
+          Categoria já definida nesta linha. Falta só confirmar o restante.
+        </p>
+      )}
+      {!faltaEscolher && !linha.sistema_atual && linha.sistema_sugerido && (
         <p className="text-[10px] text-muted-foreground">
           {linha.origem_sistema === 'linha'
             ? 'Sugerido pelo texto desta linha — confira e confirme.'
             : 'Palpite fraco, tirado do contexto da OS — confira com atenção antes de confirmar.'}
         </p>
       )}
-      {!linha.sistema_sugerido && (
+      {!linha.sistema_atual && !linha.sistema_sugerido && (
         <p className="text-[10px] text-muted-foreground">
           A regra não arriscou um palpite aqui — escolha você.
         </p>

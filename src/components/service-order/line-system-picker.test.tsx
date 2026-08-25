@@ -46,6 +46,7 @@ const linhaComPalpite: LineMissingSystem = {
   line_id: 'linha-1',
   service_name: 'Instalação da fonte 120A',
   service_verb: null,
+  sistema_atual: null,
   sistema_sugerido: 'eletrico_dc',
   verbo_sugerido: 'instalacao',
   origem_sistema: 'linha',
@@ -101,5 +102,24 @@ describe('LineSystemPicker', () => {
   it('avisa quando o palpite veio do contexto da OS, não da linha', () => {
     render(<LineSystemPicker linha={{ ...linhaComPalpite, origem_sistema: 'os' }} />);
     expect(screen.getByText(/Palpite fraco/i)).toBeTruthy();
+  });
+
+  // O RISCO QUE O BOTÃO NOVO CRIARIA se o campo fosse semeado pelo palpite: a
+  // linha entra nesta lista por faltar QUALQUER um dos eixos, então uma linha
+  // com categoria JÁ GRAVADA aparece aqui só por falta de verbo. Se o Select
+  // viesse com o palpite, um clique em Confirmar trocaria a classificação boa
+  // por um chute — e a legenda ainda diria "sugerido pelo texto desta linha".
+  it('o que está gravado vence o palpite, e a legenda não mente', () => {
+    render(
+      <LineSystemPicker
+        linha={{ ...linhaComPalpite, sistema_atual: 'gas', sistema_sugerido: 'eletrico_dc' }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Confirmar/i }));
+
+    expect(gravou[0].system).toBe('gas');
+    expect(screen.getByText(/Categoria já definida nesta linha/i)).toBeTruthy();
+    expect(screen.queryByText(/Sugerido pelo texto desta linha/i)).toBeNull();
   });
 });

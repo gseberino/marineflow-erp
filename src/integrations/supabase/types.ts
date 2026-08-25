@@ -1,4 +1,4 @@
-export type Json =
+﻿export type Json =
   | string
   | number
   | boolean
@@ -4945,6 +4945,7 @@ export type Database = {
         Row: {
           account_type: string | null
           active: boolean
+          app_user_id: string | null
           bank_account: string | null
           bank_branch: string | null
           bank_name: string | null
@@ -4965,6 +4966,7 @@ export type Database = {
         Insert: {
           account_type?: string | null
           active?: boolean
+          app_user_id?: string | null
           bank_account?: string | null
           bank_branch?: string | null
           bank_name?: string | null
@@ -4985,6 +4987,7 @@ export type Database = {
         Update: {
           account_type?: string | null
           active?: boolean
+          app_user_id?: string | null
           bank_account?: string | null
           bank_branch?: string | null
           bank_name?: string | null
@@ -5002,7 +5005,15 @@ export type Database = {
           pix_key_type?: string | null
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "payees_app_user_id_fkey"
+            columns: ["app_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       payment_condition_presets: {
         Row: {
@@ -5102,6 +5113,165 @@ export type Database = {
             columns: ["receivable_id"]
             isOneToOne: false
             referencedRelation: "receivables"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payroll_lines: {
+        Row: {
+          created_at: string
+          descontos: number
+          detalhamento: Json | null
+          diarias_inteiras: number
+          diarias_meias: number
+          horas_domingo: number
+          horas_extras: number
+          horas_normais: number
+          horas_noturnas: number
+          id: string
+          nfse_numero: string | null
+          nfse_valor: number | null
+          observacao: string | null
+          payable_id: string | null
+          payroll_period_id: string
+          retencoes: number
+          updated_at: string
+          valor_bruto: number
+          valor_comissoes: number
+          valor_diarias: number
+          valor_domingo: number
+          valor_dsr: number
+          valor_extras: number
+          valor_liquido: number
+          valor_mensal: number
+          valor_normais: number
+          valor_noturnas: number
+          work_profile_id: string
+        }
+        Insert: {
+          created_at?: string
+          descontos?: number
+          detalhamento?: Json | null
+          diarias_inteiras?: number
+          diarias_meias?: number
+          horas_domingo?: number
+          horas_extras?: number
+          horas_normais?: number
+          horas_noturnas?: number
+          id?: string
+          nfse_numero?: string | null
+          nfse_valor?: number | null
+          observacao?: string | null
+          payable_id?: string | null
+          payroll_period_id: string
+          retencoes?: number
+          updated_at?: string
+          valor_bruto?: number
+          valor_comissoes?: number
+          valor_diarias?: number
+          valor_domingo?: number
+          valor_dsr?: number
+          valor_extras?: number
+          valor_liquido?: number
+          valor_mensal?: number
+          valor_normais?: number
+          valor_noturnas?: number
+          work_profile_id: string
+        }
+        Update: {
+          created_at?: string
+          descontos?: number
+          detalhamento?: Json | null
+          diarias_inteiras?: number
+          diarias_meias?: number
+          horas_domingo?: number
+          horas_extras?: number
+          horas_normais?: number
+          horas_noturnas?: number
+          id?: string
+          nfse_numero?: string | null
+          nfse_valor?: number | null
+          observacao?: string | null
+          payable_id?: string | null
+          payroll_period_id?: string
+          retencoes?: number
+          updated_at?: string
+          valor_bruto?: number
+          valor_comissoes?: number
+          valor_diarias?: number
+          valor_domingo?: number
+          valor_dsr?: number
+          valor_extras?: number
+          valor_liquido?: number
+          valor_mensal?: number
+          valor_normais?: number
+          valor_noturnas?: number
+          work_profile_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payroll_lines_payable_id_fkey"
+            columns: ["payable_id"]
+            isOneToOne: false
+            referencedRelation: "payables"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payroll_lines_payroll_period_id_fkey"
+            columns: ["payroll_period_id"]
+            isOneToOne: false
+            referencedRelation: "payroll_periods"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payroll_lines_work_profile_id_fkey"
+            columns: ["work_profile_id"]
+            isOneToOne: false
+            referencedRelation: "work_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payroll_periods: {
+        Row: {
+          ate: string
+          created_at: string
+          de: string
+          descricao: string | null
+          fechado_em: string | null
+          fechado_por: string | null
+          id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          ate: string
+          created_at?: string
+          de: string
+          descricao?: string | null
+          fechado_em?: string | null
+          fechado_por?: string | null
+          id?: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          ate?: string
+          created_at?: string
+          de?: string
+          descricao?: string | null
+          fechado_em?: string | null
+          fechado_por?: string | null
+          id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payroll_periods_fechado_por_fkey"
+            columns: ["fechado_por"]
+            isOneToOne: false
+            referencedRelation: "app_users"
             referencedColumns: ["id"]
           },
         ]
@@ -7191,6 +7361,7 @@ export type Database = {
           discount_pct: number
           elapsed_minutes: number | null
           finished_at: string | null
+          fiscal_verb: string | null
           id: string
           line_total: number
           name_snapshot: string
@@ -7216,6 +7387,7 @@ export type Database = {
           discount_pct?: number
           elapsed_minutes?: number | null
           finished_at?: string | null
+          fiscal_verb?: string | null
           id?: string
           line_total?: number
           name_snapshot: string
@@ -7241,6 +7413,7 @@ export type Database = {
           discount_pct?: number
           elapsed_minutes?: number | null
           finished_at?: string | null
+          fiscal_verb?: string | null
           id?: string
           line_total?: number
           name_snapshot?: string
@@ -7328,6 +7501,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_service_verbs_status"
             referencedColumns: ["slug"]
+          },
+          {
+            foreignKeyName: "sos_fiscal_verb_fk"
+            columns: ["fiscal_verb"]
+            isOneToOne: false
+            referencedRelation: "service_fiscal_verbs"
+            referencedColumns: ["verb_slug"]
           },
         ]
       }
@@ -9048,6 +9228,7 @@ export type Database = {
           id: string
           notes: string | null
           service_order_id: string
+          shift_id: string | null
           started_at: string
           step_id: string | null
           stop_reason_code: string | null
@@ -9062,6 +9243,7 @@ export type Database = {
           id?: string
           notes?: string | null
           service_order_id: string
+          shift_id?: string | null
           started_at: string
           step_id?: string | null
           stop_reason_code?: string | null
@@ -9076,6 +9258,7 @@ export type Database = {
           id?: string
           notes?: string | null
           service_order_id?: string
+          shift_id?: string | null
           started_at?: string
           step_id?: string | null
           stop_reason_code?: string | null
@@ -9110,6 +9293,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "vw_os_profitability"
             referencedColumns: ["os_id"]
+          },
+          {
+            foreignKeyName: "time_entries_shift_id_fkey"
+            columns: ["shift_id"]
+            isOneToOne: false
+            referencedRelation: "work_shifts"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "time_entries_step_id_fkey"
@@ -9852,6 +10042,200 @@ export type Database = {
         }
         Relationships: []
       }
+      work_profiles: {
+        Row: {
+          app_user_id: string | null
+          created_at: string
+          divisor_mensal: number
+          id: string
+          jornada_diaria_horas: number
+          meia_diaria_ate_horas: number | null
+          modo_pagamento: string
+          observacao: string | null
+          paga_dsr: boolean
+          payee_id: string | null
+          pct_domingo: number
+          pct_hora_extra: number
+          pct_noturno: number
+          tipo_vinculo: string
+          updated_at: string
+          valor_diaria: number | null
+          valor_hora: number | null
+          valor_mensal: number | null
+          vigencia_fim: string | null
+          vigencia_inicio: string
+        }
+        Insert: {
+          app_user_id?: string | null
+          created_at?: string
+          divisor_mensal?: number
+          id?: string
+          jornada_diaria_horas?: number
+          meia_diaria_ate_horas?: number | null
+          modo_pagamento: string
+          observacao?: string | null
+          paga_dsr?: boolean
+          payee_id?: string | null
+          pct_domingo?: number
+          pct_hora_extra?: number
+          pct_noturno?: number
+          tipo_vinculo: string
+          updated_at?: string
+          valor_diaria?: number | null
+          valor_hora?: number | null
+          valor_mensal?: number | null
+          vigencia_fim?: string | null
+          vigencia_inicio?: string
+        }
+        Update: {
+          app_user_id?: string | null
+          created_at?: string
+          divisor_mensal?: number
+          id?: string
+          jornada_diaria_horas?: number
+          meia_diaria_ate_horas?: number | null
+          modo_pagamento?: string
+          observacao?: string | null
+          paga_dsr?: boolean
+          payee_id?: string | null
+          pct_domingo?: number
+          pct_hora_extra?: number
+          pct_noturno?: number
+          tipo_vinculo?: string
+          updated_at?: string
+          valor_diaria?: number | null
+          valor_hora?: number | null
+          valor_mensal?: number | null
+          vigencia_fim?: string | null
+          vigencia_inicio?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_profiles_app_user_id_fkey"
+            columns: ["app_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_profiles_payee_id_fkey"
+            columns: ["payee_id"]
+            isOneToOne: false
+            referencedRelation: "payees"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      work_shifts: {
+        Row: {
+          aprovado_em: string | null
+          aprovado_por: string | null
+          created_at: string
+          data: string
+          duracao_minutos: number | null
+          fim: string | null
+          id: string
+          inicio: string | null
+          intervalo_minutos: number
+          observacao: string | null
+          origem: string
+          registrado_por: string | null
+          service_order_id: string | null
+          status: string
+          tipo: string
+          updated_at: string
+          work_profile_id: string
+        }
+        Insert: {
+          aprovado_em?: string | null
+          aprovado_por?: string | null
+          created_at?: string
+          data: string
+          duracao_minutos?: number | null
+          fim?: string | null
+          id?: string
+          inicio?: string | null
+          intervalo_minutos?: number
+          observacao?: string | null
+          origem?: string
+          registrado_por?: string | null
+          service_order_id?: string | null
+          status?: string
+          tipo?: string
+          updated_at?: string
+          work_profile_id: string
+        }
+        Update: {
+          aprovado_em?: string | null
+          aprovado_por?: string | null
+          created_at?: string
+          data?: string
+          duracao_minutos?: number | null
+          fim?: string | null
+          id?: string
+          inicio?: string | null
+          intervalo_minutos?: number
+          observacao?: string | null
+          origem?: string
+          registrado_por?: string | null
+          service_order_id?: string | null
+          status?: string
+          tipo?: string
+          updated_at?: string
+          work_profile_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_shifts_aprovado_por_fkey"
+            columns: ["aprovado_por"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_shifts_registrado_por_fkey"
+            columns: ["registrado_por"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_shifts_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_shifts_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_shifts_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_margin"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_shifts_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "vw_os_profitability"
+            referencedColumns: ["os_id"]
+          },
+          {
+            foreignKeyName: "work_shifts_work_profile_id_fkey"
+            columns: ["work_profile_id"]
+            isOneToOne: false
+            referencedRelation: "work_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       work_stop_reasons: {
         Row: {
           active: boolean
@@ -10239,12 +10623,64 @@ export type Database = {
           tokens_lidos_do_cache: number | null
           tokens_preco_cheio: number | null
           tokens_saida: number | null
+          usd_entrada_vigente: number | null
           usd_estimado: number | null
           usd_por_chamada: number | null
           usd_real_parcial: number | null
           usd_total: number | null
         }
         Relationships: []
+      }
+      v_custo_real_mao_de_obra_por_os: {
+        Row: {
+          client_id: string | null
+          custo_real_mao_de_obra: number | null
+          dias_trabalhados: number | null
+          horas_apontadas: number | null
+          pessoas: number | null
+          primeiro_dia: string | null
+          quem_trabalhou: string | null
+          service_order_id: string | null
+          service_order_number: string | null
+          ultimo_dia: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_orders_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_shifts_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_shifts_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_shifts_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_margin"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_shifts_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "vw_os_profitability"
+            referencedColumns: ["os_id"]
+          },
+        ]
       }
       v_estoque_entradas_pendentes: {
         Row: {
@@ -10749,6 +11185,17 @@ export type Database = {
           stock_quantity: number
         }[]
       }
+      gravar_fechamento_de_folha: {
+        Args: {
+          p_ate: string
+          p_ator?: string
+          p_de: string
+          p_descricao: string
+          p_linhas: Json
+          p_vencimento?: string
+        }
+        Returns: Json
+      }
       increment_finance_rule_usage: {
         Args: { rule_id: string }
         Returns: undefined
@@ -10765,6 +11212,7 @@ export type Database = {
           origem_verbo: string
           service_name: string
           service_verb: string
+          sistema_atual: string
           sistema_sugerido: string
           verbo_sugerido: string
         }[]
@@ -10806,6 +11254,7 @@ export type Database = {
       normalize_product_text: { Args: { t: string }; Returns: string }
       parse_answer_number: { Args: { p_answer: string }; Returns: number }
       periodo_esta_fechado: { Args: { p_data: string }; Returns: boolean }
+      pode_ver_folha: { Args: { _user_id: string }; Returns: boolean }
       preview_nfe_import: {
         Args: {
           p_manual_mappings?: Json

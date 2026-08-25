@@ -23,9 +23,13 @@ import { useI18n } from '@/i18n';
 import { supabase } from '@/integrations/supabase/client';
 import { useNfseHealth, useEmitirNfse } from '@/hooks/use-nfse';
 import {
-  useBillingPreflight, useEmitirNfeDaOs, atualizarInvoicingStatus,
+  useBillingPreflight, useEmitirNfeDaOs, atualizarInvoicingStatus, useSetLineFiscalVerb,
   type PreflightDocumento, type DocumentoDaOs,
 } from '@/hooks/use-faturar-os';
+import { useServiceFiscalVerbs } from '@/hooks/use-service-fiscal';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
 import {
   AlertTriangle, CheckCircle2, FileText, Loader2, Package, Wrench, ExternalLink, RefreshCw, Pencil,
 } from 'lucide-react';
@@ -352,6 +356,71 @@ export function FaturarOsDialog({ open, onOpenChange, serviceOrderId, orderNumbe
   );
 }
 
+/**
+ * Regulariza a LINHA DIGITADA À MÃO ali mesmo, na tela de emissão.
+ *
+ * É o par do "Corrigir cadastro" da NF-e. A diferença é onde o dado vai parar:
+ * o serviço de catálogo tem um cadastro para abrir; a linha avulsa não tem
+ * nenhum — o verbo vai na PRÓPRIA LINHA.
+ *
+ * Antes daqui existia só um texto: "linha avulsa — vincule ao catálogo na OS".
+ * Vincular não existia em lugar nenhum do sistema, então a frase mandava a
+ * pessoa a um lugar que não há. Eram 33 linhas assim, e R$ 2.525 já concluídos
+ * sem poder virar nota.
+ *
+ * Escolher o verbo não muda imposto: os dez têm valores idênticos (14.01,
+ * ISS 3%, sem retenção — regra da contadora). Ele só LIGA a herança. Por isso a
+ * tela mostra o código que vai valer ao lado de cada opção: quem confirma vê o
+ * número que vai para a nota, não um rótulo abstrato.
+ */
+function VerboDaLinhaAvulsa({ lineId }: { lineId: string }) {
+  const { data: verbos = [] } = useServiceFiscalVerbs();
+  const gravar = useSetLineFiscalVerb();
+  const [escolha, setEscolha] = useState<string | undefined>(undefined);
+
+  // Sem código, herdar do verbo não produziria nota nenhuma — oferecer a opção
+  // seria repetir o beco com outra roupa.
+  const utilizaveis = verbos.filter((v) => !!v.default_national_tax_code);
+
+  if (utilizaveis.length === 0) {
+    return (
+      <span className="shrink-0 text-[10px] text-muted-foreground">
+        nenhum verbo fiscal tem código — Configurações → Fiscal → Verbos
+      </span>
+    );
+  }
+
+  return (
+    <span className="flex shrink-0 items-center gap-1.5">
+      <Select value={escolha} onValueChange={setEscolha}>
+        <SelectTrigger className="h-6 w-44 text-[11px]">
+          <SelectValue placeholder="Tipo de serviço" />
+        </SelectTrigger>
+        <SelectContent>
+          {utilizaveis.map((v) => (
+            <SelectItem key={v.verb_slug} value={v.verb_slug} className="text-xs">
+              {v.name} · {v.default_national_tax_code}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Button
+        size="sm" variant="outline" className="h-6 px-2 text-xs"
+        disabled={!escolha || gravar.isPending}
+        onClick={() => gravar.mutate(
+          { lineId, fiscalVerb: escolha! },
+          {
+            onSuccess: () => toast.success('Linha regularizada. Conferindo de novo…'),
+            onError: (e: any) => toast.error(e?.message || 'Não deu para gravar o tipo de serviço'),
+          },
+        )}
+      >
+        {gravar.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Aplicar'}
+      </Button>
+    </span>
+  );
+}
+
 function CartaoDocumento({ icone, titulo, doc, docExistente, resultado, linhaResumo, pendenciasExtra = [], aguardandoConta = false, onEmitir, rodape, onCorrigirServico, onCorrigirProduto }: {
   icone: React.ReactNode;
   titulo: string;
@@ -423,24 +492,33 @@ function CartaoDocumento({ icone, titulo, doc, docExistente, resultado, linhaRes
         </div>
       )}
 
-      {resultado.fase !== 'erro' && doc.erro && !emitida && (
+      {/* A guarda `resultado.fase !== 'erro'` saiu daqui de propósito: ela fazia a
+          lista ACIONÁVEL desaparecer justamente depois de uma emissão falhar —
+          o usuário perdia os botões que resolveriam a causa do erro. O irmão de
+          produtos nunca teve essa guarda; agora os dois se comportam igual. */}
+      {doc.erro && !emitida && (
         <div className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-2">
           <p className="text-sm break-words">{doc.erro}</p>
-          {/* Pendências ACIONÁVEIS: corrige o cadastro no popup, sem sair do assistente.
-              Dentro do popup há a sugestão (IA p/ NCM; regra da contadora p/ serviço). */}
+          {/* Pendências ACIONÁVEIS: resolve sem sair do assistente.
+              · serviço do catálogo → abre o cadastro no popup (com sugestão da IA);
+              · linha digitada à mão → grava o verbo fiscal NA PRÓPRIA LINHA, aqui. */}
           {doc.details?.servicos_pendentes?.length ? (
             <ul className="mt-1.5 space-y-1">
               {doc.details.servicos_pendentes.map((s, i) => (
-                <li key={`${s.service_id ?? 'avulso'}-${i}`} className="flex flex-wrap items-center gap-2 text-xs">
+                <li key={`${s.service_id ?? s.line_id ?? 'avulso'}-${i}`} className="flex flex-wrap items-center gap-2 text-xs">
                   <span className="min-w-0 flex-1 text-muted-foreground">• {s.name}</span>
                   {s.service_id && onCorrigirServico ? (
                     <Button size="sm" variant="outline" className="h-6 px-2 text-xs shrink-0"
                       onClick={() => onCorrigirServico(s.service_id!)}>
                       <Pencil className="mr-1 h-3 w-3" />Corrigir cadastro
                     </Button>
+                  ) : s.line_id ? (
+                    <VerboDaLinhaAvulsa lineId={s.line_id} />
                   ) : (
+                    // Edge antigo, sem `line_id`: degrada para o texto de antes
+                    // em vez de oferecer um controle que não gravaria nada.
                     <span className="shrink-0 text-[10px] text-muted-foreground">
-                      linha avulsa — vincule ao catálogo na OS
+                      linha avulsa — atualize o sistema para regularizar por aqui
                     </span>
                   )}
                 </li>
