@@ -7,6 +7,7 @@ import { createFiscalProvider, readFiscalEnvironment } from "../_shared/fiscal/f
 import { applyStatusUpdate } from "../_shared/fiscal/apply-status.ts";
 import { resolveIbgeCityCode } from "../_shared/fiscal/ibge.ts";
 import { resolveServiceFiscal, semCodigoFiscal } from "../_shared/fiscal/service-fiscal.ts";
+import { ratearDescontoGlobal } from "../_shared/fiscal/rateio-desconto.ts";
 import { logEdgeError } from "../_shared/log-error.ts";
 // [SUGESTAO-FISCAL] Modelo leve para sugerir NCM de produto direto da tela de emissão.
 // A sugestão NUNCA grava nada — ela pré-preenche o formulário e quem salva é o humano.
@@ -119,7 +120,7 @@ async function buildBodyFromServiceOrder(admin: any, body: any): Promise<
   const soId = String(body.service_order_id);
   const { data: so } = await admin
     .from("service_orders")
-    .select("id, service_order_number, status, client_id, customer_po_number")
+    .select("id, service_order_number, status, client_id, customer_po_number, discount_amount, is_travel_billable, travel_cost_total, operational_cost_total, subcontract_cost_total")
     .eq("id", soId)
     .maybeSingle();
   if (!so) return { ok: false, error: "Ordem de serviço não encontrada.", status: 404 };
@@ -134,27 +135,39 @@ async function buildBodyFromServiceOrder(admin: any, body: any): Promise<
   if (!cli) return { ok: false, error: "Cliente da OS não encontrado.", status: 404 };
 
   // Itens = PEÇAS com produto do catálogo (produto avulso sem cadastro não tem NCM).
+  // [INCIDENTE 27/08] Traz TAMBÉM o desconto por linha e o total líquido: a NF-e 27 real
+  // saiu com itens brutos (225,90) enquanto a OS cobrava 192,01 — o desconto de linha
+  // das peças nunca entrava na nota.
   const { data: parts } = await admin
     .from("service_order_parts")
-    .select("product_id, quantity, unit_sale_snapshot, products(name, sku, unit, ncm)")
+    .select("product_id, quantity, unit_sale_snapshot, discount_amount, line_total_sale, products(name, sku, unit, ncm)")
     .eq("service_order_id", soId);
 
+  const r2 = (n: number) => Math.round(n * 100) / 100;
   const itens: Array<Record<string, unknown>> = [];
+  const descontosLinha: number[] = [];
+  const liquidosLinha: number[] = [];
   const semProduto: string[] = [];
   for (const p of (parts as any[]) || []) {
     if (!p.product_id) {
       semProduto.push("item sem produto cadastrado");
       continue;
     }
+    const qtd = Number(p.quantity) || 0;
+    const unit = Number(p.unit_sale_snapshot) || 0;
+    const descLinha = r2(Number(p.discount_amount) || 0);
+    const liquido = p.line_total_sale != null ? r2(Number(p.line_total_sale)) : r2(qtd * unit - descLinha);
     itens.push({
       product_id: p.product_id,
       code: p.products?.sku || "ITEM",
       name: p.products?.name || "Produto",
       unit: p.products?.unit || undefined,
       ncm: p.products?.ncm || undefined,
-      quantity: Number(p.quantity) || 0,
-      unit_price: Number(p.unit_sale_snapshot) || 0,
+      quantity: qtd,
+      unit_price: unit,
     });
+    descontosLinha.push(descLinha);
+    liquidosLinha.push(liquido);
   }
   if (itens.length === 0) {
     return { ok: false, error: "Essa OS não tem peças de catálogo para emitir NF-e (NF-e é documento de produto).", status: 422 };
@@ -172,9 +185,23 @@ async function buildBodyFromServiceOrder(admin: any, body: any): Promise<
     total: Number(s.line_total) || 0,
   }));
   const totalServicos = listaServicos.reduce((a, s) => a + s.total, 0);
-  const totalPecas = itens.reduce((a, i) => a + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0);
 
-  const r2 = (n: number) => Math.round(n * 100) / 100;
+  // [INCIDENTE 27/08] Desconto GLOBAL da OS rateado entre serviços e peças — as MESMAS
+  // bases que a ponte da NFS-e usa, para NFS-e líquida + NF-e líquida = cobrança exata.
+  // Na 1ª produção real, o desconto de R$ 560,67 da OS-00060 não entrou em nota nenhuma.
+  const extrasServico = (so.is_travel_billable !== false ? Number(so.travel_cost_total) || 0 : 0)
+    + (Number(so.operational_cost_total) || 0)
+    + (Number(so.subcontract_cost_total) || 0);
+  const baseServicos = r2(totalServicos + extrasServico);
+  const rateio = ratearDescontoGlobal(Number(so.discount_amount) || 0, baseServicos, liquidosLinha);
+  for (let i = 0; i < itens.length; i++) {
+    const descontoItem = r2(descontosLinha[i] + rateio.descontosPorItem[i]);
+    if (descontoItem > 0) itens[i].discount = descontoItem;
+  }
+  const totalPecasBruto = r2(itens.reduce((a, i) => a + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0));
+  const descontoLinhasTotal = r2(descontosLinha.reduce((a, b) => a + b, 0));
+  const totalPecasLiquido = r2(totalPecasBruto - descontoLinhasTotal - rateio.descontoPecas);
+
   return {
     ok: true,
     body: {
@@ -205,7 +232,12 @@ async function buildBodyFromServiceOrder(admin: any, body: any): Promise<
       os: so.service_order_number,
       cliente: cli.name,
       pecas_na_nota: itens.length,
-      total_pecas: r2(totalPecas),
+      // LÍQUIDO — é o total que a nota vai declarar (bruto − desconto de linha − rateio
+      // do desconto global). O bruto e as partes ficam ao lado para conferência.
+      total_pecas: totalPecasLiquido,
+      total_pecas_bruto: totalPecasBruto,
+      desconto_linhas: descontoLinhasTotal,
+      desconto_global_rateado: rateio.descontoPecas,
       // O que NÃO entra — o agente precisa dizer isso em voz alta ao dono.
       servicos_fora_da_nfe: listaServicos.length,
       total_servicos_fora: r2(totalServicos),
@@ -778,7 +810,7 @@ async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
   const soId = String(body.service_order_id);
   const { data: so, error: soErr } = await admin
     .from("service_orders")
-    .select("id, service_order_number, status, client_id")
+    .select("id, service_order_number, status, client_id, discount_amount, is_travel_billable, travel_cost_total, operational_cost_total, subcontract_cost_total, card_fee_amount, tax_amount")
     .eq("id", soId)
     .maybeSingle();
   if (soErr) return { ok: false, error: "Falha ao consultar a OS: " + soErr.message, status: 500 };
@@ -879,20 +911,66 @@ async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
   }
 
   const fiscal = resolvidas[0].fiscal;
-  const total = lista.reduce((a, l) => a + (Number(l.line_total) || 0), 0);
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const total = r2(lista.reduce((a, l) => a + (Number(l.line_total) || 0), 0));
+
+  // [INCIDENTE 27/08] O valor da NFS-e é o que a OS COBRA pelos serviços, não o bruto:
+  //  1. entram deslocamento faturável, custo operacional e subcontratação (são cobrança
+  //     de serviço; ficavam fora);
+  //  2. sai a parte proporcional do DESCONTO GLOBAL da OS — na 1ª produção real a NFS-e
+  //     nº 1 saiu 2.500,00 brutos numa OS que cobrava 2.431,83 pelos serviços.
+  // O rateio usa as MESMAS bases da ponte da NF-e (peças LÍQUIDAS de desconto de linha),
+  // então NFS-e + NF-e = total da OS, centavo a centavo.
+  const extrasServico = (so.is_travel_billable !== false ? Number(so.travel_cost_total) || 0 : 0)
+    + (Number(so.operational_cost_total) || 0)
+    + (Number(so.subcontract_cost_total) || 0);
+  const baseServicos = r2(total + extrasServico);
+  const { data: partsRows, error: partsErr } = await admin
+    .from("service_order_parts")
+    .select("product_id, quantity, unit_sale_snapshot, discount_amount, line_total_sale")
+    .eq("service_order_id", soId);
+  if (partsErr) {
+    return { ok: false, status: 500, error: "Falha ao consultar as peças da OS (rateio do desconto): " + partsErr.message };
+  }
+  const liquidosPecas = ((partsRows as any[]) || [])
+    .filter((p) => p.product_id)
+    .map((p) => p.line_total_sale != null
+      ? r2(Number(p.line_total_sale))
+      : r2((Number(p.quantity) || 0) * (Number(p.unit_sale_snapshot) || 0) - (Number(p.discount_amount) || 0)));
+  const rateio = ratearDescontoGlobal(Number(so.discount_amount) || 0, baseServicos, liquidosPecas);
+  const totalNota = r2(baseServicos - rateio.descontoServicos);
 
   // Descrição: uma linha por serviço, com quantidade quando maior que 1. A prefeitura e o
-  // cliente leem isto — "Serviços diversos" não serve a nenhum dos dois.
-  const descricao = lista
-    .map((l) => {
-      const q = Number(l.quantity) || 1;
-      const nome = l.name_snapshot || l.description_snapshot || "Serviço";
-      return q > 1 ? `${nome} (${q}x)` : nome;
-    })
-    .join("; ")
-    .slice(0, 500);
+  // cliente leem isto — "Serviços diversos" não serve a nenhum dos dois. Deslocamento/
+  // operacional e o desconto aplicado entram por extenso: o tomador precisa entender o
+  // valor da nota sem planilha do lado.
+  const partesDescricao = lista.map((l) => {
+    const q = Number(l.quantity) || 1;
+    const nome = l.name_snapshot || l.description_snapshot || "Serviço";
+    return q > 1 ? `${nome} (${q}x)` : nome;
+  });
+  if (so.is_travel_billable !== false && (Number(so.travel_cost_total) || 0) > 0) {
+    partesDescricao.push(`Deslocamento: R$ ${r2(Number(so.travel_cost_total)).toFixed(2)}`);
+  }
+  if ((Number(so.operational_cost_total) || 0) > 0) {
+    partesDescricao.push(`Custos operacionais: R$ ${r2(Number(so.operational_cost_total)).toFixed(2)}`);
+  }
+  if ((Number(so.subcontract_cost_total) || 0) > 0) {
+    partesDescricao.push(`Serviços de terceiros: R$ ${r2(Number(so.subcontract_cost_total)).toFixed(2)}`);
+  }
+  if (rateio.descontoServicos > 0) {
+    partesDescricao.push(`Desconto comercial aplicado: R$ ${rateio.descontoServicos.toFixed(2)}`);
+  }
+  const descricao = partesDescricao.join("; ").slice(0, 500);
 
-  const r2 = (n: number) => Math.round(n * 100) / 100;
+  // O que a nota NÃO cobre — dito em voz alta no resumo, nunca somado em silêncio.
+  const avisosValor: string[] = [];
+  if ((Number(so.card_fee_amount) || 0) > 0) {
+    avisosValor.push(`A OS repassa R$ ${r2(Number(so.card_fee_amount)).toFixed(2)} de taxa de cartão, que NÃO entra na NFS-e — confirmar tratamento com a contadora.`);
+  }
+  if ((Number(so.tax_amount) || 0) > 0) {
+    avisosValor.push(`A OS tem R$ ${r2(Number(so.tax_amount)).toFixed(2)} lançados como "imposto", que NÃO entram na NFS-e.`);
+  }
 
   return {
     ok: true,
@@ -922,13 +1000,18 @@ async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
           postal_code: cli.postal_code,
         },
       },
-      amounts: { service_amount: r2(total) },
+      amounts: { service_amount: totalNota },
     },
     resumo: {
       os: so.service_order_number,
       cliente: cli.name,
       servicos_na_nota: lista.length,
-      total_servicos: r2(total),
+      // LÍQUIDO — o valor que a nota declara. Bruto e partes ao lado para conferência.
+      total_servicos: totalNota,
+      servicos_bruto: total,
+      extras_servico: r2(extrasServico),
+      desconto_rateado: rateio.descontoServicos,
+      avisos_valor: avisosValor,
       codigo_de_tributacao: fiscal.nationalTaxCode,
       cnae: fiscal.cnae,
       iss_rate: fiscal.issRate,

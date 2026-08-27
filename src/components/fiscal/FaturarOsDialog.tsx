@@ -221,10 +221,10 @@ export function FaturarOsDialog({ open, onOpenChange, serviceOrderId, orderNumbe
   };
 
   const resumoNfse = d?.nfse.resumo as
-    | { servicos_na_nota?: number; total_servicos?: number; codigo_de_tributacao?: string; origem_do_codigo?: string }
+    | { servicos_na_nota?: number; total_servicos?: number; codigo_de_tributacao?: string; origem_do_codigo?: string; desconto_rateado?: number; extras_servico?: number; avisos_valor?: string[] }
     | undefined;
   const resumoNfe = d?.nfe.resumo as
-    | { pecas_na_nota?: number; total_pecas?: number; itens_ignorados_sem_cadastro?: number }
+    | { pecas_na_nota?: number; total_pecas?: number; itens_ignorados_sem_cadastro?: number; desconto_linhas?: number; desconto_global_rateado?: number }
     | undefined;
 
   const pendenciasNfseConta = useMemo(() => {
@@ -273,7 +273,7 @@ export function FaturarOsDialog({ open, onOpenChange, serviceOrderId, orderNumbe
               resultado={resNfse}
               onCorrigirServico={abrirCorrecaoServico}
               linhaResumo={resumoNfse
-                ? `${resumoNfse.servicos_na_nota} serviço(s) · ${formatCurrency(Number(resumoNfse.total_servicos ?? 0))} · código ${resumoNfse.codigo_de_tributacao}${resumoNfse.origem_do_codigo === 'verbo' ? ' (herdado do verbo)' : ''}`
+                ? `${resumoNfse.servicos_na_nota} serviço(s) · ${formatCurrency(Number(resumoNfse.total_servicos ?? 0))}${Number(resumoNfse.desconto_rateado ?? 0) > 0 ? ` (já com −${formatCurrency(Number(resumoNfse.desconto_rateado))} do desconto da OS)` : ''} · código ${resumoNfse.codigo_de_tributacao}${resumoNfse.origem_do_codigo === 'verbo' ? ' (herdado do verbo)' : ''}`
                 : null}
               pendenciasExtra={pendenciasNfseConta}
               aguardandoConta={d.nfse.aplicavel && health.isLoading}
@@ -288,7 +288,7 @@ export function FaturarOsDialog({ open, onOpenChange, serviceOrderId, orderNumbe
               resultado={resNfe}
               onCorrigirProduto={abrirCorrecaoProduto}
               linhaResumo={resumoNfe
-                ? `${resumoNfe.pecas_na_nota} peça(s) · ${formatCurrency(Number(resumoNfe.total_pecas ?? 0))}${Number(resumoNfe.itens_ignorados_sem_cadastro ?? 0) > 0 ? ` · ${resumoNfe.itens_ignorados_sem_cadastro} item(ns) fora por falta de cadastro` : ''}`
+                ? `${resumoNfe.pecas_na_nota} peça(s) · ${formatCurrency(Number(resumoNfe.total_pecas ?? 0))}${(Number(resumoNfe.desconto_linhas ?? 0) + Number(resumoNfe.desconto_global_rateado ?? 0)) > 0 ? ` (já com −${formatCurrency(Number(resumoNfe.desconto_linhas ?? 0) + Number(resumoNfe.desconto_global_rateado ?? 0))} de descontos)` : ''}${Number(resumoNfe.itens_ignorados_sem_cadastro ?? 0) > 0 ? ` · ${resumoNfe.itens_ignorados_sem_cadastro} item(ns) fora por falta de cadastro` : ''}`
                 : null}
               onEmitir={podeEmitirNfe ? async () => { await rodarNfe(); await aposEmissao(); } : undefined}
               rodape={d.nfe.aplicavel ? (
