@@ -39,8 +39,23 @@ function preflightBase(): BillingPreflight {
   };
 }
 
+// Os verbos fiscais alimentam o seletor da linha avulsa. Referência ESTÁVEL:
+// objeto novo a cada chamada põe os efeitos do diálogo em laço.
+vi.mock('@/hooks/use-service-fiscal', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@/hooks/use-service-fiscal')>();
+  const verbos = {
+    data: [
+      { verb_slug: 'instalacao', name: 'Instalação', default_national_tax_code: '140101' },
+      // Verbo SEM código não pode ser oferecido: herdar dele não produziria nota.
+      { verb_slug: 'logistica', name: 'Logística', default_national_tax_code: null },
+    ],
+  };
+  return { ...real, useServiceFiscalVerbs: () => verbos };
+});
+
 vi.mock('@/hooks/use-faturar-os', async (importOriginal) => {
   const real = await importOriginal<typeof import('@/hooks/use-faturar-os')>();
+  const gravarVerbo = { mutate: vi.fn(), isPending: false };
   return {
     ...real,
     useBillingPreflight: () => ({
@@ -51,6 +66,7 @@ vi.mock('@/hooks/use-faturar-os', async (importOriginal) => {
       refetch: vi.fn(),
     }),
     useEmitirNfeDaOs: () => ({ mutateAsync: emitirNfeMock, isPending: false }),
+    useSetLineFiscalVerb: () => gravarVerbo,
     atualizarInvoicingStatus: vi.fn(),
   };
 });
@@ -139,7 +155,14 @@ describe('assistente Faturar OS', () => {
     expect(screen.getByText('Instalação LiFePO4')).toBeInTheDocument();
   });
 
-  it('pendência ACIONÁVEL: serviço com id ganha "Corrigir cadastro"; linha avulsa ganha a explicação', async () => {
+  // O caminho do CATÁLOGO: tem cadastro para abrir, então abre o cadastro.
+  // O caminho da LINHA DIGITADA À MÃO: não tem cadastro nenhum, então o verbo
+  // fiscal vai na própria linha — ali mesmo, sem sair do assistente.
+  //
+  // Antes desta versão o segundo caso recebia só o texto "linha avulsa —
+  // vincule ao catálogo na OS", e vincular não existia em lugar nenhum do
+  // sistema: 33 linhas em 10 ordens presas, R$ 2.525 sem virar nota.
+  it('pendência ACIONÁVEL: catálogo abre o cadastro; linha avulsa regulariza aqui', async () => {
     const p = preflightBase();
     p.nfse = {
       aplicavel: true,
@@ -148,14 +171,33 @@ describe('assistente Faturar OS', () => {
       details: {
         servicos_pendentes: [
           { service_id: 'svc-1', name: 'Instalação LiFePO4' },
-          { service_id: null, name: 'Linha digitada à mão' },
+          { service_id: null, line_id: 'linha-1', name: 'Linha digitada à mão' },
         ],
       },
     };
     estado.preflight = p;
     renderDialog();
     expect(await screen.findByRole('button', { name: /Corrigir cadastro/ })).toBeInTheDocument();
-    expect(screen.getByText(/linha avulsa — vincule ao catálogo/)).toBeInTheDocument();
+    // A linha avulsa ganha o seletor de tipo e o Aplicar — não um texto morto.
+    expect(screen.getByText(/Tipo de serviço/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Aplicar/ })).toBeInTheDocument();
+    expect(screen.queryByText(/vincule ao catálogo/)).not.toBeInTheDocument();
+  });
+
+  // Edge antigo (sem `line_id`): a tela não pode oferecer um controle que não
+  // gravaria nada. Degrada para texto, e o texto diz o que fazer.
+  it('sem line_id, degrada para texto em vez de oferecer um botão morto', async () => {
+    const p = preflightBase();
+    p.nfse = {
+      aplicavel: true,
+      pronto: false,
+      erro: 'Serviço sem cadastro fiscal.',
+      details: { servicos_pendentes: [{ service_id: null, name: 'Linha antiga' }] },
+    };
+    estado.preflight = p;
+    renderDialog();
+    expect(await screen.findByText(/atualize o sistema para regularizar/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Aplicar/ })).not.toBeInTheDocument();
   });
 
   it('produto com NCM pendente ganha "Corrigir cadastro" no cartão da NF-e', async () => {

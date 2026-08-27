@@ -255,7 +255,17 @@ export interface LineMissingSystem {
   line_id: string;
   service_name: string;
   service_verb: string | null;
-  /** Palpite da regra, para o campo já vir preenchido. Sempre editável. */
+  /**
+   * O que está GRAVADO para o sistema — da linha, ou herdado do catálogo.
+   *
+   * Não confundir com `sistema_sugerido`, que é palpite recalculado a cada
+   * chamada. A linha entra nesta lista quando falta QUALQUER um dos dois eixos,
+   * então uma linha com sistema já salvo e sem verbo aparece aqui: sem este
+   * campo, a tela mostrava o palpite por cima do que estava no banco, e
+   * confirmar sobrescrevia classificação boa.
+   */
+  sistema_atual: string | null;
+  /** Palpite da regra, para o campo vir preenchido quando não há nada gravado. */
   sistema_sugerido: string | null;
   verbo_sugerido: string | null;
   /**

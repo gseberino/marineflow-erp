@@ -55,9 +55,25 @@ function buildSurveyForPdf(raw: unknown): PDFData['survey'] {
  * lote divergir do individual — e a diferença só aparece quando o cliente
  * recebe um documento que não é o que estava na tela.
  */
-export async function carregarPDFData(serviceOrderId: string): Promise<PDFData> {
+/**
+ * `db` existe para o PORTAL PÚBLICO poder usar esta mesma montagem.
+ *
+ * Lá quem lê é o cliente do link, com o token no cabeçalho
+ * (`createShareClient`), e a RLS compara esse token. Sem este parâmetro o
+ * portal precisava de uma montagem PRÓPRIA — e foi o que aconteceu: uma
+ * terceira cópia, que divergiu em doze campos e mandava 31 orçamentos ao
+ * cliente intitulados "Ordem de Serviço" (NOVO-lev-14).
+ *
+ * O que a RLS do token não alcança (levantamento, recebíveis, pagamentos,
+ * despesas) volta VAZIO, não com erro: as tabelas têm grant de select para
+ * `anon`, e política ausente filtra linha, não derruba a consulta.
+ */
+export async function carregarPDFData(
+  serviceOrderId: string,
+  db: Pick<typeof supabase, 'from'> = supabase,
+): Promise<PDFData> {
   const [soRes, settingsRes, receivablesRes] = await Promise.all([
-    supabase.from('service_orders')
+    db.from('service_orders')
       .select(`
         *,
         clients(*),
@@ -73,12 +89,12 @@ export async function carregarPDFData(serviceOrderId: string): Promise<PDFData> 
       `)
       .eq('id', serviceOrderId)
       .single(),
-    supabase.from('app_settings')
+    db.from('app_settings')
       .select('key, value'),
     // Todos os recebíveis não cancelados da OS — usado tanto para o
     // card "Sinal Recebido" da fatura quanto para a seção de histórico
     // de pagamentos real (distinta da programação de pagamento).
-    supabase.from('receivables')
+    db.from('receivables')
       .select('id, description, amount, paid_amount, balance_amount, status, is_deposit')
       .eq('service_order_id', serviceOrderId)
       .not('status', 'eq', 'cancelled')
@@ -94,7 +110,7 @@ export async function carregarPDFData(serviceOrderId: string): Promise<PDFData> 
 
   const receivableIds = receivables.map((r) => r.id);
   const { data: paymentsData } = receivableIds.length > 0
-    ? await supabase.from('payments')
+    ? await db.from('payments')
         .select('receivable_id, payment_date, amount, payment_method')
         .in('receivable_id', receivableIds)
         .eq('status', 'confirmed')
@@ -249,9 +265,12 @@ export function usePDFData(serviceOrderId: string | undefined) {
  * anexo de WhatsApp. Devolve null em vez de lançar: quem chama trata ausência,
  * não exceção.
  */
-export async function fetchPDFData(serviceOrderId: string): Promise<PDFData | null> {
+export async function fetchPDFData(
+  serviceOrderId: string,
+  db?: Pick<typeof supabase, 'from'>,
+): Promise<PDFData | null> {
   try {
-    return await carregarPDFData(serviceOrderId);
+    return await carregarPDFData(serviceOrderId, db);
   } catch (e) {
     console.error('[fetchPDFData] failed:', e);
     return null;

@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import { StepFocusMode } from './StepFocusMode';
 import { SheetEntryDialog } from './SheetEntryDialog';
 import { printRouteSheet } from '@/lib/route-sheet';
+import { LineSystemPicker } from '@/components/service-order/line-system-picker';
 import {
   useServiceOrderSteps, useGenerateSteps, useReorderSteps, useDeleteStep,
   useCreateStep, useReopenStep, useStopReasons, useReviewAiStep, useRouteMaterials,
@@ -199,39 +200,18 @@ export function ServiceRoutePanel({
             Diga o que cada um vai tocar para o roteiro trazer a preparação de segurança certa.
             Sem isso, eles entram sem bloco de abertura nem de fechamento.
           </p>
+          {/* Era uma SEGUNDA implementação da mesma classificação, inline e com
+              o mesmo defeito do `defaultValue` — e pior, sem o eixo do VERBO.
+              Uma linha "resolvida" aqui continuava pendente, porque o filtro
+              exige os dois eixos, e o usuário não tinha como saber por quê.
+
+              As duas telas convivem em abas da mesma página, sobre o mesmo
+              cache: dava para resolver numa e ver a pendência intacta na outra.
+              Agora é o mesmo componente nos dois lugares. */}
           {semSistema.map((linha) => (
             <div key={linha.line_id} className="space-y-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="min-w-0 flex-1 truncate text-sm">{linha.service_name}</span>
-                <Select
-                  // Vem preenchido com o palpite da regra — mas visível e
-                  // editável, porque ela erra: não reconhece toda palavra e se
-                  // confunde quando o problema fala de dois sistemas.
-                  defaultValue={linha.sistema_sugerido ?? undefined}
-                  onValueChange={(sistema) =>
-                    setLineSystem.mutate({ lineId: linha.line_id, system: sistema }, {
-                      onSuccess: () => toast.success('Sistema definido para esta linha.'),
-                      onError: (e: any) => toast.error(e?.message || 'Erro ao definir'),
-                    })
-                  }
-                >
-                  <SelectTrigger className="h-9 w-full sm:w-56">
-                    <SelectValue placeholder="O que este serviço toca?" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {sistemas.map((s) => (
-                      <SelectItem key={s.slug} value={s.slug}>{s.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              {linha.sistema_sugerido && (
-                <p className="text-[11px] text-muted-foreground">
-                  {linha.origem_sistema === 'linha'
-                    ? 'Sugerido pelo texto desta linha — confira antes de confirmar.'
-                    : 'Palpite fraco, tirado do contexto da OS — confira com atenção.'}
-                </p>
-              )}
+              <span className="block min-w-0 truncate text-sm">{linha.service_name}</span>
+              <LineSystemPicker linha={linha} />
             </div>
           ))}
         </div>

@@ -6,7 +6,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { createFiscalProvider, readFiscalEnvironment } from "../_shared/fiscal/factory.ts";
 import { applyStatusUpdate } from "../_shared/fiscal/apply-status.ts";
 import { resolveIbgeCityCode } from "../_shared/fiscal/ibge.ts";
-import { resolveServiceFiscal, semCodigoFiscal } from "../_shared/fiscal/service-fiscal.ts";
+import { resolveLineFiscal, semCodigoFiscal } from "../_shared/fiscal/service-fiscal.ts";
 import { ratearDescontoGlobal } from "../_shared/fiscal/rateio-desconto.ts";
 import { logEdgeError } from "../_shared/log-error.ts";
 // [SUGESTAO-FISCAL] Modelo leve para sugerir NCM de produto direto da tela de emissão.
@@ -836,10 +836,19 @@ async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
   const { data: linhas, error: linhasErr } = await admin
     .from("service_order_services")
     .select(
-      "service_id, name_snapshot, description_snapshot, quantity, unit_price_snapshot, line_total, "
+      // `id` e `fiscal_verb` entram para a linha DIGITADA À MÃO poder ser
+      // regularizada: sem `id`, a tela de emissão não tem o que corrigir; sem o
+      // verbo da linha, não há de onde herdar o código quando não há catálogo.
+      "id, service_id, fiscal_verb, name_snapshot, description_snapshot, quantity, "
+      + "unit_price_snapshot, line_total, "
       + "services(national_tax_code, service_code, cnae, iss_rate, iss_withheld, fiscal_verb, "
       + "service_fiscal_verbs(default_national_tax_code, default_service_code, default_cnae, "
-      + "default_iss_rate, default_iss_withheld))",
+      + "default_iss_rate, default_iss_withheld)), "
+      // Alias com o nome da constraint: há DUAS relações possíveis com
+      // service_fiscal_verbs nesta consulta (a do serviço, aninhada acima, e a
+      // da linha). Sem dizer qual, o PostgREST recusa a query inteira.
+      + "verbo_da_linha:service_fiscal_verbs!sos_fiscal_verb_fk(default_national_tax_code, "
+      + "default_service_code, default_cnae, default_iss_rate, default_iss_withheld)",
     )
     .eq("service_order_id", soId);
   // Sem esta checagem, um 400 do PostgREST (ex.: embed em tabela que não existe no schema
@@ -866,9 +875,16 @@ async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
   // Resolve o fiscal EFETIVO de cada linha antes de qualquer decisão. Sem isto, um serviço que
   // herda o código do verbo seria acusado de "sem cadastro fiscal" e a emissão pararia — a
   // herança existiria no banco e não valeria nada na hora que importa.
+  // TRÊS níveis desde 25/08: catálogo (próprio → verbo do serviço) e, só quando
+  // ele não resolve, o verbo da PRÓPRIA LINHA. É o que dá saída à linha digitada
+  // à mão, que não tem cadastro nenhum por trás.
   const resolvidas = lista.map((l) => ({
     linha: l,
-    fiscal: resolveServiceFiscal(l.services ?? null, l.services?.service_fiscal_verbs ?? null),
+    fiscal: resolveLineFiscal(
+      l.services ?? null,
+      l.services?.service_fiscal_verbs ?? null,
+      l.verbo_da_linha ?? null,
+    ),
   }));
 
   // Sem cadastro fiscal não há nota. Dizer QUAIS faltam evita a caça ao serviço errado.
@@ -886,10 +902,15 @@ async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
         + "Verbos, que vale para todos os serviços daquela atividade — antes de emitir.",
       details: {
         servicos_sem_cadastro: semCadastro.map((l) => l.name_snapshot),
-        // Acionável pela UI: service_id abre o cadastro no popup. Linha avulsa (sem
-        // service_id) não tem cadastro para abrir — a UI explica o caminho (vincular).
+        // Acionável pela UI, nos DOIS casos:
+        //  · com service_id → abre o cadastro do serviço no popup;
+        //  · sem service_id (linha digitada à mão) → `line_id` deixa a tela
+        //    gravar o verbo fiscal na PRÓPRIA LINHA, ali mesmo.
+        // Antes o segundo caso só recebia o texto "vincule ao catálogo na OS",
+        // e vincular não existia em lugar nenhum — beco sem saída.
         servicos_pendentes: semCadastro.map((l) => ({
           service_id: l.service_id ?? null,
+          line_id: l.id ?? null,
           name: l.name_snapshot ?? l.description_snapshot ?? "Serviço",
         })),
       },

@@ -612,6 +612,1079 @@ cada uma vira tarefa própria, por ordem do dono.
 
 ---
 
+## Varredura noturna da frente Levantamento — 15/08 → 16/08
+
+Registrados conforme a regra 3 (não corrigidos) e numerados conforme a regra 8
+(`NOVO-lev-NN`). O código desta frente é recente e pouco exercitado em campo;
+esta varredura lê o que foi escrito nos últimos dias procurando o que só
+apareceria em uso.
+
+### [NOVO-lev-01] A folha imprime as perguntas embaralhadas entre sistemas
+
+- **Onde:** `src/lib/survey-sheet.ts`, `buildSurveySheetHtml`.
+- **O quê:** `compose_survey_for_order` passou a devolver o campo `eixo` — de qual
+  sistema ou verbo cada pergunta veio — e o comentário da função SQL diz, com todas
+  as letras, que "a folha agrupa por isto". **A folha não agrupa.** Ela separa apenas
+  por `price_impact` (o que muda o preço × o resto), então numa visita de avaliação
+  com seis sistemas as perguntas saem intercaladas: elétrico, gás, instalação,
+  logística, elétrico de novo.
+- **Por que importa:** em campo se avalia um sistema de cada vez. Quem está no paiol
+  olhando o banco de baterias não quer, entre duas perguntas de elétrico, uma sobre o
+  cilindro de gás que está do outro lado do veículo. O documentado e o construído
+  divergem, e quem confiar no comentário do SQL vai supor um agrupamento que não existe.
+- **Consertar seria:** agrupar por `eixo` dentro de cada faixa de impacto, com
+  subtítulo por sistema. O dado já chega na folha; falta só usá-lo.
+- **Não corrigido:** fora do escopo da tarefa em que foi encontrado.
+
+### [NOVO-lev-02] A folha em branco mente sobre o motivo
+
+- **Onde:** `src/lib/survey-sheet.ts` (`fetchSurveySheetData`) e
+  `src/components/service-orders/SurveyPanel.tsx` (`imprimirFolha`).
+- **O quê:** nenhuma das cinco chamadas de `fetchSurveySheetData` verifica `.error`.
+  Quando uma RPC falha, o Supabase devolve `data: null`, que vira `[]`, e a tela
+  responde: *"Este serviço ainda não tem perguntas de levantamento aprovadas."*
+- **Por que importa:** a mensagem é FALSA em todos os casos de erro — permissão
+  negada, rede caída, função derrubada por uma migration. Manda quem está de saída
+  para a tela de aprovação de perguntas, onde não há nada errado, enquanto o defeito
+  real fica invisível. É a mesma classe que derrubou o PDF do sistema inteiro em
+  05/08 e custou dois dias: erro engolido que vira mensagem errada.
+- **Consertar seria:** propagar o erro de cada RPC e distinguir na tela "não há
+  perguntas" de "não deu para buscar as perguntas: <causa>".
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-03] Uma consulta ficou fora do `Promise.all`
+
+- **Onde:** `src/lib/survey-sheet.ts`, `fetchSurveySheetData`.
+- **O quê:** a busca do nome do serviço (`service_order_services`) roda depois do
+  `Promise.all`, serializada, quando poderia ir junto das outras cinco.
+- **Por que importa:** pouco — é uma viagem a mais numa ação que já leva algumas
+  centenas de milissegundos. Registrado por completude, não por urgência.
+- **Não corrigido:** regra 3, e não vale a mexida sozinho.
+
+### [NOVO-lev-04] Resposta pulada continua alimentando o dimensionamento
+
+- **Onde:** `survey_cable_sizing` (migration `20260815110000`), nas seis leituras
+  por papel (`corrente`, `comprimento`, `tensao`, `criticidade`, `casa_maquinas`,
+  `feixe`).
+- **O quê:** o filtro é `(a.numeric_value is not null or a.answer_value is not null)`.
+  **Não há `and a.skipped_reason is null`.** Uma resposta marcada como "não consegui
+  verificar" entra no cálculo se tiver qualquer valor gravado.
+- **Como acontece na prática:** o técnico responde a corrente ("250"), depois volta
+  e marca "não consegui ver" — porque descobriu que leu o valor errado. O upsert
+  grava `skipped_reason`, mas **não apaga `numeric_value`**, porque o campo não vai
+  no payload e o `ON CONFLICT DO UPDATE` só toca no que foi enviado. O 250 fica lá,
+  e o dimensionamento continua calculando com um número que quem mediu retirou.
+- **Por que importa:** este é o cálculo que decide bitola de cabo. Uma leitura
+  retirada de propósito voltando pela porta dos fundos é pior que leitura nenhuma —
+  a função inclusive responde `pronto: true`, dizendo que sabe o que não sabe.
+- **A assimetria denuncia:** `survey_suggested_materials` FILTRA `skipped_reason is
+  null` (linha 38 da migration `20260808120000`). As duas funções leem a mesma
+  tabela com regras diferentes; a do material está certa.
+- **Consertar seria:** somar `and a.skipped_reason is null` às seis leituras, e
+  limpar `numeric_value`/`answer_unit` quando a resposta vira pulada.
+- **Não corrigido:** regra 3. **É o mais grave desta varredura.**
+
+### [NOVO-lev-05] Corrigir uma resposta pode sobrescrever OUTRA pergunta
+
+- **Onde:** `src/components/service-orders/SurveyPanel.tsx` (`gravar`), com
+  `onConflict: 'survey_id,seq'` em `use-service-survey.ts:276`.
+- **O quê:** a resposta é gravada com `seq: idx + 1` — a POSIÇÃO na lista — e o
+  upsert casa por `(survey_id, seq)`. A posição não é identidade: ela depende de
+  quais perguntas estavam ativas no momento em que a lista foi montada.
+- **Como acontece na prática:** um levantamento é aberto e respondido até a 9ª
+  pergunta. Uma pergunta nova de impacto ALTO é aprovada — e ela entra em terceiro
+  lugar, porque a ordem é por impacto no preço. O levantamento é reaberto para
+  completar; agora a 3ª posição é outra pergunta, e responder ali **sobrescreve a
+  resposta que estava no seq 3**. A original some sem aviso.
+- **Por que isso é plausível aqui, e não teórico:** há 18 perguntas aguardando
+  aprovação neste momento, e várias são de impacto alto — exatamente as que entram
+  no começo da lista. Aprovar perguntas enquanto há levantamento aberto é o curso
+  normal desta frente.
+- **Consertar seria:** casar por `(survey_id, template_id)` — que é a identidade
+  real — mantendo `seq` apenas como ordem de exibição. Exige índice único novo e
+  cuidado com as respostas de `template_id` nulo (as lançadas pela folha antiga).
+- **Não corrigido:** regra 3, e a correção mexe em chave de tabela com dados.
+
+### [NOVO-lev-06] Material lançado pelo levantamento não mexe no total da OS
+
+- **Onde:** `apply_survey_materials` (migration `20260806100000`), chamada por
+  `src/hooks/use-survey-material-rules.ts` (`useApplySurveyMaterials`) e
+  `src/components/service-orders/SuggestedMaterialsPanel.tsx`. Mesmo defeito em
+  `src/components/service-orders/RelatedMaterialsPanel.tsx` (`useAddRelated`).
+- **O quê:** as duas rotas inserem em `service_order_parts` e **ninguém recalcula
+  o total da ordem**. Conferido no banco: os únicos gatilhos da tabela são
+  `parts_reservation` (reserva de estoque), `trg_warranty_parts` (validade de
+  garantia) e `update_service_order_parts_updated_at`. Nenhum chama
+  `recalc_so_totals`. E nenhuma das duas rotas chama `recalcTotals` do frontend.
+- **Qual é o caminho certo, para comparar:** `use-service-order-parts.ts:93` —
+  toda edição de peça chama `recalcTotals(service_order_id)` logo depois de
+  gravar, dentro de um `try/catch` que **desfaz a alteração** se o recálculo
+  falhar. `ServiceOrderForm` faz o mesmo. Quem entrou por este caminho novo
+  não herdou nada disso.
+- **Por que importa:** a peça aparece na lista e o orçamento continua com o valor
+  de antes. Não há erro, não há aviso. O número volta ao lugar sozinho na próxima
+  vez que alguém editar qualquer linha ou salvar o formulário — de modo que o
+  total "muda sozinho" depois, sem ninguém ter mexido em preço. É a mesma classe
+  de defeito de `MF-AUD-009` (o agente alterava a OS por uma rota sem cascata) e
+  reaparece aqui por uma rota nova.
+- **Consertar seria:** chamar `recalcTotals` no `mutationFn` das duas rotas, com o
+  mesmo padrão de reversão do `use-service-order-parts`. Ou — melhor, porque fecha
+  a classe inteira — um gatilho `after insert or update or delete` em
+  `service_order_parts` chamando `recalc_so_totals`; mas isso é decisão de
+  arquitetura, porque a aritmética de hoje vive no frontend
+  (`receivable-redistribution.ts`) e é ela que checa o piso do que o cliente já
+  pagou.
+- **Não corrigido:** regra 3, e a correção certa é a decisão acima.
+
+### [NOVO-lev-07] A tela não atualiza porque a invalidação usa chaves que não existem
+
+- **Onde:** `src/hooks/use-survey-material-rules.ts:85-87` e
+  `src/components/service-orders/RelatedMaterialsPanel.tsx:68-70`.
+- **O quê:** as duas invalidam `['service-order-parts', id]` e `['service-order', id]`.
+  As chaves reais do repositório são **`['so-parts', id]`** (`use-service-orders.ts:307`)
+  e **`['service-orders', id]`** (`use-service-orders.ts:52`) — plural em uma,
+  nome diferente na outra. `invalidateQueries` com chave inexistente não é erro:
+  não casa com nada e devolve sucesso.
+- **Por que importa:** somado ao `NOVO-lev-06`, o clique em "Lançar" produz um
+  toast de sucesso e **nada visível muda** — nem a lista de peças, nem o total.
+  Quem confere lê aquilo como "não funcionou" e clica de novo; aí a trava de
+  duplicata responde *"Nada novo a lançar — esses materiais já estavam no
+  orçamento"*, que contradiz a tela que ele está vendo. Os itens só aparecem
+  depois de recarregar a página.
+- **Consertar seria:** trocar pelas duas chaves reais. É uma linha em cada arquivo.
+- **Não corrigido:** regra 3 — mas é o achado de menor custo de correção desta
+  varredura, e o de sintoma mais visível.
+
+### [NOVO-lev-08] "Já estavam no orçamento" também é dito quando nada foi lançado por falta de número
+
+- **Onde:** `apply_survey_materials` (migration `20260806100000`), o `case` da
+  mensagem de retorno.
+- **O quê:** o `insert ... select` descarta a linha por três motivos diferentes —
+  `quantity is null`, `quantity <= 0` e produto já lançado neste orçamento — e
+  todos caem no mesmo `v_criadas = 0`, que responde *"Nada novo a lançar — esses
+  materiais já estavam no orçamento."*
+- **Como acontece na prática:** a sugestão vem marcada com o alerta *"a resposta
+  não tem número — confira a quantidade"* (a própria função já avisa disso), quem
+  confere marca a linha assim mesmo e manda lançar. A quantidade é nula, a linha é
+  descartada, e a resposta afirma que o material já estava lá — quando não está e
+  não vai estar.
+- **Por que importa:** a mensagem manda parar de procurar. Quem a lê não volta
+  para corrigir a resposta do levantamento, que é exatamente o que precisaria
+  fazer. O `SuggestedMaterialsPanel` já desmarca sozinho a linha com alerta, o que
+  reduz a frequência — não elimina, porque marcar de volta é um clique.
+- **Consertar seria:** contar os descartados por motivo (`count(*) filter (where
+  m.quantity is null)`, etc.) e dizer qual foi. A função já tem a lista em mãos.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-09] A trava de duplicata não enxerga o que a própria instrução está inserindo
+
+- **Onde:** `apply_survey_materials`, o `not exists (...) x.source = 'survey'`.
+- **O quê:** a subconsulta anti-duplicata lê `service_order_parts` no instantâneo
+  do início da instrução. Duas regras selecionadas na mesma chamada apontando para
+  o **mesmo produto** passam as duas, porque nenhuma vê a linha que a outra está
+  criando. Aplicadas em dois cliques, a segunda é barrada.
+- **Por que é plausível aqui:** o cabo é o caso central desta frente, e o desenho
+  natural é uma regra por trecho (banco→inversor, inversor→quadro), ambas
+  apontando para o mesmo produto de cabo. Nesse desenho, o resultado depende de o
+  usuário ter marcado as duas juntas ou uma de cada vez.
+- **Efeito colateral do mesmo `not exists`, na direção oposta:** ele olha a ordem
+  INTEIRA, sem considerar `service_order_service_id`. Dois serviços na mesma ordem
+  que precisem do mesmo produto — dois bancos de bateria, dois inversores — só
+  recebem material no primeiro, e o segundo fica silenciosamente sem.
+- **Consertar seria:** trocar por `on conflict` sobre um índice único real, ou
+  agregar por produto antes de inserir (`sum(quantity) group by product_id`), o
+  que também resolveria o caso dos dois trechos de cabo virando uma linha só.
+  Decidir se a unidade de duplicata é a ordem ou a linha de serviço é escolha de
+  negócio.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-10] O planejador de quebra ignora as margens — e o card ainda parte ao meio
+
+- **Onde:** `src/lib/pdf-generator.ts:399-404` (a medição) e `src/lib/pdf-pagination.ts`
+  (`planPageBreaks`).
+- **O quê:** cada bloco é medido por `el.getBoundingClientRect().height`, que
+  **não inclui margens**. O CSS do documento dá margem a quase todo bloco de topo:
+  `.card { margin-bottom: 20px }` (`pdf-generator.ts:750`), `table { margin-bottom:
+  16px }` (:766) e `.grid { margin-bottom: 20px }` (:792). A conta de "quanto já
+  usei desta folha" fica menor que a realidade, e cresce a cada bloco.
+- **Provado com os números reais do arquivo:** cinco cards de 200 px com os 20 px
+  de margem do CSS. O planejador soma 1000 px, vê que cabe em 1032 e **não planeja
+  quebra nenhuma**. As posições reais são `[0,200] [220,420] [440,640] [660,860]
+  [880,1080]` — o quinto card termina em **1080**, 48 px além da folha, e o
+  html2pdf o corta. É exatamente o defeito que este módulo existe para impedir
+  (o card "Informações para Pagamento" partido ao meio), ainda alcançável.
+- **Por que não aparece sempre:** o erro só morde quando a soma sem margens fica
+  logo abaixo do limite e a soma com margens passa. Quanto mais blocos na folha,
+  maior a chance — documento longo é justamente o que tem muitos.
+- **Consertar seria:** medir a ocupação real. O jeito robusto não é somar
+  `height + marginTop + marginBottom` (que erra no colapso de margens), e sim
+  derivar a altura de cada bloco da diferença entre os topos dos irmãos
+  consecutivos — que já inclui a margem efetiva —, usando o fim do container para
+  o último.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-11] Bloco mais alto que a folha zera a conta pelo lugar errado
+
+- **Onde:** `src/lib/pdf-pagination.ts:101-104`.
+- **O quê:** `if (altura > alturaUtil) { usado = altura % alturaUtil; continue; }`.
+  A sobra é calculada como se o bloco alto começasse no topo de uma folha. Ele
+  quase nunca começa: vem depois do cabeçalho, dos dados do cliente, do resumo.
+  O certo é `(usado + altura) % alturaUtil`.
+- **Provado:** blocos de 200, 3000, 250 e 300 px, folha de 1032. Sobra real depois
+  do bloco de 3000 px = `(200+3000) % 1032` = **104 px**; o planejador calcula
+  `3000 % 1032` = **936 px**. Com 936 "usados", o bloco de 250 px não caberia e o
+  planejador **manda quebrar a página** — quando na realidade sobravam 928 px
+  livres. Resultado: uma folha quase inteira em branco no meio do documento.
+- **A direção contrária também existe:** com outros números o planejador acha que
+  cabe quando não cabe, e aí o bloco é fatiado — o mesmo estrago do `NOVO-lev-10`.
+- **O bloco alto é o caso comum, não o excepcional:** a tabela de itens de uma OS
+  com muitas linhas passa de 1032 px sozinha, e nunca é o primeiro filho.
+- **O teste existente passa porque evita o caso quebrado:**
+  `pdf-pagination.test.ts:41` põe o bloco alto **como primeiro bloco** — onde
+  `usado` é 0 e as duas fórmulas coincidem. Dá confiança falsa.
+- **Consertar seria:** uma linha (`usado = (usado + altura) % alturaUtil`) mais um
+  caso de teste com o bloco alto em segundo lugar.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-12] `indivisivel` é medido, documentado — e nunca usado
+
+- **Onde:** `src/lib/pdf-pagination.ts:72-80` (o tipo) e `:96` (o destructuring);
+  `src/lib/pdf-generator.ts:403` (quem calcula).
+- **O quê:** o chamador varre cada bloco com `el.classList.contains('card') ||
+  !!el.querySelector('table')` para marcar o que não pode partir, e
+  `planPageBreaks` desestrutura `indivisivel` e **não o lê em lugar nenhum**.
+  Bloco indivisível e bloco comum seguem exatamente o mesmo caminho.
+- **Por que importa:** não produz saída errada hoje — o comentário do código
+  (`:111-113`) já explica que os dois descem inteiros de propósito. O problema é o
+  contrário: o campo promete um comportamento no tipo e nos testes
+  (`pdf-pagination.test.ts:28` passa `indivisivel: true` como se importasse), e
+  quem for mexer vai supor que a distinção existe. Também custa um
+  `querySelector('table')` por bloco em toda geração.
+- **Consertar seria:** ou remover o campo, ou usá-lo — por exemplo, permitindo que
+  um bloco DIVISÍVEL longo (texto corrido de termos) parta em vez de descer
+  inteiro e deixar meia folha vazia.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-13] `scopeCss` divide seletores por vírgula sem olhar parênteses
+
+- **Onde:** `src/lib/css-scope.ts:34` (`seletores.split(',')`).
+- **O quê:** a vírgula é tratada sempre como separador de seletores. Dentro de
+  `:is()`, `:not()`, `:where()` ou de um `[attr="a,b"]` ela não é.
+  `:is(h1, h2) { … }` sai como **`.pdf :is(h1, .pdf h2)`** — verificado rodando a
+  função. O escopo entra dentro dos argumentos e o seletor passa a significar
+  outra coisa.
+- **Estado hoje:** **latente.** O CSS de `pageWrapper` não usa nenhum desses —
+  conferi os 29 blocos de regra. Nada quebrado em produção agora.
+- **Por que registrar mesmo assim:** este CSS é editado à mão sempre que o
+  documento muda, e `:not()` é a primeira coisa que alguém escreve ao ajustar
+  espaçamento de tabela ("todas as linhas menos a última"). O erro é silencioso:
+  não lança, não avisa, só deixa de aplicar.
+- **Conferido e SEM defeito, para não voltar a investigar:** o `@import` do Google
+  Fonts, que tem `;` dentro da URL (`wght@400;500;600…`), atravessa a função
+  intacto — o laço fatia em pedaços contíguos e reconcatena sem perda. E
+  comentário com chave fora da posição 0 produz texto embaralhado que o
+  navegador reinterpreta corretamente, porque o `.pdf` inserido cai sempre antes
+  do `/*` ou dentro do comentário. Os dois foram testados.
+- **Consertar seria:** dividir contando profundidade de parênteses e colchetes.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-14] O portal público monta o PDF por conta própria — e é o documento que o CLIENTE baixa
+
+- **Onde:** `src/pages/PublicServiceOrderView.tsx:211` (`buildPdfData`), contra
+  `src/hooks/use-pdf.ts:58` (`carregarPDFData`).
+- **O quê:** a unificação de 05/08 juntou `usePDFData` e `fetchPDFData` numa
+  montagem só. Ficou de fora uma **terceira cópia**, escrita à mão, no portal
+  público — que não chama nenhuma das duas e busca tudo de novo com o cliente do
+  token (`sb`, `:89-118`).
+- **O teste que deveria pegar isso nomeia justamente o portal:**
+  `use-pdf-unico.test.ts:8` diz *"usePDFData (tela) e fetchPDFData (lote, anexo de
+  WhatsApp, **portal público**)"* — e o teste só faz grep dentro de `use-pdf.ts`.
+  Mesmo padrão de confiança falsa do `NOVO-lev-11`.
+- **O que diverge, conferido campo a campo:**
+  - `documentType` é **`'service_order'` fixo** (`:214`). **Hoje há 31 orçamentos
+    em `draft` com link público** — conferido no banco. Todos os 31 são baixados
+    pelo cliente com o cabeçalho **"Ordem de Serviço"** em vez de "Orçamento"
+    (`pdf-generator.ts:1052`), com a seção chamada "Relato do Problema" em vez de
+    "Objetivo do Projeto / Diagnóstico" (`:1185`) e o bloco de assinatura dizendo
+    "Aceite do Serviço Realizado" em vez de "Aprovação do Orçamento" (`:1322`).
+  - **A validade some.** `getValidityText()` só sai quando `isQuote`
+    (`pdf-generator.ts:1276`), e `buildPdfData` nem passa `quote_validity_days`.
+    Os **31 de 31** têm validade preenchida no banco. O cliente recebe um
+    orçamento sem prazo de validade.
+  - `logo_url` não é passado: o PDF do cliente sai **sem a logo**, o do ERP com.
+  - Não passa `marina`, `expenses`, `survey`, `deposit_paid`, `receivables`,
+    `payments`, `travel_hours`, `ferry_cost`, `travel_type`, `commission_*`,
+    `financial_notes`, `payment_method_preferred`, `discount_services_pct`,
+    `discount_parts_pct`. O levantamento e o sinal já pago **nunca chegam** ao
+    documento que o cliente baixa.
+  - Na direção contrária, passa `card_fee_amount` e `card_installments`, que
+    `carregarPDFData` **não** monta. A taxa de cartão aparece no PDF do portal e
+    não aparece no do ERP — o mesmo documento, dois valores.
+  - `technical_notes` é passado e só é suprimido quando `isQuote`
+    (`pdf-generator.ts:1256`). Com `isQuote` sempre falso, **nota técnica interna
+    entra no orçamento do cliente**. Hoje nenhum dos 31 tem o campo preenchido —
+    latente, mas o caminho está aberto.
+- **Consertar seria:** o portal chamar `carregarPDFData` (o cliente do token serve
+  para as mesmas tabelas) e derivar `documentType` de `documentTypeFor(status)`,
+  que já existe em `src/lib/document-type.ts` e é exatamente para isto. E o teste
+  de unificação passar a olhar `PublicServiceOrderView.tsx`.
+- **Não corrigido:** regra 3. **É o achado de maior alcance desta varredura** —
+  atinge o documento que sai da empresa.
+
+### [NOVO-lev-15] O botão "Baixar PDF" do portal abre a janela de impressão
+
+- **Onde:** `src/pages/PublicServiceOrderView.tsx:286` e `:425-426`.
+- **O quê:** o botão tem ícone de download e o rótulo **"Baixar PDF"**, e chama
+  `printPDF(...)` — que abre a janela de impressão do navegador. Nenhum arquivo é
+  baixado.
+- **Por que importa:** este link chega ao cliente por WhatsApp, e ele o abre no
+  celular. Pedir "baixar" e receber a caixa de impressão do iOS é onde a pessoa
+  desiste — ou imprime em papel um documento que queria guardar. Todos os outros
+  botões de baixar do sistema usam `downloadPDF`.
+- **Consertar seria:** trocar por `downloadPDF`, ou renomear o botão para
+  "Imprimir" e acrescentar um de baixar de verdade.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-16] Três consultas do PDF não checam erro, e cada fallback mente diferente
+
+- **Onde:** `src/hooks/use-pdf.ts` — `settingsRes` (`:76`), `receivablesRes`
+  (`:81`) e a de `payments` (`:96`). Só `soRes.error` é verificado (`:88`).
+- **O quê:** cada uma tem um `|| []` ou `|| ''` que transforma falha em ausência.
+- **O que sai do outro lado, por consulta:**
+  - `app_settings` falha → `get()` devolve vazio em tudo. O documento sai com o
+    nome **"MarineFlow"** (`:113`, o fallback literal), sem CNPJ, sem endereço,
+    sem telefone, sem dados bancários e **sem termos** — e vai assim para o
+    cliente, sem nenhum aviso na tela.
+  - `receivables` falha → `depositPaid = 0`, `receivables: []`. O cliente que já
+    pagou o sinal recebe um documento **sem registro nenhum do que pagou**.
+  - `payments` falha → o histórico de pagamentos some, e a seção que existe para
+    "mostrar o real" mostra vazio.
+- **Por que não é teórico:** é a mesma classe que derrubou o PDF inteiro em 05/08
+  e o `NOVO-lev-02` da folha de levantamento. Aqui o erro nem chega a derrubar:
+  produz um documento plausível e errado, que é pior.
+- **Consertar seria:** checar `.error` nas três e falhar com a causa, do mesmo
+  jeito que `soRes` já faz.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-17] A galeria de fotos do PDF lê uma coluna que nada escreve
+
+- **Onde:** `src/hooks/use-pdf.ts:230` contra
+  `src/components/ServiceOrderPhotos.tsx:75`.
+- **O quê:** o PDF monta a "Galeria Técnica / Evidências do Serviço"
+  (`pdf-generator.ts:1113`) a partir de `service_orders.photos` — uma coluna
+  `jsonb`. **Nada no repositório escreve nessa coluna**: procurei em `src/`, nas
+  edge functions e nas migrations. Quem sobe foto pela tela grava na **tabela**
+  `service_order_photos`, que o PDF nunca lê.
+- **Conferido no banco:** as 79 ordens têm `photos = []`, e
+  `service_order_photos` tem 0 linhas. Ninguém subiu foto ainda — então isto não
+  está errado hoje; está errado **a partir da primeira foto**, e do jeito mais
+  difícil de perceber: a opção existe, a seção existe, e a galeria sai vazia.
+- **E os dois leitores da coluna discordam da forma:** `use-pdf.ts:230` faz
+  `photos.map(p => p.url)` (objetos), enquanto `PublicServiceOrderView.tsx:604`
+  faz `photos.map((url: string) => …)` (strings) e o próprio
+  `pdf-generator.ts:1117` espera string. Se a coluna algum dia for preenchida com
+  strings, o PDF renderiza `<img src="undefined">`.
+- **Consertar seria:** o PDF ler `service_order_photos` (a fonte real), e decidir
+  o destino da coluna `photos` — usar ou remover, não as duas coisas pela metade.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-18] Com mais de um levantamento fechado, o PDF escolhe um qualquer
+
+- **Onde:** `src/hooks/use-pdf.ts:25` — `lista.find((s) => s?.status === 'closed')`.
+- **O quê:** pega o **primeiro** fechado na ordem em que o PostgREST devolveu o
+  embed, e o embed não pede ordenação nenhuma. Sem `order by`, a ordem não é
+  garantida entre execuções.
+- **Por que passou a ser plausível:** até 15/08 o levantamento era de um serviço;
+  desde `compose_survey_for_order` ele é **da ordem**, e uma visita de avaliação
+  que gera um segundo levantamento na mesma ordem é o fluxo desenhado. Dois
+  fechados na mesma ordem deixa de ser exceção.
+- **Estado hoje:** latente — há uma única ordem com levantamento no banco, e ele
+  não está fechado.
+- **Consertar seria:** ordenar por `answered_at desc` no embed e pegar o mais
+  recente, ou respeitar `service_orders.survey_id`, que existe justamente para
+  apontar o levantamento principal.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-19] A folha impressa e a tela de lançamento montam perguntas diferentes
+
+- **Onde:** `src/lib/survey-sheet.ts:436-440` contra
+  `src/hooks/use-service-survey.ts:97` (`useSurveyQuestions`), usada por
+  `SurveySheetEntryDialog.tsx:39`.
+- **O quê:** são **duas composições distintas** para o mesmo levantamento.
+  - A folha, quando há ordem, chama `compose_survey_for_order` com
+    **`p_limit: 14`** — rodízio entre TODOS os sistemas e verbos das linhas da
+    ordem (elétrico, gás, refrigeração).
+  - A tela que lança a folha de volta chama `compose_survey_for_service`, que
+    tem **`limit 9` fixo no SQL** e só olha UM serviço.
+- **O que acontece com o papel preenchido:** o técnico volta com até 14 respostas
+  e encontra na tela uma lista mais curta e **de outro conjunto**. As perguntas
+  que ele respondeu no papel e não estão na tela **não têm onde ser lançadas** —
+  a medida foi tomada e se perde. E as que estão na tela e não estavam no papel
+  ficam em branco, e o código as grava com
+  `skipped_reason: 'em branco na folha de campo'`
+  (`SurveySheetEntryDialog.tsx:85`) — ou seja, registra como "não deu para
+  verificar" uma pergunta que **nunca foi feita ao técnico**.
+- **Por que isso é o pior tipo de erro aqui:** o levantamento inteiro existe para
+  que o orçamento não seja chutado. Uma resposta perdida vira preço faltando; uma
+  "não verificada" falsa vira contingência cobrada por algo que estava resolvido.
+  Os dois estragos são silenciosos.
+- **O `SurveySheetEntryDialog` já recebe `serviceOrderId`** (`:29`) e o usa para
+  criar o levantamento — só não o usa para montar as perguntas.
+- **Consertar seria:** a tela de lançamento usar a mesma composição da folha,
+  com o mesmo limite. Melhor ainda: a folha gravar quais `template_id` imprimiu,
+  e a tela lançar exatamente aqueles — o papel e a tela deixam de poder divergir.
+- **Não corrigido:** regra 3, e a escolha entre "mesma RPC" e "folha carimba o
+  conjunto" é decisão de desenho.
+
+### [NOVO-lev-20] A frase pronta afirma a bitola mesmo quando o cálculo não fechou
+
+- **Onde:** `supabase/functions/_shared/ai/tools/survey-ops.ts:400-402`
+  (`como_dizer`) e `dc_cable_sizing` (migration `20260808100000`), no
+  `mm2_minimo`.
+- **O quê:** `mm2_minimo` é `greatest(coalesce(v_drop,0), coalesce(v_amp,0))`. Com
+  a ampacidade indisponível, `v_amp` é nulo, o `coalesce` o transforma em **0**, e
+  o máximo passa a ser só a queda de tensão — **a metade que sobrou vira o
+  resultado**. Em seguida, `como_dizer` é montado com `r?.mm2_minimo ? …`, **sem
+  olhar `pronto`**, e entrega ao modelo uma frase fechada.
+- **Provado rodando a função em produção** (200 A, 1 m de trecho, 12 V, 10% de
+  queda, isolação 105 °C, em casa de máquinas, feixe de 4 condutores):
+  - `pronto: false`, `mm2_por_ampacidade: null` — nenhuma bitola cadastrada
+    atende com o derating.
+  - `mm2_minimo: **5.96**`.
+  - `como_dizer` sai como: *"Para 200 A neste trecho, mantendo 10% de queda, o
+    cabo precisa de no mínimo 5.96 mm²."*
+- **Por que importa:** é ~6 mm² para 200 A. A `instrucao` logo abaixo manda
+  "NUNCA apresente a bitola como fechada se 'pronto' for false" — mas a frase
+  pronta já foi entregue, e frase pronta ganha de instrução. O módulo inteiro foi
+  escrito com o princípio "meia conta nunca é apresentada como inteira"
+  (comentário da própria migration), e este é o ponto em que ele é violado.
+- **Consertar seria:** `mm2_minimo` só existir quando os dois critérios existirem
+  (ou vir acompanhado de `mm2_minimo_parcial`, com outro nome), e `como_dizer`
+  ser gerado apenas com `pronto === true` — nos outros casos, dizer o que falta.
+- **Não corrigido:** regra 3. **É o achado mais grave da noite: erra para menos
+  em dimensionamento de cabo, que é risco físico.**
+
+### [NOVO-lev-21] Quatro das seis perguntas do dimensionamento estão inativas — e os padrões saem como se tivessem sido lidos
+
+- **Onde:** `survey_cable_sizing` (migration `20260815110000`), no
+  `jsonb_build_object('lido_do_levantamento', …)`.
+- **Conferido no banco, hoje:** dos seis papéis que a função lê, só dois têm
+  pergunta ativa —
+  `corrente` ("Qual a corrente máxima do circuito, em ampères?") e
+  `comprimento` ("Qual a distância do banco de baterias até o inversor?").
+  **`tensao`, `criticidade`, `casa_maquinas` e `feixe` têm zero perguntas ativas**
+  (uma cadastrada cada, todas aguardando aprovação).
+- **O quê:** sem resposta, a função usa os padrões — 12 V, 3% de queda, fora de
+  casa de máquinas, 1 condutor no feixe — e os devolve **dentro de uma chave
+  chamada `lido_do_levantamento`**. Nada disso foi lido de levantamento nenhum.
+- **A direção do erro não é a mesma nos quatro:**
+  - `tensao = 12` e `queda = 3%` erram para MAIS (cabo mais grosso que o
+    necessário num sistema de 24/48 V). Custa dinheiro, não segurança.
+  - **`casa_maquinas = false` e `feixe = 1` erram para MENOS**: o derating de 0,7
+    da casa de máquinas e o de feixe simplesmente não são aplicados, porque a
+    pergunta que os acionaria não existe para ser respondida.
+- **O tamanho do erro, medido:** 200 A, 1 m, 12 V, 10%. Como o sistema responde
+  hoje: `mm2_por_ampacidade = 35`, `pronto = true`. Com casa de máquinas e feixe
+  de 4: `mm2_por_ampacidade = null` — **nenhuma das cinco bitolas cadastradas
+  atende**. O sistema devolve 35 mm² com `pronto: true` para um circuito cuja
+  resposta honesta é "não sei".
+- **Consertar seria:** aprovar as quatro perguntas (elas já existem, estão entre
+  as 18 pendentes) e, enquanto não houver resposta, a função declarar o padrão
+  como PADRÃO — chave `presumido`, não `lido_do_levantamento` — e derrubar
+  `pronto` quando o que falta é derating.
+- **Não corrigido:** regra 3. Ligado ao `NOVO-lev-20`: um produz o número errado,
+  o outro o apresenta como certo.
+
+### [NOVO-lev-22] A transcrição do papel não passa pela conferência de grandeza
+
+- **Onde:** `src/components/service-orders/SurveySheetEntryDialog.tsx` — não
+  importa `checkMeasure`; `SurveyPanel.tsx:112` importa e usa.
+- **O quê:** a tela viva confere cada resposta de grandeza contra a unidade e a
+  faixa esperadas e avisa "confira a vírgula e a unidade". A tela que transcreve
+  a folha **não faz nenhuma conferência** — é um `<Input>` de texto puro.
+- **Por que é justamente ali que faz falta:** na tela viva quem digita é quem
+  acabou de medir e sabe o valor. Na transcrição, quem digita está **lendo a
+  letra de outra pessoa** dias depois, e é aí que 2,5 vira 25 sem ninguém notar.
+  A rede existe, está testada com 14 casos, e não cobre o caminho de maior risco.
+- **Também não grava `numeric_value` nem `answer_unit`** — o número volta a ser
+  garimpado do texto. Isso está previsto no comentário da migration
+  `20260815110000` e é aceitável; o que não é aceitável é a ausência do aviso.
+- **Consertar seria:** chamar `checkMeasure` por campo com `expectedUnit`/
+  `minExpected`/`maxExpected` da pergunta, mostrar o aviso abaixo do campo (sem
+  bloquear) e gravar `numeric_value` quando houver um número só.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-23] Falha ao gravar as respostas deixa um levantamento órfão, e o botão cria outro
+
+- **Onde:** `src/components/service-orders/SurveySheetEntryDialog.tsx:64-90`.
+- **O quê:** `start.mutateAsync` cria o levantamento **antes** do insert das
+  respostas. Se o insert falhar (rede, RLS, um `template_id` que saiu do ar entre
+  abrir e lançar), o `catch` mostra o erro e **o levantamento fica no banco,
+  aberto e vazio**. O diálogo continua aberto com tudo preenchido, e clicar
+  "Lançar folha" de novo cria **mais um**.
+- **Por que importa:** o levantamento vazio aparece na aba como se alguém tivesse
+  começado um; e o `NOVO-lev-18` mostra que a escolha de qual levantamento vai
+  para o PDF é por ordem não determinada — quanto mais registros soltos na mesma
+  ordem, mais fácil o documento pegar o errado.
+- **Consertar seria:** guardar o `surveyId` já criado num `ref` e reaproveitá-lo
+  na nova tentativa, ou mover os três passos para uma RPC única (o insert, o
+  fechamento e a criação numa transação só).
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-24] Corrigir a medida não corrige o número que o cálculo lê
+
+- **Onde:** `src/components/service-orders/SurveyPanel.tsx:483-490` (o botão
+  "corrigir") e `src/hooks/use-service-survey.ts:263-277` (`useAnswerSurvey`).
+- **O quê:** a correção manda só `answer: correcao.trim()`. Não manda
+  `numericValue` nem `answerUnit`. E o upsert monta o payload com spread
+  condicional — `...(input.numericValue !== undefined && !== null ? { numeric_value } : {})` —,
+  de modo que a coluna **não entra no `ON CONFLICT DO UPDATE`** e o valor antigo
+  permanece.
+- **O que acontece:** a resposta era `25` (vírgula errada, deveria ser `2,5`).
+  Gravada pela tela viva, ficou `answer_value = '25'` e `numeric_value = 25`.
+  Alguém percebe e corrige para `2,5`. Agora `answer_value = '2,5'` e
+  **`numeric_value` continua 25**. O `survey_cable_sizing` lê
+  `coalesce(numeric_value, parse_answer_number(answer_value))` — pega o 25. A
+  tela mostra a resposta certa e o dimensionamento usa a errada.
+- **Por que dói exatamente aqui:** o comentário que justifica esta UI
+  (`SurveyPanel.tsx:464-468`) diz que ela existe para não *"deixar o número
+  errado sustentando o preço"*. É a única função do botão, e é a única coisa que
+  ele não faz.
+- **E a correção também não passa por `checkMeasure`:** o aviso de "confira a
+  vírgula", que aparece na resposta original, não aparece na correção.
+- **Consertar seria:** na correção, rodar `checkMeasure` e mandar
+  `numericValue`/`answerUnit` junto — e, no hook, escrever `numeric_value: null`
+  explicitamente quando não houver número, em vez de omitir a chave. A omissão é
+  a mesma raiz do `NOVO-lev-04`.
+- **Não corrigido:** regra 3. **Aparentado ao `NOVO-lev-04` e ao `NOVO-lev-20`:
+  os três terminam em bitola calculada sobre número que ninguém confirmou.**
+
+### [NOVO-lev-25] Reabrir (ou só recarregar a página) volta para a pergunta 1 e sobrescreve o que já foi respondido
+
+- **Onde:** `src/components/service-orders/SurveyPanel.tsx:85` (`useState(0)` para
+  `idx`), `:104` (`ativo`) e `:158` (`seq: idx + 1`).
+- **O quê:** `idx` é estado local que nasce em 0 e **nunca é sincronizado com as
+  respostas que já existem**. Não há `useEffect` que o posicione em
+  `respostas.length`.
+- **Dois caminhos, o mesmo estrago:**
+  1. **Reabrir.** `useReopenSurvey` põe `status: 'draft'`, e `ativo` volta a
+     apontar para o levantamento. A tela reabre **na pergunta 1**, com o campo
+     vazio. Responder grava `seq: 1`, que pelo `onConflict: 'survey_id,seq'`
+     **sobrescreve a resposta 1 que estava lá**. Para chegar na pergunta que
+     faltava, é preciso passar por todas — apagando cada uma no caminho.
+  2. **Recarregar a página no meio.** O default de `status` em `service_surveys`
+     é `'draft'` (conferido no banco), então após um F5 `ativo` continua
+     apontando para o levantamento em curso e `idx` volta a 0. Mesma
+     sobrescrita, sem ninguém ter pedido para reabrir nada.
+- **A tela promete o contrário, com todas as letras:** o comentário em `:543-545`
+  diz *"reabrir devolve a fila de perguntas **de onde parou**, sem apagar nada do
+  que já foi respondido"*, e o toast de sucesso diz *"Levantamento reaberto — as
+  respostas foram mantidas."* Elas foram mantidas até a próxima resposta.
+- **A lista "O que foi levantado" continua mostrando tudo**, então a perda não é
+  visível como perda: a linha simplesmente muda de valor.
+- **Consertar seria:** posicionar `idx` na primeira pergunta ainda sem resposta
+  (a partir de `respostas`), e marcar as já respondidas na fila. A correção
+  completa depende do `NOVO-lev-05` — enquanto a identidade for `seq` e não
+  `template_id`, "primeira sem resposta" também é uma conta sobre posição.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-26] Reabrir não limpa a estimativa, ao contrário do que o código afirma
+
+- **Onde:** `src/hooks/use-service-survey.ts:334-347`.
+- **O quê:** o comentário diz *"A confiança e a estimativa são limpas de
+  propósito — foram um julgamento sobre um conjunto de respostas que agora vai
+  mudar"*. O `update` limpa `confidence`, `confidence_rationale` e `answered_at`.
+  **Não limpa `estimated_minutes_p50`, `estimated_minutes_p80`,
+  `contingency_pct` nem `cases_used`** — exatamente os quatro campos que formam a
+  estimativa.
+- **Por que importa:** entre reabrir e fechar de novo, o levantamento carrega uma
+  contingência carimbada por um julgamento que foi explicitamente retirado.
+  `useCloseSurvey` reescreve os quatro ao fechar, então a janela é limitada — mas
+  é justamente a janela em que alguém volta ao local e olha o orçamento.
+- **Consertar seria:** ou limpar os quatro, ou corrigir o comentário. O perigo do
+  jeito atual é que a próxima pessoa vai confiar no comentário.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-27] As fotos do levantamento vão para um bucket público
+
+- **Onde:** `src/hooks/use-service-survey.ts:234-249` (`uploadSurveyPhoto` /
+  `surveyPhotoUrl`).
+- **O quê:** o upload vai para o bucket `service-order-photos` e a URL é obtida
+  por `getPublicUrl`. **Conferido no banco: `storage.buckets.public = true`** para
+  esse bucket. Quem tiver a URL vê a imagem sem autenticação nenhuma.
+- **O que são essas fotos:** quadro elétrico, banco de baterias, interior de
+  lancha e de motorhome de cliente — tiradas dentro da propriedade dele. O
+  caminho (`surveys/<uuid>/<seq>-<timestamp>.jpg`) não é adivinhável, mas a
+  proteção é só a obscuridade do UUID: a URL vaza em qualquer link colado,
+  histórico de navegador ou print de tela.
+- **Estado:** a decisão de bucket público é anterior a esta frente (já valia para
+  as fotos de OS). O que muda é o volume e a natureza — o levantamento é o que
+  passa a produzir foto de dentro da casa/embarcação do cliente de forma
+  sistemática, e o comentário do próprio código diz que "é a foto que sustenta o
+  preço".
+- **Consertar seria:** bucket privado com URL assinada de validade curta
+  (`createSignedUrl`), como já se faz nos anexos fiscais. Muda o `surveyPhotoUrl`
+  e os dois pontos que o consomem.
+- **Não corrigido:** regra 3, e a troca de bucket precisa de decisão sobre as
+  fotos já existentes.
+
+### [NOVO-lev-28] "Costuma entrar junto" aprende com orçamento que nunca virou serviço
+
+- **Onde:** `related_materials` (migration `20260807100000`), na CTE `ordens_com` —
+  o único filtro é `sop.service_order_id <> p_service_order_id`. **Não há filtro
+  de status.**
+- **O quê:** a estatística conta qualquer ordem que tenha a peça, inclusive
+  rascunho e cancelada.
+- **Medido no banco, hoje:**
+
+  | situação | ordens | linhas de peça |
+  |---|---:|---:|
+  | rascunho (`draft`) | 31 | 118 |
+  | cancelada | 24 | 41 |
+  | executada (`completed` + `invoiced`) | 13 | 40 |
+  | em andamento (demais) | 8 | 18 |
+
+  **159 das ~217 linhas — 73% — vêm de ordens que nunca foram executadas**, e as
+  canceladas entram com o mesmo peso das concluídas.
+- **E a tela afirma o contrário:** `RelatedMaterialsPanel.tsx:95` escreve
+  *"**{juntos} de {de_total}** vez(es) que você **usou** {produto}"*. Um rascunho
+  não é um uso; uma cancelada é o oposto de um uso. O comentário da própria
+  função diz "nas outras vezes que você usou isto".
+- **Por que importa:** um orçamento que o cliente recusou por causa de um item
+  caro passa a recomendar esse item nos próximos. A sugestão fica mais forte
+  justamente quando a proposta foi rejeitada muitas vezes.
+- **Consertar seria:** restringir a `status in ('completed','invoiced')` — o
+  mesmo recorte que `create_service_cases_on_complete` usa para dizer o que
+  virou caso. Com 13 ordens executadas o `p_min_juntos = 3` fica apertado, então
+  vale rever o piso junto.
+- **Não corrigido:** regra 3, e o recorte é decisão de negócio (contar `open` ou
+  não, por exemplo).
+
+### [NOVO-lev-29] A lista de material relacionado sai em ordem de UUID
+
+- **Onde:** `related_materials`, a cláusula final
+  `order by c.sugerido, pct desc, c.juntos desc`.
+- **O quê:** `distinct on (c.sugerido)` obriga o `order by` a **começar** pela
+  chave do distinct. Dentro de cada produto a ordenação por `pct desc` funciona e
+  guarda o vínculo mais forte — que é o que o comentário promete. Mas o conjunto
+  final sai ordenado por `c.sugerido`, que é um **uuid**: a ordem de exibição é
+  aleatória.
+- **Por que importa:** a tela mostra a lista inteira sem recorte
+  (`RelatedMaterialsPanel.tsx:90`), então a sugestão de 90% de recorrência pode
+  aparecer depois da de 30%. Numa lista curta ninguém nota; é quando ela cresce
+  que a ordenação passa a ser a única coisa que a torna útil. **Também não há
+  `limit`** — tudo o que passar do piso entra na tela.
+- **Consertar seria:** embrulhar o `distinct on` numa subconsulta e ordenar por
+  fora (`select * from (…) t order by pct desc, juntos desc limit 8`).
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-30] O `limit 5` do histórico não limita nada
+
+- **Onde:** `estimate_from_cases` (migration `20260730020000`), no `select` que
+  monta `baseado_em`.
+- **O quê:** `jsonb_agg` é agregado sem `group by` — a consulta devolve **uma
+  linha só**, e o `limit 5` é aplicado depois da agregação, sobre essa linha
+  única. Ele nunca corta nada.
+- **Provado rodando em produção:**
+  `select jsonb_array_length((select coalesce(jsonb_agg(g order by g desc),'[]') from generate_series(1,40) g limit 5))`
+  devolve **40**.
+- **O que sai do outro lado:** `baseado_em` traz **todas** as execuções do
+  serviço. Os dois consumidores juntam tudo numa linha:
+  - `SurveyPanel.tsx:439` — `.join(' · ')` no rodapé da estimativa;
+  - `survey-sheet.ts:194` — a mesma junção dentro do bloco de histórico da
+    **folha impressa**, que tem altura fixa.
+  Com 40 execuções, a folha do técnico ganha um parágrafo de 40 pares
+  "OS-xxxxx 3h20" onde cabiam cinco.
+  E `useCloseSurvey` grava esse mesmo array em `service_surveys.cases_used`,
+  então a lista inteira fica guardada em cada levantamento.
+- **Estado hoje:** latente, e vale registrar por quê — **`service_cases` tem 6
+  linhas e nenhuma utilizável**: todas com `actual_minutes` nulo e
+  `unusable_reason` = "Concluída sem hora apontada". Não é defeito, é o gatilho
+  funcionando e dizendo a verdade; mas significa que a estimativa por analogia
+  nunca teve dado, e que este `limit` nunca foi exercitado.
+- **Consertar seria:** mover o corte para dentro (`from (select … order by
+  created_at desc limit 5) c`).
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-31] `parse_answer_number` continua aberta para `anon`
+
+- **Onde:** migration `20260806100000`, seção 2 — a função é criada e recebe
+  `comment on`, mas **não recebe `revoke`/`grant`**, ao contrário das outras
+  quatro funções do mesmo arquivo.
+- **Conferido no banco:** `has_function_privilege('anon', …, 'EXECUTE')` = **true**.
+  É a única função desta frente nessa situação; as outras treze estão fechadas.
+- **Exposição real: nenhuma.** É um parser de texto para número, `immutable`, sem
+  acesso a tabela — quem a chamasse como anônimo só conseguiria converter o
+  próprio texto.
+- **Por que registrar mesmo assim:** a regra está escrita na migration vizinha,
+  duas semanas depois, sobre uma função igualmente inofensiva —
+  *"aritmética pura, não expõe dado nenhum — mas função nova nasce com EXECUTE
+  para public, e deixar uma aberta ensina a deixar a próxima"*
+  (`20260808100000`, linhas 65-67). Esta é a que ficou.
+- **Consertar seria:** duas linhas de `revoke`/`grant`, no padrão das demais.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-32] O limiar de valor do levantamento é "configurável" sem ter como ser configurado — e o cast pode derrubar a função
+
+- **Onde:** `should_survey_service` (migration `20260730020000`, linha 194):
+  `coalesce((select value::numeric from public.app_settings where key = 'survey_valor_limiar'), 3000)`.
+- **Duas coisas, uma leitura:**
+  1. **A chave não existe e nada a escreve.** Conferido: `app_settings` não tem a
+     linha, e `survey_valor_limiar` aparece **uma única vez em todo o
+     repositório** — nesta migration. Não há tela, seed ou rotina que a crie. O
+     limiar é, na prática, o literal 3000; o `coalesce` é o único caminho que
+     roda.
+  2. **O cast não é protegido.** `coalesce` só cobre a ausência de linha. Se a
+     chave passar a existir com um texto que não seja numérico puro — `"3.000"`,
+     `"R$ 3000"`, ou vazio —, `value::numeric` **lança** `invalid input syntax`,
+     e como `should_survey_service` é a primeira coisa que o `SurveyPanel`
+     chama, o bloco do gatilho some para **todos os serviços**, não só para um.
+     E `app_settings` aceita insert de qualquer chave por qualquer autenticado
+     (política `app_settings_auth_insert`, sem restrição).
+- **Por que importa:** é um botão que não existe protegendo um cast que não
+  perdoa. Quem for ligar a configuração — o caminho natural é inserir a chave
+  pela tela genérica de settings — tem boa chance de digitar no formato de moeda
+  brasileiro e derrubar o painel inteiro.
+- **Consertar seria:** validar com `nullif(regexp_replace(value,'[^0-9.]','','g'),'')::numeric`
+  ou `pg_input_is_valid(value,'numeric')` (PG16+), e — se o limiar é para ser
+  configurável — criar a linha e o campo na tela de configurações.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-33] O registro do ativo entra no documento sem escapar
+
+- **Onde:** `src/lib/pdf-generator.ts:1178` —
+  `${data.vessel?.registration ? `Registro: ${data.vessel.registration}<br/>` : ''}`.
+- **O quê:** é a **única interpolação de texto vindo do cadastro que não passa
+  por `esc()`** em todo o arquivo. Varri as 1.570 linhas: todas as outras — nome
+  do cliente, do ativo, do fabricante, descrição, notas técnicas, URL de foto,
+  SKU — usam `esc()`. Esta ficou de fora, cercada de vizinhas escapadas
+  (`esc(data.vessel.name)` na linha 1175, `esc(data.vessel.manufacturer)` na
+  1177).
+- **De onde vem o valor:** `vessels.hull_id_or_registration`, texto livre digitado
+  na tela de ativos por qualquer usuário interno.
+- **Por que não é só cosmético:** `generatePDFBlob` faz `container.innerHTML =
+  html` e anexa o resultado ao `document.body` do ERP; `printPDF` escreve o mesmo
+  HTML numa janela nova. Marcação injetada no campo executa nos dois caminhos, no
+  contexto da aplicação. Um `<` sozinho já quebra o bloco do ativo.
+- **Secundário, no mesmo arquivo:** `pageWrapper(`${docTypeLabel} ${docNumber}`)`
+  (linha 1343) põe o número no `<title>` sem escapar — no corpo ele é escapado
+  (`esc(docNumber)`, linha 1348). O número da ordem é gerado pelo sistema
+  (`ORÇ-00074`), então o risco é nulo; anotado para o conserto sair completo.
+- **Consertar seria:** `esc(data.vessel.registration)`, e um teste que varra o
+  arquivo procurando interpolação de campo de cadastro sem `esc` — a mesma
+  ideia das varreduras de `.select()` e de hooks.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-34] Todo documento diz "Página 01 / 01"
+
+- **Onde:** `src/lib/pdf-generator.ts:694` (cabeçalho) e `:1338` (rodapé). Nos
+  dois, a string é literal.
+- **O quê:** o documento afirma ter uma página só, sempre — inclusive nos que
+  têm cinco. O módulo inteiro de paginação (`pdf-pagination.ts`, os espaçadores,
+  o `NOVO-lev-10` e o `NOVO-lev-11`) existe justamente porque estes documentos
+  passam de uma folha.
+- **Por que importa neste sistema em particular:** o documento é assinado pelo
+  cliente no portal e circula por WhatsApp e e-mail. Numeração de página é o que
+  permite dizer que a proposta está inteira — sem ela, ninguém percebe uma folha
+  faltando, nem na conferência interna nem do lado do cliente.
+- **Consertar seria:** no caminho de imprimir, dá para fazer com CSS
+  (`@page { @bottom-right { content: counter(page) " / " counter(pages) } }`,
+  suporte irregular) ou com contadores em elementos de rodapé repetidos. No
+  caminho de baixar, quem sabe o número de folhas é o html2pdf **depois** de
+  fatiar — o jeito honesto é escrever a numeração pelo `jsPDF` sobre o PDF
+  pronto, que a API `.toPdf().get('pdf')` já permite. Enquanto isso não existir,
+  **tirar a frase é melhor que mantê-la**: informação errada é pior que
+  informação ausente.
+- **Não corrigido:** regra 3.
+
+### [NOVO-lev-35] `itemColumnCount` nunca foi ligado, e as colunas somam 85%
+
+- **Onde:** `src/lib/pdf-visibility.ts:54` (a função) contra
+  `src/lib/pdf-generator.ts` (que não a importa).
+- **O quê, em duas partes:**
+  1. `itemColumnCount` existe, tem quatro asserções em
+     `pdf-visibility.test.ts:64-67`, e o comentário dela diz que serve para o
+     `colspan` do rodapé não desalinhar a tabela — *"o tipo de defeito que só
+     aparece no papel"*. **`pdf-generator.ts` não tem nenhum `colspan`** e nunca
+     importa a função. É helper morto, com teste dando cobertura a nada — o mesmo
+     padrão do `indivisivel` (`NOVO-lev-12`).
+  2. As larguras das colunas são literais (`:1229-1233` e `:1245-1249`):
+     55% + 15% para descrição e quantidade, mais 15% por coluna de preço. Com as
+     duas colunas de preço dá 100%; **com só uma marcada no diálogo, dá 85%** —
+     a tabela sai estreita ou o navegador redistribui a sobra a seu critério, e o
+     resultado difere entre imprimir (layout do navegador) e baixar (rasterizado).
+- **Por que registrar junto:** é a mesma peça de contabilidade da tabela. Quem
+  for ligar a função vai querer que a largura saia dela também.
+- **Consertar seria:** derivar largura e `colspan` de `itemColumnCount`, ou
+  remover a função e o teste.
+- **Não corrigido:** regra 3.
+
+---
+
+## Fechamento da varredura noturna — 15/08 23:33 a 16/08 07:00
+
+Nove rodadas, uma área por rodada, lendo o código e — quando a resposta estava no
+banco e não no arquivo — **rodando a função contra produção**. Trinta e cinco
+achados (`NOVO-lev-01` a `NOVO-lev-35`). **Nada foi corrigido** (regra 3):
+nenhum dos achados quebra produção neste momento, e vários exigem decisão de
+desenho ou de negócio. Ao fim de cada rodada, `tsc -b` em zero e a suíte
+completa passando — 102 arquivos, 1.280 testes, em todas as nove.
+
+### O que foi coberto
+
+`survey-sheet.ts` · `survey-measure.ts` · `SurveyPanel.tsx` ·
+`SurveySheetEntryDialog.tsx` · `pdf-generator.ts` · `pdf-pagination.ts` ·
+`css-scope.ts` · `use-pdf.ts` · `use-service-survey.ts` ·
+`use-survey-material-rules.ts` · `RelatedMaterialsPanel.tsx` ·
+`PublicServiceOrderView.tsx` · as funções SQL do levantamento
+(`compose_survey_for_*`, `should_survey_service`, `estimate_from_cases`,
+`previous_survey_answers`, `related_materials`, `survey_suggested_materials`,
+`apply_survey_materials`, `survey_cable_sizing`, `dc_cable_sizing`,
+`parse_answer_number`) · a RLS de `service_surveys`, `service_survey_answers`,
+`survey_material_rules` e `dc_ampacity_ratings` · e a consistência entre a folha
+impressa e a tela de lançamento.
+
+### O que ficou de fora
+
+Não foram lidos: `buildInvoiceHTML` e o PDF de recibo (`v2/lib/receipt.ts`),
+`pdf-print.ts`, `download.ts`, `autosave-guard.ts`, `document-type.ts`, o
+download em lote e o anexo de WhatsApp, a tela de aprovação de perguntas e de
+regras de material, e `survey_question_catalog`.
+
+### Os achados por gravidade
+
+**1. Erram um número que decide material — inclusive bitola de cabo, que é risco
+físico.**
+`NOVO-lev-20` (a frase pronta afirma 5,96 mm² para 200 A com `pronto: false`) ·
+`NOVO-lev-21` (quatro das seis perguntas do dimensionamento inativas; os padrões
+saem sob a chave `lido_do_levantamento`, e os dois que erram para menos são
+justamente casa de máquinas e feixe) · `NOVO-lev-24` (corrigir a medida não
+corrige o `numeric_value`, que é o que o cálculo lê) · `NOVO-lev-04` (resposta
+marcada como "não consegui ver" continua alimentando o cálculo) ·
+`NOVO-lev-06` (material lançado pelo levantamento não mexe no total da ordem).
+
+**2. Saem da empresa errados.**
+`NOVO-lev-14` (31 orçamentos com link público baixados como "Ordem de Serviço" e
+sem validade; o portal tem uma terceira montagem do PDF) · `NOVO-lev-16` (três
+consultas sem checar erro: documento com o nome "MarineFlow", sem CNPJ, sem
+banco, sem termos, e sem o sinal já pago) · `NOVO-lev-34` ("Página 01 / 01" em
+documento de várias folhas) · `NOVO-lev-15` ("Baixar PDF" do portal abre a
+janela de impressão) · `NOVO-lev-10` e `NOVO-lev-11` (a paginação ainda deixa
+bloco ser cortado, e cria página quase em branco depois de tabela longa).
+
+**3. Perdem o que foi levantado.**
+`NOVO-lev-19` (a folha imprime até 14 perguntas da ordem e a tela lança 9 de um
+serviço — o que não casa se perde, e o que sobra é gravado como "não verificado"
+sem ter sido perguntado) · `NOVO-lev-25` (reabrir, ou só recarregar a página,
+volta para a pergunta 1 e sobrescreve as respostas) · `NOVO-lev-05` (o upsert
+casa por posição, não por pergunta) · `NOVO-lev-23` (falha no lançamento deixa
+levantamento órfão e o botão cria outro).
+
+**4. Sugerem mal.**
+`NOVO-lev-28` (73% da evidência de "costuma entrar junto" vem de orçamento
+rascunho ou cancelado, e a tela chama isso de "vezes que você usou") ·
+`NOVO-lev-30` (o `limit 5` do histórico não limita — a folha impressa recebe
+todas as execuções numa linha) · `NOVO-lev-29` (lista em ordem de uuid) ·
+`NOVO-lev-08` e `NOVO-lev-09` (mensagem falsa e trava de duplicata furada no
+lançamento de material) · `NOVO-lev-18` (com dois levantamentos fechados, o PDF
+pega um qualquer).
+
+**5. Erro engolido que vira mensagem errada.**
+`NOVO-lev-02` (folha vazia diz que faltam perguntas aprovadas, seja qual for a
+causa) · `NOVO-lev-07` (invalidação com chaves de cache inexistentes: o clique
+parece não ter feito nada) · `NOVO-lev-17` (a galeria de fotos lê uma coluna que
+nada escreve).
+
+**6. Higiene de segurança.**
+`NOVO-lev-27` (fotos do levantamento em bucket público) · `NOVO-lev-33` (registro
+do ativo sem `esc()`) · `NOVO-lev-32` (`value::numeric` sem validação derruba o
+painel inteiro) · `NOVO-lev-31` (`parse_answer_number` aberta para `anon`) ·
+`NOVO-lev-13` (`scopeCss` divide seletor por vírgula sem contar parênteses —
+latente).
+
+**7. Código que promete e não entrega.**
+`NOVO-lev-12` (`indivisivel`) · `NOVO-lev-35` (`itemColumnCount`) ·
+`NOVO-lev-26` (reabrir não limpa a estimativa, ao contrário do comentário) ·
+`NOVO-lev-01` (a folha diz que agrupa por sistema e não agrupa) ·
+`NOVO-lev-03` (consulta fora do `Promise.all`).
+
+### Três coisas que a varredura verificou e NÃO são defeito
+
+Anotadas para não voltarem à fila: o `@import` do Google Fonts atravessa o
+`scopeCss` intacto apesar dos `;` na URL; comentário com chave fora da posição 0
+embaralha o texto mas o navegador reinterpreta certo; e as 6 linhas de
+`service_cases` estarem todas inutilizáveis é o gatilho **funcionando** e
+dizendo a verdade ("Concluída sem hora apontada") — não há defeito ali, mas
+significa que a estimativa por analogia nunca teve dado.
+
+### O padrão que se repetiu
+
+Sete dos trinta e cinco achados são **teste ou comentário que dá confiança
+falsa**: o teste da paginação põe o bloco alto em primeiro lugar, justamente
+onde a fórmula errada acerta (`NOVO-lev-11`); o teste de unificação do PDF
+nomeia o portal público e só faz grep em `use-pdf.ts` (`NOVO-lev-14`); o
+comentário do reabrir diz que limpa a estimativa e não limpa (`NOVO-lev-26`); o
+toast diz que as respostas foram mantidas um instante antes de sobrescrevê-las
+(`NOVO-lev-25`). Vale mais como método do que como lista: **onde havia um
+comentário afirmando o comportamento, valeu a pena conferir se o código o
+cumpria** — foi o que rendeu os achados mais graves da noite.
+
+### [NOVO-lev-36] Aprovar a segunda pergunta de comprimento faz o cálculo escolher UM trecho
+
+- **Onde:** `survey_cable_sizing` (migration `20260815110000`), a leitura de
+  `comprimento`: `order by a.answered_at desc nulls last limit 1`.
+- **O quê:** hoje existe **uma** pergunta ativa com papel `comprimento` ("Qual a
+  distância do banco de baterias até o inversor?", seq 4) e **uma inativa** ("Qual
+  a distância do inversor (ou banco) até o quadro de distribuição?", seq 17,
+  também `{comprimento}`). Aprovar a segunda — que é o conserto do desdobramento
+  do ORÇ-00074, onde a pergunta pedia dois trechos e tinha um campo só — passa a
+  haver **duas respostas para o mesmo papel**, e a função pega **uma só**: a
+  respondida mais tarde.
+- **Por que isso é armadilha e não melhoria:** os dois trechos são circuitos
+  diferentes e cada um pede o seu cabo. Com `limit 1`, o dimensionamento pode sair
+  calculado sobre o trecho CURTO — o oposto do que o desdobramento pretendia
+  corrigir. E não há aviso: a função responde `pronto: true` e informa o
+  comprimento escolhido em `lido_do_levantamento.trecho_m` como se fosse o único.
+- **Consertar seria** (antes de aprovar a pergunta): dimensionar **por trecho** em
+  vez de por levantamento — a função devolver uma entrada por resposta de
+  `comprimento`, cada uma com a sua bitola. Alternativa mínima e honesta: usar
+  `max(comprimento)` e dizer explicitamente que dimensionou pelo trecho mais
+  longo.
+- **Aparentado a:** `NOVO-lev-20` e `NOVO-lev-21` — os três terminam em bitola
+  apresentada como fechada sobre premissa que ninguém confirmou.
+- **Não corrigido:** regra 3. **Descoberto ao levantar a lista de aprovações
+  pendentes para o dono — é pré-requisito da aprovação, não consequência dela.**
+
+### [NOVO-lev-37] A isolação do cabo é fixa em 105 °C — a hipótese mais generosa que existe
+
+- **Onde:** `survey_cable_sizing` (migration `20260815110000`) chama
+  `public.dc_cable_sizing(v_amps, v_len, v_volts, v_drop, **105**, …)`, e a tool
+  do agente (`supabase/functions/_shared/ai/tools/survey-ops.ts:388`) passa
+  `p_insulation_c: 105` — **literal nos dois casos**. O `input_schema` da tool
+  nem expõe o parâmetro, então não há como informar outro valor. E não existe
+  pergunta de levantamento com papel de isolação.
+- **Por que 105 °C é a hipótese perigosa:** quanto maior a temperatura da
+  isolação, maior a ampacidade admitida para a MESMA bitola. 105 °C é o topo da
+  escala da ABYC E-11 (60 / 75 / 90 / 105) — é cabo marítimo premium. Cabo de PVC
+  comum de embarcação costuma ser 75 ou 90 °C. Assumir 105 quando o cabo é 90
+  faz a tabela liberar uma bitola que o cabo real não suporta: **erra para
+  menos**, na mesma direção do `NOVO-lev-21`.
+- **E hoje isso é o único caminho possível:** `dc_ampacity_ratings` tem **5
+  linhas, todas a 105 °C** (16, 25, 35, 50 e 70 mm²). Nenhuma linha de 60, 75 ou
+  90 °C. Ou seja, mesmo que alguém passasse outra temperatura, a consulta não
+  acharia nada e devolveria `mm2_por_ampacidade: null`.
+- **Consertar seria:** cadastrar as quatro temperaturas na tabela, acrescentar a
+  isolação como pergunta de levantamento (ou como atributo do produto de cabo, que
+  é onde a informação realmente vive), e — enquanto isso não existir — assumir o
+  valor CONSERVADOR (75 °C), não o generoso, e dizer qual assumiu.
+- **Não corrigido:** regra 3. **Terceiro achado da mesma família:** `NOVO-lev-20`
+  (afirma bitola com o cálculo incompleto), `NOVO-lev-21` (derating nunca
+  aplicado) e este — os três empurram a bitola para baixo e nenhum avisa.
+
+### Lacunas de DADO desta frente (não são defeito de código)
+
+Registradas aqui porque bloqueiam a frente do mesmo jeito que um defeito, e
+porque só o dono pode preenchê-las.
+
+1. **`dc_ampacity_ratings` tem 5 de ~36 linhas.** Faltam as bitolas abaixo de
+   16 mm² (1,5 / 2,5 / 4 / 6 / 10 — iluminação, bombas, sensores), acima de
+   70 mm² (95 / 120 — banco grande, inversor de 3 kVA+) e as três outras
+   temperaturas de isolação. Fora da faixa 16–70 mm² a 105 °C, `dc_cable_sizing`
+   responde `pronto: false` e o dimensionamento não fecha. **E não há tela para
+   preencher a tabela** — só por SQL.
+2. **A única regra de material ATIVA aponta um cabo fixo.** É
+   `sempre → Cabo flexível 35 mm² - ligação da fonte 120A`, `proporcional`,
+   fator 2, folga 15%, arredondando para cima. O cálculo do COMPRIMENTO está
+   certo (ida e volta + sobra); o **produto** é o mesmo para qualquer corrente e
+   qualquer distância. **Não existe nenhuma ligação entre `dc_cable_sizing` e a
+   escolha do produto**: a função calcula a bitola, a regra escolhe o cabo, e as
+   duas nunca se falam. É o defeito original do ORÇ-00074, ainda de pé — e a
+   regra está ATIVA, ou seja, em uso.
+3. **A estimativa por analogia nunca teve dado.** 6 casos registrados, 0
+   utilizáveis: todos com `actual_minutes` nulo e `unusable_reason` = "Concluída
+   sem hora apontada". O gatilho funciona; o que falta é alguém apontar hora
+   (timer da OS ou passos do roteiro) antes de concluir.
+
+### [NOVO-fiscal-01] Um teste do espelho da NF-e fica vermelho no dia 19/08/2026 — e só nele
+
+- **Onde:** `src/test/danfe-espelho.test.ts:91-96`, contra
+  `src/lib/danfe-espelho.ts:153-154`.
+- **O quê:** o teste "formata o vencimento sem deslocar o dia (bug clássico de
+  fuso)" faz três asserções sobre o HTML: contém `20/08/2026`, contém
+  `20/09/2026`, e **não** contém `19/08/2026` — esta última sendo a guarda
+  contra a data escorregar um dia para trás por fuso horário.
+- **Por que quebrou hoje:** o espelho imprime a data de EMISSÃO com
+  `(opts.generatedAt ?? new Date()).toLocaleDateString('pt-BR')`. O teste não
+  passa `generatedAt`, então sai a data de hoje. Hoje é **19/08/2026** — o mesmo
+  literal da guarda. A asserção dispara sobre a data de emissão, não sobre o
+  vencimento.
+- **O código está certo.** O vencimento continua saindo `20/08/2026` e
+  `20/09/2026`, como as duas primeiras asserções confirmam — elas passam. É o
+  teste que colide consigo mesmo, e só neste dia: amanhã ele volta ao verde
+  sozinho, sem ninguém mexer em nada.
+- **Por que importa mesmo assim:** um teste que fica vermelho por causa do
+  calendário ensina a ignorar teste vermelho. E ele já tem a saída pronta —
+  `buildEspelhoHtml` aceita `opts.generatedAt` justamente para ser determinístico.
+- **Consertar seria:** passar `generatedAt: new Date('2026-01-15T12:00:00')` (ou
+  qualquer data fixa longe das do vencimento) no `makePayload` deste teste.
+- **Não corrigido:** regra 3 (é da frente fiscal, fora do escopo desta tarefa) e
+  regra 5 (alterar teste exige tarefa dedicada). Encontrado ao rodar a suíte
+  depois das migrations do dimensionamento de cabo — as migrations não tocam em
+  `src/`, e as outras 1.279 asserções passaram.
+
+### [NOVO-lev-38] O registro manual de migration engole colisão de versão em silêncio
+
+- **Onde:** a receita da **regra 1** do `CLAUDE.md` deste repositório:
+  `insert into supabase_migrations.schema_migrations (version, name)
+   values ('<data>', '<nome>') on conflict (version) do nothing;`
+- **O quê:** o `on conflict (version) do nothing` existe para tornar o comando
+  repetível. Só que ele **também** silencia o caso em que a versão já pertence a
+  OUTRA migration: o insert não grava nada, não devolve erro, e quem rodou
+  entende que registrou.
+- **Aconteceu nesta sessão, em produção.** Escolhi `20260818100000` para a
+  migration de ampacidade e apliquei o SQL. A versão já era de
+  `nfse_confirmacao_contadora`, de outra sessão que trabalhou na frente fiscal no
+  mesmo dia — e que registrou três versões seguidas (10h, 11h e 12h). O SQL rodou,
+  o registro não, e o arquivo teria virado o **115º sem versão registrada** —
+  exatamente a deriva que a regra 1 existe para conter. Só apareceu porque fui
+  conferir o registro depois; a receita não pede essa conferência.
+- **Por que é fácil repetir:** o repositório é editado por várias sessões ao
+  mesmo tempo, e todas carimbam a data de hoje com hora redonda. Colidir em
+  `AAAAMMDD100000` é o caso comum, não o raro.
+- **Consertar seria:** trocar a receita da regra 1 por duas etapas — conferir se a
+  versão está livre ANTES (`select ... where version = '<data>'`), e conferir o
+  registro DEPOIS. Ou remover o `on conflict`, deixando a colisão estourar como
+  erro, que é o que ela é.
+- **Não corrigido:** alterar o `CLAUDE.md` do repositório é decisão que vale para
+  todas as sessões e não cabe de passagem.
+
+### [NOVO-lev-39] A fila noturna mente sobre o estado dos próprios itens
+
+- **Onde:** `audit/fila-noturna.md`, o aviso em destaque no topo.
+- **O quê:** o arquivo abre com um bloco dizendo que os itens 1, 2 e 3
+  (`NOVO-017`, `NOVO-024`, `NOVO-009`) **“JÁ TÊM CORREÇÃO PRONTA, aguardando
+  integração”**, em `session/noturno-20260811`, fora da `main`, e instruindo o
+  próximo turno a começar pelo item 4.
+- **A verdade, conferida hoje:** os três commits (`e0a7c85`, `070d988`,
+  `d16da5b`) **são ancestrais de `origin/main`** —
+  `git merge-base --is-ancestor origin/session/noturno-20260811 origin/main`
+  responde verdadeiro. Está tudo integrado há dias. O aviso é de 12/08 e nunca
+  foi movido.
+- **Por que importa mais do que parece:** o próprio arquivo declara a regra —
+  *“Editar este arquivo é como a fila evolui. Item concluído: mover para
+  Concluídos com o commit.”* Quem integrou não voltou. E o aviso não é passivo:
+  ele **manda** o próximo turno pular os três, e alerta contra “dois diffs
+  concorrentes para o mesmo defeito”. Uma sessão que confiasse nele gastaria o
+  turno num inventário errado, ou repetiria trabalho para conferir.
+- **Aconteceu comigo, nesta sessão:** reportei ao dono que havia “três correções
+  prontas paradas há oito dias”, com essa ênfase, porque li o aviso e o repassei.
+  Só descobri o contrário ao ir integrar.
+- **Consertar seria:** mover os três para “Concluídos” com o commit de merge, e
+  apagar o bloco de aviso. Um minuto de edição.
+- **Não corrigido:** a fila é o instrumento de outra frente (o `/modo-noturno`), e
+  mexer no estado dela por fora, no meio do trabalho de outra sessão, é como o
+  aviso ficou errado em primeiro lugar.
+## NOVO-020 — O sistema de aprendizado do agente nunca funcionou uma única vez
 ## NOVO-agente-01 — O sistema de aprendizado do agente nunca funcionou uma única vez
 
 > **Renumerado em 18/08/2026.** Nasceu como `NOVO-020` (commit `f351b36`), mas esse ID já
@@ -748,6 +1821,120 @@ cada uma vira tarefa própria, por ordem do dono.
   seleção de linhas por código; o caminho hoje é a NFS-e avulsa por grupo. **Sugestão**:
   aceitar `service_line_ids` na ponte e diferenciar a dedup por código.
 
+### [NOVO-lev-40] Os termos nunca chegam ao cliente — nem na tela do portal, nem no PDF, nem no hash da assinatura
+
+- **Onde:** a política `anon_public_settings_whitelist` em `app_settings`, contra
+  `src/pages/PublicServiceOrderView.tsx` (`termsText`, `:156`) e
+  `src/hooks/use-pdf.ts` (o campo `terms`).
+- **O quê:** o portal monta os termos a partir de cinco chaves —
+  `terms_general`, `terms_warranty`, `terms_cancellation`, `terms_delivery`,
+  `terms_responsibilities`. A whitelist do `anon` em `app_settings` libera
+  `public_view_%` e uma lista nominal de 25 chaves de empresa e banco.
+  **Nenhuma das cinco está nela.**
+- **Provado com `set role anon`:** as cinco chaves existem no banco; o `anon`
+  enxerga **zero**. Não é erro, é a política funcionando — só que ninguém notou
+  que os termos ficaram do lado de fora.
+- **É REGRESSÃO, e dá para datar.** A whitelist nasceu em
+  `20260723080000_app_settings_anon_whitelist_rls.sql` (S1/A1+A2 do plano de
+  otimização, 22–23/07/2026), trocando "o `anon` lê a tabela inteira" por uma
+  lista nominal de 25 chaves. O endurecimento estava certo; as cinco de termos
+  simplesmente não entraram na lista. As assinaturas provam a data:
+
+  | assinatura | quando | termos guardados |
+  |---|---|---|
+  | validação técnica de staging | 22/05/2026 | **843 caracteres** |
+  | Rodrigo — cliente real | 29/07/2026 | **nenhum** |
+
+  Antes da whitelist os termos chegavam. Seis dias depois dela, o único cliente
+  real que assinou pelo portal aceitou um documento sem eles — e o
+  `accepted_terms_snapshot` da assinatura dele está vazio, então não há registro
+  do que ele aceitou.
+- **O que isso produz, em três lugares:**
+  1. **A tela do portal** renderiza os termos sob `show.terms && termsText`.
+     `public_view_show_terms` está **`true`** no banco — o dono ligou —, e a
+     seção nunca aparece, porque o texto vem vazio.
+  2. **O PDF que o cliente baixa** sai sem termos, pela mesma razão.
+  3. **O hash do documento assinado.** `computeDocumentHash(order, services,
+     termsText)` recebe o texto VAZIO no portal. Se o hash existe para provar o
+     que foi assinado, ele está provando um documento sem os termos que a empresa
+     acha que estão valendo.
+- **Por que importa mais que os outros:** os demais achados desta frente erram
+  número ou aparência. Este é contratual — garantia, cancelamento, prazo de
+  entrega e responsabilidades são exatamente o que se discute quando algo dá
+  errado, e o cliente assinou sem nunca tê-los visto.
+- **Não é regressão da unificação do PDF:** o portal já se comportava assim antes,
+  e a montagem única preserva o comportamento. Apareceu porque, ao ligar
+  `showTerms` ao toggle do dono, fui conferir se havia texto para mostrar.
+- **Consertar seria:** acrescentar as cinco chaves à whitelist do `anon` — são
+  texto que a empresa já publica junto da proposta, não há segredo nelas. Mexer
+  em política de `anon` é decisão de segurança, então fica registrado e não
+  aplicado. Depois disso vale conferir se o hash de assinaturas já colhidas
+  precisa ser recalculado ou anotado.
+- **Não corrigido:** regra 3, e a alteração é numa política de RLS de `anon`.
+
+### [NOVO-lev-41] A lista de orçamentos LEGADA ainda manda um link morto por WhatsApp
+
+- **Onde:** `src/pages/QuoteList.tsx:172`, dentro de `handleSendWhatsApp`.
+- **O quê:** o link é montado como
+  `${origin}/public/service-order/${share_token}`. **Essa rota não existe.**
+  A única rota pública registrada é `/view/:token` (`src/App.tsx:157`), e há um
+  curinga `path="*"` que leva ao `NotFound` — então o cliente que clica recebe a
+  página de "não encontrado".
+- **E não é um botão de copiar:** é o disparo de WhatsApp. A mensagem sai pronta
+  ("segue o link do seu Orçamento ORÇ-000XX: …") e o link vai quebrado junto.
+- **Alguém já sabia, e corrigiu só um lado.** `src/v2/pages/OrdersListV2.tsx:53`
+  e `:327` documentam a correção: *"o link wa.me de orçamentos usava
+  /public/service-order/ … quebrado que a QuoteList v1 enviava ao cliente"*. A
+  V2 foi corrigida; a V1 ficou como estava.
+- **Alcance real, medido:** o menu lateral aponta para `/v2/quotes`, e a rota
+  `/quotes` passa por `LegadoOuV2` — a tela V1 só aparece para quem optou pelo
+  legado ou digitou o caminho. **Não é o caminho do dia a dia**, e por isso o
+  defeito sobreviveu tanto tempo.
+- **Consertar seria:** uma linha (`/view/`). Mas mexer em tela legada esbarra na
+  decisão de data de corte das 19 telas antigas (`MF-AUD-037`), que está aberta:
+  se o corte estiver próximo, o certo é apagar a tela, não emendá-la.
+- **Não corrigido:** regra 3, e a correção depende da decisão do corte.
+
+### [NOVO-lev-42] O domínio que o cliente recebe serve um build morto — TODO link público está quebrado
+
+- **Onde:** o domínio `hbrmarine.online`, que é o valor de
+  `app_settings.app_public_url` e portanto o endereço de todo link de orçamento
+  que o sistema manda ao cliente.
+- **O sintoma:** abrir qualquer `/view/<token>` mostra **"Documento indisponível
+  — TypeError: Failed to fetch"**. Não é RLS, não é token: é erro de REDE, antes
+  de qualquer regra ser avaliada.
+- **A causa, medida:**
+
+  | o quê | aponta para | estado |
+  |---|---|---|
+  | `hbrmarine.online` (bundle `index-Bhp72O6g.js`) | `zssewfqhmrlagqbfqsmb.supabase.co` | **não resolve** (curl exit 6) |
+  | deploy Vercel mais recente (`index-DOUZwxrm.js`) | `okurngvcodmljjicopdp.supabase.co` | vivo |
+
+  São **builds diferentes**. O domínio serve um build antigo, de antes da troca
+  de projeto Supabase, e o projeto daquele build **não existe mais** — o
+  navegador nem chega a fazer a requisição.
+
+- **E não é a Vercel que serve o domínio.** `curl -I hbrmarine.online` responde
+  `Server: cloudflare`; o deploy da Vercel responde `Server: Vercel` com
+  `X-Vercel-Id`. A conta da Vercel tem **um único projeto**, e os deploys de
+  produção estão saindo normalmente (o último é de hoje, da `main`). Ou seja: o
+  `.online` está sendo servido por outro caminho — Cloudflare Pages ou túnel —
+  preso a um build velho.
+- **O alcance:** os 31 orçamentos com link público, mais todos os já enviados por
+  WhatsApp desde a troca de projeto. Nenhum cliente conseguiu abrir nenhum. O
+  ERP não sofre porque quem trabalha nele entra por outro endereço.
+- **Por que ninguém viu:** o link sai do sistema e a falha acontece do lado do
+  cliente. Quem não abre um orçamento pelo link — e ninguém de dentro abre —
+  nunca encontra o erro. É o mesmo cego dos termos (`NOVO-lev-40`): defeito que
+  só existe fora da empresa.
+- **Existe caminho vivo hoje:** `https://marineflow-erp.vercel.app` responde 200
+  e o bundle dele aponta para o projeto certo. Serve de endereço provisório.
+- **Consertar seria:** apontar o `.online` para o deploy atual da Vercel (domínio
+  na Vercel, ou o Cloudflare como proxy do deploy certo em vez de servir build
+  próprio). Enquanto isso não acontece, trocar `app_public_url` faz os links
+  NOVOS já saírem funcionando — os já enviados continuam mortos.
+- **Não corrigido:** é infraestrutura (DNS/hospedagem), fora do alcance desta
+  sessão, e trocar `app_public_url` muda o endereço da marca — decisão do dono.
 ## Resoluções da frente NFS-e (19/08/2026)
 
 - **NOVO-nfse-01 RESOLVIDO**: `20260815100000_grandeza_estruturada.sql` renomeada para

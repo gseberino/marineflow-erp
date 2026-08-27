@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import {
   resolveServiceFiscal,
+  resolveLineFiscal,
   semCodigoFiscal,
   type ServiceFiscalVerbDefaults,
 } from "../../supabase/functions/_shared/fiscal/service-fiscal";
@@ -198,5 +199,79 @@ describe("resolveServiceFiscal", () => {
     const r = resolveServiceFiscal({ national_tax_code: "" }, verbo);
     expect(r.nationalTaxCode).toBe("");
     expect(semCodigoFiscal(r)).toBe(true); // vazio não emite nota
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// resolveLineFiscal — o TERCEIRO nível, que só existe para a LINHA da ordem
+//
+// A linha digitada à mão não tem `service_id`: não há cadastro de catálogo onde
+// o fiscal possa morar. Ela ganhou `fiscal_verb` própria, e é aqui que entra.
+//
+// NÃO há espelho em SQL desta função, de propósito — `resolve_service_fiscal` e
+// a view respondem POR SERVIÇO, e linha não cabe nelas. Quem precisa do fiscal
+// da linha é a emissão, e a emissão roda este TypeScript.
+// ═══════════════════════════════════════════════════════════════════════════
+describe("resolveLineFiscal — a linha é fallback, nunca override", () => {
+  const verboDoServico: ServiceFiscalVerbDefaults = {
+    default_national_tax_code: "140101",
+    default_service_code: "14.01",
+    default_cnae: "3317102",
+    default_iss_rate: 3,
+  };
+  const verboDaLinha: ServiceFiscalVerbDefaults = {
+    default_national_tax_code: "140601",
+    default_service_code: "14.06",
+    default_cnae: "9999999",
+    default_iss_rate: 5,
+  };
+
+  // A REGRA QUE MAIS IMPORTA. Inverter isto faria um verbo escolhido às pressas
+  // na tela de emissão revogar o que a contabilidade cadastrou à mão — o mesmo
+  // princípio que o `toEqual` dos COALESCE protege lá em cima.
+  it("cadastro PRÓPRIO do serviço vence o verbo da linha", () => {
+    const r = resolveLineFiscal({ national_tax_code: "140601", cnae: "4321500" }, null, verboDaLinha);
+    expect(r.nationalTaxCode).toBe("140601");
+    expect(r.cnae).toBe("4321500");
+    expect(r.codeSource).toBe("proprio");
+  });
+
+  it("verbo DO SERVIÇO vence o verbo da linha", () => {
+    const r = resolveLineFiscal({}, verboDoServico, verboDaLinha);
+    expect(r.nationalTaxCode).toBe("140101");
+    expect(r.issRate).toBe(3);
+    expect(r.codeSource).toBe("verbo");
+  });
+
+  // O caso que a mudança existe para resolver: linha SEM catálogo nenhum.
+  it("sem catálogo, a linha resolve pelo verbo dela e diz de onde veio", () => {
+    const r = resolveLineFiscal(null, null, verboDaLinha);
+    expect(r.nationalTaxCode).toBe("140601");
+    expect(r.serviceCode).toBe("14.06");
+    expect(r.cnae).toBe("9999999");
+    expect(r.issRate).toBe(5);
+    expect(r.codeSource).toBe("linha");
+    expect(semCodigoFiscal(r)).toBe(false);
+  });
+
+  // Sem verbo na linha o comportamento é EXATAMENTE o de antes — é isto que
+  // garante que nenhuma OS que já emitia mude de resultado.
+  it("sem verbo na linha, o resultado é idêntico ao de dois níveis", () => {
+    const antes = resolveServiceFiscal({}, verboDoServico);
+    const agora = resolveLineFiscal({}, verboDoServico, null);
+    expect(agora).toEqual(antes);
+
+    const pendenteAntes = resolveServiceFiscal({}, null);
+    const pendenteAgora = resolveLineFiscal({}, null, null);
+    expect(pendenteAgora).toEqual(pendenteAntes);
+    expect(semCodigoFiscal(pendenteAgora)).toBe(true);
+  });
+
+  // Verbo da linha vazio (o estado em que os dez nasceram) não inventa código.
+  it("verbo da linha sem código não tira ninguém da pendência", () => {
+    const r = resolveLineFiscal({}, null, { default_national_tax_code: null, default_cnae: null });
+    expect(r.nationalTaxCode).toBeNull();
+    expect(r.codeSource).toBe("nenhum");
+    expect(semCodigoFiscal(r)).toBe(true);
   });
 });

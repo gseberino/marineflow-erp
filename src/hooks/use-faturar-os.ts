@@ -17,8 +17,16 @@ export interface PreflightDocumento {
   details?: {
     servicos_sem_cadastro?: string[];
     codigos_encontrados?: string[];
-    /** Acionável: abre o cadastro do serviço no popup. service_id null = linha avulsa. */
-    servicos_pendentes?: Array<{ service_id: string | null; name: string }>;
+    /**
+     * Acionável nos DOIS casos:
+     *  · `service_id` → abre o cadastro do serviço no popup;
+     *  · `service_id` null (linha digitada à mão) → `line_id` deixa gravar o
+     *    verbo fiscal na PRÓPRIA LINHA, sem sair do assistente.
+     *
+     * `line_id` é opcional porque o servidor antigo não o mandava — uma tela
+     * nova contra um edge não deployado deve degradar, não quebrar.
+     */
+    servicos_pendentes?: Array<{ service_id: string | null; line_id?: string | null; name: string }>;
     /** Acionável: abre o cadastro do produto no popup (falta NCM etc.). */
     produtos_pendentes?: Array<{ product_id: string; name: string; faltas: string[] }>;
   } | null;
@@ -70,6 +78,38 @@ export function useBillingPreflight(serviceOrderId: string | null, enabled: bool
         service_order_id: serviceOrderId,
       });
       return r.data;
+    },
+  });
+}
+
+/**
+ * Grava o verbo fiscal na LINHA da ordem — a saída da linha digitada à mão.
+ *
+ * A linha sem `service_id` não tem cadastro de catálogo onde o fiscal possa
+ * morar. Antes disso, a tela de emissão só sabia dizer "linha avulsa — vincule
+ * ao catálogo na OS", e vincular não existia em lugar nenhum: 33 linhas em 10
+ * ordens presas, R$ 2.525 sem virar nota.
+ *
+ * Escrita CIRÚRGICA, de propósito: só esta coluna, por `line_id`. A tabela tem
+ * seis caminhos de INSERT e sete de UPDATE, cada um com a sua lista explícita de
+ * campos — foi assim que `warranty_months` e `warranty_days` morreram, gravados
+ * por um caminho e ignorados pelos outros. Uma coluna que só esta mutação toca
+ * não entra nessa fila.
+ */
+export function useSetLineFiscalVerb() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ lineId, fiscalVerb }: { lineId: string; fiscalVerb: string | null }) => {
+      const { error } = await supabase
+        .from('service_order_services')
+        .update({ fiscal_verb: fiscalVerb })
+        .eq('id', lineId);
+      if (error) throw error;
+    },
+    // O pré-voo é o que decide se a nota sai: revalidar é o ponto todo da ação.
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['billing-preflight'] });
+      qc.invalidateQueries({ queryKey: ['so-services'] });
     },
   });
 }

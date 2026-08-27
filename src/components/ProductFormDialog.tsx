@@ -489,6 +489,55 @@ export function ProductFormDialog({ open, onOpenChange, product, onSaved }: Prop
               <Label>Garantia Padrão (dias)</Label>
               <Input type="number" min="0" value={(form as any).default_warranty_days ?? 0} onChange={e => set('default_warranty_days', Number(e.target.value))} />
             </div>
+            {/* Cabo de potência CC.
+                Estes dois campos são o que permite o dimensionamento escolher o
+                cabo pela bitola calculada, em vez de a regra de material apontar
+                um produto fixo — que foi o defeito do ORÇ-00074. Cabo só entra na
+                escolha com OS DOIS preenchidos: sem a isolação não há como saber
+                a corrente admissível. Produto que não é cabo de um condutor
+                deixa os dois em branco e nada muda para ele. */}
+            <div className="col-span-2 space-y-2 rounded-md border border-dashed p-3">
+              <div>
+                <p className="text-sm font-medium">Cabo de potência CC</p>
+                <p className="text-xs text-muted-foreground">
+                  Só para cabo de <strong>um condutor</strong> vendido por metro. Preenchidos os
+                  dois, este cabo passa a ser candidato quando o levantamento dimensionar um
+                  circuito. Em branco, o produto segue como qualquer outro.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Seção do condutor (mm²)</Label>
+                  <Input
+                    type="number" min="0" step="0.01" inputMode="decimal" placeholder="ex.: 35"
+                    value={form.conductor_mm2 ?? ''}
+                    onChange={e => set('conductor_mm2', e.target.value === '' ? null : Number(e.target.value))}
+                  />
+                </div>
+                <div>
+                  <Label>Isolação</Label>
+                  <Select
+                    value={form.conductor_insulation_c ? String(form.conductor_insulation_c) : 'nao_declarada'}
+                    onValueChange={v => set('conductor_insulation_c', v === 'nao_declarada' ? null : Number(v))}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="nao_declarada">Não declarada</SelectItem>
+                      <SelectItem value="75">75 °C</SelectItem>
+                      <SelectItem value="90">90 °C</SelectItem>
+                      <SelectItem value="105">105 °C</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              {/* A política existe para não se deduzir a isolação pelo nome do
+                  produto — errar para cima libera bitola que o cabo não aguenta. */}
+              <p className="text-xs text-muted-foreground">
+                Política da HBR: <strong>90 °C</strong> até 16 mm², <strong>105 °C</strong> a partir
+                de 25 mm². Fora dessa faixa, confira a especificação do fabricante em vez de deduzir.
+              </p>
+            </div>
+
             <div className="col-span-2">
               <Label>{t.common.notes}</Label>
               <Textarea value={form.notes ?? ''} onChange={e => set('notes', e.target.value)} />

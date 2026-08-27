@@ -32,8 +32,13 @@ export interface ServiceFiscalVerbDefaults {
   default_iss_withheld?: boolean | null;
 }
 
-/** De onde veio o código de tributação que vai na nota. */
-export type FiscalCodeSource = "proprio" | "verbo" | "nenhum";
+/**
+ * De onde veio o código de tributação que vai na nota.
+ *
+ * `linha` é o nível que `resolveLineFiscal` acrescenta, e só existe para a LINHA
+ * DA ORDEM — nunca sai de `resolveServiceFiscal`, que continua de dois níveis.
+ */
+export type FiscalCodeSource = "proprio" | "verbo" | "linha" | "nenhum";
 
 export interface ResolvedServiceFiscal {
   nationalTaxCode: string | null;
@@ -95,4 +100,55 @@ export function resolveServiceFiscal(
 /** Serviço sem código efetivo não emite nota — é o que o filtro da tela chama de pendente. */
 export function semCodigoFiscal(resolved: ResolvedServiceFiscal): boolean {
   return resolved.nationalTaxCode == null || String(resolved.nationalTaxCode).trim() === "";
+}
+
+/**
+ * O fiscal EFETIVO de uma LINHA da ordem de serviço.
+ *
+ * ═══ POR QUE ESTA FUNÇÃO EXISTE ═══
+ *
+ * Uma linha digitada à mão não tem `service_id` — não existe cadastro de catálogo
+ * onde o fiscal possa morar. Eram 33 linhas assim em 10 ordens, e a emissão da
+ * NFS-e parava em "Serviço sem cadastro fiscal" sem caminho de saída: a tela
+ * mandava "vincule ao catálogo na OS", e vincular não existia em lugar nenhum.
+ *
+ * A linha ganhou `fiscal_verb` própria. Aqui ela entra na resolução.
+ *
+ * ═══ A LINHA É FALLBACK, NÃO OVERRIDE — E ISSO É DELIBERADO ═══
+ *
+ * O verbo da linha só é consultado quando o catálogo NÃO resolveu. Se o serviço
+ * tem código próprio (ou herda do verbo dele), é esse que vale.
+ *
+ * A alternativa — deixar a linha passar por cima — inverteria o princípio que o
+ * teste de paridade protege com todas as letras: "invertido, o default do verbo
+ * passaria por cima do cadastro específico, e o serviço que a contabilidade
+ * classificou à mão sairia com o código genérico da atividade, sem ninguém
+ * notar". Um verbo escolhido às pressas na tela de emissão não pode revogar o
+ * que a contadora cadastrou.
+ *
+ * Consequência prática: esta função NUNCA muda o resultado de uma linha que já
+ * emitia. Ela só dá resposta onde antes não havia nenhuma.
+ *
+ * ═══ POR QUE NÃO HÁ ESPELHO EM SQL ═══
+ *
+ * `resolve_service_fiscal` e a view `v_services_fiscal_efetivo` respondem POR
+ * SERVIÇO — linha não cabe nelas. Criar um terceiro espelho SQL sem chamador
+ * repetiria o que já existe aqui: a função SQL de hoje não é chamada por
+ * ninguém em runtime, e o teste de paridade acabou guardando o ramo morto.
+ * Quem precisa do fiscal da linha é a emissão, e a emissão roda este TypeScript.
+ */
+export function resolveLineFiscal(
+  service: ServiceFiscalInput | null | undefined,
+  serviceVerb: ServiceFiscalVerbDefaults | null | undefined,
+  lineVerb: ServiceFiscalVerbDefaults | null | undefined,
+): ResolvedServiceFiscal {
+  const doCatalogo = resolveServiceFiscal(service, serviceVerb);
+  if (!semCodigoFiscal(doCatalogo)) return doCatalogo;
+  if (!lineVerb) return doCatalogo;
+
+  // O verbo da linha resolve como qualquer verbo: sem serviço próprio na frente.
+  const daLinha = resolveServiceFiscal(null, lineVerb);
+  if (semCodigoFiscal(daLinha)) return doCatalogo;
+
+  return { ...daLinha, codeSource: "linha" };
 }
