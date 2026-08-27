@@ -219,6 +219,42 @@ Aplicar os cortes 2–7 da seção 2.4. Reduzir EXEMPLOS DE MENSAGEM de 5 pares 
 
 **Alvo combinado F1+F2:** system 20.700 → ~14.000–15.000 tokens (−30%).
 
+#### Resultado real — 24/08/2026
+
+**Entregue: 425 tokens (1.529 caracteres), não os 2.000–2.500 projetados.** Quatro cortes,
+todos com `deno check` limpo e 268 testes passando:
+
+1. **`ROTEIRO: EXECUTAR PASSO A PASSO`** — a seção aparecia duas vezes. O conteúdo único (pular
+   com motivo obrigatório, reabrir, adicionar/remover/reordenar, `review_ai_step` com
+   `verdict='edited'`, achar pelo número da etapa) foi absorvido por `TÉCNICO EM CAMPO E AGENDA`,
+   que é onde o contexto de verdade está; a seção solta foi apagada.
+2. **`O QUE FALTA COMPRAR`** — repetia o passo 0 de `COTAÇÃO A FORNECEDORES`. Sobreviveu o passo 0,
+   que já estava no fluxo certo, acrescido do que só a seção solta dizia (status `on_order` e
+   `uncatalogued`, responder pelo que falta e não pelo que a OS tem).
+3. **`DESAMBIGUAÇÃO — FLUXO`** — sete passos numerados descrevendo uma mecânica que o código já
+   executa (`AUTO_DISAMBIG`, `agent.ts`). Reduzida ao princípio ("busque antes de perguntar") mais
+   a frase que evita o agente tentar reproduzir na mão o que o sistema monta.
+4. **Catálogo de ferramentas** — `O QUE MAIS VOCÊ SABE FAZER` e a segunda metade de
+   `AGENDA & TAREFAS` listavam ~40 nomes de tool que já viajam com `description` própria no mesmo
+   payload. Restou o princípio: procure a ferramenta antes de dizer que não consegue; se não
+   existir, diga o que falta.
+
+**O que NÃO foi cortado, e por quê:**
+
+- **`EXEMPLOS DE MENSAGEM` (5 pares → 2)** — previsto no plano, **não executado**. Os cinco pares
+  chegam ao modelo só pelo prompt estável (`exemplaresParaPrompt()`); `exemplarDe()` é exportada e
+  **não tem consumidor**, e `guardaDeEnvio` só recebe os tipos `cotacao`, `cobranca` e `os_link`.
+  Cortar três pares economizaria ~270 tokens e deixaria três blocos de conhecimento curado e
+  testado sem nenhum caminho até o modelo — exatamente o padrão apontado no NOVO-agente-01. Fica
+  como está até existir consumidor sob demanda.
+
+**A conclusão que interrompe esta linha de trabalho:** ver **NOVO-agente-03**. Medindo o payload
+real, o bloco de ferramentas custa **34.858 tokens/chamada** contra ~15.000 do system prompt
+inteiro — e o **admin recebe as 194**, com o filtro de canal aliviando só 9,5% dele. A Fase 5
+rendeu 370 tokens; a Fase 2, 425. Continuar reescrevendo prompt é trabalhar na metade menor do
+problema, com risco de remover instrução que funciona. **As Fases 1, 2 e 5 encerram o trabalho de
+texto;** o que sobra depende de decisão do dono sobre o conjunto de ferramentas por perfil.
+
 ### Fase 3 — TTL de 1 hora no cache
 
 Confirmado suportado pelo OpenRouter. Mudança de uma linha em `prompt.ts`:

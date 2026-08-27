@@ -90,6 +90,34 @@ Deno.test("diária sem horas registradas é diária inteira — é como se combi
   assertEquals(a.valor_diarias, 200);
 });
 
+// O detalhamento não é enfeite de relatório: `v_custo_real_mao_de_obra_por_os` casa o valor de cada
+// dia com a OS pelo `turno_id`. Se ele sumir de qualquer ramo do cálculo, a view perde aquele dia em
+// silêncio — a soma continua parecendo plausível, só que menor. Por isso o teste cobre os quatro
+// ramos, e não um só.
+Deno.test("cada dia do detalhamento carrega o turno_id — é o que liga o custo à OS", () => {
+  const diarista: WorkProfile = { ...porHora, modo_pagamento: "diaria", valor_diaria: 200, meia_diaria_ate_horas: 4 };
+  const d = apurar(diarista, [
+    { id: "t-diaria", data: "2026-08-17", tipo: "diaria", inicio: "2026-08-17T11:00:00Z", fim: "2026-08-17T20:00:00Z" },
+    { id: "t-folga", data: "2026-08-18", tipo: "folga" },
+  ]);
+  assertEquals(d.detalhamento.map((x) => x.turno_id), ["t-diaria", "t-folga"]);
+
+  const h = apurar(porHora, [
+    { id: "t-normal", data: "2026-08-17", tipo: "normal", inicio: "2026-08-17T11:00:00Z", fim: "2026-08-17T20:00:00Z" },
+    { id: "t-domingo", data: "2026-08-16", tipo: "normal", inicio: "2026-08-16T13:00:00Z", fim: "2026-08-16T17:00:00Z" },
+  ]);
+  assertEquals(h.detalhamento.map((x) => x.turno_id).sort(), ["t-domingo", "t-normal"]);
+  // E o valor tem que vir junto: turno_id sem valor não custeia nada.
+  assertEquals(h.detalhamento.every((x) => typeof x.valor === "number"), true);
+});
+
+Deno.test("turno sem id não quebra a apuração — vira null, não 'undefined'", () => {
+  // Apuração de prévia trabalha com turnos que ainda não existem no banco. O detalhamento tem que
+  // sobreviver a isso, porque `detalhamento` vai para uma coluna jsonb.
+  const a = apurar(porHora, [{ data: "2026-08-17", tipo: "normal", duracao_minutos: 480 }]);
+  assertEquals(a.detalhamento[0].turno_id, null);
+});
+
 Deno.test("folga, falta e atestado não geram valor", () => {
   const a = apurar(porHora, [
     { data: "2026-08-17", tipo: "folga" },
