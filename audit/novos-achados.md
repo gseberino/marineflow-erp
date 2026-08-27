@@ -1996,3 +1996,59 @@ porque só o dono pode preenchê-las.
   pagamento, e o que mais o dono quiser fixo) e passar aos dois construtores.
   Decidir O QUE vai no texto é do dono — é ele que responde pelo que a nota diz.
 - **Não corrigido:** regra 3.
+
+### [NOVO-fiscal-04] O campo de desconto da NFS-e depende de confirmação da Contora
+
+- **Onde:** `supabase/functions/_shared/fiscal/nfse-payload-builder.ts` —
+  `NfseAmountsInput` (`:62`) e a montagem de `amounts` (`:324`).
+- **O quê:** o padrão nacional TEM desconto incondicionado —
+  `NFSe/infNFSe/DPS/infDPS/valores/vDescCondIncond/vDescIncond`
+  (`docs/nfse-nacional/rn_dps.tsv:394`, regra de rejeição E0431). O construtor da
+  NFS-e não expõe campo nenhum para ele: só `deductions`, que é retenção federal
+  e entra em outro lugar da conta.
+- **Consequência do jeito que ficou:** ao corrigir o NOVO-fiscal-02, a NFS-e
+  passou a declarar o valor **LÍQUIDO** em `service_amount`. O valor da nota
+  ficou certo — bate com a OS —, mas o documento não mostra que houve desconto:
+  o quadro "Desconto Incondicionado" segue em branco, e quem comparar a nota com
+  o orçamento vê só um valor menor, sem a explicação. Foi mitigado pondo a frase
+  do desconto na discriminação dos serviços, que comprovadamente imprime.
+- **Por que não foi resolvido direito agora:** o construtor emite JSON para a
+  **Contora**, não XML nacional. O nome do campo dela para `vDescIncond` não está
+  documentado no repositório — e um nome errado é ignorado em silêncio pelo
+  provedor, o que devolveria a nota pelo valor BRUTO. Ou seja: o palpite tem como
+  pior caso exatamente o bug que acabou de ser corrigido.
+- **Consertar seria:** perguntar à Contora o campo de desconto incondicionado da
+  NFS-e (no mesmo chamado já aberto), expor `unconditionalDiscount` em
+  `NfseAmountsInput`, e passar a declarar **bruto + desconto** em vez de líquido.
+  A conta já está pronta: `repartirDescontoDaOrdem` devolve `descontoServicos`.
+- **Não corrigido:** depende de resposta de terceiro.
+
+### [NOVO-fiscal-05] Dois smoke tests falham de forma alternada, sem mudar o código
+
+- **Onde:** `src/pages/NfsePage.smoke.test.tsx` e
+  `src/components/fiscal/VerbosFiscaisGrid.smoke.test.tsx`.
+- **O quê:** as duas suítes falham de forma **não determinística**. Quatro
+  execuções na mesma máquina, em 27/08/2026:
+
+  | execução | código | VerbosFiscaisGrid | NfsePage |
+  |---|---|---|---|
+  | 15 arquivos juntos | com a correção | 4 falhas | 3 falhas |
+  | 2 arquivos | **sem** a correção | 4 falhas | passa |
+  | NfsePage sozinha | com a correção | — | passa |
+  | 2 arquivos | com a correção | passa | 3 falhas |
+
+  O resultado **inverte** entre execuções idênticas. A falha típica é
+  `The element to be cleared could not be focused` — sintoma de timing no jsdom,
+  não de asserção errada.
+- **Por que importa:** um teste que falha sem relação com o código é pior que
+  teste nenhum. Ele treina quem lê a saída a ignorar vermelho, e o dia em que a
+  falha for real ela passa despercebida. Aqui custou quatro execuções e um
+  `git stash` só para provar que a correção fiscal não tinha causado nada.
+- **Agravante de ambiente, que pode ser a causa:** a máquina está **sem pagefile
+  configurado**, com 14,8 GB de 16 GB de commit em uso. O `tsc -b` inteiro nem
+  completa (`FATAL ERROR: Zone Allocation failed`, exit 134), e o vitest só roda
+  com `--no-file-parallelism --pool=forks --poolOptions.forks.singleFork`. Sob
+  essa pressão, `user-event` perde corrida de foco. Restaurar o pagefile (item já
+  pendente da crise de disco de 25/08) pode fazer as duas suítes voltarem ao
+  normal — e é o primeiro teste a fazer antes de mexer nos testes.
+- **Não corrigido:** regra 3, e a causa mais provável é ambiente, não código.

@@ -7,6 +7,12 @@ import { createFiscalProvider, readFiscalEnvironment } from "../_shared/fiscal/f
 import { applyStatusUpdate } from "../_shared/fiscal/apply-status.ts";
 import { resolveIbgeCityCode } from "../_shared/fiscal/ibge.ts";
 import { resolveLineFiscal, semCodigoFiscal } from "../_shared/fiscal/service-fiscal.ts";
+// [F-DESC-01/03] O desconto da ORDEM e o texto das informações complementares.
+import {
+  distribuirDescontoNosItens,
+  repartirDescontoDaOrdem,
+} from "../_shared/fiscal/desconto-da-ordem.ts";
+import { montarInfoComplementar } from "../_shared/fiscal/info-complementar.ts";
 import { logEdgeError } from "../_shared/log-error.ts";
 // [SUGESTAO-FISCAL] Modelo leve para sugerir NCM de produto direto da tela de emissão.
 // A sugestão NUNCA grava nada — ela pré-preenche o formulário e quem salva é o humano.
@@ -119,7 +125,12 @@ async function buildBodyFromServiceOrder(admin: any, body: any): Promise<
   const soId = String(body.service_order_id);
   const { data: so } = await admin
     .from("service_orders")
-    .select("id, service_order_number, status, client_id, customer_po_number")
+    .select(
+      "id, service_order_number, status, client_id, customer_po_number, " +
+        // [F-DESC-01] O desconto da ORDEM. Sem estas colunas a nota sai pelo bruto.
+        "discount_amount, discount_services_pct, discount_parts_pct, " +
+        "travel_cost_total, operational_cost_total, subcontract_cost_total",
+    )
     .eq("id", soId)
     .maybeSingle();
   if (!so) return { ok: false, error: "Ordem de serviço não encontrada.", status: 404 };
@@ -174,6 +185,27 @@ async function buildBodyFromServiceOrder(admin: any, body: any): Promise<
   const totalServicos = listaServicos.reduce((a, s) => a + s.total, 0);
   const totalPecas = itens.reduce((a, i) => a + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0);
 
+  // [F-DESC-01] O desconto da ORDEM ("Desconto Especial") nunca chegava aqui: os
+  // itens saíam pelo preço cheio, e a NF-e cobrava mais do que a OS. A fatia das
+  // peças vira `vDesc` por item — o instrumento correto na NF-e, que mantém o
+  // preço unitário visível no DANFE e ainda assim reduz o total da nota.
+  const rateio = repartirDescontoDaOrdem({
+    subtotalServicos: totalServicos,
+    subtotalPecas: totalPecas,
+    despesas: (Number(so.travel_cost_total) || 0) + (Number(so.operational_cost_total) || 0) +
+      (Number(so.subcontract_cost_total) || 0),
+    desconto: so.discount_amount,
+    descontoServicosPct: so.discount_services_pct,
+    descontoPecasPct: so.discount_parts_pct,
+  });
+  if (rateio.descontoPecas > 0) {
+    const brutos = itens.map((i) => (Number(i.quantity) || 0) * (Number(i.unit_price) || 0));
+    const porItem = distribuirDescontoNosItens(brutos, rateio.descontoPecas);
+    itens.forEach((i, idx) => {
+      if (porItem[idx] > 0) i.discount = porItem[idx];
+    });
+  }
+
   const r2 = (n: number) => Math.round(n * 100) / 100;
   return {
     ok: true,
@@ -200,12 +232,28 @@ async function buildBodyFromServiceOrder(admin: any, body: any): Promise<
         },
       },
       items: itens,
+      // [F-DESC-03] Informações complementares (infCpl). O construtor já
+      // suportava o campo; a ponte da OS simplesmente nunca o preenchia, e as
+      // notas saíam com o quadro vazio. É o que amarra a nota ao serviço para o
+      // cliente e para a contabilidade.
+      additional_info: montarInfoComplementar({
+        osNumero: so.service_order_number,
+        pedidoCliente: body.customer_po_number ?? so.customer_po_number ?? null,
+        descontoDaOrdem: rateio.descontoPecas,
+        rotuloDesconto: "peças",
+      }),
     },
     resumo: {
       os: so.service_order_number,
       cliente: cli.name,
       pecas_na_nota: itens.length,
-      total_pecas: r2(totalPecas),
+      // Líquido: é o valor que a nota vai declarar. O bruto vem ao lado para
+      // quem confere antes de emitir enxergar o abatimento em vez de estranhar
+      // a diferença.
+      total_pecas: rateio.pecasLiquido,
+      total_pecas_bruto: r2(totalPecas),
+      desconto_da_ordem_nas_pecas: rateio.descontoPecas,
+      criterio_do_desconto: rateio.criterio,
       // O que NÃO entra — o agente precisa dizer isso em voz alta ao dono.
       servicos_fora_da_nfe: listaServicos.length,
       total_servicos_fora: r2(totalServicos),
@@ -778,7 +826,12 @@ async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
   const soId = String(body.service_order_id);
   const { data: so, error: soErr } = await admin
     .from("service_orders")
-    .select("id, service_order_number, status, client_id")
+    .select(
+      "id, service_order_number, status, client_id, customer_po_number, " +
+        // [F-DESC-01] Sem estas colunas a NFS-e declara receita que não entrou.
+        "discount_amount, discount_services_pct, discount_parts_pct, " +
+        "travel_cost_total, operational_cost_total, subcontract_cost_total",
+    )
     .eq("id", soId)
     .maybeSingle();
   if (soErr) return { ok: false, error: "Falha ao consultar a OS: " + soErr.message, status: 500 };
@@ -900,18 +953,69 @@ async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
   }
 
   const fiscal = resolvidas[0].fiscal;
-  const total = lista.reduce((a, l) => a + (Number(l.line_total) || 0), 0);
+  const totalBruto = lista.reduce((a, l) => a + (Number(l.line_total) || 0), 0);
+
+  // [F-DESC-01] Aqui estava o defeito que emitiu a NFS-e nº 2 por R$ 538,33 numa
+  // OS de R$ 500,00: somava-se `line_total` (que só traz o desconto POR LINHA) e
+  // ignorava-se o desconto DA ORDEM. Como a HBR é Simples Nacional, receita
+  // inflada vira DAS pago a mais.
+  //
+  // As peças entram no rateio mesmo não indo nesta nota — elas dividem o
+  // desconto com os serviços, e ignorá-las jogaria o abatimento inteiro sobre a
+  // NFS-e.
+  const { data: pecasDaOs } = await admin
+    .from("service_order_parts")
+    .select("quantity, unit_sale_snapshot")
+    .eq("service_order_id", soId);
+  const totalPecas = ((pecasDaOs as any[]) || []).reduce(
+    (a, p) => a + (Number(p.quantity) || 0) * (Number(p.unit_sale_snapshot) || 0),
+    0,
+  );
+
+  const rateio = repartirDescontoDaOrdem({
+    subtotalServicos: totalBruto,
+    subtotalPecas: totalPecas,
+    despesas: (Number(so.travel_cost_total) || 0) + (Number(so.operational_cost_total) || 0) +
+      (Number(so.subcontract_cost_total) || 0),
+    desconto: so.discount_amount,
+    descontoServicosPct: so.discount_services_pct,
+    descontoPecasPct: so.discount_parts_pct,
+  });
+
+  // O valor LÍQUIDO é o que a nota declara. O padrão nacional tem `vDescIncond`
+  // (rn_dps.tsv:394) e declarar bruto + desconto seria mais fiel ao documento,
+  // mas o nome desse campo no JSON da Contora não está documentado aqui: mandar
+  // um nome errado faz o provedor ignorar em silêncio e a nota volta a sair pelo
+  // bruto — o próprio bug. Enquanto a Contora não confirmar o campo, o líquido é
+  // o único caminho que não erra o valor. Ver NOVO-fiscal-04.
+  const total = rateio.servicosLiquido;
 
   // Descrição: uma linha por serviço, com quantidade quando maior que 1. A prefeitura e o
   // cliente leem isto — "Serviços diversos" não serve a nenhum dos dois.
-  const descricao = lista
+  const listaDescrita = lista
     .map((l) => {
       const q = Number(l.quantity) || 1;
       const nome = l.name_snapshot || l.description_snapshot || "Serviço";
       return q > 1 ? `${nome} (${q}x)` : nome;
     })
-    .join("; ")
-    .slice(0, 500);
+    .join("; ");
+
+  // [F-DESC-03] As informações complementares entram AQUI, e não num campo
+  // próprio: `xInfComp` existe no padrão nacional, mas o nome dele no JSON da
+  // Contora não está documentado no repositório. A discriminação dos serviços é
+  // o campo que comprovadamente imprime no DANFSe — melhor o texto num lugar que
+  // aparece do que num campo que talvez o provedor descarte.
+  const infoComplementar = montarInfoComplementar({
+    osNumero: so.service_order_number,
+    pedidoCliente: so.customer_po_number,
+    descontoDaOrdem: rateio.descontoServicos,
+    rotuloDesconto: "serviços",
+  });
+  // O corte é feito na LISTA de serviços, nunca na referência da OS: perder o
+  // vínculo com a ordem é justamente o que este texto existe para evitar.
+  const descricao = infoComplementar
+    ? `${listaDescrita.slice(0, Math.max(0, 500 - infoComplementar.length - 2))} ${infoComplementar}`.trim()
+    : listaDescrita.slice(0, 500);
 
   const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -949,7 +1053,12 @@ async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
       os: so.service_order_number,
       cliente: cli.name,
       servicos_na_nota: lista.length,
+      // Líquido: o valor que a nota declara. O bruto ao lado para a conferência
+      // bater com o que a tela da OS mostra.
       total_servicos: r2(total),
+      total_servicos_bruto: r2(totalBruto),
+      desconto_da_ordem_nos_servicos: rateio.descontoServicos,
+      criterio_do_desconto: rateio.criterio,
       codigo_de_tributacao: fiscal.nationalTaxCode,
       cnae: fiscal.cnae,
       iss_rate: fiscal.issRate,
