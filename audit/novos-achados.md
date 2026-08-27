@@ -1911,3 +1911,88 @@ porque só o dono pode preenchê-las.
   listas e na página NFS-e (sem aviso armado) o comportamento é o mesmo de antes.
 - Aberto por escopo: só **NOVO-nfse-05** (emissão por grupo de código) — sem demanda
   enquanto a regra da contadora for "tudo 14.01" (todos os verbos resolvem o mesmo código).
+
+### [NOVO-fiscal-02] O desconto da OS não chega às notas — nota emitida em produção com receita a mais
+
+- **Onde:** `supabase/functions/fiscal-emit/index.ts` — a ponte da NFS-e (`:903`,
+  `const total = lista.reduce((a, l) => a + Number(l.line_total), 0)`) e a da
+  NF-e (`:149-157`, itens montados só com `quantity` e `unit_price`).
+- **O quê:** a OS tem **duas camadas de desconto**, e as pontes fiscais só
+  enxergam a primeira:
+  1. desconto POR LINHA, já embutido em `line_total` (200,00 → 170,00);
+  2. desconto DA ORDEM, em `service_orders.discount_amount` — o "Desconto
+     Especial" que aparece no PDF.
+
+  A segunda camada **nunca é lida**. Nenhuma das duas pontes consulta
+  `discount_amount`, `discount_services_pct` nem `discount_parts_pct`.
+
+- **Provado com a nota REAL, já emitida em produção (NFS-e nº 2, 27/08/2026):**
+
+  | | valor |
+  |---|---:|
+  | Subtotal serviços (soma dos `line_total`) | 538,33 |
+  | Subtotal peças | 192,01 |
+  | Desconto da ordem | −230,34 |
+  | **Total que o cliente deve** | **500,00** |
+  | **NFS-e emitida** | **538,33** |
+
+  A NFS-e saiu com o BRUTO dos serviços. Pela proporção que o próprio sistema
+  usa nas parcelas (`discountRatio = grand_total / subtotal` = 500 / 730,34 =
+  0,6846), a parcela de serviço seria **368,55** e a de peças **131,45**.
+  **R$ 169,78 de receita de serviço declarada a mais.**
+
+  E não é só a NFS-e: se a NF-e da mesma OS for emitida, sairá com 192,01 em vez
+  de 131,45. As duas notas somariam **730,34** para uma OS de **500,00** —
+  R$ 230,34 de faturamento que não existe.
+
+- **Por que dói mesmo com ISS "-" na nota:** a HBR é Simples Nacional, e o DANFSe
+  traz ISSQN apurado em branco porque o imposto sai no DAS. O DAS é calculado
+  sobre a RECEITA declarada. Receita inflada em R$ 169,78 vira imposto pago a
+  mais, e um número que não bate com o que entrou no caixa.
+
+- **A conta certa já existe no repositório, e a parte fiscal não a usa:**
+  `src/lib/quote-deposit.ts` é a lib única do `discountRatio`, e o PDF aplica a
+  mesma proporção nas parcelas (`pdf-generator.ts`, cálculo de `installments`).
+  Há inclusive uma memória do projeto registrando que "sinal/parcela SEMPRE
+  aplica discountRatio". A emissão nasceu por fora dessa regra.
+
+- **Consertar exige uma DECISÃO, não só código:** como repartir o desconto da
+  ordem entre as duas notas.
+  - **proporcional** (o que o resto do sistema faz): serviços e peças caem na
+    mesma razão;
+  - **por seção**, usando `discount_services_pct` / `discount_parts_pct` quando
+    preenchidos (nesta OS estão os dois em zero, então não ajudam);
+  - e, no documento: **abater no valor** ou **declarar o bruto com desconto
+    incondicionado** (`vDescIncond` no padrão nacional). O construtor da NFS-e
+    hoje não expõe campo de desconto — só `deductions`, que é retenção federal e
+    NÃO é a mesma coisa.
+
+- **Nota já emitida:** a NFS-e nº 2 está autorizada em produção. Corrigir o
+  código não conserta a nota que saiu — isso é conversa com a contadora
+  (substituição/cancelamento dentro do prazo municipal).
+
+- **Não corrigido:** regra 3 e regra 4 — a repartição do desconto é decisão de
+  negócio com efeito fiscal.
+
+### [NOVO-fiscal-03] Nenhuma nota sai com informações complementares
+
+- **Onde:** NF-e — `supabase/functions/_shared/fiscal/payload-builder.ts:227`
+  aceita `additionalInfo` e o converte em `additional_info` → `infCpl` (`:449`),
+  mas `buildBodyFromServiceOrder` (`fiscal-emit/index.ts:178`) **nunca preenche o
+  campo**. NFS-e — `_shared/fiscal/nfse-payload-builder.ts`,
+  `BuildNfsePayloadInput` (`:75`) **não tem campo nenhum** para isso.
+- **O quê:** as duas notas emitidas saem com o quadro "INFORMAÇÕES
+  COMPLEMENTARES" vazio. Confirmado no DANFSe da NFS-e nº 2: o campo existe no
+  layout e vem `-`.
+- **Por que importa:** é onde vive o que amarra a nota ao serviço — número da
+  OS, condição de pagamento, referência do orçamento, observação da garantia. Sem
+  isso, a nota chega ao cliente e à contabilidade sem nenhum vínculo legível com
+  o trabalho que a originou; a conciliação passa a depender de alguém lembrar.
+- **A assimetria denuncia o esquecimento:** o suporte existe do lado da NF-e,
+  pronto e testado, e a ponte da OS simplesmente não passa o valor. É uma linha.
+  Do lado da NFS-e falta o campo inteiro — e antes de criá-lo é preciso conferir
+  se o provedor (Contora) aceita `infoCompl/xInfComp` do padrão nacional.
+- **Consertar seria:** montar o texto na ponte da OS (número da OS, condição de
+  pagamento, e o que mais o dono quiser fixo) e passar aos dois construtores.
+  Decidir O QUE vai no texto é do dono — é ele que responde pelo que a nota diz.
+- **Não corrigido:** regra 3.
