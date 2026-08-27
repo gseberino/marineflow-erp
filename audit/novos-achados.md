@@ -2086,14 +2086,18 @@ porque só o dono pode preenchê-las.
 - **O quê:** as duas suítes falham de forma **não determinística**. Quatro
   execuções na mesma máquina, em 27/08/2026:
 
-  | execução | código | VerbosFiscaisGrid | NfsePage |
-  |---|---|---|---|
-  | 15 arquivos juntos | com a correção | 4 falhas | 3 falhas |
-  | 2 arquivos | **sem** a correção | 4 falhas | passa |
-  | NfsePage sozinha | com a correção | — | passa |
-  | 2 arquivos | com a correção | passa | 3 falhas |
+  | execução | código | VerbosFiscaisGrid | NfsePage | NfseSection |
+  |---|---|---|---|---|
+  | 15 arquivos juntos | com a correção | 4 falhas | 3 falhas | passa |
+  | 2 arquivos | **sem** a correção | 4 falhas | passa | — |
+  | NfsePage sozinha | com a correção | — | passa | — |
+  | 2 arquivos | com a correção | passa | 3 falhas | — |
+  | 16 arquivos juntos | pós-merge | 5 falhas | **passa** | **4 falhas** |
 
-  O resultado **inverte** entre execuções idênticas. A falha típica é
+  O conjunto que falha **muda a cada execução**, e na última entrou um arquivo
+  que nunca havia falhado (`NfseSection`) enquanto saiu um que falhava
+  (`NfsePage`). Todos os 206 testes de lógica pura passam em todas as execuções;
+  só os `.smoke.test.tsx` (jsdom + `user-event`) alternam. A falha típica é
   `The element to be cleared could not be focused` — sintoma de timing no jsdom,
   não de asserção errada.
 - **Por que importa:** um teste que falha sem relação com o código é pior que
