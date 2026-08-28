@@ -332,8 +332,16 @@ a atualizar a expectativa junto.
 ## [NOVO-018] Captura rápida da Agenda: quantidade vira horário, e data inexistente vira outro ano
 
 - **Encontrado em:** 11/08/2026, escrevendo a cobertura de teste de `quick-task-parser.ts`
-- **Categoria:** A — **Severidade sugerida:** P2 (a) / P3 (b) · **Status:** registrado, **não corrigido**
+- **Categoria:** A — **Severidade sugerida:** P2 (a) / P3 (b) · **Status:** **CORRIGIDO** em 28/08/2026 (`feat/agenda-retomada`)
 - **Arquivo:linha:** `src/lib/quick-task-parser.ts:61-69` (a) e `:47-56` (b)
+
+> **Correção (28/08/2026).** Hora passou a exigir marcador (`h`, `:`, "às"/"as"), então número solto
+> continua sendo quantidade e permanece no título; data impossível é recusada conferindo
+> `getDate()/getMonth()/getFullYear()` depois de construir o `Date`, e o salto para o ano seguinte é
+> validado de novo (29/02 não existe em ano não bissexto). De quebra, minuto acima de 59 deixa de
+> virar hora — `14h75` produzia `time: "14:75"`, que estoura como *Invalid Date* no `toISOString()`
+> da `AgendaPage`. O bloco `[NOVO-018]` do teste foi invertido: era caracterização do defeito, agora
+> fixa o comportamento certo, com 3 casos de borda novos (19 testes verdes).
 
 **(a) "comprar 3 cabos" vira uma tarefa das 03:00 chamada "comprar cabos".** O reconhecimento de hora aceita
 qualquer número solto de 0 a 23 (`/\s(?:[àa]s\s+)?(\d{1,2})(?:[:h](\d{2}))?h?\s/`), sem exigir o `h`, os dois
