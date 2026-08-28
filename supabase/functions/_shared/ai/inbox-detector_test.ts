@@ -2,6 +2,7 @@ import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   isWorthAnalyzing, normalizeProposal, formatConversation, CONFIDENCE_FLOOR, buildDateTable,
   isDetectorAutonomous, shouldAutoCreate, AUTONOMY_MIN_SAMPLE, loopKeyFromTitle,
+  DETECTOR_KINDS, detectorFlagKey, enabledDetectors,
   type ConversationMessage, type RawProposal,
 } from "./inbox-detector.ts";
 
@@ -174,4 +175,44 @@ Deno.test("loopKeyFromTitle: título vazio não vira chave coringa", () => {
   // Se virasse "conv:" para qualquer entrada, dois fios sem título se fundiriam.
   assertEquals(loopKeyFromTitle(""), "conv:");
   assertEquals(loopKeyFromTitle("!!!"), "conv:");
+});
+
+Deno.test("enabledDetectors: sem linha em app_settings, todo detector nasce ligado", () => {
+  // O padrão do repo é ausência = ligado (mesmo de task_rule_<id>_enabled). Se isto
+  // invertesse, um banco novo subiria com a caixa de entrada muda e ninguém notaria.
+  const ligados = enabledDetectors({});
+  assertEquals(ligados.size, DETECTOR_KINDS.length);
+  for (const d of DETECTOR_KINDS) assertEquals(ligados.has(d), true);
+});
+
+Deno.test("enabledDetectors: 'false' desliga só o detector nomeado", () => {
+  const ligados = enabledDetectors({ [detectorFlagKey("promise")]: "false" });
+  assertEquals(ligados.has("promise"), false);
+  // os outros três seguem intactos — desligar um não pode calar a caixa inteira
+  assertEquals(ligados.has("client_request"), true);
+  assertEquals(ligados.has("followup"), true);
+  assertEquals(ligados.has("third_party_deadline"), true);
+});
+
+Deno.test("enabledDetectors: valor vazio ou lixo não desliga por acidente", () => {
+  // Só o literal "false" desliga. Um upsert que grave "" (ou "0", ou "não") não pode
+  // apagar um detector em silêncio — o efeito de desligar tem que ser deliberado.
+  assertEquals(enabledDetectors({ [detectorFlagKey("promise")]: "" }).has("promise"), true);
+  assertEquals(enabledDetectors({ [detectorFlagKey("promise")]: "true" }).has("promise"), true);
+  assertEquals(enabledDetectors({ [detectorFlagKey("promise")]: "0" }).has("promise"), false);
+});
+
+Deno.test("detectorFlagKey espelha o padrão de nome do motor de regras", () => {
+  // task_rule_<id>_enabled : agenda_detector_<tipo>_enabled — mesmo formato, para quem
+  // já conhece um mecanismo adivinhar o outro.
+  assertEquals(detectorFlagKey("promise"), "agenda_detector_promise_enabled");
+  assertEquals(detectorFlagKey("client_request"), "agenda_detector_client_request_enabled");
+});
+
+Deno.test("CONFIDENCE_FLOOR cobre exatamente os detectores declarados", () => {
+  // normalizeProposal usa a presença no CONFIDENCE_FLOOR como whitelist. Se um detector
+  // entrasse em DETECTOR_KINDS sem limiar, ele seria rejeitado como "desconhecido" e a
+  // flag dele existiria sem nunca ter efeito.
+  assertEquals(DETECTOR_KINDS.length, Object.keys(CONFIDENCE_FLOOR).length);
+  for (const d of DETECTOR_KINDS) assertEquals(typeof CONFIDENCE_FLOOR[d], "number");
 });

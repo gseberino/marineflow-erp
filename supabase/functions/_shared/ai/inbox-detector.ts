@@ -48,6 +48,31 @@ export const CONFIDENCE_FLOOR: Record<DetectorKind, number> = {
   followup: 0.75,
 };
 
+/** Todos os detectores da conversa (voice_note não passa por aqui — ver agenda-voice-capture). */
+export const DETECTOR_KINDS: DetectorKind[] = [
+  "promise", "client_request", "third_party_deadline", "followup",
+];
+
+/** Flag por detector em app_settings, espelhando `task_rule_<id>_enabled`. Nasce LIGADO. */
+export function detectorFlagKey(d: DetectorKind): string {
+  return `agenda_detector_${d}_enabled`;
+}
+
+/**
+ * Lê as flags e devolve quem continua valendo. Ausente ou vazio = ligado.
+ *
+ * Existe porque a confiança auto-declarada pelo modelo não discrimina em todo detector:
+ * no `promise`, as descartadas tinham média 0.88 e as aceitas 0.93, com 4 descartadas em
+ * 0.95 — subir o piso cortaria as aceitas junto. Quando um detector só produz ruído, o
+ * que resolve é desligá-lo, e por DADO (sem deploy), do jeito que o motor de regras já faz.
+ */
+export function enabledDetectors(settings: Record<string, string>): Set<DetectorKind> {
+  return new Set(DETECTOR_KINDS.filter((d) => {
+    const v = settings[detectorFlagKey(d)];
+    return v === undefined || v === "" ? true : v === "true";
+  }));
+}
+
 export interface DetectorStats { accepted: number; dismissed: number }
 
 /**
