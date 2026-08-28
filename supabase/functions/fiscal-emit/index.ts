@@ -4,7 +4,7 @@
 // Ações: action="create" (default) | "cancel" | "correction".
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { createFiscalProvider, readFiscalEnvironment } from "../_shared/fiscal/factory.ts";
-import { applyStatusUpdate } from "../_shared/fiscal/apply-status.ts";
+import { applyStatusUpdate, recomputeInvoicingStatus } from "../_shared/fiscal/apply-status.ts";
 import { resolveIbgeCityCode } from "../_shared/fiscal/ibge.ts";
 import { resolveLineFiscal, semCodigoFiscal } from "../_shared/fiscal/service-fiscal.ts";
 import { ratearDescontoGlobal } from "../_shared/fiscal/rateio-desconto.ts";
@@ -2115,6 +2115,11 @@ async function handleCancel(admin: any, body: any): Promise<Response> {
     const st = await provider.getStatus(doc.document_type, doc.provider_document_id);
     if (st.ok && st.data.status === "cancelled") {
       await applyStatusUpdate(admin, provider, { ...doc, status: "processing" }, st.data);
+      // [27/08] Nota de OS cancelada muda o marcador de faturamento — sem isto a OS
+      // seguia "invoiced" com a NFS-e cancelada (visto ao vivo na OS-00075).
+      if (doc.origin_type === "service_order" && doc.origin_id) {
+        await recomputeInvoicingStatus(admin, String(doc.origin_id));
+      }
       return jr({ ok: true, cancelled: true });
     }
   }
