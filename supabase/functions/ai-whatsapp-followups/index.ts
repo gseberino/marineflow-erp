@@ -8,7 +8,14 @@
 // Como fala com CLIENTE, respeita wa_test_mode: se ligado, o número é trocado pelo
 // wa_test_number ANTES de enfileirar (o whatsapp-queue-worker não aplica test mode).
 // Dedupe via ai_operator_alerts_log (ON CONFLICT DO NOTHING).
-// Agendado via pg_cron (jobid 7, */30) — DESATIVADO até validação.
+//
+// *** ESTA FUNÇÃO ESTÁ NO AR. *** Agendada via pg_cron (jobid 7, */30) e ATIVA — conferido
+// no banco em 28/08/2026. O comentário que ficava aqui dizia "DESATIVADO até validação" e
+// estava errado havia mais de um mês. Não existe gate interno nenhum: passado o cron-secret,
+// as duas réguas executam direto. Com wa_test_mode desligado (é o caso hoje), isto MANDA
+// MENSAGEM REAL PARA CLIENTE. O volume observado é baixo (3 envios em 30 dias) porque o
+// dedupe segura, não porque esteja parada.
+// Para desligar de verdade: `select cron.unschedule(7);` — editar este cabeçalho não desliga.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";

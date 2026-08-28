@@ -15,6 +15,7 @@ import {
 } from "./rules.ts";
 import { expandOccurrences } from "../_shared/recurrence.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
+import { logEdgeError } from "../_shared/log-error.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -77,6 +78,10 @@ async function createTaskFromCandidate(db: Db, c: RuleCandidate, assigneeId: str
 async function runRules(db: Db, settings: Record<string, string>) {
   const created: string[] = [];
   const resolved: string[] = [];
+  // Falhas por regra. Antes o catch abaixo só fazia console.error e a função devolvia
+  // {created, resolved}: uma regra quebrada ficava indistinguível de uma regra sem
+  // gatilho, e o cron reportava 200. Foi assim que a R17 passou dias sem efeito.
+  const falhas: { rule: string; code?: string; msg: string }[] = [];
   const assigneeCache = new Map<string, string | null>();
 
   const cooldownDays = dismissCooldownDays(settings);
@@ -122,7 +127,23 @@ async function runRules(db: Db, settings: Record<string, string>) {
         }
       }
     } catch (e) {
+      const code = (e as any)?.code as string | undefined;
+      const msg = String((e as any)?.message ?? e);
       console.error(`rule ${rule.id} find/create failed:`, e);
+      falhas.push({ rule: rule.id, code, msg });
+      // 23514 = violação de CHECK. Aqui só há um CHECK que uma regra consegue violar:
+      // related_entity_type fora da lista fechada. Nunca é esperado (o único erro
+      // esperado, 23505 do dedupe, é tratado no createTaskFromCandidate), então vai
+      // para a tabela de erros — é o que transforma "sumiu em silêncio" em "consultável".
+      if (code === "23514") {
+        await logEdgeError(db, {
+          context: "task-automations",
+          action: `rule:${rule.id}`,
+          message: `regra ${rule.id}: related_entity_type fora do CHECK de agenda_tasks (23514)`,
+          details: { rule: rule.id, code, msg },
+          error: e,
+        });
+      }
     }
   }
 
@@ -152,7 +173,7 @@ async function runRules(db: Db, settings: Record<string, string>) {
     }
   }
 
-  return { created, resolved };
+  return { created, resolved, falhas };
 }
 
 /** R10 — lembrete interno de OS (equipe, nunca cliente) em DUAS janelas BRT:
@@ -437,7 +458,9 @@ Deno.serve(async (req) => {
     const recurrence = await materializeRecurrences(db);
 
     const summary = { identidade, fios, rules, r10, r9, r13, reminders, recurrence };
-    if (rules.created.length || rules.resolved.length || recurrence.created) {
+    // Regra que falhou também é motivo para auditar: sem isto, um tick em que TODAS as
+    // regras quebraram não deixaria registro nenhum (created e resolved vazios).
+    if (rules.created.length || rules.resolved.length || recurrence.created || rules.falhas.length) {
       await audit(db, "task_automations_run", summary);
     }
     return new Response(JSON.stringify({ success: true, ...summary }), {
