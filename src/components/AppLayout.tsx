@@ -166,7 +166,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
         { label: 'CRM & Funil', icon: Target, path: '/v2/crm' },
         { label: 'Ordens de Serviço', icon: ClipboardList, path: '/v2/service-orders' },
         { label: 'Orçamentos', icon: FileText, path: '/v2/quotes' },
-        { label: 'Agenda', icon: CalendarDays, path: '/agenda' },
+        { label: 'Agenda', icon: CalendarDays, path: '/v2/agenda' },
         { label: 'Quadro do Dia', icon: LayoutGrid, path: '/day-board', roles: ['admin', 'financial', 'technician'] },
         { label: 'Roteiros Padrão', icon: ListChecks, path: '/step-templates', roles: ['admin', 'financial', 'technician'] },
         { label: 'Motor de Vendas', icon: Rocket, path: '/v2/prospecting', roles: ['admin'] },
@@ -363,7 +363,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
     // Contador da Caixa de Entrada: sem ele, as sugestões do agente só existem para quem
     // já sabe que a aba existe. É o padrão de fila de aprovação — o número no menu é o
     // que faz a pessoa entrar. Recolhido, vira um ponto (não cabe número).
-    const pendentes = item.path === '/agenda'
+    const pendentes = item.path === '/v2/agenda'
       ? sugestoesPendentes
       : item.path === '/v2/financial?tab=inbox' ? propostasPendentes : 0;
     const ativo = isActive(item.path);

@@ -15,6 +15,7 @@ import { EntityCard } from '@/v2/components/EntityCard';
 import { DataTable, type DataColumn } from '@/v2/components/DataTable';
 import { serviceOrderStatusTone } from '@/v2/status-map';
 import { V2Shell } from '@/v2/components/V2Shell';
+import { DashboardTasksWidget } from '@/components/agenda/DashboardTasksWidget';
 import '@/v2/tokens.css';
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -249,6 +250,12 @@ function AdminHome({
         )}
       </section>
 
+      {/* Faixa Tarefas — mesma do v1, com a rota e o raio do v2 (MF-AUD-050) */}
+      <DashboardTasksWidget
+        to="/v2/agenda"
+        className="rounded-lg shadow-none hover:shadow-none hover:border-primary/50 transition-colors"
+      />
+
       {/* KPIs clicáveis */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KPIStat
@@ -422,6 +429,12 @@ function TechnicianHome() {
 
   return (
     <>
+      {/* O técnico é quem mais depende de tarefa: a faixa vem antes das OS, não no rodapé */}
+      <DashboardTasksWidget
+        to="/v2/agenda"
+        className="rounded-lg shadow-none hover:shadow-none hover:border-primary/50 transition-colors"
+      />
+
       <section className="space-y-2.5">
         <h2 className="flex items-center gap-2 text-sm font-bold">
           <CalendarDays className="h-4 w-4 text-primary" /> Minhas OS de hoje

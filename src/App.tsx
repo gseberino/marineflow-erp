@@ -241,7 +241,7 @@ const App = () => (
                         <Route path="/v2/purchasing" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><PurchasingHubPage /></ProtectedRoute>} />
                         <Route path="/v2/purchasing/quotes" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><QuoteRequestsPage /></ProtectedRoute>} />
                         <Route path="/v2/purchasing/quotes/:id" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><QuoteRequestDetailPage /></ProtectedRoute>} />
-                        <Route path="/agenda" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><AgendaPage /></ProtectedRoute>} />
+                        <Route path="/agenda" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><LegadoOuV2 to="/v2/agenda" legacy={<AgendaPage />} /></ProtectedRoute>} />
                         <Route path="/day-board" element={<ProtectedRoute roles={['admin','financial','technician']} groupId="operacional"><DayBoardPage /></ProtectedRoute>} />
                         <Route path="/step-templates" element={<ProtectedRoute roles={['admin','financial','technician']} groupId="operacional"><StepTemplatesPage /></ProtectedRoute>} />
                         {/* Financeiro migrado para a v2 em 30/07/2026. Links antigos,
