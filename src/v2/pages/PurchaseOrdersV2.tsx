@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { ChevronDown, Download, PackageCheck, Pencil, Plus, Trash2, Truck } from 'lucide-react';
@@ -187,6 +187,7 @@ function POFormDialog({ open, onOpenChange, editing }: {
 }
 
 export default function PurchaseOrdersV2() {
+  const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [formOpen, setFormOpen] = useState(false);
@@ -240,12 +241,23 @@ export default function PurchaseOrdersV2() {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        {ALL_STATUSES.filter((s) => s !== po.status).map((s) => (
-          <DropdownMenuItem key={s} onClick={() => updatePO.mutate({ id: po.id, status: s })} className="gap-2">
-            {s === 'received' && <PackageCheck className="h-3.5 w-3.5 text-success" />}
-            {PO_STATUS_LABELS[s]}
+        {/* 'received' e 'partial' saem daqui de proposito. Marcar o status direto NAO da
+            entrada no estoque nem gera a conta a pagar — quem faz isso e a rotina de
+            recebimento (RPC receive_po), no detalhe da OC. Em 29/08/2026 havia duas OCs
+            marcadas 'received' com zero itens recebidos e zero movimento de estoque,
+            justamente por este menu. */}
+        {ALL_STATUSES
+          .filter((s) => s !== po.status && s !== 'received' && s !== 'partial')
+          .map((s) => (
+            <DropdownMenuItem key={s} onClick={() => updatePO.mutate({ id: po.id, status: s })} className="gap-2">
+              {PO_STATUS_LABELS[s]}
+            </DropdownMenuItem>
+          ))}
+        {po.status !== 'received' && po.status !== 'cancelled' && (
+          <DropdownMenuItem className="gap-2" onClick={() => navigate(`/v2/purchase-orders/${po.id}`)}>
+            <PackageCheck className="h-3.5 w-3.5 text-success" /> Receber itens…
           </DropdownMenuItem>
-        ))}
+        )}
         <DropdownMenuItem className="gap-2 text-destructive focus:text-destructive" onClick={() => setDeleteId(po.id)}>
           <Trash2 className="h-3.5 w-3.5" /> Excluir
         </DropdownMenuItem>
@@ -390,7 +402,7 @@ export default function PurchaseOrdersV2() {
                 columns={columns}
                 sort={sort}
                 onSort={handleSort}
-                onRowClick={handleEdit}
+                onRowClick={(po) => navigate(`/v2/purchase-orders/${po.id}`)}
                 emptyMessage="Nenhuma ordem de compra encontrada."
                 rowActions={(po) => (
                   <>
@@ -414,10 +426,11 @@ export default function PurchaseOrdersV2() {
                     po.service_orders?.service_order_number ? `OS ${po.service_orders.service_order_number}` : 'Sem OS vinculada',
                     `${po.expected_date ? format(new Date(po.expected_date), 'dd/MM/yyyy', { locale: ptBR }) + ' · ' : ''}${fmtBRL(po.total_amount ?? 0)}`,
                   ]}
-                  onClick={() => handleEdit(po)}
+                  onClick={() => navigate(`/v2/purchase-orders/${po.id}`)}
                   actions={
                     <>
-                      <Button className="flex-1" onClick={() => handleEdit(po)}>Editar</Button>
+                      <Button className="flex-1" onClick={() => navigate(`/v2/purchase-orders/${po.id}`)}>Abrir</Button>
+                      <Button variant="outline" onClick={() => handleEdit(po)}>Editar</Button>
                       {statusMenu(po)}
                     </>
                   }
