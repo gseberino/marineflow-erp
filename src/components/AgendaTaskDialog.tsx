@@ -87,6 +87,10 @@ const LINKABLE: { value: RelatedEntityType | ''; label: string }[] = [
   { value: 'external_quote', label: 'Orçamento externo' },
   { value: 'client', label: 'Cliente' },
   { value: 'purchase_order', label: 'Ordem de compra' },
+  // A R14 grava 'vessel' e a aba Tarefas da embarcação abre este dialog já vinculado.
+  // Sem esta linha o Select fica com um value fora da lista: aparece vazio e, se a
+  // pessoa tocar nele, o vínculo com a embarcação some sem aviso.
+  { value: 'vessel', label: 'Embarcação' },
 ];
 
 function useEntityOptions(type: RelatedEntityType | '') {
@@ -125,6 +129,18 @@ function useEntityOptions(type: RelatedEntityType | '') {
           .order('created_at', { ascending: false })
           .limit(200);
         rows = (data || []).map((p: any) => ({ value: p.id, label: p.po_number }));
+      } else if (type === 'vessel') {
+        const { data } = await supabase
+          .from('vessels')
+          .select('id, name, clients(name)')
+          .order('name')
+          .limit(500);
+        // O nome do barco se repete entre clientes ("Fibrafort 230"), então o dono
+        // desambigua — mesma razão pela qual a OS mostra o cliente ao lado do número.
+        rows = (data || []).map((v: any) => ({
+          value: v.id,
+          label: v.clients?.name ? `${v.name} — ${v.clients.name}` : v.name,
+        }));
       }
       if (!cancelled) setOptions(rows);
     }

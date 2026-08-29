@@ -7,6 +7,7 @@ import { StatusBadge } from '@/components/StatusBadge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { MaintenancePlansPanel } from '@/components/agenda/MaintenancePlansPanel';
+import { EntityTasksPanel } from '@/components/agenda/EntityTasksPanel';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, Ship, Anchor, Battery, Radio, Zap, Edit } from 'lucide-react';
 import { VesselFormDialog } from '@/components/VesselFormDialog';
@@ -79,6 +80,7 @@ export default function VesselDetail() {
           <TabsTrigger value="technical">{t.vessels.technicalProfile}</TabsTrigger>
           <TabsTrigger value="history">{t.vessels.serviceHistory}</TabsTrigger>
           <TabsTrigger value="maintenance">Manutenção</TabsTrigger>
+          <TabsTrigger value="tasks">Tarefas</TabsTrigger>
           <TabsTrigger value="audit">Histórico de Edições</TabsTrigger>
         </TabsList>
 
@@ -245,6 +247,12 @@ export default function VesselDetail() {
         </TabsContent>
         <TabsContent value="maintenance" className="mt-4">
           <MaintenancePlansPanel vesselId={id} />
+        </TabsContent>
+        {/* Vizinha de Manutenção de propósito: a R14 nasce de um plano e grava 'vessel' */}
+        <TabsContent value="tasks" className="mt-4">
+          <div className="max-w-2xl">
+            <EntityTasksPanel entityType="vessel" entityId={id} title="Tarefas desta embarcação" />
+          </div>
         </TabsContent>
         <TabsContent value="audit" className="mt-4">
           <div className="rounded-xl border bg-card shadow-sm p-4">
