@@ -1781,6 +1781,21 @@ porque só o dono pode preenchê-las.
   filtro de canal já faz. Um "perfil de admin no WhatsApp" enxuto, decidido uma vez e congelado,
   é o caminho que resta; escolher o que entra nele é decisão de negócio, não técnica.
 
+> **NOVO-agente-04 a 09 CORRIGIDOS em 31/08/2026**, branch `fix/agente-qualidade` (commits
+> `3006c9f`, `346affa`, `080b6f4`). O **NOVO-agente-10** (196 ferramentas de uma vez; ausência de
+> macro de EDIÇÃO em lote) segue **ABERTO** — é decisão de escopo do dono, não defeito de código.
+>
+> Duas das correções nasceram da revisão das próprias correções, e valem como aviso para quem
+> mexer aqui depois:
+> - **A regra de siglas rejeitava o produto CERTO quando o pedido vinha em CAIXA ALTA**, porque
+>   "PARA" e "DE" contavam como sigla técnica ausente. Rejeitar demais teria sido tão ruim quanto
+>   casar errado: o catálogo deixaria de ser usado e cada orçamento criaria produto novo. A
+>   maiúscula só é sinal quando há minúscula no termo para contrastar.
+> - **Começar a janela na fala do usuário NÃO bastava.** Como todas as linhas de um turno
+>   compartilham `created_at`, a fala do usuário volta do banco ANTES dos `tool_result` do turno
+>   anterior; o órfão faria a API responder 400 e o agente ficaria **mudo em vez de cego**. Só
+>   apareceu ao testar contra a sequência REAL do banco, não contra caso sintético.
+
 ## NOVO-agente-04 — O agente lê as 30 mensagens mais ANTIGAS da sessão, para sempre
 
 - **Achado em:** 31/08/2026, investigando a queixa do dono de que "pedido de ajuste vira orçamento
