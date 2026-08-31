@@ -316,7 +316,9 @@ export function AIAgentWidget() {
                   status={item.status}
                   onConfirm={confirmProposal}
                   onCancel={cancelProposal}
-                  disabled={loading || !activeProposal}
+                  // Só o cartão que ainda espera decisão fica clicável. Era `!activeProposal`,
+                  // global: um cartão já resolvido continuava com os botões vivos.
+                  disabled={loading || item.status !== 'pending'}
                 />
               );
             if (item.kind === 'options')

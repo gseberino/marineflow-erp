@@ -42,7 +42,15 @@ const ACESSORIO_RE = /\b(cabo|cabos|sensor|sensores|suporte|adaptador|conector|c
  *  (não substring): "50" pedido não pode casar dentro de "250" do candidato. */
 function numerosFaltando(termo: string, nome: string, sku: string | null): string[] {
   const alvoTokens = new Set(tokenizar(`${nome} ${sku || ""}`));
-  return tokensNumericos(termo).filter((n) => !alvoTokens.has(n));
+  // Número que vem antes de palavra de quantidade é QUANTO, não QUAL: em "10 metros de cabo
+  // elétrico 70mm²" o modelo é 70mm e o 10 é o tamanho do rolo. Contar o 10 como modelo ausente
+  // rejeitava "Cabo elétrico 70mm²", que é exatamente o produto pedido.
+  const toks = tokenizar(termo);
+  const quantidades = new Set<string>();
+  for (let i = 0; i < toks.length - 1; i++) {
+    if (/^\d+$/.test(toks[i]) && QUANTIDADE.has(toks[i + 1])) quantidades.add(toks[i]);
+  }
+  return tokensNumericos(termo).filter((n) => !alvoTokens.has(n) && !quantidades.has(n));
 }
 
 // Palavras que não identificam nada — não contam nem a favor nem contra na sobreposição.
@@ -63,8 +71,40 @@ function tokensUteis(s: string): string[] {
  * de um suporte) e ambos contêm palavra de acessório, então nenhum filtro disparou.
  */
 export function nucleoDoTermo(termo: string): string | null {
-  for (const t of tokensUteis(termo)) if (!/\d/.test(t)) return t;
+  for (const t of tokensUteis(termo)) if (!/\d/.test(t) && !QUANTIDADE.has(t)) return t;
   return null;
+}
+
+/** Palavras de embalagem/quantidade: são o "quanto", não o "quê". "10 metros de cabo" pede CABO. */
+const QUANTIDADE = new Set([
+  "metro", "metros", "m", "kit", "kits", "par", "pares", "unidade", "unidades",
+  "peca", "pecas", "rolo", "rolos", "caixa", "caixas", "conjunto", "jogo",
+]);
+
+/** Raiz aproximada: tira plural e sufixo curto, para "cabos"~"cabo" e "terminais"~"terminal". */
+function raiz(t: string): string {
+  return t.replace(/(oes|aes|ais|eis|is|ns|es|s)$/, "");
+}
+
+/**
+ * O termo "fala do mesmo objeto" que o candidato? Verdadeiro se QUALQUER token útil não-numérico
+ * do pedido aparece no candidato, tolerando plural.
+ *
+ * Por que não é mais só o PRIMEIRO token: veto por uma palavra posicional derruba casamento
+ * perfeito em três formas de escrever que o dono usa todo dia — plural ("os cabos do inversor"),
+ * marca ou categoria na frente ("Victron Cerbo GX", "Inversor MultiPlus-II") e unidade na frente
+ * ("10 metros de cabo"). E anula a tolerância a erro de digitação que a busca por trigrama existe
+ * para dar: "Disjuntro CC 200A" deixaria de achar "Disjuntor CC 200A".
+ *
+ * A regra continua pegando o bug que a originou, porque ali NENHUM token casa: "Terminal de olhal
+ * para cabo 25mm²" não tem terminal, nem olhal, nem cabo em "SUPORTE PARA FACHO HOLMES".
+ */
+export function falaDoMesmoObjeto(termo: string, nome: string, sku: string | null): boolean {
+  const alvo = tokenizar(`${nome} ${sku || ""}`);
+  const alvoRaizes = new Set(alvo.map(raiz));
+  const doTermo = tokensUteis(termo).filter((t) => !/\d/.test(t) && !QUANTIDADE.has(t));
+  if (doTermo.length === 0) return true; // só números/quantidade: a regra não se aplica
+  return doTermo.some((t) => alvoRaizes.has(raiz(t)) || alvo.some((a) => a.includes(t) || t.includes(a)));
 }
 
 /**
@@ -89,8 +129,19 @@ export function siglasFaltando(termoOriginal: string, nome: string, sku: string 
     .map((s) => normalizarTermo(s))
     // Preposição em caixa alta ("DE", "COM") não identifica peça nenhuma.
     .filter((s) => !VAZIAS.has(s))
+    .filter((s) => !QUALIFICADOR_UNIVERSAL.has(s))
     .filter((s) => !alvo.has(s));
 }
+
+/**
+ * Siglas que descrevem CONTEXTO, não o tipo da peça. "Fusível ANL 100A para proteção CC" pede o
+ * mesmo fusível que "Fusível ANL 100A com porta-fusível" — o CC diz onde ele vai, não o que ele é,
+ * e o nome do produto quase nunca o carrega. Tratá-las como sigla de tipo fazia o produto EXATO do
+ * catálogo ser rejeitado, e o orçamento cadastrava uma duplicata valendo R$ 0,00.
+ */
+const QUALIFICADOR_UNIVERSAL = new Set([
+  "cc", "ca", "dc", "ac", "v", "a", "ah", "w", "kw", "kv", "hz", "mm", "cm", "ip", "un", "pc",
+]);
 
 /** Fração dos tokens úteis do termo presentes no candidato. 1 = casou tudo. */
 export function fracaoCasada(termo: string, nome: string, sku: string | null): number {
@@ -118,9 +169,9 @@ export const PISO_DE_CONFIANCA = 0.5;
 export function matchFraco(termo: string, nome: string, sku: string | null): { fraco: boolean; motivo: string } {
   const alvo = normalizarTermo(`${nome} ${sku || ""}`);
 
-  const nucleo = nucleoDoTermo(termo);
-  if (nucleo && !alvo.includes(nucleo)) {
-    return { fraco: true, motivo: `pedido é "${nucleo}" e o candidato não é` };
+  if (!falaDoMesmoObjeto(termo, nome, sku)) {
+    const nucleo = nucleoDoTermo(termo);
+    return { fraco: true, motivo: nucleo ? `pedido é "${nucleo}" e o candidato não é` : "candidato não corresponde ao pedido" };
   }
 
   const siglas = siglasFaltando(termo, nome, sku);
@@ -164,6 +215,21 @@ function origemDoHistorico(row: any): string {
   return "praticado antes";
 }
 
+/**
+ * Preço de venda da linha, na ordem de precedência: informado no pedido → praticado antes →
+ * cadastro do catálogo. Zero em qualquer um deles é AUSÊNCIA de preço, não preço.
+ *
+ * O `??` que estava aqui deixava o zero vencer: um produto cadastrado sem preço (o que acontece
+ * sempre que o item nasce de um orçamento sem estimativa) devolvia 0 e a linha entrava valendo
+ * R$ 0,00 com status "resolvido" — sem aviso nenhum, porque tecnicamente "achou no catálogo".
+ */
+export function precoDoItem(informado: number | undefined, praticado: number | null, catalogo: unknown): number {
+  if (informado != null && Number(informado) > 0) return Number(informado);
+  if (praticado != null && Number(praticado) > 0) return Number(praticado);
+  const cat = Number(catalogo);
+  return Number.isFinite(cat) && cat > 0 ? cat : 0;
+}
+
 /** Preço já praticado deste produto (fonte da verdade de "valor já usado"). */
 // Preferência de preço: último praticado a ESTE cliente → último praticado (global) → catálogo.
 // Mesma precedência da RPC resolve_practiced_price (fonte de verdade), mantida aqui em TS só para
@@ -176,7 +242,10 @@ async function ultimoPreco(sb: any, productId: string, clientId?: string | null)
       .select("unit_sale_snapshot, created_at, service_orders!inner(service_order_number, created_at, client_id)")
       .eq("product_id", productId)
       .eq("service_orders.client_id", clientId)
-      .not("unit_sale_snapshot", "is", null)
+      // > 0, e não apenas "não nulo": um item cadastrado sem preço grava snapshot ZERO, e zero
+      // lido como "preço praticado" faz a linha voltar valendo R$ 0,00 no orçamento seguinte —
+      // com status "resolvido", sem aviso nenhum. Zero não é preço, é ausência de preço.
+      .gt("unit_sale_snapshot", 0)
       .order("created_at", { ascending: false })
       .limit(1);
     const hh = ((h1 as any[]) || [])[0];
@@ -187,7 +256,7 @@ async function ultimoPreco(sb: any, productId: string, clientId?: string | null)
     .from("service_order_parts")
     .select("unit_sale_snapshot, created_at, service_orders(service_order_number, created_at)")
     .eq("product_id", productId)
-    .not("unit_sale_snapshot", "is", null)
+    .gt("unit_sale_snapshot", 0)   // mesmo motivo do bloco acima: zero não é preço praticado
     .order("created_at", { ascending: false })
     .limit(1);
   const h = ((hist as any[]) || [])[0];
@@ -222,7 +291,7 @@ export async function resolverItens(
           const preco = await ultimoPreco(sb, p.id, clientId);
           return {
             keyword: termo, quantidade: qtd, status: "resolvido", product_id: p.id, nome: p.name,
-            preco_venda: precoInformado ?? preco.preco ?? (p.sale_price != null ? Number(p.sale_price) : 0),
+            preco_venda: precoDoItem(precoInformado, preco.preco, p.sale_price),
             custo: p.cost_price != null ? Number(p.cost_price) : 0,
             origem: precoInformado != null ? "preço informado no pedido" : (preco.preco != null ? preco.origem : "apelido aprendido → cadastro"),
             preco_informado: precoInformado,
@@ -251,11 +320,18 @@ export async function resolverItens(
       const status: ItemResolvido["status"] = toks.length > 0 && casados === toks.length ? "resolvido" : "assumido";
 
       const preco = await ultimoPreco(sb, p.id, clientId);
+      const precoFinal = precoDoItem(precoInformado, preco.preco, p.sale_price);
+      // Casou o produto certo, mas ninguém sabe por quanto vender: não é "resolvido". Marcar como
+      // assumido faz a macro devolvê-lo em `confirmar`, e o dono vê a lacuna antes de mandar ao
+      // cliente. Sem isto a linha entra valendo R$ 0,00 com cara de item conferido.
+      const statusFinal: ItemResolvido["status"] = precoFinal > 0 ? status : "assumido";
       return {
-        keyword: termo, quantidade: qtd, status, product_id: p.id, nome: p.name,
-        preco_venda: precoInformado ?? preco.preco ?? (p.sale_price != null ? Number(p.sale_price) : 0),
+        keyword: termo, quantidade: qtd, status: statusFinal, product_id: p.id, nome: p.name,
+        preco_venda: precoFinal,
         custo: p.cost_price != null ? Number(p.cost_price) : 0,
-        origem: precoInformado != null ? "preço informado no pedido" : (preco.preco != null ? preco.origem : "cadastro atual do catálogo"),
+        origem: precoFinal === 0
+          ? "SEM PREÇO — o produto existe no catálogo mas não tem valor de venda"
+          : (precoInformado != null && precoInformado > 0 ? "preço informado no pedido" : (preco.preco != null ? preco.origem : "cadastro atual do catálogo")),
         candidatos: lista.length,
         preco_informado: precoInformado,
       };

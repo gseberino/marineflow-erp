@@ -206,10 +206,12 @@ export function useAIAgent(context: AIContext) {
             return next;
           });
         }
+        return true;
       } catch (e: any) {
         const msg = e?.message || 'Erro ao processar a decisão';
         setError(msg);
         setDisplay((d) => [...d, { kind: 'message', role: 'assistant', content: `❌ ${msg}` }]);
+        return false;
       } finally {
         setLoading(false);
       }
@@ -217,30 +219,38 @@ export function useAIAgent(context: AIContext) {
     [invalidateAll]
   );
 
-  const confirmProposal = useCallback(async (note?: string) => {
-    if (!activeProposal) return;
-    const proposalIdx = activeProposal.idx;
-    const pendingActionId = activeProposal.proposal.pending_action_id;
-    setDisplay((d) =>
-      d.map((it, i) => (i === proposalIdx && it.kind === 'proposal' ? { ...it, status: 'confirmed' } : it))
-    );
-    setActiveProposal(null);
-    await callConfirmAction(pendingActionId, 'approve', note);
-    setDisplay((d) =>
-      d.map((it, i) => (i === proposalIdx && it.kind === 'proposal' ? { ...it, status: 'executed' as any } : it))
-    );
-  }, [activeProposal, callConfirmAction]);
+  // O cartão diz QUAL ação ele representa. Antes as duas funções liam `activeProposal`, o estado
+  // único — então, com dois cartões pendentes na tela (acontece: o campo de texto não é bloqueado
+  // enquanto um cartão espera), clicar no cartão de cima executava a ação do de baixo, e o cartão
+  // clicado continuava aberto como se nada tivesse ocorrido.
+  const confirmProposal = useCallback(async (note?: string, pendingActionId?: string) => {
+    const alvo = pendingActionId
+      ? display.findIndex((it) => it.kind === 'proposal' && it.proposal.pending_action_id === pendingActionId)
+      : activeProposal?.idx ?? -1;
+    const id = pendingActionId ?? activeProposal?.proposal.pending_action_id;
+    if (!id || alvo < 0) return;
 
-  const cancelProposal = useCallback(async (note?: string) => {
-    if (!activeProposal) return;
-    const proposalIdx = activeProposal.idx;
-    const pendingActionId = activeProposal.proposal.pending_action_id;
+    setDisplay((d) => d.map((it, i) => (i === alvo && it.kind === 'proposal' ? { ...it, status: 'confirmed' } : it)));
+    if (activeProposal?.idx === alvo) setActiveProposal(null);
+    const ok = await callConfirmAction(id, 'approve', note);
+    // Só marca como executada se a chamada REALMENTE passou — antes o cartão dizia "executada"
+    // mesmo quando a ação falhava, porque o catch engolia o erro e o fluxo seguia.
     setDisplay((d) =>
-      d.map((it, i) => (i === proposalIdx && it.kind === 'proposal' ? { ...it, status: 'cancelled' } : it))
+      d.map((it, i) => (i === alvo && it.kind === 'proposal' ? { ...it, status: (ok ? 'executed' : 'pending') as any } : it))
     );
-    setActiveProposal(null);
-    await callConfirmAction(pendingActionId, 'reject', note);
-  }, [activeProposal, callConfirmAction]);
+  }, [activeProposal, callConfirmAction, display]);
+
+  const cancelProposal = useCallback(async (note?: string, pendingActionId?: string) => {
+    const alvo = pendingActionId
+      ? display.findIndex((it) => it.kind === 'proposal' && it.proposal.pending_action_id === pendingActionId)
+      : activeProposal?.idx ?? -1;
+    const id = pendingActionId ?? activeProposal?.proposal.pending_action_id;
+    if (!id || alvo < 0) return;
+
+    setDisplay((d) => d.map((it, i) => (i === alvo && it.kind === 'proposal' ? { ...it, status: 'cancelled' } : it)));
+    if (activeProposal?.idx === alvo) setActiveProposal(null);
+    await callConfirmAction(id, 'reject', note);
+  }, [activeProposal, callConfirmAction, display]);
 
   const selectOption = useCallback(async (value: string, label: string) => {
     if (!activeOptions) return;

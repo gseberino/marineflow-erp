@@ -1,7 +1,7 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
-  fracaoCasada, matchFraco, normalizarTermo, nucleoDoTermo, PISO_DE_CONFIANCA,
-  pontuaCandidato, siglasFaltando, tokenizar, tokensNumericos,
+  falaDoMesmoObjeto, fracaoCasada, matchFraco, normalizarTermo, nucleoDoTermo, PISO_DE_CONFIANCA,
+  pontuaCandidato, precoDoItem, siglasFaltando, tokenizar, tokensNumericos,
 } from "./keyword-resolver.ts";
 
 // Funções PURAS do resolvedor — a lógica de escolha que precisa ser estável.
@@ -139,6 +139,59 @@ Deno.test("PEDIDO EM CAIXA ALTA não vira uma lista de siglas — o dono escreve
 Deno.test("preposição em caixa alta nunca conta como sigla", () => {
   assertEquals(siglasFaltando("Cabo PARA bateria", "Cabo de bateria", null), []);
   assertEquals(siglasFaltando("Terminal DE olhal", "Terminal para olhal", null), []);
+});
+
+// ── O piso não pode rejeitar o produto CERTO ─────────────────────────────────────────────────
+// Rejeitar demais é tão caro quanto casar errado: o catálogo deixa de ser usado e cada orçamento
+// cadastra uma duplicata valendo R$ 0,00. Estes casos vieram da revisão, rodados contra nomes
+// reais da tabela `products` e contra o jeito como o dono escreve nas mensagens.
+
+Deno.test("CC/DC/AC são contexto, não tipo de peça — não podem vetar o produto exato", () => {
+  assertEquals(matchFraco("Fusível ANL 100A para proteção CC", "Fusível ANL 100A com porta-fusível", null).fraco, false);
+  assertEquals(matchFraco("Terminal a compressão 70mm² para cabo CC", "Terminal a compressão 70mm²", null).fraco, false);
+  assertEquals(matchFraco("Cabo flexível 25mm² vermelho para saída do carregador DC/DC", "Cabo flexível 25mm² vermelho", null).fraco, false);
+  assertEquals(matchFraco("disjuntor CC 12V 250A", "Disjuntor CC 250A 12V", null).fraco, false);
+  // Mas a sigla que É o tipo continua vetando.
+  assertEquals(matchFraco("Fusível ANL 250A", "Fusível Mega 250A/32V", null).fraco, true);
+});
+
+Deno.test("plural nos dois sentidos casa — o dono escreve 'os cabos', o catálogo tem 'KIT Terminais'", () => {
+  assertEquals(matchFraco("Cabos flexíveis 25mm² vermelho", "Cabo flexível 25mm² vermelho", null).fraco, false);
+  assertEquals(matchFraco("Fusíveis ANL 100A com porta-fusível", "Fusível ANL 100A com porta-fusível", null).fraco, false);
+  assertEquals(matchFraco("terminal a compressão 95mm²", "KIT Terminais a compressão 95mm²", null).fraco, false);
+  assertEquals(matchFraco("Disjuntores CC 200A", "Disjuntor CC 200A", null).fraco, false);
+});
+
+Deno.test("marca, categoria ou quantidade na frente não matam o casamento", () => {
+  assertEquals(matchFraco("Victron Cerbo GX", "Cerbo GX", null).fraco, false);
+  assertEquals(matchFraco("Inversor MultiPlus-II 12/3000", "MultiPlus-II 12/3000", null).fraco, false);
+  assertEquals(matchFraco("Controlador SmartSolar MPPT 100/50", "SmartSolar MPPT 100/50", null).fraco, false);
+  // "10 metros" é QUANTO, não QUAL: o 10 não pode contar como número de modelo ausente.
+  assertEquals(matchFraco("10 metros de cabo elétrico 70mm²", "Cabo elétrico 70mm²", null).fraco, false);
+});
+
+Deno.test("erro de digitação na primeira palavra não anula a tolerância do trigrama", () => {
+  assertEquals(matchFraco("Disjuntro CC 200A", "Disjuntor CC 200A", null).fraco, false);
+});
+
+Deno.test("falaDoMesmoObjeto: basta UM token do pedido casar, mas algum tem que casar", () => {
+  assertEquals(falaDoMesmoObjeto("Inversor MultiPlus-II", "MultiPlus-II 12/3000", null), true);
+  assertEquals(falaDoMesmoObjeto("Terminal de olhal para cabo", "SUPORTE PARA FACHO HOLMES", null), false);
+  // Só número e quantidade: a regra não se aplica e deixa passar para os outros filtros.
+  assertEquals(falaDoMesmoObjeto("10 metros 25mm", "Cabo 25mm", null), true);
+});
+
+// ── Preço ZERO não é preço ───────────────────────────────────────────────────────────────────
+Deno.test("zero nunca vence como preço — nem informado, nem praticado, nem de catálogo", () => {
+  // Era `informado ?? praticado ?? catalogo`, e o zero vencia: um produto cadastrado sem preço
+  // fazia a linha voltar valendo R$ 0,00 com status "resolvido", sem aviso nenhum.
+  assertEquals(precoDoItem(undefined, null, 42), 42);
+  assertEquals(precoDoItem(undefined, 30, 42), 30);
+  assertEquals(precoDoItem(55, 30, 42), 55);
+  assertEquals(precoDoItem(0, 30, 42), 30);      // informado zero cai para o praticado
+  assertEquals(precoDoItem(undefined, 0, 42), 42); // praticado zero cai para o catálogo
+  assertEquals(precoDoItem(undefined, 0, 0), 0);   // nada: zero mesmo, e o chamador avisa
+  assertEquals(precoDoItem(undefined, null, null), 0);
 });
 
 Deno.test("o piso NÃO estraga os casamentos legítimos que já funcionavam", () => {

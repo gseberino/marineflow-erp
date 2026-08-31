@@ -223,18 +223,35 @@ Responda APENAS com o texto da mensagem pronta para envio, sem explicações ou 
  * a seguinte é devolvida como nova proposta e o card reaparece. Ordem cronológica, para o lote
  * ser confirmado na mesma sequência em que foi pedido.
  */
+/** A sessão do widget vive em localStorage e dura dias, acumulando pendências de vários turnos —
+ *  há sessão em produção com 8 abertas de dois turnos diferentes. A fila só encadeia o que nasceu
+ *  JUNTO da ação decidida (mesmo turno = criadas no mesmo instante, com folga de um minuto para o
+ *  lote), senão o card ressuscitaria decisão velha anunciada como "desta rodada". */
+const JANELA_DA_RODADA_MS = 60_000;
+
+function limitesDaRodada(criadaEm: string): { de: string; ate: string } {
+  const t = new Date(criadaEm).getTime();
+  return {
+    de: new Date(t - JANELA_DA_RODADA_MS).toISOString(),
+    ate: new Date(t + JANELA_DA_RODADA_MS).toISOString(),
+  };
+}
+
 async function proximaPendenciaDaSessao(
   admin: any,
   sessionId: string | null,
-  idJaDecidida: string,
+  decidida: { id: string; created_at: string },
 ): Promise<Proposal | null> {
   if (!sessionId) return null;
+  const { de, ate } = limitesDaRodada(decidida.created_at);
   const { data } = await admin
     .from("ai_operator_pending_actions")
     .select("id, title, summary, risk_level")
     .eq("session_id", sessionId)
     .eq("status", "pending")
-    .neq("id", idJaDecidida)
+    .neq("id", decidida.id)
+    .gte("created_at", de)
+    .lte("created_at", ate)
     .order("created_at", { ascending: true })
     .limit(1)
     .maybeSingle();
@@ -247,16 +264,23 @@ async function proximaPendenciaDaSessao(
   };
 }
 
-/** Quantas pendências continuam abertas na sessão — para a mensagem não dizer "executado" quando
- *  ainda falta a maior parte do lote. */
-async function quantasPendenciasAbertas(admin: any, sessionId: string | null, idJaDecidida: string): Promise<number> {
+/** Quantas ações da MESMA rodada continuam abertas — para a mensagem não dizer "executado" quando
+ *  ainda falta a maior parte do lote, nem contar pendência de outro dia. */
+async function quantasPendenciasAbertas(
+  admin: any,
+  sessionId: string | null,
+  decidida: { id: string; created_at: string },
+): Promise<number> {
   if (!sessionId) return 0;
+  const { de, ate } = limitesDaRodada(decidida.created_at);
   const { count } = await admin
     .from("ai_operator_pending_actions")
     .select("id", { count: "exact", head: true })
     .eq("session_id", sessionId)
     .eq("status", "pending")
-    .neq("id", idJaDecidida);
+    .neq("id", decidida.id)
+    .gte("created_at", de)
+    .lte("created_at", ate);
   return Number(count) || 0;
 }
 
@@ -645,15 +669,15 @@ Deno.serve(async (req) => {
           event_category: userNote ? "learning" : "security",
           payload: { args: pending.payload, user_note: userNote || null },
         });
-        const restantesRej = await quantasPendenciasAbertas(admin, pending.session_id, pendingActionId);
+        const restantesRej = await quantasPendenciasAbertas(admin, pending.session_id, { id: pendingActionId, created_at: pending.created_at });
         const rejectMsg = restantesRej > 0
-          ? `❌ Ação rejeitada: ${pending.title}. ${restantesRej === 1 ? "Falta 1 ação" : `Faltam ${restantesRej} ações`} desta mesma rodada — segue a próxima.`
+          ? `❌ Ação rejeitada: ${pending.title}. ${restantesRej === 1 ? "Falta 1 ação" : `Faltam ${restantesRej} ações`} deste mesmo pedido — segue a próxima.`
           : `❌ Ação rejeitada: ${pending.title}.`;
         if (pending.session_id) {
           await admin.from("ai_operator_messages").insert({ session_id: pending.session_id, role: "assistant", content: rejectMsg, source: "web" });
           await admin.from("ai_operator_sessions").update({ last_activity_at: new Date().toISOString() }).eq("id", pending.session_id);
         }
-        const proximaRej = await proximaPendenciaDaSessao(admin, pending.session_id, pendingActionId);
+        const proximaRej = await proximaPendenciaDaSessao(admin, pending.session_id, { id: pendingActionId, created_at: pending.created_at });
         return jr({
           message: { role: "assistant", content: rejectMsg },
           tool_events: [],
@@ -686,9 +710,9 @@ Deno.serve(async (req) => {
       const executedAt = new Date().toISOString();
       // "Executado" sem ressalva era falso quando o turno pedira várias ações: o dono lia a
       // confirmação de UMA e supunha que as seis tinham passado (NOVO-agente-08).
-      const restantes = await quantasPendenciasAbertas(admin, pending.session_id, pendingActionId);
+      const restantes = await quantasPendenciasAbertas(admin, pending.session_id, { id: pendingActionId, created_at: pending.created_at });
       const sufixoFila = restantes > 0
-        ? ` ${restantes === 1 ? "Falta 1 ação" : `Faltam ${restantes} ações`} desta mesma rodada — segue a próxima.`
+        ? ` ${restantes === 1 ? "Falta 1 ação" : `Faltam ${restantes} ações`} deste mesmo pedido — segue a próxima.`
         : "";
       const execMsg = execError
         ? `⚠️ ${pending.title} — falhou: ${execError}${sufixoFila}`
@@ -702,7 +726,7 @@ Deno.serve(async (req) => {
         await admin.from("ai_operator_sessions").update({ last_activity_at: executedAt }).eq("id", pending.session_id);
       }
 
-      const proxima = await proximaPendenciaDaSessao(admin, pending.session_id, pendingActionId);
+      const proxima = await proximaPendenciaDaSessao(admin, pending.session_id, { id: pendingActionId, created_at: pending.created_at });
       return jr({
         message: { role: "assistant", content: execMsg },
         tool_events: [{ name: pending.action_name, args: pending.payload, result: execResult }],
