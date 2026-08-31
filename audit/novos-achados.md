@@ -1781,6 +1781,141 @@ porque só o dono pode preenchê-las.
   filtro de canal já faz. Um "perfil de admin no WhatsApp" enxuto, decidido uma vez e congelado,
   é o caminho que resta; escolher o que entra nele é decisão de negócio, não técnica.
 
+## NOVO-agente-04 — O agente lê as 30 mensagens mais ANTIGAS da sessão, para sempre
+
+- **Achado em:** 31/08/2026, investigando a queixa do dono de que "pedido de ajuste vira orçamento
+  novo". É a causa raiz do sintoma, e não é o modelo.
+- **Evidência (código em produção):** `supabase/functions/ai-agent/index.ts:695-700` carrega o
+  histórico com `.order("created_at", { ascending: true }).limit(30)` — ascendente + limite são as
+  30 **primeiras** linhas da sessão, não as últimas. A janela **congela** depois do primeiro turno
+  grande e nunca avança. `index.ts:711` fecha o cerco: havendo histórico persistido, o array
+  `incoming` que o frontend mandou (que é a janela correta) é descartado e só a última fala do
+  usuário é aproveitada. O mesmo defeito está em `index.ts:417-422` (WhatsApp) e `index.ts:557-561`
+  (endpoint `load_history` — por isso a própria tela mostra só o começo de conversas longas).
+- **Prova (sessão `3ac5b84a-4ef8-4d99-8b28-d193a49d8343`, 31/08):** 236 mensagens, de 12:28:53 a
+  14:45:18. A linha nº 30 é de **12:43:08**; o `tool_result` que criou o ORÇ-00086 é a linha **36**.
+  **206 das 236 mensagens nunca voltaram ao modelo.** Das 12:45 às 14:45 ele recebeu sempre o mesmo
+  prefixo congelado — cujo conteúdo dominante é o pedido original "Preciso montar um orçamento" — e
+  o executou de novo a cada turno. Os três "Continue" geraram ORÇ-00087, 00088 e 00091; o pedido de
+  LEITURA "me mande os itens provisórios para eu checar" gerou o ORÇ-00090.
+- **Agravante independente:** todas as linhas de um turno são gravadas num INSERT em lote e
+  compartilham o mesmo `created_at`; não há coluna de sequência. Dentro do turno a ordem é
+  indefinida — `tool_result` volta antes do `assistant` que o gerou. O modelo relê um log truncado
+  **e embaralhado** do próprio trabalho.
+- **Correção (não aplicada):** `.order("created_at", { ascending: false }).limit(60)` + `.reverse()`
+  antes do `map`, nos três pontos. **Cuidado obrigatório:** pegar as N mais recentes pode cortar um
+  lote de `tool_result` deixando órfão sem o `tool_use` correspondente — a API responde 400. Depois
+  do reverse, avançar o início da janela até a primeira linha `role='user'` que não seja
+  `tool_result`. A ordem dentro do turno pede coluna de sequência (migration própria).
+
+## NOVO-agente-05 — Material sem cadastro é gravado em service_order_services por desenho
+
+- **Achado em:** 31/08/2026 (queixa: "produtos aparecem na lista de serviços").
+- **Causa estrutural:** `service_order_parts.product_id` é **NOT NULL** e não existe produto
+  genérico/placeholder; `service_order_services.service_id` é nullable com `name_snapshot` NOT NULL.
+  Linha de material sem produto cadastrado **não tem onde caber** em Peças.
+- **Onde acontece:** `_shared/ai/tools/quote-builder.ts:156-178` — o comentário é explícito
+  ("Provisórios (sem cadastro) + mão de obra → service_order_services"). O critério é só a
+  truthiness de `i.product_id`. A macro **não** chama `create_product` nem `avisoDeItemFisico()`
+  (que só roda em `add_material_to_order`, `service-orders.ts:666`, e AVISA depois de gravar).
+- **Cegueira que impede o conserto:** o retorno da macro (`quote-builder.ts:218-223`) nunca diz a
+  palavra "serviço" — devolve só "N itens provisórios". O agente narra honestamente e o dono abre o
+  PDF com cabo embaixo de Serviços.
+- **Contradição no prompt que torna a correção impossível:** `prompt.ts:95` ("DEPOIS DA MACRO,
+  PARE... não chame edit_service_order_item para ajustar o que ela montou") proíbe exatamente o que
+  `prompt.ts:167-168` exige ("item físico vai SEMPRE em PEÇAS" + roteiro de mover). Não existe tool
+  de mover linha: 3 chamadas por linha × 18 linhas = 54, contra teto de 24 iterações (`models.ts:14`).
+  Some-se `prompt.ts:279`, que manda usar `add_material_to_order` para peça — o oposto de `:105`.
+- **Medição da tendência:** linhas de texto livre em `service_order_services` — jun 0, jul 19,
+  **ago 57 de 71 (80%)**, com 32 marcadas "Valor provisório".
+
+## NOVO-agente-06 — create_product ignora profit_margin e cria produto com preço de venda ZERO
+
+- **Evidência:** `_shared/ai/tools/products.ts:296` faz `sb.from("products").insert(args)` cru. O
+  `input_schema` (`:289`) anuncia `profit_margin` ("Margem em %"), o modelo envia
+  `cost_price + profit_margin`, e **nada calcula `sale_price`**. A linha 302 detecta o zero e apenas
+  avisa. Sem `additionalProperties:false` e sem allowlist de colunas, argumento alucinado vai direto
+  ao Postgres e o erro do banco volta cru ao modelo.
+- **Dano medido:** **39 produtos ativos com `sale_price = 0`**, todos com `profit_margin` definido;
+  11 têm custo e não têm venda. Na sessão de 31/08 foram 16 criações — as 11 primeiras com custo e
+  venda zero. É a resposta à pergunta do dono na conversa: "a maioria dos materiais estão sem preço,
+  por quê?".
+- **Efeito em cadeia:** produto recém-criado vale zero → inútil para orçar → o agente volta a casar
+  com produto errado do catálogo, que ao menos tem preço. Liga NOVO-agente-06 a NOVO-agente-07.
+- **Correção (não aplicada):** `sale_price = cost_price × (1 + profit_margin/100)` quando a margem
+  vier e o preço não; allowlist de colunas antes do insert; varredura para os 39 já criados.
+
+## NOVO-agente-07 — Casamento de catálogo sem piso: 1 token de 6 vira peça com preço
+
+- **Evidência:** `_shared/ai/keyword-resolver.ts:158-164`. `pontuaCandidato` soma +1000 por token
+  achado como **substring** e subtrai **5000** por número de modelo ausente; o `sim` do trigrama
+  (`search_products_trgm`) é **descartado**. Não há limiar mínimo — o vencedor pode ter casado 1
+  token de 6. `matchFraco` (`:55-61`) só rejeita por número ausente ou por "acessório", e **nunca
+  compara o substantivo**.
+- **Casos reais (ORÇ-00086/00090):** "Terminal de olhal para cabo 25mm²" → **SUPORTE PARA FACHO
+  HOLMES 40X22-25MM** (o token `25mm` veio da medida de um suporte; `terminal` e `suporte` estão
+  ambos na lista de acessório, então o filtro não dispara). "Fusível ANL 250A" → "Fusível Mega
+  250A/32V Victron". Um item casou com "PCBA de reposição Pylontech", qtd 20, R$ 5.397.
+- **A penalidade INVERTE a escolha:** os quatro fusíveis ANL corretos estavam no topo do trigrama
+  (sim 0,706) e foram para −5000, enquanto a família errada venceu por conter o número.
+- **Duas políticas de confiança no mesmo agente:** a abstenção existe só no caminho da macro.
+  `search_products`/`search_products_batch` (`products.ts:15-84`) são `ilike %termo%` sem score, sem
+  limiar, e `products.ts:78-81` **ordena** o modelo a escolher ("Escolha o candidato mais adequado"),
+  oferecendo abstenção só quando o resultado é ZERO.
+
+## NOVO-agente-08 — Só a PRIMEIRA ação de risco do turno é apresentada; as outras morrem em pending
+
+- **Evidência:** `_shared/ai/agent.ts:483-499`. O `if (!shortCircuit)` faz com que apenas a primeira
+  `createdPendingProposal` do turno vire short-circuit. As demais já foram gravadas em
+  `ai_operator_pending_actions` (`:442-456`) e recebem `tool_result {pending:true}`, mas **nunca são
+  apresentadas** — ficam órfãs até expirar em 24h (`:453`).
+- **Prova:** 31/08, dois lotes de 5 cancelamentos; **2 executados, 8 órfãos em `pending`**. Quatro
+  dos seis orçamentos seguem em `draft`. Histórico do sistema: 18 executed, 13 failed, **13 expired**
+  — os expired são exatamente esses órfãos.
+- **Agravante:** o agente respondeu "✅ Cancelar OS — executado" (recebeu a confirmação da única que
+  passou), violando a regra "NÃO FINJA" de `prompt.ts:41`. O dono percebeu e perguntou "vi que você
+  cancelou, e as alterações, você fez?".
+
+## NOVO-agente-09 — RISCO FÍSICO: produção cota cabo 19% mais fino que o padrão conservador
+
+- **Evidência:** a edge `ai-agent` em produção passa `p_insulation_c: 105` a `dc_cable_sizing`. A
+  correção (remoção do parâmetro) está na `main` desde **19/08/2026** (commit `59d33ec`) e **nunca
+  foi deployada** — nasceu em worktree e entrou na main em 27/08, depois do deploy de 23/08.
+- **Magnitude medida em produção:** 200 A / 1 m / 12 V / 3% → `mm2_minimo = 34` com 105 °C contra
+  **42** com 90 °C (o default da função no banco). Os 12 resultados bem-sucedidos de `size_dc_cable`
+  na sessão trazem `"isolacao_c":105`; a conversa dimensionou 200 A, 167 A, 166 A, 100 A e 70 A.
+- **Por que é grave:** cabo subdimensionado aquece. Em lancha e motorhome isso é risco de incêndio,
+  não erro de orçamento. **É o item mais urgente da lista, e não precisa de código novo — é deploy.**
+- **Bug gêmeo na mesma RPC:** `v_faltando := v_faltando || 'corrente máxima do circuito (A)'`
+  concatena `text[]` com literal `unknown`, que o Postgres resolve como `array_cat` e não
+  `array_append` → `malformed array literal`. Reproduzido em produção com
+  `select public.dc_cable_sizing(null, 5, 12, 3, 90, false, 1)`. **9 de 21 chamadas falharam (43%)**
+  — todas as que passaram `survey_id`. Conserto: `::text` no literal (e no gêmeo, "comprimento do
+  trecho (m)"). A ironia é que só quebra o caminho que existia para degradar com elegância.
+
+## NOVO-agente-10 — 196 ferramentas enviadas de uma vez, 4× acima do limite documentado
+
+- **Evidência:** `_shared/ai/anthropic.ts:154-158` envia todas as tools em toda chamada. A Anthropic
+  documenta que "a habilidade do Claude de escolher a ferramenta certa degrada acima de 30–50
+  ferramentas disponíveis". Medição externa: com seleção de ferramentas, Opus 4.5 foi de 79,5% para
+  88,1% de acerto e −85% de tokens de definição.
+- **Ambiguidade concreta:** três tools para "adicionar linha na OS" —
+  `add_service_order_item` (`service-orders.ts:557`), `add_service_to_order` (`:589`) e
+  `add_material_to_order` (`:632`) — com a distinção na prosa da descrição, não no schema.
+- **Assimetria que empurra o modelo a recriar:** existe macro de CRIAÇÃO em lote
+  (`create_quote_from_items`) e **nenhuma de EDIÇÃO em lote**. Recriar = 1 chamada; corrigir 18
+  linhas = 54. Na sessão: 38 chamadas de conserto (16 remove + 11 add + 11 edit) contra 6 de criação.
+  A macro nem aceita `service_order_id` (`quote-builder.ts:113-137` sempre faz INSERT novo) e não tem
+  chave de idempotência nem checagem de rascunho do mesmo cliente/ativo.
+- **Padrão de referência:** Fellegi-Sunter (dois limiares, três saídas: casa / revisão humana / não
+  casa) para o matching; chave de idempotência derivada de (cliente, ativo, dia) para a criação.
+
+> **Nota transversal destas seis entradas.** As regras que deveriam impedir A, B e C **já existem no
+> prompt** e foram ignoradas: `prompt.ts:48` ("não crie nova OS sem pedido explícito" — criou seis) e
+> `prompt.ts:167` (item físico vai em Peças). E **não é atraso de deploy**: a edge em produção é
+> byte-idêntica ao commit `645c749`, e nenhum commit pendente toca essas regras. Regra de prompt que
+> já falhou em produção não se conserta reescrevendo a regra — vira guarda na ferramenta.
+
 ---
 
 # Frente NFS-e — anotações e achados (18/08/2026, sessão nfse-um-clique)
