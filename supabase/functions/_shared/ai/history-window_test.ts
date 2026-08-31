@@ -67,6 +67,53 @@ Deno.test("a janela é maior que a antiga de 30 e olha para o lado certo", () =>
   assertEquals(TAMANHO_DA_JANELA, 60);
 });
 
+Deno.test("tool_result órfão DEPOIS da fala do usuário também some — o caso do banco real", () => {
+  // Todas as linhas de um turno compartilham created_at e não há coluna de sequência, então a
+  // fala do usuário volta do banco ANTES dos tool_result do turno anterior. Cortar no primeiro
+  // 'user' deixava esses órfãos passarem, e a API responde 400.
+  const linhas = [u("oi"), tR("{}"), tR("{}"), a("resposta"), aT("chamo"), tR("{}")];
+  const r = aparaJanela(linhas);
+  assertEquals(r.map((l) => l.role), ["user", "assistant", "assistant", "tool"]);
+});
+
+Deno.test("janela sem nenhum tool_use não carrega tool_result nenhum", () => {
+  const linhas = [u("oi"), tR("{}"), a("ok")];
+  assertEquals(aparaJanela(linhas).map((l) => l.role), ["user", "assistant"]);
+});
+
+// ── Caso REAL de produção ────────────────────────────────────────────────────────────────────
+Deno.test("REGRESSÃO: as 60 últimas da sessão 3ac5b84a viram janela VÁLIDA", () => {
+  // Sequência lida do banco em 31/08/2026 (A=assistant, A*=com tool_calls, U=user, t=tool_result).
+  // Ela começa no meio de um turno e tem a fala do usuário embaralhada com tool_results — os dois
+  // cortes que a API recusa.
+  const SEQ = "A*tttA*UtttttttttttttttttttttAA*UtttttttttttA*A*A*A*A*A*UtttttttttA*A*A";
+  const linhas: LinhaHistorico[] = [];
+  for (let i = 0; i < SEQ.length; i++) {
+    const c = SEQ[i];
+    if (c === "*") continue;
+    if (c === "U") linhas.push(u(`u${i}`));
+    else if (c === "t") linhas.push(tR("{}"));
+    else if (c === "A") linhas.push(SEQ[i + 1] === "*" ? aT(`a${i}`) : a(`a${i}`));
+  }
+
+  const r = aparaJanela(linhas);
+  assertEquals(r[0].role, "user", "tem que começar numa fala do usuário");
+
+  // Nenhum tool_result antes do primeiro tool_use.
+  let vistoToolUse = false;
+  for (const l of r) {
+    if (l.role === "assistant" && Array.isArray(l.tool_calls) && l.tool_calls.length) vistoToolUse = true;
+    assertEquals(l.role === "tool" && !vistoToolUse, false, "tool_result órfão na janela");
+  }
+
+  // Não termina com tool_use pendente.
+  const ultimo = r[r.length - 1];
+  assertEquals(ultimo.role === "assistant" && Array.isArray(ultimo.tool_calls) && ultimo.tool_calls.length > 0, false);
+
+  // E, o ponto de tudo: a janela alcança o FIM da conversa.
+  assertEquals(r[r.length - 1], linhas[linhas.length - 1]);
+});
+
 // ── A regressão que originou tudo ────────────────────────────────────────────────────────────
 Deno.test("REGRESSÃO NOVO-agente-04: a janela alcança o FIM da conversa, não o começo", () => {
   // 236 linhas como na sessão real: a criação do orçamento na 36 e os pedidos de correção no fim.

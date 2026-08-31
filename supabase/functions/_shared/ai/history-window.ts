@@ -57,6 +57,25 @@ export function aparaJanela(linhas: LinhaHistorico[]): LinhaHistorico[] {
   if (inicio === -1) return []; // nenhuma âncora: melhor começar limpo do que enviar fragmento.
   let janela = linhas.slice(inicio);
 
+  // Começar numa fala do usuário NÃO basta, e isto só apareceu ao testar com dado real: todas as
+  // linhas de um turno são gravadas num INSERT em lote e compartilham o mesmo `created_at`, sem
+  // coluna de sequência — então a ordem DENTRO do turno é indefinida, e a fala do usuário costuma
+  // voltar do banco antes dos `tool_result` do turno ANTERIOR. O resultado é um tool_result sem o
+  // tool_use que o originou, que a API recusa com 400.
+  //
+  // Todo `tool_result` que aparece antes do primeiro `tool_use` da janela é, por definição, órfão:
+  // o assistant que o pediu ficou fora do corte. Some com eles — perder um resultado órfão é o
+  // preço de a janela ser válida, e o conteúdo dele não teria como ser interpretado mesmo.
+  const primeiroToolUse = janela.findIndex((l) => l.role === "assistant" && temToolCalls(l));
+  if (primeiroToolUse === -1) {
+    janela = janela.filter((l) => l.role !== "tool");
+  } else {
+    janela = [
+      ...janela.slice(0, primeiroToolUse).filter((l) => l.role !== "tool"),
+      ...janela.slice(primeiroToolUse),
+    ];
+  }
+
   // --- Ponta da frente: derrubar um turno que ficou pela metade. ---
   // Percorre de trás para frente enquanto o fim for um `assistant` com tool_use sem os
   // `tool_result` correspondentes (turno interrompido por timeout, erro ou short-circuit).
