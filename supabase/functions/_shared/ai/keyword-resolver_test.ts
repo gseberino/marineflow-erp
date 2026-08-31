@@ -122,6 +122,25 @@ Deno.test("fracaoCasada ignora preposição — 'de'/'para' não inflam o placar
   assertEquals(fracaoCasada("terminal de olhal", "Suporte de facho", null) < 0.5, true);
 });
 
+Deno.test("PEDIDO EM CAIXA ALTA não vira uma lista de siglas — o dono escreve assim", () => {
+  // Sem esta guarda, "PARA" e "DE" viravam "sigla técnica ausente" e o piso rejeitava o produto
+  // CERTO. Rejeitar demais é tão ruim quanto casar errado: o catálogo deixa de ser usado e cada
+  // orçamento cria produto novo.
+  assertEquals(matchFraco("CABO PARA BATERIA 25MM", "Cabo de bateria 25mm vermelho", null).fraco, false);
+  assertEquals(matchFraco("CABO DE BATERIA 25MM", "Cabo de bateria 25mm vermelho", null).fraco, false);
+  assertEquals(matchFraco("TOMADA 220V 10A EMBUTIR", "Tomada 220V 10A de embutir branca", null).fraco, false);
+  assertEquals(matchFraco("DISJUNTOR CC 200A", "Disjuntor CC 200A para banco de baterias 12V", null).fraco, false);
+  // Num texto TODO em maiúsculas não há contraste, então nada ali é lido como sigla.
+  assertEquals(siglasFaltando("FUSIVEL ANL 250A", "Fusível Mega 250A", null), []);
+  // Com minúsculas ao redor, a sigla volta a ser sinal — que é o caso do bug real.
+  assertEquals(siglasFaltando("Fusível ANL 250A", "Fusível Mega 250A", null), ["anl"]);
+});
+
+Deno.test("preposição em caixa alta nunca conta como sigla", () => {
+  assertEquals(siglasFaltando("Cabo PARA bateria", "Cabo de bateria", null), []);
+  assertEquals(siglasFaltando("Terminal DE olhal", "Terminal para olhal", null), []);
+});
+
 Deno.test("o piso NÃO estraga os casamentos legítimos que já funcionavam", () => {
   // Estes precisam continuar entrando como peça — senão o orçamento vira uma lista de provisórios.
   assertEquals(matchFraco("MPPT 100/50", "MPPT SmartSolar 100/50", null).fraco, false);

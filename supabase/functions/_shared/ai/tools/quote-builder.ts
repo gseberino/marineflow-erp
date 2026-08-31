@@ -39,8 +39,11 @@ async function resolverCliente(sb: any, clientId?: string, clientName?: string) 
  * cadastro existir, para a linha poder morar em Peças.
  */
 async function produtoProvisorio(sb: any, nome: string, precoVenda: number): Promise<{ id: string } | null> {
+  // `%` e `_` são curinga no ILIKE: um item chamado "Cabo 2,5% cobre" casaria com qualquer produto
+  // do catálogo e o orçamento receberia o item errado. Escapar antes de comparar.
+  const nomeEscapado = nome.replace(/([\\%_])/g, "\\$1");
   const { data: existente } = await sb
-    .from("products").select("id").ilike("name", nome).limit(1).maybeSingle();
+    .from("products").select("id").ilike("name", nomeEscapado).limit(1).maybeSingle();
   if (existente?.id) return { id: existente.id };
 
   const { data, error } = await sb
@@ -142,15 +145,18 @@ export const quoteBuilderTools: ToolDef[] = [
       // A janela de histórico já foi corrigida; esta trava é a segunda linha de defesa, e vale
       // mesmo quando o pedido vem de outra sessão ou de outra pessoa.
       if (!args.force_new) {
-        const desdeMeiaNoite = new Date();
-        desdeMeiaNoite.setHours(0, 0, 0, 0);
+        // JANELA RELATIVA, não "hoje". A Edge Function roda em UTC: `setHours(0,0,0,0)` daria
+        // meia-noite de Londres, e entre 21h e 00h no Brasil a trava deixaria de enxergar o
+        // orçamento criado mais cedo no mesmo dia de trabalho. Doze horas cobrem uma jornada
+        // inteira e ainda pegam quem vira a noite montando orçamento — que foi o caso real.
+        const desde = new Date(Date.now() - 12 * 60 * 60 * 1000);
         const { data: jaExiste } = await sb
           .from("service_orders")
           .select("id, service_order_number, created_at")
           .eq("client_id", cli.id)
           .eq("vessel_id", ativo.id)
           .eq("status", "draft")
-          .gte("created_at", desdeMeiaNoite.toISOString())
+          .gte("created_at", desde.toISOString())
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
@@ -158,7 +164,7 @@ export const quoteBuilderTools: ToolDef[] = [
           return {
             ja_existe: jaExiste.service_order_number,
             service_order_id: jaExiste.id,
-            error: `Já existe um orçamento em rascunho de hoje para ${cli.nome} / ${ativo.nome}: ${jaExiste.service_order_number}.`,
+            error: `Já existe um orçamento em rascunho recente para ${cli.nome} / ${ativo.nome}: ${jaExiste.service_order_number}.`,
             instruction:
               "NÃO crie outro. Para ajustar o que já existe use as ferramentas de item " +
               "(add_service_order_item / edit_service_order_item / remove_service_order_item) sobre este service_order_id. " +
@@ -229,12 +235,15 @@ export const quoteBuilderTools: ToolDef[] = [
       // prompt já declara suficiente para orçar) e a linha vai para Peças, onde ela pertence.
       const provisorios = resolvidos.filter((i) => !i.product_id);
       const criados: Array<{ item: string; product_id: string; preco: number; quantidade: number }> = [];
-      const naoCadastrados: string[] = [];
+      // Guarda o item inteiro, não só o nome: dois itens do mesmo pedido podem ter o mesmo nome, e
+      // procurar de volta por nome devolveria a quantidade do outro.
+      const naoCadastrados: Array<{ nome: string; quantidade: number; preco: number }> = [];
       for (const p of provisorios) {
         const nome = String(p.keyword || "").trim();
-        if (nome.length < 2) { naoCadastrados.push(nome || "(vazio)"); continue; }
+        const naoDeu = { nome: nome || "(sem nome)", quantidade: p.quantidade, preco: p.preco_venda };
+        if (nome.length < 2) { naoCadastrados.push(naoDeu); continue; }
         const criado = await produtoProvisorio(sb, nome, p.preco_venda);
-        if (!criado) { naoCadastrados.push(nome); continue; }
+        if (!criado) { naoCadastrados.push(naoDeu); continue; }
         criados.push({ item: nome, product_id: criado.id, preco: p.preco_venda, quantidade: p.quantidade });
         // SEM baixa de estoque, ao contrário das peças resolvidas: este produto acabou de nascer
         // com estoque zero e não foi comprado. Dar baixa aqui criaria saldo negativo — a mesma
@@ -256,13 +265,12 @@ export const quoteBuilderTools: ToolDef[] = [
       const svcRows: any[] = [];
       // Sobra para Serviços só o que não deu para cadastrar (nome vazio/inutilizável) — e mesmo
       // assim marcado, para não sumir do orçamento.
-      for (const nome of naoCadastrados) {
-        const p = provisorios.find((x) => String(x.keyword || "").trim() === nome || (!nome && !x.keyword));
+      for (const n of naoCadastrados) {
         svcRows.push({
           service_order_id: so.id, service_id: null,
-          name_snapshot: `${nome} — Valor provisório (aguardando cotação)`,
-          billing_unit_snapshot: "unit", quantity: p?.quantidade ?? 1,
-          unit_price_snapshot: p?.preco_venda ?? 0, line_total: r2((p?.preco_venda ?? 0) * (p?.quantidade ?? 1)),
+          name_snapshot: `${n.nome} — Valor provisório (aguardando cotação)`,
+          billing_unit_snapshot: "unit", quantity: n.quantidade,
+          unit_price_snapshot: n.preco, line_total: r2(n.preco * n.quantidade),
         });
       }
       for (const l of labor) {
@@ -322,9 +330,7 @@ export const quoteBuilderTools: ToolDef[] = [
           confirmar: i.status === "assumido" ? `casamento PARCIAL — confira se "${i.nome}" é mesmo "${i.keyword}"` : null,
         })),
         cadastrados_agora: criados.map((c) => ({ item: c.item, qtd: c.quantidade, preco: c.preco || null })),
-        provisorios: svcRows.length
-          ? naoCadastrados.map((n) => ({ item: n, lista: "SERVIÇOS (não deu para cadastrar)" }))
-          : [],
+        provisorios: naoCadastrados.map((n) => ({ item: n.nome, qtd: n.quantidade, lista: "SERVIÇOS (não deu para cadastrar)" })),
         mao_de_obra: labor.length,
         avisos: [
           criados.length
@@ -334,7 +340,7 @@ export const quoteBuilderTools: ToolDef[] = [
             ? "Alguns dos itens cadastrados ficaram SEM PREÇO (R$ 0,00) — informe o valor antes de enviar ao cliente."
             : null,
           naoCadastrados.length
-            ? `${naoCadastrados.length} item(ns) não puderam ser cadastrados e ficaram como texto na lista de SERVIÇOS: ${naoCadastrados.join(", ")}.`
+            ? `${naoCadastrados.length} item(ns) não puderam ser cadastrados e ficaram como texto na lista de SERVIÇOS: ${naoCadastrados.map((n) => n.nome).join(", ")}.`
             : null,
           comProduto.some((i) => i.status === "assumido") ? "Alguns itens foram ASSUMIDOS entre parecidos — confira os marcados." : null,
         ].filter(Boolean),

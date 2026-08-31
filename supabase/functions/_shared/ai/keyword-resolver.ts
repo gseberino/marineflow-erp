@@ -74,11 +74,22 @@ export function nucleoDoTermo(termo: string): string | null {
  * Detecta pela grafia do termo ORIGINAL (por isso não recebe a versão normalizada).
  */
 export function siglasFaltando(termoOriginal: string, nome: string, sku: string | null): string[] {
+  const bruto = String(termoOriginal || "");
+  const palavras = bruto.split(/[^A-Za-zÀ-ÿ0-9]+/).filter(Boolean);
+
+  // O sinal é a MAIÚSCULA DESTACADA — só vale quando o texto tem minúsculas para contrastar.
+  // Quem escreve "CABO PARA BATERIA 25MM" está gritando, não citando siglas; ali "PARA" não é o
+  // tipo da peça, e tratá-la como tal rejeitaria "Cabo de bateria 25mm", que é o produto certo.
+  const temMinuscula = palavras.some((p) => /[a-zà-ÿ]/.test(p));
+  if (!temMinuscula) return [];
+
   const alvo = new Set(tokenizar(`${nome} ${sku || ""}`));
-  const siglas = String(termoOriginal || "")
-    .split(/[^A-Za-zÀ-ÿ0-9]+/)
-    .filter((p) => p.length >= 2 && p.length <= 6 && /^[A-ZÀ-Þ]+$/.test(p));
-  return siglas.map((s) => normalizarTermo(s)).filter((s) => !alvo.has(s));
+  return palavras
+    .filter((p) => p.length >= 2 && p.length <= 6 && /^[A-ZÀ-Þ0-9]+$/.test(p) && /[A-ZÀ-Þ]/.test(p))
+    .map((s) => normalizarTermo(s))
+    // Preposição em caixa alta ("DE", "COM") não identifica peça nenhuma.
+    .filter((s) => !VAZIAS.has(s))
+    .filter((s) => !alvo.has(s));
 }
 
 /** Fração dos tokens úteis do termo presentes no candidato. 1 = casou tudo. */
