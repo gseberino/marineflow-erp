@@ -45,18 +45,88 @@ function numerosFaltando(termo: string, nome: string, sku: string | null): strin
   return tokensNumericos(termo).filter((n) => !alvoTokens.has(n));
 }
 
+// Palavras que não identificam nada — não contam nem a favor nem contra na sobreposição.
+const VAZIAS = new Set(["de", "da", "do", "para", "com", "sem", "em", "no", "na", "por", "ou", "e", "un", "pc"]);
+
+/** Tokens que de fato identificam o item (fora preposição e afins). */
+function tokensUteis(s: string): string[] {
+  return tokenizar(s).filter((t) => !VAZIAS.has(t));
+}
+
 /**
- * Match FRACO = provável produto ERRADO, mesmo com tokens sobrepostos:
- *  - número de modelo do termo ausente no candidato ("100/50" pedido, "250/100" achado); ou
- *  - candidato é acessório (cabo/sensor/suporte...) sem o termo pedir acessório.
+ * O NÚCLEO do pedido: o primeiro token útil e não-numérico — o substantivo que diz O QUE é a peça.
+ * "Terminal de olhal para cabo 25mm²" -> "terminal". "Fusível ANL 250A" -> "fusivel".
+ *
+ * Por que isto faltava e por que é a regra que mais importa: a pontuação casava por número e por
+ * "ser acessório", e nunca comparava a COISA pedida. Foi assim que "Terminal de olhal 25mm²" virou
+ * "SUPORTE PARA FACHO HOLMES 40X22-25MM" num orçamento real — o token `25mm` bateu (veio da medida
+ * de um suporte) e ambos contêm palavra de acessório, então nenhum filtro disparou.
+ */
+export function nucleoDoTermo(termo: string): string | null {
+  for (const t of tokensUteis(termo)) if (!/\d/.test(t)) return t;
+  return null;
+}
+
+/**
+ * Siglas técnicas do pedido ausentes no candidato. Em eletroeletrônica a sigla é o TIPO da peça —
+ * ANL, MRBF, MPPT, VSR, MIDI — e trocá-la troca o produto, mesmo com o resto todo igual.
+ * "Fusível ANL 250A" e "Fusível Mega 250A/32V" compartilham palavra e número; só a sigla os separa.
+ * Detecta pela grafia do termo ORIGINAL (por isso não recebe a versão normalizada).
+ */
+export function siglasFaltando(termoOriginal: string, nome: string, sku: string | null): string[] {
+  const alvo = new Set(tokenizar(`${nome} ${sku || ""}`));
+  const siglas = String(termoOriginal || "")
+    .split(/[^A-Za-zÀ-ÿ0-9]+/)
+    .filter((p) => p.length >= 2 && p.length <= 6 && /^[A-ZÀ-Þ]+$/.test(p));
+  return siglas.map((s) => normalizarTermo(s)).filter((s) => !alvo.has(s));
+}
+
+/** Fração dos tokens úteis do termo presentes no candidato. 1 = casou tudo. */
+export function fracaoCasada(termo: string, nome: string, sku: string | null): number {
+  const toks = tokensUteis(termo);
+  if (toks.length === 0) return 0;
+  const alvo = normalizarTermo(`${nome} ${sku || ""}`);
+  return toks.filter((t) => alvo.includes(t)).length / toks.length;
+}
+
+/** Abaixo disto o candidato não é aceito nem como "assumido" — vira provisório com motivo.
+ *  Metade dos tokens úteis é o mínimo para a linha valer o preço que carrega. */
+export const PISO_DE_CONFIANCA = 0.5;
+
+/**
+ * Match FRACO = provável produto ERRADO, mesmo com tokens sobrepostos. Quatro regras, e o pedido
+ * precisa passar por todas:
+ *  - o NÚCLEO (o substantivo pedido) tem que estar no candidato — terminal ≠ suporte;
+ *  - SIGLA técnica do pedido não pode faltar — ANL ≠ Mega;
+ *  - número de modelo do termo ausente no candidato ("100/50" pedido, "250/100" achado);
+ *  - candidato é acessório (cabo/sensor/suporte...) sem o termo pedir acessório;
+ *  - e, por fim, um PISO: menos de metade dos tokens úteis casados não é casamento.
  * Nesses casos é mais honesto virar PROVISÓRIO (sem preço) do que assumir o preço de um item
  * que não é o pedido — foi o que poluía o total e exigia correção manual depois.
  */
 export function matchFraco(termo: string, nome: string, sku: string | null): { fraco: boolean; motivo: string } {
   const alvo = normalizarTermo(`${nome} ${sku || ""}`);
+
+  const nucleo = nucleoDoTermo(termo);
+  if (nucleo && !alvo.includes(nucleo)) {
+    return { fraco: true, motivo: `pedido é "${nucleo}" e o candidato não é` };
+  }
+
+  const siglas = siglasFaltando(termo, nome, sku);
+  if (siglas.length > 0) {
+    return { fraco: true, motivo: `tipo diferente (falta ${siglas.join("/").toUpperCase()})` };
+  }
+
   const faltando = numerosFaltando(termo, nome, sku);
   if (faltando.length > 0) return { fraco: true, motivo: `modelo diferente (falta ${faltando.join("/")})` };
+
   if (ACESSORIO_RE.test(alvo) && !ACESSORIO_RE.test(normalizarTermo(termo))) return { fraco: true, motivo: "candidato é acessório, não o equipamento" };
+
+  const fracao = fracaoCasada(termo, nome, sku);
+  if (fracao < PISO_DE_CONFIANCA) {
+    return { fraco: true, motivo: `só ${Math.round(fracao * 100)}% do pedido casou` };
+  }
+
   return { fraco: false, motivo: "" };
 }
 

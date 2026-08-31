@@ -191,6 +191,21 @@ export function useAIAgent(context: AIContext) {
         const content = (data as any).message?.content || '';
         if (content) setDisplay((d) => [...d, { kind: 'message', role: 'assistant', content }]);
         if (decision === 'approve') invalidateAll(); // a tool real pode ter mudado dados
+
+        // A FILA ANDA (NOVO-agente-08). Quando o agente pede várias ações de risco no mesmo turno,
+        // o servidor só mostrava a primeira e as outras morriam em 'pending' — o dono pediu seis
+        // cancelamentos, dois aconteceram, e ele leu "executado". Agora o servidor devolve a
+        // próxima da fila aqui, e o card reaparece até a rodada acabar.
+        const proxima = (data as any).proposal as Proposal | undefined;
+        if (proxima) {
+          setDisplay((d) => {
+            const next = [...d];
+            const idx = next.length;
+            next.push({ kind: 'proposal', proposal: proxima, status: 'pending' });
+            setActiveProposal({ idx, proposal: proxima });
+            return next;
+          });
+        }
       } catch (e: any) {
         const msg = e?.message || 'Erro ao processar a decisão';
         setError(msg);

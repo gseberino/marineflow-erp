@@ -30,6 +30,33 @@ async function resolverCliente(sb: any, clientId?: string, clientName?: string) 
   return { ok: true as const, id: lista[0].id, nome: lista[0].name };
 }
 
+/**
+ * Produto para um item que o catálogo não tinha. Reaproveita se já existir com o mesmo nome —
+ * orçar duas vezes a mesma peça não pode encher o catálogo de duplicatas.
+ *
+ * Nasce PENDENTE de propósito: sem NCM ele não entra em NF-e, e é isso que o `fiscal_complete`
+ * marca. O prompt já trata produto pendente como suficiente para orçamento — o que faltava era o
+ * cadastro existir, para a linha poder morar em Peças.
+ */
+async function produtoProvisorio(sb: any, nome: string, precoVenda: number): Promise<{ id: string } | null> {
+  const { data: existente } = await sb
+    .from("products").select("id").ilike("name", nome).limit(1).maybeSingle();
+  if (existente?.id) return { id: existente.id };
+
+  const { data, error } = await sb
+    .from("products")
+    .insert({
+      name: nome,
+      sale_price: precoVenda > 0 ? r2(precoVenda) : 0,
+      unit: "UN",
+      notes: "Criado automaticamente ao montar um orçamento. Confirmar preço, unidade e NCM.",
+    })
+    .select("id")
+    .single();
+  if (error || !data) return null;
+  return { id: data.id };
+}
+
 /** Resolve o ativo por id ou nome (dentro do cliente). */
 async function resolverAtivo(sb: any, clientId: string, vesselId?: string, vesselName?: string) {
   if (vesselId) {
@@ -89,6 +116,10 @@ export const quoteBuilderTools: ToolDef[] = [
         discount_amount: { type: "number", description: "Desconto em R$." },
         payment_conditions: { type: "string" },
         quote_validity_days: { type: "number" },
+        force_new: {
+          type: "boolean",
+          description: "Só use se o usuário confirmar que quer OUTRO orçamento para o mesmo cliente/ativo hoje. Sem isto, a tool recusa quando já existe um rascunho aberto e diz qual é.",
+        },
       },
       required: ["title", "items"],
     },
@@ -105,7 +136,38 @@ export const quoteBuilderTools: ToolDef[] = [
       const ativo = await resolverAtivo(sb, cli.id, args.vessel_id, args.vessel_name);
       if (!ativo.ok) return ativo.ambiguo ? { needs_choice: true, o_que: "ativo", opcoes: ativo.opcoes, message: ativo.erro } : { error: ativo.erro };
 
-      // 2. Resolve os itens contra o catálogo (paralelo).
+      // 2. TRAVA DE DUPLICATA (NOVO-agente-04/B). Sem isto, nada impedia seis orçamentos idênticos
+      // numa tarde — foi exatamente o que aconteceu em 31/08 (ORÇ-00086 a 00091), porque o agente
+      // não enxergava o orçamento que ele mesmo tinha acabado de criar e reexecutava o pedido.
+      // A janela de histórico já foi corrigida; esta trava é a segunda linha de defesa, e vale
+      // mesmo quando o pedido vem de outra sessão ou de outra pessoa.
+      if (!args.force_new) {
+        const desdeMeiaNoite = new Date();
+        desdeMeiaNoite.setHours(0, 0, 0, 0);
+        const { data: jaExiste } = await sb
+          .from("service_orders")
+          .select("id, service_order_number, created_at")
+          .eq("client_id", cli.id)
+          .eq("vessel_id", ativo.id)
+          .eq("status", "draft")
+          .gte("created_at", desdeMeiaNoite.toISOString())
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (jaExiste?.id) {
+          return {
+            ja_existe: jaExiste.service_order_number,
+            service_order_id: jaExiste.id,
+            error: `Já existe um orçamento em rascunho de hoje para ${cli.nome} / ${ativo.nome}: ${jaExiste.service_order_number}.`,
+            instruction:
+              "NÃO crie outro. Para ajustar o que já existe use as ferramentas de item " +
+              "(add_service_order_item / edit_service_order_item / remove_service_order_item) sobre este service_order_id. " +
+              "Só chame de novo com force_new=true se o usuário confirmar que quer um orçamento SEPARADO.",
+          };
+        }
+      }
+
+      // 3. Resolve os itens contra o catálogo (paralelo).
       const itens = Array.isArray(args.items) ? args.items : [];
       if (itens.length === 0) return { error: "Informe ao menos um item em items." };
       const resolvidos = await resolverItens(sb, itens, cli.id);
@@ -153,16 +215,54 @@ export const quoteBuilderTools: ToolDef[] = [
         for (const row of partsRows) await applyStockDelta(sb, row.product_id, -Number(row.quantity), so.id, row.unit_cost_snapshot);
       }
 
-      // 5. Provisórios (sem cadastro) + mão de obra → service_order_services (linhas de texto).
+      // 5. Provisórios (sem cadastro) → PRODUTO PENDENTE + service_order_parts.
+      //
+      // Antes iam para `service_order_services`, junto da mão de obra, porque
+      // `service_order_parts.product_id` é NOT NULL e uma linha sem produto não tinha onde caber.
+      // O resultado (NOVO-agente-05) era cabo, terminal e disjuntor aparecendo na lista de
+      // Serviços do orçamento: no ORÇ-00086, 13 das 18 linhas de "serviço" eram material físico,
+      // e em agosto isso já era 80% das linhas de serviço criadas.
+      //
+      // Tudo que entra por `items` é peça POR DEFINIÇÃO do schema ("Peças/equipamentos como
+      // palavras-chave") — mão de obra vem por `labor`. Então o item sem cadastro não precisa de
+      // um lugar improvisado: precisa de cadastro. Ele vira produto PENDENTE (sem NCM, o que o
+      // prompt já declara suficiente para orçar) e a linha vai para Peças, onde ela pertence.
       const provisorios = resolvidos.filter((i) => !i.product_id);
+      const criados: Array<{ item: string; product_id: string; preco: number; quantidade: number }> = [];
+      const naoCadastrados: string[] = [];
+      for (const p of provisorios) {
+        const nome = String(p.keyword || "").trim();
+        if (nome.length < 2) { naoCadastrados.push(nome || "(vazio)"); continue; }
+        const criado = await produtoProvisorio(sb, nome, p.preco_venda);
+        if (!criado) { naoCadastrados.push(nome); continue; }
+        criados.push({ item: nome, product_id: criado.id, preco: p.preco_venda, quantidade: p.quantidade });
+        // SEM baixa de estoque, ao contrário das peças resolvidas: este produto acabou de nascer
+        // com estoque zero e não foi comprado. Dar baixa aqui criaria saldo negativo — a mesma
+        // classe do estoque fantasma que já custou uma investigação neste sistema.
+        await sb.from("service_order_parts").insert({
+          service_order_id: so.id,
+          product_id: criado.id,
+          quantity: p.quantidade,
+          unit_cost_snapshot: 0,
+          unit_sale_snapshot: p.preco_venda,
+          currency_snapshot: "BRL",
+          line_total_cost: 0,
+          line_total_sale: r2(p.preco_venda * p.quantidade),
+          notes: "Cadastrado pelo orçamento — confirmar preço e completar cadastro fiscal.",
+        });
+      }
+
       const labor = Array.isArray(args.labor) ? args.labor : [];
       const svcRows: any[] = [];
-      for (const p of provisorios) {
+      // Sobra para Serviços só o que não deu para cadastrar (nome vazio/inutilizável) — e mesmo
+      // assim marcado, para não sumir do orçamento.
+      for (const nome of naoCadastrados) {
+        const p = provisorios.find((x) => String(x.keyword || "").trim() === nome || (!nome && !x.keyword));
         svcRows.push({
           service_order_id: so.id, service_id: null,
-          name_snapshot: `${p.keyword} — Valor provisório (aguardando cotação)`,
-          billing_unit_snapshot: "unit", quantity: p.quantidade,
-          unit_price_snapshot: p.preco_venda, line_total: r2(p.preco_venda * p.quantidade),
+          name_snapshot: `${nome} — Valor provisório (aguardando cotação)`,
+          billing_unit_snapshot: "unit", quantity: p?.quantidade ?? 1,
+          unit_price_snapshot: p?.preco_venda ?? 0, line_total: r2((p?.preco_venda ?? 0) * (p?.quantidade ?? 1)),
         });
       }
       for (const l of labor) {
@@ -178,7 +278,10 @@ export const quoteBuilderTools: ToolDef[] = [
       if (svcRows.length) await sb.from("service_order_services").insert(svcRows);
 
       // 6. Imposto e comissão (subtotal = peças + serviços já inseridos).
-      const subtotalPecas = comProduto.reduce((a, i) => a + i.preco_venda * i.quantidade, 0);
+      // Os provisórios agora entram como PEÇA, então precisam somar aqui — sem isto o imposto e a
+      // comissão sairiam sobre uma base menor que o orçamento.
+      const subtotalPecas = comProduto.reduce((a, i) => a + i.preco_venda * i.quantidade, 0)
+        + criados.reduce((a, c) => a + c.preco * c.quantidade, 0);
       const subtotalSvc = svcRows.reduce((a, s) => a + Number(s.line_total), 0);
       const subtotal = subtotalPecas + subtotalSvc;
       const desconto = args.discount_amount != null ? Number(args.discount_amount) : 0;
@@ -211,14 +314,28 @@ export const quoteBuilderTools: ToolDef[] = [
         total: grand,
         margem_bruta_pct: margem,
         encargos: Object.keys(encargos).length ? encargos : null,
+        // `pedido` ao lado de `item` é o que permite ver a TROCA (NOVO-agente-07): o retorno só
+        // trazia o nome do catálogo, então "pedi cabo, veio suporte" era invisível para o modelo
+        // e para quem lia a narração.
         itens_no_catalogo: comProduto.map((i) => ({
-          item: i.nome, qtd: i.quantidade, preco: i.preco_venda, origem: i.origem,
-          confirmar: i.status === "assumido" ? `assumi entre ${i.candidatos} parecidos` : null,
+          pedido: i.keyword, item: i.nome, qtd: i.quantidade, preco: i.preco_venda, origem: i.origem,
+          confirmar: i.status === "assumido" ? `casamento PARCIAL — confira se "${i.nome}" é mesmo "${i.keyword}"` : null,
         })),
-        provisorios: provisorios.map((i) => ({ item: i.keyword, qtd: i.quantidade, preco: i.preco_venda || null })),
+        cadastrados_agora: criados.map((c) => ({ item: c.item, qtd: c.quantidade, preco: c.preco || null })),
+        provisorios: svcRows.length
+          ? naoCadastrados.map((n) => ({ item: n, lista: "SERVIÇOS (não deu para cadastrar)" }))
+          : [],
         mao_de_obra: labor.length,
         avisos: [
-          provisorios.length ? `${provisorios.length} item(ns) sem cadastro entraram como PROVISÓRIO — cote e ajuste.` : null,
+          criados.length
+            ? `${criados.length} item(ns) não existiam no catálogo: foram CADASTRADOS como produto pendente e entraram na lista de PEÇAS. Confirme preço e complete o NCM depois.`
+            : null,
+          criados.some((c) => !c.preco)
+            ? "Alguns dos itens cadastrados ficaram SEM PREÇO (R$ 0,00) — informe o valor antes de enviar ao cliente."
+            : null,
+          naoCadastrados.length
+            ? `${naoCadastrados.length} item(ns) não puderam ser cadastrados e ficaram como texto na lista de SERVIÇOS: ${naoCadastrados.join(", ")}.`
+            : null,
           comProduto.some((i) => i.status === "assumido") ? "Alguns itens foram ASSUMIDOS entre parecidos — confira os marcados." : null,
         ].filter(Boolean),
       };

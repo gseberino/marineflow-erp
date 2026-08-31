@@ -1,5 +1,8 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { matchFraco, normalizarTermo, pontuaCandidato, tokenizar, tokensNumericos } from "./keyword-resolver.ts";
+import {
+  fracaoCasada, matchFraco, normalizarTermo, nucleoDoTermo, PISO_DE_CONFIANCA,
+  pontuaCandidato, siglasFaltando, tokenizar, tokensNumericos,
+} from "./keyword-resolver.ts";
 
 // Funções PURAS do resolvedor — a lógica de escolha que precisa ser estável.
 // (A busca em si é testada por SQL contra o banco; aqui garantimos o normalizador e a
@@ -63,4 +66,67 @@ Deno.test("pontuaCandidato: equipamento principal vence o acessório de mesmo no
   const principal = pontuaCandidato("carregador Orion", "Carregador Orion-Tr Smart", null);
   const acessorio = pontuaCandidato("carregador Orion", "Cabo remoto Orion-Tr", null);
   assertEquals(principal > acessorio, true);
+});
+
+// ── Piso de confiança (NOVO-agente-07) ───────────────────────────────────────────────────────
+// Os casos abaixo são LINHAS REAIS de orçamentos de 31/08/2026. Cada um custou uma correção
+// manual do dono, e dois deles entraram no total com o preço de outro produto.
+
+Deno.test("nucleoDoTermo: o substantivo pedido, ignorando preposição e medida", () => {
+  assertEquals(nucleoDoTermo("Terminal de olhal para cabo 25mm²"), "terminal");
+  assertEquals(nucleoDoTermo("Fusível ANL 250A com porta-fusível"), "fusivel");
+  // Sem substantivo próprio, o núcleo é o primeiro token sem dígito: "25mm" é medida, "preto" não.
+  assertEquals(nucleoDoTermo("25mm² preto"), "preto");
+  // Só números: não há núcleo, e a regra do núcleo não se aplica (as outras ainda valem).
+  assertEquals(nucleoDoTermo("100/50"), null);
+});
+
+Deno.test("REGRESSÃO: terminal não casa com suporte, mesmo compartilhando '25mm'", () => {
+  // ORÇ-00090: "Terminal de olhal 25mm²" virou "SUPORTE PARA FACHO HOLMES ... 40X22-25MM".
+  // O 25mm do candidato era a medida de um suporte. Ambos contêm palavra de acessório, então
+  // nenhum filtro antigo disparava.
+  const r = matchFraco("Terminal de olhal para cabo 25mm²", "SUPORTE PARA FACHO HOLMES EM ACO INOX. - 40X22-25MM.", null);
+  assertEquals(r.fraco, true);
+  assertEquals(r.motivo.includes("terminal"), true);
+});
+
+Deno.test("REGRESSÃO: fusível ANL não casa com fusível Mega — a sigla é o tipo da peça", () => {
+  // ORÇ-00086: "Fusível ANL 250A" virou "Fusível Mega 250A/32V Victron". Mesma palavra, mesmo
+  // número; só a sigla separava — e ela não era comparada.
+  const r = matchFraco("Fusível ANL 250A com porta-fusível", "Fusível Mega 250A/32V - 5 unidades - Victron Energy", null);
+  assertEquals(r.fraco, true);
+  assertEquals(r.motivo.includes("ANL"), true);
+});
+
+Deno.test("REGRESSÃO: cabo não casa com suporte", () => {
+  assertEquals(matchFraco("Cabo 25mm² preto", "SUPORTE PARA FACHO HOLMES EM ACO INOX. - 40X22-25MM.", null).fraco, true);
+});
+
+Deno.test("siglasFaltando enxerga a sigla técnica ausente e ignora palavra comum", () => {
+  assertEquals(siglasFaltando("Fusível ANL 250A", "Fusível Mega 250A", null), ["anl"]);
+  assertEquals(siglasFaltando("Fusível ANL 250A", "Fusível ANL 250A com base", null), []);
+  // "Fusível" começa com maiúscula mas não é sigla (tem minúsculas) — não conta.
+  assertEquals(siglasFaltando("Fusível de vidro", "Base de vidro", null), []);
+});
+
+Deno.test("o piso barra o casamento por um token só", () => {
+  // "shunt / busbar negativo" contra um produto que só compartilha "negativo".
+  const r = matchFraco("shunt busbar negativo", "Cabo negativo 10mm", null);
+  assertEquals(r.fraco, true);
+  assertEquals(PISO_DE_CONFIANCA, 0.5);
+});
+
+Deno.test("fracaoCasada ignora preposição — 'de'/'para' não inflam o placar", () => {
+  // Sem descartar as vazias, "terminal de olhal para cabo" teria 2 de 5 só pelas preposições.
+  assertEquals(fracaoCasada("terminal de olhal para cabo", "Terminal de olhal para cabo 25mm", null), 1);
+  assertEquals(fracaoCasada("terminal de olhal", "Suporte de facho", null) < 0.5, true);
+});
+
+Deno.test("o piso NÃO estraga os casamentos legítimos que já funcionavam", () => {
+  // Estes precisam continuar entrando como peça — senão o orçamento vira uma lista de provisórios.
+  assertEquals(matchFraco("MPPT 100/50", "MPPT SmartSolar 100/50", null).fraco, false);
+  assertEquals(matchFraco("cabo remoto orion", "Cabo remoto Orion-Tr DC/DC", null).fraco, false);
+  assertEquals(matchFraco("Fusível Mega 250A", "Fusível Mega 250A/32V - 5 unidades - Victron Energy", null).fraco, false);
+  assertEquals(matchFraco("Porta Fusível MIDI", "Porta Fusível MIDI Victron", null).fraco, false);
+  assertEquals(matchFraco("Tomada 220V 10A embutir", "Tomada 220V 10A de embutir branca", null).fraco, false);
 });

@@ -37,6 +37,7 @@ import { verifyPin } from "../_shared/ai/whatsapp-pin.ts";
 import { STATUS_INJETAVEL, colunaDaEntidade } from "../_shared/ai/memory-scope.ts";
 import { podarHistoricoParaLLM } from "../_shared/ai/context-pruning.ts";
 import { filtrarPorCanal } from "../_shared/ai/channel-scope.ts";
+import { carregarJanela } from "../_shared/ai/history-window.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -209,6 +210,56 @@ Responda APENAS com o texto da mensagem pronta para envio, sem explicações ou 
 // direta pending -> executed é REJEITADA pelo trigger). O primeiro update é condicional
 // a status='pending' e serve de trava: se outra requisição já moveu a pendência (duplo
 // clique / corrida), o update não afeta linha nenhuma e abortamos sem re-executar a tool.
+/**
+ * A PRÓXIMA pendência ainda aberta da mesma sessão — o que faz a fila andar (NOVO-agente-08).
+ *
+ * O agente pode disparar várias ações de risco no mesmo turno (o dono pediu SEIS cancelamentos de
+ * uma vez). O loop só transforma a PRIMEIRA em proposta visível: as demais eram gravadas como
+ * `pending` e ficavam órfãs até expirar em 24h — 8 numa tarde, e os 13 `expired` do histórico são
+ * exatamente isso. Pior, o agente respondia "✅ executado", porque a única que passou foi mesmo
+ * executada.
+ *
+ * Encadear resolve sem tocar na máquina de estados nem no contrato da tela: decidida uma ação,
+ * a seguinte é devolvida como nova proposta e o card reaparece. Ordem cronológica, para o lote
+ * ser confirmado na mesma sequência em que foi pedido.
+ */
+async function proximaPendenciaDaSessao(
+  admin: any,
+  sessionId: string | null,
+  idJaDecidida: string,
+): Promise<Proposal | null> {
+  if (!sessionId) return null;
+  const { data } = await admin
+    .from("ai_operator_pending_actions")
+    .select("id, title, summary, risk_level")
+    .eq("session_id", sessionId)
+    .eq("status", "pending")
+    .neq("id", idJaDecidida)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (!data) return null;
+  return {
+    pending_action_id: data.id,
+    title: data.title,
+    summary_markdown: data.summary,
+    risk_level: data.risk_level,
+  };
+}
+
+/** Quantas pendências continuam abertas na sessão — para a mensagem não dizer "executado" quando
+ *  ainda falta a maior parte do lote. */
+async function quantasPendenciasAbertas(admin: any, sessionId: string | null, idJaDecidida: string): Promise<number> {
+  if (!sessionId) return 0;
+  const { count } = await admin
+    .from("ai_operator_pending_actions")
+    .select("id", { count: "exact", head: true })
+    .eq("session_id", sessionId)
+    .eq("status", "pending")
+    .neq("id", idJaDecidida);
+  return Number(count) || 0;
+}
+
 async function approveAndExecutePendingAction(
   admin: any,
   toolCtx: { sb: any; admin: any; userId: string; userRole: Role; jwt: string; appOrigin: string; settings: Record<string, string> },
@@ -414,13 +465,10 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
   }
 
   // ---- Turno normal do LLM ----
-  const { data: rows } = await admin
-    .from("ai_operator_messages")
-    .select("role, content, tool_calls, tool_call_id")
-    .eq("session_id", sessionId)
-    .order("created_at", { ascending: true })
-    .limit(30);
-  const seedMessages = (rows || []).map(rowToChatMessage);
+  // Janela pelas mensagens MAIS RECENTES (ver history-window.ts). Antes era ascending+limit, que
+  // devolvia as mais antigas e congelava — o agente relia o pedido original a cada turno.
+  const rows = await carregarJanela(admin, sessionId);
+  const seedMessages = rows.map(rowToChatMessage);
   const alreadyPersistedCount = toAnthropicMessages(seedMessages).length;
   const historyMessages: ChatMessage[] = [...seedMessages, { role: "user", content: effectiveText }];
 
@@ -553,13 +601,9 @@ Deno.serve(async (req) => {
       if (!sess || (sess.owner_user_id && sess.owner_user_id !== userId && userRole !== "admin")) {
         return jr({ session_id: null, messages: [] });
       }
-      const { data: rows } = await admin
-        .from("ai_operator_messages")
-        .select("role, content, tool_calls, tool_call_id")
-        .eq("session_id", requestedSessionId)
-        .order("created_at", { ascending: true })
-        .limit(30);
-      return jr({ session_id: requestedSessionId, messages: (rows || []).map(rowToChatMessage) });
+      // A tela mostrava só o COMEÇO de conversas longas, pelo mesmo motivo do turno do LLM.
+      const rows = await carregarJanela(admin, requestedSessionId);
+      return jr({ session_id: requestedSessionId, messages: rows.map(rowToChatMessage) });
     }
 
     // ---------- Confirmação determinística de pendência (Fase 3) — SEM chamada de LLM ----------
@@ -601,12 +645,21 @@ Deno.serve(async (req) => {
           event_category: userNote ? "learning" : "security",
           payload: { args: pending.payload, user_note: userNote || null },
         });
-        const rejectMsg = `❌ Ação rejeitada: ${pending.title}.`;
+        const restantesRej = await quantasPendenciasAbertas(admin, pending.session_id, pendingActionId);
+        const rejectMsg = restantesRej > 0
+          ? `❌ Ação rejeitada: ${pending.title}. ${restantesRej === 1 ? "Falta 1 ação" : `Faltam ${restantesRej} ações`} desta mesma rodada — segue a próxima.`
+          : `❌ Ação rejeitada: ${pending.title}.`;
         if (pending.session_id) {
           await admin.from("ai_operator_messages").insert({ session_id: pending.session_id, role: "assistant", content: rejectMsg, source: "web" });
           await admin.from("ai_operator_sessions").update({ last_activity_at: new Date().toISOString() }).eq("id", pending.session_id);
         }
-        return jr({ message: { role: "assistant", content: rejectMsg }, tool_events: [], session_id: pending.session_id });
+        const proximaRej = await proximaPendenciaDaSessao(admin, pending.session_id, pendingActionId);
+        return jr({
+          message: { role: "assistant", content: rejectMsg },
+          tool_events: [],
+          session_id: pending.session_id,
+          ...(proximaRej ? { proposal: proximaRej } : {}),
+        });
       }
 
       // decision === "approve": executa o payload GRAVADO, sem passar pelo LLM de novo.
@@ -631,7 +684,15 @@ Deno.serve(async (req) => {
       });
 
       const executedAt = new Date().toISOString();
-      const execMsg = execError ? `⚠️ ${pending.title} — falhou: ${execError}` : `✅ ${pending.title} — executado.`;
+      // "Executado" sem ressalva era falso quando o turno pedira várias ações: o dono lia a
+      // confirmação de UMA e supunha que as seis tinham passado (NOVO-agente-08).
+      const restantes = await quantasPendenciasAbertas(admin, pending.session_id, pendingActionId);
+      const sufixoFila = restantes > 0
+        ? ` ${restantes === 1 ? "Falta 1 ação" : `Faltam ${restantes} ações`} desta mesma rodada — segue a próxima.`
+        : "";
+      const execMsg = execError
+        ? `⚠️ ${pending.title} — falhou: ${execError}${sufixoFila}`
+        : `✅ ${pending.title} — executado.${sufixoFila}`;
       // Continuidade: injeta uma mensagem assistant simples no histórico (não um tool_result
       // sintético — o tool_result do momento da interceptação já foi persistido no turno
       // original; inventar outro sem um tool_use pareado quebraria a reconstrução do
@@ -641,10 +702,13 @@ Deno.serve(async (req) => {
         await admin.from("ai_operator_sessions").update({ last_activity_at: executedAt }).eq("id", pending.session_id);
       }
 
+      const proxima = await proximaPendenciaDaSessao(admin, pending.session_id, pendingActionId);
       return jr({
         message: { role: "assistant", content: execMsg },
         tool_events: [{ name: pending.action_name, args: pending.payload, result: execResult }],
         session_id: pending.session_id,
+        // A fila anda sozinha: a tela recebe a próxima proposta e mostra o card de novo.
+        ...(proxima ? { proposal: proxima } : {}),
       });
     }
 
@@ -692,13 +756,8 @@ Deno.serve(async (req) => {
       if (sessErr || !newSession) return jr({ error: `Falha ao criar sessão: ${sessErr?.message || "erro desconhecido"}` }, 500);
       sessionId = newSession.id;
     } else {
-      const { data: rows } = await admin
-        .from("ai_operator_messages")
-        .select("role, content, tool_calls, tool_call_id")
-        .eq("session_id", sessionId)
-        .order("created_at", { ascending: true })
-        .limit(30);
-      seedMessages = (rows || []).map(rowToChatMessage);
+      const rows = await carregarJanela(admin, sessionId);
+      seedMessages = rows.map(rowToChatMessage);
       alreadyPersistedCount = toAnthropicMessages(seedMessages).length;
     }
     // Neste ponto sessionId sempre está definido (criado ou validado acima).
