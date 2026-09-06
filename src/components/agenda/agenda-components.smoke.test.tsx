@@ -120,6 +120,21 @@ describe('componentes da Agenda 2.0 — smoke de render', () => {
     expect(screen.getByText('Nova tarefa')).toBeTruthy();
   });
 
+  it('EntityTasksPanel monta para embarcação — a aba nova da VesselDetail', () => {
+    // A R14 ("Propor revisão") grava related_entity_type 'vessel', então esta aba nasce
+    // com conteúdo real. O painel é agnóstico de tipo; o que faltava era onde ancorá-lo.
+    wrap(<EntityTasksPanel entityType="vessel" entityId="v-1" title="Tarefas desta embarcação" />);
+    expect(screen.getByText('Tarefas desta embarcação')).toBeTruthy();
+    expect(screen.getByText('Nova tarefa')).toBeTruthy();
+  });
+
+  it('EntityTasksPanel some quando não há entidade, em vez de renderizar vazio', () => {
+    // Guarda do `if (!entityId) return null`: uma tela que ainda está carregando o id
+    // não pode piscar um painel órfão com botão de criar tarefa sem vínculo.
+    const { container } = wrap(<EntityTasksPanel entityType="vessel" entityId={undefined} />);
+    expect(container.textContent).toBe('');
+  });
+
   it('MaintenancePlansPanel renderiza vazio com call-to-action', () => {
     wrap(<MaintenancePlansPanel vesselId="v-1" />);
     expect(screen.getByText('Planos de manutenção')).toBeTruthy();

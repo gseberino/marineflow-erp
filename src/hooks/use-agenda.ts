@@ -4,12 +4,11 @@ import { supabase } from '@/integrations/supabase/client';
 // Mesmo padrão de import cruzado já usado com _shared/banking/mcc.
 import { STATUS_OS_AGENDAVEIS } from '../../supabase/functions/_shared/service-order-status';
 
-// Tipos de entidade vinculável a uma tarefa (espelha o CHECK de agenda_tasks)
-export type RelatedEntityType =
-  | 'service_order' | 'quote' | 'external_quote' | 'client' | 'vessel'
-  | 'receivable' | 'payable' | 'purchase_order' | 'collection' | 'stock_item'
-  /** cotação a fornecedor (COT-) — usada pela regra R17, cobrança de resposta */
-  | 'quote_request';
+// Tipos de entidade vinculável a uma tarefa. A lista vivia copiada aqui e as duas tabelas
+// já divergiram uma vez — agora vem do mesmo arquivo que as Edge Functions usam, com teste
+// que lê o CHECK das DUAS e cobra a igualdade (agenda-entity-types_test.ts).
+import type { RelatedEntityType } from '../../supabase/functions/_shared/agenda-entity-types';
+export type { RelatedEntityType };
 
 export type ReminderInput = { remind_at: string; channel: 'app' | 'whatsapp' };
 

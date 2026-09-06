@@ -7,6 +7,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
   detectInConversation, shouldAutoCreate, loopKeyFromTitle,
+  DETECTOR_KINDS, detectorFlagKey, enabledDetectors,
   type ConversationMessage, type DetectorStats,
 } from "../_shared/ai/inbox-detector.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
@@ -34,7 +35,8 @@ Deno.serve(async (req) => {
 
   try {
     const { data: settingsRows } = await db.from("app_settings").select("key, value")
-      .in("key", [CURSOR_KEY, "agenda_detector_enabled", "agenda_autonomy_enabled"]);
+      .in("key", [CURSOR_KEY, "agenda_detector_enabled", "agenda_autonomy_enabled",
+        ...DETECTOR_KINDS.map(detectorFlagKey)]);
     const settings = Object.fromEntries((settingsRows || []).map((s: any) => [s.key, s.value]));
 
     if ((settings["agenda_detector_enabled"] ?? "true") !== "true") {
@@ -43,6 +45,10 @@ Deno.serve(async (req) => {
     // Autonomia graduada (Fase 11): nasce LIGADA, mas só age em detector que já provou
     // acerto (≥8 decisões e ≥80% de aceite). Até lá, tudo continua indo para a caixa.
     const autonomyEnabled = (settings["agenda_autonomy_enabled"] ?? "true") === "true";
+    // Liga/desliga POR DETECTOR (app_settings.agenda_detector_<tipo>_enabled). Nasce ligado.
+    // O LLM continua rodando igual — o que isso evita é o ruído chegar na caixa de entrada
+    // e contaminar a estatística de aceite que decide a autonomia de cada detector.
+    const ligados = enabledDetectors(settings);
 
     // Histórico de decisões por detector — a evidência que libera (ou não) a autonomia
     const { data: hist } = await db.from("agenda_suggestions")
@@ -103,6 +109,9 @@ Deno.serve(async (req) => {
     let reforcados = 0;
     // Propostas descartadas por virem de mensagem que já rendeu sugestão viva.
     let repetidas = 0;
+    // Propostas barradas por detector desligado. Contado (e devolvido) de propósito: sem
+    // isso não dá para saber se a flag está pegando ou se o detector só não achou nada.
+    let desligadas = 0;
     const detalhes: any[] = [];
 
     for (const [phone, convMsgs] of conversations) {
@@ -229,7 +238,12 @@ Deno.serve(async (req) => {
           ].filter(Boolean).join("\n\n");
         }
 
-        const proposals = await detectInConversation(contextMsgs, contactLabel, new Date(), erpContext);
+        const brutas = await detectInConversation(contextMsgs, contactLabel, new Date(), erpContext);
+        const proposals = brutas.filter((p) => {
+          if (ligados.has(p.detector)) return true;
+          desligadas++;
+          return false;
+        });
 
         for (const p of proposals) {
           // A mensagem que originou esta proposta já rendeu sugestão viva num ciclo
@@ -375,7 +389,7 @@ Deno.serve(async (req) => {
         payload: {
           mensagens: rows.length, conversas: conversations.length,
           sugestoes: created, fios_reforcados: reforcados,
-          repetidas_descartadas: repetidas, detalhes,
+          repetidas_descartadas: repetidas, barradas_por_detector_desligado: desligadas, detalhes,
         },
       }).then(() => {}, () => {});
     }
@@ -388,6 +402,9 @@ Deno.serve(async (req) => {
       fios_reforcados: reforcados,
       // Sobe quando a mesma mensagem tenta virar sugestão de novo, com outras palavras.
       repetidas_descartadas: repetidas,
+      // Propostas de detector desligado por app_settings.agenda_detector_<tipo>_enabled.
+      barradas_por_detector_desligado: desligadas,
+      detectores_ligados: [...ligados],
       criadas_automaticamente: autoCreated,
       autonomia: Object.fromEntries(Object.entries(statsByDetector).map(([k, v]) => [
         k, `${v.accepted}/${v.accepted + v.dismissed}`,

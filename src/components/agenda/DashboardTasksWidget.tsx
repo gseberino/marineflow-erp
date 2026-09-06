@@ -1,9 +1,17 @@
 import { useNavigate } from 'react-router-dom';
 import { ListChecks, AlertTriangle, Inbox } from 'lucide-react';
 import { useLiveTasks, useSuggestions } from '@/hooks/use-agenda';
+import { cn } from '@/lib/utils';
+
+interface DashboardTasksWidgetProps {
+  /** Para onde a faixa leva. O v2 precisa apontar para a gêmea, senão o clique sai do tema. */
+  to?: string;
+  /** Ajuste de aparência por tema (o v2 usa rounded-lg, não rounded-xl). */
+  className?: string;
+}
 
 /** Faixa "Tarefas" do Dashboard: atrasadas / hoje / total vivo, com link para a Agenda. */
-export function DashboardTasksWidget() {
+export function DashboardTasksWidget({ to = '/agenda', className }: DashboardTasksWidgetProps = {}) {
   const navigate = useNavigate();
   const { data: tasks = [] } = useLiveTasks();
   const { data: suggestions = [] } = useSuggestions();
@@ -25,8 +33,11 @@ export function DashboardTasksWidget() {
 
   return (
     <button
-      onClick={() => navigate('/agenda')}
-      className="w-full rounded-xl border bg-card p-4 shadow-sm text-left hover:shadow-md transition-all"
+      onClick={() => navigate(to)}
+      className={cn(
+        'w-full rounded-xl border bg-card p-4 shadow-sm text-left hover:shadow-md transition-all',
+        className,
+      )}
     >
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
         <span className="inline-flex items-center gap-2 text-sm font-semibold">

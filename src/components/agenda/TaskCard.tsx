@@ -20,7 +20,10 @@ const ENTITY_CONFIG: Record<RelatedEntityType, { label: string; Icon: typeof Bri
   quote:          { label: 'Orçamento',  Icon: FileText,     route: (id) => `/service-orders/${id}` },
   external_quote: { label: 'Orçamento',  Icon: FileText,     route: (id) => `/external-quotes/${id}` },
   client:         { label: 'Cliente',    Icon: User,         route: (id) => `/clients/${id}` },
-  vessel:         { label: 'Embarcação', Icon: Anchor,       route: () => '/service-orders' },
+  vessel:         { label: 'Embarcação', Icon: Anchor,       route: (id) => `/vessels/${id}` },
+  // Os três abaixo caem na LISTA, sem usar o id, porque não existe tela de detalhe de
+  // recebível, pagável nem de OC. Quando existir, é aqui que o chip passa a levar ao
+  // registro — e é o mesmo dia em que o EntityTasksPanel ganha onde ser embutido.
   receivable:     { label: 'Recebível',  Icon: DollarSign,   route: () => '/financial' },
   payable:        { label: 'Pagável',    Icon: DollarSign,   route: () => '/financial' },
   purchase_order: { label: 'OC',         Icon: ShoppingCart, route: () => '/purchase-orders' },

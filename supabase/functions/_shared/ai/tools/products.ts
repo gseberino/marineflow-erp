@@ -1,6 +1,7 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
 import { normalizarTermo } from "../keyword-resolver.ts";
 import { produtoFiscalPendencias } from "../product-fiscal.ts";
+import { camposDeProduto, precoDeVenda } from "../product-create.ts";
 
 export const productTools: ToolDef[] = [
   {
@@ -293,19 +294,33 @@ export const productTools: ToolDef[] = [
     },
     risk: "low",
     async execute(args, { sb }) {
-      const { data, error } = await sb.from("products").insert(args).select().single();
+      // NOVO-agente-06: `insert(args)` cru gravava o produto com preço de venda ZERO sempre que o
+      // modelo mandasse custo + margem (que é o que o próprio schema pede). Ver product-create.ts.
+      const { linha, ignorados } = camposDeProduto(args as Record<string, unknown>);
+      const venda = precoDeVenda(args as Record<string, unknown>);
+      if (venda !== null) linha.sale_price = venda;
+
+      const { data, error } = await sb.from("products").insert(linha).select().single();
       if (error) throw error;
       // fiscal_complete é calculado por trigger no banco — reflete a realidade fiscal do registro.
       // As pendências abaixo dizem exatamente o que falta para o produto poder entrar numa NF-e.
       const pendenciasFiscais = produtoFiscalPendencias(data);
       const faltando = [...pendenciasFiscais];
-      if (data.sale_price == null || Number(data.sale_price) === 0) faltando.push("preço de venda");
+      const semPreco = data.sale_price == null || Number(data.sale_price) === 0;
+      if (semPreco) faltando.push("preço de venda");
       return {
         ok: true,
         product: data,
         pendente: !data.fiscal_complete,
         pronto_para_nota_fiscal: !!data.fiscal_complete,
         pendencias_fiscais: pendenciasFiscais,
+        // Sem isto o agente não sabe que o produto que acabou de criar não serve para orçar — e
+        // volta a casar com um produto errado do catálogo só porque aquele tem preço.
+        preco_de_venda: semPreco ? null : Number(data.sale_price),
+        ...(semPreco
+          ? { atencao: "Produto SEM preço de venda: informe sale_price, ou cost_price junto com profit_margin. Sem preço ele entra no orçamento valendo R$ 0,00." }
+          : {}),
+        ...(ignorados.length ? { campos_ignorados: ignorados } : {}),
         aviso: pendenciasFiscais.length
           ? `Produto cadastrado como PENDENTE — já pode ir ao orçamento, mas falta para NF-e: ${pendenciasFiscais.join(", ")}. Sugira/pergunte o NCM e complete depois.`
           : (faltando.length ? `Cadastrado. Falta ${faltando.join(" e ")}.` : null),

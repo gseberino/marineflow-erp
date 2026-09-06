@@ -1,5 +1,8 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { matchFraco, normalizarTermo, pontuaCandidato, tokenizar, tokensNumericos } from "./keyword-resolver.ts";
+import {
+  falaDoMesmoObjeto, fracaoCasada, matchFraco, normalizarTermo, nucleoDoTermo, PISO_DE_CONFIANCA,
+  pontuaCandidato, precoDoItem, siglasFaltando, tokenizar, tokensNumericos,
+} from "./keyword-resolver.ts";
 
 // Funções PURAS do resolvedor — a lógica de escolha que precisa ser estável.
 // (A busca em si é testada por SQL contra o banco; aqui garantimos o normalizador e a
@@ -63,4 +66,139 @@ Deno.test("pontuaCandidato: equipamento principal vence o acessório de mesmo no
   const principal = pontuaCandidato("carregador Orion", "Carregador Orion-Tr Smart", null);
   const acessorio = pontuaCandidato("carregador Orion", "Cabo remoto Orion-Tr", null);
   assertEquals(principal > acessorio, true);
+});
+
+// ── Piso de confiança (NOVO-agente-07) ───────────────────────────────────────────────────────
+// Os casos abaixo são LINHAS REAIS de orçamentos de 31/08/2026. Cada um custou uma correção
+// manual do dono, e dois deles entraram no total com o preço de outro produto.
+
+Deno.test("nucleoDoTermo: o substantivo pedido, ignorando preposição e medida", () => {
+  assertEquals(nucleoDoTermo("Terminal de olhal para cabo 25mm²"), "terminal");
+  assertEquals(nucleoDoTermo("Fusível ANL 250A com porta-fusível"), "fusivel");
+  // Sem substantivo próprio, o núcleo é o primeiro token sem dígito: "25mm" é medida, "preto" não.
+  assertEquals(nucleoDoTermo("25mm² preto"), "preto");
+  // Só números: não há núcleo, e a regra do núcleo não se aplica (as outras ainda valem).
+  assertEquals(nucleoDoTermo("100/50"), null);
+});
+
+Deno.test("REGRESSÃO: terminal não casa com suporte, mesmo compartilhando '25mm'", () => {
+  // ORÇ-00090: "Terminal de olhal 25mm²" virou "SUPORTE PARA FACHO HOLMES ... 40X22-25MM".
+  // O 25mm do candidato era a medida de um suporte. Ambos contêm palavra de acessório, então
+  // nenhum filtro antigo disparava.
+  const r = matchFraco("Terminal de olhal para cabo 25mm²", "SUPORTE PARA FACHO HOLMES EM ACO INOX. - 40X22-25MM.", null);
+  assertEquals(r.fraco, true);
+  assertEquals(r.motivo.includes("terminal"), true);
+});
+
+Deno.test("REGRESSÃO: fusível ANL não casa com fusível Mega — a sigla é o tipo da peça", () => {
+  // ORÇ-00086: "Fusível ANL 250A" virou "Fusível Mega 250A/32V Victron". Mesma palavra, mesmo
+  // número; só a sigla separava — e ela não era comparada.
+  const r = matchFraco("Fusível ANL 250A com porta-fusível", "Fusível Mega 250A/32V - 5 unidades - Victron Energy", null);
+  assertEquals(r.fraco, true);
+  assertEquals(r.motivo.includes("ANL"), true);
+});
+
+Deno.test("REGRESSÃO: cabo não casa com suporte", () => {
+  assertEquals(matchFraco("Cabo 25mm² preto", "SUPORTE PARA FACHO HOLMES EM ACO INOX. - 40X22-25MM.", null).fraco, true);
+});
+
+Deno.test("siglasFaltando enxerga a sigla técnica ausente e ignora palavra comum", () => {
+  assertEquals(siglasFaltando("Fusível ANL 250A", "Fusível Mega 250A", null), ["anl"]);
+  assertEquals(siglasFaltando("Fusível ANL 250A", "Fusível ANL 250A com base", null), []);
+  // "Fusível" começa com maiúscula mas não é sigla (tem minúsculas) — não conta.
+  assertEquals(siglasFaltando("Fusível de vidro", "Base de vidro", null), []);
+});
+
+Deno.test("o piso barra o casamento por um token só", () => {
+  // "shunt / busbar negativo" contra um produto que só compartilha "negativo".
+  const r = matchFraco("shunt busbar negativo", "Cabo negativo 10mm", null);
+  assertEquals(r.fraco, true);
+  assertEquals(PISO_DE_CONFIANCA, 0.5);
+});
+
+Deno.test("fracaoCasada ignora preposição — 'de'/'para' não inflam o placar", () => {
+  // Sem descartar as vazias, "terminal de olhal para cabo" teria 2 de 5 só pelas preposições.
+  assertEquals(fracaoCasada("terminal de olhal para cabo", "Terminal de olhal para cabo 25mm", null), 1);
+  assertEquals(fracaoCasada("terminal de olhal", "Suporte de facho", null) < 0.5, true);
+});
+
+Deno.test("PEDIDO EM CAIXA ALTA não vira uma lista de siglas — o dono escreve assim", () => {
+  // Sem esta guarda, "PARA" e "DE" viravam "sigla técnica ausente" e o piso rejeitava o produto
+  // CERTO. Rejeitar demais é tão ruim quanto casar errado: o catálogo deixa de ser usado e cada
+  // orçamento cria produto novo.
+  assertEquals(matchFraco("CABO PARA BATERIA 25MM", "Cabo de bateria 25mm vermelho", null).fraco, false);
+  assertEquals(matchFraco("CABO DE BATERIA 25MM", "Cabo de bateria 25mm vermelho", null).fraco, false);
+  assertEquals(matchFraco("TOMADA 220V 10A EMBUTIR", "Tomada 220V 10A de embutir branca", null).fraco, false);
+  assertEquals(matchFraco("DISJUNTOR CC 200A", "Disjuntor CC 200A para banco de baterias 12V", null).fraco, false);
+  // Num texto TODO em maiúsculas não há contraste, então nada ali é lido como sigla.
+  assertEquals(siglasFaltando("FUSIVEL ANL 250A", "Fusível Mega 250A", null), []);
+  // Com minúsculas ao redor, a sigla volta a ser sinal — que é o caso do bug real.
+  assertEquals(siglasFaltando("Fusível ANL 250A", "Fusível Mega 250A", null), ["anl"]);
+});
+
+Deno.test("preposição em caixa alta nunca conta como sigla", () => {
+  assertEquals(siglasFaltando("Cabo PARA bateria", "Cabo de bateria", null), []);
+  assertEquals(siglasFaltando("Terminal DE olhal", "Terminal para olhal", null), []);
+});
+
+// ── O piso não pode rejeitar o produto CERTO ─────────────────────────────────────────────────
+// Rejeitar demais é tão caro quanto casar errado: o catálogo deixa de ser usado e cada orçamento
+// cadastra uma duplicata valendo R$ 0,00. Estes casos vieram da revisão, rodados contra nomes
+// reais da tabela `products` e contra o jeito como o dono escreve nas mensagens.
+
+Deno.test("CC/DC/AC são contexto, não tipo de peça — não podem vetar o produto exato", () => {
+  assertEquals(matchFraco("Fusível ANL 100A para proteção CC", "Fusível ANL 100A com porta-fusível", null).fraco, false);
+  assertEquals(matchFraco("Terminal a compressão 70mm² para cabo CC", "Terminal a compressão 70mm²", null).fraco, false);
+  assertEquals(matchFraco("Cabo flexível 25mm² vermelho para saída do carregador DC/DC", "Cabo flexível 25mm² vermelho", null).fraco, false);
+  assertEquals(matchFraco("disjuntor CC 12V 250A", "Disjuntor CC 250A 12V", null).fraco, false);
+  // Mas a sigla que É o tipo continua vetando.
+  assertEquals(matchFraco("Fusível ANL 250A", "Fusível Mega 250A/32V", null).fraco, true);
+});
+
+Deno.test("plural nos dois sentidos casa — o dono escreve 'os cabos', o catálogo tem 'KIT Terminais'", () => {
+  assertEquals(matchFraco("Cabos flexíveis 25mm² vermelho", "Cabo flexível 25mm² vermelho", null).fraco, false);
+  assertEquals(matchFraco("Fusíveis ANL 100A com porta-fusível", "Fusível ANL 100A com porta-fusível", null).fraco, false);
+  assertEquals(matchFraco("terminal a compressão 95mm²", "KIT Terminais a compressão 95mm²", null).fraco, false);
+  assertEquals(matchFraco("Disjuntores CC 200A", "Disjuntor CC 200A", null).fraco, false);
+});
+
+Deno.test("marca, categoria ou quantidade na frente não matam o casamento", () => {
+  assertEquals(matchFraco("Victron Cerbo GX", "Cerbo GX", null).fraco, false);
+  assertEquals(matchFraco("Inversor MultiPlus-II 12/3000", "MultiPlus-II 12/3000", null).fraco, false);
+  assertEquals(matchFraco("Controlador SmartSolar MPPT 100/50", "SmartSolar MPPT 100/50", null).fraco, false);
+  // "10 metros" é QUANTO, não QUAL: o 10 não pode contar como número de modelo ausente.
+  assertEquals(matchFraco("10 metros de cabo elétrico 70mm²", "Cabo elétrico 70mm²", null).fraco, false);
+});
+
+Deno.test("erro de digitação na primeira palavra não anula a tolerância do trigrama", () => {
+  assertEquals(matchFraco("Disjuntro CC 200A", "Disjuntor CC 200A", null).fraco, false);
+});
+
+Deno.test("falaDoMesmoObjeto: basta UM token do pedido casar, mas algum tem que casar", () => {
+  assertEquals(falaDoMesmoObjeto("Inversor MultiPlus-II", "MultiPlus-II 12/3000", null), true);
+  assertEquals(falaDoMesmoObjeto("Terminal de olhal para cabo", "SUPORTE PARA FACHO HOLMES", null), false);
+  // Só número e quantidade: a regra não se aplica e deixa passar para os outros filtros.
+  assertEquals(falaDoMesmoObjeto("10 metros 25mm", "Cabo 25mm", null), true);
+});
+
+// ── Preço ZERO não é preço ───────────────────────────────────────────────────────────────────
+Deno.test("zero nunca vence como preço — nem informado, nem praticado, nem de catálogo", () => {
+  // Era `informado ?? praticado ?? catalogo`, e o zero vencia: um produto cadastrado sem preço
+  // fazia a linha voltar valendo R$ 0,00 com status "resolvido", sem aviso nenhum.
+  assertEquals(precoDoItem(undefined, null, 42), 42);
+  assertEquals(precoDoItem(undefined, 30, 42), 30);
+  assertEquals(precoDoItem(55, 30, 42), 55);
+  assertEquals(precoDoItem(0, 30, 42), 30);      // informado zero cai para o praticado
+  assertEquals(precoDoItem(undefined, 0, 42), 42); // praticado zero cai para o catálogo
+  assertEquals(precoDoItem(undefined, 0, 0), 0);   // nada: zero mesmo, e o chamador avisa
+  assertEquals(precoDoItem(undefined, null, null), 0);
+});
+
+Deno.test("o piso NÃO estraga os casamentos legítimos que já funcionavam", () => {
+  // Estes precisam continuar entrando como peça — senão o orçamento vira uma lista de provisórios.
+  assertEquals(matchFraco("MPPT 100/50", "MPPT SmartSolar 100/50", null).fraco, false);
+  assertEquals(matchFraco("cabo remoto orion", "Cabo remoto Orion-Tr DC/DC", null).fraco, false);
+  assertEquals(matchFraco("Fusível Mega 250A", "Fusível Mega 250A/32V - 5 unidades - Victron Energy", null).fraco, false);
+  assertEquals(matchFraco("Porta Fusível MIDI", "Porta Fusível MIDI Victron", null).fraco, false);
+  assertEquals(matchFraco("Tomada 220V 10A embutir", "Tomada 220V 10A de embutir branca", null).fraco, false);
 });

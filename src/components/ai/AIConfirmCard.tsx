@@ -14,8 +14,10 @@ export function AIConfirmCard({
 }: {
   proposal: Proposal;
   status: 'pending' | 'confirmed' | 'cancelled' | 'executed';
-  onConfirm: (note?: string) => void;
-  onCancel: (note?: string) => void;
+  // O id da ação viaja junto para o hook agir sobre ESTE cartão, e não sobre o último que chegou
+  // na tela: com dois cartões pendentes, o clique no de cima executava a ação do de baixo.
+  onConfirm: (note?: string, pendingActionId?: string) => void;
+  onCancel: (note?: string, pendingActionId?: string) => void;
   disabled?: boolean;
 }) {
   const [showNote, setShowNote] = useState(false);
@@ -51,10 +53,10 @@ export function AIConfirmCard({
             </div>
           )}
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" onClick={() => onConfirm(trimmed || undefined)} disabled={disabled} className="gap-1">
+            <Button size="sm" onClick={() => onConfirm(trimmed || undefined, proposal.pending_action_id)} disabled={disabled} className="gap-1">
               <Check className="h-4 w-4" /> Confirmar
             </Button>
-            <Button size="sm" variant="outline" onClick={() => onCancel(trimmed || undefined)} disabled={disabled} className="gap-1">
+            <Button size="sm" variant="outline" onClick={() => onCancel(trimmed || undefined, proposal.pending_action_id)} disabled={disabled} className="gap-1">
               <X className="h-4 w-4" /> Cancelar
             </Button>
             {!showNote && (

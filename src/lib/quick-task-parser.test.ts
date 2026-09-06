@@ -109,25 +109,50 @@ describe('título', () => {
   });
 });
 
-describe('[NOVO-018] interpretações erradas conhecidas — documentadas, não aprovadas', () => {
-  it('quantidade no meio do texto é lida como hora, e some do título', () => {
-    // "comprar 3 cabos" vira uma tarefa das 03:00 chamada "comprar cabos". Some a
-    // quantidade — que é o dado que importa — e aparece um horário que ninguém pediu.
+describe('[NOVO-018] número solto e data inexistente', () => {
+  it('quantidade continua no título e não vira horário', () => {
+    // Sem marcador (h, :, "às"), número é quantidade. Antes: 03:00 / "comprar cabos".
     const r = parseQuickTask('comprar 3 cabos', AGORA);
-    expect(r.time).toBe('03:00');
-    expect(r.title).toBe('comprar cabos');
-    expect(dia(r.date)).toBe('11/8/2026');
+    expect(r.time).toBeNull();
+    expect(r.date).toBeNull();
+    expect(r.title).toBe('comprar 3 cabos');
 
     const r2 = parseQuickTask('comprar 10 disjuntores urgente', AGORA);
-    expect(r2.time).toBe('10:00');
-    expect(r2.title).toBe('comprar disjuntores');
+    expect(r2.time).toBeNull();
+    expect(r2.title).toBe('comprar 10 disjuntores');
+    expect(r2.priority).toBe('urgent');
+
+    // quantidade e hora convivem na mesma frase: só a hora tem marcador
+    const r3 = parseQuickTask('levar 3 baterias amanhã às 8h', AGORA);
+    expect(r3.time).toBe('08:00');
+    expect(r3.title).toBe('levar 3 baterias');
+    expect(dia(r3.date)).toBe('12/8/2026');
   });
 
-  it('data inexistente vira outro dia em vez de ser recusada', () => {
-    // `new Date(2026, 1, 30)` não é inválida: o JavaScript normaliza 30 de fevereiro para
-    // 2 de março. Como essa data já passou, a regra do "ano que vem" empurra para 2027 — e a
-    // tarefa nasce a mais de um ano de distância, sem nenhum aviso.
-    expect(dia(parseQuickTask('revisar 30/02', AGORA).date)).toBe('2/3/2027');
-    expect(dia(parseQuickTask('revisar 31/11/2026', AGORA).date)).toBe('1/12/2026');
+  it('data inexistente é recusada e fica no título', () => {
+    // `new Date(2026, 1, 30)` não falha — normaliza para 02/03. Antes virava 2/3/2027.
+    const r = parseQuickTask('revisar 30/02', AGORA);
+    expect(r.date).toBeNull();
+    expect(r.title).toBe('revisar 30/02');
+
+    const r2 = parseQuickTask('revisar 31/11/2026', AGORA);
+    expect(r2.date).toBeNull();
+    expect(r2.title).toBe('revisar 31/11/2026');
+  });
+
+  it('29/02 sem ano não é empurrado para um ano não bissexto', () => {
+    const emAnoBissexto = new Date(2028, 7, 11); // 29/02/2028 existe, mas já passou
+    const r = parseQuickTask('revisar 29/02', emAnoBissexto);
+    expect(r.date).toBeNull();
+    expect(r.title).toBe('revisar 29/02');
+    // com ano explícito e válido, continua valendo
+    expect(dia(parseQuickTask('29/02/2028 teste', AGORA).date)).toBe('29/2/2028');
+  });
+
+  it('minuto acima de 59 não é hora', () => {
+    // Antes virava time "14:75", que quebra o new Date(...).toISOString() da AgendaPage.
+    const r = parseQuickTask('ligar 14h75', AGORA);
+    expect(r.time).toBeNull();
+    expect(r.title).toBe('ligar 14h75');
   });
 });

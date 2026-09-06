@@ -76,13 +76,6 @@ Coluna "Marina" repete o nome do barco (as duas entradas usam `key: 'name'`); as
 **Entregar:** correção + testes, incluindo as quatro células perigosas.
 `src/lib/export-utils.ts:16-23,80`
 
-### 6. NOVO-018 — captura rápida perde o "3"
-"comprar 3 cabos" vira tarefa das 03:00 chamada "comprar cabos": número solto é lido como hora. E `30/02` vira
-02/03 do ano seguinte, sem aviso.
-**Entregar:** exigir marcador de hora (`h`, `:` ou "às"); recusar data inexistente conferindo o dia depois de
-construir. Testes dos dois.
-`src/lib/quick-task-parser.ts:47-56,61-69`
-
 ### 7. NOVO-023 — o guarda do hash de assinatura lê a migration pelo nome
 Procura o arquivo `f41d70d9`. Trigger alterado em migration nova passa batido, e a suíte fica verde no
 cenário exato que o teste diz impedir.
@@ -101,7 +94,13 @@ Teste cobrindo a corrida.
 
 ## Concluídos
 
-_(mover para cá com o commit que fechou)_
+### 6. NOVO-018 — captura rápida perde o "3" · `feat/agenda-retomada` (28/08/2026)
+Hora passou a exigir marcador (`h`, `:`, "às"/"as"), então número solto continua sendo quantidade e fica no
+título; data inexistente (30/02, 31/11, e 29/02 em ano não bissexto) é recusada em vez de virar outro dia.
+Também deixou de aceitar minuto acima de 59, que produzia `14:75` e estourava como *Invalid Date* na
+`AgendaPage`. O bloco `[NOVO-018]` do teste foi invertido — era caracterização do defeito, agora fixa o
+comportamento certo — mais 3 bordas novas. 19 testes verdes; os 15 casos legítimos passaram sem alteração.
+`src/lib/quick-task-parser.ts`
 
 ## Não reproduzem mais
 
