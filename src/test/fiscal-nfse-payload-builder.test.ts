@@ -193,7 +193,11 @@ describe("payload no contrato da Contora", () => {
       iss_withheld: false,
       total_tax_rate_sn: 6,
     });
-    expect(p.amounts).toMatchObject({ service_amount: 1500, net_amount: 1500 });
+    // O líquido NÃO acompanha mais o bruto. Desde 06/09/2026, com o campo de
+    // desconto existindo, quem calcula bruto − descontos − deduções é o
+    // Ambiente Nacional; mandar um líquido nosso ao lado do desconto é o
+    // caminho curto para o valor sair descontado duas vezes.
+    expect(p.amounts).toEqual({ service_amount: 1500 });
   });
 
   it("limpa a máscara de documento, CEP e código IBGE", () => {
@@ -215,11 +219,20 @@ describe("payload no contrato da Contora", () => {
     expect("municipal_tax_code" in p.service).toBe(false);
   });
 
-  it("deriva o líquido descontando as retenções", () => {
-    const p = buildNfseDraftPayload(base({
+  // Este teste travava o contrato ANTERIOR: o líquido era derivado das
+  // retenções federais. Não vale mais, e o motivo é bom — a NFS-e nunca
+  // transportou retenção federal (o grupo tribFederal do nacional exige CST,
+  // base e tipo, não só o valor), então o número era aceito, descartado em
+  // silêncio e mesmo assim reduzia o líquido que declarávamos. Desde 06/09/2026
+  // a Contora recusa retenção com valor, e o validador daqui recusa antes.
+  it("recusa retenção federal em vez de derivar líquido com ela", () => {
+    const comRetencao = {
       amounts: { serviceAmount: 1000, pisAmount: 6.5, cofinsAmount: 30, inssAmount: 110 },
-    })) as Record<string, any>;
-    expect(p.amounts.net_amount).toBe(853.5);
+    };
+    expect(validateNfseDraftInput(base(comRetencao)).join(" ")).toMatch(/PIS/);
+
+    const p = buildNfseDraftPayload(base({ amounts: { serviceAmount: 1000 } })) as Record<string, any>;
+    expect(p.amounts).not.toHaveProperty("net_amount");
   });
 
   it("número sem casa decimal não vira dízima", () => {

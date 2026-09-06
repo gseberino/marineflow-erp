@@ -2112,3 +2112,34 @@ porque só o dono pode preenchê-las.
   pendente da crise de disco de 25/08) pode fazer as duas suítes voltarem ao
   normal — e é o primeiro teste a fazer antes de mexer nos testes.
 - **Não corrigido:** regra 3, e a causa mais provável é ambiente, não código.
+
+### [NOVO-fiscal-06] Seis serviços sem alíquota de ISS efetiva emitem com zero
+
+- **Onde:** `v_services_fiscal_efetivo.iss_rate_efetivo`; a ponte usa
+  `fiscal.issRate ?? null` e o construtor faz `iss_rate: Number(s.issRate ?? 0)`.
+- **O quê:** 268 dos 274 serviços têm alíquota efetiva de **3%**, herdada dos 10
+  verbos (`service_fiscal_verbs.default_iss_rate = 3`). Seis não têm nenhuma, e
+  para eles a nota sai com `iss_rate: 0` — não com o padrão, com **zero**:
+
+  | serviço | usos em OS |
+  |---|---:|
+  | SUBSTITUIÇÃO DE FONTE CONVERSOR DE TENSÃO | 1 |
+  | Serviço de Substituição de Claraboia de Teto | 1 |
+  | Mão de obra — acumulador de pressão e caixa coletora | 1 |
+  | REPARO DE VAZAMENTO CLARABOIA DE TETO | 1 |
+  | REPARO DE GELADEIRA 12V | 1 |
+  | INSTALAÇÃO DE CONVERSOR DE ENERGIA STARLINK | 1 |
+
+  Todos são serviços reais, cada um já usado numa ordem.
+- **Por que passa despercebido:** a HBR é Simples Nacional e o ISS sai no DAS, de
+  modo que o DANFSe traz o ISSQN apurado em branco de qualquer jeito. Uma nota
+  com alíquota 0 e uma com 3% ficam visualmente iguais para quem confere.
+- **O outro lado do mesmo problema:** a Contora informou em 06/09/2026 que o
+  cadastro deles tem `nfse_iss_rate_default = 6`. Enquanto o ERP mandar
+  `iss_rate` em toda nota, o padrão deles não é usado; no dia em que o campo
+  faltar no payload, a nota sai com **6%** — o dobro — e a Sefin autoriza sem
+  reclamar. Ou seja: falta a alíquota e o resultado é 0% ou 6%, nunca o correto.
+- **Consertar seria:** dar verbo (ou alíquota própria) aos seis serviços, e o
+  construtor recusar emissão com alíquota ausente em vez de mandar zero.
+- **Não corrigido:** regra 3, e a alíquota correta é decisão da contadora — a
+  Contora está aguardando a confirmação de 3% desde 19/08.

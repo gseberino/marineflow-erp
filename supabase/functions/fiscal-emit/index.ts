@@ -9,10 +9,7 @@ import { resolveIbgeCityCode } from "../_shared/fiscal/ibge.ts";
 import { resolveLineFiscal, semCodigoFiscal } from "../_shared/fiscal/service-fiscal.ts";
 import { ratearDescontoGlobal } from "../_shared/fiscal/rateio-desconto.ts";
 // [NOVO-fiscal-03] O vínculo legível entre a nota e a OS que a originou.
-import {
-  montarInfoComplementar,
-  referenciaCurtaDaOs,
-} from "../_shared/fiscal/info-complementar.ts";
+import { montarInfoComplementar } from "../_shared/fiscal/info-complementar.ts";
 import { logEdgeError } from "../_shared/log-error.ts";
 // [SUGESTAO-FISCAL] Modelo leve para sugerir NCM de produto direto da tela de emissão.
 // A sugestão NUNCA grava nada — ela pré-preenche o formulário e quem salva é o humano.
@@ -234,12 +231,12 @@ async function buildBodyFromServiceOrder(admin: any, body: any): Promise<
       items: itens,
       // [NOVO-fiscal-03] infCpl. O construtor já suportava o campo e a ponte da
       // OS nunca o preenchia, então toda NF-e saía sem nada que a ligasse ao
-      // serviço. O desconto entra por extenso porque no DANFE ele fica diluído
-      // no vDesc de cada item — quem compara a nota com o orçamento não o vê.
+      // serviço. O desconto não entra por extenso: ele já sai no `vDesc` de cada
+      // item e no total do DANFE — repetir faria o cliente ler o mesmo
+      // abatimento duas vezes.
       additional_info: montarInfoComplementar({
         osNumero: so.service_order_number,
         pedidoCliente: body.customer_po_number ?? so.customer_po_number ?? null,
-        descontoAplicado: rateio.descontoPecas,
       }),
     },
     resumo: {
@@ -993,18 +990,15 @@ async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
   if ((Number(so.subcontract_cost_total) || 0) > 0) {
     partesDescricao.push(`Serviços de terceiros: R$ ${r2(Number(so.subcontract_cost_total)).toFixed(2)}`);
   }
-  if (rateio.descontoServicos > 0) {
-    partesDescricao.push(`Desconto comercial aplicado: R$ ${rateio.descontoServicos.toFixed(2)}`);
-  }
-  // [NOVO-fiscal-03] A referência à OS entra por ÚLTIMO na lista mas é a única
-  // parte protegida do corte de 500 caracteres: numa OS com muitos serviços, o
-  // `slice` cortaria justamente o que amarra a nota ao trabalho. O padrão
-  // nacional tem `xInfComp` para isto, mas o nome do campo no JSON da Contora
-  // não está confirmado — ver NOVO-fiscal-04.
-  const refOs = referenciaCurtaDaOs(so.service_order_number);
-  const descricao = refOs
-    ? `${partesDescricao.join("; ").slice(0, Math.max(0, 500 - refOs.length - 2))}; ${refOs}`
-    : partesDescricao.join("; ").slice(0, 500);
+  // O desconto NÃO entra mais por extenso aqui: desde 06/09/2026 ele tem campo
+  // próprio (`amounts.unconditional_discount`) e sai discriminado no DANFSe,
+  // sob "Desconto Incondicionado". Repetir na descrição faria o tomador ler o
+  // mesmo abatimento duas vezes e suspeitar de desconto em dobro.
+  //
+  // A referência da OS também saiu daqui, pelo mesmo motivo: agora vive em
+  // `service.additional_info` e não disputa mais os 500 caracteres da
+  // discriminação. Ver NOVO-fiscal-04.
+  const descricao = partesDescricao.join("; ").slice(0, 500);
 
   // O que a nota NÃO cobre — dito em voz alta no resumo, nunca somado em silêncio.
   const avisosValor: string[] = [];
@@ -1028,6 +1022,13 @@ async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
         cnae: fiscal.cnae ?? null,
         iss_rate: fiscal.issRate ?? null,
         iss_withheld: fiscal.issWithheld,
+        // [NOVO-fiscal-04] `serv/infoCompl/xInfComp`. Campo criado pela Contora
+        // em 06/09/2026 a pedido nosso; antes disso a referência da OS era
+        // empurrada para dentro da descrição.
+        additional_info: montarInfoComplementar({
+          osNumero: so.service_order_number,
+          pedidoCliente: so.customer_po_number,
+        }),
       },
       taker: {
         name: cli.name,
@@ -1043,7 +1044,17 @@ async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
           postal_code: cli.postal_code,
         },
       },
-      amounts: { service_amount: totalNota },
+      // [NOVO-fiscal-04] BRUTO + desconto em campo próprio, e o líquido OMITIDO
+      // de propósito: quem calcula é o Ambiente Nacional. Até 06/09/2026 não
+      // havia campo de desconto e mandávamos o líquido — a nota saía com o
+      // valor certo e o desconto invisível. Mandar líquido E desconto juntos
+      // descontaria duas vezes.
+      amounts: {
+        service_amount: baseServicos,
+        ...(rateio.descontoServicos > 0
+          ? { unconditional_discount: rateio.descontoServicos }
+          : {}),
+      },
     },
     resumo: {
       os: so.service_order_number,
@@ -1375,6 +1386,7 @@ async function prepareNfsePayload(admin: any, body: any): Promise<
       // Percentual do Simples: o do serviço vence, mas o do cadastro é o padrão — é lá que
       // a contabilidade preenche uma vez e vale para todas as notas (E0712).
       totalTaxRateSn: s.total_tax_rate_sn ?? company.nfse_total_tax_rate_sn ?? null,
+      additionalInfo: s.additional_info ?? null,
     },
     taker: {
       name: t.name ?? null,
@@ -1394,6 +1406,8 @@ async function prepareNfsePayload(admin: any, body: any): Promise<
     amounts: {
       serviceAmount: amt.service_amount ?? null,
       netAmount: amt.net_amount ?? null,
+      unconditionalDiscount: amt.unconditional_discount ?? null,
+      conditionalDiscount: amt.conditional_discount ?? null,
       deductions: amt.deductions ?? null,
       pisAmount: amt.pis_amount ?? null,
       cofinsAmount: amt.cofins_amount ?? null,

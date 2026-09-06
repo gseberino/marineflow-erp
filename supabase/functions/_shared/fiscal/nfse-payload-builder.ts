@@ -57,14 +57,63 @@ export interface NfseServiceInput {
   issWithheld?: boolean;
   /** Percentual TOTAL de tributos do Simples. Obrigatório para ME/EPP no nacional (E0712). */
   totalTaxRateSn?: number | null;
+  /**
+   * Informações complementares — `serv/infoCompl/xInfComp` no nacional,
+   * `InformacoesComplementares` no ABRASF. Texto livre, ATÉ 2000 caracteres.
+   *
+   * A Contora RECUSA acima de 2000 em vez de truncar, e o motivo é bom: texto
+   * cortado vira nota autorizada com informação pela metade — o erro some e o
+   * dano fica. O campo passou a existir em 06/09/2026, a pedido nosso; antes
+   * disso a referência da OS era empurrada para dentro da descrição do serviço,
+   * disputando os 500 caracteres com ela.
+   */
+  additionalInfo?: string | null;
 }
 
 export interface NfseAmountsInput {
+  /**
+   * Valor BRUTO do serviço, ANTES dos descontos (`valores/vServPrest/vServ`).
+   *
+   * Era o líquido até 06/09/2026, quando não havia campo de desconto: a nota
+   * saía com o valor certo e o desconto invisível. Agora é o bruto, e o
+   * Ambiente Nacional calcula o líquido sozinho.
+   */
   serviceAmount?: number | null;
-  /** Quando ausente, é derivado de serviceAmount menos as retenções. */
+  /**
+   * Líquido. PREFIRA OMITIR: sem ele a Contora calcula bruto − descontos −
+   * deduções. Mandar os dois e errar a conta gera aviso na análise — a proteção
+   * contra o engano mais provável, que é subtrair o desconto do bruto E ainda
+   * declarar o desconto, descontando duas vezes.
+   */
   netAmount?: number | null;
-  /** Retenções federais, quando houver. */
+  /**
+   * Desconto INCONDICIONADO — `valores/vDescCondIncond/vDescIncond`.
+   * Reduz a base de cálculo do ISS e o valor líquido.
+   */
+  unconditionalDiscount?: number | null;
+  /**
+   * Desconto CONDICIONADO — `valores/vDescCondIncond/vDescCond`.
+   * Reduz o líquido mas NÃO a base do ISS: depende de condição futura, então
+   * não pode tirar imposto.
+   */
+  conditionalDiscount?: number | null;
+  /**
+   * Dedução/redução — `valores/vDedRed/vDR`.
+   *
+   * ⚠️ NÃO USAR NA HBR. A Sefin recusa com **E0441** para prestador ME/EPP
+   * optante do Simples quando o município parametriza assim o código de
+   * serviço — e é o caso do 14.01 em Itajaí. Confirmado em homologação pela
+   * Contora em 06/09/2026. O campo segue aqui porque a regra é municipal: o
+   * mesmo 14.01 admite dedução em outro município.
+   */
   deductions?: number | null;
+  /**
+   * ⚠️ Retenções federais: só ZERO é aceito. Desde 06/09/2026 a Contora RECUSA
+   * valor diferente de zero, porque a NFS-e ainda não transporta retenção
+   * federal — o grupo `tribFederal` do nacional exige CST, base e tipo, não só
+   * o valor. Mandar o número não teria efeito no documento.
+   * A retenção de ISS não é aqui: é `service.issWithheld`.
+   */
   pisAmount?: number | null;
   cofinsAmount?: number | null;
   inssAmount?: number | null;
@@ -91,6 +140,9 @@ export interface BuildNfsePayloadInput {
 function onlyDigits(s: string | null | undefined): string {
   return String(s ?? "").replace(/\D/g, "");
 }
+
+/** Limite de `serv/infoCompl/xInfComp` — a Contora recusa acima disto. */
+export const NFSE_INFO_COMPL_MAX = 2000;
 
 function round2(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;
@@ -249,6 +301,84 @@ export function validateNfseDraftInput(input: BuildNfsePayloadInput): string[] {
     );
   }
 
+  // ── Descontos e deduções (06/09/2026) ─────────────────────────────────────
+  // Recusar aqui em vez de deixar o provedor recusar: esta função existe para
+  // gastar zero cota de evento fiscal com payload que já se sabe inválido.
+  const desconto = Number(amt.unconditionalDiscount ?? 0) + Number(amt.conditionalDiscount ?? 0);
+  const abatimentos = desconto + Number(amt.deductions ?? 0);
+  for (
+    const [rotulo, valor] of [
+      ["Desconto incondicionado", amt.unconditionalDiscount],
+      ["Desconto condicionado", amt.conditionalDiscount],
+      ["Dedução/redução", amt.deductions],
+    ] as const
+  ) {
+    if (valor != null && Number(valor) < 0) {
+      errors.push(`${rotulo} não pode ser negativo (recebido ${valor}).`);
+    }
+  }
+  if (abatimentos > servico) {
+    errors.push(
+      `A soma de descontos e deduções (${round2(abatimentos)}) não pode passar do valor do `
+      + `serviço (${round2(servico)}).`,
+    );
+  }
+  // O engano mais provável, e o mais caro: subtrair o desconto do bruto E ainda
+  // declarar o desconto. A nota sairia com o valor descontado duas vezes.
+  if (amt.netAmount != null && desconto > 0) {
+    const esperado = round2(servico - abatimentos);
+    if (round2(Number(amt.netAmount)) !== esperado) {
+      errors.push(
+        `Valor líquido informado (${round2(Number(amt.netAmount))}) não bate com bruto menos `
+        + `descontos e deduções (${esperado}). Se o desconto já foi abatido do valor do `
+        + `serviço, ele está sendo contado duas vezes — o correto é enviar o valor BRUTO em `
+        + `service_amount e omitir o líquido.`,
+      );
+    }
+  }
+
+  // E0441: para ME/EPP do Simples, com o código de serviço parametrizado assim
+  // pelo município, a Sefin recusa dedução. É o caso do 14.01 em Itajaí.
+  // Não se bloqueia por município aqui — a regra é dele, não nossa —, mas o
+  // aviso poupa uma rejeição.
+  if (Number(amt.deductions ?? 0) > 0) {
+    errors.push(
+      "Dedução/redução não é aceita para prestador ME/EPP do Simples Nacional quando o "
+      + "município parametriza assim o código de serviço — é o caso do 14.01 em Itajaí, e a "
+      + "Sefin recusa com E0441. Se o desconto é comercial, use o desconto incondicionado.",
+    );
+  }
+
+  // A NFS-e ainda não transporta retenção federal: o grupo tribFederal do
+  // nacional exige CST, base e tipo, não só o valor. Mandar o número não teria
+  // efeito no documento — melhor recusar do que emitir nota que o omite.
+  for (
+    const [rotulo, valor] of [
+      ["PIS", amt.pisAmount],
+      ["COFINS", amt.cofinsAmount],
+      ["INSS", amt.inssAmount],
+      ["IR", amt.irAmount],
+      ["CSLL", amt.csllAmount],
+    ] as const
+  ) {
+    if (valor != null && Number(valor) !== 0) {
+      errors.push(
+        `Retenção de ${rotulo} (${valor}) não pode ser enviada na NFS-e: o documento ainda `
+        + "não transporta retenção federal, e o valor seria descartado sem aparecer na nota. "
+        + "A retenção de ISS é declarada em iss_withheld.",
+      );
+    }
+  }
+
+  const infoCompl = String(s.additionalInfo ?? "");
+  if (infoCompl.length > NFSE_INFO_COMPL_MAX) {
+    errors.push(
+      `Informações complementares têm ${infoCompl.length} caracteres e o limite é `
+      + `${NFSE_INFO_COMPL_MAX}. O texto NÃO é cortado de propósito: nota autorizada com `
+      + "informação pela metade esconde o erro e mantém o dano.",
+    );
+  }
+
   return errors;
 }
 
@@ -273,6 +403,14 @@ export function buildNfseDraftPayload(
     iss_rate: Number(s.issRate ?? 0),
     iss_withheld: s.issWithheld === true,
   };
+
+  // Informações complementares — vale nos dois padrões (xInfComp / ABRASF).
+  // NÃO se trunca aqui de propósito: o excesso é recusado por
+  // `validateNfseDraftInput`, antes de gastar cota. Cortar em silêncio
+  // produziria nota autorizada com informação pela metade — o erro sumiria e o
+  // dano ficaria. É a mesma razão pela qual a Contora recusa em vez de cortar.
+  const infoCompl = String(s.additionalInfo ?? "").trim();
+  if (infoCompl) service.additional_info = infoCompl;
 
   if (input.standard === "nacional") {
     service.national_tax_code = onlyDigits(s.nationalTaxCode);
@@ -316,17 +454,27 @@ export function buildNfseDraftPayload(
   if (t.email?.trim()) taker.email = t.email.trim();
 
   const servico = round2(Number(amt.serviceAmount ?? 0));
-  const retencoes = round2(
-    Number(amt.pisAmount ?? 0) + Number(amt.cofinsAmount ?? 0) +
-    Number(amt.inssAmount ?? 0) + Number(amt.irAmount ?? 0) +
-    Number(amt.csllAmount ?? 0) + Number(amt.deductions ?? 0),
-  );
   const amounts: Record<string, unknown> = {
+    // BRUTO, antes dos descontos. Ver NfseAmountsInput.serviceAmount.
     service_amount: servico,
-    // Líquido derivado quando não informado. Explicitar evita que o provedor assuma um
-    // valor diferente do que a OS cobrou.
-    net_amount: amt.netAmount != null ? round2(Number(amt.netAmount)) : round2(servico - retencoes),
   };
+
+  // Descontos (06/09/2026). O incondicionado reduz a base do ISS; o
+  // condicionado só o líquido, porque depende de condição futura.
+  if (amt.unconditionalDiscount != null) {
+    amounts.unconditional_discount = round2(Number(amt.unconditionalDiscount));
+  }
+  if (amt.conditionalDiscount != null) {
+    amounts.conditional_discount = round2(Number(amt.conditionalDiscount));
+  }
+
+  // O líquido só vai quando alguém o afirmou. Omitido, quem calcula é o
+  // Ambiente Nacional — bruto − descontos − deduções —, e é a conta que vale.
+  // Mandar um líquido nosso junto com o desconto é o caminho curto para
+  // descontar duas vezes; a Contora responde com aviso quando os dois não
+  // fecham, mas o certo é não criar a divergência.
+  if (amt.netAmount != null) amounts.net_amount = round2(Number(amt.netAmount));
+
   if (amt.deductions != null) amounts.deductions = round2(Number(amt.deductions));
   if (amt.pisAmount != null) amounts.pis_amount = round2(Number(amt.pisAmount));
   if (amt.cofinsAmount != null) amounts.cofins_amount = round2(Number(amt.cofinsAmount));
