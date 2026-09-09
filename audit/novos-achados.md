@@ -936,8 +936,11 @@ apareceria em uso.
   para as mesmas tabelas) e derivar `documentType` de `documentTypeFor(status)`,
   que já existe em `src/lib/document-type.ts` e é exatamente para isto. E o teste
   de unificação passar a olhar `PublicServiceOrderView.tsx`.
-- **Não corrigido:** regra 3. **É o achado de maior alcance desta varredura** —
-  atinge o documento que sai da empresa.
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO em 22/08/2026** (commit `f872370`,
+  "o PDF do cliente sai da montagem única, e o tipo vem do status"): o portal
+  passou a chamar `carregarPDFData` com o cliente do token e deriva o tipo por
+  `documentTypeFor(status)`. Conferido no código em 09/09/2026 — a 3ª montagem
+  não existe mais. Era **o achado de maior alcance desta varredura**.
 
 ### [NOVO-lev-15] O botão "Baixar PDF" do portal abre a janela de impressão
 
@@ -951,7 +954,8 @@ apareceria em uso.
   botões de baixar do sistema usam `downloadPDF`.
 - **Consertar seria:** trocar por `downloadPDF`, ou renomear o botão para
   "Imprimir" e acrescentar um de baixar de verdade.
-- **Não corrigido:** regra 3.
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO em 22/08/2026** (mesmo commit
+  `f872370` do lev-14): o botão chama `downloadPDF`. Conferido em 09/09/2026.
 
 ### [NOVO-lev-16] Três consultas do PDF não checam erro, e cada fallback mente diferente
 
@@ -2028,7 +2032,12 @@ porque só o dono pode preenchê-las.
   em política de `anon` é decisão de segurança, então fica registrado e não
   aplicado. Depois disso vale conferir se o hash de assinaturas já colhidas
   precisa ser recalculado ou anotado.
-- **Não corrigido:** regra 3, e a alteração é numa política de RLS de `anon`.
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO em 09/09/2026** com autorização
+  prévia do dono: migration `20260909120000_terms_na_whitelist_anon.sql` recria a
+  whitelist com as cinco chaves `terms_*`. Aplicada em produção e **provada com
+  `set role anon`** (as 5 chaves legíveis, 400–580 caracteres cada). Fica em
+  aberto só a decisão sobre o hash/`accepted_terms_snapshot` das assinaturas já
+  colhidas sem termos (Rodrigo, 29/07).
 
 ### [NOVO-lev-41] A lista de orçamentos LEGADA ainda manda um link morto por WhatsApp
 
@@ -2091,8 +2100,12 @@ porque só o dono pode preenchê-las.
   na Vercel, ou o Cloudflare como proxy do deploy certo em vez de servir build
   próprio). Enquanto isso não acontece, trocar `app_public_url` faz os links
   NOVOS já saírem funcionando — os já enviados continuam mortos.
-- **Não corrigido:** é infraestrutura (DNS/hospedagem), fora do alcance desta
-  sessão, e trocar `app_public_url` muda o endereço da marca — decisão do dono.
+- **PARCIALMENTE RESOLVIDO** (conferido 09/09/2026): `app_public_url` **já
+  aponta para `https://marineflow-erp.vercel.app`** — links novos nascem
+  funcionando. O `.online` continua servindo o build morto (bundle
+  `index-Bhp72O6g.js` → `zssewfqhmrlagqbfqsmb`, verificado por curl em 09/09):
+  links JÁ ENVIADOS seguem quebrados até o DNS/hospedagem ser reapontado —
+  infraestrutura Cloudflare, ação do dono.
 ## Resoluções da frente NFS-e (19/08/2026)
 
 - **NOVO-nfse-01 RESOLVIDO**: `20260815100000_grandeza_estruturada.sql` renomeada para
