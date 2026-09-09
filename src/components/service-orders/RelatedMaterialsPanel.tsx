@@ -66,8 +66,10 @@ function useAddRelated(serviceOrderId?: string) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['related-materials', serviceOrderId] });
-      qc.invalidateQueries({ queryKey: ['service-order-parts', serviceOrderId] });
-      qc.invalidateQueries({ queryKey: ['service-order', serviceOrderId] });
+      // NOVO-lev-07: chaves inexistentes ('service-order-parts'/'service-order') —
+      // o item entrava no banco e a tela não refletia. Chaves reais:
+      qc.invalidateQueries({ queryKey: ['so-parts', serviceOrderId] });
+      qc.invalidateQueries({ queryKey: ['service-orders', serviceOrderId] });
       toast.success('Item lançado. Confira a quantidade.');
     },
     onError: (e: any) => toast.error(e?.message || 'Erro ao lançar'),

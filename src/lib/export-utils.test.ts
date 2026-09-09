@@ -5,8 +5,9 @@
 // planilha de conferência, às vezes para outro sistema. Estrutura errada aqui não dá erro em
 // tela: dá coluna deslocada na planilha de outra pessoa.
 //
-// Três defeitos apareceram e estão registrados como NOVO-019 — documentados aqui pelo que
-// fazem hoje, com o ID no nome do caso.
+// Três defeitos apareceram e estão registrados como NOVO-019 — CORRIGIDOS em 09/09/2026;
+// os casos abaixo agora travam o comportamento certo (marina de verdade, envelope de
+// aspas, fórmula neutralizada), com o ID no nome do caso.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { exportToCSV, PRODUCTS_COLUMNS, CLIENTS_COLUMNS, VESSELS_COLUMNS } from './export-utils';
 
@@ -99,34 +100,42 @@ describe('catálogos de colunas', () => {
     }
   });
 
-  // ⚠️ NOVO-019(a) — a coluna "Marina" do export de embarcações lê a chave `name`, que é o
-  // nome da EMBARCAÇÃO. A planilha sai com o nome do barco repetido na coluna da marina.
-  it('[NOVO-019] no export de embarcações, "Marina" repete o nome da embarcação', () => {
+  // NOVO-019(a) CORRIGIDO — a coluna "Marina" lia a chave `name` (o nome da EMBARCAÇÃO).
+  // Agora lê o embed `marinas` e extrai o nome da marina de verdade.
+  it('[NOVO-019] no export de embarcações, "Marina" traz a marina, não o barco', () => {
     const marina = VESSELS_COLUMNS.find(c => c.header === 'Marina')!;
     const nome = VESSELS_COLUMNS.find(c => c.header === 'Nome')!;
-    expect(marina.key).toBe(nome.key); // as duas leem `name` — é o defeito
+    expect(marina.key).not.toBe(nome.key);
 
-    exportToCSV([{ name: 'Lancha Azul' }], 'x.csv', VESSELS_COLUMNS);
-    const celulas = linhas()[1].split(';');
+    exportToCSV(
+      [{ name: 'Lancha Azul', marinas: { name: 'Marina Itajaí' } }, { name: 'Sem Marina' }],
+      'x.csv', VESSELS_COLUMNS,
+    );
     const iNome = VESSELS_COLUMNS.findIndex(c => c.header === 'Nome');
     const iMarina = VESSELS_COLUMNS.findIndex(c => c.header === 'Marina');
-    expect(celulas[iMarina]).toBe(celulas[iNome]);
-    expect(celulas[iMarina]).toBe('Lancha Azul'); // deveria ser o nome da marina
+    expect(linhas()[1].split(';')[iNome]).toBe('Lancha Azul');
+    expect(linhas()[1].split(';')[iMarina]).toBe('Marina Itajaí');
+    expect(linhas()[2].split(';')[iMarina]).toBe(''); // sem marina = vazio, não o barco
   });
 });
 
-describe('[NOVO-019] escapes que faltam', () => {
-  it('aspas sem outro separador saem duplicadas e sem envelope', () => {
-    // O código escapa `"` para `""` mas só envolve o campo quando há `;` ou quebra de linha.
-    // Resultado: `cabo "flex"` chega ao Excel como `cabo ""flex""`.
+describe('[NOVO-019] escapes corrigidos', () => {
+  it('aspas ganham envelope além do escape — o Excel volta a ler `cabo "flex"`', () => {
     exportToCSV([{ name: 'cabo "flex" 6mm', notes: 'ok' }], 'x.csv', COLUNAS);
-    expect(linhas()[1]).toBe('cabo ""flex"" 6mm;ok');
+    expect(linhas()[1]).toBe('"cabo ""flex"" 6mm";ok');
   });
 
-  it('valor começando com = sai como fórmula para o Excel', () => {
-    // Injeção de fórmula em CSV: um campo de texto do cadastro que comece com = + - @ é
-    // executado ao abrir a planilha. O conteúdo vem do usuário e sai da empresa.
+  it('valor começando com = ou @ é neutralizado com apóstrofo (injeção de fórmula)', () => {
     exportToCSV([{ name: '=1+1', notes: '@SUM(A1:A9)' }], 'x.csv', COLUNAS);
-    expect(linhas()[1]).toBe('=1+1;@SUM(A1:A9)');
+    expect(linhas()[1]).toBe("'=1+1;'@SUM(A1:A9)");
+  });
+
+  it('+/− só é neutralizado quando NÃO é número: negativo legítimo passa intacto', () => {
+    exportToCSV(
+      [{ name: '-1234,56', notes: '-2+3' }, { name: '+5511999999999', notes: '-0.5' }],
+      'x.csv', COLUNAS,
+    );
+    expect(linhas()[1]).toBe("-1234,56;'-2+3");
+    expect(linhas()[2]).toBe("+5511999999999;-0.5");
   });
 });

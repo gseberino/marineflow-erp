@@ -82,8 +82,10 @@ export function useApplySurveyMaterials() {
       return data as unknown as { ok: boolean; linhas_criadas?: number; mensagem: string };
     },
     onSuccess: (_r, input) => {
-      qc.invalidateQueries({ queryKey: ['service-order-parts', input.serviceOrderId] });
-      qc.invalidateQueries({ queryKey: ['service-order', input.serviceOrderId] });
+      // NOVO-lev-07: as chaves eram 'service-order-parts'/'service-order', que não
+      // existem — o clique em Lançar parecia não fazer nada até um F5. As reais:
+      qc.invalidateQueries({ queryKey: ['so-parts', input.serviceOrderId] });
+      qc.invalidateQueries({ queryKey: ['service-orders', input.serviceOrderId] });
       qc.invalidateQueries({ queryKey: ['survey-suggested-materials', input.surveyId] });
     },
   });

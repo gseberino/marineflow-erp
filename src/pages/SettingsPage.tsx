@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { PageHeader } from '@/components/PageHeader';
 import { useI18n, type Locale } from '@/i18n';
@@ -1808,6 +1808,10 @@ function PdfDefaultsSection() {
   const [draft, setDraft] = useState<Record<string, PDFOptions>>({});
   const [dirty, setDirty] = useState<Set<string>>(new Set());
   const [initialized, setInitialized] = useState(false);
+  // NOVO-021: o closure de `salvar` congela `draft` no clique; este ref enxerga o
+  // estado pós-edição, para não descartar uma mudança feita com o salvar em voo.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
 
   useEffect(() => {
     if (!appSettings || initialized) return;
@@ -1834,7 +1838,18 @@ function PdfDefaultsSection() {
     if (Object.keys(entries).length === 0) return;
     try {
       await updateSettings.mutateAsync(entries);
-      setDirty(new Set());
+      // NOVO-021: `setDirty(new Set())` zerava TUDO — uma marcação feita enquanto o
+      // salvar estava em voo era descartada com a tela dizendo "salvo". Só limpa o
+      // tipo cujo valor atual é exatamente o que acabou de ser gravado.
+      setDirty(prev => {
+        const next = new Set(prev);
+        for (const chave of Object.keys(entries)) {
+          const tipo = chave.replace('pdf_options_', '');
+          const atualJson = JSON.stringify(draftRef.current[tipo] ?? DEFAULT_PDF_OPTIONS);
+          if (atualJson === entries[chave]) next.delete(tipo);
+        }
+        return next;
+      });
     } catch {
       /* erro já exibido pelo hook */
     }

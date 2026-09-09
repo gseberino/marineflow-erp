@@ -10,7 +10,13 @@ export function exportToCSV(
     columns
       .map((c) => {
         const val = c.format ? c.format(row[c.key]) : row[c.key] ?? '';
-        return `"${String(val).replace(/"/g, '""')}"`;
+        let s = String(val);
+        // NOVO-019: aspas não impedem o Excel de executar célula-fórmula (= @, ou
+        // +/− não numérico) — neutraliza com apóstrofo, igual ao export-utils.
+        if (/^[=@\t\r]/.test(s) || (/^[+-]/.test(s) && !/^[+-]?\d+(?:[.,]\d+)?$/.test(s))) {
+          s = `'${s}`;
+        }
+        return `"${s.replace(/"/g, '""')}"`;
       })
       .join(';')
   );

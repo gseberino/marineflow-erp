@@ -17,8 +17,16 @@ export function exportToCSV(
     columns.map(col => {
       const val = row[col.key];
       const transformed = col.transform ? col.transform(val) : (val ?? '');
-      const str = String(transformed).replace(/"/g, '""');
-      return str.includes(';') || str.includes('\n') ? `"${str}"` : str;
+      let str = String(transformed);
+      // NOVO-019: c\u00E9lula come\u00E7ando com = @ (ou +/\u2212 que n\u00E3o seja n\u00FAmero) \u00E9 executada
+      // como f\u00F3rmula pelo Excel ao abrir \u2014 e o conte\u00FAdo vem de campo livre do cadastro.
+      // O ap\u00F3strofo neutraliza; n\u00FAmero negativo leg\u00EDtimo (-1234,56) passa intacto.
+      if (/^[=@\t\r]/.test(str) || (/^[+-]/.test(str) && !/^[+-]?\d+(?:[.,]\d+)?$/.test(str))) {
+        str = `'${str}`;
+      }
+      str = str.replace(/"/g, '""');
+      // NOVO-019: aspas tamb\u00E9m exigem envelope \u2014 sem ele o `""` chega literal na planilha.
+      return /[";\n]/.test(str) ? `"${str}"` : str;
     }).join(';'),
   );
   const csv = BOM + [header, ...rows].join('\n');
@@ -77,7 +85,9 @@ export const VESSELS_COLUMNS: ExportColumn[] = [
   { header: 'Comprimento (m)', key: 'length_meters' },
   { header: 'Motorização', key: 'engine_type' },
   { header: 'Registro', key: 'registration_number' },
-  { header: 'Marina', key: 'name' },
+  // NOVO-019: era key 'name' — repetia o nome da EMBARCAÇÃO na coluna da marina.
+  // A lista embeda marinas(name); a célula agora lê o nome da marina de verdade.
+  { header: 'Marina', key: 'marinas', transform: (v: any) => v?.name ?? '' },
   { header: 'Situação', key: 'active', transform: (v: any) => v ? 'Ativo' : 'Inativo' },
 ];
 
