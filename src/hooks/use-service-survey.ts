@@ -269,9 +269,14 @@ export function useAnswerSurvey() {
           answer_value: input.answer ?? null,
           skipped_reason: input.skippedReason ?? null,
           ...(input.photoPath ? { photo_path: input.photoPath } : {}),
-          ...(input.numericValue !== undefined && input.numericValue !== null
-            ? { numeric_value: input.numericValue } : {}),
-          ...(input.answerUnit ? { answer_unit: input.answerUnit } : {}),
+          // NOVO-lev-24: o spread condicional omitia a coluna no ON CONFLICT e o
+          // número VELHO sobrevivia à correção — a tela mostrava "2,5" e o
+          // dimensionamento usava 25. numeric_value/answer_unit agora acompanham
+          // SEMPRE a resposta atual: correção sem número estruturado LIMPA o campo,
+          // e o cálculo cai no parse do texto novo (parse_answer_number), nunca no
+          // número da resposta anterior.
+          numeric_value: input.numericValue ?? null,
+          answer_unit: input.answerUnit ?? null,
         },
         { onConflict: 'survey_id,seq' },
       );

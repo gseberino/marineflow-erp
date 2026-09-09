@@ -690,7 +690,13 @@ apareceria em uso.
   tabela com regras diferentes; a do material está certa.
 - **Consertar seria:** somar `and a.skipped_reason is null` às seis leituras, e
   limpar `numeric_value`/`answer_unit` quando a resposta vira pulada.
-- **Não corrigido:** regra 3. **É o mais grave desta varredura.**
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO em duas partes:** a
+  `survey_cable_sizing` de produção ganhou `and a.skipped_reason is null` nas
+  seis leituras (frente de 18–19/08, conferido na definição viva em
+  09/09/2026); e em 09/09/2026 o upsert do hook (`use-service-survey.ts`)
+  passou a gravar `numeric_value`/`answer_unit` SEMPRE — pular ou corrigir sem
+  número novo LIMPA o campo (mesma correção do lev-24). Era **o mais grave
+  desta varredura**.
 
 ### [NOVO-lev-05] Corrigir uma resposta pode sobrescrever OUTRA pergunta
 
@@ -1073,8 +1079,12 @@ apareceria em uso.
 - **Consertar seria:** `mm2_minimo` só existir quando os dois critérios existirem
   (ou vir acompanhado de `mm2_minimo_parcial`, com outro nome), e `como_dizer`
   ser gerado apenas com `pronto === true` — nos outros casos, dizer o que falta.
-- **Não corrigido:** regra 3. **É o achado mais grave da noite: erra para menos
-  em dimensionamento de cabo, que é risco físico.**
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO nas duas pontas** (conferido nas
+  definições vivas em 09/09/2026): `dc_cable_sizing` só monta `mm2_minimo`
+  quando os DOIS critérios existem (case, não coalesce-0), e `como_dizer` da
+  tool só afirma bitola com `pronto === true` — caso contrário diz o que falta
+  (comentário NOVO-lev-20 no próprio `survey-ops.ts:399`). Era o achado mais
+  grave da noite.
 
 ### [NOVO-lev-21] Quatro das seis perguntas do dimensionamento estão inativas — e os padrões saem como se tivessem sido lidos
 
@@ -1104,8 +1114,15 @@ apareceria em uso.
   as 18 pendentes) e, enquanto não houver resposta, a função declarar o padrão
   como PADRÃO — chave `presumido`, não `lido_do_levantamento` — e derrubar
   `pronto` quando o que falta é derating.
-- **Não corrigido:** regra 3. Ligado ao `NOVO-lev-20`: um produz o número errado,
-  o outro o apresenta como certo.
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO em duas etapas:** as 4 perguntas
+  (tensão, criticidade, casa de máquinas, feixe) foram aprovadas e estão ATIVAS
+  (conferido no banco em 09/09/2026 — as 7 do dimensionamento, incluindo a 2ª de
+  comprimento); e a migration `20260909170000_survey_cable_sizing_declara_presumido`
+  (09/09) fez a função declarar padrão como PADRÃO: chave nova `presumido`,
+  campos não lidos saem null em `lido_do_levantamento`, e casa de máquinas/feixe
+  sem resposta derrubam `pronto` com aviso de que o erro seria PARA MENOS.
+  Provado contra o levantamento real do ORÇ-00074 (250 A · 2,5 m):
+  `pronto=false`, os 4 padrões listados em `presumido`.
 
 ### [NOVO-lev-22] A transcrição do papel não passa pela conferência de grandeza
 
@@ -1168,8 +1185,12 @@ apareceria em uso.
   `numericValue`/`answerUnit` junto — e, no hook, escrever `numeric_value: null`
   explicitamente quando não houver número, em vez de omitir a chave. A omissão é
   a mesma raiz do `NOVO-lev-04`.
-- **Não corrigido:** regra 3. **Aparentado ao `NOVO-lev-04` e ao `NOVO-lev-20`:
-  os três terminam em bitola calculada sobre número que ninguém confirmou.**
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO na raiz em 09/09/2026**
+  (`use-service-survey.ts`): `numeric_value`/`answer_unit` agora SEMPRE entram
+  no upsert — correção sem número estruturado LIMPA o campo, e o cálculo cai no
+  `parse_answer_number` do texto NOVO ("2,5" → 2.5), nunca no número da resposta
+  anterior. O refinamento de rodar `checkMeasure` também na correção segue como
+  melhoria futura; o defeito (número velho sustentando a bitola) morreu.
 
 ### [NOVO-lev-25] Reabrir (ou só recarregar a página) volta para a pergunta 1 e sobrescreve o que já foi respondido
 
@@ -1564,8 +1585,12 @@ cumpria** — foi o que rendeu os achados mais graves da noite.
   longo.
 - **Aparentado a:** `NOVO-lev-20` e `NOVO-lev-21` — os três terminam em bitola
   apresentada como fechada sobre premissa que ninguém confirmou.
-- **Não corrigido:** regra 3. **Descoberto ao levantar a lista de aprovações
-  pendentes para o dono — é pré-requisito da aprovação, não consequência dela.**
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO** (frente de 18–19/08, conferido
+  na definição viva em 09/09/2026): a leitura de `comprimento` virou
+  `max(...)` sobre TODOS os trechos, com aviso listando do menor ao maior e
+  dizendo que a conta usou o MAIS LONGO — exatamente a "alternativa mínima e
+  honesta" proposta aqui. A 2ª pergunta de comprimento foi aprovada em cima
+  disso e está ativa.
 
 ### [NOVO-lev-37] A isolação do cabo é fixa em 105 °C — a hipótese mais generosa que existe
 
@@ -1589,9 +1614,14 @@ cumpria** — foi o que rendeu os achados mais graves da noite.
   isolação como pergunta de levantamento (ou como atributo do produto de cabo, que
   é onde a informação realmente vive), e — enquanto isso não existir — assumir o
   valor CONSERVADOR (75 °C), não o generoso, e dizer qual assumiu.
-- **Não corrigido:** regra 3. **Terceiro achado da mesma família:** `NOVO-lev-20`
-  (afirma bitola com o cálculo incompleto), `NOVO-lev-21` (derating nunca
-  aplicado) e este — os três empurram a bitola para baixo e nenhum avisa.
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO** (conferido em produção em
+  09/09/2026): `dc_ampacity_ratings` recebeu em 18/08 a transcrição COMPLETA
+  das Tabelas VI-A/VI-B da ABYC — 0,75 a 150 mm² nas isolações 75/90/105 °C,
+  com as quatro colunas da norma (ar livre/casa de máquinas × solto/feixe) e
+  procedência por linha; `survey_cable_sizing` e a tool passaram a usar o
+  padrão CONSERVADOR de 90 °C (deploy do ai-agent v169 em 31/08 —
+  NOVO-agente-09). A skill `dimensionamento-cabo-cc` foi atualizada em 09/09
+  para refletir a cobertura real.
 
 ### Lacunas de DADO desta frente (não são defeito de código)
 

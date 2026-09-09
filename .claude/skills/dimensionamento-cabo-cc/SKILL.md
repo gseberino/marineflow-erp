@@ -48,26 +48,27 @@ O comprimento é de **ida e volta**: o positivo vai e o negativo volta, e a
 corrente atravessa os dois. Calcular com o comprimento simples erra por 2 — é
 o erro mais comum do ramo, e a função já dobra sozinha o trecho informado.
 
-A **ampacidade também está calculada** desde 09/08/2026. A tabela
-`dc_ampacity_ratings` foi preenchida com valores da ABYC E-11 reproduzidos por
-Ancor e EXPLORIST.life, conferidos entre si, e cada linha guarda a procedência
-no campo `source`.
+A **ampacidade também está calculada** desde 09/08/2026 — e desde 18/08/2026 a
+tabela `dc_ampacity_ratings` deixou de ser a amostra inicial: recebeu a
+**transcrição completa das Tabelas VI-A e VI-B da ABYC E-11**, cada linha com a
+procedência no campo `source` (conferido contra produção em 09/09/2026).
 
-Cobertura atual: **16, 25, 35, 50 e 70 mm²**, isolação 105 °C. Fora dessa faixa
-a função devolve `pronto: false` e diz *"nenhuma bitola cadastrada aguenta esta
-corrente"* — o que é mais honesto que devolver a maior e deixar parecer que
-serve. Para cobrir mais, cadastrar nova linha com a fonte junto.
+Cobertura atual: **0,75 a 150 mm²** — incluindo os equivalentes AWG
+16/14/12/10/8/6/3/2/1/0/00/000 — nas isolações **75, 90 e 105 °C**. O padrão
+da chamada é 90 °C (`p_insulation_c default 90`). Fora da faixa cadastrada a
+função devolve `pronto: false` e diz que nenhuma bitola cadastrada atende — o
+que é mais honesto que devolver a maior e deixar parecer que serve. Para
+cobrir mais, cadastrar nova linha com a fonte junto.
 
-Fatores de correção, ambos aplicados sobre o valor de tabela:
+Casa de máquinas e feixe **não são mais fatores multiplicativos**: a tabela
+guarda as quatro colunas da norma (`amps_free_air`, `amps_free_air_engine`,
+`amps_bundled`, `amps_bundled_engine`) e `dc_cable_sizing` escolhe a coluna
+certa pela condição informada. O resultado declara a condição usada
+(`coluna_da_norma`) e a tabela da norma (`VI-A` ao ar livre, `VI-B` em feixe).
 
-| Condição | Fator |
-|---|---|
-| Casa de máquinas / compartimento de motor | **0,85** (ambiente 20 °C mais quente) |
-| Condutores em feixe, qualquer quantidade | **0,70** |
-
-O 0,70 vale para **qualquer** tamanho de feixe: a ABYC usa fator único em
-corrente contínua. Os fatores que variam com o número de condutores (0,6 / 0,5
-/ 0,4) são de corrente **alternada** — não misturar.
+Feixe com **mais de 3 condutores**: as tabelas da norma cobrem até três; acima
+disso a função usa a coluna de feixe, marca `pronto: false` e avisa que o
+valor é PISO, não resposta — a correção adicional da norma não está cadastrada.
 
 ## Como agir
 
