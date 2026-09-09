@@ -323,6 +323,12 @@ Deno.serve(async (req) => {
                 p_evidence: p.evidence,
                 p_evidence_at: p.evidence_at,
                 p_source_message_id: p.source_message_id,
+                // A direção existia e era jogada fora: o modelo classifica em 4 tipos, mas
+                // a linha do p_kind acima colapsa em 2, e 'third_party_deadline' (que é
+                // literalmente "o terceiro deu um prazo") virava 'promise' junto com as
+                // promessas da HBR. Por isso só 2 de 68 fios apareciam como espera de
+                // terceiro. Aqui a classificação do detector é preservada.
+                p_direction: p.detector === "third_party_deadline" ? "theirs" : "ours",
               });
               loopId = ((loop as any[]) || [])[0]?.loop_id ?? null;
             } catch (e) { console.error("record loop:", e); }

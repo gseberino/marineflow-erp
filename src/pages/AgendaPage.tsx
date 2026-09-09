@@ -27,6 +27,8 @@ import {
   useSuggestions,
   useAutoCreated,
   useUndoAutoCreated,
+  useOpenLoops,
+  type OpenLoop,
 } from '@/hooks/use-agenda';
 import { TaskCard } from '@/components/agenda/TaskCard';
 import { AgendaTaskDialog, type ExistingTask } from '@/components/AgendaTaskDialog';
@@ -43,11 +45,12 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
 import { useI18n } from '@/i18n';
+import { useAuth } from '@/hooks/use-auth';
 import { statusConfig } from '@/lib/constants';
 import { FilterPresets } from '@/components/FilterPresets';
 import { downloadCSV } from '@/lib/download';
 
-type ViewMode = 'today' | 'week' | 'month' | 'done' | 'inbox';
+type ViewMode = 'today' | 'week' | 'month' | 'done' | 'inbox' | 'esperando';
 
 function startOfWeek(d: Date): Date {
   const date = new Date(d);
@@ -97,7 +100,9 @@ export default function AgendaPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [view, setView] = useState<ViewMode>(() => {
     const v = searchParams.get('view');
-    return (['today', 'week', 'month', 'done', 'inbox'] as const).includes(v as any)
+    // Esta lista tem de andar junto com o ViewMode: um valor que exista lá e falte aqui
+    // cai em 'today' sem erro nenhum — e o link salvo no celular abre a tela errada.
+    return (['today', 'week', 'month', 'done', 'inbox', 'esperando'] as const).includes(v as any)
       ? (v as ViewMode) : 'today';
   });
   const [cursor, setCursor] = useState(() => new Date());
@@ -141,6 +146,9 @@ export default function AgendaPage() {
   const { data: liveTasks = [], isLoading: loadingLive } = useLiveTasks();
   const { data: doneTasks = [], isLoading: loadingDone } = useCompletedTasks(doneDays);
   const { data: suggestions = [], isLoading: loadingSuggestions } = useSuggestions();
+  // Fios que dependem de uma ação nossa. Fica aqui em cima (e não dentro da view) porque
+  // o número aparece no botão da visão, do mesmo jeito que o da caixa de entrada.
+  const { data: loopsOurs = [] } = useOpenLoops('ours');
   const completeTask = useCompleteTask();
   const reschedule = useRescheduleTask();
   const saveTask = useSaveAgendaTask();
@@ -337,7 +345,9 @@ export default function AgendaPage() {
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-1 rounded-md border p-1">
+          {/* flex-wrap aqui porque são 6 visões: sem isso a fileira estoura no celular
+              e nasce a barra de rolagem lateral, que não pode existir neste produto. */}
+          <div className="flex flex-wrap items-center gap-1 rounded-md border p-1">
             <Button size="sm" variant={view === 'today' ? 'default' : 'ghost'} onClick={() => setView('today')}>
               Hoje
             </Button>
@@ -356,6 +366,15 @@ export default function AgendaPage() {
               {suggestions.length > 0 && (
                 <span className="ml-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground">
                   {suggestions.length}
+                </span>
+              )}
+            </Button>
+            <Button size="sm" variant={view === 'esperando' ? 'default' : 'ghost'} onClick={() => setView('esperando')}
+              className="relative">
+              Depende de você
+              {loopsOurs.length > 0 && (
+                <span className="ml-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground">
+                  {loopsOurs.length}
                 </span>
               )}
             </Button>
@@ -456,6 +475,8 @@ export default function AgendaPage() {
               completeTask.mutate({ id, done }, { onError: (e: any) => toast.error(e?.message || 'Erro ao concluir') })}
             onScheduleOs={(t) => { setScheduleOsId(t.related_entity_id); setOsDialogOpen(true); }}
           />
+        ) : view === 'esperando' ? (
+          <EsperandoView loops={loopsOurs} />
         ) : view === 'inbox' ? (
           <InboxView suggestions={suggestions} />
         ) : view === 'done' ? (
@@ -509,6 +530,113 @@ export default function AgendaPage() {
         prefillDate={prefill.date}
         existing={editingTask}
       />
+    </div>
+  );
+}
+
+// ============================================================
+// DEPENDE DE VOCÊ — os fios em aberto que esperam uma ação nossa
+//
+// Os fios soltos existiam desde julho, mas só apareciam dentro da tela de cada cliente:
+// para ver o que estava pendente com o Fulano era preciso já estar pensando no Fulano.
+// A pergunta que faltava — "o que está parado esperando por mim, em qualquer lugar" — não
+// tinha resposta em lugar nenhum do sistema.
+//
+// A medição de 30/08 mostrou por que isso importa: de 68 fios abertos, quase todos são
+// obrigação da própria casa (enviar a nota, gerar o orçamento, deixar o barco pronto).
+// Esta é a lista de trabalho real que estava invisível.
+// ============================================================
+function LinhaFio({ fio, onAbrir }: { fio: OpenLoop; onAbrir: (f: OpenLoop) => void }) {
+  const quando = fio.due_at ? new Date(fio.due_at) : null;
+  return (
+    <button
+      onClick={() => onAbrir(fio)}
+      className="w-full rounded-md border bg-card p-3 text-left transition-colors hover:border-primary/50"
+    >
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium leading-snug break-words">{fio.title}</p>
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+            <span className="font-medium text-foreground/70">{fio.entity_name}</span>
+            {fio.service_order_number && <span>· {fio.service_order_number}</span>}
+            {quando && (
+              <span className={fio.atrasado ? 'font-medium text-destructive' : ''}>
+                · {quando.toLocaleDateString('pt-BR')}
+              </span>
+            )}
+            {fio.mentions > 1 && <span>· cobrado {fio.mentions}×</span>}
+            {fio.source === 'conversation' && <span className="rounded bg-muted px-1">da conversa</span>}
+          </div>
+          {/* A frase original é o que faz confiar no item — sem ela, "enviar a nota" vira
+              mais uma linha genérica que a pessoa não sabe de onde veio. */}
+          {fio.evidence && (
+            <p className="mt-1.5 border-l-2 border-muted pl-2 text-xs italic text-muted-foreground break-words">
+              “{fio.evidence}”
+            </p>
+          )}
+        </div>
+      </div>
+    </button>
+  );
+}
+
+/** Técnico não vê dinheiro — mesma regra do OpenLoopsPanel e do get_client_360. Precisa
+ *  ser repetida aqui porque a policy da tabela é `auth.uid() IS NOT NULL` para tudo: o
+ *  banco não filtra, quem filtra é a tela. */
+const FIOS_FINANCEIROS = new Set(['receivable', 'payable']);
+
+function EsperandoView({ loops: todos }: { loops: OpenLoop[] }) {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const loops = user?.role === 'technician'
+    ? todos.filter((f) => !FIOS_FINANCEIROS.has(f.kind))
+    : todos;
+
+  const abrir = (f: OpenLoop) => {
+    // Leva ao lugar onde o fio se resolve: a OS quando existe, senão a ficha do contato.
+    if (f.service_order_id) navigate(`/service-orders/${f.service_order_id}`);
+    else if (f.entity_type === 'client' && f.entity_id) navigate(`/clients/${f.entity_id}`);
+    else toast.info('Este fio veio de uma conversa e ainda não tem tela própria.');
+  };
+
+  const semana = new Date();
+  semana.setDate(semana.getDate() + 7);
+
+  const atrasados = loops.filter((f) => f.atrasado);
+  const proximos = loops.filter((f) => !f.atrasado && f.due_at && new Date(f.due_at) <= semana);
+  const semPrazo = loops.filter((f) => !f.atrasado && !f.due_at);
+  const depois = loops.filter((f) => !f.atrasado && f.due_at && new Date(f.due_at) > semana);
+
+  const secoes: [string, OpenLoop[]][] = [
+    ['Atrasado', atrasados],
+    ['Próximos 7 dias', proximos],
+    ['Sem prazo', semPrazo],
+    ['Mais adiante', depois],
+  ];
+
+  return (
+    <div className="max-w-2xl space-y-5">
+      {loops.length === 0 && (
+        <div className="space-y-2 py-10 text-center">
+          <p className="text-sm font-medium">Nada parado esperando por você</p>
+          <p className="mx-auto max-w-md text-xs text-muted-foreground">
+            Aqui aparece o que está em aberto e depende de uma ação sua — um orçamento a
+            fazer, uma nota a emitir, um retorno prometido. Sai da lista sozinho quando o
+            sistema registra que aconteceu.
+          </p>
+        </div>
+      )}
+
+      {secoes.map(([titulo, itens]) =>
+        itens.length === 0 ? null : (
+          <div key={titulo} className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              {titulo} ({itens.length})
+            </p>
+            {itens.map((f) => <LinhaFio key={f.id} fio={f} onAbrir={abrir} />)}
+          </div>
+        ),
+      )}
     </div>
   );
 }

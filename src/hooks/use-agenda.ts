@@ -661,6 +661,11 @@ export type OpenLoop = {
   opened_at: string;
   last_seen_at: string;
   atrasado: boolean;
+  /** Para o fio ANDAR, quem precisa agir. Só vem preenchido na consulta global. */
+  direction?: 'ours' | 'theirs';
+  entity_type?: 'client' | 'supplier';
+  entity_id?: string;
+  entity_name?: string;
 };
 
 /**
@@ -687,5 +692,30 @@ export function useEntityOpenLoops(
       if (error) throw error;
       return (data || []) as OpenLoop[];
     },
+  });
+}
+
+/**
+ * Todos os fios em aberto, de todos os contatos — a fila de "Depende de você".
+ *
+ * O painel por entidade só responde "o que está pendente com o Fulano", e para isso é
+ * preciso já estar na tela do Fulano. Esta é a pergunta que faltava: "o que está parado
+ * esperando por MIM, em qualquer lugar". `direction='ours'` é o filtro que torna a
+ * pergunta respondível — sem ele a lista mistura o que depende de nós com o que só
+ * depende de aguardar.
+ */
+export function useOpenLoops(direction: 'ours' | 'theirs' | null = 'ours') {
+  return useQuery({
+    queryKey: ['open-loops', direction],
+    queryFn: async () => {
+      // Mesmo motivo do cast acima: types.ts é gerado e várias sessões mexem no repo.
+      const { data, error } = await (supabase.rpc as any)('get_open_loops', {
+        p_direction: direction,
+        p_limit: 200,
+      });
+      if (error) throw error;
+      return (data || []) as OpenLoop[];
+    },
+    staleTime: 30_000,
   });
 }

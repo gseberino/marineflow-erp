@@ -12,7 +12,7 @@ import AgendaPage from './AgendaPage';
 import { AgendaV2 } from '@/v2/pages/wrapped';
 
 // vi.mock é içado para o topo do módulo — helpers/fixtures precisam de vi.hoisted
-const { queryBuilder, q, mut, liveTasks, doneTasks, suggestions } = vi.hoisted(() => {
+const { queryBuilder, q, mut, liveTasks, doneTasks, suggestions, openLoops } = vi.hoisted(() => {
   const queryBuilder = (): any => {
     const o: any = {};
     for (const k of ['select', 'eq', 'neq', 'in', 'gte', 'lte', 'lt', 'gt', 'order',
@@ -63,7 +63,27 @@ const { queryBuilder, q, mut, liveTasks, doneTasks, suggestions } = vi.hoisted((
     confidence: 0.95, contact_label: null, suggested_due_at: null,
     suggested_start_at: null, client_id: null, target_user_id: 'u1',
   }];
-  return { queryBuilder, q, mut, liveTasks, doneTasks, suggestions };
+  // Fios que dependem de uma ação nossa — o material da visão "Depende de você".
+  const openLoops = [
+    {
+      id: 'l1', kind: 'request', source: 'conversation', direction: 'ours',
+      title: 'Enviar nota fiscal do serviço do fogão para Charline',
+      detail: null, due_at: new Date(Date.now() - 172800000).toISOString(),
+      priority: 'normal', service_order_id: null, service_order_number: null,
+      mentions: 2, evidence: 'você consegue me mandar a nota do fogão?',
+      opened_at: new Date().toISOString(), last_seen_at: new Date().toISOString(),
+      atrasado: true, entity_type: 'client', entity_id: 'c-1', entity_name: 'Charline',
+    },
+    {
+      id: 'l2', kind: 'receivable', source: 'erp', direction: 'ours',
+      title: 'Título VENCIDO R$ 1.998,96',
+      detail: null, due_at: null, priority: 'high',
+      service_order_id: null, service_order_number: null, mentions: 1, evidence: null,
+      opened_at: new Date().toISOString(), last_seen_at: new Date().toISOString(),
+      atrasado: false, entity_type: 'client', entity_id: 'c-2', entity_name: 'Cliente Beta',
+    },
+  ];
+  return { queryBuilder, q, mut, liveTasks, doneTasks, suggestions, openLoops };
 });
 
 vi.mock('@/integrations/supabase/client', () => ({
@@ -76,6 +96,10 @@ vi.mock('@/integrations/supabase/client', () => ({
   },
 }));
 
+// A visão "Depende de você" filtra fio financeiro por cargo (o banco não filtra), então
+// precisa do usuário. Mesmo mock do agenda-components.smoke.test.tsx.
+vi.mock('@/hooks/use-auth', () => ({ useAuth: () => ({ user: { id: 'u1', role: 'admin' } }) }));
+
 vi.mock('@/hooks/use-agenda', () => ({
   useSuggestions: () => q(suggestions),
   useAcceptSuggestion: mut,
@@ -83,6 +107,7 @@ vi.mock('@/hooks/use-agenda', () => ({
   useVoiceCapture: mut,
   useAutoCreated: () => q([]),
   useUndoAutoCreated: mut,
+  useOpenLoops: () => q(openLoops),
   useAgendaOrders: () => q([{
     id: 'so-1', service_order_number: 'OS-100', status: 'scheduled',
     scheduled_start_at: new Date().toISOString(), scheduled_end_at: new Date(Date.now() + 3600000).toISOString(),
@@ -150,6 +175,28 @@ describe('AgendaPage — smoke de render (todas as visões)', () => {
     expect(screen.getAllByText('Aceitar').length).toBe(2);
     expect(screen.getByText('Seus recados (1)')).toBeTruthy();
     expect(screen.getByText('Detectado nas conversas (1)')).toBeTruthy();
+  });
+
+  it('a visão "Depende de você" lista os fios com contato, prazo e a frase original', async () => {
+    // A pergunta que o sistema não respondia: "o que está parado esperando por mim".
+    // Os fios existiam desde julho, mas só dentro da tela de cada cliente.
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <I18nProvider>
+          <MemoryRouter><AgendaPage /></MemoryRouter>
+        </I18nProvider>
+      </QueryClientProvider>,
+    );
+    await userEvent.click(screen.getByRole('button', { name: /Depende de você/ }));
+
+    expect(screen.getByText('Enviar nota fiscal do serviço do fogão para Charline')).toBeTruthy();
+    expect(screen.getByText('Charline')).toBeTruthy();
+    // a evidência é o que faz confiar no item — sem ela vira linha genérica
+    expect(screen.getByText(/você consegue me mandar a nota do fogão/)).toBeTruthy();
+    // o atrasado ganha seção própria, e o sem prazo também
+    expect(screen.getByText('Atrasado (1)')).toBeTruthy();
+    expect(screen.getByText('Sem prazo (1)')).toBeTruthy();
   });
 
   it('a rota /v2/agenda renderiza a MESMA agenda dentro da casca de tema', () => {
