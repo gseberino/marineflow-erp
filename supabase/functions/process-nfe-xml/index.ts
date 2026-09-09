@@ -78,17 +78,39 @@ function normalizeGtin(raw: string | null): string | null {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
-  const authHeader = req.headers.get("Authorization");
-  if (!authHeader) {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const supabase = createClient(supabaseUrl, supabaseKey);
+
+  // A function roda com service role e o gateway (verify_jwt) valida só a ASSINATURA
+  // do token, não o cargo: qualquer autenticado alcançava o preview. As RPCs de
+  // confirmar/desfazer já têm gate is_admin (4337d8e); aqui fecha a porta que faltava,
+  // no mesmo padrão do requireAdmin do fiscal-emit.
+  const jwt = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
+  if (!jwt) {
     return new Response(JSON.stringify({ error: "Missing authorization" }), {
       status: 401,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
-
-  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const supabase = createClient(supabaseUrl, supabaseKey);
+  const { data: userData, error: authErr } = await supabase.auth.getUser(jwt);
+  if (authErr || !userData?.user) {
+    return new Response(JSON.stringify({ error: "Sessão inválida" }), {
+      status: 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+  const { data: perfil } = await supabase
+    .from("app_users")
+    .select("id, role, active")
+    .eq("id", userData.user.id)
+    .maybeSingle();
+  if (!perfil || perfil.role !== "admin" || perfil.active === false) {
+    return new Response(
+      JSON.stringify({ error: "Apenas administradores podem importar XML de NF-e." }),
+      { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
 
   try {
     const body = await req.json();
