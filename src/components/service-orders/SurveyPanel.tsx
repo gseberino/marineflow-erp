@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -103,6 +103,17 @@ export function SurveyPanel({
 
   const ativo = surveyId || (survey?.status && survey.status !== 'closed' ? survey.id : null);
   const fechado = survey?.status === 'closed';
+
+  // NOVO-lev-25: `idx` nascia em 0 e nunca era sincronizado com o que já existe.
+  // Reabrir o levantamento (ou dar F5 no meio) voltava à pergunta 1, e o upsert
+  // por (survey_id, seq) SOBRESCREVIA as respostas já dadas — com o toast dizendo
+  // que tinham sido mantidas. A fila agora continua de onde parou; para mexer no
+  // que já foi respondido existe o "corrigir" da lista, que edita sem reordenar.
+  useEffect(() => {
+    if (!ativo || respostas.length === 0) return;
+    const maiorSeq = Math.max(...respostas.map((r) => r.seq ?? 0));
+    setIdx((i) => Math.max(i, maiorSeq));
+  }, [ativo, respostas]);
   const atual: SurveyQuestion | undefined = questions[idx];
   const anterior = atual ? anteriores[atual.id] : undefined;
   const reaproveitavel = canReuseAnswer(atual, anterior);

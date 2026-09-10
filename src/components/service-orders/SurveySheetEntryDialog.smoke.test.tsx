@@ -36,7 +36,12 @@ vi.mock('@/hooks/use-service-survey', async (orig) => {
 vi.mock('@/integrations/supabase/client', () => ({
   supabase: {
     from: (tabela: string) => ({
-      insert: async (linhas: any) => { gravadas.push({ tabela, linhas }); return { error: null }; },
+      // NOVO-lev-23: as respostas entram por UPSERT em (survey_id, seq) — retry
+      // após falha parcial regrava as mesmas linhas em vez de duplicá-las.
+      upsert: async (linhas: any, opts: any) => {
+        gravadas.push({ tabela, linhas, onConflict: opts?.onConflict });
+        return { error: null };
+      },
       update: (patch: any) => ({
         eq: async () => { atualizacoes.push(patch); return { error: null }; },
       }),
@@ -88,11 +93,16 @@ describe('lançar a folha preenchida', () => {
     await userEvent.click(screen.getByRole('button', { name: /^Lançar folha$/i }));
 
     expect(gravadas).toHaveLength(1);
+    expect(gravadas[0].onConflict).toBe('survey_id,seq'); // NOVO-lev-23
     const [respondida, embranco] = gravadas[0].linhas;
     expect(respondida.answer_value).toBe('4,5 metros');
     expect(respondida.skipped_reason).toBeNull();
+    // NOVO-lev-22: grandeza transcrita com um número vira número estruturado —
+    // é o que o dimensionamento lê, em vez de garimpar dígito na frase.
+    expect(respondida.numeric_value).toBe(4.5);
     expect(embranco.answer_value).toBeNull();
     expect(embranco.skipped_reason).toBe('em branco na folha de campo');
+    expect(embranco.numeric_value).toBeNull();
   });
 
   // Sem confiança declarada, o levantamento não fecha — é a mesma regra da tela.

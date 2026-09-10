@@ -982,7 +982,10 @@ apareceria em uso.
   produz um documento plausível e errado, que é pior.
 - **Consertar seria:** checar `.error` nas três e falhar com a causa, do mesmo
   jeito que `soRes` já faz.
-- **Não corrigido:** regra 3.
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO em 10/09/2026**: as três consultas
+  agora derrubam a montagem com a causa. Sob o token do portal nada muda —
+  política ausente FILTRA linha, não é erro; o que passa a falhar alto é falha
+  de verdade (rede/PGRST), que antes virava documento plausível e errado.
 
 ### [NOVO-lev-17] A galeria de fotos do PDF lê uma coluna que nada escreve
 
@@ -1004,7 +1007,12 @@ apareceria em uso.
   strings, o PDF renderiza `<img src="undefined">`.
 - **Consertar seria:** o PDF ler `service_order_photos` (a fonte real), e decidir
   o destino da coluna `photos` — usar ou remover, não as duas coisas pela metade.
-- **Não corrigido:** regra 3.
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO em 10/09/2026**: a galeria lê
+  `service_order_photos.public_url` (embed com hint de FK, ordenado por
+  `created_at`). Hoje 0 fotos = mudança visual zero; quando existirem, a galeria
+  funciona como desenhada. Fica de fora: aposentar a coluna morta
+  `service_orders.photos` (migration — fila do dono) e, se o volume de fotos
+  crescer, avaliar um toggle próprio de galeria no catálogo de opções de PDF.
 
 ### [NOVO-lev-18] Com mais de um levantamento fechado, o PDF escolhe um qualquer
 
@@ -1021,7 +1029,9 @@ apareceria em uso.
 - **Consertar seria:** ordenar por `answered_at desc` no embed e pegar o mais
   recente, ou respeitar `service_orders.survey_id`, que existe justamente para
   apontar o levantamento principal.
-- **Não corrigido:** regra 3.
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO em 10/09/2026**: `buildSurveyForPdf`
+  filtra os fechados e ordena por `answered_at` desc — o documento leva sempre o
+  levantamento mais recente.
 
 ### [NOVO-lev-19] A folha impressa e a tela de lançamento montam perguntas diferentes
 
@@ -1141,7 +1151,10 @@ apareceria em uso.
 - **Consertar seria:** chamar `checkMeasure` por campo com `expectedUnit`/
   `minExpected`/`maxExpected` da pergunta, mostrar o aviso abaixo do campo (sem
   bloquear) e gravar `numeric_value` quando houver um número só.
-- **Não corrigido:** regra 3.
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO em 10/09/2026**: a transcrição
+  passa por `checkMeasure` (aviso âmbar por campo, nunca barra) e grava
+  `numeric_value`/`answer_unit` quando há um número só — com mais de um, fica o
+  texto e o aviso pede o total. Smoke test trava o comportamento.
 
 ### [NOVO-lev-23] Falha ao gravar as respostas deixa um levantamento órfão, e o botão cria outro
 
@@ -1158,7 +1171,10 @@ apareceria em uso.
 - **Consertar seria:** guardar o `surveyId` já criado num `ref` e reaproveitá-lo
   na nova tentativa, ou mover os três passos para uma RPC única (o insert, o
   fechamento e a criação numa transação só).
-- **Não corrigido:** regra 3.
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO em 10/09/2026**: `surveyIdRef`
+  reaproveita o levantamento da tentativa que falhou, e as respostas entram por
+  UPSERT em `(survey_id, seq)` — retry regrava as mesmas linhas em vez de
+  duplicá-las (cobre também o caso de o INSERT ter passado e o fechamento não).
 
 ### [NOVO-lev-24] Corrigir a medida não corrige o número que o cálculo lê
 
@@ -1219,7 +1235,11 @@ apareceria em uso.
   (a partir de `respostas`), e marcar as já respondidas na fila. A correção
   completa depende do `NOVO-lev-05` — enquanto a identidade for `seq` e não
   `template_id`, "primeira sem resposta" também é uma conta sobre posição.
-- **Não corrigido:** regra 3.
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO (o estrago) em 10/09/2026**:
+  `useEffect` posiciona `idx` no maior `seq` já gravado — reabrir/F5 continua de
+  onde parou e nada mais é sobrescrito; editar o que já foi respondido é papel
+  do "corrigir" da lista. A troca de identidade `seq`→`template_id` (lev-05)
+  segue aberta como melhoria estrutural.
 
 ### [NOVO-lev-26] Reabrir não limpa a estimativa, ao contrário do que o código afirma
 

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from '@/components/ui/dialog';
@@ -10,6 +10,7 @@ import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useSurveyQuestions, useStartSurvey } from '@/hooks/use-service-survey';
+import { checkMeasure } from '@/lib/survey-measure';
 
 /**
  * Lançar a folha que voltou do campo — tudo de uma vez.
@@ -45,11 +46,34 @@ export function SurveySheetEntryDialog({
   const [rationale, setRationale] = useState('');
   const [extras, setExtras] = useState('');
   const [salvando, setSalvando] = useState(false);
+  // NOVO-lev-23: o levantamento criado numa tentativa que falhou é REAPROVEITADO
+  // na próxima — sem isto, cada clique em "Lançar folha" após um erro criava
+  // mais um levantamento aberto e vazio no banco.
+  const surveyIdRef = useRef<string | null>(null);
 
   const preenchidas = useMemo(
     () => questions.filter((q) => (respostas[q.id] || '').trim()).length,
     [questions, respostas],
   );
+
+  // NOVO-lev-22: na transcrição é que a conferência mais faz falta — quem digita
+  // está lendo a letra de outra pessoa dias depois, e é aí que 2,5 vira 25.
+  // Mesma rede da tela viva (checkMeasure): AVISA, nunca barra.
+  const medidas = useMemo(() => {
+    const out: Record<string, ReturnType<typeof checkMeasure>> = {};
+    for (const q of questions) {
+      const eGrandeza = (q as any).answer_type === 'medida' || (q as any).answer_type === 'numero';
+      if (!eGrandeza) continue;
+      const texto = (respostas[q.id] || '').trim();
+      if (!texto) continue;
+      out[q.id] = checkMeasure(texto, {
+        unit: (q as any).expected_unit,
+        min: (q as any).min_expected,
+        max: (q as any).max_expected,
+      });
+    }
+    return out;
+  }, [questions, respostas]);
 
   async function lancar() {
     if (!serviceId) return;
@@ -60,8 +84,10 @@ export function SurveySheetEntryDialog({
     setSalvando(true);
     try {
       // Um levantamento novo, já fechado: a folha é o registro do que foi feito
-      // em campo, não um rascunho a continuar.
-      const surveyId = await start.mutateAsync({
+      // em campo, não um rascunho a continuar. NOVO-lev-23: se a tentativa
+      // anterior criou o levantamento e falhou depois, reaproveita em vez de
+      // deixar um órfão aberto e criar outro.
+      const surveyId = surveyIdRef.current ?? await start.mutateAsync({
         serviceId,
         serviceOrderId,
         clientId, vesselId,
@@ -69,9 +95,15 @@ export function SurveySheetEntryDialog({
         triggerReason: 'Folha de campo preenchida à mão',
         questionsPlanned: questions.length,
       });
+      surveyIdRef.current = surveyId;
 
       const linhas = questions.map((q, i) => {
         const resp = (respostas[q.id] || '').trim();
+        // NOVO-lev-22: grandeza transcrita com UM número vira número estruturado
+        // (é o que o dimensionamento lê); com mais de um, fica só o texto e o
+        // aviso na tela já pediu para escrever o total.
+        const medida = resp ? medidas[q.id] : undefined;
+        const numeroUnico = medida && medida.numberCount === 1 ? medida.value : null;
         return {
           survey_id: surveyId,
           template_id: q.id,
@@ -83,10 +115,16 @@ export function SurveySheetEntryDialog({
           skipped_reason: resp
             ? null
             : (motivos[q.id] || '').trim() || 'em branco na folha de campo',
+          numeric_value: numeroUnico,
+          answer_unit: numeroUnico !== null ? ((q as any).expected_unit ?? null) : null,
         };
       });
 
-      const { error } = await supabase.from('service_survey_answers').insert(linhas);
+      // Upsert por (survey_id, seq): retry após falha parcial REGRAVA as mesmas
+      // linhas em vez de duplicá-las (NOVO-lev-23, segunda metade).
+      const { error } = await supabase
+        .from('service_survey_answers')
+        .upsert(linhas, { onConflict: 'survey_id,seq' });
       if (error) throw error;
 
       // O bloco "enquanto eu estava lá" entra junto da justificativa: é ali que
@@ -107,6 +145,7 @@ export function SurveySheetEntryDialog({
       if (e2) throw e2;
 
       toast.success(`Folha lançada: ${preenchidas} de ${questions.length} respondidas.`);
+      surveyIdRef.current = null;
       onOpenChange(false);
       setRespostas({}); setMotivos({}); setConfidence(''); setRationale(''); setExtras('');
     } catch (e: any) {
@@ -155,6 +194,13 @@ export function SurveySheetEntryDialog({
                     placeholder="o que está escrito na folha"
                     className="h-9"
                   />
+                  {/* NOVO-lev-22: a mesma conferência da tela viva, onde ela mais
+                      faz falta — lendo letra alheia é que 2,5 vira 25. */}
+                  {medidas[q.id]?.warning && (
+                    <p className="text-xs text-amber-700 dark:text-amber-400">
+                      {medidas[q.id].warning}
+                    </p>
+                  )}
                   {/* Só aparece quando ficou em branco: perguntar o motivo de
                       algo que foi respondido seria ruído. */}
                   {vazia && (
