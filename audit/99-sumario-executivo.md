@@ -126,7 +126,12 @@ Correções de menos de meia hora cada, sem decisão pendente:
 ### 🌊 Onda 2 — Devolver o que o usuário perdeu + quick wins
 *Objetivo: o que ele sente no dia a dia.*
 
-1. **MF-AUD-050** `[DECISÃO]` — repor as 4 funcionalidades na V2 (quais?).
+1. **MF-AUD-050** ~~`[DECISÃO]`~~ — **RESOLVIDO**: as 4 voltaram, todas (repor é
+   aditivo, a escolha "quais?" ficou sem objeto). Widget de tarefas no DashboardV2
+   (feat/agenda-retomada, 28/08); em 10/09/2026: extrato do cliente no
+   ClientDetailV2 ("Enviar extrato" na aba Financeiro), cobrança em lote na
+   ReceivablesV2 ("Cobrar em lote") e programação de caixa como aba "Programação"
+   na FinancialV2. Componentes originais intactos — só ganharam casa na V2.
 2. **MF-AUD-005** + MF-AUD-006/007/008 — a classe inteira dos status fantasma, com constante única e teste de
    guarda.
 3. **MF-AUD-014** `[DECISÃO]` — separar preferência do usuário de padrão da empresa. **Antes disso**, conferir o
