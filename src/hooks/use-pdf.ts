@@ -22,7 +22,11 @@ import type { PDFData } from '@/lib/pdf-generator';
  */
 function buildSurveyForPdf(raw: unknown): PDFData['survey'] {
   const lista = (Array.isArray(raw) ? raw : raw ? [raw] : []) as any[];
-  const fechado = lista.find((s) => s?.status === 'closed');
+  // NOVO-lev-18: com 2+ levantamentos fechados, o `find` pegava um QUALQUER (ordem
+  // de embed não é determinada). O documento do cliente leva o mais RECENTE.
+  const fechado = lista
+    .filter((s) => s?.status === 'closed')
+    .sort((a, b) => String(b?.answered_at ?? '').localeCompare(String(a?.answered_at ?? '')))[0];
   if (!fechado) return undefined;
 
   const answers = [...((fechado.service_survey_answers || []) as any[])]
@@ -85,6 +89,7 @@ export async function carregarPDFData(
           answered_at, confidence_rationale, status,
           service_survey_answers(seq, question_snapshot, answer_value, skipped_reason, photo_path)),
         service_order_expenses(category, description, amount, paid_by),
+        service_order_photos!service_order_photos_service_order_id_fkey(public_url, created_at),
         payment_condition_presets(label, installments)
       `)
       .eq('id', serviceOrderId)
@@ -102,6 +107,14 @@ export async function carregarPDFData(
   ]);
 
   if (soRes.error) throw soRes.error;
+  // NOVO-lev-16: cada `|| []`/`|| ''` daqui para baixo transformava FALHA em ausência —
+  // app_settings falho saía como empresa "MarineFlow" sem CNPJ nem termos, e receivables
+  // falho apagava o sinal já pago do documento do cliente. Erro engolido que produz
+  // documento plausível e errado é pior que derrubar: agora derruba, e quem chama
+  // (usePDFData/fetchPDFData/portal) mostra indisponibilidade em vez de mentir.
+  // Sob o token do portal, política ausente FILTRA linha (não é erro) — nada muda lá.
+  if (settingsRes.error) throw settingsRes.error;
+  if (receivablesRes.error) throw receivablesRes.error;
   const so = soRes.data;
   const receivables = receivablesRes.data || [];
   const depositPaid = receivables
@@ -109,13 +122,15 @@ export async function carregarPDFData(
     .reduce((sum, r) => sum + (r.paid_amount || 0), 0);
 
   const receivableIds = receivables.map((r) => r.id);
-  const { data: paymentsData } = receivableIds.length > 0
+  const paymentsRes = receivableIds.length > 0
     ? await db.from('payments')
         .select('receivable_id, payment_date, amount, payment_method')
         .in('receivable_id', receivableIds)
         .eq('status', 'confirmed')
         .order('payment_date', { ascending: true })
-    : { data: [] as any[] };
+    : { data: [] as any[], error: null };
+  if (paymentsRes.error) throw paymentsRes.error; // NOVO-lev-16
+  const paymentsData = paymentsRes.data;
 
   const settingsMap: Record<string, string> = {};
   for (const row of (settingsRes.data || []) as Array<{ key: string; value: string }>) {
@@ -243,7 +258,13 @@ export async function carregarPDFData(
       get('terms_delivery'),
       get('terms_responsibilities'),
     ].filter(Boolean).join('\n\n') || undefined,
-    photos: (so as any).photos?.map((p: any) => p.url) || [],
+    // NOVO-lev-17: a galeria lia `service_orders.photos`, coluna que NADA escreve —
+    // as fotos reais vivem em `service_order_photos.public_url`. Hoje há 0 fotos
+    // (mudança visual zero); quando existirem, a galeria funciona como desenhada.
+    photos: [...(((so as any).service_order_photos || []) as any[])]
+      .sort((a, b) => String(a.created_at ?? '').localeCompare(String(b.created_at ?? '')))
+      .map((p) => p.public_url)
+      .filter(Boolean),
   };
   return pdfData;
 }
