@@ -16,6 +16,9 @@ import { FinancialFilterPanel, applyFilters, defaultFilters, type FinancialFilte
 import { PaymentDialog } from '@/components/PaymentDialog';
 import { ReceivableFormDialog } from '@/components/ReceivableFormDialog';
 import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/SendViaWhatsAppDialog';
+// MF-AUD-050: a cobrança em lote por WhatsApp (546 linhas, com throttle e retry)
+// vivia só no Financeiro v1 — desde 30/07 só era alcançável com ?legacy=1.
+import { BulkBillingReminderDialog } from '@/components/BulkBillingReminderDialog';
 import { PageShell } from '@/v2/components/PageShell';
 import { KPIStat } from '@/v2/components/KPIStat';
 import { StatusChip, type StatusTone } from '@/v2/components/StatusChip';
@@ -85,6 +88,7 @@ export default function ReceivablesV2() {
   const [paymentTarget, setPaymentTarget] = useState<ReceivableRow | null>(null);
   const [editing, setEditing] = useState<ReceivableRow | null>(null);
   const [showNew, setShowNew] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [whatsAppTarget, setWhatsAppTarget] = useState<SendViaWhatsAppTarget | null>(null);
 
   const filtered = useMemo(() => {
@@ -257,6 +261,9 @@ export default function ReceivablesV2() {
             <Button variant="outline" size="sm" onClick={csvExport} className="hidden gap-1.5 sm:inline-flex">
               <Download className="h-4 w-4" /> Exportar CSV
             </Button>
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setBulkOpen(true)}>
+              <Send className="h-4 w-4" /> Cobrar em lote
+            </Button>
             <Button className="gap-1.5" onClick={() => setShowNew(true)}>
               <Plus className="h-4 w-4" /> Novo recebível
             </Button>
@@ -414,6 +421,7 @@ export default function ReceivablesV2() {
         onOpenChange={(v) => { if (!v) setWhatsAppTarget(null); }}
         target={whatsAppTarget}
       />
+      <BulkBillingReminderDialog open={bulkOpen} onOpenChange={setBulkOpen} initialFilter="overdue" />
     </V2Shell>
   );
 }

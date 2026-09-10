@@ -27,6 +27,7 @@ import { CartoesPanel } from '@/components/CartoesPanel';
 import { FechamentoPanel } from '@/components/FechamentoPanel';
 import { SaudeDoCadastroPanel } from '@/components/SaudeDoCadastroPanel';
 import { AgingReportPanel } from '@/components/AgingReportPanel';
+import { CashForecastPanel } from '@/components/CashForecastPanel';
 import { ReimbursementsPanel } from '@/components/ReimbursementsPanel';
 import { PageShell } from '@/v2/components/PageShell';
 import { KPIStat } from '@/v2/components/KPIStat';
@@ -343,6 +344,10 @@ export default function FinancialV2() {
                 dois mundos, porque prometia troca de conteúdo e entregava troca de página.
                 Agora é item do menu, onde uma tela inteira deve estar. */}
             <TabsTrigger value="payables">{t.financial.tabPayables}</TabsTrigger>
+            {/* MF-AUD-050: a programação de caixa (8 semanas, alerta de semana negativa e
+                duplicata de pagáveis) vivia só no Financeiro v1 — desde os redirects de
+                30/07 ficou alcançável apenas com ?legacy=1. O painel sempre funcionou. */}
+            <TabsTrigger value="forecast">Programação</TabsTrigger>
             {/* A ORDEM AQUI É O FLUXO DO TRABALHO, e ela mudou.
                 Extrato vem primeiro: é a triagem do que o banco trouxe e ainda não virou
                 lançamento. Conciliação vem depois: confere o que JÁ foi lançado contra o
@@ -624,6 +629,7 @@ export default function FinancialV2() {
               — tolerância de diferença, conciliação em grupo, criação de cliente na hora —
               volta em fases seguintes, sobre o modelo certo. O arquivo continua no repo
               até a F3 terminar, para nada se perder no caminho. */}
+          <TabsContent value="forecast" className="mt-4"><CashForecastPanel /></TabsContent>
           <TabsContent value="reconciliation" className="mt-4"><ConciliacaoPanel /></TabsContent>
           <TabsContent value="cartoes" className="mt-4"><CartoesPanel /></TabsContent>
           <TabsContent value="ignoradas" className="mt-4"><IgnoradasPanel /></TabsContent>

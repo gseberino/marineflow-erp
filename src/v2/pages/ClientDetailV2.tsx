@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Mail, MapPin, Pencil, Phone, Ship } from 'lucide-react';
+import { FileText, Mail, MapPin, Pencil, Phone, Ship } from 'lucide-react';
 import { useI18n } from '@/i18n';
 import { useClient } from '@/hooks/use-clients';
 import { useVesselsForClient } from '@/hooks/use-vessels';
@@ -10,6 +10,10 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ClientFormDialog } from '@/components/ClientFormDialog';
+// MF-AUD-050: o extrato do cliente vivia só no ClientDetail v1 — desde os redirects
+// de 30/07 ficou alcançável apenas com ?legacy=1. O componente sempre funcionou;
+// faltava a casa na V2.
+import { ClientStatementDialog } from '@/components/ClientStatementDialog';
 import { RecordHistory } from '@/components/RecordHistory';
 import { EntityTasksPanel } from '@/components/agenda/EntityTasksPanel';
 import { OpenLoopsPanel } from '@/components/agenda/OpenLoopsPanel';
@@ -36,6 +40,7 @@ export default function ClientDetailV2() {
   const { data: client, isLoading } = useClient(id);
   const { data: vessels } = useVesselsForClient(id);
   const [editOpen, setEditOpen] = useState(false);
+  const [statementOpen, setStatementOpen] = useState(false);
 
   const { data: orders } = useQuery({
     queryKey: ['service-orders', 'client', id],
@@ -228,9 +233,12 @@ export default function ClientDetailV2() {
             {clientReceivables && clientReceivables.length > 0 && (
               <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/40 px-4 py-2 text-sm">
                 <span>Total ({clientReceivables.length} lançamentos): <b className="tabular-nums">{formatCurrency(recTotal)}</b></span>
-                <span className="flex gap-4 text-xs">
+                <span className="flex flex-wrap items-center gap-4 text-xs">
                   <span className="text-success">Pago: <b className="tabular-nums">{formatCurrency(recPaid)}</b></span>
                   <span className="text-warning">Em aberto: <b className="tabular-nums">{formatCurrency(recTotal - recPaid)}</b></span>
+                  <Button variant="outline" size="sm" className="h-7 gap-1.5" onClick={() => setStatementOpen(true)}>
+                    <FileText className="h-3.5 w-3.5" /> Enviar extrato
+                  </Button>
                 </span>
               </div>
             )}
@@ -249,6 +257,13 @@ export default function ClientDetailV2() {
       </PageShell>
 
       <ClientFormDialog open={editOpen} onOpenChange={setEditOpen} client={client} />
+      <ClientStatementDialog
+        open={statementOpen}
+        onOpenChange={setStatementOpen}
+        clientName={client.name}
+        clientPhone={(client as any).whatsapp || client.phone}
+        items={(clientReceivables ?? []) as any}
+      />
     </V2Shell>
   );
 }

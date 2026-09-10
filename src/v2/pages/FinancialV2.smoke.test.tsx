@@ -45,6 +45,8 @@ vi.mock('@/components/FinanceRulesPanel', () => ({
 }));
 vi.mock('@/components/DREPanel', () => ({ DREPanel: () => <div>painel dre</div> }));
 vi.mock('@/components/AgingReportPanel', () => ({ AgingReportPanel: () => <div>painel aging</div> }));
+// MF-AUD-050: a Programação de caixa voltou como aba — o painel real tem smoke próprio.
+vi.mock('@/components/CashForecastPanel', () => ({ CashForecastPanel: () => <div>painel programação</div> }));
 // Diálogos ficam montados mesmo fechados e arrastam a cadeia de hooks deles; não são o
 // objeto do teste.
 vi.mock('@/components/PayableFormDialog', () => ({ PayableFormDialog: () => null }));
