@@ -3,6 +3,12 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { cancelServiceOrderCascade, reopenServiceOrder, updateReceivableFromSO } from '@/lib/cascade-updates';
+import type { QueryData } from '@supabase/supabase-js';
+import { useOptionalAuth } from '@/hooks/use-auth';
+import {
+  OS_TABELA, OS_VIEW_TECNICO, leDaViewDoTecnico,
+  COLUNAS_DE_VALOR_DA_OS, COLUNAS_DE_VALOR_DAS_PECAS, COLUNAS_DE_VALOR_DOS_SERVICOS,
+} from '@/lib/service-orders-source';
 
 // Modelo de estoque v2 (flag app_settings.stock_model_v2='on'): o banco gerencia estoque
 // (reserva na OS comprometida, baixa física na conclusão). Quando ligado, o frontend NÃO baixa
@@ -32,14 +38,104 @@ const SO_DETAIL_SELECT = `
   payment_condition_presets(*)
 `;
 
+/**
+ * SELECTs do TÉCNICO (NOVO-006/008/020): lê das views sem valor, com colunas NOMEADAS e sem
+ * nenhum embed que dependa de coluna ausente na view — `payment_condition_presets` fica de
+ * fora de propósito (a view não tem a FK; o PostgREST responderia 400 PGRST200 e derrubaria a
+ * consulta inteira, não só o embed — foi o NOVO-020a). Os itens vêm pelas views irmãs e o
+ * produto sem preço/custo.
+ */
+const SO_SELECT_TECNICO = `
+  id, service_order_number, client_id, vessel_id, marina_id, status, quote_status, priority,
+  service_type, problem_description, scheduled_start_at, scheduled_end_at, check_in_at,
+  check_out_at, created_at, updated_at,
+  clients(name, phone, whatsapp),
+  vessels(name, manufacturer, model),
+  marinas(name, latitude, longitude),
+  service_order_technicians(user_id)
+`;
+
+const SO_DETAIL_SELECT_TECNICO = `
+  id, service_order_number, client_id, vessel_id, marina_id, requested_by_name,
+  requested_by_contact_id, scheduled_start_at, scheduled_end_at, check_in_at, check_out_at,
+  status, quote_status, priority, service_type, problem_description, initial_findings,
+  diagnosis, solution_applied, technician_notes, internal_notes, extra_notes,
+  customer_visible_report, estimated_hours, labor_hours_total, travel_distance_km,
+  technician_count_for_travel, travel_hours, travel_type, is_travel_billable, currency,
+  client_signature_url, signed_at, signed_by_name, signed_document_hash, requires_resignature,
+  resignature_requested_at, photos, survey_id, estimate_confidence, customer_po_number,
+  customer_buyer_name, quote_validity_days, quote_validity_date, converted_to_os_at,
+  cancelled_at, cancellation_reason, reopened_at, reopen_reason, reminder_sent_at,
+  created_by, created_at, updated_at,
+  clients(name, phone, whatsapp, email),
+  vessels(name, manufacturer, model, current_dock_position),
+  marinas(name, latitude, longitude),
+  service_order_parts_tecnico(*, products(id, name, sku, image_url, unit)),
+  service_order_services_tecnico(*, services(name)),
+  service_order_technicians(*, app_users(*)),
+  time_entries(*, app_users(*))
+`;
+
+/**
+ * ═══ O TIPO DIZ A VERDADE (regra 7 do CLAUDE.md) ═══
+ *
+ * A linha da OS que estes hooks devolvem tem as colunas de VALOR como OPCIONAIS: presentes
+ * quando o cargo lê da tabela, ausentes quando o técnico lê da view. Não é um cast que
+ * finge que tudo existe — foi um cast assim (`as typeof OS_TABELA`) que escondeu do
+ * compilador os dois bloqueios do NOVO-020. Com o opcional, cada consumidor que usa
+ * `grand_total`, `share_token` ou o preço de um item é obrigado a tratar a ausência, e o
+ * `tsc` acusa quem esquecer.
+ *
+ * Os tipos são DERIVADOS dos próprios SELECTs da tabela (via QueryData): quando o select
+ * mudar, o tipo muda junto — não há segunda lista para manter.
+ */
+const consultaLista = () => supabase.from(OS_TABELA).select(SO_SELECT);
+const consultaDetalhe = (id: string) => supabase.from(OS_TABELA).select(SO_DETAIL_SELECT).eq('id', id).maybeSingle();
+
+type LinhaListaTabela = QueryData<ReturnType<typeof consultaLista>>[number];
+type DetalheTabela = NonNullable<QueryData<ReturnType<typeof consultaDetalhe>>>;
+
+type ColunaDeValorOS = (typeof COLUNAS_DE_VALOR_DA_OS)[number];
+type ValorNaLista = Extract<ColunaDeValorOS, keyof LinhaListaTabela>;
+type ValorNoDetalhe = Extract<ColunaDeValorOS, keyof DetalheTabela>;
+
+type PecaTabela = DetalheTabela['service_order_parts'][number];
+type ServicoTabela = DetalheTabela['service_order_services'][number];
+type ValorPeca = Extract<(typeof COLUNAS_DE_VALOR_DAS_PECAS)[number], keyof PecaTabela>;
+type ValorServico = Extract<(typeof COLUNAS_DE_VALOR_DOS_SERVICOS)[number], keyof ServicoTabela>;
+
+/** Peça da OS como qualquer cargo a recebe: sem garantia de preço/custo (o técnico não os lê). */
+export type PecaDaOS = Omit<PecaTabela, ValorPeca | 'products'>
+  & Partial<Pick<PecaTabela, ValorPeca>>
+  & { products: Partial<NonNullable<PecaTabela['products']>> | null };
+/** Serviço da OS como qualquer cargo o recebe: sem garantia de preço/total. */
+export type ServicoDaOS = Omit<ServicoTabela, ValorServico> & Partial<Pick<ServicoTabela, ValorServico>>;
+
+/** Linha da lista de OS — colunas de valor opcionais. */
+export type LinhaDaOS = Omit<LinhaListaTabela, ValorNaLista> & Partial<Pick<LinhaListaTabela, ValorNaLista>>;
+/** Detalhe da OS — colunas de valor e condição de pagamento opcionais; itens sem garantia de preço. */
+export type DetalheDaOS =
+  Omit<DetalheTabela, ValorNoDetalhe | 'payment_condition_presets' | 'service_order_parts' | 'service_order_services'>
+  & Partial<Pick<DetalheTabela, ValorNoDetalhe | 'payment_condition_presets'>>
+  & { service_order_parts: PecaDaOS[]; service_order_services: ServicoDaOS[] };
+
 export function useServiceOrders() {
+  const cargo = useOptionalAuth()?.user?.role;
+  const pelaView = leDaViewDoTecnico(cargo);
   return useQuery({
-    queryKey: ['service-orders'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('service_orders')
-        .select(SO_SELECT)
-        .order('created_at', { ascending: false });
+    // O cargo entra na chave: trocar de usuário no mesmo navegador não pode servir ao
+    // técnico o cache com valores que o admin acabou de carregar.
+    queryKey: ['service-orders', { fonte: pelaView ? OS_VIEW_TECNICO : OS_TABELA }],
+    queryFn: async (): Promise<LinhaDaOS[]> => {
+      if (pelaView) {
+        const { data, error } = await supabase
+          .from(OS_VIEW_TECNICO).select(SO_SELECT_TECNICO).order('created_at', { ascending: false });
+        if (error) throw error;
+        // A view tem as mesmas colunas operacionais e os mesmos embeds; só não tem as de
+        // valor — que em LinhaDaOS são opcionais. A ponte de tipo é essa, e só essa.
+        return (data ?? []) as unknown as LinhaDaOS[];
+      }
+      const { data, error } = await consultaLista().order('created_at', { ascending: false });
       if (error) throw error;
       return data;
     },
@@ -48,15 +144,28 @@ export function useServiceOrders() {
 }
 
 export function useServiceOrder(id: string | undefined) {
+  const cargo = useOptionalAuth()?.user?.role;
+  const pelaView = leDaViewDoTecnico(cargo);
   return useQuery({
-    queryKey: ['service-orders', id],
-    queryFn: async () => {
+    queryKey: ['service-orders', id, { fonte: pelaView ? OS_VIEW_TECNICO : OS_TABELA }],
+    queryFn: async (): Promise<DetalheDaOS | null> => {
       if (!id) return null;
-      const { data, error } = await supabase
-        .from('service_orders')
-        .select(SO_DETAIL_SELECT)
-        .eq('id', id)
-        .maybeSingle();
+      if (pelaView) {
+        const { data, error } = await supabase
+          .from(OS_VIEW_TECNICO).select(SO_DETAIL_SELECT_TECNICO).eq('id', id).maybeSingle();
+        if (error) throw error;
+        if (!data) return null;
+        // A tela usa `service_order_parts`/`service_order_services`; para o técnico elas vêm
+        // pelas views irmãs, sob outro nome. Reexpor pelo nome esperado mantém a tela única —
+        // sem preço, a linha continua existindo (quantidade, nome, garantia, tempo).
+        const d = data as unknown as Record<string, unknown>;
+        return {
+          ...d,
+          service_order_parts: d.service_order_parts_tecnico ?? [],
+          service_order_services: d.service_order_services_tecnico ?? [],
+        } as unknown as DetalheDaOS;
+      }
+      const { data, error } = await consultaDetalhe(id);
       if (error) throw error;
       return data;
     },

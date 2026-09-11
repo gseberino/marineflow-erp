@@ -1,6 +1,12 @@
 # Retrabalho — view da OS sem valores para o técnico (NOVO-006a / NOVO-020)
 
-**Estado:** rejeitado na revisão de integração de 11/08/2026 e **removido do branch** antes do merge.
+**Estado (10/09/2026): RETRABALHO ENTREGUE.** Migration `20260910120000_views_tecnico_sem_valores.sql`
+(3 views: OS + peças + serviços, sem `invoicing_status`/`payment_status`) aplicada e verificada; SELECT
+próprio do técnico sem `payment_condition_presets`; `payloadParaCargo` no Salvar/autosave/criação; cast
+removido com tipos regenerados; embeds (inclusive view→view) provados via REST com a chave anon
+(42501 = resolvido). O que segue abaixo é o histórico da rejeição de 11/08 e a spec que foi cumprida.
+
+~~**Estado:** rejeitado na revisão de integração de 11/08/2026 e **removido do branch** antes do merge.~~
 Nada foi para a `main`, nada foi aplicado no banco. O material está preservado aqui porque **o SQL é bom** —
 o que quebrou foi o caminho de leitura e escrita no frontend.
 

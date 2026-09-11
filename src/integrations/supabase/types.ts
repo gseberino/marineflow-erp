@@ -1,4 +1,4 @@
-﻿export type Json =
+export type Json =
   | string
   | number
   | boolean
@@ -11,31 +11,6 @@ export type Database = {
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
     PostgrestVersion: "14.5"
-  }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
   }
   public: {
     Tables: {
@@ -1141,6 +1116,13 @@ export type Database = {
             foreignKeyName: "ai_operator_drafts_converted_service_order_id_fkey"
             columns: ["converted_service_order_id"]
             isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_operator_drafts_converted_service_order_id_fkey"
+            columns: ["converted_service_order_id"]
+            isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
             referencedColumns: ["id"]
           },
@@ -1170,6 +1152,13 @@ export type Database = {
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_operator_drafts_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
             referencedColumns: ["id"]
           },
           {
@@ -1576,6 +1565,13 @@ export type Database = {
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_operator_sessions_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
             referencedColumns: ["id"]
           },
           {
@@ -2215,6 +2211,13 @@ export type Database = {
             foreignKeyName: "bank_charges_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bank_charges_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
             referencedColumns: ["id"]
           },
@@ -2445,6 +2448,13 @@ export type Database = {
             columns: ["reconciled_service_order_id"]
             isOneToOne: false
             referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bank_transactions_reconciled_service_order_id_fkey"
+            columns: ["reconciled_service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
             referencedColumns: ["id"]
           },
           {
@@ -2806,6 +2816,13 @@ export type Database = {
             foreignKeyName: "collections_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "collections_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
             referencedColumns: ["id"]
           },
@@ -2888,6 +2905,13 @@ export type Database = {
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "commissions_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
             referencedColumns: ["id"]
           },
           {
@@ -3106,6 +3130,7 @@ export type Database = {
         Row: {
           created_at: string
           detail: string | null
+          direction: string
           due_at: string | null
           entity_id: string
           entity_type: string
@@ -3133,6 +3158,7 @@ export type Database = {
         Insert: {
           created_at?: string
           detail?: string | null
+          direction?: string
           due_at?: string | null
           entity_id: string
           entity_type: string
@@ -3160,6 +3186,7 @@ export type Database = {
         Update: {
           created_at?: string
           detail?: string | null
+          direction?: string
           due_at?: string | null
           entity_id?: string
           entity_type?: string
@@ -3190,6 +3217,13 @@ export type Database = {
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "entity_open_loops_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
             referencedColumns: ["id"]
           },
           {
@@ -3631,6 +3665,13 @@ export type Database = {
             foreignKeyName: "external_quotes_converted_service_order_id_fkey"
             columns: ["converted_service_order_id"]
             isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "external_quotes_converted_service_order_id_fkey"
+            columns: ["converted_service_order_id"]
+            isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
             referencedColumns: ["id"]
           },
@@ -3860,6 +3901,13 @@ export type Database = {
             columns: ["suggested_service_order_id"]
             isOneToOne: false
             referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_review_queue_suggested_service_order_id_fkey"
+            columns: ["suggested_service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
             referencedColumns: ["id"]
           },
           {
@@ -4199,6 +4247,13 @@ export type Database = {
             foreignKeyName: "fiscal_note_items_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fiscal_note_items_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
             referencedColumns: ["id"]
           },
@@ -4521,6 +4576,13 @@ export type Database = {
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoices_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
             referencedColumns: ["id"]
           },
           {
@@ -4902,6 +4964,13 @@ export type Database = {
             columns: ["linked_service_order_id"]
             isOneToOne: false
             referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payables_linked_service_order_id_fkey"
+            columns: ["linked_service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
             referencedColumns: ["id"]
           },
           {
@@ -6066,6 +6135,13 @@ export type Database = {
             foreignKeyName: "purchase_orders_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_orders_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
             referencedColumns: ["id"]
           },
@@ -6208,10 +6284,24 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "quote_request_items_service_order_part_id_fkey"
+            columns: ["service_order_part_id"]
+            isOneToOne: false
+            referencedRelation: "service_order_parts_tecnico"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "quote_request_items_service_order_service_id_fkey"
             columns: ["service_order_service_id"]
             isOneToOne: false
             referencedRelation: "service_order_services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_request_items_service_order_service_id_fkey"
+            columns: ["service_order_service_id"]
+            isOneToOne: false
+            referencedRelation: "service_order_services_tecnico"
             referencedColumns: ["id"]
           },
         ]
@@ -6314,6 +6404,13 @@ export type Database = {
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_requests_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
             referencedColumns: ["id"]
           },
           {
@@ -6547,6 +6644,13 @@ export type Database = {
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "receivables_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
             referencedColumns: ["id"]
           },
           {
@@ -6924,6 +7028,13 @@ export type Database = {
             foreignKeyName: "service_cases_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_cases_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
             referencedColumns: ["id"]
           },
@@ -7104,6 +7215,13 @@ export type Database = {
             foreignKeyName: "service_order_expenses_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_expenses_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
             referencedColumns: ["id"]
           },
@@ -7244,6 +7362,13 @@ export type Database = {
             foreignKeyName: "service_order_parts_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_parts_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
             referencedColumns: ["id"]
           },
@@ -7266,6 +7391,13 @@ export type Database = {
             columns: ["service_order_service_id"]
             isOneToOne: false
             referencedRelation: "service_order_services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_parts_service_order_service_id_fkey"
+            columns: ["service_order_service_id"]
+            isOneToOne: false
+            referencedRelation: "service_order_services_tecnico"
             referencedColumns: ["id"]
           },
         ]
@@ -7313,6 +7445,13 @@ export type Database = {
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_photos_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
             referencedColumns: ["id"]
           },
           {
@@ -7457,6 +7596,13 @@ export type Database = {
             foreignKeyName: "service_order_services_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_services_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
             referencedColumns: ["id"]
           },
@@ -7566,6 +7712,13 @@ export type Database = {
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_signatures_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
             referencedColumns: ["id"]
           },
           {
@@ -7733,6 +7886,13 @@ export type Database = {
             foreignKeyName: "service_order_steps_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_steps_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
             referencedColumns: ["id"]
           },
@@ -7755,6 +7915,13 @@ export type Database = {
             columns: ["service_order_service_id"]
             isOneToOne: false
             referencedRelation: "service_order_services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_steps_service_order_service_id_fkey"
+            columns: ["service_order_service_id"]
+            isOneToOne: false
+            referencedRelation: "service_order_services_tecnico"
             referencedColumns: ["id"]
           },
           {
@@ -7797,6 +7964,13 @@ export type Database = {
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_technicians_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
             referencedColumns: ["id"]
           },
           {
@@ -8680,6 +8854,13 @@ export type Database = {
             foreignKeyName: "service_surveys_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_surveys_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
             referencedColumns: ["id"]
           },
@@ -9277,6 +9458,13 @@ export type Database = {
             foreignKeyName: "time_entries_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "time_entries_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
             referencedColumns: ["id"]
           },
@@ -9670,6 +9858,13 @@ export type Database = {
             foreignKeyName: "whatsapp_messages_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_messages_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
             referencedColumns: ["id"]
           },
@@ -9871,6 +10066,13 @@ export type Database = {
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_scheduled_sends_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
             referencedColumns: ["id"]
           },
           {
@@ -10210,6 +10412,13 @@ export type Database = {
             foreignKeyName: "work_shifts_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_shifts_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
             referencedColumns: ["id"]
           },
@@ -10428,6 +10637,13 @@ export type Database = {
             foreignKeyName: "bank_transactions_reconciled_service_order_id_fkey"
             columns: ["reconciled_service_order_id"]
             isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bank_transactions_reconciled_service_order_id_fkey"
+            columns: ["reconciled_service_order_id"]
+            isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
             referencedColumns: ["id"]
           },
@@ -10599,6 +10815,497 @@ export type Database = {
         }
         Relationships: []
       }
+      service_order_parts_tecnico: {
+        Row: {
+          created_at: string | null
+          id: string | null
+          notes: string | null
+          product_id: string | null
+          quantity: number | null
+          serial_number: string | null
+          service_order_id: string | null
+          service_order_service_id: string | null
+          source: string | null
+          updated_at: string | null
+          warranty_days: number | null
+          warranty_expires_at: string | null
+          warranty_months: number | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string | null
+          notes?: string | null
+          product_id?: string | null
+          quantity?: number | null
+          serial_number?: string | null
+          service_order_id?: string | null
+          service_order_service_id?: string | null
+          source?: string | null
+          updated_at?: string | null
+          warranty_days?: number | null
+          warranty_expires_at?: string | null
+          warranty_months?: number | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string | null
+          notes?: string | null
+          product_id?: string | null
+          quantity?: number | null
+          serial_number?: string | null
+          service_order_id?: string | null
+          service_order_service_id?: string | null
+          source?: string | null
+          updated_at?: string | null
+          warranty_days?: number | null
+          warranty_expires_at?: string | null
+          warranty_months?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_order_parts_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "product_availability"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_parts_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_parts_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_entradas_pendentes"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "service_order_parts_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "v_estoque_variancia"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "service_order_parts_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_parts_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_parts_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_parts_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_margin"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_parts_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "vw_os_profitability"
+            referencedColumns: ["os_id"]
+          },
+          {
+            foreignKeyName: "service_order_parts_service_order_service_id_fkey"
+            columns: ["service_order_service_id"]
+            isOneToOne: false
+            referencedRelation: "service_order_services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_parts_service_order_service_id_fkey"
+            columns: ["service_order_service_id"]
+            isOneToOne: false
+            referencedRelation: "service_order_services_tecnico"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      service_order_services_tecnico: {
+        Row: {
+          billing_unit_snapshot: string | null
+          created_at: string | null
+          description_snapshot: string | null
+          elapsed_minutes: number | null
+          finished_at: string | null
+          fiscal_verb: string | null
+          id: string | null
+          name_snapshot: string | null
+          notes: string | null
+          quantity: number | null
+          service_id: string | null
+          service_order_id: string | null
+          service_system: string | null
+          service_verb: string | null
+          started_at: string | null
+          technician_user_id: string | null
+          updated_at: string | null
+          warranty_days: number | null
+          warranty_expires_at: string | null
+          warranty_months: number | null
+        }
+        Insert: {
+          billing_unit_snapshot?: string | null
+          created_at?: string | null
+          description_snapshot?: string | null
+          elapsed_minutes?: number | null
+          finished_at?: string | null
+          fiscal_verb?: string | null
+          id?: string | null
+          name_snapshot?: string | null
+          notes?: string | null
+          quantity?: number | null
+          service_id?: string | null
+          service_order_id?: string | null
+          service_system?: string | null
+          service_verb?: string | null
+          started_at?: string | null
+          technician_user_id?: string | null
+          updated_at?: string | null
+          warranty_days?: number | null
+          warranty_expires_at?: string | null
+          warranty_months?: number | null
+        }
+        Update: {
+          billing_unit_snapshot?: string | null
+          created_at?: string | null
+          description_snapshot?: string | null
+          elapsed_minutes?: number | null
+          finished_at?: string | null
+          fiscal_verb?: string | null
+          id?: string | null
+          name_snapshot?: string | null
+          notes?: string | null
+          quantity?: number | null
+          service_id?: string | null
+          service_order_id?: string | null
+          service_system?: string | null
+          service_verb?: string | null
+          started_at?: string | null
+          technician_user_id?: string | null
+          updated_at?: string | null
+          warranty_days?: number | null
+          warranty_expires_at?: string | null
+          warranty_months?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_order_services_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_services_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "v_services_fiscal_efetivo"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_services_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_services_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_services_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_services_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_margin"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_order_services_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "vw_os_profitability"
+            referencedColumns: ["os_id"]
+          },
+          {
+            foreignKeyName: "service_order_services_service_system_fkey"
+            columns: ["service_system"]
+            isOneToOne: false
+            referencedRelation: "service_systems"
+            referencedColumns: ["slug"]
+          },
+          {
+            foreignKeyName: "service_order_services_service_system_fkey"
+            columns: ["service_system"]
+            isOneToOne: false
+            referencedRelation: "v_service_systems_status"
+            referencedColumns: ["slug"]
+          },
+          {
+            foreignKeyName: "service_order_services_service_verb_fkey"
+            columns: ["service_verb"]
+            isOneToOne: false
+            referencedRelation: "service_verbs"
+            referencedColumns: ["slug"]
+          },
+          {
+            foreignKeyName: "service_order_services_service_verb_fkey"
+            columns: ["service_verb"]
+            isOneToOne: false
+            referencedRelation: "v_service_verbs_status"
+            referencedColumns: ["slug"]
+          },
+          {
+            foreignKeyName: "sos_fiscal_verb_fk"
+            columns: ["fiscal_verb"]
+            isOneToOne: false
+            referencedRelation: "service_fiscal_verbs"
+            referencedColumns: ["verb_slug"]
+          },
+        ]
+      }
+      service_orders_tecnico: {
+        Row: {
+          cancellation_reason: string | null
+          cancelled_at: string | null
+          check_in_at: string | null
+          check_out_at: string | null
+          client_id: string | null
+          client_signature_url: string | null
+          converted_to_os_at: string | null
+          created_at: string | null
+          created_by: string | null
+          currency: string | null
+          customer_buyer_name: string | null
+          customer_po_number: string | null
+          customer_visible_report: string | null
+          diagnosis: string | null
+          estimate_confidence: string | null
+          estimated_hours: number | null
+          extra_notes: string | null
+          id: string | null
+          initial_findings: string | null
+          internal_notes: string | null
+          is_travel_billable: boolean | null
+          labor_hours_total: number | null
+          marina_id: string | null
+          photos: Json | null
+          priority: string | null
+          problem_description: string | null
+          quote_status: string | null
+          quote_validity_date: string | null
+          quote_validity_days: number | null
+          reminder_sent_at: string | null
+          reopen_reason: string | null
+          reopened_at: string | null
+          requested_by_contact_id: string | null
+          requested_by_name: string | null
+          requires_resignature: boolean | null
+          resignature_requested_at: string | null
+          scheduled_end_at: string | null
+          scheduled_start_at: string | null
+          service_order_number: string | null
+          service_type: string | null
+          signed_at: string | null
+          signed_by_name: string | null
+          signed_document_hash: string | null
+          solution_applied: string | null
+          status: string | null
+          survey_id: string | null
+          technician_count_for_travel: number | null
+          technician_notes: string | null
+          travel_distance_km: number | null
+          travel_hours: number | null
+          travel_type: string | null
+          updated_at: string | null
+          vessel_id: string | null
+        }
+        Insert: {
+          cancellation_reason?: string | null
+          cancelled_at?: string | null
+          check_in_at?: string | null
+          check_out_at?: string | null
+          client_id?: string | null
+          client_signature_url?: string | null
+          converted_to_os_at?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          currency?: string | null
+          customer_buyer_name?: string | null
+          customer_po_number?: string | null
+          customer_visible_report?: string | null
+          diagnosis?: string | null
+          estimate_confidence?: string | null
+          estimated_hours?: number | null
+          extra_notes?: string | null
+          id?: string | null
+          initial_findings?: string | null
+          internal_notes?: string | null
+          is_travel_billable?: boolean | null
+          labor_hours_total?: number | null
+          marina_id?: string | null
+          photos?: Json | null
+          priority?: string | null
+          problem_description?: string | null
+          quote_status?: string | null
+          quote_validity_date?: string | null
+          quote_validity_days?: number | null
+          reminder_sent_at?: string | null
+          reopen_reason?: string | null
+          reopened_at?: string | null
+          requested_by_contact_id?: string | null
+          requested_by_name?: string | null
+          requires_resignature?: boolean | null
+          resignature_requested_at?: string | null
+          scheduled_end_at?: string | null
+          scheduled_start_at?: string | null
+          service_order_number?: string | null
+          service_type?: string | null
+          signed_at?: string | null
+          signed_by_name?: string | null
+          signed_document_hash?: string | null
+          solution_applied?: string | null
+          status?: string | null
+          survey_id?: string | null
+          technician_count_for_travel?: number | null
+          technician_notes?: string | null
+          travel_distance_km?: number | null
+          travel_hours?: number | null
+          travel_type?: string | null
+          updated_at?: string | null
+          vessel_id?: string | null
+        }
+        Update: {
+          cancellation_reason?: string | null
+          cancelled_at?: string | null
+          check_in_at?: string | null
+          check_out_at?: string | null
+          client_id?: string | null
+          client_signature_url?: string | null
+          converted_to_os_at?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          currency?: string | null
+          customer_buyer_name?: string | null
+          customer_po_number?: string | null
+          customer_visible_report?: string | null
+          diagnosis?: string | null
+          estimate_confidence?: string | null
+          estimated_hours?: number | null
+          extra_notes?: string | null
+          id?: string | null
+          initial_findings?: string | null
+          internal_notes?: string | null
+          is_travel_billable?: boolean | null
+          labor_hours_total?: number | null
+          marina_id?: string | null
+          photos?: Json | null
+          priority?: string | null
+          problem_description?: string | null
+          quote_status?: string | null
+          quote_validity_date?: string | null
+          quote_validity_days?: number | null
+          reminder_sent_at?: string | null
+          reopen_reason?: string | null
+          reopened_at?: string | null
+          requested_by_contact_id?: string | null
+          requested_by_name?: string | null
+          requires_resignature?: boolean | null
+          resignature_requested_at?: string | null
+          scheduled_end_at?: string | null
+          scheduled_start_at?: string | null
+          service_order_number?: string | null
+          service_type?: string | null
+          signed_at?: string | null
+          signed_by_name?: string | null
+          signed_document_hash?: string | null
+          solution_applied?: string | null
+          status?: string | null
+          survey_id?: string | null
+          technician_count_for_travel?: number | null
+          technician_notes?: string | null
+          travel_distance_km?: number | null
+          travel_hours?: number | null
+          travel_type?: string | null
+          updated_at?: string | null
+          vessel_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_orders_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_orders_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_orders_marina_id_fkey"
+            columns: ["marina_id"]
+            isOneToOne: false
+            referencedRelation: "marinas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_orders_requested_by_contact_id_fkey"
+            columns: ["requested_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "vessel_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_orders_survey_id_fkey"
+            columns: ["survey_id"]
+            isOneToOne: false
+            referencedRelation: "service_surveys"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_orders_vessel_id_fkey"
+            columns: ["vessel_id"]
+            isOneToOne: false
+            referencedRelation: "vessels"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       unidentified_contacts: {
         Row: {
           mensagens: number | null
@@ -10657,6 +11364,13 @@ export type Database = {
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_shifts_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
             referencedColumns: ["id"]
           },
           {
@@ -11165,6 +11879,29 @@ export type Database = {
           title: string
         }[]
       }
+      get_open_loops: {
+        Args: { p_direction?: string; p_limit?: number }
+        Returns: {
+          atrasado: boolean
+          detail: string
+          direction: string
+          due_at: string
+          entity_id: string
+          entity_name: string
+          entity_type: string
+          evidence: string
+          id: string
+          kind: string
+          last_seen_at: string
+          mentions: number
+          opened_at: string
+          priority: string
+          service_order_id: string
+          service_order_number: string
+          source: string
+          title: string
+        }[]
+      }
       get_os_purchase_needs: { Args: { p_so_id: string }; Returns: Json }
       get_promo_candidates: {
         Args: { p_limit?: number }
@@ -11290,26 +12027,48 @@ export type Database = {
         Returns: undefined
       }
       reconcile_stock_to_v2: { Args: never; Returns: undefined }
-      record_conversation_loop: {
-        Args: {
-          p_detail?: string
-          p_due_at?: string
-          p_entity_id: string
-          p_entity_type: string
-          p_evidence?: string
-          p_evidence_at?: string
-          p_kind: string
-          p_loop_key: string
-          p_priority?: string
-          p_service_order_id?: string
-          p_source_message_id?: string
-          p_title: string
-        }
-        Returns: {
-          criado: boolean
-          loop_id: string
-        }[]
-      }
+      record_conversation_loop:
+        | {
+            Args: {
+              p_detail?: string
+              p_due_at?: string
+              p_entity_id: string
+              p_entity_type: string
+              p_evidence?: string
+              p_evidence_at?: string
+              p_kind: string
+              p_loop_key: string
+              p_priority?: string
+              p_service_order_id?: string
+              p_source_message_id?: string
+              p_title: string
+            }
+            Returns: {
+              criado: boolean
+              loop_id: string
+            }[]
+          }
+        | {
+            Args: {
+              p_detail?: string
+              p_direction?: string
+              p_due_at?: string
+              p_entity_id: string
+              p_entity_type: string
+              p_evidence?: string
+              p_evidence_at?: string
+              p_kind: string
+              p_loop_key: string
+              p_priority?: string
+              p_service_order_id?: string
+              p_source_message_id?: string
+              p_title: string
+            }
+            Returns: {
+              criado: boolean
+              loop_id: string
+            }[]
+          }
       refresh_entity_open_loops: {
         Args: never
         Returns: {
@@ -11551,12 +12310,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -11580,11 +12339,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -11605,11 +12364,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -11630,11 +12389,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -11647,11 +12406,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -11661,9 +12420,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {},
   },

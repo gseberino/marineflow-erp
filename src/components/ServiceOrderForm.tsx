@@ -50,6 +50,8 @@ import { useSuppliers } from '@/hooks/use-suppliers';
 import { useServiceOrderExpenses, useAddServiceOrderExpense, useUpdateServiceOrderExpense, useRemoveServiceOrderExpense } from '@/hooks/use-service-order-expenses';
 import { useUpdateServiceOrderService } from '@/hooks/use-service-order-services';
 import { useUpdateServiceOrderPart } from '@/hooks/use-service-order-parts';
+// NOVO-020b: o técnico lê da view sem valores; o que ele não leu não pode voltar no Salvar.
+import { payloadParaCargo } from '@/lib/service-orders-source';
 import { PriceCalculatorDialog } from '@/components/PriceCalculatorDialog';
 import { supabase } from '@/integrations/supabase/client';
 import { usePDFData } from '@/hooks/use-pdf';
@@ -832,7 +834,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       };
 
       if (isNew) {
-        const result = await createSO.mutateAsync(payload);
+        const result = await createSO.mutateAsync(payloadParaCargo(authUser?.role, payload));
         const { supabase } = await import('@/integrations/supabase/client');
         const validTechs = selectedTechnicians.filter(uid => uid && uid.trim() !== '');
         if (validTechs.length > 0) {
@@ -891,7 +893,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         toast.success('Ordem de serviço criada com sucesso');
         navigate(`/service-orders/${result.id}`);
       } else {
-        await updateSO.mutateAsync({ id: orderId!, ...payload });
+        await updateSO.mutateAsync({ id: orderId!, ...payloadParaCargo(authUser?.role, payload) });
         const { supabase } = await import('@/integrations/supabase/client');
         const { data: existingTechs } = await supabase
           .from('service_order_technicians')
@@ -1716,7 +1718,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
 
     setSalvandoAuto(true);
     try {
-      await updateSO.mutateAsync({ id: orderId!, ...payload });
+      await updateSO.mutateAsync({ id: orderId!, ...payloadParaCargo(authUser?.role, payload) });
       ultimoSalvoRef.current = assinatura;
       setSalvoEm(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
     } catch (e: any) {

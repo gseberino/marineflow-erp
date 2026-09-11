@@ -422,7 +422,8 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
     },
     {
       key: 'total', header: 'Total', minWidth: 118, priority: 2, align: 'right', sortable: true, detailLabel: 'Total',
-      render: (so) => <span className="font-semibold">{formatCurrency(so.grand_total || 0)}</span>,
+      // Técnico lê da view sem valores: sem grand_total, mostra travessão — não "R$ 0,00".
+      render: (so) => <span className="font-semibold">{so.grand_total == null ? '—' : formatCurrency(so.grand_total)}</span>,
     },
     isOrders
       ? {
@@ -720,7 +721,7 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
                   title={so.clients?.name || '—'}
                   lines={[
                     [so.vessels?.name, so.service_type ? (t.serviceType as Record<string, string>)[so.service_type] : null].filter(Boolean).join(' · ') || '—',
-                    `${isOrders && so.scheduled_start_at ? formatDate(so.scheduled_start_at) + ' · ' : ''}${formatCurrency(so.grand_total || 0)}`,
+                    `${isOrders && so.scheduled_start_at ? formatDate(so.scheduled_start_at) + ' · ' : ''}${so.grand_total == null ? '—' : formatCurrency(so.grand_total)}`,
                   ]}
                   onClick={() => navigate(`/v2/service-orders/${so.id}`)}
                   actions={

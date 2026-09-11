@@ -135,7 +135,13 @@ Não foram corrigidos.
 ## [NOVO-006] Valores da OS continuam visíveis ao técnico — column-level grant não serve aqui
 
 - **Encontrado em:** 10/08/2026, na T1.7 (decisão #3, item 2: "avaliar column-level grants")
-- **Categoria:** F — **Severidade sugerida:** P2 · **Status:** avaliado, **não aplicado**, por decisão técnica
+- **Categoria:** F — **Severidade sugerida:** P2 · **Status:** ~~avaliado, não aplicado~~
+  **RESOLVIDO em 10/09/2026** pelo caminho que este achado apontou: view
+  `service_orders_tecnico` (migration `20260910120000_views_tecnico_sem_valores`,
+  aplicada e verificada — security_invoker=on, anon sem leitura) + roteamento por
+  cargo no frontend (`fonteDeLeituraDaOS`, `VIEW_TECNICO_DISPONIVEL=true`). Embeds
+  provados via REST (42501, não PGRST200). Ver NOVO-008 e NOVO-020 para as outras
+  duas metades.
 - **Descrição:** A decisão #3 pediu para avaliar `REVOKE SELECT (coluna)` nos campos de valor de
   `service_orders` (`grand_total`, `labor_cost_total`, `parts_cost_total`, `travel_cost_total`,
   `operational_cost_total`, `card_fee_amount`, `discount_amount`, `tax_amount`…), com a instrução de manter a
@@ -218,7 +224,12 @@ Não foram corrigidos.
 ## [NOVO-008] Os itens da OS continuam com preço unitário no mesmo embed que a tela do técnico usa
 
 - **Encontrado em:** 11/08/2026, escrevendo a view do NOVO-006a
-- **Categoria:** F — **Severidade sugerida:** P2 · **Status:** registrado, **não corrigido**
+- **Categoria:** F — **Severidade sugerida:** P2 · **Status:** ~~registrado, não corrigido~~
+  **RESOLVIDO em 10/09/2026**: views irmãs `service_order_parts_tecnico` (sem
+  unit_cost/unit_sale/line_total/desconto) e `service_order_services_tecnico` (sem
+  unit_price/line_total/desconto); o SELECT do técnico embeda as views e pede
+  `products(id, name, sku, image_url, unit)` — sem preço nem custo do produto.
+  Relacionamento view→view provado via REST.
 - **Descrição:** a view `service_orders_tecnico` tira as colunas de valor **da OS**, mas o detalhe da OS é
   lido com embed dos itens — `service_order_parts(*, products(*))` e `service_order_services(*, services(name))`
   (`src/hooks/use-service-orders.ts:25-35`). As duas tabelas de item têm `unit_price`/`total_price`, e
@@ -393,7 +404,15 @@ antes do sinal, quando o valor começar com um desses quatro.
 ## [NOVO-020] A view do técnico não pode ser ativada como está — dois bloqueios, um deles apaga dado
 
 - **Encontrado em:** 11/08/2026, na revisão pré-merge do `NOVO-006a` (revisores independentes)
-- **Categoria:** A — **Severidade sugerida:** **P1 se ativada** · **Status:** registrado, **não corrigido**
+- **Categoria:** A — **Severidade sugerida:** **P1 se ativada** · **Status:** ~~registrado, não corrigido~~
+  **RESOLVIDO em 10/09/2026, os dois bloqueios:** (a) SELECT PRÓPRIO do técnico com
+  colunas nomeadas e SEM `payment_condition_presets` (`SO_SELECT_TECNICO`/
+  `SO_DETAIL_SELECT_TECNICO` em use-service-orders.ts) — provado via REST que os
+  embeds resolvem (42501, não PGRST200); (b) `payloadParaCargo` retira as colunas de
+  valor do Salvar/autosave/criação quando o cargo é técnico (função pura, testada
+  com as 12 colunas que este achado viu sendo zeradas). O cast `as typeof OS_TABELA`
+  não existe mais: os tipos foram regenerados com as views. `invoicing_status`/
+  `payment_status` saíram da view (decisão (b)); o bloqueio de edição usa `status`.
 - **Arquivo:linha:** `src/hooks/use-service-orders.ts:34`, `src/components/ServiceOrderForm.tsx:610-660,774,805`
 
 Com `VIEW_TECNICO_DISPONIVEL = false` e a migration não aplicada, **nada disso acontece hoje**. Os dois
