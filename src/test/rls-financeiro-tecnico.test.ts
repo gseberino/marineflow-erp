@@ -2,7 +2,11 @@
 //
 // A decisão #3 do dono (09/08/2026) é: o cargo técnico não enxerga NADA financeiro. A
 // migration `20260810113036_tecnico_nao_ve_financeiro` cumpriu isso apertando o predicado das
-// cinco tabelas do dinheiro.
+// cinco tabelas do dinheiro com `NOT is_technician(...)`. Em 09/09/2026 a
+// `20260909140000_financeiro_rls_admin_ou_financeiro` trocou a barreira negativa pela positiva
+// `is_admin_or_financial(auth.uid())` — só admin/financeiro ATIVOS passam; técnico, vendedor
+// externo e papel desconhecido ficam de fora sem precisar ser nomeados. As duas formas valem
+// aqui; o que não vale é política sem nenhuma das duas.
 //
 // ═══ POR QUE UMA GUARDA ESTÁTICA, E NÃO SÓ O TESTE DE VERDADE ═══
 //
@@ -89,34 +93,67 @@ describe("MF-AUD-020 — o técnico não enxerga o financeiro", () => {
     expect(corpo.slice(0, 400)).toMatch(/set\s+search_path\s*=\s*public/i);
   });
 
+  it("a função is_admin_or_financial existe, é SECURITY DEFINER e está fechada para anon", () => {
+    // É o predicado positivo das políticas de 09/09. Se ela sumir ou abrir para anon, a
+    // barreira continua "escrita" e deixa de valer — o mesmo raciocínio da is_technician.
+    const todas = migrationsEmOrdem().map((m) => m.sql).join("\n");
+
+    expect(todas).toMatch(/create\s+or\s+replace\s+function\s+public\.is_admin_or_financial\(/i);
+    expect(todas).toMatch(/revoke\s+execute\s+on\s+function\s+public\.is_admin_or_financial\(uuid\)\s+from\s+public,\s*anon/i);
+
+    const corpo = todas.slice(todas.search(/create\s+or\s+replace\s+function\s+public\.is_admin_or_financial\(/i));
+    expect(corpo.slice(0, 400)).toMatch(/security\s+definer/i);
+    expect(corpo.slice(0, 400)).toMatch(/set\s+search_path\s*(?:=|to)\s*'?public'?/i);
+  });
+
   for (const tabela of TABELAS_FINANCEIRAS) {
     it(`a política vigente de ${tabela} carrega a barreira do técnico`, () => {
       const definicao = ultimaDefinicaoDePolitica(tabela);
       expect(definicao, `nenhuma política encontrada para ${tabela}`).not.toBeNull();
 
       const trecho = definicao!.trecho.toLowerCase();
+      const negativa = /not\s+(?:public\.)?is_technician\s*\(/.test(trecho);
+      const positiva = /(?:public\.)?is_admin_or_financial\s*\(\s*auth\.uid\(\)\s*\)/.test(trecho);
       expect(
-        trecho,
+        negativa || positiva,
         `A última migration a mexer nas políticas de "${tabela}" foi `
-        + `"${definicao!.arquivo}", e o predicado resultante não menciona is_technician. `
+        + `"${definicao!.arquivo}", e o predicado resultante não carrega a barreira do técnico. `
         + `Se a intenção era reescrever a política, ela precisa manter `
-        + `"NOT public.is_technician(auth.uid())" — decisão #3 do dono, 09/08/2026.`,
-      ).toContain("is_technician");
+        + `"is_admin_or_financial(auth.uid())" (ou "NOT public.is_technician(auth.uid())") `
+        + `— decisão #3 do dono, 09/08/2026.`,
+      ).toBe(true);
 
-      // Negado, não permitido: `NOT is_technician`. Uma política que dissesse
-      // `USING (is_technician(...))` mencionaria a função e faria exatamente o oposto.
-      expect(trecho).toMatch(/not\s+public\.is_technician\s*\(/);
+      // Uma política que dissesse `USING (is_technician(...))` mencionaria a função e faria
+      // exatamente o oposto.
+      expect(trecho).not.toMatch(/using\s*\(\s*(?:public\.)?is_technician\s*\(/);
+
+      // Sem `TO authenticated` a política vale para anon também: com a barreira negativa,
+      // `NOT is_technician(null)` é verdadeiro e o anônimo passa (lição de 08/2026). Cada
+      // CREATE POLICY do trecho vigente precisa nomear o papel.
+      const criacoes = [...trecho.matchAll(/create\s+policy[\s\S]*?;/g)].map((m) => m[0]);
+      expect(criacoes.length, `nenhum CREATE POLICY no trecho vigente de ${tabela}`).toBeGreaterThan(0);
+      for (const criacao of criacoes) {
+        expect(
+          criacao,
+          `política sem "to authenticated" em "${definicao!.arquivo}": ${criacao.slice(0, 90)}…`,
+        ).toMatch(/\bto\s+authenticated\b/);
+      }
     });
   }
 
   it("payables mantém a regra de categoria sensível junto com a do técnico", () => {
     // A T1.4 (MF-AUD-023) fechou UPDATE/DELETE de payables de categoria sensível. A migration
-    // do técnico veio depois e usou ALTER para somar, não substituir. Se alguém reescrever a
-    // política do zero, uma das duas regras cai — e este teste diz qual.
+    // do técnico veio depois e usou ALTER para somar, não substituir; a de 09/09 reescreveu
+    // do zero e manteve as duas (estendendo a categoria ao INSERT). Se alguém reescrever a
+    // política e uma das duas regras cair, este teste diz qual.
     const definicao = ultimaDefinicaoDePolitica("payables");
     const trecho = definicao!.trecho.toLowerCase();
 
-    expect(trecho).toContain("is_technician");
+    expect(
+      /not\s+(?:public\.)?is_technician\s*\(/.test(trecho)
+        || /(?:public\.)?is_admin_or_financial\s*\(\s*auth\.uid\(\)\s*\)/.test(trecho),
+      `A política de payables em "${definicao!.arquivo}" perdeu a barreira do técnico.`,
+    ).toBe(true);
     expect(
       trecho.includes("sensitive") || trecho.includes("sensivel") || trecho.includes("categoria"),
       `A política de payables em "${definicao!.arquivo}" perdeu a referência à categoria `

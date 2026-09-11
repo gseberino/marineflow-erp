@@ -427,7 +427,7 @@ export async function fetchSurveySheetData(
   vesselId?: string | null,
   serviceOrderId?: string | null,
 ): Promise<{ header: Partial<SurveySheetHeader>; questions: SurveySheetQuestion[]; history: SurveySheetHistory }> {
-  const [qRes, histRes, prevRes, osRes, cfgRes] = await Promise.all([
+  const [qRes, histRes, prevRes, osRes, cfgRes, linhaRes] = await Promise.all([
     // O levantamento é da ORDEM, não de um serviço: um orçamento com três
     // serviços precisa levantar o dos três, e uma visita de avaliação precisa
     // levantar os sistemas que o técnico marcou nas linhas — o "diagnóstico no
@@ -453,7 +453,36 @@ export async function fetchSurveySheetData(
           .maybeSingle()
       : Promise.resolve({ data: null as any }),
     supabase.from('app_settings').select('key, value').in('key', ['company_name']),
+    // O serviço: o nome vem da linha da ordem, que é o que o cliente contratou.
+    // (NOVO-lev-03: rodava depois do Promise.all, serializada — agora vai junto.)
+    serviceOrderId
+      ? supabase
+          .from('service_order_services')
+          .select('name_snapshot')
+          .eq('service_order_id', serviceOrderId)
+          .eq('service_id', serviceId)
+          .limit(1)
+          .maybeSingle()
+      : Promise.resolve({ data: null as any, error: null }),
   ]);
+
+  // NOVO-lev-02: nenhuma consulta checava `.error`. Uma RPC recusada (permissão, rede,
+  // função derrubada por migration) virava `data: null` → `[]` → "não tem perguntas
+  // aprovadas" — mensagem falsa que manda quem está de saída para a tela errada. A primeira
+  // falha derruba a chamada com a causa real; o SurveyPanel já mostra `e.message` no toast.
+  const consultas: Array<[string, { error?: { message?: string } | null }]> = [
+    ['as perguntas do levantamento', qRes as any],
+    ['o histórico de execuções', histRes as any],
+    ['as respostas anteriores do ativo', prevRes as any],
+    ['o cabeçalho da ordem', osRes as any],
+    ['as configurações da empresa', cfgRes as any],
+    ['a linha do serviço na ordem', linhaRes as any],
+  ];
+  for (const [rotulo, res] of consultas) {
+    if (res?.error) {
+      throw new Error(`Não deu para buscar ${rotulo}: ${res.error.message || 'erro desconhecido'}`);
+    }
+  }
 
   const anteriores = new Map<string, { answer: string; when: string | null }>();
   for (const p of ((prevRes as any).data || []) as any[]) {
@@ -465,18 +494,7 @@ export async function fetchSurveySheetData(
   const cfg = (((cfgRes as any).data || []) as Array<{ key: string; value: string }>)
     .find((r) => r.key === 'company_name');
 
-  // O serviço: o nome vem da linha da ordem, que é o que o cliente contratou.
-  let serviceName: string | null = null;
-  if (serviceOrderId) {
-    const { data: linha } = await supabase
-      .from('service_order_services')
-      .select('name_snapshot')
-      .eq('service_order_id', serviceOrderId)
-      .eq('service_id', serviceId)
-      .limit(1)
-      .maybeSingle();
-    serviceName = (linha as any)?.name_snapshot ?? null;
-  }
+  const serviceName: string | null = ((linhaRes as any).data as any)?.name_snapshot ?? null;
 
   return {
     header: {

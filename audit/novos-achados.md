@@ -486,7 +486,10 @@ algo que não tem efeito é pior do que não oferecer.
 ## [NOVO-023] O guarda anti-drift do hash de assinatura lê um arquivo só, e vai ficar verde quando o trigger mudar
 
 - **Encontrado em:** 11/08/2026, na revisão pré-merge da cobertura de teste
-- **Categoria:** I — **Severidade sugerida:** P3 · **Status:** registrado, **não corrigido**
+- **Categoria:** I — **Severidade sugerida:** P3 · **Status:** ~~registrado, não corrigido~~
+  **RESOLVIDO em 10/09/2026** — o teste varre todas as migrations que definem
+  `detect_so_change_after_signature` com `IS DISTINCT FROM` e usa a mais recente pelo nome do
+  arquivo; uma migration nova que acrescente um campo vigiado passa a ser a lida.
 - **Arquivo:linha:** `src/lib/document-hash.test.ts:145`
 
 O bloco que cobra paridade entre o hash e o trigger procura a migration **pelo nome** (`f41d70d9`, a de
@@ -677,7 +680,11 @@ apareceria em uso.
   05/08 e custou dois dias: erro engolido que vira mensagem errada.
 - **Consertar seria:** propagar o erro de cada RPC e distinguir na tela "não há
   perguntas" de "não deu para buscar as perguntas: <causa>".
-- **Não corrigido:** regra 3.
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO em 10/09/2026**: as seis consultas de
+  `fetchSurveySheetData` passam por uma checagem de `.error`, e a primeira falha derruba a
+  chamada com a causa real ("Não deu para buscar as perguntas do levantamento: <mensagem>").
+  O `SurveyPanel` já exibia `e.message` no `toast.error`, então a tela passa a distinguir
+  "não há perguntas aprovadas" de "não deu para buscar".
 
 ### [NOVO-lev-03] Uma consulta ficou fora do `Promise.all`
 
@@ -686,7 +693,9 @@ apareceria em uso.
   `Promise.all`, serializada, quando poderia ir junto das outras cinco.
 - **Por que importa:** pouco — é uma viagem a mais numa ação que já leva algumas
   centenas de milissegundos. Registrado por completude, não por urgência.
-- **Não corrigido:** regra 3, e não vale a mexida sozinho.
+- ~~**Não corrigido:** regra 3, e não vale a mexida sozinho.~~ **RESOLVIDO em 10/09/2026**,
+  na mesma mexida do lev-02: a consulta de `service_order_services` entrou no `Promise.all`
+  como sexto item.
 
 ### [NOVO-lev-04] Resposta pulada continua alimentando o dimensionamento
 
@@ -1358,7 +1367,10 @@ apareceria em uso.
   `limit`** — tudo o que passar do piso entra na tela.
 - **Consertar seria:** embrulhar o `distinct on` numa subconsulta e ordenar por
   fora (`select * from (…) t order by pct desc, juntos desc limit 8`).
-- **Não corrigido:** regra 3.
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO em 10/09/2026** (migration
+  `20260910140000_funcoes_levantamento_lev_29_30_32`, aplicada em produção): o `distinct on`
+  ficou numa CTE `melhor_vinculo` e a seleção final ordena por `pct desc, juntos desc,
+  product_name` com `limit 8`. Provado no banco: a lista sai em ordem decrescente de vínculo.
 
 ### [NOVO-lev-30] O `limit 5` do histórico não limita nada
 
@@ -1386,7 +1398,10 @@ apareceria em uso.
   nunca teve dado, e que este `limit` nunca foi exercitado.
 - **Consertar seria:** mover o corte para dentro (`from (select … order by
   created_at desc limit 5) c`).
-- **Não corrigido:** regra 3.
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO em 10/09/2026** (mesma migration
+  `20260910140000`): o `limit 5` foi para a subconsulta, antes do `jsonb_agg`, ordenada por
+  `created_at desc`. Continua latente (`service_cases` sem linha utilizável), mas o corte
+  agora existe.
 
 ### [NOVO-lev-31] `parse_answer_number` continua aberta para `anon`
 
@@ -1430,7 +1445,12 @@ apareceria em uso.
 - **Consertar seria:** validar com `nullif(regexp_replace(value,'[^0-9.]','','g'),'')::numeric`
   ou `pg_input_is_valid(value,'numeric')` (PG16+), e — se o limiar é para ser
   configurável — criar a linha e o campo na tela de configurações.
-- **Não corrigido:** regra 3.
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO (o cast) em 10/09/2026** (mesma migration
+  `20260910140000`): função nova `parse_valor_ptbr(text)` — entende `'1.500'` = 1500,
+  `'1.234,56'` = 1234.56, `'R$ 3.000'` = 3000 e devolve NULL para lixo, nunca exceção
+  (provada nos 7 casos em produção) — e `should_survey_service` lê o limiar por ela com
+  `coalesce(…, 3000)`. **Fica em aberto** a parte 1: não há tela nem seed para
+  `survey_valor_limiar`; o literal 3000 segue sendo o único caminho que roda.
 
 ### [NOVO-lev-33] O registro do ativo entra no documento sem escapar
 

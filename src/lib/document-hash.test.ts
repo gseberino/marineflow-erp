@@ -140,11 +140,22 @@ describe('o hash cobre tudo que o banco vigia (trigger detect_so_change_after_si
   // deles, ao mudar, tem que mudar o hash — senão o banco pede re-assinatura de uma alteração
   // que o documento assinado não registra, e a prova fica incompleta justamente no caso em
   // que ela é necessária.
+  // NOVO-023: antes lia só a migration original ('f41d70d9'). Se uma migration NOVA
+  // redefinisse o trigger com mais um campo vigiado, a guarda continuaria verde olhando
+  // para a versão antiga. Agora varre TODAS as migrations que definem o trigger e usa a
+  // MAIS RECENTE — a definição que está de fato no banco.
   const migration = (() => {
-    const arquivo = readdirSync(join(process.cwd(), 'supabase', 'migrations'))
-      .find(f => f.includes('f41d70d9')); // detect_so_change_after_signature
-    if (!arquivo) throw new Error('migration do trigger de re-assinatura não encontrada');
-    return readFileSync(join(process.cwd(), 'supabase', 'migrations', arquivo), 'utf8');
+    const pasta = join(process.cwd(), 'supabase', 'migrations');
+    const candidatas = readdirSync(pasta)
+      .filter(f => f.endsWith('.sql'))
+      .sort()
+      .filter(f => {
+        const sql = readFileSync(join(pasta, f), 'utf8');
+        return /detect_so_change_after_signature/i.test(sql)
+          && /NEW\.\w+\s+IS\s+DISTINCT\s+FROM\s+OLD\./i.test(sql);
+      });
+    if (candidatas.length === 0) throw new Error('migration do trigger de re-assinatura não encontrada');
+    return readFileSync(join(pasta, candidatas[candidatas.length - 1]), 'utf8');
   })();
 
   const camposVigiados = Array.from(
