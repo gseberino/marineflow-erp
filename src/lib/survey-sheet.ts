@@ -46,6 +46,7 @@
  */
 
 import { supabase } from '@/integrations/supabase/client';
+import { SYSTEM_LABEL, VERB_LABEL } from '@/hooks/use-step-blocks';
 
 const BRAND = '#002B5B';
 
@@ -106,6 +107,30 @@ function formatMin(min: number | null | undefined): string {
   const h = Math.floor(min / 60);
   const m = Math.round(min % 60);
   return h ? `${h}h${m ? String(m).padStart(2, '0') : ''}` : `${m}min`;
+}
+
+/**
+ * Em campo se avalia um sistema de cada vez: quem está no paiol olhando o banco
+ * de baterias não quer, entre duas perguntas de elétrico, uma sobre o cilindro
+ * de gás do outro lado do veículo. `compose_survey_for_order` já manda de qual
+ * sistema ou verbo cada pergunta veio (`eixo`); a folha agrupa por ele dentro
+ * de cada faixa de impacto, na ordem em que os sistemas aparecem. Pergunta sem
+ * eixo fica num grupo próprio, "Geral".
+ */
+function agruparPorEixo(
+  qs: SurveySheetQuestion[],
+): Array<{ eixo: string | null; itens: SurveySheetQuestion[] }> {
+  const grupos = new Map<string | null, SurveySheetQuestion[]>();
+  for (const q of qs) {
+    const chave = q.eixo ?? null;
+    if (!grupos.has(chave)) grupos.set(chave, []);
+    grupos.get(chave)!.push(q);
+  }
+  return Array.from(grupos, ([eixo, itens]) => ({ eixo, itens }));
+}
+
+function rotuloDoEixo(eixo: string): string {
+  return SYSTEM_LABEL[eixo] ?? VERB_LABEL[eixo] ?? eixo.replace(/_/g, ' ');
 }
 
 /**
@@ -176,6 +201,20 @@ export function buildSurveySheetHtml(
       ${fieldFor(q)}
     </div>`;
 
+  // Com um sistema só (ou nenhum) não há subtítulo: a folha de um serviço
+  // simples continua exatamente como era.
+  const renderFaixa = (qs: SurveySheetQuestion[], destaque: boolean) => {
+    const grupos = agruparPorEixo(qs);
+    if (grupos.length <= 1) return qs.map((q) => questionBlock(q, destaque)).join('');
+    return grupos
+      .map(
+        (g) =>
+          `<div class="eixo">${esc(g.eixo ? rotuloDoEixo(g.eixo) : 'Geral')}</div>` +
+          g.itens.map((q) => questionBlock(q, destaque)).join(''),
+      )
+      .join('');
+  };
+
   // ── O que o histórico sabe ────────────────────────────────────────────────
   // Só aparece quando há base. Inventar "média de 2 casos" seria pior que o
   // silêncio: quem lê trata número como fato.
@@ -237,6 +276,10 @@ export function buildSurveySheetHtml(
   .sectitle { font-size: 9pt; font-weight: bold; color: ${BRAND}; text-transform: uppercase;
               letter-spacing: .05em; border-bottom: .6pt solid #bbb; padding-bottom: .8mm;
               margin: 3.5mm 0 2mm; }
+  /* Subtítulo por sistema dentro da faixa — menor que o título da faixa, para não
+     competir com ele. */
+  .eixo { font-size: 8pt; font-weight: bold; color: #444; text-transform: uppercase;
+          letter-spacing: .06em; margin: 2mm 0 1mm; }
 
   .q { margin-bottom: 2.4mm; page-break-inside: avoid; }
   .q.alta { border-left: 2pt solid ${BRAND}; padding-left: 2mm; }
@@ -332,9 +375,9 @@ export function buildSurveySheetHtml(
 ${historyBlock}
 
 <div class="sectitle">O que muda o preço</div>
-${altas.map((q) => questionBlock(q, true)).join('')}
+${renderFaixa(altas, true)}
 
-${demais.length ? `<div class="sectitle">Bom saber antes de orçar</div>${demais.map((q) => questionBlock(q, false)).join('')}` : ''}
+${demais.length ? `<div class="sectitle">Bom saber antes de orçar</div>${renderFaixa(demais, false)}` : ''}
 
 <div class="twocol">
   <div>

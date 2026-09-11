@@ -218,3 +218,52 @@ describe('grandeza na folha impressa', () => {
     expect(html).not.toContain('costuma ficar entre');
   });
 });
+
+describe('as perguntas agrupadas por sistema', () => {
+  // Em campo se avalia um sistema de cada vez: entre duas perguntas de elétrico
+  // não pode entrar uma sobre o cilindro de gás do outro lado do veículo.
+  const misturadas: SurveySheetQuestion[] = [
+    { id: 'e1', question: 'Qual a corrente máxima do banco?', answer_type: 'numero',
+      options: null, price_impact: 'alto', eixo: 'eletrico_dc' },
+    { id: 'g1', question: 'Onde fica o cilindro de gás?', answer_type: 'texto',
+      options: null, price_impact: 'alto', eixo: 'gas' },
+    { id: 'e2', question: 'Qual a distância do banco ao inversor?', answer_type: 'medida',
+      options: null, price_impact: 'alto', eixo: 'eletrico_dc' },
+  ];
+
+  it('junta as perguntas do mesmo sistema, com subtítulo legível por sistema', () => {
+    const html = buildSurveySheetHtml(header, misturadas, { cases: 0 });
+    expect(html).toContain('Elétrico DC (12/24V)');
+    expect(html).toContain('Gás GLP');
+    expect(html.indexOf('distância do banco ao inversor')).toBeLessThan(html.indexOf('cilindro de gás'));
+  });
+
+  it('mantém a ordem em que os sistemas aparecem', () => {
+    const html = buildSurveySheetHtml(header, misturadas, { cases: 0 });
+    expect(html.indexOf('Elétrico DC (12/24V)')).toBeLessThan(html.indexOf('Gás GLP'));
+  });
+
+  it('com um sistema só (ou nenhum) não imprime subtítulo — a folha simples continua igual', () => {
+    const umSo = misturadas.filter((q) => q.eixo === 'eletrico_dc');
+    expect(buildSurveySheetHtml(header, umSo, { cases: 0 })).not.toContain('class="eixo"');
+    expect(buildSurveySheetHtml(header, perguntas, { cases: 0 })).not.toContain('class="eixo"');
+  });
+
+  it('pergunta sem eixo no meio de sistemas vai para "Geral"', () => {
+    const comGeral: SurveySheetQuestion[] = [
+      ...misturadas,
+      { id: 'x1', question: 'Há tomada perto?', answer_type: 'sim_nao', options: null, price_impact: 'alto' },
+    ];
+    expect(buildSurveySheetHtml(header, comGeral, { cases: 0 })).toContain('Geral');
+  });
+
+  it('eixo sem rótulo cadastrado sai legível, não como slug cru', () => {
+    const verbo: SurveySheetQuestion[] = [
+      { ...misturadas[0], eixo: 'eletrico_dc' },
+      { ...misturadas[1], eixo: 'sistema_novo' },
+    ];
+    const html = buildSurveySheetHtml(header, verbo, { cases: 0 });
+    expect(html).toContain('sistema novo');
+    expect(html).not.toContain('sistema_novo');
+  });
+});

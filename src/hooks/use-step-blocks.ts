@@ -67,6 +67,7 @@ export const VERB_LABEL: Record<string, string> = {
   configuracao: 'Configuração',
   adequacao: 'Adequação',
   logistica: 'Logística / deslocamento',
+  projeto: 'Projeto',
 };
 
 const ROLE_LABEL: Record<BlockRole, string> = {
