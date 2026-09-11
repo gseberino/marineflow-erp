@@ -1,14 +1,12 @@
-// Cobertura do cálculo de deslocamento — módulo sem teste até agora.
+// Cobertura do cálculo de deslocamento.
 //
 // Deslocamento é dinheiro que entra em toda OS de campo, e a conta tem três partes que se
 // multiplicam: quilometragem, hora de equipe e multiplicador de urgência/fim de semana. Um
 // erro aqui não aparece como erro — aparece como uma OS que fechou por menos do que custou.
 //
-// `calculateDisplacement` não é testada aqui: ela consulta `app_settings` no Supabase. E o que
-// ela tem de próprio — a haversine e o × 2 da ida e volta — fica DESCOBERTO, o que precisa ser
-// dito em voz alta: trocar o raio da Terra, inverter lat/lng ou perder o × 2 não quebra teste
-// nenhum, e a distância errada vai direto para travel_distance_km e travel_cost_total da OS.
-// O que ela tem de errado hoje está registrado como NOVO-024.
+// `calculateDisplacement` consulta `app_settings`; o bloco final a testa com o cliente mockado,
+// inclusive a haversine e o × 2 da ida e volta — trocar o raio da Terra, inverter lat/lng ou
+// perder o × 2 iria direto para travel_distance_km e travel_cost_total da OS.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { calculateTravelCost, travelRatesFromSettings, hourlyRateFor, DEFAULT_TRAVEL_RATES } from './displacement';
 
@@ -125,10 +123,10 @@ describe('calculateTravelCost — a conta que vai para a OS', () => {
     expect(String(custo).split('.')[1]?.length ?? 0).toBeLessThanOrEqual(2);
   });
 
-  // [NOVO-016a] CORRIGIDO. A tabela vai até 3 técnicos; o código fazia
-  // `rates.hourly[4] || rates.hourly[1]` e caía na tarifa de UM. Quatro pessoas na estrada
-  // custavam menos que três, e o número de técnicos é campo livre na tela.
-  it('[NOVO-016] 4 técnicos custam MAIS que 3, extrapolando o passo da configuração', () => {
+  // [NOVO-024a] A tabela vai até 3 técnicos; o código fazia `rates.hourly[4] || rates.hourly[1]`
+  // e caía na tarifa de UM. Quatro pessoas na estrada custavam menos que três, e o número de
+  // técnicos é campo livre na tela.
+  it('[NOVO-024] 4 técnicos custam MAIS que 3 — o passo da tabela é extrapolado, nunca a tarifa de 1', () => {
     const params = { distance_km: 0, travel_hours: 1, ferry_cost: 0, travel_type: 'comercial' as const };
     const um = calculateTravelCost({ ...params, technician_count: 1 });
     const tres = calculateTravelCost({ ...params, technician_count: 3 });
@@ -136,25 +134,25 @@ describe('calculateTravelCost — a conta que vai para a OS', () => {
 
     expect(um).toBe(90);
     expect(tres).toBe(250);
-    // 90/170/250 descreve um passo de 80 — o 4º técnico entra por 330, derivado dos números
-    // configurados, não escolhido à mão.
+    // Política PROVISÓRIA (em produção desde 12/08): acima da última faixa, o passo da
+    // própria tabela (250 − 170 = 80) por técnico adicional. Quanto cobrar de verdade é
+    // decisão comercial do dono; o que não pode é 4 custar como 1.
     expect(quatro).toBe(330);
     expect(quatro).toBeGreaterThan(tres);
   });
 
-  it('[NOVO-016] a extrapolação segue crescendo, sem degrau nem teto', () => {
+  it('[NOVO-024] acima do teto nunca cai: de 1 a 6 técnicos o custo é não-decrescente', () => {
     const params = { distance_km: 0, travel_hours: 1, ferry_cost: 0, travel_type: 'comercial' as const };
     const custos = [1, 2, 3, 4, 5, 6].map((n) =>
       calculateTravelCost({ ...params, technician_count: n }));
     for (let i = 1; i < custos.length; i++) {
       expect(custos[i], `${i + 1} técnicos não pode custar menos que ${i}`)
-        .toBeGreaterThan(custos[i - 1]);
+        .toBeGreaterThanOrEqual(custos[i - 1]);
     }
     expect(custos).toEqual([90, 170, 250, 330, 410, 490]);
   });
 
-  it('[NOVO-016] o passo vem da configuração da empresa, não de constante no código', () => {
-    // Faixas dobradas: o 4º técnico tem de dobrar junto.
+  it('[NOVO-024] o passo vem da configuração da empresa, não de constante no código', () => {
     const rates = travelRatesFromSettings({
       travel_hourly_1: '180', travel_hourly_2: '340', travel_hourly_3: '500',
     });
@@ -163,23 +161,35 @@ describe('calculateTravelCost — a conta que vai para a OS', () => {
     expect(calculateTravelCost({ ...params, technician_count: 4 }, rates)).toBe(660);
   });
 
-  it('[NOVO-016] contagem zerada ou negativa vira 1 técnico — alguém sempre vai', () => {
+  it('[NOVO-024] contagem zerada ou negativa vira 1 técnico — alguém sempre vai', () => {
     const params = { distance_km: 0, travel_hours: 1, ferry_cost: 0, travel_type: 'comercial' as const };
     expect(calculateTravelCost({ ...params, technician_count: 0 })).toBe(90);
     expect(calculateTravelCost({ ...params, technician_count: -2 })).toBe(90);
   });
 
-  it('[NOVO-016] hourlyRateFor sozinha: faixa exata, extrapolação e borda', () => {
+  it('[NOVO-024] hourlyRateFor sozinha: faixa exata, teto e borda', () => {
     expect(hourlyRateFor(DEFAULT_TRAVEL_RATES, 2)).toBe(170);
     expect(hourlyRateFor(DEFAULT_TRAVEL_RATES, 4)).toBe(330);
     expect(hourlyRateFor(DEFAULT_TRAVEL_RATES, 1.7)).toBe(90);  // trunca
-    // Uma faixa só: sem passo a derivar, N técnicos custam N vezes — o mais conservador.
+    // Uma faixa só não descreve passo: é o teto, e vale para qualquer contagem.
     const umaFaixa = { ...DEFAULT_TRAVEL_RATES, hourly: { 1: 100 } };
-    expect(hourlyRateFor(umaFaixa, 3)).toBe(300);
+    expect(hourlyRateFor(umaFaixa, 3)).toBe(100);
+    // Buraco na tabela (só 1 e 3): 2 técnicos sobem para a faixa seguinte, não descem para 1;
+    // acima do teto o passo é por técnico ((300 − 100) / 2 = 100), então 4 → 400.
+    const buraco = { ...DEFAULT_TRAVEL_RATES, hourly: { 1: 100, 3: 300 } };
+    expect(hourlyRateFor(buraco, 2)).toBe(300);
+    expect(hourlyRateFor(buraco, 4)).toBe(400);
+  });
+
+  it('[NOVO-024] faixa configurada em zero é zero — o `||` antigo trocava de faixa', () => {
+    // travelRatesFromSettings rejeita 0, então isto só chega por objeto montado à mão — mas a
+    // função não pode decidir sozinha que 0 "não vale".
+    const rates = { ...DEFAULT_TRAVEL_RATES, hourly: { 1: 90, 2: 0, 3: 250 } };
+    expect(hourlyRateFor(rates, 2)).toBe(0);
   });
 });
 
-describe('[NOVO-016b] calculateDisplacement usa a tarifa configurada, não a do código', () => {
+describe('[NOVO-024b] calculateDisplacement usa a tarifa configurada, não a do código', () => {
   // Esta função consulta `app_settings`. O mock devolve o que a EMPRESA configurou; se o
   // cálculo ignorar isso e usar DEFAULT_TRAVEL_RATES, os números abaixo não fecham.
   //
@@ -206,7 +216,7 @@ describe('[NOVO-016b] calculateDisplacement usa a tarifa configurada, não a do 
 
   afterEach(() => vi.doUnmock('@/integrations/supabase/client'));
 
-  it('devolve o km da configuração, não o 1.10 que estava fixo no return', async () => {
+  it('sem `rates`, devolve o km da configuração — não o 1.10 que estava fixo no return', async () => {
     const { calculateDisplacement } = await import('./displacement');
     // Mesma coordenada da base: distância zero isola a tarifa do resto do cálculo.
     const r = await calculateDisplacement(-26.9078, -48.6728, 1);
@@ -214,12 +224,25 @@ describe('[NOVO-016b] calculateDisplacement usa a tarifa configurada, não a do 
     expect(r.distance_km).toBe(0);
   });
 
-  it('o total usa a tarifa por km configurada', async () => {
+  it('o total usa a tarifa por km configurada, sobre ida E volta', async () => {
     const { calculateDisplacement } = await import('./displacement');
     const r = await calculateDisplacement(-27.0, -48.6728, 1);
+    // 0,0922° de latitude ≈ 10,25 km; ida e volta ≈ 20,5. Pina o raio da Terra e o × 2.
+    expect(r.distance_km).toBeCloseTo(20.5, 1);
     // travel_hours é 0 aqui, então o total é só distância × km configurado (R$ 2,00).
     expect(r.total_cost).toBeCloseTo(r.distance_km * 2, 2);
     // Com o defeito, seria distance × 1.10 — a asserção abaixo é a que pega a regressão.
     expect(r.total_cost).not.toBeCloseTo(r.distance_km * 1.1, 2);
+  });
+
+  it('com `rates` passadas, usa-as e devolve o km DELAS — mesmo que app_settings diga outro', async () => {
+    // É o caminho do formulário da OS: ele já tem as tarifas na mão e precisa gravar na OS o
+    // mesmo km que usou na conta, sem depender de uma segunda leitura da tabela.
+    const { calculateDisplacement } = await import('./displacement');
+    const doFormulario = { ...DEFAULT_TRAVEL_RATES, km_rate: 3.5 };
+    const r = await calculateDisplacement(-27.0, -48.6728, 1, doFormulario);
+    expect(r.cost_per_km).toBe(3.5);
+    expect(r.total_cost).toBeCloseTo(r.distance_km * 3.5, 2);
+    expect(r.total_cost).not.toBeCloseTo(r.distance_km * 2, 2);
   });
 });

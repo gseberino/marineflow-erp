@@ -4,9 +4,9 @@
 // Um erro aqui não aparece como erro: aparece como preço, estoque ou telefone errado em
 // centenas de linhas de uma vez, já gravados, misturados aos certos.
 //
-// Dois defeitos reais apareceram enquanto eu escrevia estes casos — `NOVO-017` em
-// audit/novos-achados.md. Estão documentados abaixo pelo que fazem HOJE, marcados com o ID,
-// para que a correção seja uma decisão e não um efeito colateral.
+// Dois defeitos reais apareceram enquanto estes casos eram escritos — `NOVO-017` em
+// audit/novos-achados.md — e já estão corrigidos. Os casos marcados com o ID afirmam o
+// comportamento certo e explicam o que quebrava, para ninguém "simplificar" de volta.
 import { describe, it, expect } from 'vitest';
 import { parseCSVContent, detectFormat, transformValue, applyMapping } from './import-detector';
 
@@ -162,8 +162,19 @@ describe('transformValue — converter texto de planilha em dado', () => {
   it('[NOVO-017] formas simples continuam valendo', () => {
     expect(transformValue('89,90', 'sale_price')).toBe(89.9);
     expect(transformValue('89.90', 'sale_price')).toBe(89.9);
+    // Um separador só, com uma casa: decimal nos dois idiomas.
+    expect(transformValue('12,5', 'sale_price')).toBe(12.5);
+    expect(transformValue('12.5', 'sale_price')).toBe(12.5);
     expect(transformValue('1234', 'sale_price')).toBe(1234);
     expect(transformValue('0', 'sale_price')).toBe(0);
+  });
+
+  it('[NOVO-017] célula vazia é null, não zero — vazio e "0" são informações diferentes', () => {
+    // "0" é um preço declarado; célula em branco é ausência de preço. Misturar os dois faria
+    // o importador gravar R$ 0,00 em produto cujo preço ninguém informou.
+    expect(transformValue('', 'sale_price')).toBeNull();
+    expect(transformValue('   ', 'cost_price')).toBeNull();
+    expect(transformValue('', 'stock_quantity')).toBeNull();
   });
 
   it('[NOVO-017] símbolo de moeda e espaço do Excel não atrapalham', () => {
@@ -237,6 +248,17 @@ describe('applyMapping — do arquivo para os campos do sistema', () => {
     const resultado = applyMapping(
       [{ Telefone: '', Celular: '(47) 99999-0000' }],
       { Telefone: 'phone', Celular: 'phone' },
+      'clients',
+    );
+    expect(resultado[0].phone).toBe('(47) 99999-0000');
+  });
+
+  it('[NOVO-017] coluna só com espaços conta como vazia', () => {
+    // Planilha exportada de outro ERP traz " " onde não tinha nada. Se espaço contasse como
+    // valor, o celular seria apagado do mesmo jeito — só que por um caractere invisível.
+    const resultado = applyMapping(
+      [{ Celular: '(47) 99999-0000', Telefone: '   ' }],
+      { Celular: 'phone', Telefone: 'phone' },
       'clients',
     );
     expect(resultado[0].phone).toBe('(47) 99999-0000');

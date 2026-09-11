@@ -697,10 +697,12 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     const marina = marinas?.find((m) => m.id === form.marina_id);
     if (!marina?.latitude || !marina?.longitude) return;
     try {
+      // As mesmas tarifas do cálculo manual: a OS grava o km que fechou a conta.
       const result = await calculateDisplacement(
         Number(marina.latitude),
         Number(marina.longitude),
-        form.technician_count_for_travel
+        form.technician_count_for_travel,
+        travelRates
       );
       set('travel_distance_km', result.distance_km);
       set('travel_cost_per_km', result.cost_per_km);
@@ -708,7 +710,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     } catch (e) {
       console.error('Displacement calc failed', e);
     }
-  }, [form.marina_id, form.technician_count_for_travel, marinas]);
+  }, [form.marina_id, form.technician_count_for_travel, marinas, travelRates]);
 
   // Financial summary — matemática extraída para o módulo puro os-financials
   // (Fase 3 UI v2: os testes de paridade pinam este comportamento).

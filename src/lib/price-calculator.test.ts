@@ -82,31 +82,38 @@ describe('calculateSalePrice — imposto e comissão saem de dentro do preço', 
     expect(bd.tax_rate).toBe(caso.tax_rate);
   });
 
-  // ⚠️ NOVO-009 — DEFEITO CONHECIDO, registrado em audit/novos-achados.md e NÃO corrigido
-  // aqui (regra 3: achado fora do escopo se registra, não se conserta de passagem).
-  //
-  // Quando margem + imposto + comissão dão EXATAMENTE 100%, o divisor deveria ser zero e cair
-  // no guard. Em ponto flutuante binário ele às vezes cai do lado positivo — 60+30+10 dá
-  // 2,7755575615628914e-17 — e o guard `divisor <= 0` não pega. O preço vira 3,6 × 10¹⁸.
-  //
-  // Não é teórico: `PriceCalculator.tsx` sincroniza o preço calculado para o formulário
-  // sempre que `breakdown.sale_price > 0`, então esse número entra no campo de preço do
-  // produto enquanto o aviso de "impossível" está na tela.
-  //
-  // O `.fails` é proposital: o dia em que alguém corrigir o guard, este caso passa a passar e
-  // o Vitest acusa — obrigando a trocar por `it()` e apagar este comentário.
-  it.fails('[NOVO-009] soma EXATAMENTE 100% deveria devolver zeros, e hoje devolve 3,6e18', () => {
-    const bd = calculateSalePrice({ cost_price: 100, profit_margin: 60, tax_rate: 30, commission_rate: 10 });
-    expect(bd.sale_price).toBe(0);
+  it('[NOVO-009] soma EXATAMENTE 100% devolve zeros e erro, seja qual for a combinação', () => {
+    // Em frações, `1 - 0,6 - 0,3 - 0,1` dá +2,78e-17 em binário e escapava do guard com um
+    // preço de 3,6 × 10¹⁸ — que `PriceCalculator.tsx` sincronizava para o campo do produto.
+    // As seis combinações são as que caíam de cada lado do zero (três escapavam, três não):
+    // mesma soma, resultados opostos, e é isso que tornava o relato impossível de reproduzir.
+    const combinacoes: Array<[number, number, number]> = [
+      [60, 30, 10],           // escapava: +2,78e-17
+      [70, 20, 10],           // escapava: +2,78e-17
+      [33.33, 33.33, 33.34],  // escapava: +5,55e-17
+      [50, 30, 20],           // caía certo: 0
+      [40, 40, 20],           // caía certo: −5,55e-17
+      [80, 15, 5],            // caía certo: −4,16e-17
+    ];
+    for (const [profit_margin, tax_rate, commission_rate] of combinacoes) {
+      const bd = calculateSalePrice({ cost_price: 100, profit_margin, tax_rate, commission_rate });
+      const rotulo = `${profit_margin}+${tax_rate}+${commission_rate}`;
+      expect(bd.sale_price, rotulo).toBe(0);
+      expect(bd.tax_amount, rotulo).toBe(0);
+      expect(bd.commission_amount, rotulo).toBe(0);
+      expect(bd.profit_amount, rotulo).toBe(0);
+      expect(bd.markup, rotulo).toBe(0);
+      expect(bd.error, rotulo).toMatch(/somam 100%/);
+    }
   });
 
-  it('[NOVO-009] o defeito depende da combinação — algumas somas de 100% caem certo, outras não', () => {
-    // Documenta o comportamento de HOJE. Mesma soma, resultados opostos: é o que torna o
-    // defeito difícil de reproduzir a partir do relato de quem o encontrou.
-    const escapa = calculateSalePrice({ cost_price: 100, profit_margin: 70, tax_rate: 20, commission_rate: 10 });
-    const naoEscapa = calculateSalePrice({ cost_price: 100, profit_margin: 50, tax_rate: 30, commission_rate: 20 });
-    expect(escapa.sale_price).toBeGreaterThan(1e17);
-    expect(naoEscapa.sale_price).toBe(0);
+  it('[NOVO-009] a tolerância do guard não engole soma legítima logo abaixo de 100%', () => {
+    // 99,99% é o maior valor com duas casas: divisor 1e-4, preço 10.000× o custo. Tem que
+    // calcular (com aviso) — um guard largo demais recusaria margem alta legítima.
+    const bd = calculateSalePrice({ cost_price: 100, profit_margin: 99.99, tax_rate: 0, commission_rate: 0 });
+    expect(bd.error).toBeNull();
+    expect(bd.sale_price).toBe(1000000);
+    expect(bd.warning).not.toBeNull();
   });
 
   it('custo zero não divide por zero no markup', () => {

@@ -249,7 +249,14 @@ Não foram corrigidos.
 ## [NOVO-009] Preço de venda vira 3,6 × 10¹⁸ quando margem + imposto + comissão dão exatamente 100%
 
 - **Encontrado em:** 11/08/2026, escrevendo a cobertura de teste de `price-calculator.ts`
-- **Categoria:** A — **Severidade sugerida:** P2 · **Status:** registrado, **não corrigido** (regra 3)
+- **Categoria:** A — **Severidade sugerida:** P2 · **Status:** ~~registrado, não corrigido~~
+  **RESOLVIDO em 10/09/2026**: `d16da5b` (11/08) tratou o zero exato e o aviso de 99%, mas
+  o guard em ponto flutuante continuava furado — `1 - 0,6 - 0,3 - 0,1` dá `+2,78e-17`.
+  O divisor agora é montado em pontos percentuais, `(100 - m - i - c) / 100` (subtração
+  exata de inteiros), e o guard usa tolerância `<= 1e-9` para entradas com centavos
+  (33,33+33,33+33,34). As seis combinações da auditoria devolvem zeros + `error`; 99,99%
+  segue calculando com aviso. `PriceCalculator.tsx` não sincroniza preço zero, então nada
+  chega ao formulário. `src/lib/price-calculator.ts:79-90`; testes 24/24.
 - **Arquivo:linha:** `src/lib/price-calculator.ts:30-39` (o guard), `src/components/PriceCalculator.tsx:53-60`
   (o que faz o número escapar para o formulário)
 - **Descrição:** a fórmula é `custo / (1 - margem - imposto - comissão)` e existe um guard para o caso
@@ -281,7 +288,19 @@ Não foram corrigidos.
 ## [NOVO-024] Deslocamento: 4 técnicos custam o mesmo que 1, e a tarifa por km exibida na OS não é a usada no cálculo
 
 - **Encontrado em:** 11/08/2026, escrevendo a cobertura de teste de `displacement.ts`
-- **Categoria:** A — **Severidade sugerida:** P2 · **Status:** registrado, **não corrigido** (regra 3)
+- **Categoria:** A — **Severidade sugerida:** P2 · **Status:** ~~registrado, não corrigido~~
+  **RESOLVIDO (a, b) em 10/09/2026**; já havia correção na main desde `070d988` (turno noturno
+  de 11-12/08, sob o ID `NOVO-016` — colisão do NOVO-025), ajustada nesta passada. **(a)**
+  acima da última faixa a hora **extrapola pelo passo da própria tabela** (90/170/250 → 4º
+  técnico 330), política PROVISÓRIA em produção desde 12/08 e mantida de propósito — trocá-la
+  por piso baixaria orçamentos sem o dono decidir; teto derivado das chaves da tabela, `??`
+  no lugar de `||` (faixa em 0 é 0), 0/negativo vira 1 técnico, uma faixa só fica no teto.
+  Quanto cobrar por técnico adicional **continua decisão comercial do dono**. **(b)**
+  `calculateDisplacement` recebe `rates` opcional; o formulário da OS passa o mesmo
+  `travelRatesFromSettings(appSettings)` do cálculo manual e grava em `travel_cost_per_km` o
+  `km_rate` que fechou a conta; sem `rates`, lê `app_settings`. 21 testes em
+  `displacement.test.ts`. **(c) continua com o dono**: o default `3,5` do formulário e a chave
+  órfã `app_settings.travel_cost_per_km` não foram tocados — qual chave de km é a verdadeira.
 - **Arquivo:linha:** `src/lib/displacement.ts:59` e `:79-93`; `src/components/ServiceOrderForm.tsx:344,634,695`
 
 **(a) A tarifa por hora despenca fora da faixa 1–3.** A tabela é `{1: 90, 2: 170, 3: 250}` e a busca é
@@ -311,7 +330,16 @@ apagar a outra e fazer o formulário gravar a mesma tarifa que usou na conta.
 ## [NOVO-017] Importação de CSV: preço com separador de milhar vira centavos, e "Telefone" vazio apaga o celular
 
 - **Encontrado em:** 11/08/2026, escrevendo a cobertura de teste de `import-detector.ts`
-- **Categoria:** A — **Severidade sugerida:** P1 (a) / P2 (b) · **Status:** registrado, **não corrigido** (regra 3)
+- **Categoria:** A — **Severidade sugerida:** P1 (a) / P2 (b) · **Status:** ~~registrado, não
+  corrigido~~ **RESOLVIDO** (correção commitada em `e0a7c85`, 11/08; verificação e cobertura
+  complementar em 10/09/2026): (a) `parseFloat`/`parseInt` deram lugar a `parseNumeroBR`
+  (`src/lib/import-detector.ts:187-218`), que decide o decimal pelo ÚLTIMO separador (pt-BR
+  e en-US), trata milhar só-pontos ("1.500" → 1500), remove `R$`, espaço e NBSP, e devolve
+  `null` sem dígito; usada nos cinco campos (estoque truncado para inteiro). (b)
+  `applyMapping` (`:271`) não deixa valor vazio sobrescrever valor preenchido — `Telefone`
+  em branco preserva o celular; preenchido sobre preenchido continua com a última coluna
+  vencendo. Testes 36/36. Decisões mantidas: lixo em preço vira 0 (NOVO-import-01) e
+  estoque trunca em vez de arredondar.
 - **Arquivo:linha:** `src/lib/import-detector.ts:170-178` (a) e `:142-143` + `:194-201` (b);
   entrada pela tela `src/components/ImportWizard.tsx:86-116`
 
@@ -379,7 +407,11 @@ ano, hora nas quatro formas, prioridade, limpeza do título).
 
 - **Encontrado em:** 11/08/2026, escrevendo a cobertura de teste de `export-utils.ts`
 - **Categoria:** A (a, b) / G-segurança (c) — **Severidade sugerida:** P2 (a) / P3 (b) / P2 (c)
-- **Status:** registrado, **não corrigido** (regra 3)
+- **Status:** ~~registrado, não corrigido~~ **RESOLVIDO (a, b, c) em 09/09/2026** (quick win
+  da sessão de destravamento; livro atualizado em 10/09): a coluna Marina lê
+  `marinas.name` via `transform`; aspas passam a exigir envelope; célula que começa com
+  `=`, `@`, ou `+`/`-` sem ser número recebe apóstrofo (negativo legítimo passa intacto).
+  Testes de `export-utils.test.ts` invertidos para o comportamento correto.
 - **Arquivo:linha:** `src/lib/export-utils.ts:80` (a), `:20-21` (b), `:16-23` (c)
 
 **(a) No export de embarcações, a coluna "Marina" lê a chave `name`** — que é o nome da **embarcação**. A
@@ -449,7 +481,10 @@ sem uso** (inócua) ou a tarefa é revertida.
 ## [NOVO-021] Padrão dos PDFs: edição feita durante o "Salvar" é descartada, e a tela diz que salvou
 
 - **Encontrado em:** 11/08/2026, na revisão pré-merge do MF-AUD-014
-- **Categoria:** A — **Severidade sugerida:** P3 · **Status:** registrado, **não corrigido**
+- **Categoria:** A — **Severidade sugerida:** P3 · **Status:** ~~registrado, não corrigido~~
+  **RESOLVIDO em 09/09/2026** (quick win da sessão de destravamento; livro atualizado em
+  10/09): `salvar()` remove de `dirty` só as chaves efetivamente enviadas
+  (`SettingsPage.tsx` ~:1841) — marcação feita durante o round-trip continua pendente.
 - **Arquivo:linha:** `src/pages/SettingsPage.tsx:1832` (`setDirty(new Set())`) e `:1870-1874` (checkboxes sem `disabled`)
 
 Em `PdfDefaultsSection.salvar()`, o sucesso da mutation limpa o conjunto `dirty` **inteiro** — inclusive tipos
@@ -465,7 +500,19 @@ Salvar desabilitado, enquanto o banco tem o valor antigo. Volta no reload.
 ## [NOVO-022] Toggles de PDF que não fazem o que o rótulo promete (três casos, dois pré-existentes)
 
 - **Encontrado em:** 11/08/2026, na revisão pré-merge (NOVO-006b e T3.8)
-- **Categoria:** A — **Severidade sugerida:** P3 · **Status:** registrado, **não corrigido**
+- **Categoria:** A — **Severidade sugerida:** P3 · **Status:** ~~registrado, não corrigido~~
+  **RESOLVIDO (1, 2, 3) em 10/09/2026**: (1) o diálogo desabilita só os toggles de valor
+  com a via de execução marcada (`isFinancialOption` em `src/lib/pdf-visibility.ts`, com
+  teste que obriga toda chave de `DEFAULT_PDF_OPTIONS` a estar classificada) — termos,
+  assinatura e fotos seguem clicáveis e o gerador os obedece; (2) na fatura,
+  `showBankDetails` governa a coluna "Dados Bancários" e `showPaymentInstructions` a coluna
+  "Pague via PIX"/comprovante — o card sai se qualquer um estiver ligado; (3) o bloco de
+  assinatura do orçamento/OS obedece `showSignature`. Os três têm default `true` no
+  gerador, no padrão da empresa e no portal (`public_view_*` = 'true'), então o PDF de quem
+  nunca mexeu não muda. **Avisar o dono**: empresa que desligou a assinatura digital do link
+  público passa a baixar o PDF do portal sem as linhas de assinatura (mapeamento que já
+  existia e agora tem efeito); o texto livre `company.payment_instructions` do portal
+  continua fora do PDF (exige campo em `PDFData` + `use-pdf.ts`).
 
 1. **Na via de execução, os outros toggles ficam cinzas mas continuam valendo.** `PDFOptionsDialog.tsx:139`
    desabilita **todos** os demais quando "Via de execução" é marcada — inclusive os que não decidem valor
@@ -664,7 +711,12 @@ apareceria em uso.
   divergem, e quem confiar no comentário do SQL vai supor um agrupamento que não existe.
 - **Consertar seria:** agrupar por `eixo` dentro de cada faixa de impacto, com
   subtítulo por sistema. O dado já chega na folha; falta só usá-lo.
-- **Não corrigido:** fora do escopo da tarefa em que foi encontrado.
+- ~~**Não corrigido:** fora do escopo da tarefa em que foi encontrado.~~ **RESOLVIDO em
+  10/09/2026**: `buildSurveySheetHtml` agrupa por `eixo` dentro de cada faixa de impacto, na
+  ordem em que os sistemas aparecem, com subtítulo legível (`SYSTEM_LABEL`/`VERB_LABEL` de
+  `use-step-blocks.ts`, que ganhou `projeto`); pergunta sem eixo vai para "Geral". Com um
+  sistema só (ou nenhum) não há subtítulo — a folha de serviço simples continua idêntica.
+  5 casos novos em `survey-sheet.test.ts` (28 verdes).
 
 ### [NOVO-lev-02] A folha em branco mente sobre o motivo
 
@@ -794,8 +846,11 @@ apareceria em uso.
   orçamento"*, que contradiz a tela que ele está vendo. Os itens só aparecem
   depois de recarregar a página.
 - **Consertar seria:** trocar pelas duas chaves reais. É uma linha em cada arquivo.
-- **Não corrigido:** regra 3 — mas é o achado de menor custo de correção desta
-  varredura, e o de sintoma mais visível.
+- ~~**Não corrigido:** regra 3 — mas é o achado de menor custo de correção desta
+  varredura, e o de sintoma mais visível.~~ **RESOLVIDO em 09/09/2026** (quick win da
+  sessão de destravamento; livro atualizado em 10/09): `use-survey-material-rules.ts:87-88`
+  e `RelatedMaterialsPanel.tsx:71-72` invalidam `['so-parts', id]` e `['service-orders', id]`
+  — as chaves reais.
 
 ### [NOVO-lev-08] "Já estavam no orçamento" também é dito quando nada foi lançado por falta de número
 
@@ -816,7 +871,15 @@ apareceria em uso.
   reduz a frequência — não elimina, porque marcar de volta é um clique.
 - **Consertar seria:** contar os descartados por motivo (`count(*) filter (where
   m.quantity is null)`, etc.) e dizer qual foi. A função já tem a lista em mãos.
-- **Não corrigido:** regra 3.
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO em 10/09/2026** (migration
+  `20260910150000_apply_survey_materials_motivo_do_descarte`, aplicada): a função conta o
+  descarte por motivo antes de inserir (sem número / quantidade inválida / já lançada) e
+  responde qual foi — "Nada foi lançado: 1 sem número na resposta — corrija a resposta do
+  levantamento e lance de novo" — além de devolver os três contadores em `descartadas`.
+  Provado em produção dentro de transação com rollback nos ramos "sem seleção" e "sem
+  número"; o ramo "já estava(m)" não é exercitável hoje (nenhum levantamento tem sugestão
+  com quantidade > 0) e ficou coberto por leitura. A unidade de duplicata (ordem × linha)
+  continua em aberto no lev-09.
 
 ### [NOVO-lev-09] A trava de duplicata não enxerga o que a própria instrução está inserindo
 
@@ -863,7 +926,14 @@ apareceria em uso.
   derivar a altura de cada bloco da diferença entre os topos dos irmãos
   consecutivos — que já inclui a margem efetiva —, usando o fim do container para
   o último.
-- **Não corrigido:** regra 3.
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO em 10/09/2026**: `alturasOcupadas()`
+  (`src/lib/pdf-pagination.ts`) deriva a altura de cada bloco da distância ao topo do
+  irmão seguinte (último: até o fim do container), com o colapso de margens já resolvido
+  pelo navegador, e `generatePDFBlob` passa essas alturas a `planPageBreaks`. Teste com o
+  caso dos cinco cards (`[220,220,220,220,200]` → quebra em `[4]`) e contraprova da
+  medição antiga (o 5º terminava em 1080 > 1032). Viés residual conservador: bloco cuja
+  caixa cabe mas cuja margem estoura desce inteiro (branco no pé, nunca corte). Falta a
+  conferência visual em navegador com uma OS longa.
 
 ### [NOVO-lev-11] Bloco mais alto que a folha zera a conta pelo lugar errado
 
@@ -936,7 +1006,12 @@ apareceria em uso.
   navegador reinterpreta corretamente, porque o `.pdf` inserido cai sempre antes
   do `/*` ou dentro do comentário. Os dois foram testados.
 - **Consertar seria:** dividir contando profundidade de parênteses e colchetes.
-- **Não corrigido:** regra 3.
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO em 10/09/2026**: `scopeCss` divide a lista de
+  seletores só nas vírgulas de nível zero — profundidade de parênteses e colchetes contada,
+  conteúdo entre aspas ignorado, `\` escapando o caractere seguinte
+  (`src/lib/css-scope.ts`, `separarSeletores`). `:is(h1, h2)` sai como `.pdf-root :is(h1, h2)`;
+  `:not(...)` com lista, `[title="a,b"]` e aninhamento cobertos em `css-scope.test.ts` (18
+  verdes). `@import` com `;` na URL e comentários continuam atravessando intactos.
 
 ### [NOVO-lev-14] O portal público monta o PDF por conta própria — e é o documento que o CLIENTE baixa
 
@@ -1419,7 +1494,11 @@ apareceria em uso.
   para public, e deixar uma aberta ensina a deixar a próxima"*
   (`20260808100000`, linhas 65-67). Esta é a que ficou.
 - **Consertar seria:** duas linhas de `revoke`/`grant`, no padrão das demais.
-- **Não corrigido:** regra 3.
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO em 09/09/2026** (migration
+  `20260909130000_parse_answer_number_sem_anon`; livro atualizado em 10/09): revoke de
+  PUBLIC **e** de anon, grant nominal a authenticated/service_role. Lição registrada:
+  revogar só de anon não fecha quando o EXECUTE veio por PUBLIC — provado com
+  `has_function_privilege('anon', …)` = false depois.
 
 ### [NOVO-lev-32] O limiar de valor do levantamento é "configurável" sem ter como ser configurado — e o cast pode derrubar a função
 
@@ -1523,7 +1602,14 @@ apareceria em uso.
   for ligar a função vai querer que a largura saia dela também.
 - **Consertar seria:** derivar largura e `colspan` de `itemColumnCount`, ou
   remover a função e o teste.
-- **Não corrigido:** regra 3.
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO em 10/09/2026**: `itemColumnWidths()` em
+  `src/lib/pdf-visibility.ts` deriva as larguras de `itemColumnCount`: 4 colunas
+  55/15/15/15 (inalterado), 3 colunas 70/15/15 (a descrição absorve a sobra; qtd e valor
+  iguais nas duas tabelas, que continuam alinhadas), 2 colunas 80/20 (a divisão que a via
+  de execução já usava). As duas tabelas de itens em `pdf-generator.ts` consomem a função;
+  não há `colspan` no gerador. Teste garante soma = 100 em toda combinação de toggles e que
+  o documento padrão não muda de forma. Pendência lateral registrada: a tabela da FATURA
+  tem larguras em px fixas e ignora `showServicePrices`.
 
 ---
 

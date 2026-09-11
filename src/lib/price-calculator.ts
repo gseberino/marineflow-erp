@@ -76,14 +76,18 @@ export function calculateSalePrice(c: PriceComponents): PriceBreakdown {
   const marginD = c.profit_margin / 100
   const taxD = c.tax_rate / 100
   const commD = c.commission_rate / 100
-  const divisor = 1 - marginD - taxD - commD
+  // Em pontos percentuais, não em frações: `1 - 0,6 - 0,3 - 0,1` em binário dá +2,78e-17, e
+  // um guard em zero deixava passar um preço de 3,6 × 10¹⁸. Subtrair inteiros é exato.
+  const divisor = (100 - c.profit_margin - c.tax_rate - c.commission_rate) / 100
 
   // [NOVO-009] ≥ 100% não é "preço alto": é impossível. Margem, imposto e comissão saem da
   // RECEITA, então somados a 100% não sobra nada para pagar o custo — e acima disso a conta
   // vira negativa. Antes isto devolvia `sale_price: 0` em silêncio, e zero é um preço que
   // parece válido: entra no campo, salva no produto e sai numa proposta ao cliente.
   const soma = round2(c.profit_margin + c.tax_rate + c.commission_rate)
-  if (divisor <= 0) {
+  // Tolerância em vez de zero exato: percentual com centavos (33,33 + 33,33 + 33,34) ainda
+  // sobra lasca. Nenhum divisor legítimo chega perto — com duas casas, o menor é 1e-4.
+  if (divisor <= 1e-9) {
     return vazio(
       `Margem (${c.profit_margin}%) + imposto (${c.tax_rate}%) + comissão (${c.commission_rate}%) `
       + `somam ${soma}%. Como os três saem do preço de venda, a soma precisa ficar ABAIXO de `
