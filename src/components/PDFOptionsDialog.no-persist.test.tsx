@@ -124,3 +124,28 @@ describe('PDFOptionsDialog — não persiste preferência (MF-AUD-014)', () => {
     expect(segunda.onGenerate.mock.calls[0][1]).toMatchObject({ showTerms: DEFAULT_PDF_OPTIONS.showTerms });
   });
 });
+
+// NOVO-022 — a via de execução desabilitava TODOS os outros toggles, inclusive os que não
+// decidem valor nenhum (termos, assinatura, fotos). O gerador continua lendo esses três com
+// a via marcada, então quem queria a folha de campo SEM termos não tinha como desmarcar.
+describe('PDFOptionsDialog — via de execução desabilita só os toggles de valor', () => {
+  it('termos, assinatura e fotos continuam clicáveis; os de valor, não', async () => {
+    renderDialog({ documentType: 'service_order', hasProductImages: true });
+    await userEvent.click(await screen.findByLabelText(/via de execução|execution copy/i));
+
+    expect(screen.getByLabelText(/preço unitário dos serviços|service unit prices/i)).toBeDisabled();
+    expect(screen.getByLabelText(/^desconto$|^discount$/i)).toBeDisabled();
+    expect(screen.getByLabelText(/termos e condições|terms and conditions/i)).toBeEnabled();
+    expect(screen.getByLabelText(/campo de assinatura|signature field/i)).toBeEnabled();
+    expect(screen.getByLabelText(/fotos dos produtos|product photos/i)).toBeEnabled();
+  });
+
+  it('a folha de campo sem termos chega ao gerador com os dois marcados do jeito pedido', async () => {
+    const { onGenerate } = renderDialog({ documentType: 'service_order' });
+    await userEvent.click(await screen.findByLabelText(/via de execução|execution copy/i));
+    await userEvent.click(screen.getByLabelText(/termos e condições|terms and conditions/i));
+    await userEvent.click(screen.getByRole('button', { name: /imprimir|print/i }));
+
+    expect(onGenerate.mock.calls[0][1]).toMatchObject({ hideFinancials: true, showTerms: false });
+  });
+});

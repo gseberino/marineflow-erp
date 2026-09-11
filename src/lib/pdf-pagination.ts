@@ -69,8 +69,40 @@ export function alturaDoEspacador(
   return pxPagina - restoNaPagina;
 }
 
+export interface CaixaDoBloco {
+  /** Topo da caixa do bloco (getBoundingClientRect), sem margem. */
+  top: number;
+  /** Fundo da caixa do bloco, sem margem. */
+  bottom: number;
+}
+
+/**
+ * Quanto cada bloco OCUPA na coluna — não quanto mede a caixa dele.
+ *
+ * `getBoundingClientRect().height` é só a caixa, sem margens, e quase todo bloco de
+ * topo do documento tem margem embaixo (`.card` 20px, `table` 16px, `.grid` 20px).
+ * Somar caixas dizia "cabe" para um bloco que terminava abaixo do pé da folha: cinco
+ * cards de 200px somam 1000 e "cabem" em 1032, mas o quinto termina em 1080 — e o
+ * html2pdf o corta ao meio, que é exatamente o corte que este módulo existe para
+ * impedir.
+ *
+ * Somar `height + marginTop + marginBottom` também erraria: margens verticais de
+ * irmãos COLAPSAM (20px embaixo de um e 16px em cima do outro viram 20px, não 36).
+ * O que não erra é a distância do topo de um bloco ao topo do seguinte — o
+ * navegador já resolveu o colapso ao posicioná-los. O último bloco vai até o fim do
+ * container, que é onde a captura também termina.
+ */
+export function alturasOcupadas(caixas: CaixaDoBloco[], fimDoContainer: number): number[] {
+  return caixas.map((caixa, i) => {
+    const proximoTopo = i + 1 < caixas.length ? caixas[i + 1].top : fimDoContainer;
+    // Piso na própria caixa: um irmão puxado para cima por margem negativa, ou um
+    // container medido menor que o conteúdo, não pode fazer o bloco "encolher".
+    return Math.max(proximoTopo - caixa.top, caixa.bottom - caixa.top);
+  });
+}
+
 export interface Bloco {
-  /** Altura renderizada, em pixels. */
+  /** Altura OCUPADA, em pixels — ver `alturasOcupadas`. */
   altura: number;
   /**
    * Bloco que não deve ser partido (um card, uma tabela curta). Bloco mais alto

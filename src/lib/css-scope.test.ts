@@ -73,3 +73,46 @@ describe('escopo do CSS do documento', () => {
     expect(scopeCss('', R)).toBe('');
   });
 });
+
+// Vírgula nem sempre separa seletor: dentro de :is()/:not()/:where() ou de um
+// valor de atributo ela é parte dele, e a raiz tem de ficar do lado de fora.
+// Antes saía `.pdf-root :is(h1, .pdf-root h2)` — silencioso, só deixava de aplicar.
+describe('vírgula dentro de parênteses, colchetes e aspas', () => {
+  it(':is(h1, h2) recebe a raiz uma vez, do lado de fora', () => {
+    expect(limpo(scopeCss(':is(h1, h2) { margin: 0; }', R)))
+      .toBe('.pdf-root :is(h1, h2) { margin: 0; }');
+  });
+
+  it(':not() com lista — o que alguém escreve ao ajustar espaçamento de tabela', () => {
+    expect(limpo(scopeCss('tr:not(:last-child, .total) td { border-bottom: 1px solid; }', R)))
+      .toBe('.pdf-root tr:not(:last-child, .total) td { border-bottom: 1px solid; }');
+  });
+
+  it('parênteses aninhados contam profundidade, não só o primeiro nível', () => {
+    expect(limpo(scopeCss(':where(:not(.a, .b), .c) { color: red; }', R)))
+      .toBe('.pdf-root :where(:not(.a, .b), .c) { color: red; }');
+  });
+
+  it('vírgula entre aspas de atributo não divide', () => {
+    expect(limpo(scopeCss('[title="a,b"] { color: red; }', R)))
+      .toBe('.pdf-root [title="a,b"] { color: red; }');
+    expect(limpo(scopeCss("[title='a,b'] { color: red; }", R)))
+      .toBe(".pdf-root [title='a,b'] { color: red; }");
+  });
+
+  it('parêntese dentro de aspas não abre nível', () => {
+    // Um `(` literal no valor deixaria o nível aberto e engoliria a vírgula seguinte.
+    expect(limpo(scopeCss('[data-x="(a"], h2 { color: red; }', R)))
+      .toBe('.pdf-root [data-x="(a"], .pdf-root h2 { color: red; }');
+  });
+
+  it('lista simples continua virando um seletor escopado por item', () => {
+    expect(limpo(scopeCss('h1, :is(h2, h3), h4 { margin: 0; }', R)))
+      .toBe('.pdf-root h1, .pdf-root :is(h2, h3), .pdf-root h4 { margin: 0; }');
+  });
+
+  it('body dentro de :is() não vira a raiz — a troca é por seletor inteiro', () => {
+    expect(limpo(scopeCss(':is(body, h1) { margin: 0; }', R)))
+      .toBe('.pdf-root :is(body, h1) { margin: 0; }');
+  });
+});

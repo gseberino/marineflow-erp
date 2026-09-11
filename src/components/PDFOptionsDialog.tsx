@@ -9,6 +9,7 @@ import { AlertTriangle, Download, Printer, Loader2 } from 'lucide-react';
 import type { PDFOptions, PDFDocumentType } from '@/lib/pdf-generator';
 import { DEFAULT_PDF_OPTIONS, resolvePdfOptions } from '@/lib/pdf-generator';
 import { pdfOptionItems } from '@/lib/pdf-options-catalog';
+import { isFinancialOption } from '@/lib/pdf-visibility';
 import { useAppSetting, useAppSettings } from '@/hooks/use-app-settings';
 
 export type ValidityConfig = {
@@ -97,9 +98,11 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
   // opção nova.
   const checkboxItems = pdfOptionItems(documentType, t.pdf as unknown as Record<string, string>, { hasProductImages });
 
-  // "Via de execução" não convive com os outros: ela tira TODOS os valores do documento, e os
-  // demais toggles decidem quais valores aparecem. Deixá-los clicáveis prometeria um efeito
-  // que não existe — então ficam desabilitados enquanto ela estiver marcada.
+  // "Via de execução" não convive com os toggles de VALOR: ela tira todos os valores do
+  // documento, e esses toggles decidem quais valores aparecem. Deixá-los clicáveis prometeria
+  // um efeito que não existe — então ficam desabilitados enquanto ela estiver marcada. Os que
+  // não decidem valor (termos, assinatura, fotos) continuam valendo na folha de campo, e o
+  // gerador continua lendo cada um: quem quer a via de execução SEM termos precisa desmarcar.
   const anulaOsOutros = checkboxItems.some(i => i.overridesOthers && !!options[i.key]);
 
   const triggerAction = async (action: PDFAction) => {
@@ -136,7 +139,7 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
               <p className="text-xs text-muted-foreground">{t.pdf.optionsScopeHint}</p>
             </div>
             {checkboxItems.map(({ key, label, overridesOthers }) => {
-              const desabilitado = anulaOsOutros && !overridesOthers;
+              const desabilitado = anulaOsOutros && !overridesOthers && isFinancialOption(key);
               return (
                 <div key={key} className={`flex items-center gap-2${desabilitado ? ' opacity-50' : ''}`}>
                   <Checkbox

@@ -1,7 +1,52 @@
 import { describe, it, expect } from 'vitest';
-import { planPageBreaks, ALTURA_UTIL_PX } from './pdf-pagination';
+import { planPageBreaks, alturasOcupadas, ALTURA_UTIL_PX } from './pdf-pagination';
 
 const H = ALTURA_UTIL_PX; // ≈ 1032 px
+
+/**
+ * NOVO-lev-10 — o planejador media a caixa de cada bloco e ignorava a margem.
+ *
+ * O CSS do documento dá margem embaixo de quase todo bloco de topo (`.card` 20px,
+ * `table` 16px, `.grid` 20px). Medido só pela caixa, cinco cards de 200 px somavam
+ * 1000, "cabiam" em 1032 e não quebravam — mas o quinto terminava em 1080 e o
+ * html2pdf o cortava ao meio.
+ */
+describe('a ocupação de cada bloco inclui a margem', () => {
+  // Cinco cards de 200 px com margin-bottom de 20 px, como o navegador os posiciona.
+  const caixas = [0, 220, 440, 660, 880].map((top) => ({ top, bottom: top + 200 }));
+  // A margem do último colapsa para fora do container: ele termina onde o card termina.
+  const fimDoContainer = 1080;
+
+  it('vai do topo de um bloco ao topo do seguinte; o último, até o fim do container', () => {
+    expect(alturasOcupadas(caixas, fimDoContainer)).toEqual([220, 220, 220, 220, 200]);
+  });
+
+  it('com a ocupação real, o quinto card desce para a folha seguinte', () => {
+    const blocos = alturasOcupadas(caixas, fimDoContainer).map((altura) => ({ altura }));
+    expect(planPageBreaks(blocos, H)).toEqual([4]);
+  });
+
+  it('contraprova: medindo só a caixa, não quebrava — e o quinto card saía cortado', () => {
+    const soCaixas = caixas.map((c) => ({ altura: c.bottom - c.top }));
+    expect(planPageBreaks(soCaixas, H)).toEqual([]);
+    expect(caixas[4].bottom).toBeGreaterThan(H);
+  });
+
+  it('bloco sem margem ocupa exatamente a própria caixa', () => {
+    expect(alturasOcupadas([{ top: 0, bottom: 300 }, { top: 300, bottom: 450 }], 450))
+      .toEqual([300, 150]);
+  });
+
+  it('nunca devolve menos que a própria caixa', () => {
+    // Irmão puxado para cima (margem negativa) ou container medido curto demais.
+    expect(alturasOcupadas([{ top: 0, bottom: 300 }, { top: 290, bottom: 400 }], 380))
+      .toEqual([300, 110]);
+  });
+
+  it('lista vazia', () => {
+    expect(alturasOcupadas([], 0)).toEqual([]);
+  });
+});
 
 /**
  * O caso que originou tudo: o bloco "Informações para Pagamento" saiu partido

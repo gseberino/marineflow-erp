@@ -1,5 +1,5 @@
 import { scopeCss } from './css-scope';
-import { valueVisibility } from './pdf-visibility';
+import { itemColumnWidths, valueVisibility } from './pdf-visibility';
 
 export type PDFDocumentType = 'quote' | 'service_order' | 'invoice' | 'receipt';
 
@@ -396,20 +396,28 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
     ) as HTMLElement[];
 
     if (filhos.length > 1) {
+      const { planPageBreaks, alturaDoEspacador, alturasOcupadas } = await import('./pdf-pagination');
+
       // NOVO-lev-12: `indivisivel` era medido aqui (um querySelector por bloco em
       // toda geração) e NUNCA lido por planPageBreaks — todo bloco que não cabe
       // desce inteiro, card ou não. Só a altura decide.
-      const blocos = filhos.map((el) => ({
-        altura: el.getBoundingClientRect().height,
-      }));
-
-      const { planPageBreaks, alturaDoEspacador } = await import('./pdf-pagination');
+      //
+      // E a altura é a OCUPADA, não a da caixa: `.height` do rect deixa a margem de
+      // fora, e quase todo bloco de topo tem margin-bottom. Medida só pela caixa, a
+      // conta de "quanto já usei da folha" ficava menor que a realidade e o último
+      // bloco da página saía cortado ao meio.
+      const rectDoContainer = alvoDaPaginacao.getBoundingClientRect();
+      const caixas = filhos.map((el) => {
+        const r = el.getBoundingClientRect();
+        return { top: r.top, bottom: r.bottom };
+      });
+      const blocos = alturasOcupadas(caixas, rectDoContainer.bottom).map((altura) => ({ altura }));
 
       // Em ordem CRESCENTE, medindo um por vez: cada espaçador desloca os blocos
       // seguintes, então o topo do próximo só é confiável depois que o anterior entrou.
       // (Ler todas as posições de uma vez e inserir depois é exatamente o defeito do
       // `legacy`, que invalida as próprias coordenadas enquanto insere.)
-      const topoDoContainer = alvoDaPaginacao.getBoundingClientRect().top;
+      const topoDoContainer = rectDoContainer.top;
       for (const i of planPageBreaks(blocos)) {
         const topoDoBloco = filhos[i].getBoundingClientRect().top - topoDoContainer;
         const altura = alturaDoEspacador(topoDoBloco);
@@ -1076,6 +1084,12 @@ function buildOrderHTML(data: PDFData, options: PDFOptions): string {
   // documento saía com os totais mesmo com tudo desmarcado.
   const vis = valueVisibility(options);
 
+  // As larguras seguem a contagem de colunas para fecharem em 100%. Com literais, uma
+  // coluna de valor a menos deixava 15% sem dono — e imprimir e baixar redistribuíam
+  // a sobra de jeitos diferentes. Na via de execução não há coluna de valor nenhuma.
+  const colServico = itemColumnWidths(!semValores && vis.servicoUnitario, !semValores && vis.servicoTotal);
+  const colPeca = itemColumnWidths(!semValores && vis.pecaUnitario, !semValores && vis.pecaTotal);
+
   const serviceRows = data.services.map(s => `
     <tr>
       <td style="font-weight:600;">${esc(s.name)}${s.description ? `<div style="font-weight:400;color:var(--pdf-text-muted);font-size:9px;margin-top:2px;">${esc(s.description)}</div>` : ''}</td>
@@ -1225,11 +1239,11 @@ ${data.services.length > 0 ? `
 <table>
   <thead>
     <tr>
-      <th style="width:${semValores ? '80' : '55'}%;">Descrição Técnica</th>
-      <th style="width:${semValores ? '20' : '15'}%;text-align:center;">Qtd/Unid</th>
+      <th style="width:${colServico.descricao}%;">Descrição Técnica</th>
+      <th style="width:${colServico.quantidade}%;text-align:center;">Qtd/Unid</th>
       ${semValores ? '' : `
-      ${vis.servicoUnitario ? '<th style="width:15%;text-align:right;">Unitário</th>' : ''}
-      ${vis.servicoTotal ? '<th style="width:15%;text-align:right;">Subtotal</th>' : ''}`}
+      ${vis.servicoUnitario ? `<th style="width:${colServico.valor}%;text-align:right;">Unitário</th>` : ''}
+      ${vis.servicoTotal ? `<th style="width:${colServico.valor}%;text-align:right;">Subtotal</th>` : ''}`}
     </tr>
   </thead>
   <tbody>${serviceRows}</tbody>
@@ -1241,11 +1255,11 @@ ${data.parts.length > 0 ? `
 <table>
   <thead>
     <tr>
-      <th style="width:${semValores ? '80' : '55'}%;">Item / Especificação</th>
-      <th style="width:${semValores ? '20' : '15'}%;text-align:center;">Qtd</th>
+      <th style="width:${colPeca.descricao}%;">Item / Especificação</th>
+      <th style="width:${colPeca.quantidade}%;text-align:center;">Qtd</th>
       ${semValores ? '' : `
-      ${vis.pecaUnitario ? '<th style="width:15%;text-align:right;">Unitário</th>' : ''}
-      ${vis.pecaTotal ? '<th style="width:15%;text-align:right;">Subtotal</th>' : ''}`}
+      ${vis.pecaUnitario ? `<th style="width:${colPeca.valor}%;text-align:right;">Unitário</th>` : ''}
+      ${vis.pecaTotal ? `<th style="width:${colPeca.valor}%;text-align:right;">Subtotal</th>` : ''}`}
     </tr>
   </thead>
   <tbody>${partsRows}</tbody>
@@ -1306,6 +1320,7 @@ ${!semValores && options.showBankDetails !== false && data.bank && (data.bank.ba
 </div>
 ` : ''}
 
+${options.showSignature !== false ? `
 <div class="grid" style="margin-top:40px;">
   <div style="text-align:center;">
     <div style="height:60px;"></div>
@@ -1322,6 +1337,7 @@ ${!semValores && options.showBankDetails !== false && data.bank && (data.bank.ba
     </div>
   </div>
 </div>
+` : ''}
 
 ${photoGallery}
 
@@ -1399,6 +1415,13 @@ function buildInvoiceHTML(data: PDFData, options: PDFOptions): string {
 
   const bank = data.bank || {};
   const hasBank = !!(bank.bank_name || bank.bank_agency || bank.bank_account || bank.pix_key);
+  // Dois toggles, um card. "Dados bancários" é a coluna da esquerda (banco, agência,
+  // conta, favorecido); "instruções de pagamento" é a da direita — como pagar (PIX) e
+  // o que fazer depois (mandar o comprovante). Só o `false` explícito esconde: quem
+  // monta as opções à mão (portal, WhatsApp) não pode perder a coluna por omissão.
+  const mostraDadosBancarios = options.showBankDetails !== false;
+  const mostraInstrucoes = options.showPaymentInstructions !== false;
+  const duasColunas = mostraDadosBancarios && mostraInstrucoes;
 
   const body = `
 ${companyHeaderHTML(data.company, 'Fatura de Serviço', docNumber)}
@@ -1475,22 +1498,22 @@ ${data.serviceOrder.financial_notes ? `
 </div>
 ` : ''}
 
-${options.showBankDetails !== false && hasBank ? `
+${(mostraDadosBancarios || mostraInstrucoes) && hasBank ? `
 <div class="card">
   <div class="section-title">Instruções para Pagamento${data.serviceOrder.payment_method_preferred ? ` — ${PAYMENT_METHOD_LABELS[data.serviceOrder.payment_method_preferred] || data.serviceOrder.payment_method_preferred}` : ''}</div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:10px;line-height:1.6;">
-    <div>
+  <div style="display:grid;grid-template-columns:${duasColunas ? '1fr 1fr' : '1fr'};gap:12px;font-size:10px;line-height:1.6;">
+    ${mostraDadosBancarios ? `<div>
       <strong>Dados Bancários:</strong><br/>
       ${bank.bank_name ? `Banco: ${esc(bank.bank_name)}<br/>` : ''}
       ${bank.bank_agency ? `Agência: ${esc(bank.bank_agency)} · ` : ''}${bank.bank_account ? `Conta: ${esc(bank.bank_account)}` : ''}<br/>
       Favorecido: ${esc(data.company.name)}<br/>
       ${data.company.cnpj ? `CNPJ: ${esc(data.company.cnpj)}` : ''}
-    </div>
-    <div style="border-left:1px solid var(--pdf-border);padding-left:12px;">
+    </div>` : ''}
+    ${mostraInstrucoes ? `<div style="${duasColunas ? 'border-left:1px solid var(--pdf-border);padding-left:12px;' : ''}">
       <strong>Pague via PIX:</strong><br/>
       Chave: <span style="font-size:11px;font-weight:700;color:var(--pdf-primary);">${esc(bank.pix_key || 'N/A')}</span><br/>
       <span style="font-size:9px;color:var(--pdf-text-muted);margin-top:4px;display:block;">Após o pagamento, envie o comprovante para ${data.company.email || 'nosso contato'}.</span>
-    </div>
+    </div>` : ''}
   </div>
 </div>
 ` : ''}

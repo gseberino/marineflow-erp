@@ -24,6 +24,46 @@
 const AT_RULES_SEM_ESCOPO = /^@(import|charset|namespace|page|font-face|keyframes|-webkit-keyframes)/i;
 
 /**
+ * Separa a lista de seletores só nas vírgulas de nível zero.
+ *
+ * Dentro de `:is()`, `:not()`, `:where()` ou de `[title="a,b"]` a vírgula faz
+ * parte do seletor: partir ali poria a raiz dentro do argumento e o seletor
+ * passaria a significar outra coisa. Aspas protegem inclusive parênteses e
+ * colchetes literais no valor de um atributo; `\` escapa o caractere seguinte.
+ */
+function separarSeletores(seletores: string): string[] {
+  const partes: string[] = [];
+  let atual = '';
+  let nivel = 0;
+  let aspas: string | null = null;
+
+  for (let i = 0; i < seletores.length; i++) {
+    const ch = seletores[i];
+    if (ch === '\\') {
+      atual += ch + (seletores[i + 1] ?? '');
+      i++;
+      continue;
+    }
+    if (aspas) {
+      if (ch === aspas) aspas = null;
+    } else if (ch === '"' || ch === "'") {
+      aspas = ch;
+    } else if (ch === '(' || ch === '[') {
+      nivel++;
+    } else if (ch === ')' || ch === ']') {
+      nivel = Math.max(0, nivel - 1);
+    } else if (ch === ',' && nivel === 0) {
+      partes.push(atual);
+      atual = '';
+      continue;
+    }
+    atual += ch;
+  }
+  partes.push(atual);
+  return partes;
+}
+
+/**
  * Prefixa cada seletor com `root`.
  *
  * `:root`, `html` e `body` viram a própria raiz — dentro do documento embutido
@@ -31,8 +71,7 @@ const AT_RULES_SEM_ESCOPO = /^@(import|charset|namespace|page|font-face|keyframe
  * raiz já recebe o que precisa pela regra de body.
  */
 function prefixarSeletores(seletores: string, root: string): string {
-  return seletores
-    .split(',')
+  return separarSeletores(seletores)
     .map((s) => {
       const sel = s.trim();
       if (!sel) return '';

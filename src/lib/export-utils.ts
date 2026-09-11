@@ -18,14 +18,14 @@ export function exportToCSV(
       const val = row[col.key];
       const transformed = col.transform ? col.transform(val) : (val ?? '');
       let str = String(transformed);
-      // NOVO-019: c\u00E9lula come\u00E7ando com = @ (ou +/\u2212 que n\u00E3o seja n\u00FAmero) \u00E9 executada
-      // como f\u00F3rmula pelo Excel ao abrir \u2014 e o conte\u00FAdo vem de campo livre do cadastro.
-      // O ap\u00F3strofo neutraliza; n\u00FAmero negativo leg\u00EDtimo (-1234,56) passa intacto.
+      // Célula começando com = @ (ou +/− que não seja número) é executada como fórmula
+      // pelo Excel ao abrir — e o conteúdo vem de campo livre do cadastro. O apóstrofo
+      // neutraliza; número negativo legítimo (-1234,56) passa intacto.
       if (/^[=@\t\r]/.test(str) || (/^[+-]/.test(str) && !/^[+-]?\d+(?:[.,]\d+)?$/.test(str))) {
         str = `'${str}`;
       }
       str = str.replace(/"/g, '""');
-      // NOVO-019: aspas tamb\u00E9m exigem envelope \u2014 sem ele o `""` chega literal na planilha.
+      // Aspas também exigem envelope — sem ele o `""` chega literal na planilha.
       return /[";\n]/.test(str) ? `"${str}"` : str;
     }).join(';'),
   );
