@@ -62,7 +62,6 @@ import { useUpdateServiceOrderService } from '@/hooks/use-service-order-services
 import { useUpdateServiceOrderPart } from '@/hooks/use-service-order-parts';
 import { PriceCalculatorDialog } from '@/components/PriceCalculatorDialog';
 import { supabase } from '@/integrations/supabase/client';
-import { usePDFData } from '@/hooks/use-pdf';
 import { generatePDF, downloadPDF, DEFAULT_PDF_OPTIONS } from '@/lib/pdf-generator';
 import type { PDFOptions } from '@/lib/pdf-generator';
 import { PDFOptionsDialog } from '@/components/PDFOptionsDialog';

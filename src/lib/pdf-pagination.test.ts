@@ -47,6 +47,20 @@ describe('onde virar a página', () => {
     expect(planPageBreaks(blocos, H)).toEqual([2]);
   });
 
+  // NOVO-lev-11: o caso que o teste acima evitava. O bloco alto NÃO é o primeiro —
+  // começa depois de 500 px já ocupados. O resto na última folha é de
+  // (500 + H + 200), não de (H + 200): a conta antiga dizia "sobram 200" quando
+  // sobravam 700, e o bloco seguinte de 400 px era desenhado atravessando o corte
+  // — folha quase em branco no meio do documento.
+  it('bloco alto em SEGUNDO lugar recomeça a conta pelo que já estava ocupado', () => {
+    const blocos = [
+      { altura: 500 },
+      { altura: H + 200 },   // termina a (500 + H + 200) → resto 700 na folha nova
+      { altura: 400 },       // 700 + 400 = 1100 > 1032 → tem que quebrar
+    ];
+    expect(planPageBreaks(blocos, H)).toEqual([2]);
+  });
+
   it('conta certo ao longo de várias folhas', () => {
     const blocos = [
       { altura: 600 }, { altura: 500 },   // 600 | 500 → quebra em 1

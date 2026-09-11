@@ -396,11 +396,11 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
     ) as HTMLElement[];
 
     if (filhos.length > 1) {
+      // NOVO-lev-12: `indivisivel` era medido aqui (um querySelector por bloco em
+      // toda geração) e NUNCA lido por planPageBreaks — todo bloco que não cabe
+      // desce inteiro, card ou não. Só a altura decide.
       const blocos = filhos.map((el) => ({
         altura: el.getBoundingClientRect().height,
-        // Card e tabela são os que não podem partir; o CSS já declara o mesmo,
-        // e aqui a intenção vira medida.
-        indivisivel: el.classList.contains('card') || !!el.querySelector('table'),
       }));
 
       const { planPageBreaks, alturaDoEspacador } = await import('./pdf-pagination');
@@ -690,8 +690,7 @@ function companyHeaderHTML(company: PDFData['company'], docTypeLabel: string, do
         <h1 style="font-size:24px;margin-bottom:4px;color:var(--pdf-primary);">${docTypeLabel}</h1>
         <div style="font-size:16px;font-weight:700;color:var(--pdf-secondary);">${esc(docNumber)}</div>
         <div style="margin-top:8px;font-size:10px;color:var(--pdf-text-muted);">
-          Emissão: ${new Date().toLocaleDateString('pt-BR')}<br/>
-          Página 01 / 01
+          Emissão: ${new Date().toLocaleDateString('pt-BR')}
         </div>
       </div>
     </header>
@@ -1175,7 +1174,7 @@ ${semValores ? `
     ${data.vessel ? `<div style="font-size:12px;font-weight:700;color:var(--pdf-primary);">${esc(data.vessel.name)}</div>` : ''}
     <div style="font-size:10px;">
       ${data.vessel?.manufacturer ? `${esc(data.vessel.manufacturer)} ${esc(data.vessel.model || '')} (${data.vessel.year || '—'})<br/>` : ''}
-      ${data.vessel?.registration ? `Registro: ${data.vessel.registration}<br/>` : ''}
+      ${data.vessel?.registration ? `Registro: ${esc(data.vessel.registration)}<br/>` : ''}
       ${data.marina ? `<strong>Marina:</strong> ${esc(data.marina.name)}${data.marina.city ? ` (${esc(data.marina.city)})` : ''}` : ''}
     </div>
   </div>
@@ -1335,7 +1334,6 @@ ${options.showTerms && data.terms ? `
 
 <footer style="margin-top:30px;text-align:center;font-size:9px;color:var(--pdf-text-muted);border-top:1px solid var(--pdf-border);padding-top:10px; display:flex; justify-content:space-between; align-items:center;">
   <span>MarineFlow ERP · Documento Digital Autenticado</span>
-  <span>Página 01 / 01</span>
   <span>Emitido em ${new Date().toLocaleString('pt-BR')}</span>
 </footer>
 `;

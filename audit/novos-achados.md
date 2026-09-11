@@ -858,7 +858,10 @@ apareceria em uso.
   `usado` é 0 e as duas fórmulas coincidem. Dá confiança falsa.
 - **Consertar seria:** uma linha (`usado = (usado + altura) % alturaUtil`) mais um
   caso de teste com o bloco alto em segundo lugar.
-- **Não corrigido:** regra 3.
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO em 10/09/2026**: a linha corrigida
+  e o caso de teste "bloco alto em SEGUNDO lugar" adicionado em
+  `pdf-pagination.test.ts` (500 · H+200 · 400 → quebra em [2]; a conta antiga
+  não quebrava e o bloco de 400 px atravessava o corte).
 
 ### [NOVO-lev-12] `indivisivel` é medido, documentado — e nunca usado
 
@@ -877,7 +880,12 @@ apareceria em uso.
 - **Consertar seria:** ou remover o campo, ou usá-lo — por exemplo, permitindo que
   um bloco DIVISÍVEL longo (texto corrido de termos) parta em vez de descer
   inteiro e deixar meia folha vazia.
-- **Não corrigido:** regra 3.
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO (pela remoção) em 10/09/2026**: o
+  gerador parou de medir `indivisivel` (o `querySelector` por bloco saiu) e
+  `planPageBreaks` parou de desestruturá-lo — só a altura decide, como o
+  comentário já dizia. O campo segue opcional no tipo `Bloco` por
+  compatibilidade com os testes existentes, sem efeito. Deixar bloco divisível
+  partir é decisão de desenho que continua em aberto.
 
 ### [NOVO-lev-13] `scopeCss` divide seletores por vírgula sem olhar parênteses
 
@@ -1256,7 +1264,9 @@ apareceria em uso.
   é justamente a janela em que alguém volta ao local e olha o orçamento.
 - **Consertar seria:** ou limpar os quatro, ou corrigir o comentário. O perigo do
   jeito atual é que a próxima pessoa vai confiar no comentário.
-- **Não corrigido:** regra 3.
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO em 10/09/2026**: `useReopenSurvey`
+  limpa também `estimated_minutes_p50/p80`, `contingency_pct` e `cases_used` —
+  o código passou a cumprir o que o comentário prometia.
 
 ### [NOVO-lev-27] As fotos do levantamento vão para um bucket público
 
@@ -1426,7 +1436,9 @@ apareceria em uso.
 - **Consertar seria:** `esc(data.vessel.registration)`, e um teste que varra o
   arquivo procurando interpolação de campo de cadastro sem `esc` — a mesma
   ideia das varreduras de `.select()` e de hooks.
-- **Não corrigido:** regra 3.
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO em 10/09/2026**:
+  `esc(data.vessel.registration)`. A varredura automática de interpolações sem
+  `esc` fica como melhoria futura.
 
 ### [NOVO-lev-34] Todo documento diz "Página 01 / 01"
 
@@ -1448,7 +1460,9 @@ apareceria em uso.
   pronto, que a API `.toPdf().get('pdf')` já permite. Enquanto isso não existir,
   **tirar a frase é melhor que mantê-la**: informação errada é pior que
   informação ausente.
-- **Não corrigido:** regra 3.
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO (pela retirada) em 10/09/2026**: a
+  frase "Página 01 / 01" saiu do cabeçalho e do rodapé. Numeração REAL via
+  jsPDF sobre o PDF pronto continua como melhoria a fazer.
 
 ### [NOVO-lev-35] `itemColumnCount` nunca foi ligado, e as colunas somam 85%
 
@@ -2110,7 +2124,10 @@ porque só o dono pode preenchê-las.
 - **Consertar seria:** uma linha (`/view/`). Mas mexer em tela legada esbarra na
   decisão de data de corte das 19 telas antigas (`MF-AUD-037`), que está aberta:
   se o corte estiver próximo, o certo é apagar a tela, não emendá-la.
-- **Não corrigido:** regra 3, e a correção depende da decisão do corte.
+- ~~**Não corrigido:** regra 3.~~ **RESOLVIDO em 10/09/2026**: a linha passou a
+  montar `/view/${share_token}`. A correção é inócua para a decisão do corte
+  (MF-AUD-037): se a tela for apagada, some junto; enquanto existir, não manda
+  mais link morto.
 
 ### [NOVO-lev-42] O domínio que o cliente recebe serve um build morto — TODO link público está quebrado
 

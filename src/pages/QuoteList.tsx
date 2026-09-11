@@ -169,7 +169,9 @@ export default function QuoteList() {
 
   const handleSendWhatsApp = (so: any) => {
     if (!so.share_token) { toast.error('Este orçamento ainda não tem link público gerado.'); return; }
-    const url = `${window.location.origin}/public/service-order/${so.share_token}`;
+    // NOVO-lev-41: a rota /public/service-order/ nunca existiu — o cliente caía no
+    // "não encontrado". A V2 já mandava /view/; a tela legada tinha ficado para trás.
+    const url = `${window.location.origin}/view/${so.share_token}`;
     const clientName = so.clients?.name;
     const phone = normalizePhoneE164(so.clients?.whatsapp || so.clients?.phone || '');
     const msg = `Olá${clientName ? ' ' + clientName : ''}, segue o link do seu Orçamento ${so.service_order_number}: ${url}`;

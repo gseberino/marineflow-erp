@@ -93,13 +93,16 @@ export function planPageBreaks(
   let usado = 0;
 
   for (let i = 0; i < blocos.length; i++) {
-    const { altura, indivisivel } = blocos[i];
+    const { altura } = blocos[i];
 
     // Bloco maior que a folha inteira: não adianta empurrar para a próxima,
     // ele vai ser partido de todo jeito. Deixa seguir e recomeça a contagem
-    // pelo que sobra do último pedaço.
+    // pelo que sobra do último pedaço. NOVO-lev-11: o pedaço que sobra é de
+    // (usado + altura) — o bloco começa DEPOIS do que já ocupava a folha. Contar
+    // só `altura` errava o resto e produzia folha quase em branco no meio do
+    // documento quando o bloco alto não era o primeiro.
     if (altura > alturaUtil) {
-      usado = altura % alturaUtil;
+      usado = (usado + altura) % alturaUtil;
       continue;
     }
 

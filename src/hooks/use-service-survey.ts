@@ -347,6 +347,15 @@ export function useReopenSurvey() {
           confidence: null,
           confidence_rationale: null,
           answered_at: null,
+          // NOVO-lev-26: o comentário acima prometia limpar a estimativa e o
+          // código só limpava a confiança — entre reabrir e fechar de novo, o
+          // levantamento carregava contingência carimbada por um julgamento
+          // explicitamente retirado. Agora os quatro campos da estimativa vão
+          // junto; useCloseSurvey os reescreve ao fechar.
+          estimated_minutes_p50: null,
+          estimated_minutes_p80: null,
+          contingency_pct: null,
+          cases_used: null,
         })
         .eq('id', input.surveyId);
       if (error) throw error;
