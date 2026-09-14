@@ -91,6 +91,15 @@ Superfície: 243 arquivos em `supabase/migrations/`, `src/integrations/supabase/
   convergência. Sem isso, o repositório não reconstrói a produção — que é a definição de perda de
   reprodutibilidade.
 - **Esforço:** L — **Decisão do Gustavo:** Sim — mesma decisão de MF-AUD-022.
+- **RESOLVIDO em 14/09/2026** (ver `audit/migrations-reconciliacao-20260914.md`): medido de novo
+  (360 versões × 303 arquivos; 180 sem arquivo, 124 sem registro), snapshot fiel da produção em
+  `supabase/schemas/producao/` gerado por `scripts/snapshot-producao.mjs` (catálogos pela CLI,
+  sem Docker), 122 versões registradas com evidência por arquivo, 20 migrations recuperadas dos
+  transcripts (SQL exato), 116 duplicatas e 43 perdidas com stub, 11 arquivos de timestamp
+  repetido renomeados. `migration list --linked` alinhado e `db push --dry-run` sem pendências —
+  o `LegacyDbPushMissingLocalError` acabou. **Fica com o dono** (classificador barrou a gravação):
+  a migration que derruba no repo as 24 políticas allow-all da era Lovable que a
+  `20260706165104` removeu do banco, e a que fecha 36 funções para anon.
 
 ### [MF-AUD-059] Duas tabelas de backup/reparo esquecidas no banco de produção
 - **Módulo:** Banco

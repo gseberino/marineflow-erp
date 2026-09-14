@@ -145,7 +145,10 @@ Correções de menos de meia hora cada, sem decisão pendente:
 
 1. **MF-AUD-043** — script `typecheck` + CI (`lint`, `typecheck`, `test`, `test:edge`, `build`) **antes** de
    zerar os 16 erros de tipo.
-2. **MF-AUD-058 / MF-AUD-022** `[DECISÃO]` — conciliar `pg_policies`/migrations e commitar a convergência.
+2. ~~**MF-AUD-058 / MF-AUD-022** `[DECISÃO]` — conciliar `pg_policies`/migrations e commitar a convergência.~~
+   **FEITO em 14/09/2026** (`audit/migrations-reconciliacao-20260914.md`): histórico alinhado, `db push`
+   utilizável de novo, snapshot da produção em `supabase/schemas/producao/`. Restam duas migrations
+   prontas na fila do dono (políticas órfãs no repo; funções abertas para anon).
 3. **MF-AUD-055** `[DECISÃO]` — classificar as 10 funções órfãs: apagar ou versionar (`ai-cost-reconcile` está
    viva e agendada).
 4. **MF-AUD-037** `[DECISÃO]` — data de corte para as 19 telas legadas (só depois da Onda 2, que depende delas).
