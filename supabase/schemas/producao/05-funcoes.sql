@@ -459,8 +459,7 @@ BEGIN
 END;
 $function$
 ;
--- ACL: =X/postgres postgres=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.backfill_message_identity(p_limit integer) TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.backfill_message_identity(p_limit integer) TO postgres;
 GRANT EXECUTE ON FUNCTION public.backfill_message_identity(p_limit integer) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.backfill_message_identity(p_limit integer) TO service_role;
@@ -484,10 +483,8 @@ AS $function$
   order by 2 desc nulls last;
 $function$
 ;
--- ACL: =X/postgres postgres=X/postgres anon=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.bi_margin_by_category(_since date) TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.bi_margin_by_category(_since date) TO postgres;
-GRANT EXECUTE ON FUNCTION public.bi_margin_by_category(_since date) TO anon;
 GRANT EXECUTE ON FUNCTION public.bi_margin_by_category(_since date) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.bi_margin_by_category(_since date) TO service_role;
 
@@ -512,10 +509,8 @@ AS $function$
   order by revenue desc nulls last;
 $function$
 ;
--- ACL: =X/postgres postgres=X/postgres anon=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.bi_revenue_by_brand(_since date, _brand text) TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.bi_revenue_by_brand(_since date, _brand text) TO postgres;
-GRANT EXECUTE ON FUNCTION public.bi_revenue_by_brand(_since date, _brand text) TO anon;
 GRANT EXECUTE ON FUNCTION public.bi_revenue_by_brand(_since date, _brand text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.bi_revenue_by_brand(_since date, _brand text) TO service_role;
 
@@ -538,10 +533,8 @@ AS $function$
   limit greatest(_limit,1);
 $function$
 ;
--- ACL: =X/postgres postgres=X/postgres anon=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.bi_top_clients(_since date, _limit integer) TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.bi_top_clients(_since date, _limit integer) TO postgres;
-GRANT EXECUTE ON FUNCTION public.bi_top_clients(_since date, _limit integer) TO anon;
 GRANT EXECUTE ON FUNCTION public.bi_top_clients(_since date, _limit integer) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.bi_top_clients(_since date, _limit integer) TO service_role;
 
@@ -581,10 +574,8 @@ begin
   return new;
 end $function$
 ;
--- ACL: =X/postgres postgres=X/postgres anon=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.calc_shift_duration() TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.calc_shift_duration() TO postgres;
-GRANT EXECUTE ON FUNCTION public.calc_shift_duration() TO anon;
 GRANT EXECUTE ON FUNCTION public.calc_shift_duration() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.calc_shift_duration() TO service_role;
 
@@ -611,10 +602,8 @@ begin
 end;
 $function$
 ;
--- ACL: =X/postgres postgres=X/postgres anon=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.calc_warranty_expiry() TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.calc_warranty_expiry() TO postgres;
-GRANT EXECUTE ON FUNCTION public.calc_warranty_expiry() TO anon;
 GRANT EXECUTE ON FUNCTION public.calc_warranty_expiry() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.calc_warranty_expiry() TO service_role;
 
@@ -1051,10 +1040,8 @@ BEGIN
 END;
 $function$
 ;
--- ACL: =X/postgres postgres=X/postgres anon=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.compute_next_run(_from timestamp with time zone, _recurrence_type text, _days_of_week integer[], _day_of_month integer) TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.compute_next_run(_from timestamp with time zone, _recurrence_type text, _days_of_week integer[], _day_of_month integer) TO postgres;
-GRANT EXECUTE ON FUNCTION public.compute_next_run(_from timestamp with time zone, _recurrence_type text, _days_of_week integer[], _day_of_month integer) TO anon;
 GRANT EXECUTE ON FUNCTION public.compute_next_run(_from timestamp with time zone, _recurrence_type text, _days_of_week integer[], _day_of_month integer) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.compute_next_run(_from timestamp with time zone, _recurrence_type text, _days_of_week integer[], _day_of_month integer) TO service_role;
 
@@ -1852,10 +1839,8 @@ BEGIN
   RETURN NEW;
 END; $function$
 ;
--- ACL: =X/postgres postgres=X/postgres anon=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.deduct_stock_on_os_complete() TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.deduct_stock_on_os_complete() TO postgres;
-GRANT EXECUTE ON FUNCTION public.deduct_stock_on_os_complete() TO anon;
 GRANT EXECUTE ON FUNCTION public.deduct_stock_on_os_complete() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.deduct_stock_on_os_complete() TO service_role;
 
@@ -1899,10 +1884,8 @@ BEGIN
 END;
 $function$
 ;
--- ACL: =X/postgres postgres=X/postgres anon=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.detect_so_change_after_signature() TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.detect_so_change_after_signature() TO postgres;
-GRANT EXECUTE ON FUNCTION public.detect_so_change_after_signature() TO anon;
 GRANT EXECUTE ON FUNCTION public.detect_so_change_after_signature() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.detect_so_change_after_signature() TO service_role;
 
@@ -2243,10 +2226,8 @@ AS $function$
      AND tstzrange(so.scheduled_start_at, so.scheduled_end_at) && tstzrange(p_start, p_end);
 $function$
 ;
--- ACL: =X/postgres postgres=X/postgres anon=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.get_agenda_conflicts(p_user_id uuid, p_start timestamp with time zone, p_end timestamp with time zone, p_exclude_task uuid, p_exclude_so uuid) TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.get_agenda_conflicts(p_user_id uuid, p_start timestamp with time zone, p_end timestamp with time zone, p_exclude_task uuid, p_exclude_so uuid) TO postgres;
-GRANT EXECUTE ON FUNCTION public.get_agenda_conflicts(p_user_id uuid, p_start timestamp with time zone, p_end timestamp with time zone, p_exclude_task uuid, p_exclude_so uuid) TO anon;
 GRANT EXECUTE ON FUNCTION public.get_agenda_conflicts(p_user_id uuid, p_start timestamp with time zone, p_end timestamp with time zone, p_exclude_task uuid, p_exclude_so uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_agenda_conflicts(p_user_id uuid, p_start timestamp with time zone, p_end timestamp with time zone, p_exclude_task uuid, p_exclude_so uuid) TO service_role;
 
@@ -2274,10 +2255,8 @@ AS $function$
    LIMIT coalesce(p_limit, 20);
 $function$
 ;
--- ACL: =X/postgres postgres=X/postgres anon=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.get_entity_open_loops(p_entity_type text, p_entity_id uuid, p_limit integer) TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.get_entity_open_loops(p_entity_type text, p_entity_id uuid, p_limit integer) TO postgres;
-GRANT EXECUTE ON FUNCTION public.get_entity_open_loops(p_entity_type text, p_entity_id uuid, p_limit integer) TO anon;
 GRANT EXECUTE ON FUNCTION public.get_entity_open_loops(p_entity_type text, p_entity_id uuid, p_limit integer) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_entity_open_loops(p_entity_type text, p_entity_id uuid, p_limit integer) TO service_role;
 
@@ -2310,8 +2289,7 @@ AS $function$
   LIMIT greatest(1, least(coalesce(p_limit, 100), 500));
 $function$
 ;
--- ACL: =X/postgres postgres=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.get_open_loops(p_direction text, p_limit integer) TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.get_open_loops(p_direction text, p_limit integer) TO postgres;
 GRANT EXECUTE ON FUNCTION public.get_open_loops(p_direction text, p_limit integer) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_open_loops(p_direction text, p_limit integer) TO service_role;
@@ -2836,10 +2814,8 @@ BEGIN
 END;
 $function$
 ;
--- ACL: =X/postgres postgres=X/postgres anon=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.log_product_cost_change() TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.log_product_cost_change() TO postgres;
-GRANT EXECUTE ON FUNCTION public.log_product_cost_change() TO anon;
 GRANT EXECUTE ON FUNCTION public.log_product_cost_change() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.log_product_cost_change() TO service_role;
 
@@ -3015,10 +2991,8 @@ AS $function$
   select trim(regexp_replace(lower(unaccent(coalesce(_s, ''))), '\s+', ' ', 'g'));
 $function$
 ;
--- ACL: =X/postgres postgres=X/postgres anon=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.normalize_alias(_s text) TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.normalize_alias(_s text) TO postgres;
-GRANT EXECUTE ON FUNCTION public.normalize_alias(_s text) TO anon;
 GRANT EXECUTE ON FUNCTION public.normalize_alias(_s text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.normalize_alias(_s text) TO service_role;
 
@@ -3032,10 +3006,8 @@ AS $function$
   SELECT btrim(regexp_replace(upper(extensions.unaccent(coalesce(t, ''))), '[^A-Z0-9]+', ' ', 'g'));
 $function$
 ;
--- ACL: =X/postgres postgres=X/postgres anon=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.normalize_product_text(t text) TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.normalize_product_text(t text) TO postgres;
-GRANT EXECUTE ON FUNCTION public.normalize_product_text(t text) TO anon;
 GRANT EXECUTE ON FUNCTION public.normalize_product_text(t text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.normalize_product_text(t text) TO service_role;
 
@@ -3132,8 +3104,7 @@ AS $function$
   );
 $function$
 ;
--- ACL: =X/postgres postgres=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.pode_ver_folha(_user_id uuid) TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.pode_ver_folha(_user_id uuid) TO postgres;
 GRANT EXECUTE ON FUNCTION public.pode_ver_folha(_user_id uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.pode_ver_folha(_user_id uuid) TO service_role;
@@ -3410,10 +3381,8 @@ BEGIN
 END;
 $function$
 ;
--- ACL: =X/postgres postgres=X/postgres anon=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.recalc_po_total(p_po_id uuid) TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.recalc_po_total(p_po_id uuid) TO postgres;
-GRANT EXECUTE ON FUNCTION public.recalc_po_total(p_po_id uuid) TO anon;
 GRANT EXECUTE ON FUNCTION public.recalc_po_total(p_po_id uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.recalc_po_total(p_po_id uuid) TO service_role;
 
@@ -3726,8 +3695,7 @@ BEGIN
 END;
 $function$
 ;
--- ACL: =X/postgres postgres=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.record_conversation_loop(p_entity_type text, p_entity_id uuid, p_loop_key text, p_kind text, p_title text, p_detail text, p_service_order_id uuid, p_due_at timestamp with time zone, p_priority text, p_evidence text, p_evidence_at timestamp with time zone, p_source_message_id uuid) TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.record_conversation_loop(p_entity_type text, p_entity_id uuid, p_loop_key text, p_kind text, p_title text, p_detail text, p_service_order_id uuid, p_due_at timestamp with time zone, p_priority text, p_evidence text, p_evidence_at timestamp with time zone, p_source_message_id uuid) TO postgres;
 GRANT EXECUTE ON FUNCTION public.record_conversation_loop(p_entity_type text, p_entity_id uuid, p_loop_key text, p_kind text, p_title text, p_detail text, p_service_order_id uuid, p_due_at timestamp with time zone, p_priority text, p_evidence text, p_evidence_at timestamp with time zone, p_source_message_id uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.record_conversation_loop(p_entity_type text, p_entity_id uuid, p_loop_key text, p_kind text, p_title text, p_detail text, p_service_order_id uuid, p_due_at timestamp with time zone, p_priority text, p_evidence text, p_evidence_at timestamp with time zone, p_source_message_id uuid) TO service_role;
@@ -3770,8 +3738,7 @@ BEGIN
 END;
 $function$
 ;
--- ACL: =X/postgres postgres=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.record_conversation_loop(p_entity_type text, p_entity_id uuid, p_loop_key text, p_kind text, p_title text, p_detail text, p_service_order_id uuid, p_due_at timestamp with time zone, p_priority text, p_evidence text, p_evidence_at timestamp with time zone, p_source_message_id uuid, p_direction text) TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.record_conversation_loop(p_entity_type text, p_entity_id uuid, p_loop_key text, p_kind text, p_title text, p_detail text, p_service_order_id uuid, p_due_at timestamp with time zone, p_priority text, p_evidence text, p_evidence_at timestamp with time zone, p_source_message_id uuid, p_direction text) TO postgres;
 GRANT EXECUTE ON FUNCTION public.record_conversation_loop(p_entity_type text, p_entity_id uuid, p_loop_key text, p_kind text, p_title text, p_detail text, p_service_order_id uuid, p_due_at timestamp with time zone, p_priority text, p_evidence text, p_evidence_at timestamp with time zone, p_source_message_id uuid, p_direction text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.record_conversation_loop(p_entity_type text, p_entity_id uuid, p_loop_key text, p_kind text, p_title text, p_detail text, p_service_order_id uuid, p_due_at timestamp with time zone, p_priority text, p_evidence text, p_evidence_at timestamp with time zone, p_source_message_id uuid, p_direction text) TO service_role;
@@ -3859,8 +3826,7 @@ BEGIN
 END;
 $function$
 ;
--- ACL: =X/postgres postgres=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.refresh_entity_open_loops() TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.refresh_entity_open_loops() TO postgres;
 GRANT EXECUTE ON FUNCTION public.refresh_entity_open_loops() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.refresh_entity_open_loops() TO service_role;
@@ -4189,10 +4155,8 @@ AS $function$
   LIMIT 1;
 $function$
 ;
--- ACL: =X/postgres postgres=X/postgres anon=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.resolve_contact_identity(p_phone text) TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.resolve_contact_identity(p_phone text) TO postgres;
-GRANT EXECUTE ON FUNCTION public.resolve_contact_identity(p_phone text) TO anon;
 GRANT EXECUTE ON FUNCTION public.resolve_contact_identity(p_phone text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.resolve_contact_identity(p_phone text) TO service_role;
 
@@ -4460,10 +4424,8 @@ AS $function$
   limit greatest(1, least(coalesce(_lim, 20), 40));
 $function$
 ;
--- ACL: =X/postgres postgres=X/postgres anon=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.search_products_trgm(_term text, _lim integer) TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.search_products_trgm(_term text, _lim integer) TO postgres;
-GRANT EXECUTE ON FUNCTION public.search_products_trgm(_term text, _lim integer) TO anon;
 GRANT EXECUTE ON FUNCTION public.search_products_trgm(_term text, _lim integer) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.search_products_trgm(_term text, _lim integer) TO service_role;
 
@@ -4492,10 +4454,8 @@ CREATE OR REPLACE FUNCTION public.set_ai_agent_memory_updated_at()
 AS $function$
 BEGIN NEW.updated_at = now(); RETURN NEW; END; $function$
 ;
--- ACL: =X/postgres postgres=X/postgres anon=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.set_ai_agent_memory_updated_at() TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.set_ai_agent_memory_updated_at() TO postgres;
-GRANT EXECUTE ON FUNCTION public.set_ai_agent_memory_updated_at() TO anon;
 GRANT EXECUTE ON FUNCTION public.set_ai_agent_memory_updated_at() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.set_ai_agent_memory_updated_at() TO service_role;
 
@@ -4507,10 +4467,8 @@ CREATE OR REPLACE FUNCTION public.set_ai_agent_tasks_updated_at()
 AS $function$
 BEGIN NEW.updated_at = now(); RETURN NEW; END; $function$
 ;
--- ACL: =X/postgres postgres=X/postgres anon=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.set_ai_agent_tasks_updated_at() TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.set_ai_agent_tasks_updated_at() TO postgres;
-GRANT EXECUTE ON FUNCTION public.set_ai_agent_tasks_updated_at() TO anon;
 GRANT EXECUTE ON FUNCTION public.set_ai_agent_tasks_updated_at() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.set_ai_agent_tasks_updated_at() TO service_role;
 
@@ -4522,10 +4480,8 @@ CREATE OR REPLACE FUNCTION public.set_ai_inbound_sessions_updated_at()
 AS $function$
 BEGIN NEW.updated_at = now(); RETURN NEW; END; $function$
 ;
--- ACL: =X/postgres postgres=X/postgres anon=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.set_ai_inbound_sessions_updated_at() TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.set_ai_inbound_sessions_updated_at() TO postgres;
-GRANT EXECUTE ON FUNCTION public.set_ai_inbound_sessions_updated_at() TO anon;
 GRANT EXECUTE ON FUNCTION public.set_ai_inbound_sessions_updated_at() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.set_ai_inbound_sessions_updated_at() TO service_role;
 
@@ -4537,10 +4493,8 @@ CREATE OR REPLACE FUNCTION public.set_ai_workflows_updated_at()
 AS $function$
 BEGIN NEW.updated_at = now(); RETURN NEW; END; $function$
 ;
--- ACL: =X/postgres postgres=X/postgres anon=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.set_ai_workflows_updated_at() TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.set_ai_workflows_updated_at() TO postgres;
-GRANT EXECUTE ON FUNCTION public.set_ai_workflows_updated_at() TO anon;
 GRANT EXECUTE ON FUNCTION public.set_ai_workflows_updated_at() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.set_ai_workflows_updated_at() TO service_role;
 
@@ -4602,10 +4556,8 @@ begin
 end;
 $function$
 ;
--- ACL: =X/postgres postgres=X/postgres anon=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.set_updated_at_now() TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.set_updated_at_now() TO postgres;
-GRANT EXECUTE ON FUNCTION public.set_updated_at_now() TO anon;
 GRANT EXECUTE ON FUNCTION public.set_updated_at_now() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.set_updated_at_now() TO service_role;
 
@@ -5597,10 +5549,8 @@ begin
   return new;
 end $function$
 ;
--- ACL: =X/postgres postgres=X/postgres anon=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.touch_fiscal_emission_draft() TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.touch_fiscal_emission_draft() TO postgres;
-GRANT EXECUTE ON FUNCTION public.touch_fiscal_emission_draft() TO anon;
 GRANT EXECUTE ON FUNCTION public.touch_fiscal_emission_draft() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.touch_fiscal_emission_draft() TO service_role;
 
@@ -5621,8 +5571,7 @@ AS $function$
   RETURNING mentions;
 $function$
 ;
--- ACL: =X/postgres postgres=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.touch_open_loop(p_loop_id uuid, p_evidence text, p_evidence_at timestamp with time zone, p_source_message_id uuid) TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.touch_open_loop(p_loop_id uuid, p_evidence text, p_evidence_at timestamp with time zone, p_source_message_id uuid) TO postgres;
 GRANT EXECUTE ON FUNCTION public.touch_open_loop(p_loop_id uuid, p_evidence text, p_evidence_at timestamp with time zone, p_source_message_id uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.touch_open_loop(p_loop_id uuid, p_evidence text, p_evidence_at timestamp with time zone, p_source_message_id uuid) TO service_role;
@@ -5634,10 +5583,8 @@ CREATE OR REPLACE FUNCTION public.touch_updated_at()
 AS $function$
 begin new.updated_at := now(); return new; end $function$
 ;
--- ACL: =X/postgres postgres=X/postgres anon=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.touch_updated_at() TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.touch_updated_at() TO postgres;
-GRANT EXECUTE ON FUNCTION public.touch_updated_at() TO anon;
 GRANT EXECUTE ON FUNCTION public.touch_updated_at() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.touch_updated_at() TO service_role;
 
@@ -5679,10 +5626,8 @@ BEGIN
 END;
 $function$
 ;
--- ACL: =X/postgres postgres=X/postgres anon=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.trg_poi_recalc_total() TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.trg_poi_recalc_total() TO postgres;
-GRANT EXECUTE ON FUNCTION public.trg_poi_recalc_total() TO anon;
 GRANT EXECUTE ON FUNCTION public.trg_poi_recalc_total() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.trg_poi_recalc_total() TO service_role;
 
@@ -5809,10 +5754,8 @@ AS $function$
 BEGIN NEW.updated_at = now(); RETURN NEW; END;
 $function$
 ;
--- ACL: =X/postgres postgres=X/postgres anon=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.update_updated_at_column() TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.update_updated_at_column() TO postgres;
-GRANT EXECUTE ON FUNCTION public.update_updated_at_column() TO anon;
 GRANT EXECUTE ON FUNCTION public.update_updated_at_column() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.update_updated_at_column() TO service_role;
 
@@ -5927,10 +5870,8 @@ BEGIN
 END;
 $function$
 ;
--- ACL: =X/postgres postgres=X/postgres anon=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.wa_extract_body_text(p jsonb) TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.wa_extract_body_text(p jsonb) TO postgres;
-GRANT EXECUTE ON FUNCTION public.wa_extract_body_text(p jsonb) TO anon;
 GRANT EXECUTE ON FUNCTION public.wa_extract_body_text(p jsonb) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.wa_extract_body_text(p jsonb) TO service_role;
 
@@ -5962,10 +5903,8 @@ BEGIN
 END;
 $function$
 ;
--- ACL: =X/postgres postgres=X/postgres anon=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.wa_extract_message_type(p jsonb) TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.wa_extract_message_type(p jsonb) TO postgres;
-GRANT EXECUTE ON FUNCTION public.wa_extract_message_type(p jsonb) TO anon;
 GRANT EXECUTE ON FUNCTION public.wa_extract_message_type(p jsonb) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.wa_extract_message_type(p jsonb) TO service_role;
 
@@ -6001,10 +5940,8 @@ BEGIN
 END;
 $function$
 ;
--- ACL: =X/postgres postgres=X/postgres anon=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.wa_normalize_phone(raw text) TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.wa_normalize_phone(raw text) TO postgres;
-GRANT EXECUTE ON FUNCTION public.wa_normalize_phone(raw text) TO anon;
 GRANT EXECUTE ON FUNCTION public.wa_normalize_phone(raw text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.wa_normalize_phone(raw text) TO service_role;
 
@@ -6059,10 +5996,8 @@ AS $function$
   limit _limit;
 $function$
 ;
--- ACL: =X/postgres postgres=X/postgres anon=X/postgres authenticated=X/postgres service_role=X/postgres
-GRANT EXECUTE ON FUNCTION public.whatsapp_pending_inbox(_since timestamp with time zone, _limit integer) TO PUBLIC;
+-- ACL: postgres=X/postgres authenticated=X/postgres service_role=X/postgres
 GRANT EXECUTE ON FUNCTION public.whatsapp_pending_inbox(_since timestamp with time zone, _limit integer) TO postgres;
-GRANT EXECUTE ON FUNCTION public.whatsapp_pending_inbox(_since timestamp with time zone, _limit integer) TO anon;
 GRANT EXECUTE ON FUNCTION public.whatsapp_pending_inbox(_since timestamp with time zone, _limit integer) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.whatsapp_pending_inbox(_since timestamp with time zone, _limit integer) TO service_role;
 
