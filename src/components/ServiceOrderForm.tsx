@@ -840,9 +840,12 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         const { supabase } = await import('@/integrations/supabase/client');
         const validTechs = selectedTechnicians.filter(uid => uid && uid.trim() !== '');
         if (validTechs.length > 0) {
-          await supabase.from('service_order_technicians').insert(
+          const { error: erroTecnicos } = await supabase.from('service_order_technicians').insert(
             validTechs.map((uid) => ({ service_order_id: result.id, user_id: uid }))
           );
+          // A OS já existe; o que falhou foi só a atribuição. Dizer isso é melhor do que
+          // navegar em silêncio para uma OS sem técnico.
+          if (erroTecnicos) toast.error(`OS criada, mas os técnicos não foram gravados: ${erroTecnicos.message}`);
         }
         if (selectedTechnicians.length > 0) {
           for (const uid of selectedTechnicians) {
@@ -897,17 +900,30 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       } else {
         await updateSO.mutateAsync({ id: orderId!, ...payloadParaCargo(authUser?.role, payload) });
         const { supabase } = await import('@/integrations/supabase/client');
-        const { data: existingTechs } = await supabase
+        const { data: existingTechs, error: erroLeitura } = await supabase
           .from('service_order_technicians')
           .select('user_id')
           .eq('service_order_id', orderId!);
+        if (erroLeitura) throw new Error(`Não deu para ler os técnicos da OS: ${erroLeitura.message}`);
         const existingIds = new Set((existingTechs ?? []).map((t: any) => t.user_id));
-        await supabase.from('service_order_technicians').delete().eq('service_order_id', orderId!);
         const validTechs = selectedTechnicians.filter(uid => uid && uid.trim() !== '');
-        if (validTechs.length > 0) {
-          await supabase.from('service_order_technicians').insert(
-            validTechs.map((uid) => ({ service_order_id: orderId!, user_id: uid }))
+        // Só o que mudou: apagar tudo e reinserir deixava a OS sem técnico se o insert
+        // falhasse depois do delete — e nenhum dos dois erros era lido.
+        const aRemover = [...existingIds].filter((uid) => !validTechs.includes(uid));
+        const aInserir = validTechs.filter((uid) => !existingIds.has(uid));
+        if (aRemover.length > 0) {
+          const { error } = await supabase
+            .from('service_order_technicians')
+            .delete()
+            .eq('service_order_id', orderId!)
+            .in('user_id', aRemover);
+          if (error) throw new Error(`Não deu para remover técnicos da OS: ${error.message}`);
+        }
+        if (aInserir.length > 0) {
+          const { error } = await supabase.from('service_order_technicians').insert(
+            aInserir.map((uid) => ({ service_order_id: orderId!, user_id: uid }))
           );
+          if (error) throw new Error(`Não deu para atribuir técnicos à OS: ${error.message}`);
         }
         if (selectedTechnicians.length > 0) {
           const newlyAssigned = selectedTechnicians.filter((uid) => !existingIds.has(uid));

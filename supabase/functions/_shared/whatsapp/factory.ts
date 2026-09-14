@@ -5,9 +5,9 @@ import type { WhatsAppProvider } from "./types.ts";
 /**
  * Creates the active WhatsApp provider based on the WHATSAPP_PROVIDER env var.
  *
- * "zapi" (default) — reads credentials from zapiConfig or ZAPI_* env vars.
- * "evolution"      — reads EVOLUTION_API_URL, EVOLUTION_API_KEY, EVOLUTION_INSTANCE
- *                    from env vars (zapiConfig is ignored).
+ * "evolution" (default) — reads EVOLUTION_API_URL, EVOLUTION_API_KEY, EVOLUTION_INSTANCE
+ *                         from env vars (zapiConfig is ignored). É o provedor em produção.
+ * "zapi"                — reads credentials from zapiConfig or ZAPI_* env vars (legado).
  *
  * Callers that resolve Z-API credentials from app_settings (DB) pass zapiConfig
  * explicitly. Callers that read only from env can omit it.
