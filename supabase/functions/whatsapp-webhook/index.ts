@@ -406,6 +406,10 @@ export async function handler(req: Request): Promise<Response> {
           } catch { /* best-effort */ }
         })();
       }
+      // "Deixar a IA acompanhar": se este número tem missão ativa, a resposta pausa os toques
+      // e vai para o dono (waiting_reply). A resposta é DADO, não comando — a RPC só registra.
+      admin.rpc("followup_registrar_resposta", { p_phone: phone, p_body: body, p_message_id: msg?.id ?? null })
+        .then(() => {}, () => {});
     }
 
     if (leadId) {

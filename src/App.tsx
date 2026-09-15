@@ -58,6 +58,7 @@ const PayeesPage = lazy(() => import("./pages/PayeesPage"));
 const AuditLogV2 = lazy(() => import("./v2/pages/AuditLogV2"));
 const ReportsV2 = lazy(() => import("./v2/pages/ReportsV2"));
 const SmartPurchaseV2 = lazy(() => import("./v2/pages/SmartPurchaseV2"));
+const FollowupMissionsV2 = lazy(() => import("./v2/pages/FollowupMissionsV2"));
 const InventoryV2 = lazy(() => import("./v2/pages/InventoryV2"));
 const PurchaseOrdersV2 = lazy(() => import("./v2/pages/PurchaseOrdersV2"));
 const PurchaseOrderDetailV2 = lazy(() => import("./v2/pages/PurchaseOrderDetailV2"));
@@ -199,6 +200,8 @@ const App = () => (
                         <Route path="/v2/settings" element={<ProtectedRoute roles={['admin']}><SettingsV2 /></ProtectedRoute>} />
                         {/* Mesmos cargos da /agenda v1 — a v2 é a mesma tela com tema. */}
                         <Route path="/v2/agenda" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><AgendaV2 /></ProtectedRoute>} />
+                        {/* "Deixar a IA acompanhar": painel das missões (a aprovação de cada toque fica no sino). */}
+                        <Route path="/v2/agenda/acompanhamentos" element={<ProtectedRoute roles={['admin','financial','seller']} groupId="operacional"><FollowupMissionsV2 /></ProtectedRoute>} />
                         <Route path="/v2/whatsapp/leads" element={<ProtectedRoute roles={['admin','financial','seller']} groupId="whatsapp"><WhatsAppLeadsV2 /></ProtectedRoute>} />
                         <Route path="/v2/whatsapp/logs" element={<ProtectedRoute roles={['admin']} groupId="whatsapp"><WhatsAppLogsV2 /></ProtectedRoute>} />
                         <Route path="/v2/whatsapp/scheduled" element={<ProtectedRoute roles={['admin','financial']} groupId="whatsapp"><WhatsAppScheduledV2 /></ProtectedRoute>} />

@@ -124,6 +124,9 @@ const TOOL_LABELS_PT: Record<string, string> = {
   send_collection_reminder: "Enviar lembrete de cobrança",
   send_service_order_link: "Enviar link da OS ao cliente",
   schedule_whatsapp_message: "Agendar WhatsApp a cliente",
+  followup_send_touch: "Enviar toque de acompanhamento (IA acompanha)",
+  criar_missao_acompanhamento: "Deixar a IA acompanhar",
+  cancelar_missao_acompanhamento: "Encerrar acompanhamento da IA",
 };
 
 function humanizeToolNamePt(name: string): string {

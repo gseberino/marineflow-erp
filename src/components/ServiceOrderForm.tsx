@@ -63,6 +63,7 @@ import { RegisterDepositDialog } from '@/components/RegisterDepositDialog';
 import { CompletionSendDialog } from '@/components/CompletionSendDialog';
 import { FaturarOsDialog } from '@/components/fiscal/FaturarOsDialog';
 import { useOptionalAuth } from '@/hooks/use-auth';
+import { FollowupMissionButton } from '@/components/followups/FollowupMissionDialog';
 import { StockAlertDialog } from '@/components/StockAlertDialog';
 import { ReceivePODialog } from '@/components/ReceivePODialog';
 import { calculateDisplacement, calculateTravelCost, travelRatesFromSettings } from '@/lib/displacement';
@@ -1927,6 +1928,23 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               que a WCAG 2.5.5 recomenda) e 36px a partir de `sm`, onde há
               mouse e o cursor é preciso. */}
           <div ref={topActionsRef} className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+            {/* Orçamento parado com o cliente é um dos dois casos do "Deixar a IA acompanhar"
+                (decisão do dono, 30/08). A IA cobra a aprovação; cada toque passa pelo sino. */}
+            {!isNew && orderId && isQuoteStatus(currentStatus) && (
+              <FollowupMissionButton
+                compacto
+                className="h-11 sm:h-9"
+                origem={{ tipo: 'quote', id: orderId, rotulo: orderData?.service_order_number || 'Orçamento' }}
+                contraparte={orderData?.client_id ? {
+                  tipo: 'client',
+                  id: orderData.client_id,
+                  label: (orderData as any)?.clients?.name ?? null,
+                  phone: (orderData as any)?.clients?.whatsapp || (orderData as any)?.clients?.phone || null,
+                } : null}
+                sugestaoObjetivo={`saber se o cliente aprova o orçamento ${orderData?.service_order_number || ''}`.trim()}
+                sugestaoPrazo={orderData?.quote_validity_date ?? null}
+              />
+            )}
             {!isNew && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

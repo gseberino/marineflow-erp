@@ -574,6 +574,208 @@ export type Database = {
         }
         Relationships: []
       }
+      ai_followup_events: {
+        Row: {
+          classificacao: string | null
+          conteudo: string | null
+          created_at: string
+          created_by: string | null
+          evidencia: string | null
+          id: string
+          meta: Json
+          mission_id: string
+          pending_action_id: string | null
+          tipo: string
+          whatsapp_message_id: string | null
+        }
+        Insert: {
+          classificacao?: string | null
+          conteudo?: string | null
+          created_at?: string
+          created_by?: string | null
+          evidencia?: string | null
+          id?: string
+          meta?: Json
+          mission_id: string
+          pending_action_id?: string | null
+          tipo: string
+          whatsapp_message_id?: string | null
+        }
+        Update: {
+          classificacao?: string | null
+          conteudo?: string | null
+          created_at?: string
+          created_by?: string | null
+          evidencia?: string | null
+          id?: string
+          meta?: Json
+          mission_id?: string
+          pending_action_id?: string | null
+          tipo?: string
+          whatsapp_message_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_followup_events_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_followup_events_mission_id_fkey"
+            columns: ["mission_id"]
+            isOneToOne: false
+            referencedRelation: "ai_followup_missions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_followup_events_pending_action_id_fkey"
+            columns: ["pending_action_id"]
+            isOneToOne: false
+            referencedRelation: "ai_operator_pending_actions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_followup_events_whatsapp_message_id_fkey"
+            columns: ["whatsapp_message_id"]
+            isOneToOne: false
+            referencedRelation: "whatsapp_messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ai_followup_missions: {
+        Row: {
+          autonomia: string
+          contraparte_id: string | null
+          contraparte_label: string
+          contraparte_phone: string
+          contraparte_tipo: string
+          created_at: string
+          criada_por: string | null
+          criterio_erp: string
+          id: string
+          max_toques: number
+          objetivo: string
+          open_loop_id: string | null
+          origem_id: string | null
+          origem_tipo: string
+          prazo_final: string | null
+          proximo_toque_em: string | null
+          resolucao: string | null
+          resolucao_evidencia: string | null
+          resolvida_em: string | null
+          service_order_id: string | null
+          status: string
+          toques_feitos: number
+          ultimo_toque_em: string | null
+          updated_at: string
+        }
+        Insert: {
+          autonomia?: string
+          contraparte_id?: string | null
+          contraparte_label: string
+          contraparte_phone: string
+          contraparte_tipo: string
+          created_at?: string
+          criada_por?: string | null
+          criterio_erp?: string
+          id?: string
+          max_toques?: number
+          objetivo: string
+          open_loop_id?: string | null
+          origem_id?: string | null
+          origem_tipo: string
+          prazo_final?: string | null
+          proximo_toque_em?: string | null
+          resolucao?: string | null
+          resolucao_evidencia?: string | null
+          resolvida_em?: string | null
+          service_order_id?: string | null
+          status?: string
+          toques_feitos?: number
+          ultimo_toque_em?: string | null
+          updated_at?: string
+        }
+        Update: {
+          autonomia?: string
+          contraparte_id?: string | null
+          contraparte_label?: string
+          contraparte_phone?: string
+          contraparte_tipo?: string
+          created_at?: string
+          criada_por?: string | null
+          criterio_erp?: string
+          id?: string
+          max_toques?: number
+          objetivo?: string
+          open_loop_id?: string | null
+          origem_id?: string | null
+          origem_tipo?: string
+          prazo_final?: string | null
+          proximo_toque_em?: string | null
+          resolucao?: string | null
+          resolucao_evidencia?: string | null
+          resolvida_em?: string | null
+          service_order_id?: string | null
+          status?: string
+          toques_feitos?: number
+          ultimo_toque_em?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_followup_missions_criada_por_fkey"
+            columns: ["criada_por"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_followup_missions_open_loop_id_fkey"
+            columns: ["open_loop_id"]
+            isOneToOne: false
+            referencedRelation: "entity_open_loops"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_followup_missions_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_followup_missions_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_followup_missions_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_followup_missions_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_margin"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_followup_missions_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "vw_os_profitability"
+            referencedColumns: ["os_id"]
+          },
+        ]
+      }
       ai_inbound_sessions: {
         Row: {
           client_id: string | null
@@ -11690,6 +11892,10 @@ export type Database = {
           revenue: number
         }[]
       }
+      cancel_followup_mission: {
+        Args: { p_id: string; p_motivo?: string }
+        Returns: boolean
+      }
       cancel_service_order_cascade: {
         Args: { p_reason: string; p_service_order_id: string }
         Returns: Json
@@ -11802,6 +12008,19 @@ export type Database = {
         Returns: string
       }
       count_purchase_shortages: { Args: { p_so_ids: string[] }; Returns: Json }
+      create_followup_mission: {
+        Args: {
+          p_contraparte_id?: string
+          p_contraparte_tipo?: string
+          p_label?: string
+          p_objetivo: string
+          p_origem_id: string
+          p_origem_tipo: string
+          p_phone?: string
+          p_prazo_final?: string
+        }
+        Returns: string
+      }
       dc_cable_min_mm2_by_drop: {
         Args: {
           p_amps: number
@@ -11837,6 +12056,10 @@ export type Database = {
       estimate_from_cases: {
         Args: { p_min_casos?: number; p_service_id: string }
         Returns: Json
+      }
+      followup_registrar_resposta: {
+        Args: { p_body: string; p_message_id?: string; p_phone: string }
+        Returns: string
       }
       frase_legivel: { Args: { p_texto: string }; Returns: string }
       free_text_is_material: { Args: { p_texto: string }; Returns: boolean }
@@ -11990,6 +12213,7 @@ export type Database = {
       normalize_alias: { Args: { _s: string }; Returns: string }
       normalize_product_text: { Args: { t: string }; Returns: string }
       parse_answer_number: { Args: { p_answer: string }; Returns: number }
+      parse_valor_ptbr: { Args: { p_texto: string }; Returns: number }
       periodo_esta_fechado: { Args: { p_data: string }; Returns: boolean }
       pode_ver_folha: { Args: { _user_id: string }; Returns: boolean }
       preview_nfe_import: {

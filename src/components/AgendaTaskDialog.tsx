@@ -22,6 +22,7 @@ import {
 } from '@/hooks/use-agenda';
 import { useClients } from '@/hooks/use-clients';
 import { useQuery } from '@tanstack/react-query';
+import { FollowupMissionButton } from '@/components/followups/FollowupMissionDialog';
 
 /** Modelos de checklist (app_settings.task_checklist_templates) — padrão ServiceM8/FieldPulse. */
 export function useChecklistTemplates() {
@@ -578,7 +579,7 @@ export function AgendaTaskDialog({
         </div>
 
         <DialogFooter className="gap-2 sm:justify-between">
-          <div>
+          <div className="flex flex-wrap gap-2">
             {existing && (
               <Button
                 variant="outline"
@@ -588,6 +589,18 @@ export function AgendaTaskDialog({
               >
                 <Trash2 className="h-4 w-4 mr-1" /> Excluir
               </Button>
+            )}
+            {/* "Deixar a IA acompanhar": a IA cobra a outra pessoa por este compromisso (dossiê
+                plans/marineflow-ia-acompanha.md). Só em tarefa existente e aberta: tarefa
+                concluída não tem o que cobrar. */}
+            {existing && existing.status !== 'done' && (
+              <FollowupMissionButton
+                size="default"
+                origem={{ tipo: 'agenda_task', id: existing.id, rotulo: existing.title }}
+                contraparte={existing.client_id ? { tipo: 'client', id: existing.client_id } : null}
+                sugestaoObjetivo={existing.title}
+                sugestaoPrazo={existing.due_at ?? existing.scheduled_start_at ?? null}
+              />
             )}
           </div>
           <div className="flex gap-2">

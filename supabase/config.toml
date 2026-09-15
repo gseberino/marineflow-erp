@@ -45,6 +45,11 @@ verify_jwt = false
 [functions.ai-whatsapp-followups]
 verify_jwt = false
 
+# "Deixar a IA acompanhar" (copiloto): pg_cron chama de hora em hora só com x-cron-secret.
+# Relê o ERP, redige o toque e grava PENDÊNCIA de aprovação — nunca envia sozinha.
+[functions.ai-followup-runner]
+verify_jwt = false
+
 [functions.ai-business-monitor]
 verify_jwt = false
 

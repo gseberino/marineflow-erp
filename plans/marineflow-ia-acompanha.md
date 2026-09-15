@@ -32,6 +32,42 @@ registrada antes da pesquisa · complementa `marineflow-agenda-autonoma.md` (Fas
 
 ---
 
+> ## ✅ ESTADO EM 14/09/2026 — Fases 0 e 1 IMPLEMENTADAS E NO AR
+>
+> - **Banco** (`20260914130000_ia_acompanha_missoes.sql`): `ai_followup_missions` (contraparte
+>   genérica congelada: tipo/id/telefone/rótulo — resolve o §2.4), `ai_followup_events` (trilha),
+>   RPCs `create_followup_mission` / `cancel_followup_mission` (equipe interna) e
+>   `followup_registrar_resposta` (só service role, chamada pelo webhook), kill switch
+>   `app_settings.followup_missions_enabled` + teto `followup_missions_daily_cap` (10), cron
+>   `ai-followup-runner` de hora em hora. Uma missão ativa por contato (índice parcial único).
+>   Fornecedor 3 toques, cliente/lead 2 (decisão de 30/08).
+> - **Runner** (`supabase/functions/ai-followup-runner`): relê o ERP antes de tudo (tarefa
+>   concluída / orçamento decidido / fio solto fechado → fecha sem falar com ninguém), devolve ao
+>   dono o que estourou (teto de toques ou prazo), respeita seg-sex 9-18h e "um por dia", redige
+>   com `MODEL_LITE` no perfil de voz (`perfilDeVoz`), obedece ao feedback de um rascunho rejeitado
+>   ("Ensinar a IA") e grava **pendência `followup_send_touch` (alto risco)** no sino. Nunca envia.
+>   Disparo manual: corpo `{"ignorar_janela": true}` (só com o cron secret).
+> - **Envio** (`_shared/ai/tools/followups.ts`, `followup_send_touch`, em `NEVER_AUTONOMOUS`):
+>   executa só pela aprovação do dono; reconfere kill switch, opt-out, guarda de conformidade
+>   (horário 8-20h) e teto diário; envia por `whatsapp-send`; grava `touch_sent` e agenda o
+>   próximo toque (D-7/D-3/D-1 ou 2/4/7 dias). Tools do agente: `listar_/criar_/cancelar_missao_
+>   acompanhamento`.
+> - **Resposta do terceiro**: gancho no `whatsapp-webhook` → `followup_registrar_resposta` →
+>   evento `reply` + missão em `waiting_reply` (para de tocar; o dono lê). A classificação
+>   automática da resposta é a Fase 2, não feita.
+> - **UI**: botão **"Deixar a IA acompanhar"** no diálogo da tarefa (`AgendaTaskDialog`, tarefa
+>   existente e aberta) e na barra do orçamento (`ServiceOrderForm`, status de orçamento);
+>   painel `/v2/agenda/acompanhamentos` (missões, trilha, encerrar, kill switch); link
+>   "IA acompanhando" na barra da agenda. Aprovação de cada toque continua no sino.
+> - **Prova em produção (14/09)**: missão de teste para o `wa_test_number` → runner (disparo
+>   manual) → rascunho identificando-se como assistente da HBR → pendência "Toque 1/2" no sino,
+>   nenhuma mensagem enviada. Cadência coberta por `cadencia_test.ts` (7 testes Deno).
+> - **Limites conhecidos desta entrega**: aprovar fora do horário 8-20h falha o envio (a pendência
+>   vira `failed` e o runner rearma para o dia seguinte) — a evolução é enfileirar para a próxima
+>   janela; não há "Ajustar texto" (o payload da pendência é imutável): rejeitar com observação
+>   faz a IA reescrever; Fase 2 (classificar `resolvido`/`nova_data`/`pare`), Fase 3 (autonomia
+>   por tipo) e Fase 4 (botão no fio solto) ficam para depois dos 30 dias de copiloto.
+
 ## 1. A ideia, na sua frase
 
 > *"Um botão na tarefa que faz a IA acompanhar aquele compromisso com o terceiro. Tenho uma tarefa

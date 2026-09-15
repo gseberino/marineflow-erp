@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { PageHeader } from '@/components/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -377,6 +377,11 @@ export default function AgendaPage() {
                   {loopsOurs.length}
                 </span>
               )}
+            </Button>
+            {/* O que depende DELES e a IA está cobrando: painel próprio (as missões do
+                "Deixar a IA acompanhar"). Link, não hook: a agenda não carrega mais uma query. */}
+            <Button asChild size="sm" variant="ghost">
+              <Link to="/v2/agenda/acompanhamentos">IA acompanhando</Link>
             </Button>
           </div>
 

@@ -23,12 +23,15 @@ function actionMeta(name: string): { Icon: typeof ShieldCheck; label: string } {
   if (name.startsWith('register_payment') || name.startsWith('register_deposit') || name.startsWith('receive_purchase'))
     return { Icon: DollarSign, label: labelFor(name) };
   if (name.startsWith('cancel_') || name.startsWith('reopen_')) return { Icon: Trash2, label: labelFor(name) };
-  if (name.startsWith('send_') || name.startsWith('schedule_whatsapp')) return { Icon: Send, label: labelFor(name) };
+  if (name.startsWith('send_') || name.startsWith('schedule_whatsapp') || name.startsWith('followup_')) return { Icon: Send, label: labelFor(name) };
   return { Icon: AlertTriangle, label: labelFor(name) };
 }
 
 function labelFor(name: string): string {
   const map: Record<string, string> = {
+    followup_send_touch: 'Enviar toque de acompanhamento (IA acompanha)',
+    criar_missao_acompanhamento: 'Deixar a IA acompanhar',
+    cancelar_missao_acompanhamento: 'Encerrar acompanhamento da IA',
     register_payment: 'Registrar pagamento',
     register_deposit_and_convert: 'Registrar sinal e converter em OS',
     receive_purchase_order: 'Receber ordem de compra',

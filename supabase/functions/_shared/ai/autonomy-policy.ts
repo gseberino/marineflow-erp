@@ -31,6 +31,10 @@ export const NEVER_AUTONOMOUS = new Set<string>([
   // send_service_order_link) NÃO estão aqui de propósito — o dono PODE liberá-los via
   // set_tool_autonomy quando a qualidade provar (são de baixo risco).
   "send_collection_reminder",
+  // "Deixar a IA acompanhar" (Fase 1, copiloto por 30 dias — decisão do dono de 30/08/2026):
+  // é a IA falando com TERCEIRO em nome da empresa. Autonomia por tipo só na Fase 3, e aí
+  // sai daqui de propósito, com a promoção/demoção do dossiê.
+  "followup_send_touch",
 ]);
 
 /** Prefixo das chaves em app_settings. */
