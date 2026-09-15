@@ -248,6 +248,67 @@ Deno.serve(async (req) => {
       console.warn("[ai-daily-briefing] bloco da fila financeira falhou:", (e as Error).message);
     }
 
+    // ── Conselheiro (Executivo Financeiro, módulo V — decisão do dono de 14/09/2026) ──
+    // No máximo três CONSTATAÇÕES: resultado do mês até aqui, concentração do faturamento e
+    // a próxima semana no vermelho. A SUGESTÃO fica separada, no bloco "Sugestão de hoje".
+    // Mesmo cálculo da tool resultado_do_periodo; best-effort, nunca derruba o briefing.
+    const conselheiroLines: string[] = [];
+    let semanaNoVermelho: { inicio: string; saldo: number } | null = null;
+    try {
+      const fmtBRL0 = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+      const deMes = `${todayISO.slice(0, 7)}-01`;
+      const [cats, pays, recs, entradas] = await Promise.all([
+        admin.from("financial_categories").select("name, type, dre_group"),
+        admin.from("payables").select("amount, expense_category").gte("issue_date", deMes).lte("issue_date", todayISO),
+        admin.from("receivables").select("amount, status").gte("issue_date", deMes).lte("issue_date", todayISO),
+        admin.from("bank_transactions").select("id", { count: "exact", head: true })
+          .eq("transaction_type", "credit").eq("reconciled", false).eq("source_type", "bank")
+          .gte("transaction_date", deMes).lte("transaction_date", todayISO),
+      ]);
+      const grupoDe = new Map<string, string>();
+      for (const c of (cats.data as any[]) || []) if (c.dre_group) grupoDe.set(`payable:${c.name}`, c.dre_group);
+      const somaGrupo = (g: string) => ((pays.data as any[]) || [])
+        .filter((p) => grupoDe.get(`payable:${p.expense_category}`) === g)
+        .reduce((s, p) => s + Number(p.amount || 0), 0);
+      const receita = ((recs.data as any[]) || []).filter((r) => r.status !== "cancelled").reduce((s, r) => s + Number(r.amount || 0), 0);
+      const saidas = somaGrupo("custo_direto") + somaGrupo("despesa_operacional") + somaGrupo("financeiro");
+      const semReceita = entradas.count ?? 0;
+      if (receita > 0 || saidas > 0) {
+        conselheiroLines.push(
+          `📊 Mês até aqui: receita ${fmtBRL0.format(receita)} · custos e despesas ${fmtBRL0.format(saidas)} · resultado *${fmtBRL0.format(receita - saidas)}*`
+          + (semReceita > 0 ? ` (${semReceita} entrada(s) do banco ainda sem receita lançada — o número está pessimista)` : ""),
+        );
+      }
+
+      const { data: topRows } = await admin.rpc("bi_top_clients", { _since: deMes, _limit: 500 });
+      const top = ((topRows as any[]) || []).filter((c) => Number(c.revenue) > 0);
+      const totalFat = top.reduce((s, c) => s + Number(c.revenue), 0);
+      if (totalFat > 0 && top.length > 0) {
+        const tres = top.slice(0, 3).map((c) => `${String(c.name || "sem cliente").split(" ")[0]} ${Math.round(100 * Number(c.revenue) / totalFat)}%`);
+        const concentrado = Number(top[0].revenue) / totalFat >= 0.5;
+        conselheiroLines.push(`🏆 Faturamento do mês por cliente: ${tres.join(" · ")}${concentrado ? " — concentrado" : ""}`);
+      }
+
+      // Quatro semanas à frente: a receber (pendente) menos a pagar (pendente), por semana.
+      const fim28 = new Date(now.getTime() + 28 * 86400000).toISOString().slice(0, 10);
+      const [recFut, payFut] = await Promise.all([
+        admin.from("receivables").select("balance_amount, amount, due_date").in("status", ["pending", "partially_paid"]).eq("is_deposit", false).gte("due_date", todayISO).lt("due_date", fim28),
+        admin.from("payables").select("balance_amount, amount, due_date").in("status", ["pending", "partially_paid", "overdue"]).gte("due_date", todayISO).lt("due_date", fim28),
+      ]);
+      const semanas = [0, 0, 0, 0];
+      const idx = (d: string) => Math.min(3, Math.max(0, Math.floor((new Date(`${d}T12:00:00Z`).getTime() - new Date(`${todayISO}T12:00:00Z`).getTime()) / (7 * 86400000))));
+      for (const r of (recFut.data as any[]) || []) semanas[idx(r.due_date)] += Number(r.balance_amount ?? r.amount ?? 0);
+      for (const p of (payFut.data as any[]) || []) semanas[idx(p.due_date)] -= Number(p.balance_amount ?? p.amount ?? 0);
+      const negativa = semanas.findIndex((s) => s < 0);
+      if (negativa >= 0) {
+        const inicio = new Date(new Date(`${todayISO}T12:00:00Z`).getTime() + negativa * 7 * 86400000).toISOString().slice(0, 10);
+        semanaNoVermelho = { inicio, saldo: semanas[negativa] };
+        conselheiroLines.push(`📉 Semana de ${inicio.slice(8, 10)}/${inicio.slice(5, 7)} prevista no vermelho: ${fmtBRL0.format(semanas[negativa])} (a receber − a pagar)`);
+      }
+    } catch (e) {
+      console.warn("[ai-daily-briefing] bloco do conselheiro falhou:", (e as Error).message);
+    }
+
     // ── "Deixar a IA acompanhar": o que espera o dono, quem respondeu, o que voltou ──
     // Só aparece quando há missão em andamento; devolvidas só nos 3 primeiros dias, para o
     // digest não repetir a mesma pendência todo dia. Best-effort: não derruba o briefing.
@@ -407,6 +468,10 @@ Deno.serve(async (req) => {
     for (const c of manutCandidatos.slice(0, 3)) {
       sugestoes.push(`oferecer revisão do *${c.ativo}* (${c.cliente}) — ${c.meses} meses sem serviço. Me peça que eu preparo o orçamento.`);
     }
+    if (semanaNoVermelho) {
+      const d = semanaNoVermelho.inicio;
+      sugestoes.push(`olhar a semana de *${d.slice(8, 10)}/${d.slice(5, 7)}*: os pagamentos previstos passam dos recebimentos em ${fmt.format(-semanaNoVermelho.saldo)}. Antecipar uma cobrança ou combinar um vencimento resolve.`);
+    }
     const diaDoAno = Math.floor((now.getTime() - new Date(now.getFullYear(), 0, 0).getTime()) / 86400000);
     const sugestaoLine = sugestoes.length > 0 ? `💡 *Sugestão de hoje:* ${sugestoes[diaDoAno % sugestoes.length]}` : "";
 
@@ -441,6 +506,7 @@ Deno.serve(async (req) => {
       ...(upcomingCount > 0 ? [`🔜 A vencer (próx. 3 dias): *${upcomingCount}* (${fmt.format(upcomingSum)})`] : []),
       `✅ Aprovações da IA pendentes: *${pendingCount ?? 0}*`,
       ...filaFinanceiraLines,
+      ...conselheiroLines,
       ...conciliaLines,
       ...stuckLines,
       ...manutLines,

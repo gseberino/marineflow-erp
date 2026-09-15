@@ -21,10 +21,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
-import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { useI18n } from '@/i18n';
@@ -474,8 +470,6 @@ function CartaoDoFavorecido({
   const limiteLote = useLimiteLote();
   const [aberto, setAberto] = useState(false);
 
-  const [confirmando, setConfirmando] = useState(false);
-
   /**
    * Grupo de ENTRADA só quando todas são entrada.
    *
@@ -489,20 +483,15 @@ function CartaoDoFavorecido({
 
   const semCategoriaEscolhida = !categoria || categoria === SEM_CATEGORIA;
   /**
-   * O que exige atenção é a INCERTEZA, não o valor.
+   * Acima do limite de lote, a proposta NÃO entra no botão do grupo.
    *
-   * O limite de R$ 500 existia como aproximação de "quanto isto merece de conferência".
-   * Serve enquanto a classificação é um palpite — mas depois que a categoria está
-   * definida, seja por escolha sua no cabeçalho do grupo, seja por uma regra que você
-   * escreveu, a decisão JÁ FOI TOMADA. Um pró-labore de R$ 3 mil resolvido por regra não
-   * precisa da mesma conferência que uma saída de R$ 600 sem categoria; pedir confirmação
-   * linha a linha ali é fazer a mesma pergunta várias vezes.
-   *
-   * O que sobra do limite é o que ele tinha de útil: as maiores ficam VISÍVEIS antes do
-   * clique, listadas uma a uma, em vez de sumirem dentro de um total.
+   * Decisão do dono (14/09/2026), revertendo a leitura anterior de que "o que exige atenção
+   * é a incerteza, não o valor": uma saída grande é aprovada uma a uma, sempre — a categoria
+   * escolhida no cabeçalho desce para ela, mas o clique é individual. O botão do grupo
+   * alcança só o que está abaixo do limite (`emLote`); as demais ficam listadas na própria
+   * linha, com o aviso "Acima de R$ X — aprove aqui".
    */
-  const podeAprovar = grupo.propostas.length > 0 && !semCategoriaEscolhida;
-  const exigemOlhar = grupo.individuais;
+  const podeAprovar = grupo.emLote.length > 0 && !semCategoriaEscolhida;
 
   /**
    * Por que o botão não aprova — ESCRITO NA TELA, não num tooltip.
@@ -515,7 +504,9 @@ function CartaoDoFavorecido({
    */
   const motivo = semCategoriaEscolhida
     ? 'Escolha a categoria acima para poder aprovar.'
-    : null;
+    : grupo.emLote.length === 0
+      ? `Todas passam de ${formatCurrency(limiteLote)} — aprove uma a uma.`
+      : null;
 
   return (
     <Card className="p-3">
@@ -594,10 +585,10 @@ function CartaoDoFavorecido({
           <Button
             size="sm"
             disabled={ocupado || !podeAprovar}
-            onClick={() => (exigemOlhar.length > 0 ? setConfirmando(true) : onAprovarLote())}
+            onClick={onAprovarLote}
           >
             <Check className="mr-2 h-4 w-4" />
-            Aprovar {grupo.propostas.length} · {formatCurrency(grupo.total)}
+            Aprovar {grupo.emLote.length} · {formatCurrency(grupo.totalEmLote)}
           </Button>
           <Button size="sm" variant="ghost" disabled={ocupado} onClick={onCriarRegra}>
             <Wand2 className="mr-2 h-4 w-4" />
@@ -608,61 +599,6 @@ function CartaoDoFavorecido({
           )}
         </div>
       </div>
-
-      {/* As maiores aparecem ANTES do clique, uma a uma. É o que o limite de valor tinha de
-          útil: não impedir a aprovação, e sim impedir que uma saída grande passe
-          despercebida dentro de um total. Uma conferência para o grupo todo, não uma por
-          linha. */}
-      {/* `min-w-0` em toda coluna de texto não é detalhe: filho de flex nasce com
-          `min-width: auto`, então um nome de estabelecimento longo empurra a linha para
-          fora da janela em vez de ser cortado, e leva o resto do layout junto. É o que
-          quebrava esta caixa. */}
-      <AlertDialog open={confirmando} onOpenChange={setConfirmando}>
-        <AlertDialogContent className="max-w-[min(32rem,calc(100vw-2rem))] overflow-hidden">
-          <AlertDialogHeader className="min-w-0">
-            <AlertDialogTitle className="break-words">
-              Aprovar {grupo.propostas.length} de {grupo.rotulo}?
-            </AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="min-w-0 space-y-3 text-sm">
-                <p className="break-words">
-                  Serão lançadas como <strong>{categoria}</strong>, somando{' '}
-                  <strong>{formatCurrency(grupo.total)}</strong>. Isto cria os registros de
-                  despesa — nenhum pagamento é feito.
-                </p>
-                <div className="min-w-0">
-                  <p className="mb-1 font-medium text-foreground">
-                    {exigemOlhar.length === 1
-                      ? `1 passa de ${formatCurrency(limiteLote)}:`
-                      : `${exigemOlhar.length} passam de ${formatCurrency(limiteLote)}:`}
-                  </p>
-                  <ul className="max-h-48 space-y-1.5 overflow-y-auto rounded-md border p-2">
-                    {exigemOlhar.map((p) => (
-                      <li key={p.id} className="flex min-w-0 items-baseline justify-between gap-2">
-                        <span className="min-w-0 flex-1 break-words">
-                          <span className="text-muted-foreground">
-                            {p.suggested_date ? formatDate(p.suggested_date) : '—'}
-                          </span>{' '}
-                          {p.suggested_description ?? p.title}
-                        </span>
-                        <span className="shrink-0 whitespace-nowrap font-semibold text-foreground">
-                          {formatCurrency(Number(p.suggested_amount ?? 0))}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={onAprovarLote}>
-              Aprovar as {grupo.propostas.length}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       <Collapsible open={aberto} onOpenChange={setAberto}>
         <CollapsibleTrigger asChild>
@@ -858,15 +794,12 @@ export function FinanceReviewInbox({
   };
 
   /**
-   * Aprova o grupo INTEIRO, inclusive o que passa do limite de lote.
-   *
-   * O limite continua valendo onde ele serve — na lista solta, onde a classificação ainda
-   * é palpite do sistema. Aqui não: o grupo só chega a este botão com categoria definida,
-   * e as maiores foram listadas uma a uma antes do clique. Segurar cada uma para perguntar
-   * de novo seria pedir a mesma decisão duas vezes.
+   * Aprova só o que está abaixo do limite de lote (decisão do dono, 14/09/2026). O que
+   * passa do limite fica na linha, para aprovação individual — e o servidor recusa em lote
+   * de qualquer jeito (finance-review/aprovar), então isto não é só cortesia da tela.
    */
   const aprovarGrupo = (g: GrupoDeFavorecido) => {
-    const ids = g.propostas.map((p) => p.id);
+    const ids = g.emLote.map((p) => p.id);
     if (ids.length === 0) return;
     const overrides: Record<string, Correcao> = {};
     for (const id of ids) if (correcoes[id]) overrides[id] = correcoes[id];

@@ -1232,7 +1232,25 @@ async function aprovar(
   /** Pernas de compra parcelada que saíram de vista junto com a aprovação. */
   let pernasRetiradas = 0;
 
-  for (const p of (propostas ?? []) as any[]) {
+  // Decisão do dono (14/09/2026): acima do limite de lote a proposta é aprovada UMA A UMA.
+  // Em lote (mais de um id), o servidor tira do caminho o que passa do limite e devolve a
+  // lista — assim nem a tela nem o agente conseguem contornar por engano. Transferência
+  // entre contas não tem valor a julgar: passa.
+  const todas = (propostas ?? []) as any[];
+  const acimaDoLimite: string[] = [];
+  let elegiveis = todas;
+  if (ids.length > 1) {
+    const limite = await lerLimiteLote(admin);
+    elegiveis = todas.filter((p) => {
+      if (p.kind !== "create_payable" && p.kind !== "create_receivable") return true;
+      const valor = Math.abs(Number(overrides[p.id]?.amount ?? p.suggested_amount ?? 0));
+      if (valor < limite) return true;
+      acimaDoLimite.push(`${String(p.title).slice(0, 60)} (${valor.toFixed(2)})`);
+      return false;
+    });
+  }
+
+  for (const p of elegiveis) {
     try {
       const ov = overrides[p.id] ?? {};
       const valor = Number(ov.amount ?? p.suggested_amount);
@@ -1397,10 +1415,13 @@ async function aprovar(
     ok: falhas.length === 0,
     aprovadas: feitos.length,
     falhas,
+    acima_do_limite: acimaDoLimite,
     pernas_de_parcelamento: pernasRetiradas,
     message: `${feitos.length} lançamento(s) criado(s)`
       + (pernasRetiradas > 0
         ? ` · ${pernasRetiradas} parcela(s) da mesma compra saíram da fila junto` : "")
+      + (acimaDoLimite.length
+        ? ` · ${acimaDoLimite.length} acima do limite de lote ficaram para aprovação individual` : "")
       + (falhas.length ? ` · ${falhas.length} falharam` : ""),
   });
 }
